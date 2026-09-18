@@ -20,6 +20,7 @@ import {
   plannedExclusions,
   testSelectionIdentity,
 } from "./ci-domains.mjs";
+import { expectedTestFiles } from "./test-selection.mjs";
 import { validateExecutionPlan } from "./ci-summary.mjs";
 
 /**
@@ -102,6 +103,7 @@ function logicalGroup({ kind, group, physicalJobId, all = false }) {
     requiredChecks: [...(contract.requiredChecks || [])],
     testSelectionIdentity: testSelectionIdentity(kind, group),
     expectedTests: expectedTestSelectors(kind, group),
+    expectedFiles: expectedTestFiles(kind, group, { root: projectRoot }),
     exclusions: plannedExclusions(kind, group.key, mode),
   };
 }

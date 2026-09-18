@@ -410,7 +410,7 @@ onBeforeUnmount(() => {
         :description="t('queues.page.help')"
       />
     <section v-else class="card list-surface">
-      <NxpSortableList transition-name="nxp-card" class="script-grid" @reorder="reorderQueues">
+        <NxpSortableList transition-name="app-card" class="script-grid" @reorder="reorderQueues">
         <QueueCard
           v-for="queue in visibleQueues"
           :key="queue.id"

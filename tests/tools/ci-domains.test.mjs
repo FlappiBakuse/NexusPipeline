@@ -408,3 +408,20 @@ test("workflow_dispatch 的插件候选 SHA 进入 changes execution-plan", () =
   assert.match(changesBlock, /NEXUS_CANDIDATE_REF:\s*\$\{\{\s*inputs\.plugins_ref\s*\}\}/u);
   assert.match(changesBlock, /node tools\/ci-changes\.mjs --all/u);
 });
+
+test("v0.16.6 专属验收分别保留 Test Host 与管理员真实计时模式", () => {
+  const workflow = fs.readFileSync(path.join(repoRoot, ".github", "workflows", "ci.yml"), "utf8");
+  assert.match(workflow, /test_host_acceptance:[\s\S]*type: boolean/u);
+  assert.match(workflow, /admin_execution_acceptance:[\s\S]*type: boolean/u);
+
+  const testHost = workflow.slice(workflow.indexOf("  version-acceptance-test-host:"), workflow.indexOf("  version-acceptance-admin-execution:"));
+  assert.match(testHost, /NEXUS_CI_MODE: test-host/u);
+  assert.match(testHost, /NEXUS_TIME_SCALE: "1"/u);
+  assert.match(testHost, /node tests\\run\.mjs codex system --group update --realtime/u);
+
+  const adminExecution = workflow.slice(workflow.indexOf("  version-acceptance-admin-execution:"), workflow.indexOf("  # 每周计划与手动触发执行完整管理员门禁"));
+  assert.match(adminExecution, /NEXUS_CI_MODE: admin/u);
+  assert.match(adminExecution, /NEXUS_TIME_SCALE: "1"/u);
+  assert.match(adminExecution, /管理员完整性自检/u);
+  assert.match(adminExecution, /node tests\\run\.mjs admin system --group execution --realtime/u);
+});

@@ -25,11 +25,11 @@ describe("delayed help tooltip contract", () => {
     input.focus();
     await new Promise(resolve => setTimeout(resolve, 720));
 
-    const tooltip = document.body.querySelector(":scope > .nxp-tooltip");
+    const tooltip = document.body.querySelector(":scope > [role='tooltip']");
     expect(tooltip?.textContent).toBe("字段说明");
 
     input.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
-    expect(document.body.querySelector(":scope > .nxp-tooltip")).toBeNull();
+    expect(document.body.querySelector(":scope > [role='tooltip']")).toBeNull();
   });
 
   it("suppresses the field help for path picker and number stepper buttons", async () => {
@@ -51,13 +51,13 @@ describe("delayed help tooltip contract", () => {
       control.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
       control.focus();
       await new Promise(resolve => setTimeout(resolve, 720));
-      expect(document.body.querySelector(":scope > .nxp-tooltip"), `${control.tagName} ${control.dataset}`).toBeNull();
+      expect(document.body.querySelector(":scope > [role='tooltip']"), `${control.tagName} ${control.dataset}`).toBeNull();
     }
 
     // 排除只针对操作按钮：同一容器内的文本输入仍然提供字段说明。
     input.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
     input.focus();
     await new Promise(resolve => setTimeout(resolve, 720));
-    expect(document.body.querySelector(":scope > .nxp-tooltip")?.textContent).toBe("字段说明");
+    expect(document.body.querySelector(":scope > [role='tooltip']")?.textContent).toBe("字段说明");
   });
 });

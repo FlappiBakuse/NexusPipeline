@@ -87,6 +87,18 @@ test("production source scanning covers CSS, JavaScript, MJS, and HTML", () => {
   assert.equal(findings.filter(item => item.ruleId === "native-interactive-bypass").length, 1);
 });
 
+test("CSS 私有样式边界覆盖私有类、公开控件后代与分组选择器", () => {
+  const findings = scanSource(
+    "frontend/src/features/example/styles.css",
+    ".nxp-scroll-viewport { overflow: auto; }\n"
+      + "nxp-modal .nxp-scroll-viewport { overflow: auto; }\n"
+      + ":is(.feature-shell, .nxp-scroll-viewport) { color: red; }\n"
+      + "nxp-modal { display: block; }",
+  );
+  const privateStyles = findings.filter(item => item.ruleId === "private-style-selector");
+  assert.equal(privateStyles.length, 3);
+});
+
 test("frontend boundary CLI scans the real production file tree", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "nxp-frontend-boundaries-"));
   try {
@@ -96,13 +108,14 @@ test("frontend boundary CLI scans the real production file tree", () => {
     fs.writeFileSync(path.join(sourceRoot, "widget.js"), "const element = document.createElement(\"button\");\n");
     fs.writeFileSync(path.join(sourceRoot, "widget.mjs"), "const element = document.createElement(\"button\");\n");
     fs.writeFileSync(path.join(sourceRoot, "widget.html"), "<main><button>Save</button></main>\n");
+    fs.writeFileSync(path.join(root, "frontend", "index.html"), "<main>app</main>\n");
     fs.writeFileSync(path.join(sourceRoot, "ignored.test.ts"), "const element = document.createElement(\"button\");\n");
 
     const entries = readProductionSources(root);
-    assert.equal(entries.length, 4);
+    assert.equal(entries.length, 5);
     const result = spawnSync(process.execPath, [toolPath, "--root", root, "--quiet"], { encoding: "utf8" });
     assert.equal(result.status, 1, result.stderr);
-    assert.match(result.stdout, /扫描 4 个生产文件/u);
+    assert.match(result.stdout, /扫描 5 个生产文件/u);
     assert.match(result.stdout, /private-style-selector/u);
     assert.match(result.stdout, /widget\.mjs.*native-dynamic-interactive-bypass/su);
     assert.match(result.stdout, /widget\.html.*native-interactive-bypass/su);

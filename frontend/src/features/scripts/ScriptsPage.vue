@@ -197,7 +197,7 @@ onBeforeUnmount(() => {
         :description="t('scripts.page.empty_help')"
       />
       <section v-else class="card list-surface">
-        <NxpSortableList transition-name="nxp-card" class="script-grid" @reorder="reorderScripts">
+        <NxpSortableList transition-name="app-card" class="script-grid" @reorder="reorderScripts">
           <ScriptCard
             v-for="script in scripts"
             :key="script.id"
@@ -227,10 +227,9 @@ onBeforeUnmount(() => {
             type="button"
             @click.stop="openEditor(null, '')"
           >
-            <strong>{{ t("scripts.new_general_script_instance") }}</strong
-            ><span class="muted">{{
-              t("scripts.editor.manual_config_help")
-            }}</span></NxpButton>
+            <strong>{{ t("scripts.new_general_script_instance") }}</strong>
+            <span class="muted">{{ t("scripts.editor.manual_config_help") }}</span>
+          </NxpButton>
           <NxpButton
             v-for="plugin in specializedPlugins"
             :key="plugin.name"
@@ -238,13 +237,14 @@ onBeforeUnmount(() => {
             type="button"
             @click.stop="openEditor(null, plugin.name || '')"
           >
-            <strong class="scroll-text"
-              ><span class="scroll-inner">{{
-                t("scripts.action.create_specialized", {
+            <strong class="scroll-text">
+              <span class="scroll-inner">
+                {{ t("scripts.action.create_specialized", {
                   plugin: plugin.displayName || plugin.name || "",
-                })
-              }}</span></strong
-            ><span class="muted">{{ t("scripts.plugin.config_auto") }}</span>
+                }) }}
+              </span>
+            </strong>
+            <span class="muted">{{ t("scripts.plugin.config_auto") }}</span>
           </NxpButton>
         </div>
       <template #footer>

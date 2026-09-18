@@ -97,6 +97,48 @@ describe("public composite UI", () => {
     wrapper.unmount();
   });
 
+  it.each(["zh-CN", "en-US"])("renders month and date labels with the supplied locale: %s", locale => {
+    const wrapper = mount(NxpDateRangePicker, {
+      props: {
+        open: true,
+        from: "2026-08-14",
+        to: "2026-09-12",
+        maxDate: "2026-09-30",
+        locale,
+      },
+    });
+
+    const expectedMonths = [8, 9].map(month => new Intl.DateTimeFormat(locale, { year: "numeric", month: "long" }).format(new Date(2026, month - 1, 1)));
+    expect(wrapper.findAll(".nxp-date-range-month h4").map(month => month.text())).toEqual(expectedMonths);
+
+    const expectedDate = new Intl.DateTimeFormat(locale, { year: "numeric", month: "short", day: "numeric" }).format(new Date("2026-08-14T00:00:00"));
+    expect(wrapper.findAll("button[aria-label]").some(button => button.attributes("aria-label") === expectedDate)).toBe(true);
+    expect(wrapper.get(".nxp-date-range-selection").text()).toContain("2026/08/14");
+    wrapper.unmount();
+  });
+
+  it("uses the browser locale only when the host does not provide one", () => {
+    const originalLanguage = Object.getOwnPropertyDescriptor(window.navigator, "language");
+    Object.defineProperty(window.navigator, "language", { configurable: true, value: "en-US" });
+    try {
+      const browserWrapper = mount(NxpDateRangePicker, {
+        props: { open: true, from: "2026-08-14", to: "2026-09-12", maxDate: "2026-09-30" },
+      });
+      const browserMonth = new Intl.DateTimeFormat("en-US", { year: "numeric", month: "long" }).format(new Date(2026, 7, 1));
+      expect(browserWrapper.get(".nxp-date-range-month h4").text()).toBe(browserMonth);
+      browserWrapper.unmount();
+
+      const hostWrapper = mount(NxpDateRangePicker, {
+        props: { open: true, from: "2026-08-14", to: "2026-09-12", maxDate: "2026-09-30", locale: "zh-CN" },
+      });
+      const hostMonth = new Intl.DateTimeFormat("zh-CN", { year: "numeric", month: "long" }).format(new Date(2026, 7, 1));
+      expect(hostWrapper.get(".nxp-date-range-month h4").text()).toBe(hostMonth);
+      hostWrapper.unmount();
+    } finally {
+      if (originalLanguage) Object.defineProperty(window.navigator, "language", originalLanguage);
+    }
+  });
+
   it("keeps date drafts local until apply and rejects future selections", async () => {
     const wrapper = mount(NxpDateRangePicker, {
       props: {

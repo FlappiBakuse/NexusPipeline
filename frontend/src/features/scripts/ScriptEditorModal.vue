@@ -822,4 +822,87 @@ watch(
   display: none;
 }
 
+.judge-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  margin-top: 14px;
+}
+.judge-actions > * { flex: 0 0 auto; }
+.judge-mode-card {
+  flex: 0 1 calc((100% - 2 * var(--space-3)) / 3);
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 64px;
+  margin: 0;
+  border: 1px solid var(--content-card-border);
+  border-radius: var(--radius-md);
+  background: var(--content-control);
+  color: var(--text);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 52px;
+  grid-template-rows: 1fr auto;
+  align-items: center;
+  padding: 10px 12px;
+  text-align: left;
+}
+.judge-mode-card::after {
+  grid-column: 1;
+  grid-row: 2;
+  margin-top: 3px;
+  color: var(--muted);
+  content: attr(data-hint);
+  font-size: 11px;
+  line-height: 1.35;
+}
+.judge-mode-card:hover,
+.judge-upload-button:hover { border-color: var(--accent); background: var(--accent-soft); }
+.judge-mode-card[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--text); }
+.judge-toggle-track {
+  position: relative;
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  display: block;
+  width: 52px;
+  height: 30px;
+  border-radius: 999px;
+  background: var(--border-strong);
+  transition: background .18s ease;
+}
+.judge-toggle-thumb {
+  position: absolute;
+  top: 5px;
+  left: 5px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--content-card);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .18);
+  transition: transform .18s ease;
+}
+.judge-mode-card[aria-pressed="true"] .judge-toggle-track { background: var(--accent); }
+.judge-mode-card[aria-pressed="true"] .judge-toggle-thumb { transform: translateX(22px); }
+.judge-box #sm-script-box > .field + .field { margin-top: var(--space-3); }
+.judge-box #sm-kw-box > .field + .field { margin-top: var(--space-3); }
+.judge-upload-button {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-end;
+  min-height: 40px;
+  padding: 8px 13px;
+  border: 1px solid var(--content-control-border);
+  border-radius: var(--radius-sm);
+  background: var(--content-control);
+  color: var(--text);
+  white-space: nowrap;
+}
+
+@media (max-width: 700px) {
+  .judge-actions { align-items: center; justify-content: flex-end; }
+  .judge-actions > * { flex: 0 0 auto; }
+  .judge-actions .judge-mode-card { flex: 0 1 calc((100% - var(--space-3)) / 2); }
+}
+
 </style>

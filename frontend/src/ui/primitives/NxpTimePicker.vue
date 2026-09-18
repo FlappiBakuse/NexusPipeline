@@ -95,5 +95,21 @@ onBeforeUnmount(() => {
 </template>
 
 <style>
+.nxp-time { position: relative; min-width: 0; }
+.nxp-time-input-wrap { display: flex; min-width: 0; }
+.nxp-time-value { flex: 1 1 auto; min-width: 0; border-radius: 8px 0 0 8px !important; cursor: pointer; }
+.nxp-time-trigger { width: 42px; min-width: 42px; min-height: 40px; padding: 0; border-radius: 0 8px 8px 0; color: var(--muted, var(--nx-color-muted)); font: inherit; }
+.nxp-time-trigger:hover, .nxp-time-trigger[aria-expanded="true"] { border-color: var(--accent, var(--nx-color-accent)); background: var(--content-control-hover, transparent); color: var(--nx-color-text); }
+.nxp-time-trigger:disabled { cursor: not-allowed; opacity: .45; }
+.nxp-time-popover { position: absolute; top: calc(100% + 6px); right: 0; z-index: 60; width: 100%; min-width: 0; padding: var(--space-3, var(--nx-space-3)); border: 1px solid var(--content-control-border, var(--nx-color-border)); border-radius: var(--radius-md, var(--nx-radius-md)); background: var(--content-card, var(--nx-color-surface)); box-shadow: var(--shadow); }
+.nxp-time-popover[hidden] { display: none; }
+.nxp-time-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.nxp-time-wheel { display: grid; min-width: 0; grid-template-rows: 30px 96px 30px; }
+.nxp-time-step { display: grid; width: 100%; min-height: 30px; place-items: center; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--muted, var(--nx-color-muted)); font: inherit; font-size: 16px; line-height: 1; box-shadow: none; }
+.nxp-time-step:hover, .nxp-time-step:focus-visible { background: var(--content-control-hover, transparent); color: var(--nx-color-text); }
+.nxp-time-viewport { display: grid; grid-template-rows: repeat(3, 32px); overflow: hidden; border-top: 1px solid var(--border, var(--nx-color-border)); border-bottom: 1px solid var(--border, var(--nx-color-border)); }
+.nxp-time-option { display: grid; width: 100%; min-width: 0; min-height: 32px; place-items: center; padding: 0 4px; border: 0; border-radius: 0; background: transparent; color: var(--muted, var(--nx-color-muted)); font: inherit; font-size: 13px; font-variant-numeric: tabular-nums; box-shadow: none; }
+.nxp-time-option:hover, .nxp-time-option:focus-visible { background: var(--content-control-hover, transparent); color: var(--nx-color-text); }
+.nxp-time-option[aria-selected="true"] { background: var(--accent-soft, transparent); color: var(--accent, var(--nx-color-accent)); font-weight: 750; box-shadow: inset 0 1px 0 var(--accent, currentColor), inset 0 -1px 0 var(--accent, currentColor); }
 .nxp-time-popover { position: fixed !important; z-index: 1000; }
 </style>

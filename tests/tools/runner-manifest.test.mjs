@@ -84,6 +84,59 @@ test("全量 docs runner 同时记录 domain 与治理逻辑组且不重复治�
   }
 });
 
+test("插件契约 runner 合并命令调用与引擎报告的实际文件身份", () => {
+  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nxp-runner-plugin-plan-"));
+  const manifestPath = path.join(fixtureRoot, "plugin-manifest.json");
+  const reportRoot = path.join(fixtureRoot, "reports");
+  const sourcePlan = createExecutionPlan([], {
+    all: true,
+    base: "test-base",
+    head: "test-head",
+  });
+  const pluginGroup = sourcePlan.selectedGroups.find(group => group.groupId === "domain:plugin");
+  assert.ok(pluginGroup);
+  const plan = {
+    ...sourcePlan,
+    selectedGroups: [{ ...pluginGroup, physicalJobId: "plugin-contract", mode: "ci" }],
+  };
+  const environment = {
+    ...process.env,
+    NEXUS_CI_MANIFEST: manifestPath,
+    NEXUS_CI_REPORT_DIR: reportRoot,
+    NEXUS_CI_JOB_ID: "plugin-contract",
+    NEXUS_CI_DOMAIN: "plugin",
+    NEXUS_CI_MODE: "ci",
+    NEXUS_CI_HEAD_SHA: "test-head",
+    NEXUS_CI_REPOSITORY_SHA: "test-head",
+    NEXUS_CI_PLAN_DIGEST: plan.planDigest,
+    NEXUS_CI_EXECUTION_PLAN: JSON.stringify(plan),
+    NEXUS_CI_COUNTERPART_REPOSITORY: plan.counterpartRepository,
+    NEXUS_CI_COUNTERPART_SHA: plan.counterpartSha,
+    NEXUS_CI_SOURCE_DIGEST: plan.buildInputs.sourceDigest,
+    NEXUS_CI_BUILD_INPUTS_DIGEST: plan.buildInputs.buildInputsDigest,
+    NEXUS_OFFICIAL_PLUGINS_ROOT: path.resolve(root, "..", "NexusPipeline-Plugins"),
+  };
+  delete environment.NODE_TEST_CONTEXT;
+
+  try {
+    const result = spawnSync(process.execPath, [path.join(root, "tests", "run.mjs"), "contract"], {
+      cwd: root,
+      encoding: "utf8",
+      env: environment,
+      windowsHide: true,
+    });
+    assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+    const group = manifest.groups.find(item => item.groupId === "domain:plugin");
+    assert.ok(group);
+    assert.deepEqual(group.invokedFiles, group.expectedFiles);
+    assert.deepEqual(group.observedFiles, group.expectedFiles);
+    assert.equal(manifest.artifactManifest.present, false);
+  } finally {
+    fs.rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
 test("无 CI 计划的 docs 入口仍执行完整文档套件", () => {
   const environment = { ...process.env };
   delete environment.NEXUS_CI_MANIFEST;

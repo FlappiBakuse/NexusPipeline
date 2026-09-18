@@ -14,6 +14,16 @@ name: CI
         description: 官方插件候选完整 commit SHA；留空使用 plugins.lock.json
         required: false
         type: string
+      test_host_acceptance:
+        description: 运行 v0.16.6 Test Host 更新专属验收（真实 timeScale=1）
+        required: false
+        default: false
+        type: boolean
+      admin_execution_acceptance:
+        description: 运行 v0.16.6 管理员 Execution 专属验收（真实 timeScale=1）
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -915,6 +925,146 @@ jobs:
             Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'NEXUS_CI_MANIFEST'
           } else {
             Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value 'json={"result":"missing"}'
+          }
+
+  # v0.16.6 版本验收专属模式：与管理员生产门禁分开，保留 Test Host、原始报告和实际产物清单身份。
+  version-acceptance-test-host:
+    name: v0.16.6 验收 Test Host Update（timeScale=1）
+    needs: changes
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.test_host_acceptance == true }}
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      NEXUS_SYSTEM_WEB_PORT: "58835"
+      NEXUS_SYSTEM_SMOKE: "1"
+      NEXUS_TIME_SCALE: "1"
+      NEXUS_CI_MANIFEST: ${{ github.workspace }}\nexus-ci-version-acceptance-test-host.json
+      NEXUS_CI_JOB_ID: version-acceptance-test-host
+      NEXUS_CI_MODE: test-host
+      NEXUS_CI_DOMAIN: version-acceptance
+      NEXUS_CI_HEAD_SHA: ${{ github.sha }}
+      NEXUS_CI_REPOSITORY_SHA: ${{ github.sha }}
+      NEXUS_CI_PLAN_DIGEST: ${{ needs.changes.outputs.plan_digest }}
+      NEXUS_CI_SOURCE_DIGEST: ${{ needs.changes.outputs.source_digest }}
+      NEXUS_CI_BUILD_INPUTS_DIGEST: ${{ needs.changes.outputs.build_inputs_digest }}
+      NEXUS_CI_COUNTERPART_REPOSITORY: ${{ needs.changes.outputs.counterpart_repository }}
+      NEXUS_CI_COUNTERPART_SHA: ${{ needs.changes.outputs.counterpart_sha }}
+      NEXUS_CI_REPORT_DIR: ${{ runner.temp }}/nexus-ci-reports/version-acceptance-test-host
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 .NET 8 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Test Host Update 专属验收（真实计时）
+        shell: pwsh
+        run: node tests\run.mjs codex system --group update --realtime
+
+      - name: 上传 Test Host 原始报告与产物清单
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexus-v0.16.6-test-host-update-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/nexus-ci-reports/version-acceptance-test-host
+            tests/system/runtime-*
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: 导出 Test Host 验收结果 manifest
+        if: always()
+        shell: pwsh
+        env:
+          NEXUS_CI_RESULT: ${{ job.status }}
+        run: |
+          if (Test-Path -LiteralPath $env:NEXUS_CI_MANIFEST) {
+            $manifest = Get-Content -LiteralPath $env:NEXUS_CI_MANIFEST -Raw | ConvertFrom-Json
+            $manifest | Add-Member -NotePropertyName result -NotePropertyValue $env:NEXUS_CI_RESULT -Force
+            $manifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $env:NEXUS_CI_MANIFEST -Encoding utf8
+          }
+
+  # v0.16.6 版本验收专属模式：以管理员生产产物执行真实 timeScale=1 的 Execution 收尾/重启义务。
+  version-acceptance-admin-execution:
+    name: v0.16.6 验收 Admin Execution（timeScale=1）
+    needs: changes
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.admin_execution_acceptance == true }}
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      NEXUS_SYSTEM_WEB_PORT: "58836"
+      NEXUS_TIME_SCALE: "1"
+      NEXUS_CI_MANIFEST: ${{ github.workspace }}\nexus-ci-version-acceptance-admin-execution.json
+      NEXUS_CI_JOB_ID: version-acceptance-admin-execution
+      NEXUS_CI_MODE: admin
+      NEXUS_CI_DOMAIN: version-acceptance
+      NEXUS_CI_HEAD_SHA: ${{ github.sha }}
+      NEXUS_CI_REPOSITORY_SHA: ${{ github.sha }}
+      NEXUS_CI_PLAN_DIGEST: ${{ needs.changes.outputs.plan_digest }}
+      NEXUS_CI_SOURCE_DIGEST: ${{ needs.changes.outputs.source_digest }}
+      NEXUS_CI_BUILD_INPUTS_DIGEST: ${{ needs.changes.outputs.build_inputs_digest }}
+      NEXUS_CI_COUNTERPART_REPOSITORY: ${{ needs.changes.outputs.counterpart_repository }}
+      NEXUS_CI_COUNTERPART_SHA: ${{ needs.changes.outputs.counterpart_sha }}
+      NEXUS_CI_REPORT_DIR: ${{ runner.temp }}/nexus-ci-reports/version-acceptance-admin-execution
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 .NET 8 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: 管理员完整性自检
+        shell: pwsh
+        run: |
+          $groups = & whoami /groups 2>&1
+          $status = $LASTEXITCODE
+          $text = ($groups -join "`n")
+          Write-Output $text
+          if ($status -ne 0 -or $text -notmatch 'S-1-16-(?:12288|16384)\b') {
+            Write-Error "Windows runner 未处于 Administrator / High Integrity 或 System Integrity。"
+            exit 2
+          }
+          Write-Output "[权限] 已确认 High/System Integrity。"
+
+      - name: Admin Execution 专属验收（真实计时）
+        shell: pwsh
+        run: node tests\run.mjs admin system --group execution --realtime
+
+      - name: 上传 Admin Execution 原始报告与产物清单
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexus-v0.16.6-admin-execution-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/nexus-ci-reports/version-acceptance-admin-execution
+            tests/system/runtime-*
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: 导出 Admin Execution 验收结果 manifest
+        if: always()
+        shell: pwsh
+        env:
+          NEXUS_CI_RESULT: ${{ job.status }}
+        run: |
+          if (Test-Path -LiteralPath $env:NEXUS_CI_MANIFEST) {
+            $manifest = Get-Content -LiteralPath $env:NEXUS_CI_MANIFEST -Raw | ConvertFrom-Json
+            $manifest | Add-Member -NotePropertyName result -NotePropertyValue $env:NEXUS_CI_RESULT -Force
+            $manifest | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $env:NEXUS_CI_MANIFEST -Encoding utf8
           }
 
   # 每周计划与手动触发执行完整管理员门禁：Unit + Component + Web + Docs + Syntax + Build + UI + 全部 System suite。

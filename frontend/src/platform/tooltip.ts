@@ -77,7 +77,7 @@ function showNow(context: TooltipContext): void {
   anchor = context.anchor || element;
   tooltip = document.createElement("div");
   tooltip.id = `nxp-tooltip-${++sequence}`;
-  tooltip.className = "nxp-tooltip secondary-surface";
+  tooltip.className = "platform-tooltip secondary-surface";
   tooltip.setAttribute("role", "tooltip");
   tooltip.textContent = text;
   document.body.append(tooltip);

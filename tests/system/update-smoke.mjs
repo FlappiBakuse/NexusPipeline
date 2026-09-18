@@ -215,7 +215,7 @@ test("apply-update：备份→交换→保留插件与数据→重拉宿主→�
   await stopRuntimeHard();
 });
 
-test("故障注入：SwapReady 阶段强杀 worker 后启动回滚并清理现场", { skip: faultInjectionSkip, concurrency: false }, async () => {
+test("update:swap-ready | 故障注入：SwapReady 阶段强杀 worker 后启动回滚并清理现场", { skip: faultInjectionSkip, concurrency: false }, async () => {
   await stopRuntimeHard();
   prepareRuntime();
   prepareLegacyInstall();

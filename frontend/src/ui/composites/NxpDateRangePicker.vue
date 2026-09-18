@@ -63,7 +63,7 @@ const emit = defineEmits<{
 const today = computed(() => normalizeDateKey(props.maxDate, dateKey()));
 const draft = ref<DateRangeDraft>({ from: props.from, to: props.to });
 const rangeAnchor = ref<RangeAnchor>("from");
-const calendarMonth = ref(monthKey(props.from || today.value));
+const calendarMonth = ref(monthFromDate(props.from || today.value));
 const calendarMonths = computed(() => [calendarMonth.value, shiftMonth(calendarMonth.value, 1)]);
 
 function localeValue() {
@@ -86,6 +86,10 @@ function displayDate(value: string) {
   return value.replaceAll("-", "/");
 }
 
+function monthFromDate(value: string) {
+  return monthKey(value.slice(0, 7));
+}
+
 const calendarTitle = computed(() => `${monthLabel(calendarMonths.value[0])} — ${monthLabel(calendarMonths.value[1])}`);
 const canNextMonth = computed(() => canMoveToNextMonth(calendarMonths.value[1], today.value));
 const rangeDisplay = computed(() => {
@@ -96,7 +100,7 @@ const rangeDisplay = computed(() => {
 function resetDraft() {
   draft.value = { from: props.from, to: props.to };
   rangeAnchor.value = "from";
-  calendarMonth.value = monthKey(props.from || today.value);
+  calendarMonth.value = monthFromDate(props.from || today.value);
 }
 
 function selectDate(value: string) {

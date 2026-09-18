@@ -10,7 +10,7 @@
 
 - 网页管理界面由 `frontend/` 中的 Vue/TypeScript/Vite 源码构建为纯静态 ES modules；运行程序只加载构建结果，源码构建需要 Node.js/npm。
 - 正式程序以管理员身份运行，构建产物带 `requireAdministrator` 清单；Codex 本地 UI/System 反馈使用 `NexusTestHost=true` 的 Test Host，GitHub Administrator Gate 使用生产 release 并在 Administrator / High Integrity 或 System Integrity 下执行。
-- `tests/e2e/` 已声明 Playwright 依赖；安装和运行方式见 [TESTING.md](../TESTING.md)。
+- `tests/e2e/` 已声明 Playwright 依赖；安装和运行方式见[测试命令](../testing/commands.md)。
 
 
 
@@ -64,7 +64,7 @@ dotnet publish src\NexusPipeline.csproj -c Release -r win-x64 --self-contained f
 
 ## 测试入口
 
-测试分层、归属、默认命令、CI 顺序、System Smoke 和清理要求统一见 [TESTING.md](../TESTING.md)。统一入口为 `node tests/run.mjs codex <suite>` 或 `node tests/run.mjs admin <suite>`；每次改动按照修改范围执行对应模式；涉及进程、端口、解释器、模拟器、插件或更新事务时，先运行 Codex System Smoke，再由 GitHub Administrator Gate 验证生产 release。
+测试分层与归属见[测试索引](../testing/README.md)和[测试政策](../testing/policy.md)，命令、CI 顺序、System Smoke 和清理要求见[测试命令](../testing/commands.md)。统一入口为 `node tests/run.mjs codex <suite>` 或 `node tests/run.mjs admin <suite>`；每次改动按照修改范围执行对应模式；涉及进程、端口、解释器、模拟器、插件或更新事务时，先运行 Codex System Smoke，再由 GitHub Administrator Gate 验证生产 release。
 
 System Smoke 可按影响域只跑受影响的 suite；省略分组等于全部 suite，`--dry` 只列出将要执行的 suite：
 
@@ -150,5 +150,5 @@ CI 按影响域决定各 Gate 是否执行，路径清单唯一来源为 `tools/
 | 检测到已在运行 | 检查任务管理器中的残留进程；确认单实例互斥体没有被其他服务占用 |
 | Web 打不开 | 确认服务正在运行、端口正确，轻量模式不会启动 Web |
 | 重构建失败或 exe 被锁定 | 停止对应服务进程后重新构建 |
-| 测试出现级联失败 | 检查对应 suite 的隔离 runtime 和残留进程，按 [TESTING.md](../TESTING.md) 清理 |
+| 测试出现级联失败 | 检查对应 suite 的隔离 runtime 和残留进程，按[测试命令](../testing/commands.md)清理 |
 | 配置还原异常 | 检查 `data/{脚本Id}/{UserId}/` 下的 `.session`、`original/` 和 `swap-backup/`，保留现场后再进行恢复操作 |

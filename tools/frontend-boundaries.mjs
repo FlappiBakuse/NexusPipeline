@@ -87,6 +87,10 @@ const GENERATED_DIRECTORIES = new Set(["node_modules", "dist", "bin", "obj", ".g
 export function readProductionSources(root) {
   const frontendRoot = path.join(root, "frontend", "src");
   const files = [];
+  const entryFile = path.join(root, "frontend", "index.html");
+  if (fs.existsSync(entryFile) && fs.statSync(entryFile).isFile()) {
+    files.push([normalizePath(path.relative(root, entryFile)), fs.readFileSync(entryFile, "utf8")]);
+  }
   const walk = directory => {
     if (!fs.existsSync(directory)) return;
     for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
@@ -263,11 +267,46 @@ function styleBlocks(filePath, source) {
   return descriptor.styles.map(block => ({ text: block.content, offset: block.loc.start.offset }));
 }
 
+function splitSelectorList(value) {
+  const selectors = [];
+  let start = 0;
+  let depth = 0;
+  let quote = "";
+  for (let index = 0; index < value.length; index++) {
+    const character = value[index];
+    if (quote) {
+      if (character === quote && value[index - 1] !== "\\") quote = "";
+      continue;
+    }
+    if (character === "\"" || character === "'") {
+      quote = character;
+      continue;
+    }
+    if (character === "(" || character === "[") depth++;
+    else if (character === ")" || character === "]") depth = Math.max(0, depth - 1);
+    else if (character === "," && depth === 0) {
+      selectors.push(value.slice(start, index).trim());
+      start = index + 1;
+    }
+  }
+  selectors.push(value.slice(start).trim());
+  return selectors.filter(Boolean);
+}
+
 function styleSelectorIsDescendantOfPublicControl(selector) {
   const normalized = selector.replace(/\s+/gu, " ").trim();
-  if (!/\b(?:nxp-[A-Za-z0-9_-]+|nxp-[a-z0-9-]+)\b/iu.test(normalized)) return false;
-  const firstToken = normalized.split(/\s+|>|\+|~/u)[0] || "";
-  return !/^(?:\.?nxp-[A-Za-z0-9_-]+|nxp-[A-Za-z0-9_-]+)(?::|\.|\[|$)/u.test(firstToken);
+  if (!normalized) return false;
+  // A private nxp-* class is an internal implementation selector regardless of
+  // whether it appears below a public element, inside :is(), or in a group.
+  if (/(?:^|[^A-Za-z0-9_-])\.nxp-[A-Za-z0-9_-]+\b/u.test(normalized)) return true;
+
+  const publicElement = /(?:^|[\s>+~,(])nxp-[a-z0-9-]+(?=[:.#\[\s>+~),]|$)/iu.exec(normalized);
+  if (!publicElement) return false;
+  const publicEnd = publicElement.index + publicElement[0].length;
+  const remainder = normalized.slice(publicEnd);
+  // A public custom-element root may be styled for layout/state. Descendants
+  // belong to that public component and must not be reached from business CSS.
+  return /(?:^|[\s>+~])[^\s>+~]+[.#\[]/u.test(remainder);
 }
 
 function scanStyleSelectors(filePath, source, findings, offsetBase = 0) {
@@ -276,7 +315,7 @@ function scanStyleSelectors(filePath, source, findings, offsetBase = 0) {
   for (const match of withoutComments.matchAll(/([^{}]+)\{/gu)) {
     const rawSelector = match[1].trim();
     if (!rawSelector || rawSelector.startsWith("@")) continue;
-    for (const selector of rawSelector.split(",").map(value => value.trim()).filter(Boolean)) {
+    for (const selector of splitSelectorList(rawSelector)) {
       if (!styleSelectorIsDescendantOfPublicControl(selector)) continue;
       const localOffset = match.index + match[1].indexOf(selector);
       addFinding(findings, {
@@ -326,6 +365,7 @@ export function scanFrontendBoundaries({ root = path.resolve(path.dirname(fileUR
   return {
     schemaVersion: FRONTEND_BOUNDARY_SCHEMA_VERSION,
     filesScanned: hostEntries.length + pluginEntries.length,
+    sourceRoots: sources ? ["provided"] : ["frontend/index.html", "frontend/src"],
     findings,
     issues: findings.filter(finding => finding.severity === "error"),
     ok: findings.every(finding => finding.severity !== "error"),

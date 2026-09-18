@@ -182,7 +182,7 @@ function toggleDay(timeSet: QueueDraft["timeSets"][number], day: number) {
                 ><span class="timeset-summary-chevron" aria-hidden="true">⌄</span>
               </NxpButton>
             </div>
-            <Transition name="nxp-collapse">
+            <Transition name="app-collapse">
               <div v-if="isTimeSetOpen(timeSetKey(timeSet, index))" class="timeset-details" data-testid="queue-timeset-body">
               <div class="timeset-body">
                 <div class="timeset-layout">

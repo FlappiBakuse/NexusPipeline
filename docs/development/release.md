@@ -14,7 +14,7 @@
 ### 发布前置
 
 1. 确认版本开发计划、CHANGELOG 与 `docs/STATUS.md` 已反映当前状态；
-2. 按 [TESTING.md](../TESTING.md) 执行默认质量门禁，并运行修改范围适用的 System Smoke、Stress 或 Soak；
+2. 按[测试命令](../testing/commands.md)执行默认质量门禁，并运行修改范围适用的 System Smoke、Stress 或 Soak；
 3. 确认 `git diff --check` 通过，工作树中没有运行产物、用户配置、日志、密钥和测试 runtime；
 4. 核对发布包只包含程序运行所需文件，用户配置和运行数据不进入资产；
 5. 确认 Release Notes 使用当前版本的真实变更，SHA 资产与 zip 一一对应。

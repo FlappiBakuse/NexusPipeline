@@ -1,10 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createExecutionPlan } from "../../tools/ci-changes.mjs";
+import { artifactSetDigest } from "../../tools/artifact-manifest.mjs";
 import {
   evaluateRequiredSummary,
   executionPlanDigest,
-  expectedArtifactDigest,
   validateExecutionPlan,
 } from "../../tools/ci-summary.mjs";
 
@@ -34,12 +34,29 @@ function requiredChecks(groups) {
   return [...new Set(groups.flatMap(group => group.requiredChecks || []))];
 }
 
+function artifactManifestFor(mode, present) {
+  const files = present
+    ? [{ relativePath: "nexus-pipeline.exe", byteLength: 1, sha256: "a".repeat(64) }]
+    : [];
+  return {
+    schemaVersion: 1,
+    present,
+    kind: present ? "runtime" : "none",
+    mode,
+    producer: "test",
+    files,
+    artifactSetDigest: present ? artifactSetDigest(files) : null,
+  };
+}
+
 function manifestFor(plan, jobId, overrides = {}) {
   const groups = selectedFor(plan, jobId);
   assert.ok(groups.length > 0, `计划没有绑定 ${jobId}`);
   const mode = groups[0].mode;
   const integrityLevel = groups.some(group => group.requiredIntegrity === "high-or-system") ? "high" : "none";
   const buildFingerprint = "f".repeat(64);
+  const binaryRequired = groups.some(group => group.mode === "admin" || ["host", "frontend"].includes(group.kind));
+  const artifactManifest = artifactManifestFor(mode, binaryRequired);
   const records = groups.map(group => ({
     groupId: group.groupId,
     physicalJobId: jobId,
@@ -47,8 +64,21 @@ function manifestFor(plan, jobId, overrides = {}) {
     integrityLevel,
     testSelectionIdentity: group.testSelectionIdentity,
     plannedTests: group.expectedTests,
-    selectedTests: group.expectedTests,
-    selection: { plannedTests: group.expectedTests, actualTests: group.expectedTests },
+    expectedFiles: group.expectedFiles,
+    selectedTests: group.expectedFiles,
+    invokedFiles: group.expectedFiles,
+    observedFiles: group.expectedFiles,
+    selection: {
+      plannedTests: group.expectedTests,
+      actualTests: group.expectedFiles,
+      expectedFiles: group.expectedFiles,
+      invokedFiles: group.expectedFiles,
+      observedFiles: group.expectedFiles,
+    },
+    observedCases: [
+      ...group.exclusions.map(exclusion => ({ id: exclusion.testId, status: "required-in-other-mode" })),
+      { id: `${group.groupId}:case`, title: "synthetic passing case", status: "passed" },
+    ],
     result: "success",
     testCount: 1,
     passed: 1,
@@ -56,6 +86,8 @@ function manifestFor(plan, jobId, overrides = {}) {
     skipped: 0,
     nativeTotal: 1,
     exitCode: 0,
+    observedMode: group.mode,
+    timeScale: "1",
     exclusions: group.exclusions,
   }));
   return {
@@ -86,14 +118,9 @@ function manifestFor(plan, jobId, overrides = {}) {
     buildInputsDigest: plan.buildInputs.buildInputsDigest,
     counterpartRepository: plan.counterpartRepository,
     counterpartSha: plan.counterpartSha,
-    artifactDigest: expectedArtifactDigest({
-      buildFingerprint,
-      sourceDigest: plan.buildInputs.sourceDigest,
-      buildInputsDigest: plan.buildInputs.buildInputsDigest,
-      counterpartSha: plan.counterpartSha,
-      mode,
-      physicalJobId: jobId,
-    }),
+    artifactDigest: artifactManifest.present ? artifactManifest.artifactSetDigest : null,
+    artifactManifest,
+    artifactManifests: artifactManifest.present ? [artifactManifest] : [],
     mode,
     integrityLevel,
     checks: requiredChecks(groups).map(checkId => ({ checkId, status: "success" })),
@@ -171,14 +198,6 @@ test("C02：单个逻辑组为零执行时汇总失败", () => {
 test("C03：管理员计划拒绝 Test Host 结果替代", () => {
   const plan = planFor(["frontend/src/features/history/HistoryView.vue"]);
   const manifest = manifestFor(plan, "ui-smoke", { mode: "test-host" });
-  manifest.artifactDigest = expectedArtifactDigest({
-    buildFingerprint: manifest.buildFingerprint,
-    sourceDigest: manifest.sourceDigest,
-    buildInputsDigest: manifest.buildInputsDigest,
-    counterpartSha: manifest.counterpartSha,
-    mode: "test-host",
-    physicalJobId: "ui-smoke",
-  });
   const result = evaluateRequiredSummary(inputFor(plan, { jobs: { "ui-smoke": manifest } }));
   assert.equal(result.ok, false);
   assert.match(result.issues.join("\n"), /ui-smoke.*mode/u);
@@ -213,24 +232,18 @@ test("结果必须携带当前格式的 Job 身份、摘要和结构化实际选
   assert.equal(evaluateRequiredSummary(inputFor(plan, { jobs: { "docs-i18n": missingJobIdentity } })).ok, false);
 
   const arbitraryFingerprint = manifestFor(plan, "docs-i18n", { buildFingerprint: "fingerprint" });
-  arbitraryFingerprint.artifactDigest = expectedArtifactDigest({
-    buildFingerprint: arbitraryFingerprint.buildFingerprint,
-    sourceDigest: arbitraryFingerprint.sourceDigest,
-    buildInputsDigest: arbitraryFingerprint.buildInputsDigest,
-    counterpartSha: arbitraryFingerprint.counterpartSha,
-    mode: arbitraryFingerprint.mode,
-    physicalJobId: "docs-i18n",
-  });
   const fingerprintResult = evaluateRequiredSummary(inputFor(plan, { jobs: { "docs-i18n": arbitraryFingerprint } }));
   assert.equal(fingerprintResult.ok, false);
   assert.match(fingerprintResult.issues.join("\n"), /buildFingerprint/u);
 
   const wrongSelection = manifestFor(plan, "docs-i18n");
   wrongSelection.groups[0].selectedTests = ["tests/tools/not-planned.mjs"];
+  wrongSelection.groups[0].invokedFiles = wrongSelection.groups[0].selectedTests;
+  wrongSelection.groups[0].selection.invokedFiles = wrongSelection.groups[0].selectedTests;
   wrongSelection.groups[0].selection.actualTests = wrongSelection.groups[0].selectedTests;
   const selectionResult = evaluateRequiredSummary(inputFor(plan, { jobs: { "docs-i18n": wrongSelection } }));
   assert.equal(selectionResult.ok, false);
-  assert.match(selectionResult.issues.join("\n"), /实际测试选择/u);
+  assert.match(selectionResult.issues.join("\n"), /实际调用文件|实际测试选择/u);
 
   const missingStructuredSelection = manifestFor(plan, "docs-i18n");
   delete missingStructuredSelection.groups[0].selection;
@@ -281,6 +294,59 @@ test("C09：计划声明的 System Update 模式排除可被逐组核对", () =>
   const result = evaluateRequiredSummary(inputFor(plan));
   assert.equal(result.ok, true, result.issues.join("\n"));
   assert.ok(result.excludedGroups.includes("system:update"));
+});
+
+test("F2-01：计划的两个 System Update 文件漏跑一个时失败并列出缺失", () => {
+  const plan = planFor(["src/Services/Update/UpdateService.cs"]);
+  const input = inputFor(plan);
+  const manifest = input.jobs["system-update"];
+  const group = manifest.groups.find(item => item.groupId === "system:update");
+  assert.equal(group.expectedFiles.length, 2);
+  const oneFile = [group.expectedFiles[0]];
+  group.selectedTests = oneFile;
+  group.invokedFiles = oneFile;
+  group.observedFiles = oneFile;
+  group.selection.actualTests = oneFile;
+  group.selection.invokedFiles = oneFile;
+  group.selection.observedFiles = oneFile;
+  const result = evaluateRequiredSummary(input);
+  assert.equal(result.ok, false);
+  assert.match(result.issues.join("\n"), /实际观测文件缺失/u);
+});
+
+test("F2-01：一个许可排除不能覆盖七个实际 skipped case", () => {
+  const plan = planFor(["src/Services/Update/UpdateService.cs"]);
+  const input = inputFor(plan);
+  const group = input.jobs["system-update"].groups.find(item => item.groupId === "system:update");
+  Object.assign(group, {
+    testCount: 8,
+    passed: 1,
+    skipped: 7,
+    nativeTotal: 8,
+    observedCases: [
+      { id: "update:swap-ready", status: "required-in-other-mode" },
+      ...Array.from({ length: 6 }, (_, index) => ({ id: `unexpected:skip-${index + 1}`, status: "skipped-by-engine" })),
+    ],
+  });
+  const result = evaluateRequiredSummary(input);
+  assert.equal(result.ok, false);
+  assert.match(result.issues.join("\n"), /未计划 skip/u);
+});
+
+test("F2-01：skip 数量相同但身份错误时失败", () => {
+  const plan = planFor(["src/Services/Update/UpdateService.cs"]);
+  const input = inputFor(plan);
+  const group = input.jobs["system-update"].groups.find(item => item.groupId === "system:update");
+  Object.assign(group, {
+    testCount: 2,
+    passed: 1,
+    skipped: 1,
+    nativeTotal: 2,
+    observedCases: [{ id: "other:case", status: "skipped-by-engine" }],
+  });
+  const result = evaluateRequiredSummary(input);
+  assert.equal(result.ok, false);
+  assert.match(result.issues.join("\n"), /计划排除未在实际结果中闭合|未计划 skip/u);
 });
 
 test("C10：缺少物理 Job、重复 Job 和额外运行均有明确分类", () => {

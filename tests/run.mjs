@@ -6,7 +6,8 @@ import { fileURLToPath } from "node:url";
 import { FRONTEND_TEST_GROUPS, GOVERNANCE_DOMAINS, HOST_TEST_AREAS, SYSTEM_TEST_GROUPS, logicalGroupId } from "../tools/ci-domains.mjs";
 import { globToRegExp } from "../tools/ci-changes.mjs";
 import { createBuildFingerprint } from "../tools/ci-fingerprint.mjs";
-import { expectedArtifactDigest, validateExecutionPlan } from "../tools/ci-summary.mjs";
+import { validateExecutionPlan } from "../tools/ci-summary.mjs";
+import { createArtifactManifest, createNoArtifactManifest, verifyArtifactManifest } from "../tools/artifact-manifest.mjs";
 import { parseTapResults, parseTrxResults, parseVitestResults, parsePlaywrightResults } from "../tools/test-results.mjs";
 import { getIntegrityLevel, isAdministrator, killProcessTree } from "./support/windows-process.mjs";
 
@@ -30,6 +31,7 @@ const ciExecution = {
   domainId: process.env.NEXUS_CI_DOMAIN || "",
   groups: [],
   checks: [],
+  artifacts: [],
 };
 let productionBuildPromise = null;
 let testHostBuildPromise = null;
@@ -86,8 +88,39 @@ function recordCiCheck(checkId, status, detail = "") {
   ciExecution.checks.push({ checkId, status: normalized, ...(detail ? { detail } : {}) });
 }
 
+function uniquePaths(values) {
+  return [...new Set((Array.isArray(values) ? values : [])
+    .map(value => String(value || "").trim().replaceAll("\\", "/").replace(/^\.\//u, ""))
+    .filter(Boolean))].sort();
+}
+
+function mergeObservedCases(left, right) {
+  const values = [...(Array.isArray(left) ? left : []), ...(Array.isArray(right) ? right : [])];
+  const seen = new Set();
+  return values.filter(item => {
+    const key = JSON.stringify([item?.id || "", item?.status || "", item?.file || "", item?.title || ""]);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function refreshGroupSelection(group) {
+  group.selectedTests = uniquePaths(group.invokedFiles || group.selectedTests);
+  group.invokedFiles = uniquePaths(group.invokedFiles || group.selectedTests);
+  group.observedFiles = uniquePaths(group.observedFiles);
+  group.selection = {
+    plannedTests: group.plannedTests || [],
+    actualTests: group.invokedFiles,
+    expectedFiles: group.expectedFiles || [],
+    invokedFiles: group.invokedFiles,
+    observedFiles: group.observedFiles,
+  };
+}
+
 function upsertCiGroup(record) {
   if (!ciManifestEnabled() || !record.groupId) return;
+  refreshGroupSelection(record);
   const existing = ciExecution.groups.find(group => group.groupId === record.groupId);
   if (!existing) {
     const reportPaths = [...new Set([...(record.reportPaths || []), ...(record.reportPath ? [record.reportPath] : [])])];
@@ -97,11 +130,18 @@ function upsertCiGroup(record) {
     });
     return;
   }
-  existing.selectedTests = [...new Set([...(existing.selectedTests || []), ...(record.selectedTests || [])])];
-  existing.selection = {
-    plannedTests: existing.plannedTests,
-    actualTests: existing.selectedTests,
-  };
+  existing.selectedTests = uniquePaths([...(existing.selectedTests || []), ...(record.selectedTests || [])]);
+  existing.invokedFiles = uniquePaths([...(existing.invokedFiles || []), ...(record.invokedFiles || [])]);
+  existing.observedFiles = uniquePaths([...(existing.observedFiles || []), ...(record.observedFiles || [])]);
+  existing.expectedFiles = uniquePaths([...(existing.expectedFiles || []), ...(record.expectedFiles || [])]);
+  existing.plannedTests = [...new Set([...(existing.plannedTests || []), ...(record.plannedTests || [])])];
+  existing.observedCases = mergeObservedCases(existing.observedCases, record.observedCases);
+  existing.exclusionObservations = [
+    ...new Map([...(existing.exclusionObservations || []), ...(record.exclusionObservations || [])]
+      .map(item => [String(item?.testId || item?.id || ""), item])
+      .filter(([id]) => id)).values(),
+  ];
+  refreshGroupSelection(existing);
   for (const key of ["testCount", "passed", "failed", "skipped", "nativeTotal"]) {
     existing[key] = Number(existing[key] || 0) + Number(record[key] || 0);
   }
@@ -115,22 +155,50 @@ function upsertCiGroup(record) {
   }
 }
 
-function recordCiTests(result, { groupIds = [], selectedTests = [], format = "", exitCode = 0, reportPath = "" } = {}) {
+function recordCiTests(result, {
+  groupIds = [],
+  selectedTests = [],
+  invokedFiles = selectedTests,
+  expectedFiles = [],
+  plannedTests = [],
+  exclusions = [],
+  format = "",
+  exitCode = 0,
+  reportPath = "",
+  observedMode = "",
+  timeScale = "",
+} = {}) {
   for (const key of ["testCount", "passed", "failed", "skipped"]) ciExecution[key] += result[key];
   if (!ciManifestEnabled()) return;
   const plan = readCiPlan();
   for (const groupId of groupIds) {
     const planned = plan?.selectedGroups?.find(group => group.groupId === groupId) || {};
-    const actualTests = Array.isArray(selectedTests) ? selectedTests : [];
+    const actualTests = uniquePaths(invokedFiles);
+    const observedFiles = uniquePaths(result.observedFiles);
+    const groupExpectedFiles = uniquePaths(planned.expectedFiles || expectedFiles);
+    const groupPlannedTests = planned.expectedTests || plannedTests;
     upsertCiGroup({
       groupId,
       physicalJobId: planned.physicalJobId || ciJobId(),
       mode: planned.mode || process.env.NEXUS_CI_MODE || "ci",
       integrityLevel: process.env.NEXUS_CI_INTEGRITY_LEVEL || getIntegrityLevel(),
       testSelectionIdentity: planned.testSelectionIdentity || "",
-      plannedTests: planned.expectedTests || [],
+      plannedTests: groupPlannedTests,
+      expectedFiles: groupExpectedFiles,
       selectedTests: actualTests,
-      selection: { plannedTests: planned.expectedTests || [], actualTests },
+      invokedFiles: actualTests,
+      observedFiles,
+      observedCases: result.observedCases || [],
+      exclusionObservations: (result.observedCases || [])
+        .filter(item => ["skipped-by-engine", "required-in-other-mode", "excluded-before-run"].includes(item.status))
+        .map(item => ({ testId: item.id, status: item.status })),
+      selection: {
+        plannedTests: groupPlannedTests,
+        actualTests,
+        expectedFiles: groupExpectedFiles,
+        invokedFiles: actualTests,
+        observedFiles,
+      },
       result: exitCode === 0 && result.failed === 0 ? "success" : "failure",
       testCount: result.testCount,
       passed: result.passed,
@@ -138,14 +206,16 @@ function recordCiTests(result, { groupIds = [], selectedTests = [], format = "",
       skipped: result.skipped,
       nativeTotal: result.testCount,
       exitCode: exitCode || (result.failed > 0 ? 1 : 0),
-      exclusions: planned.exclusions || [],
+      exclusions: planned.exclusions || exclusions,
       framework: format,
+      observedMode: observedMode || planned.mode || process.env.NEXUS_CI_MODE || "ci",
+      timeScale: String(timeScale || process.env.NEXUS_TIME_SCALE || "1"),
       ...(reportPath ? { reportPath } : {}),
     });
   }
 }
 
-function recordCiGroupFailure(groupIds, { selectedTests = [], format = "", error = "" } = {}) {
+function recordCiGroupFailure(groupIds, { selectedTests = [], invokedFiles = selectedTests, format = "", error = "" } = {}) {
   if (!ciManifestEnabled()) return;
   const plan = readCiPlan();
   for (const groupId of groupIds) {
@@ -157,8 +227,18 @@ function recordCiGroupFailure(groupIds, { selectedTests = [], format = "", error
       integrityLevel: process.env.NEXUS_CI_INTEGRITY_LEVEL || getIntegrityLevel(),
       testSelectionIdentity: planned.testSelectionIdentity || "",
       plannedTests: planned.expectedTests || [],
-      selectedTests,
-      selection: { plannedTests: planned.expectedTests || [], actualTests: selectedTests },
+      expectedFiles: planned.expectedFiles || [],
+      selectedTests: uniquePaths(invokedFiles),
+      invokedFiles: uniquePaths(invokedFiles),
+      observedFiles: [],
+      observedCases: [],
+      selection: {
+        plannedTests: planned.expectedTests || [],
+        actualTests: uniquePaths(invokedFiles),
+        expectedFiles: planned.expectedFiles || [],
+        invokedFiles: uniquePaths(invokedFiles),
+        observedFiles: [],
+      },
       result: "failure",
       testCount: 0,
       passed: 0,
@@ -171,6 +251,101 @@ function recordCiGroupFailure(groupIds, { selectedTests = [], format = "", error
       error,
     });
   }
+}
+
+function recordCiInvocation(groupId, { selectedTest = "", format = "command", exitCode = 0, reportPath = "", output = "" } = {}) {
+  if (!ciManifestEnabled() || !groupId) return;
+  const planned = ciPlannedGroup(groupId) || {};
+  const invokedFiles = selectedTest ? [selectedTest] : [];
+  upsertCiGroup({
+    groupId,
+    physicalJobId: planned.physicalJobId || ciJobId(),
+    mode: planned.mode || process.env.NEXUS_CI_MODE || "ci",
+    integrityLevel: process.env.NEXUS_CI_INTEGRITY_LEVEL || getIntegrityLevel(),
+    testSelectionIdentity: planned.testSelectionIdentity || "",
+    plannedTests: planned.expectedTests || [],
+    expectedFiles: planned.expectedFiles || [],
+    selectedTests: invokedFiles,
+    invokedFiles,
+    observedFiles: invokedFiles,
+    observedCases: [],
+    exclusionObservations: [],
+    selection: {
+      plannedTests: planned.expectedTests || [],
+      actualTests: invokedFiles,
+      expectedFiles: planned.expectedFiles || [],
+      invokedFiles,
+      observedFiles: [],
+    },
+    result: exitCode === 0 ? "success" : "failure",
+    testCount: 0,
+    passed: 0,
+    failed: 0,
+    skipped: 0,
+    nativeTotal: 0,
+    exitCode,
+    exclusions: planned.exclusions || [],
+    framework: format,
+    ...(output ? { invocationOutput: output.slice(-8192) } : {}),
+    ...(reportPath ? { reportPath } : {}),
+  });
+}
+
+function captureArtifact(kind, root, {
+  mode = process.env.NEXUS_CI_MODE || "ci",
+  producer = ciJobId(),
+  buildInvocation = [],
+  observedTimeScale = process.env.NEXUS_TIME_SCALE || "1",
+  metadata = {},
+} = {}) {
+  if (!ciManifestEnabled()) return null;
+  try {
+    const manifest = createArtifactManifest({
+      root,
+      kind,
+      mode,
+      producer,
+      sourceRepository: process.env.GITHUB_REPOSITORY || "FlappiBakuse/NexusPipeline",
+      sourceSha: process.env.NEXUS_CI_HEAD_SHA || process.env.GITHUB_SHA || "local",
+      sourceDigest: process.env.NEXUS_CI_SOURCE_DIGEST || "",
+      buildInputsDigest: process.env.NEXUS_CI_BUILD_INPUTS_DIGEST || "",
+      counterpartRepository: process.env.NEXUS_CI_COUNTERPART_REPOSITORY || "",
+      counterpartSha: process.env.NEXUS_CI_COUNTERPART_SHA || "",
+      buildFingerprint: process.env.NEXUS_CI_BUILD_FINGERPRINT || createBuildFingerprint({ mode }),
+      buildInvocation,
+      toolchain: { node: process.version },
+      observedTimeScale,
+      metadata,
+    });
+    const existing = ciExecution.artifacts.findIndex(item => item.kind === kind);
+    if (existing >= 0) ciExecution.artifacts[existing] = manifest;
+    else ciExecution.artifacts.push(manifest);
+    if (process.env.NEXUS_CI_REPORT_DIR) {
+      const destination = path.join(process.env.NEXUS_CI_REPORT_DIR, `artifact-${kind}.json`);
+      fs.mkdirSync(path.dirname(destination), { recursive: true });
+      fs.writeFileSync(destination, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+    }
+    recordCiCheck("artifacts", "success");
+    console.error(`[CI artifact] ${kind}：${manifest.files.length} 个文件，digest=${manifest.artifactSetDigest}`);
+    return manifest;
+  } catch (error) {
+    recordCiCheck("artifacts", "failure", error.message);
+    console.error(`[CI artifact] ${kind} 清单生成失败：${error.message}`);
+    return null;
+  }
+}
+
+function verifyCapturedArtifact(kind, root) {
+  if (!ciManifestEnabled()) return true;
+  const manifest = ciExecution.artifacts.find(item => item.kind === kind);
+  if (!manifest) {
+    recordCiCheck("artifact-consumer", "failure", `缺少 ${kind} 产物清单`);
+    return false;
+  }
+  const result = verifyArtifactManifest(root, manifest);
+  recordCiCheck("artifact-consumer", result.ok ? "success" : "failure", result.issues.join("; "));
+  if (!result.ok) console.error(`[CI artifact] ${kind} 消费前校验失败：${result.issues.join("; ")}`);
+  return result.ok;
 }
 
 function retainNativeReport({ reportFile, rawOutput, format, groupIds = [] }) {
@@ -214,12 +389,25 @@ async function runReported(command, args, options = {}, format = "tap", context 
   try {
     const code = await runProcess(command, reportedArgs, { ...options, env, onOutput: chunk => { tail = (tail + chunk).slice(-262144); } });
     try {
-      const result = format === "tap" ? parseTapResults(tail)
-        : format === "trx" ? parseTrxResults(fs.readFileSync(reportFile, "utf8"))
-        : format === "vitest" ? parseVitestResults(JSON.parse(fs.readFileSync(reportFile, "utf8")))
-        : parsePlaywrightResults(JSON.parse(fs.readFileSync(reportFile, "utf8")));
+      const planned = (context.groupIds || []).map(groupId => ciPlannedGroup(groupId)).find(Boolean) || {};
+      const parseOptions = {
+        expectedFiles: context.expectedFiles || planned.expectedFiles || [],
+        invokedFiles: context.invokedFiles || context.selectedTests || [],
+      };
+      const result = format === "tap" ? parseTapResults(tail, parseOptions)
+        : format === "trx" ? parseTrxResults(fs.readFileSync(reportFile, "utf8"), parseOptions)
+        : format === "vitest" ? parseVitestResults(JSON.parse(fs.readFileSync(reportFile, "utf8")), parseOptions)
+        : parsePlaywrightResults(JSON.parse(fs.readFileSync(reportFile, "utf8")), parseOptions);
       const reportPath = retainNativeReport({ reportFile, rawOutput: tail, format, groupIds: context.groupIds || [] });
-      recordCiTests(result, { ...context, format, exitCode: code, reportPath });
+      recordCiTests(result, {
+        ...context,
+        invokedFiles: context.invokedFiles || context.selectedTests || [],
+        format,
+        exitCode: code,
+        reportPath,
+        observedMode: context.observedMode || (env.NEXUS_TEST_HOST === "1" ? "test-host" : env.NEXUS_TEST_MODE === "admin" ? "admin" : env.NEXUS_CI_MODE || "ci"),
+        timeScale: context.timeScale || env.NEXUS_TIME_SCALE || "1",
+      });
       recordCiCheck(context.checkId || "tests", code === 0 && result.failed === 0 ? "success" : "failure");
       console.error(`[测试结果] passed=${result.passed} failed=${result.failed} skipped=${result.skipped}`);
       return code || (result.failed > 0 ? 1 : 0);
@@ -465,8 +653,30 @@ async function runUnitOnce(groups = []) {
 async function runUnit(groups = []) {
   const selectedGroups = ciPlannedKeys("host", groups);
   if (ciManifestEnabled() && selectedGroups.length > 0) {
-    if (ciJobId() === "host-core") recordCiCheck("build", process.env.NEXUS_CI_BUILD_STATUS || "success");
-    if (ciJobId() === "plugin-contract") recordCiCheck("build", process.env.NEXUS_CI_BUILD_STATUS || "success");
+    if (ciJobId() === "host-core") {
+      recordCiCheck("build", process.env.NEXUS_CI_BUILD_STATUS || "success");
+    }
+    if (ciJobId() === "plugin-contract" && !process.env.NEXUS_CI_BUILD_STATUS) {
+      const buildCode = await runCheckedProcess("build", "dotnet", ["build", "src\\NexusPipeline.csproj", "-c", "Release", "--nologo"]);
+      if (buildCode !== 0) return buildCode;
+      captureArtifact("host-build", path.join(projectRoot, "src", "bin", "Release", "net8.0-windows"), {
+        mode: "ci",
+        producer: ciJobId(),
+        buildInvocation: ["dotnet build src/NexusPipeline.csproj -c Release"],
+        metadata: { consumer: "Plugin Contract host fallback" },
+      });
+    }
+    if (ciJobId() === "host-core" && process.env.NEXUS_CI_BUILD_STATUS === "success") {
+      captureArtifact("host-build", path.join(projectRoot, "src", "bin", "Release", "net8.0-windows"), {
+        mode: "ci",
+        producer: ciJobId(),
+        buildInvocation: ["workflow: dotnet build src/NexusPipeline.csproj -c Release"],
+        metadata: { consumer: "Host Unit/Component" },
+      });
+    }
+    if (["host-core", "plugin-contract"].includes(ciJobId()) && !verifyCapturedArtifact("host-build", path.join(projectRoot, "src", "bin", "Release", "net8.0-windows"))) {
+      return 1;
+    }
     for (const group of selectedGroups) {
       const code = await runUnitOnce([group]);
       if (code !== 0) return code;
@@ -520,7 +730,16 @@ async function runFrontend(groups = []) {
     ? groups.length === 0
     : ["frontend-unit", "plugin-contract", "full-regression"].includes(ciJobId());
   if (!shouldBuild) return 0;
-  return runCheckedProcess("build", npmCommand, ["run", "build"], { cwd: frontendDir });
+  const buildCode = await runCheckedProcess("build", npmCommand, ["run", "build"], { cwd: frontendDir });
+  if (buildCode === 0) {
+    captureArtifact("frontend", path.join(frontendDir, "dist"), {
+      mode: process.env.NEXUS_CI_MODE || "ci",
+      producer: ciJobId(),
+      buildInvocation: ["npm run build --prefix frontend"],
+      metadata: { consumer: "Frontend/Plugin Contract" },
+    });
+  }
+  return buildCode;
 }
 
 async function runWeb() {
@@ -538,19 +757,18 @@ async function runRecordedCommand(command, args, {
   });
   const planned = groupId && ciPlannedGroup(groupId);
   if (planned) {
-    const passed = code === 0 ? 1 : 0;
     const reportPath = retainNativeReport({
       reportFile: "",
       rawOutput: output,
       format: "command",
       groupIds: [groupId],
     });
-    recordCiTests({ testCount: 1, passed, failed: passed ? 0 : 1, skipped: 0 }, {
-      groupIds: [groupId],
-      selectedTests: selectedTest ? [selectedTest] : [],
+    recordCiInvocation(groupId, {
+      selectedTest,
       format: "command",
       exitCode: code,
       reportPath,
+      output,
     });
     recordCiCheck(checkId, code === 0 ? "success" : "failure", code === 0 ? "" : `exit=${code}`);
   }
@@ -571,6 +789,7 @@ async function runContracts() {
   let code = await runReported(npmCommand, ["run", "test", "--", "--config", "vitest.contract.config.ts"], { cwd: frontendDir }, "vitest", {
     groupIds: planned ? [groupId] : [],
     selectedTests: planned ? ["frontend/contracts/official-plugins.test.ts"] : [],
+    expectedFiles: ["frontend/contracts/official-plugins.test.ts"],
     checkId: "contract",
   });
   if (code !== 0) return code;
@@ -585,6 +804,7 @@ async function runContracts() {
   return runReported(nodeCommand, ["--test", "tests/tools/plugin-source-layout.test.mjs"], {}, "tap", {
     groupIds: planned ? [groupId] : [],
     selectedTests: planned ? ["tests/tools/plugin-source-layout.test.mjs"] : [],
+    expectedFiles: ["tests/tools/plugin-source-layout.test.mjs"],
     checkId: "contract",
   });
 }
@@ -640,6 +860,7 @@ async function runTooling() {
     "tests\\tools\\ci-domains.test.mjs",
     "tests\\tools\\ci-summary.test.mjs",
     "tests\\tools\\ci-fingerprint.test.mjs",
+    "tests\\tools\\artifact-manifest.test.mjs",
     "tests\\tools\\test-results.test.mjs",
     "tests\\tools\\runner-manifest.test.mjs",
     "tests\\tools\\frontend-boundaries.test.mjs",
@@ -690,6 +911,14 @@ async function runBuild() {
   }
   const code = await productionBuildPromise;
   recordCiCheck("build", code === 0 ? "success" : "failure", code === 0 ? "" : `exit=${code}`);
+  if (code === 0) {
+    captureArtifact("production", path.join(projectRoot, "release"), {
+      mode: process.env.NEXUS_CI_MODE || "admin",
+      producer: ciJobId(),
+      buildInvocation: ["build.cmd", "dotnet publish src/NexusPipeline.csproj -c Release -r win-x64"],
+      metadata: { consumer: "Administrator Production Release" },
+    });
+  }
   return code;
 }
 
@@ -732,6 +961,12 @@ async function buildTestHostCore() {
   fs.cpSync(path.join(projectRoot, "frontend", "dist"), path.join(testHostDir, "wwwroot"), { recursive: true });
   const pluginsDir = path.join(testHostDir, "plugins");
   fs.mkdirSync(pluginsDir, { recursive: true });
+  captureArtifact("test-host", testHostDir, {
+    mode: "test-host",
+    producer: ciJobId(),
+    buildInvocation: ["dotnet publish src/NexusPipeline.csproj -c Release -r win-x64 -p:NexusTestHost=true"],
+    metadata: { consumer: "Codex/Test Host" },
+  });
   console.error(`[Test Host] 构建完成：${path.join(testHostDir, "nexus-pipeline.exe")}`);
   return 0;
 }
@@ -794,6 +1029,9 @@ async function runUi(mode, args) {
     if (mode === "codex") cleanTestHost();
     return testHostCode;
   }
+  const artifactRoot = mode === "codex" ? testHostDir : path.join(projectRoot, "release");
+  const artifactKind = mode === "codex" ? "test-host" : "production";
+  if (!verifyCapturedArtifact(artifactKind, artifactRoot)) return 1;
   const env = modeEnvironment(mode, {
     exitFile: path.join(e2eDir, "runtime", ".nxp", "test-host.exit"),
   });
@@ -1008,6 +1246,9 @@ async function runSystem(mode, args) {
     if (mode === "codex") cleanTestHost();
     return testHostCode;
   }
+  const artifactRoot = mode === "codex" ? testHostDir : path.join(projectRoot, "release");
+  const artifactKind = mode === "codex" ? "test-host" : "production";
+  if (!verifyCapturedArtifact(artifactKind, artifactRoot)) return 1;
   if (suites.some(suite => suite.group === "emulator")) {
     const emulatorFixtureCode = await buildEmulatorFixturePlugin();
     if (emulatorFixtureCode !== 0) {
@@ -1021,7 +1262,8 @@ async function runSystem(mode, args) {
     // 系统测试使用独立 Web 端口，避免复用用户正在运行的 NexusPipeline 服务。
     NEXUS_SYSTEM_WEB_PORT: process.env.NEXUS_SYSTEM_WEB_PORT || "58831",
   };
-  if (!args.includes("--realtime")) env.NEXUS_TIME_SCALE = env.NEXUS_TIME_SCALE || "10";
+  if (args.includes("--realtime")) env.NEXUS_TIME_SCALE = "1";
+  else env.NEXUS_TIME_SCALE = env.NEXUS_TIME_SCALE || "10";
   const suiteTimeoutMs = 5 * 60 * 1000;
   try {
     for (const { group, runtimeName, file } of suites) {
@@ -1042,8 +1284,13 @@ async function runSystem(mode, args) {
         { env: suiteEnv, timeoutMs: suiteTimeoutMs },
         "tap",
         {
-          groupIds: ciPlannedGroup(logicalGroupId("system", group)) ? [logicalGroupId("system", group)] : [],
+          groupIds: ciPlannedGroup(logicalGroupId("system", group)) || ciManifestEnabled()
+            ? [logicalGroupId("system", group)]
+            : [],
           selectedTests: [path.relative(projectRoot, file).replaceAll("\\", "/")],
+          expectedFiles: [path.relative(projectRoot, file).replaceAll("\\", "/")],
+          observedMode: mode === "codex" ? "test-host" : "admin",
+          timeScale: suiteEnv.NEXUS_TIME_SCALE,
           checkId: "tests",
         },
       );
@@ -1163,6 +1410,17 @@ if (process.env.NEXUS_CI_MANIFEST && CI_MANIFEST_COMMANDS.has(command.toLowerCas
   const buildFingerprint = process.env.NEXUS_CI_BUILD_FINGERPRINT || createBuildFingerprint({
     mode: manifestMode === "test-host" ? "test-host" : "production",
   });
+  const artifactCandidates = [...ciExecution.artifacts];
+  const artifactForMode = manifestMode === "test-host"
+    ? artifactCandidates.find(item => item.kind === "test-host")
+    : manifestMode === "admin"
+      ? artifactCandidates.find(item => item.kind === "production")
+      : artifactCandidates.find(item => ["host-build", "frontend", "production"].includes(item.kind));
+  const artifactManifest = artifactForMode || createNoArtifactManifest({
+    mode: manifestMode,
+    producer: physicalJobId,
+    reason: physicalJobId === "docs-i18n" ? "文档与治理作业不生成二进制产物" : "本 Job 未生成可消费的二进制产物",
+  });
   const manifest = {
     schemaVersion: 2,
     jobId: physicalJobId,
@@ -1175,14 +1433,9 @@ if (process.env.NEXUS_CI_MANIFEST && CI_MANIFEST_COMMANDS.has(command.toLowerCas
     buildInputsDigest,
     counterpartRepository: process.env.NEXUS_CI_COUNTERPART_REPOSITORY || "",
     counterpartSha,
-    artifactDigest: expectedArtifactDigest({
-      buildFingerprint,
-      sourceDigest,
-      buildInputsDigest,
-      counterpartSha,
-      mode: manifestMode,
-      physicalJobId,
-    }),
+    artifactDigest: artifactManifest.present ? artifactManifest.artifactSetDigest : null,
+    artifactManifest,
+    artifactManifests: artifactCandidates,
     mode: manifestMode,
     integrityLevel: process.env.NEXUS_CI_INTEGRITY_LEVEL || getIntegrityLevel(),
     checks: [...ciExecution.checks],
@@ -1232,6 +1485,27 @@ if (process.env.NEXUS_CI_MANIFEST && CI_MANIFEST_COMMANDS.has(command.toLowerCas
         if (check?.checkId) recordCiCheck(check.checkId, check.status, check.detail || "");
       }
       manifest.checks = [...ciExecution.checks];
+      if (Array.isArray(previous.artifactManifests)) {
+        for (const artifact of previous.artifactManifests) {
+          if (!artifact?.kind || ciExecution.artifacts.some(item => item.kind === artifact.kind)) continue;
+          ciExecution.artifacts.push(artifact);
+        }
+        manifest.artifactManifests = [...ciExecution.artifacts];
+      }
+      const previousArtifact = previous.artifactManifest;
+      if (previousArtifact?.kind && !ciExecution.artifacts.some(item => item.kind === previousArtifact.kind)) {
+        ciExecution.artifacts.push(previousArtifact);
+        manifest.artifactManifests = [...ciExecution.artifacts];
+      }
+      const mergedArtifact = manifestMode === "test-host"
+        ? ciExecution.artifacts.find(item => item.kind === "test-host")
+        : manifestMode === "admin"
+          ? ciExecution.artifacts.find(item => item.kind === "production")
+          : ciExecution.artifacts.find(item => ["host-build", "frontend", "production"].includes(item.kind));
+      if (mergedArtifact) {
+        manifest.artifactManifest = mergedArtifact;
+        manifest.artifactDigest = mergedArtifact.artifactSetDigest;
+      }
     }
     fs.mkdirSync(path.dirname(manifestPath), { recursive: true });
     fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");

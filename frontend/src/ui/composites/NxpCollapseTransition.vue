@@ -99,7 +99,7 @@ function cancel(element: Element) {
 
 <template>
   <Transition
-    name="nxp-collapse"
+    name="app-collapse"
     @before-enter="beforeEnter"
     @enter="enter"
     @after-enter="clearStyles"

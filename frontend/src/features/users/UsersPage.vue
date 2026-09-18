@@ -336,7 +336,7 @@ onBeforeUnmount(() => {
         :description="t('users.page.empty_help')"
       />
       <section v-else class="card list-surface">
-        <NxpSortableList transition-name="nxp-card" class="script-grid global-user-list" @reorder="reorderUsers">
+        <NxpSortableList transition-name="app-card" class="script-grid global-user-list" @reorder="reorderUsers">
           <GlobalUserCard
             v-for="user in sortedUsers"
             :key="user.id"

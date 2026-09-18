@@ -18,6 +18,8 @@ import {
   plannedExclusions,
   testSelectionIdentity,
 } from "./ci-domains.mjs";
+import { validateArtifactManifestShape } from "./artifact-manifest.mjs";
+import { expectedTestFiles } from "./test-selection.mjs";
 
 /**
  * 选择性 CI 的最终汇总器。
@@ -127,6 +129,7 @@ function expectedSelectedGroups(plan) {
       requiredChecks: [...(contract?.requiredChecks || [])],
       testSelectionIdentity: testSelectionIdentity(kind, group),
       expectedTests: expectedTestSelectors(kind, group),
+      expectedFiles: expectedTestFiles(kind, group),
       exclusions: plannedExclusions(kind, group.key, contract?.mode || ""),
     });
   };
@@ -209,6 +212,7 @@ function validateSelectedGroup(group, plan, errors) {
   if (typeof value.requiredIntegrity !== "string" || !value.requiredIntegrity) errors.push(`逻辑组 ${groupId} 缺少 requiredIntegrity`);
   if (!isDigest(value.testSelectionIdentity)) errors.push(`逻辑组 ${groupId} 缺少有效 testSelectionIdentity`);
   if (!Array.isArray(value.expectedTests) || value.expectedTests.length === 0) errors.push(`逻辑组 ${groupId} 缺少 expectedTests`);
+  if (!Array.isArray(value.expectedFiles) || value.expectedFiles.length === 0) errors.push(`逻辑组 ${groupId} 缺少 expectedFiles`);
   if (!Array.isArray(value.exclusions)) errors.push(`逻辑组 ${groupId} 缺少 exclusions`);
 
   const definition = groupDefinition(groupId);
@@ -218,7 +222,7 @@ function validateSelectedGroup(group, plan, errors) {
   if (value.kind === "domain" && !DOMAIN_KEYS.has(value.key)) errors.push(`selectedGroups 引用了未知 domain：${value.key}`);
   const expected = expectedSelectedGroups(plan).find(item => item.groupId === groupId);
   if (expected) {
-    for (const key of ["physicalJobId", "mode", "requiredIntegrity", "requiredChecks", "testSelectionIdentity", "expectedTests", "exclusions"]) {
+    for (const key of ["physicalJobId", "mode", "requiredIntegrity", "requiredChecks", "testSelectionIdentity", "expectedTests", "expectedFiles", "exclusions"]) {
       const matches = Array.isArray(value[key]) || Array.isArray(expected[key])
         ? JSON.stringify(value[key]) === JSON.stringify(expected[key])
         : value[key] === expected[key];
@@ -325,7 +329,7 @@ export function validateExecutionPlan(plan, { expectedHeadSha = "" } = {}) {
     for (const group of value.selectedGroups) {
       const expected = expectedById.get(group?.groupId);
       if (!expected) continue;
-      for (const key of ["kind", "key", "physicalJobId", "mode", "requiredIntegrity", "requiredChecks", "testSelectionIdentity"]) {
+      for (const key of ["kind", "key", "physicalJobId", "mode", "requiredIntegrity", "requiredChecks", "testSelectionIdentity", "expectedTests", "expectedFiles", "exclusions"]) {
         const matches = Array.isArray(group[key]) || Array.isArray(expected[key])
           ? JSON.stringify(group[key]) === JSON.stringify(expected[key])
           : group[key] === expected[key];
@@ -359,10 +363,6 @@ function integritySatisfies(required, actual) {
   if (required === "none") return true;
   const value = String(actual || "").toLowerCase();
   return required === "high-or-system" && ["high", "system", "high-or-system"].includes(value);
-}
-
-export function expectedArtifactDigest({ buildFingerprint, sourceDigest, buildInputsDigest, counterpartSha, mode, physicalJobId }) {
-  return sha256Json({ buildFingerprint, sourceDigest, buildInputsDigest, counterpartSha, mode, physicalJobId });
 }
 
 function checkChecks(jobId, item, issues, requiredChecks = [], delegatedChecks = new Set()) {
@@ -455,7 +455,21 @@ function checkJobIdentity(jobId, value, { plan, expectedHeadSha, expectedReposit
   if (item.buildInputsDigest !== plan.buildInputs.buildInputsDigest) issues.push(`${jobId}: buildInputsDigest 不匹配`);
   if (item.counterpartRepository !== plan.counterpartRepository) issues.push(`${jobId}: counterpartRepository 不匹配`);
   if (item.counterpartSha !== plan.counterpartSha) issues.push(`${jobId}: counterpartSha 不匹配`);
-  if (!isDigest(item.artifactDigest)) issues.push(`${jobId}: 缺少有效 artifactDigest`);
+  const artifactManifest = asObject(item.artifactManifest);
+  if (!artifactManifest) {
+    issues.push(`${jobId}: 缺少 artifactManifest`);
+  } else {
+    issues.push(...validateArtifactManifestShape(artifactManifest).map(message => `${jobId}: ${message}`));
+    const binaryRequired = expectedGroups.some(group => group.mode === "admin" || ["host", "frontend"].includes(group.kind));
+    if (binaryRequired && artifactManifest.present !== true) issues.push(`${jobId}: 选定作业缺少真实产物`);
+    if (jobId === "docs-i18n" && artifactManifest.present === true) issues.push(`${jobId}: 文档作业不应伪造二进制产物`);
+    if (artifactManifest.present === true) {
+      if (item.artifactDigest !== artifactManifest.artifactSetDigest) issues.push(`${jobId}: artifactDigest 未绑定实际产物清单`);
+      if (artifactManifest.mode !== item.mode) issues.push(`${jobId}: artifactManifest mode 与 Job 不匹配`);
+    } else if (item.artifactDigest !== null) {
+      issues.push(`${jobId}: 无产物作业的 artifactDigest 必须为 null`);
+    }
+  }
   const expectedDomainId = expectedJobDomainId(jobId, expectedGroups);
   if (expectedDomainId && item.domainId !== expectedDomainId) issues.push(`${jobId}: domainId 不匹配`);
   const requiredChecks = [...new Set(expectedGroups.flatMap(group => group.requiredChecks || []))];
@@ -465,18 +479,6 @@ function checkJobIdentity(jobId, value, { plan, expectedHeadSha, expectedReposit
   if (expectedModes.size === 1 && item.mode !== [...expectedModes][0]) issues.push(`${jobId}: mode 不匹配`);
   if (expectedGroups.some(group => group.requiredIntegrity === "high-or-system") && !integritySatisfies("high-or-system", item.integrityLevel || item.integrity)) issues.push(`${jobId}: 缺少 High/System Integrity 证据`);
   if (expectedGroups.some(group => group.mode === "admin") && (item.testHost === true || item.mode === "test-host")) issues.push(`${jobId}: Test Host 不能替代 admin 生产模式`);
-  if (isDigest(item.artifactDigest) && expectedModes.size === 1) {
-    const expected = expectedArtifactDigest({
-      buildFingerprint: item.buildFingerprint,
-      sourceDigest: item.sourceDigest,
-      buildInputsDigest: item.buildInputsDigest,
-      counterpartSha: item.counterpartSha,
-      mode: item.mode,
-      physicalJobId: jobId,
-    });
-    if (item.artifactDigest !== expected) issues.push(`${jobId}: artifactDigest 与构建身份不匹配`);
-  }
-
   const testCount = count(item.testCount);
   const passed = count(item.passed ?? item.passedCount);
   const failed = count(item.failed ?? item.failedCount);
@@ -512,11 +514,26 @@ function normalizeSelectedPath(value) {
   return normalized;
 }
 
-function selectionMatchesExpected(selectedTests, expectedTests) {
-  const normalized = selectedTests.map(normalizeSelectedPath);
+function selectionMatchesExpected(actualPaths, expectedPaths) {
+  const normalized = (Array.isArray(actualPaths) ? actualPaths : []).map(normalizeSelectedPath);
+  const expected = (Array.isArray(expectedPaths) ? expectedPaths : []).map(normalizeSelectedPath);
   const invalid = normalized.some(value => !value);
-  const unexpected = normalized.filter(value => value && !expectedTests.some(pattern => globToRegExp(pattern).test(value)));
-  return { normalized, invalid, unexpected };
+  const expectedSet = new Set(expected);
+  const actualSet = new Set(normalized.filter(Boolean));
+  return {
+    normalized,
+    invalid,
+    duplicate: normalized.length !== actualSet.size,
+    missing: expected.filter(value => value && !actualSet.has(value)),
+    unexpected: normalized.filter(value => value && !expectedSet.has(value)),
+  };
+}
+
+function observedSkipIdentities(record) {
+  return (Array.isArray(record.observedCases) ? record.observedCases : [])
+    .filter(item => ["skipped-by-engine", "required-in-other-mode", "excluded-before-run"].includes(String(item?.status || "")))
+    .map(item => String(item?.id || item?.testId || "").trim())
+    .filter(Boolean);
 }
 
 function checkSelectedGroup(jobId, record, expected, manifest) {
@@ -525,19 +542,36 @@ function checkSelectedGroup(jobId, record, expected, manifest) {
   if (record.groupId !== groupId) issues.push(`${jobId}/${groupId}: groupId 不匹配`);
   if (record.physicalJobId !== expected.physicalJobId) issues.push(`${jobId}/${groupId}: physicalJobId 不匹配`);
   if (record.mode !== expected.mode) issues.push(`${jobId}/${groupId}: mode 不匹配`);
+  if (expected.kind === "system") {
+    if (record.observedMode !== expected.mode) issues.push(`${jobId}/${groupId}: 实际执行模式不匹配`);
+    if (record.timeScale === undefined || record.timeScale === null || String(record.timeScale).trim() === "") {
+      issues.push(`${jobId}/${groupId}: 缺少实际 timeScale 记录`);
+    }
+  }
   if (expected.requiredIntegrity !== "none" && !integritySatisfies(expected.requiredIntegrity, record.integrityLevel || manifest.integrityLevel || manifest.integrity)) {
     issues.push(`${jobId}/${groupId}: 完整性级别不满足要求`);
   }
   if (record.testSelectionIdentity !== expected.testSelectionIdentity) issues.push(`${jobId}/${groupId}: testSelectionIdentity 不匹配`);
   const selection = asObject(record.selection);
-  const selectedTests = record.selectedTests;
-  if (!Array.isArray(selectedTests) || selectedTests.length === 0) {
-    issues.push(`${jobId}/${groupId}: 缺少实际测试选择记录`);
+  const invokedFiles = Array.isArray(record.invokedFiles) ? record.invokedFiles : record.selectedTests;
+  const observedFiles = record.observedFiles;
+  const invokedResult = selectionMatchesExpected(invokedFiles, expected.expectedFiles);
+  const observedResult = selectionMatchesExpected(observedFiles, expected.expectedFiles);
+  if (!Array.isArray(invokedFiles) || invokedFiles.length === 0) {
+    issues.push(`${jobId}/${groupId}: 缺少实际调用文件记录`);
   } else {
-    const selectionResult = selectionMatchesExpected(selectedTests, expected.expectedTests);
-    if (selectionResult.invalid) issues.push(`${jobId}/${groupId}: 实际测试选择包含非法路径`);
-    if (selectionResult.normalized.length !== new Set(selectionResult.normalized).size) issues.push(`${jobId}/${groupId}: 实际测试选择存在重复`);
-    if (selectionResult.unexpected.length) issues.push(`${jobId}/${groupId}: 实际测试选择超出计划：${selectionResult.unexpected.join(", ")}`);
+    if (invokedResult.invalid) issues.push(`${jobId}/${groupId}: 实际调用文件包含非法路径`);
+    if (invokedResult.duplicate) issues.push(`${jobId}/${groupId}: 实际调用文件存在重复`);
+    if (invokedResult.missing.length) issues.push(`${jobId}/${groupId}: 实际调用文件缺失：${invokedResult.missing.join(", ")}`);
+    if (invokedResult.unexpected.length) issues.push(`${jobId}/${groupId}: 实际调用文件超出计划：${invokedResult.unexpected.join(", ")}`);
+  }
+  if (!Array.isArray(observedFiles) || observedFiles.length === 0) {
+    issues.push(`${jobId}/${groupId}: 缺少测试引擎实际观测文件记录`);
+  } else {
+    if (observedResult.invalid) issues.push(`${jobId}/${groupId}: 实际观测文件包含非法路径`);
+    if (observedResult.duplicate) issues.push(`${jobId}/${groupId}: 实际观测文件存在重复`);
+    if (observedResult.missing.length) issues.push(`${jobId}/${groupId}: 实际观测文件缺失：${observedResult.missing.join(", ")}`);
+    if (observedResult.unexpected.length) issues.push(`${jobId}/${groupId}: 实际观测文件超出计划：${observedResult.unexpected.join(", ")}`);
   }
   if (!selection || !Array.isArray(selection.plannedTests) || !Array.isArray(selection.actualTests)) {
     issues.push(`${jobId}/${groupId}: 缺少结构化测试选择记录`);
@@ -545,8 +579,17 @@ function checkSelectedGroup(jobId, record, expected, manifest) {
     if (JSON.stringify(selection.plannedTests) !== JSON.stringify(expected.expectedTests)) {
       issues.push(`${jobId}/${groupId}: selection.plannedTests 与计划不一致`);
     }
-    if (!Array.isArray(selectedTests) || JSON.stringify(selection.actualTests) !== JSON.stringify(selectedTests)) {
+    if (!Array.isArray(invokedFiles) || JSON.stringify(selection.actualTests) !== JSON.stringify(invokedFiles)) {
       issues.push(`${jobId}/${groupId}: selection.actualTests 与实际选择不一致`);
+    }
+    if (!Array.isArray(selection.expectedFiles) || JSON.stringify(selection.expectedFiles) !== JSON.stringify(expected.expectedFiles)) {
+      issues.push(`${jobId}/${groupId}: selection.expectedFiles 与计划不一致`);
+    }
+    if (!Array.isArray(selection.invokedFiles) || JSON.stringify(selection.invokedFiles) !== JSON.stringify(invokedFiles)) {
+      issues.push(`${jobId}/${groupId}: selection.invokedFiles 与实际调用不一致`);
+    }
+    if (!Array.isArray(selection.observedFiles) || JSON.stringify(selection.observedFiles) !== JSON.stringify(observedFiles)) {
+      issues.push(`${jobId}/${groupId}: selection.observedFiles 与实际观测不一致`);
     }
   }
   if (!Array.isArray(record.plannedTests) || JSON.stringify(record.plannedTests) !== JSON.stringify(expected.expectedTests)) {
@@ -570,9 +613,21 @@ function checkSelectedGroup(jobId, record, expected, manifest) {
 
   const declaredExclusions = exclusionIds(record.exclusions || record.excludedTests);
   const expectedExclusions = exclusionIds(expected.exclusions);
+  const observedSkips = observedSkipIdentities(record);
+  const exclusionObservations = new Set((Array.isArray(record.exclusionObservations) ? record.exclusionObservations : [])
+    .map(item => String(item?.testId || item?.id || "").trim())
+    .filter(Boolean));
   const missingExclusions = expectedExclusions.filter(id => !declaredExclusions.includes(id));
   if (missingExclusions.length) issues.push(`${jobId}/${groupId}: 缺少计划声明的合法排除：${missingExclusions.join(", ")}`);
+  if (skipped > 0 && observedSkips.length === 0) issues.push(`${jobId}/${groupId}: 测试引擎 skip 缺少实际身份`);
   if (skipped > 0 && declaredExclusions.length === 0) issues.push(`${jobId}/${groupId}: 存在未按身份声明的 skip`);
+  for (const id of expectedExclusions) {
+    if (!observedSkips.includes(id) && !exclusionObservations.has(id)) {
+      issues.push(`${jobId}/${groupId}: 计划排除未在实际结果中闭合：${id}`);
+    }
+  }
+  const unexpectedObservedSkips = observedSkips.filter(id => !expectedExclusions.includes(id));
+  if (unexpectedObservedSkips.length) issues.push(`${jobId}/${groupId}: 实际结果出现未计划 skip：${unexpectedObservedSkips.join(", ")}`);
   const unexpectedExclusions = declaredExclusions.filter(id => !expectedExclusions.includes(id));
   if (unexpectedExclusions.length) issues.push(`${jobId}/${groupId}: 出现未计划排除：${unexpectedExclusions.join(", ")}`);
   return issues;

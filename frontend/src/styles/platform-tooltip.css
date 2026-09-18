@@ -1,0 +1,23 @@
+.platform-tooltip {
+  position: fixed;
+  left: 50%;
+  z-index: 320;
+  width: fit-content;
+  max-width: min(360px, calc(100vw - 24px));
+  box-sizing: border-box;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 3px;
+  background: #3a3a3a;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, .26);
+  color: #fff;
+  font-size: 14px;
+  line-height: 1.45;
+  pointer-events: none;
+  overflow-wrap: anywhere;
+  text-align: center;
+  transform: translateX(-50%);
+}
+.platform-tooltip::after { position: absolute; left: 50%; width: 0; height: 0; content: ""; transform: translateX(-50%); }
+.platform-tooltip[data-placement="top"]::after { bottom: -7px; border-top: 7px solid #3a3a3a; border-right: 7px solid transparent; border-left: 7px solid transparent; }
+.platform-tooltip[data-placement="bottom"]::after { top: -7px; border-right: 7px solid transparent; border-bottom: 7px solid #3a3a3a; border-left: 7px solid transparent; }

@@ -500,7 +500,7 @@ onMounted(() => {
               </NxpButton>
               <NxpButton class="danger um-binding-remove" type="button" data-testid="um-remove-binding" @click.stop="removeBinding(binding)">{{ t("users.remove_binding") }}</NxpButton>
             </div>
-            <Transition name="nxp-collapse">
+            <Transition name="app-collapse">
               <div v-if="expandedBindingId === binding.scriptInstanceId" class="um-binding-body">
                 <div class="um-binding-options">
                   <NxpButton class="um-edit-config" type="button" :class="{ 'is-unavailable': Boolean(bindingStatus(binding)) }" @click.stop="openConfigEdit(binding)">

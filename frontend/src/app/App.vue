@@ -136,7 +136,7 @@ function openNav() {
     <div class="page-shell">
       <header class="topbar"><NxpIconButton class="menu-button" :label="t('shell.open_navigation')" data-i18n-aria-label="shell.open_navigation" :expanded="shell.navOpen" aria-controls="sidebar" @click="openNav"><NxpIcon name="menu" /></NxpIconButton><div class="topbar-context"><span class="topbar-product" data-i18n="shell.product"></span><span id="topbar-title" class="sr-only" data-i18n="shell.dashboard"></span></div><div class="topbar-actions"><NxpIconButton :label="t('shell.theme_toggle')" data-i18n-aria-label="shell.theme_toggle" @click="cycleTheme"><span id="theme-icon" data-theme-icon aria-hidden="true"><NxpIcon name="theme" /></span></NxpIconButton></div></header>
       <NxpScrollArea class="page-main-scroll" :aria-label="t('shell.main_content')">
-        <Transition name="nxp-page" mode="out-in" appear>
+        <Transition name="app-page" mode="out-in" appear>
           <RouterView v-if="shell.booted" :key="route.fullPath" />
           <BootLoadingState v-else-if="!shell.bootError" />
         </Transition>
@@ -145,6 +145,6 @@ function openNav() {
   </div>
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
   <div id="notice-stack" aria-live="polite" :aria-label="t('shell.page_notifications')" data-i18n-aria-label="shell.page_notifications"></div>
-  <div v-if="shell.bootError" class="empty nxp-boot-error" role="alert"><strong>{{ t("shell.boot.error_details") }}</strong><span>{{ shell.bootError }}</span></div>
+  <div v-if="shell.bootError" class="empty app-boot-error" role="alert"><strong>{{ t("shell.boot.error_details") }}</strong><span>{{ shell.bootError }}</span></div>
   <TokenPrompt :open="shell.tokenPromptOpen" @close="shell.tokenPromptOpen = false" />
 </template>

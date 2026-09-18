@@ -392,7 +392,7 @@ export const GOVERNANCE_DOMAINS = [
   { key: "i18n-functional", paths: ["frontend/public/i18n/**", "src/Localization/**"], testPaths: ["tests/documentation/i18n-*.mjs"] },
   { key: "architecture-boundaries", paths: ["tools/frontend-boundaries.mjs", "tests/tools/**"], testPaths: ["tests/tools/ci-domains.test.mjs", "tests/tools/frontend-boundaries.test.mjs"] },
   { key: "test-policy", paths: ["AGENTS.md", "tests/documentation/test-policy-consistency.mjs"], testPaths: ["tests/documentation/test-policy-consistency.mjs"] },
-  { key: "ci-tooling", paths: [".github/workflows/**", "tools/ci-*.mjs", "tools/test-results.mjs", "tests/run.mjs", "tests/tools/ci-summary.test.mjs", "tests/tools/test-results.test.mjs", "tests/tools/runner-manifest.test.mjs"], testPaths: ["tests/tools/ci-domains.test.mjs", "tests/tools/ci-fingerprint.test.mjs", "tests/tools/ci-summary.test.mjs", "tests/tools/test-results.test.mjs", "tests/tools/runner-manifest.test.mjs"] },
+  { key: "ci-tooling", paths: [".github/workflows/**", "tools/ci-*.mjs", "tools/artifact-manifest.mjs", "tools/test-selection.mjs", "tools/test-results.mjs", "tests/run.mjs", "tests/tools/ci-summary.test.mjs", "tests/tools/artifact-manifest.test.mjs", "tests/tools/test-results.test.mjs", "tests/tools/runner-manifest.test.mjs"], testPaths: ["tests/tools/ci-domains.test.mjs", "tests/tools/ci-fingerprint.test.mjs", "tests/tools/ci-summary.test.mjs", "tests/tools/artifact-manifest.test.mjs", "tests/tools/test-results.test.mjs", "tests/tools/runner-manifest.test.mjs"] },
 ];
 
 export const TEST_DOMAIN_REGISTRY = Object.freeze({

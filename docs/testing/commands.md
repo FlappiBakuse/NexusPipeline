@@ -20,6 +20,8 @@ node tests\run.mjs build
 
 `tooling` 校验 CI 影响域、结果汇总与计数、构建指纹、前端边界扫描器、源码编码和更新策略，并扫描实际宿主前端源码。首次使用时执行 `npm ci --prefix tools` 安装解析器依赖。`changes` 作业在判定影响域之前验证影响域映射。
 
+CI 结果按逻辑组保留 `expectedFiles`、实际 `invokedFiles`、引擎报告中的 `observedFiles/observedCases` 和原始报告路径；构建或测试消费的生产/Test Host 输出会在 `NEXUS_CI_REPORT_DIR` 中写入实际文件清单，清单按相对路径、字节长度和 SHA256 计算 `artifactSetDigest`。文档治理作业声明无二进制产物。结果汇总同时核对计划、调用、原生报告和产物模式。
+
 `unit` 与 `frontend` 支持重复指定 `--group <名称>`；`list --json` 返回现役分组与测试文件。CI 使用 `--affected` 读取 `NEXUS_CI_EXECUTION_PLAN` 中已校验的分组，包含下游调用方；未知路径按全量处理。
 
 `contract` 从相邻 `NexusPipeline-Plugins`（或 `NEXUS_OFFICIAL_PLUGINS_ROOT`）加载官方插件构建模块，并注册真实宿主公共元素。运行前在两仓库安装前端依赖；插件源码有变化时先执行插件仓库的 `npm run build:frontend`。
@@ -50,6 +52,22 @@ node tests\run.mjs codex system [runtime|control|config|execution|judge|emulator
 
 `codex` 使用 `NexusTestHost=true` 的 `asInvoker` Test Host；`admin` 使用生产 release，并要求 Administrator / High Integrity 或 System Integrity。权限不足返回 exit code `2`，不降级运行。
 
+v0.16.6 版本验收需要在 GitHub Actions 的 `workflow_dispatch` 中按需启用 `test_host_acceptance` 与 `admin_execution_acceptance`，分别执行独立的 Test Host Update 和管理员 Execution 专属模式：
+
+```text
+NEXUS_SYSTEM_SMOKE=1 NEXUS_TIME_SCALE=1 node tests\run.mjs codex system --group update --realtime
+```
+
+该模式保留 `update:swap-ready` 的实际测试身份、Test Host 产物清单和原始报告；它与 Administrator 生产门禁分别记录。
+
+管理员 Execution 专属验收使用生产构建与真实计时：
+
+```text
+node tests\run.mjs admin system --group execution --realtime
+```
+
+该模式记录管理员完整性、`timeScale=1`、Execution 原始报告和实际产物清单；它与 Test Host Update 专属模式分别记录。
+
 System Smoke 的 `emulator` suite 覆盖宿主内置 Generic ADB、MuMuManager、无扩展时 Generic ADB 回退，以及通过真实 managed-code TestPlugin 注册的 API v1.7 provider 执行、截图和实例清理。雷电、夜神和 BlueStacks 的厂商命令与探测在 `NexusPipeline-Plugins/plugins/general/EmulatorSupport` 的插件测试中验证；真实设备矩阵由插件仓库维护。`update` suite 的 8 个用例覆盖启动前宿主更新检查、安装与恢复及既有运行期更新；启动失败冷却由 `StartupUpdateAttemptStore` 和 `StartupUpdateCoordinator` 单元测试覆盖。
 
 
@@ -58,7 +76,7 @@ System Smoke 的 `emulator` suite 覆盖宿主内置 Generic ADB、MuMuManager�
 
 1. 修改宿主代码、测试或前端纯函数后运行 Unit/Component、Web Logic、Docs、Syntax、UI Smoke（适用时）和 `build.cmd` 的适用组合。
 2. 涉及配置交换、Windows 进程、端口、解释器、插件、模拟器或更新事务时，追加 `node tests\run.mjs codex system`；宿主模拟器系统边界通过 TestPlugin 验证 provider 注册到执行及清理，厂商驱动行为由官方扩展插件测试覆盖。
-3. 发布前在适用的 CI 触发路径中由管理员上下文执行 `node tests\run.mjs admin default`、`admin ui` 和适用的 `admin system`，并核对每项 exit code 为 `0`；计划任务与手动回归会执行完整组合。
+3. 发布前在适用的 CI 触发路径中由管理员上下文执行 `node tests\run.mjs admin default`、`admin ui` 和适用的 `admin system`，并核对每项 exit code 为 `0`；版本验收另执行上面的 Test Host `update --realtime`，计划任务与手动回归会执行完整组合。
 4. 两仓库的宿主—插件契约发生变化时，在插件仓库执行 `python tools/repository.py validate-source`、`node tools/Test-FrontendPlugins.mjs` 和 `python -m unittest discover -s tools/tests -v`，并核对两仓库文档、manifest 和测试。
 5. 修改 `frontend/src/plugin-bridge/**`、`frontend/src/platform/appearance.ts`、公开 `nxp-*` 元素或 Frontend API 契约时，必须执行 `NexusPipeline-Plugins/tools/Test-FrontendPlugins.mjs` 和宿主 `node tests/run.mjs contract`。前者使用 mock host 验证插件业务与生命周期，从实际宿主检出的 `NEXUS_PUBLIC_ELEMENTS` 读取公开清单；后者加载真实公共元素完成装配交互验证。两仓库 CI 分别通过 `plugins.lock.json` 和 `host.lock.json` 固定对方 commit；手动候选验证支持完整 SHA 输入。managed-code 构建与打包共享宿主锁定规则。
 

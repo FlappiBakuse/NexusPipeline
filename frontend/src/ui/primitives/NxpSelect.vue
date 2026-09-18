@@ -168,5 +168,20 @@ onBeforeUnmount(() => {
   min-width: 0;
   width: 100%;
 }
+.nxp-select { position: relative; min-width: 0; }
+.nxp-select-trigger { display: flex; width: 100%; min-width: 0; height: 40px; align-items: center; justify-content: space-between; gap: 10px; padding: 0 12px; border: 1px solid var(--content-control-border, var(--nx-color-border)); border-radius: 8px; background: var(--content-control, transparent); color: var(--nx-color-text); font: inherit; font-size: 13px; font-weight: 400; text-align: left; }
+.nxp-select-trigger:hover, .nxp-select-trigger[aria-expanded="true"] { border-color: var(--accent, var(--nx-color-accent)); background: var(--content-control-hover, transparent); }
+.nxp-select-trigger:disabled { cursor: not-allowed; opacity: .45; }
+.nxp-select-trigger > [data-nxp-select-label] { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nxp-select-chevron { display: inline-flex; flex: 0 0 18px; align-items: center; justify-content: center; color: var(--muted, var(--nx-color-muted)); line-height: 0; transition: transform .15s ease; }
+.nxp-select-chevron-icon { display: block; width: 16px; height: 16px; }
+.nxp-select-trigger[aria-expanded="true"] .nxp-select-chevron { transform: rotate(180deg); }
+.nxp-select-menu { position: absolute; top: calc(100% + 6px); right: 0; left: 0; z-index: 60; display: flex; max-height: min(280px, 40vh); flex-direction: column; gap: 2px; overflow: hidden; padding: 5px; border: 1px solid var(--content-control-border, var(--nx-color-border)); border-radius: var(--radius-md, var(--nx-radius-md)); background: var(--content-card, var(--nx-color-surface)); box-shadow: var(--shadow); }
+.nxp-select-menu-scroll { min-height: 0; max-height: 100%; }
+.nxp-select-menu[hidden] { display: none; }
+.nxp-select-option { display: flex; width: 100%; min-height: 36px; align-items: center; justify-content: space-between; gap: 8px; margin: 0; padding: 7px 9px; border: 0; border-radius: 6px; background: transparent; color: var(--nx-color-text); font: inherit; font-size: 13px; font-weight: 400; text-align: left; box-shadow: none; }
+.nxp-select-option:hover, .nxp-select-option:focus-visible, .nxp-select-option.is-selected { background: var(--content-control-hover, transparent); color: var(--accent, var(--nx-color-accent)); }
+.nxp-select-option:disabled { cursor: not-allowed; color: var(--faint, var(--nx-color-muted)); opacity: .55; }
+.nxp-select-check { flex: 0 0 auto; color: var(--accent, var(--nx-color-accent)); font-weight: 700; }
 .nxp-select-menu { position: fixed !important; z-index: 1000; }
 </style>
