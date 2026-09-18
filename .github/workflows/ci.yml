@@ -949,7 +949,6 @@ jobs:
       NEXUS_CI_BUILD_INPUTS_DIGEST: ${{ needs.changes.outputs.build_inputs_digest }}
       NEXUS_CI_COUNTERPART_REPOSITORY: ${{ needs.changes.outputs.counterpart_repository }}
       NEXUS_CI_COUNTERPART_SHA: ${{ needs.changes.outputs.counterpart_sha }}
-      NEXUS_CI_REPORT_DIR: ${{ runner.temp }}/nexus-ci-reports/version-acceptance-test-host
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -966,6 +965,8 @@ jobs:
 
       - name: Test Host Update 专属验收（真实计时）
         shell: pwsh
+        env:
+          NEXUS_CI_REPORT_DIR: ${{ runner.temp }}/nexus-ci-reports/version-acceptance-test-host
         run: node tests\run.mjs codex system --group update --realtime
 
       - name: 上传 Test Host 原始报告与产物清单
@@ -1012,7 +1013,6 @@ jobs:
       NEXUS_CI_BUILD_INPUTS_DIGEST: ${{ needs.changes.outputs.build_inputs_digest }}
       NEXUS_CI_COUNTERPART_REPOSITORY: ${{ needs.changes.outputs.counterpart_repository }}
       NEXUS_CI_COUNTERPART_SHA: ${{ needs.changes.outputs.counterpart_sha }}
-      NEXUS_CI_REPORT_DIR: ${{ runner.temp }}/nexus-ci-reports/version-acceptance-admin-execution
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -1042,6 +1042,8 @@ jobs:
 
       - name: Admin Execution 专属验收（真实计时）
         shell: pwsh
+        env:
+          NEXUS_CI_REPORT_DIR: ${{ runner.temp }}/nexus-ci-reports/version-acceptance-admin-execution
         run: node tests\run.mjs admin system --group execution --realtime
 
       - name: 上传 Admin Execution 原始报告与产物清单
