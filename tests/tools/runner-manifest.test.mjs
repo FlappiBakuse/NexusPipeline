@@ -88,6 +88,58 @@ test("全量 docs runner 同时记录 domain 与治理逻辑组且不重复治�
   }
 });
 
+test("tooling 治理 runner 逐文件记录测试引擎实际观测身份", () => {
+  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nxp-runner-tooling-plan-"));
+  const manifestPath = path.join(fixtureRoot, "tooling-manifest.json");
+  const reportRoot = path.join(fixtureRoot, "reports");
+  const sourcePlan = createExecutionPlan([], {
+    all: true,
+    base: "test-base",
+    head: "test-head",
+  });
+  const architectureGroup = sourcePlan.selectedGroups.find(group => group.groupId === "governance:architecture-boundaries");
+  assert.ok(architectureGroup);
+  const plan = {
+    ...sourcePlan,
+    all: false,
+    selectedGroups: [{ ...architectureGroup, physicalJobId: "docs-i18n", mode: "ci" }],
+  };
+  const environment = {
+    ...process.env,
+    NEXUS_CI_MANIFEST: manifestPath,
+    NEXUS_CI_REPORT_DIR: reportRoot,
+    NEXUS_CI_JOB_ID: "docs-i18n",
+    NEXUS_CI_DOMAIN: "docs",
+    NEXUS_CI_MODE: "ci",
+    NEXUS_CI_HEAD_SHA: "test-head",
+    NEXUS_CI_REPOSITORY_SHA: "test-head",
+    NEXUS_CI_PLAN_DIGEST: plan.planDigest,
+    NEXUS_CI_EXECUTION_PLAN: JSON.stringify(plan),
+    NEXUS_CI_COUNTERPART_REPOSITORY: plan.counterpartRepository,
+    NEXUS_CI_COUNTERPART_SHA: plan.counterpartSha,
+    NEXUS_CI_SOURCE_DIGEST: plan.buildInputs.sourceDigest,
+    NEXUS_CI_BUILD_INPUTS_DIGEST: plan.buildInputs.buildInputsDigest,
+  };
+  delete environment.NODE_TEST_CONTEXT;
+
+  try {
+    const result = spawnSync(process.execPath, [path.join(root, "tests", "run.mjs"), "tooling"], {
+      cwd: root,
+      encoding: "utf8",
+      env: environment,
+      windowsHide: true,
+    });
+    assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+    const group = manifest.groups.find(item => item.groupId === "governance:architecture-boundaries");
+    assert.ok(group);
+    assert.deepEqual(group.invokedFiles, group.expectedFiles);
+    assert.deepEqual(group.observedFiles, group.expectedFiles);
+  } finally {
+    fs.rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
 test("插件契约 runner 合并命令调用与引擎报告的实际文件身份", () => {
   const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nxp-runner-plugin-plan-"));
   const manifestPath = path.join(fixtureRoot, "plugin-manifest.json");

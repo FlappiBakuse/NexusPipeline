@@ -894,12 +894,16 @@ async function runTooling() {
         recordCiGroupFailure([group.groupId], { error: "没有可运行治理测试" });
         return 1;
       }
-      const code = await runReported(nodeCommand, ["--test", ...selectedFiles.map(file => file.replaceAll("\\", "/"))], {}, "tap", {
-        groupIds: [group.groupId],
-        selectedTests: selectedFiles.map(file => path.relative(projectRoot, file).replaceAll("\\", "/")),
-        checkId: "tests",
-      });
-      if (code !== 0) return code;
+      for (const file of selectedFiles) {
+        const relativeFile = path.relative(projectRoot, file).replaceAll("\\", "/");
+        const code = await runReported(nodeCommand, ["--test", relativeFile], {}, "tap", {
+          groupIds: [group.groupId],
+          selectedTests: [relativeFile],
+          expectedFiles: [relativeFile],
+          checkId: "tests",
+        });
+        if (code !== 0) return code;
+      }
     }
   } else {
     const code = await runReported(nodeCommand, ["--test", ...files.map(file => file.replaceAll("\\", "/"))], {}, "tap", { checkId: "tests" });
