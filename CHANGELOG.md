@@ -2,7 +2,7 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本使用 `major.minor.patch`、`-beta.N` 或 `-rc.N` 的受限格式；GitHub Release 分类遵循宿主项目发布策略：`major=0` 或带 `-beta.N` / `-rc.N` 后缀的版本为 Pre-release，`major>=1` 且无后缀的版本为正式 Release。
 
-## v0.16.6（Pre-release，开发中）
+## v0.16.6（Pre-release）
 
 ### 开发方向
 
@@ -17,6 +17,11 @@
 - 主快照与附加配置事务补充 manifest、commit、metadata 写入失败及重复恢复验证；提交完成后的新快照由下一次恢复收尾。
 - 插件 pending journal 使用当前格式严格校验和已验证归属，安装、更新、卸载在隔离 Test Host 经真实 API 与连续重启完成幂等验证。
 - 配置门禁使用租约协调等待者、持有者与删除退役。
+
+### 执行与截图
+
+- 游戏进程识别优先按用户填写的游戏路径进程名解析，窗口前置支持延迟启动、失败重试与进程切换。
+- 专项脚本实例在运行期间和结束判定阶段动态解析当前游戏进程，并按 Attempt 回退最近有效截图，修复截图失效问题。
 
 ### 前端与官方插件
 
