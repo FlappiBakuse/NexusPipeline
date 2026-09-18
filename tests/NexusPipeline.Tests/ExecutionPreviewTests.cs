@@ -73,6 +73,63 @@ public sealed class ExecutionPreviewTests
     }
 
     [Fact]
+    public void GameProcessSelectionPrefersConfiguredProcessNameBeforePreferredPid()
+    {
+        Assert.Equal(
+            101,
+            ExecutionCoordinator.SelectGameProcessId(
+                new[] { 101 },
+                preferredProcessId: 202,
+                isVisible: _ => true));
+
+        Assert.Equal(
+            202,
+            ExecutionCoordinator.SelectGameProcessId(
+                new[] { 201, 202 },
+                preferredProcessId: 202,
+                isVisible: _ => true));
+
+        Assert.Equal(
+            202,
+            ExecutionCoordinator.SelectGameProcessId(
+                Array.Empty<int>(),
+                preferredProcessId: 202,
+                isVisible: _ => true));
+    }
+
+    [Fact]
+    public async Task PcScreenshotFallsBackToCurrentAttemptFrameWhenProcessIdChanges()
+    {
+        ExecutionPreviewTarget target = new(
+            "script-1",
+            "脚本",
+            ExecutionPreviewSource.Pc,
+            ExecutionPreviewState.Ready,
+            ProcessId: 42);
+        int captureCalls = 0;
+        using var capture = new AttemptScreenshotCapture(
+            new ScriptInstance { Id = "script-1", Name = "脚本", GameExe = "game.exe" },
+            () => target,
+            () => target.ProcessId,
+            () => null,
+            () => null,
+            _ => Interlocked.Increment(ref captureCalls) == 1
+                ? ExecutionPreviewImageResult.Success(new byte[] { 1, 2, 3 })
+                : ExecutionPreviewImageResult.Failure("窗口不可用"));
+
+        capture.BeginAttempt(1);
+        await capture.TryRefreshPcAsync(1, 42, CancellationToken.None);
+        target = target with { ProcessId = 43 };
+
+        RunScreenshotCaptureResult result = await capture.CaptureAsync(1, "judge", CancellationToken.None);
+
+        Assert.True(result.Ok, result.Error);
+        Assert.True(result.FromCache);
+        Assert.Equal(new byte[] { 1, 2, 3 }, result.Data);
+        Assert.Equal(2, captureCalls);
+    }
+
+    [Fact]
     public void RunningExecution_StoresCanonicalStructuredLogEntries()
     {
         var execution = new RunningExecution { Id = "run-1", Kind = "script" };

@@ -165,6 +165,33 @@ internal static class ProcessWindows
         }
     }
 
+    /// <summary>按 PID 捕获进程身份并异步前置窗口；调用方可等待结果并在失败时重试。</summary>
+    public static Task<bool> BringToFrontAsync(
+        int pid,
+        string what,
+        CancellationToken cancellationToken)
+    {
+        if (pid <= 0)
+        {
+            return Task.FromResult(false);
+        }
+
+        ProcessIdentity? identity;
+        try
+        {
+            using Process process = Process.GetProcessById(pid);
+            identity = ProcessIdentity.Capture(process);
+        }
+        catch
+        {
+            return Task.FromResult(false);
+        }
+
+        return identity is null
+            ? Task.FromResult(false)
+            : BringToFrontAsync(identity.Value, what, cancellationToken);
+    }
+
     /// <summary>按捕获的进程身份异步前置窗口；按本次启动的进程树寻找 GUI 窗口，取消后立即结束轮询。</summary>
     public static Task<bool> BringToFrontAsync(
         ProcessIdentity identity,

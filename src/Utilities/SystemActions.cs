@@ -160,6 +160,12 @@ internal static class SystemActions
         ProcessWindows.BringToFrontFireAndForget(pid, what);
 
     public static Task<bool> BringToFrontAsync(
+        int pid,
+        string what,
+        CancellationToken cancellationToken) =>
+        ProcessWindows.BringToFrontAsync(pid, what, cancellationToken);
+
+    public static Task<bool> BringToFrontAsync(
         ProcessIdentity identity,
         string what,
         CancellationToken cancellationToken) =>

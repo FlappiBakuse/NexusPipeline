@@ -8,21 +8,27 @@ internal sealed class AttemptScreenshotCapture : IDisposable
     private readonly ScriptInstance _script;
     private readonly Func<ExecutionPreviewTarget?> _target;
     private readonly Func<int?> _gameProcessId;
+    private readonly Func<int?> _resolvePcProcessId;
     private readonly Func<IEmulatorDriver?> _emulatorDriver;
+    private readonly Func<int, ExecutionPreviewImageResult> _capturePc;
     private readonly RecentScreenshotCache _cache;
 
     public AttemptScreenshotCapture(
         ScriptInstance script,
         Func<ExecutionPreviewTarget?> target,
         Func<int?> gameProcessId,
-        Func<IEmulatorDriver?> emulatorDriver)
+        Func<int?> resolvePcProcessId,
+        Func<IEmulatorDriver?> emulatorDriver,
+        Func<int, ExecutionPreviewImageResult>? capturePc = null)
     {
         _script = script;
         _target = target;
         _gameProcessId = gameProcessId;
+        _resolvePcProcessId = resolvePcProcessId;
         _emulatorDriver = emulatorDriver;
+        _capturePc = capturePc ?? (processId => ExecutionPreviewImage.CapturePcOriginal(processId));
         _cache = new RecentScreenshotCache(
-            processId => ExecutionPreviewImage.CapturePcOriginal(processId));
+            _capturePc);
     }
 
     public Task TryRefreshPcAsync(
@@ -45,11 +51,12 @@ internal sealed class AttemptScreenshotCapture : IDisposable
         }
         if (target.Source == ExecutionPreviewSource.Pc)
         {
-            int? processId = target.ProcessId ?? _gameProcessId();
+            // 每次截图都重新按用户配置的游戏路径解析进程，避免沿用启动器或已退出进程的旧 PID。
+            int? processId = _resolvePcProcessId() ?? target.ProcessId ?? _gameProcessId();
             if (processId is int pid && pid > 0)
             {
                 ExecutionPreviewImageResult image = await Task.Run(
-                    () => ExecutionPreviewImage.CapturePcOriginal(pid),
+                    () => _capturePc(pid),
                     cancellationToken).ConfigureAwait(false);
                 if (image.Ok)
                 {
@@ -65,6 +72,17 @@ internal sealed class AttemptScreenshotCapture : IDisposable
                         cached.CapturedAt,
                         fromCache: true,
                         cacheAge);
+                }
+
+                // 游戏进程可能在截图瞬间切换 PID；当前 Attempt 内最近有效帧仍可作为稳定回退。
+                if (_cache.TryGet(attemptNumber, out RecentScreenshotFrame changedProcessCached, out TimeSpan changedProcessCacheAge))
+                {
+                    return RunScreenshotCaptureResult.Success(
+                        changedProcessCached.Data,
+                        "pc",
+                        changedProcessCached.CapturedAt,
+                        fromCache: true,
+                        changedProcessCacheAge);
                 }
 
                 return RunScreenshotCaptureResult.Failure("pc", image.Error);

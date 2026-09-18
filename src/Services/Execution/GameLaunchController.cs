@@ -86,13 +86,9 @@ internal sealed class GameLaunchController
             {
                 gamePsi.UseShellExecute = true;
             }
-            Process? gameProcess = SystemActions.StartWithOutputDrain(gamePsi, disposeWhenExited: true);
-            int gamePid = gameProcess?.Id ?? 0;
-            if (gamePid > 0)
-            {
-                _setPcProcessId(gamePid);
-                SystemActions.BringToFrontFireAndForget(gamePid, "游戏");
-            }
+            // 启动返回的 PID 可能属于启动器；后续统一按用户提供的 GameExe 进程名解析，
+            // 再由监控循环负责窗口前置和截图目标更新。
+            SystemActions.StartWithOutputDrain(gamePsi, disposeWhenExited: true);
             Logger.Info($"游戏已启动：{_script.GameExe}（等待 {_script.GameWaitSeconds} 秒确认）。");
         }
         catch (Exception ex)
