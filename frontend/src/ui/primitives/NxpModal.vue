@@ -109,15 +109,15 @@ onBeforeUnmount(() => {
 
 <template>
   <Transition name="nxp-modal" appear>
-    <div v-if="props.open" ref="root" v-bind="attrs" class="modal-mask nxp-modal" role="dialog" aria-modal="true" tabindex="-1" :aria-label="props.ariaLabel || props.title || undefined">
+    <div v-if="props.open" ref="root" v-bind="attrs" class="nxp-modal" role="dialog" aria-modal="true" tabindex="-1" :aria-label="props.ariaLabel || props.title || undefined">
       <div v-if="props.closeable" class="nxp-modal-backdrop" aria-hidden="true" @pointerdown="preventBackdropFocus" @click="onBackdropClick"></div>
-      <section ref="panel" class="modal nxp-modal-panel" :class="[props.panelClass, { wide: props.size === 'wide', 'is-secondary': props.surface === 'secondary', 'nxp-modal-panel--with-footer': props.footer || Boolean($slots.footer) }]" tabindex="-1" :data-locked="props.locked ? '' : undefined">
-        <header v-if="title || closeable || $slots.header" class="nxp-modal-header modal-header">
-          <slot name="header"><h2 v-if="title" class="modal-title">{{ title }}</h2></slot>
-          <button v-if="closeable" class="icon-button modal-close" type="button" :aria-label="props.closeLabel" @click="emit('close')"><NxpIcon name="close" /></button>
+      <section ref="panel" class="nxp-modal-panel" :class="[props.panelClass, { 'nxp-modal-panel--wide': props.size === 'wide', 'is-secondary': props.surface === 'secondary', 'nxp-modal-panel--with-footer': props.footer || Boolean($slots.footer) }]" tabindex="-1" :data-locked="props.locked ? '' : undefined">
+        <header v-if="title || closeable || $slots.header" class="nxp-modal-header">
+          <slot name="header"><h2 v-if="title" class="nxp-modal-title">{{ title }}</h2></slot>
+          <button v-if="closeable" class="icon-button nxp-modal-close" type="button" :aria-label="props.closeLabel" @click="emit('close')"><NxpIcon name="close" class-name="nxp-modal-close-icon" /></button>
         </header>
-        <NxpScrollArea class="nxp-modal-body modal-body" :class="props.bodyClass"><slot /></NxpScrollArea>
-        <footer v-if="props.footer || $slots.footer" class="nxp-modal-footer modal-footer"><slot name="footer" /></footer>
+        <NxpScrollArea class="nxp-modal-body" :class="props.bodyClass" viewport-class="nxp-modal-viewport"><slot /></NxpScrollArea>
+        <footer v-if="props.footer || $slots.footer" class="nxp-modal-footer"><slot name="footer" /></footer>
       </section>
     </div>
   </Transition>
@@ -128,18 +128,18 @@ onBeforeUnmount(() => {
 .nxp-modal-backdrop { position: absolute; inset: 0; background: transparent; cursor: default; }
 .nxp-modal-panel { position: relative; z-index: 1; display: flex; width: min(680px, 100%); max-height: min(88vh, 900px); min-height: 0; flex-direction: column; overflow: hidden; border: 1px solid var(--nx-color-border); border-radius: var(--nx-radius-lg); background: var(--nx-color-surface); color: var(--nx-color-text); box-shadow: var(--shadow, 0 16px 40px rgba(0, 0, 0, .28)); }
 .nxp-modal-panel.is-secondary { background: var(--content-card-soft, var(--nx-color-surface)); }
-.nxp-modal-panel.wide { width: min(960px, 100%); }
+.nxp-modal-panel--wide { width: min(960px, 100%); }
 .nxp-modal-header { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: var(--nx-space-3); margin: 0; padding: clamp(18px, 3vw, 30px) clamp(18px, 3vw, 30px) var(--nx-space-4); border-bottom: 0; }
 .nxp-modal-header h2 { margin: 0; font-size: 19px; }
 .nxp-modal-header button { flex: 0 0 auto; }
-.nxp-modal-header button .nxp-icon { width: 18px; height: 18px; }
+.nxp-modal-close-icon { width: 18px; height: 18px; }
 .nxp-modal-panel > .nxp-modal-body { min-height: 0; flex: 1 1 auto; padding: 0 clamp(18px, 3vw, 30px) var(--nx-space-4); }
-.nxp-modal-panel--with-footer > .nxp-modal-body > .nxp-scroll-viewport > div:not(.form-grid):not(.subsection):last-child { margin-bottom: 0; }
-.nxp-modal-body > .nxp-scroll-viewport > div:not(.form-grid):not(.subsection) { margin-bottom: 20px; }
-.nxp-modal-body > .nxp-scroll-viewport > .field-label { margin-top: 20px; }
-.nxp-modal-body > .nxp-scroll-viewport > .form-grid { margin-bottom: 20px; }
-.nxp-modal-body > .nxp-scroll-viewport > .form-grid:last-of-type { margin-bottom: 0; }
-.nxp-modal-body > .nxp-scroll-viewport > .form-grid + .subsection { margin-top: 4px; }
+.nxp-modal-panel--with-footer > .nxp-modal-body > .nxp-modal-viewport > div:not(.form-grid):not(.subsection):last-child { margin-bottom: 0; }
+.nxp-modal-viewport > div:not(.form-grid):not(.subsection) { margin-bottom: 20px; }
+.nxp-modal-viewport > .field-label { margin-top: 20px; }
+.nxp-modal-viewport > .form-grid { margin-bottom: 20px; }
+.nxp-modal-viewport > .form-grid:last-of-type { margin-bottom: 0; }
+.nxp-modal-viewport > .form-grid + .subsection { margin-top: 4px; }
 .nxp-modal-footer { display: flex; flex: 0 0 auto; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: var(--nx-space-3); margin: 0; padding: var(--nx-space-4) clamp(18px, 3vw, 30px) clamp(18px, 3vw, 30px); border-top: 1px solid var(--nx-color-border); border-bottom: 0; }
 .nxp-modal:focus, .nxp-modal-panel:focus { outline: none; }
 .nxp-modal-enter-active,
@@ -155,7 +155,7 @@ onBeforeUnmount(() => {
 .nxp-modal-enter-from .nxp-modal-panel,
 .nxp-modal-leave-to .nxp-modal-panel { opacity: 0; transform: translateY(5px) scale(.985); }
 @media (max-width: 560px) {
-  .nxp-modal-body > .nxp-scroll-viewport > .form-grid { margin-bottom: var(--nx-space-3); }
-  .nxp-modal-body > .nxp-scroll-viewport > div:not(.form-grid):not(.subsection):not(.toggle-row):not(.field-btn-row) { margin-bottom: var(--nx-space-3); }
+  .nxp-modal-viewport > .form-grid { margin-bottom: var(--nx-space-3); }
+  .nxp-modal-viewport > div:not(.form-grid):not(.subsection):not(.toggle-row):not(.field-btn-row) { margin-bottom: var(--nx-space-3); }
 }
 </style>

@@ -30,6 +30,7 @@ function update(value: boolean) {
       <span v-if="props.description" class="muted">{{ props.description }}</span>
     </div>
     <NxpSwitch
+      class="nxp-switch-setting-control"
       :id="props.id || undefined"
       :model-value="props.modelValue"
       :disabled="props.disabled"
@@ -60,7 +61,7 @@ function update(value: boolean) {
 .nxp-switch-setting-copy { flex: 1 1 auto; min-width: 0; padding-right: var(--nx-switch-setting-copy-padding, 0); }
 .nxp-switch-setting-copy > strong { display: block; font-size: 13px; line-height: 1.45; }
 .nxp-switch-setting-copy > .muted { display: block; margin-top: 4px; color: var(--muted, var(--nx-color-muted)); font-size: 12px; line-height: 1.55; }
-.nxp-switch-setting-root > .nxp-switch-control { align-self: center; }
+.nxp-switch-setting-control { align-self: center; }
 .nxp-switch-setting-root { --nx-switch-control-width: var(--nx-switch-setting-control-width, 56px); --nx-switch-control-height: var(--nx-switch-setting-control-height, 40px); --nx-switch-track-width: var(--nx-switch-setting-track-width, 52px); --nx-switch-track-height: var(--nx-switch-setting-track-height, 30px); }
 @media (max-width: 480px) {
   .nxp-switch-setting-root { align-items: flex-start; }

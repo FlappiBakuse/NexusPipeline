@@ -94,7 +94,7 @@ describe("public composite UI", () => {
       },
     });
 
-    await wrapper.get('[data-dnd-id="b"] .drag-handle').trigger("keydown", { key: "ArrowUp" });
+    await wrapper.get('[data-dnd-id="b"] [data-drag-handle]').trigger("keydown", { key: "ArrowUp" });
     await nextTick();
 
     expect(wrapper.findAll("[data-dnd-id]").map(item => item.attributes("data-dnd-id"))).toEqual(["a", "b"]);

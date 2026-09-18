@@ -40,15 +40,15 @@ function go(page: number) {
 </script>
 
 <template>
-  <nav v-if="props.totalPages > 1" class="pager nxp-pager" :aria-label="props.label" data-testid="nxp-pager" :data-page-current="props.page" :data-pages="props.totalPages">
-    <span class="pager-info" aria-live="polite">{{ summary }}</span>
+  <nav v-if="props.totalPages > 1" class="nxp-pager" :aria-label="props.label" data-testid="nxp-pager" :data-page-current="props.page" :data-pages="props.totalPages">
+    <span class="nxp-pager-info" aria-live="polite">{{ summary }}</span>
     <div class="nxp-pager-controls">
       <button class="sm" type="button" :disabled="props.page <= 1" @click="go(props.page - 1)">{{ previousText }}</button>
       <button
         v-for="pageNumber in props.totalPages"
         :key="pageNumber"
         class="sm"
-        :class="{ 'pager-active': pageNumber === props.page }"
+        :class="{ 'nxp-pager-active': pageNumber === props.page }"
         type="button"
         :aria-current="pageNumber === props.page ? 'page' : undefined"
         @click="go(pageNumber)"
@@ -59,7 +59,10 @@ function go(page: number) {
 </template>
 
 <style>
-.nxp-pager { width: 100%; margin: 0; padding: var(--nx-space-3) var(--nx-space-4) var(--nx-space-4); border-top: 1px solid var(--nx-color-border); }
+.nxp-pager { display: flex; align-items: center; flex-wrap: wrap; gap: var(--nx-space-2); width: 100%; margin-top: var(--nx-space-4); padding: var(--nx-space-3) var(--nx-space-4) var(--nx-space-4); border-top: 1px solid var(--nx-color-border); }
+.nxp-pager-info { margin-right: auto; color: var(--nx-color-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .nxp-pager-controls { display: inline-flex; align-items: center; flex-wrap: wrap; gap: var(--nx-space-2); }
 .nxp-pager button { min-width: 36px; }
+.nxp-pager button.nxp-pager-active { background: var(--nx-color-accent-soft); border-color: var(--nx-color-border-strong, var(--nx-color-border)); color: var(--nx-color-accent); }
+.nxp-pager button:disabled { cursor: not-allowed; opacity: .4; }
 </style>

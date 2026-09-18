@@ -43,22 +43,6 @@
   transition: none !important;
 }
 
-.app-collapse-enter-active,
-.app-collapse-leave-active {
-  overflow: hidden;
-  max-height: 1800px;
-  will-change: max-height, opacity, transform;
-  transition: max-height var(--nx-motion-duration-normal) var(--nx-motion-ease), opacity var(--nx-motion-duration-normal) var(--nx-motion-ease), transform var(--nx-motion-duration-normal) var(--nx-motion-ease);
-}
-
-.app-collapse-enter-from,
-.app-collapse-leave-to {
-  max-height: 0;
-  opacity: 0;
-  transform: translateY(-4px);
-}
-
-
 /* 基础元素样式：先于布局与组件样式加载，供 Nexus UI 元件类选择器按层叠规则覆盖。 */
 button, input, select, textarea {font: inherit;}
 button, a, input, select, textarea {-webkit-tap-highlight-color: transparent;}

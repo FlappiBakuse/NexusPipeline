@@ -121,7 +121,7 @@ describe("ScriptEditorModal root probe", () => {
     probeScriptRoot.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectPending = reject; }));
     const wrapper = mountEditor(null, "hoyolab");
     await setRootPath(wrapper, "D:/Game");
-    await wrapper.find(".modal-close").trigger("click");
+    await wrapper.find(".nxp-modal-close").trigger("click");
     rejectPending(new Error("closed"));
     await nextTick();
     await nextTick();
@@ -132,7 +132,7 @@ describe("ScriptEditorModal root probe", () => {
   it("exposes one close control that shares the cancel handler", async () => {
     const wrapper = mountEditor(null, "hoyolab");
 
-    const closeControls = wrapper.findAll(".modal-close");
+    const closeControls = wrapper.findAll(".nxp-modal-close");
     expect(closeControls).toHaveLength(1);
     expect(closeControls[0].attributes("aria-label")).toBe("Close");
 
@@ -141,7 +141,7 @@ describe("ScriptEditorModal root probe", () => {
     wrapper.unmount();
 
     const cancelWrapper = mountEditor(null, "hoyolab");
-    const cancel = cancelWrapper.findAll(".modal-footer button").find(button => button.text() === "common.cancel");
+    const cancel = cancelWrapper.findAll(".nxp-modal-footer button").find(button => button.text() === "common.cancel");
     expect(cancel).toBeTruthy();
     await cancel!.trigger("click");
     expect(cancelWrapper.emitted("close")).toHaveLength(1);
@@ -150,7 +150,7 @@ describe("ScriptEditorModal root probe", () => {
 
   it("marks every missing required field and clears its error after editing", async () => {
     const wrapper = mountEditor(null, "hoyolab");
-    const save = wrapper.find(".modal-footer .primary");
+    const save = wrapper.find(".nxp-modal-footer .primary");
     expect(save).toBeTruthy();
     await save!.trigger("click");
 

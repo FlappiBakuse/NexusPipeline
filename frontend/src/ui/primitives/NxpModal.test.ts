@@ -10,7 +10,7 @@ describe("NxpModal", () => {
     trigger.focus();
     const wrapper = mount(NxpModal, { attachTo: document.body, props: { open: true, title: "测试弹窗" }, slots: { default: "内容" } });
     await nextTick();
-    expect(document.activeElement).toBe(wrapper.get(".modal-close").element);
+    expect(document.activeElement).toBe(wrapper.get(".nxp-modal-close").element);
     expect(wrapper.get(".nxp-modal-backdrop").element.tagName).toBe("DIV");
     await wrapper.trigger("keydown", { key: "Escape" });
     expect(wrapper.emitted("close")).toHaveLength(1);
@@ -26,12 +26,12 @@ describe("NxpModal", () => {
     await wrapper.trigger("keydown", { key: "Escape" });
     await wrapper.get(".nxp-modal-backdrop").trigger("click");
     expect(wrapper.emitted("close")).toBeUndefined();
-    await wrapper.get(".modal-close").trigger("click");
+    await wrapper.get(".nxp-modal-close").trigger("click");
     expect(wrapper.emitted("close")).toHaveLength(1);
-    const button = wrapper.get(".modal-footer button").element as HTMLButtonElement;
+    const button = wrapper.get(".nxp-modal-footer button").element as HTMLButtonElement;
     button.focus();
     await wrapper.trigger("keydown", { key: "Tab" });
-    expect(document.activeElement).toBe(wrapper.get(".modal-close").element);
+    expect(document.activeElement).toBe(wrapper.get(".nxp-modal-close").element);
     wrapper.unmount();
   });
 
@@ -43,7 +43,7 @@ describe("NxpModal", () => {
     });
     await nextTick();
 
-    const close = wrapper.get(".modal-close");
+    const close = wrapper.get(".nxp-modal-close");
     expect(close.isVisible()).toBe(true);
     expect(close.attributes("aria-label")).toBe("Close");
     expect(wrapper.get("[role='dialog']").attributes("aria-label")).toBe("锁定二级弹窗");

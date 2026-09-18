@@ -1,6 +1,5 @@
 <script setup lang="ts">
-/** 标签页切换：保留 `role="tablist"` / `role="tab"` / `aria-selected` 语义，
- *  视觉沿用 shell 既有 `.plugin-tabs` 紧凑按钮组。 */
+/** 标签页切换：保留 `role="tablist"` / `role="tab"` / `aria-selected` 语义。 */
 interface NxpTab {
   value: string;
   label: string;
@@ -28,7 +27,7 @@ function select(tab: NxpTab) {
 </script>
 
 <template>
-  <div class="plugin-tabs nxp-tabs" role="tablist" :aria-label="props.ariaLabel || undefined" :data-testid="props.testId">
+  <div class="nxp-tabs" role="tablist" :aria-label="props.ariaLabel || undefined" :data-testid="props.testId">
     <button
       v-for="tab in props.tabs"
       :key="tab.value"

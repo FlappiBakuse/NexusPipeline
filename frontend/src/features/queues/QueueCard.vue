@@ -31,6 +31,7 @@ const emit = defineEmits<{
   >
     <template #leading>
       <NxpDragHandle
+        class="script-drag-handle"
         :label="translate('common.reorder.keyboard_help')"
         :title="translate('common.drag_to_reorder')"
       />

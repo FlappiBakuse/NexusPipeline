@@ -70,7 +70,7 @@ function browse(
         :aria-label="`${props.ariaLabel}选择文件`"
         @click="browse('file')"
       >
-        <NxpIcon name="file" />
+        <NxpIcon name="file" class-name="nxp-path-trigger-icon" />
       </button>
       <button
         class="nxp-path-trigger nxp-path-choice"
@@ -81,7 +81,7 @@ function browse(
         :aria-label="`${props.ariaLabel}选择文件夹`"
         @click="browse('folder')"
       >
-        <NxpIcon name="folder" />
+        <NxpIcon name="folder" class-name="nxp-path-trigger-icon" />
       </button>
     </span>
     <button
@@ -94,7 +94,7 @@ function browse(
       :aria-label="`${props.ariaLabel}浏览`"
       @click="browse()"
     >
-      <NxpIcon :name="props.kind === 'folder' ? 'folder' : 'file'" />
+      <NxpIcon :name="props.kind === 'folder' ? 'folder' : 'file'" class-name="nxp-path-trigger-icon" />
     </button>
   </div>
 </template>
@@ -138,7 +138,7 @@ function browse(
   opacity: 0.5;
   cursor: not-allowed;
 }
-.nxp-path-trigger .nxp-icon {
+.nxp-path-trigger-icon {
   width: 18px;
   height: 18px;
 }

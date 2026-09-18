@@ -26,7 +26,7 @@ describe("NxpCollapsibleCard", () => {
       slots: { default: "<p class=\"body-content\">内容</p>" },
     });
 
-    expect(wrapper.get(".nxp-collapsible-card").classes()).toContain("is-expanded");
+    expect(wrapper.get(".nxp-collapsible-card").classes()).toContain("nxp-collapsible-card-open");
     expect(wrapper.get("#panel-b").isVisible()).toBe(true);
     expect(wrapper.get(".body-content").text()).toBe("内容");
 

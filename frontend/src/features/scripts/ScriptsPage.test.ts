@@ -37,9 +37,9 @@ describe("scripts page chooser close contract", () => {
   it("shows the chooser with one close control", async () => {
     const wrapper = await openChooser();
 
-    expect(wrapper.get(".modal-title").text()).toBe("scripts.new_script_instance");
-    expect(wrapper.findAll(".modal-close")).toHaveLength(1);
-    expect(wrapper.get(".modal-close").attributes("aria-label")).toBe("Close");
+    expect(wrapper.get(".nxp-modal-title").text()).toBe("scripts.new_script_instance");
+    expect(wrapper.findAll(".nxp-modal-close")).toHaveLength(1);
+    expect(wrapper.get(".nxp-modal-close").attributes("aria-label")).toBe("Close");
     expect(wrapper.get(".new-script-chooser").text()).not.toContain(">");
     wrapper.unmount();
   });
@@ -47,20 +47,20 @@ describe("scripts page chooser close contract", () => {
   it("dismisses the chooser from the close control", async () => {
     const wrapper = await openChooser();
 
-    await wrapper.get(".modal-close").trigger("click");
+    await wrapper.get(".nxp-modal-close").trigger("click");
     await flushPromises();
-    expect(wrapper.find(".modal-title").exists()).toBe(false);
+    expect(wrapper.find(".nxp-modal-title").exists()).toBe(false);
     wrapper.unmount();
   });
 
   it("dismisses the chooser from the cancel button", async () => {
     const wrapper = await openChooser();
 
-    const cancel = wrapper.findAll(".modal-footer button").find(button => button.text() === "common.cancel");
+    const cancel = wrapper.findAll(".nxp-modal-footer button").find(button => button.text() === "common.cancel");
     expect(cancel).toBeTruthy();
     await cancel!.trigger("click");
     await flushPromises();
-    expect(wrapper.find(".modal-title").exists()).toBe(false);
+    expect(wrapper.find(".nxp-modal-title").exists()).toBe(false);
     wrapper.unmount();
   });
 });

@@ -17,27 +17,17 @@
 }
 .nxp-switch-list {
   display: grid;
-  gap: 0;
+  gap: 1px;
   margin: var(--space-3, var(--nx-space-3)) 0 var(--space-5, var(--nx-space-5));
   border: 1px solid var(--content-card-border, var(--nx-color-border));
   border-radius: var(--radius-lg, var(--nx-radius-lg));
   overflow: hidden;
-  background: var(--content-card, var(--nx-color-surface));
-}
-.nxp-switch-list > .nxp-switch-setting-root,
-.nxp-switch-list > nxp-switch-setting > .nxp-switch-setting-root {
-  min-height: 64px;
-  border: 0;
-  border-bottom: 1px solid var(--border, var(--nx-color-border));
-  border-radius: 0;
-  background: transparent;
-}
-.nxp-switch-list > .nxp-switch-setting-root:hover,
-.nxp-switch-list > nxp-switch-setting:hover > .nxp-switch-setting-root {
-  background: var(--content-card-hover, var(--nx-color-surface));
-}
-.nxp-switch-list > .nxp-switch-setting-root:last-child,
-.nxp-switch-list > nxp-switch-setting:last-child > .nxp-switch-setting-root {
-  border-bottom: 0;
+  background: var(--content-card-border, var(--nx-color-border));
+  --nx-switch-setting-min-height: 64px;
+  --nx-switch-setting-border: 0;
+  --nx-switch-setting-border-bottom: 0;
+  --nx-switch-setting-radius: 0;
+  --nx-switch-setting-background: var(--content-card, var(--nx-color-surface));
+  --nx-switch-setting-hover-background: var(--content-card-hover, var(--nx-color-surface));
 }
 </style>

@@ -54,6 +54,7 @@ const emit = defineEmits<{
     :data-dnd-id="user.id"
   >
     <NxpDragHandle
+      class="global-user-drag-handle"
       :label="translate('users.global.order_help')"
       :title="translate('common.drag_to_reorder')"
     />

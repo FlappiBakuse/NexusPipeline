@@ -56,13 +56,13 @@ onBeforeUnmount(() => {
 <template>
   <span class="nxp-entity-icon" aria-hidden="true">
     <img v-if="source" :src="source" :alt="props.alt" loading="lazy" />
-    <NxpIcon v-else :name="props.fallback" />
+    <NxpIcon v-else :name="props.fallback" class-name="nxp-entity-icon-symbol" />
   </span>
 </template>
 
 <style>
 .nxp-entity-icon { display: inline-flex; flex: 0 0 auto; width: 36px; height: 36px; align-items: center; justify-content: center; border: 1px solid var(--content-card-border, var(--nx-color-border)); border-radius: 6px; background: color-mix(in srgb, #000 7%, var(--content-card, var(--nx-color-surface))); color: rgb(0 0 0 / 38%); object-fit: contain; }
-.nxp-entity-icon > .nxp-icon { width: 24px; height: 24px; }
+.nxp-entity-icon-symbol { width: 24px; height: 24px; }
 .nxp-entity-icon img {
   width: 100%;
   height: 100%;

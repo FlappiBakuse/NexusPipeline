@@ -77,7 +77,7 @@ function sortableOwner(target: Element | null): HTMLElement | null {
 }
 
 function dragHandle(target: EventTarget | null): HTMLElement | null {
-  return target instanceof Element ? target.closest<HTMLElement>(".drag-handle") : null;
+  return target instanceof Element ? target.closest<HTMLElement>("[data-drag-handle]") : null;
 }
 
 function sortableItem(container: HTMLElement, handle: Element | null): HTMLElement | null {

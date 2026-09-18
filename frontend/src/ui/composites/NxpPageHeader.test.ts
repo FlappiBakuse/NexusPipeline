@@ -9,17 +9,17 @@ describe("NxpPageHeader", () => {
       slots: { actions: "<button class=\"primary\">操作</button>" },
     });
 
-    expect(wrapper.get(".eyebrow").text()).toBe("分组");
+    expect(wrapper.get(".nxp-page-header-eyebrow").text()).toBe("分组");
     expect(wrapper.get("h2").text()).toBe("页面标题");
-    expect(wrapper.get(".page-kicker").text()).toBe("页面说明");
-    expect(wrapper.get(".page-head-actions .primary").text()).toBe("操作");
+    expect(wrapper.get(".nxp-page-header-kicker").text()).toBe("页面说明");
+    expect(wrapper.get(".nxp-page-header-actions .primary").text()).toBe("操作");
     expect(wrapper.classes()).toContain("has-actions");
   });
 
   it("omits the actions column and description when the page has neither", () => {
     const wrapper = mount(NxpPageHeader, { props: { title: "仅标题" } });
 
-    expect(wrapper.find(".page-head-actions").exists()).toBe(false);
+    expect(wrapper.find(".nxp-page-header-actions").exists()).toBe(false);
     expect(wrapper.find(".page-kicker").exists()).toBe(false);
     expect(wrapper.classes()).not.toContain("has-actions");
   });
@@ -30,6 +30,6 @@ describe("NxpPageHeader", () => {
     });
 
     expect(wrapper.get(".custom-title").text()).toBe("插槽标题");
-    expect(wrapper.get(".page-kicker").text()).toBe("插槽说明");
+    expect(wrapper.get(".nxp-page-header-kicker").text()).toBe("插槽说明");
   });
 });

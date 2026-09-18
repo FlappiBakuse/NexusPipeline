@@ -87,7 +87,7 @@ defineExpose({ focus: () => input.value?.focus() });
       @mousedown.prevent
       @click="togglePasswordVisibility"
     >
-      <NxpIcon :name="passwordVisible ? 'eyeOff' : 'eye'" />
+      <NxpIcon :name="passwordVisible ? 'eyeOff' : 'eye'" class-name="nxp-password-toggle-icon" />
     </button>
   </div>
   <input v-else ref="input" v-bind="inputAttrs" :class="[inputClass, 'nxp-input']" :style="inputStyle" :id="inputId" :type="inputType" :value="props.modelValue" :placeholder="props.placeholder" :disabled="props.disabled" :maxlength="props.maxlength" :readonly="props.readonly" :autocomplete="props.autocomplete" :aria-label="ariaLabel" @input.stop="update" @change.stop="change" />
@@ -104,5 +104,5 @@ defineExpose({ focus: () => input.value?.focus() });
 .nxp-password-toggle { position: absolute; top: 50%; right: 4px; display: inline-flex; width: 32px; height: 32px; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: var(--nx-radius-sm); transform: translateY(-50%); background: transparent; color: var(--nx-color-muted); cursor: pointer; }
 .nxp-password-toggle:hover { background: var(--content-control-hover, var(--nx-color-surface)); color: var(--nx-color-text); }
 .nxp-password-toggle:focus-visible { outline: 2px solid var(--nx-color-accent); outline-offset: 1px; }
-.nxp-password-toggle .nxp-icon { width: 17px; height: 17px; }
+.nxp-password-toggle-icon { width: 17px; height: 17px; }
 </style>

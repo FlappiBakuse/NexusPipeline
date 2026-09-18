@@ -36,7 +36,7 @@ describe("SettingsNetworkSection", () => {
     expect(wrapper.emitted("toggle")).toEqual([[]]);
     await wrapper.setProps({ expanded: false });
     expect(toggle.attributes("aria-expanded")).toBe("false");
-    expect(wrapper.get(".nxp-collapsible-card").classes()).not.toContain("is-expanded");
+    expect(wrapper.get(".nxp-collapsible-card").classes()).not.toContain("nxp-collapsible-card-open");
 
     const url = wrapper.get("#st-proxy-url");
     await url.setValue("http://127.0.0.1:7890");

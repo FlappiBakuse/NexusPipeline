@@ -153,7 +153,7 @@ onBeforeUnmount(() => {
     <Teleport to="body">
       <div ref="menu" v-show="open" :id="menuId" class="nxp-select-menu secondary-surface" role="listbox" :aria-multiselectable="multiple || undefined">
         <NxpScrollArea class="nxp-select-menu-scroll" direction="vertical" :aria-label="ariaLabel || summary()">
-          <button v-for="(option, index) in options" :key="option.value" class="nxp-select-option" :class="{ 'is-selected': selected().includes(String(option.value)) }" type="button" role="option" data-nxp-select-option :data-value="option.value" :data-option-index="index" :disabled="option.disabled" :aria-selected="selected().includes(String(option.value))" :title="option.title || undefined" @click="choose(option)" @keydown="onOptionKeydown($event, index)">
+          <button v-for="(option, index) in options" :key="option.value" class="nxp-select-option" :class="{ 'nxp-select-option-selected': selected().includes(String(option.value)) }" type="button" role="option" data-nxp-select-option :data-value="option.value" :data-option-index="index" :disabled="option.disabled" :aria-selected="selected().includes(String(option.value))" :title="option.title || undefined" @click="choose(option)" @keydown="onOptionKeydown($event, index)">
             <span>{{ option.label }}</span><span v-if="selected().includes(String(option.value))" class="nxp-select-check" aria-hidden="true">✓</span>
           </button>
         </NxpScrollArea>
@@ -180,7 +180,7 @@ onBeforeUnmount(() => {
 .nxp-select-menu-scroll { min-height: 0; max-height: 100%; }
 .nxp-select-menu[hidden] { display: none; }
 .nxp-select-option { display: flex; width: 100%; min-height: 36px; align-items: center; justify-content: space-between; gap: 8px; margin: 0; padding: 7px 9px; border: 0; border-radius: 6px; background: transparent; color: var(--nx-color-text); font: inherit; font-size: 13px; font-weight: 400; text-align: left; box-shadow: none; }
-.nxp-select-option:hover, .nxp-select-option:focus-visible, .nxp-select-option.is-selected { background: var(--content-control-hover, transparent); color: var(--accent, var(--nx-color-accent)); }
+.nxp-select-option:hover, .nxp-select-option:focus-visible, .nxp-select-option.nxp-select-option-selected { background: var(--content-control-hover, transparent); color: var(--accent, var(--nx-color-accent)); }
 .nxp-select-option:disabled { cursor: not-allowed; color: var(--faint, var(--nx-color-muted)); opacity: .55; }
 .nxp-select-check { flex: 0 0 auto; color: var(--accent, var(--nx-color-accent)); font-weight: 700; }
 .nxp-select-menu { position: fixed !important; z-index: 1000; }

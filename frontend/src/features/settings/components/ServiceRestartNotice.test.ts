@@ -64,7 +64,7 @@ describe("service restart notice", () => {
     await flushPromises();
 
     await wrapper.get("[data-testid='restart-service']").trigger("click");
-    await wrapper.get(".modal-footer .danger").trigger("click");
+    await wrapper.get(".nxp-modal-footer .danger").trigger("click");
     await flushPromises();
 
     expect(restartServiceMock).toHaveBeenCalledTimes(1);
@@ -80,7 +80,7 @@ describe("service restart notice", () => {
     await flushPromises();
 
     await wrapper.get("[data-testid='restart-service']").trigger("click");
-    await wrapper.get(".modal-footer .ghost").trigger("click");
+    await wrapper.get(".nxp-modal-footer .ghost").trigger("click");
     await flushPromises();
 
     expect(restartServiceMock).not.toHaveBeenCalled();
@@ -99,7 +99,7 @@ describe("service restart notice", () => {
     await flushPromises();
 
     await wrapper.get("[data-testid='restart-service']").trigger("click");
-    await wrapper.get(".modal-footer .danger").trigger("click");
+    await wrapper.get(".nxp-modal-footer .danger").trigger("click");
     await flushPromises();
 
     expect(shell.restarting).toBe(true);
@@ -120,7 +120,7 @@ describe("service restart notice", () => {
     await flushPromises();
 
     await wrapper.get("[data-testid='restart-service']").trigger("click");
-    await wrapper.get(".modal-footer .danger").trigger("click");
+    await wrapper.get(".nxp-modal-footer .danger").trigger("click");
     await flushPromises();
 
     expect(shell.restartError).toBe("settings.service.restart_timeout");

@@ -9,7 +9,7 @@ export const FRONTEND_BOUNDARY_SCHEMA_VERSION = 1;
 
 const PRIVATE_VUE_FIELDS = /\._(?:instance|mount|app|vnode|slots)\b/gu;
 const IMPORT_SPECIFIER = /(?:\bfrom\s*|\bimport\s*\(\s*)["']([^"']+)["']/gu;
-const STATIC_CLASS_ATTRIBUTE = /\bclass(?:Name)?\s*(?::|=)\s*["'`]([^"'`]+)["'`]/gu;
+const STATIC_CLASS_ATTRIBUTE = /(?<!:)\b(?:class(?:Name)?|class-name|[A-Za-z0-9_-]+-class)\s*(?::|=)\s*["'`]([^"'`]+)["'`]/gu;
 
 // 这些名称是 v0.16.6 前公共组件曾经暴露到宿主 CSS 的实现类。它们保留在扫描器中只用于
 // 捕获迁移遗漏；现役公共组件类集合从 register.ts 登记的 SFC 模板自动生成。
@@ -30,6 +30,24 @@ const MIGRATED_COMPONENT_CLASSES = new Set([
   "plugin-loading-progress",
   "badge",
   "empty",
+  "drag-handle",
+]);
+
+// 只有明确由全局基础样式定义、且跨组件复用的语义 token 才能进入这里。
+// 组件结构类（例如 modal-body、pager、page-head）必须保留 owner，避免重新形成
+// 通过 shell.css 访问公共组件内部 DOM 的旁路。
+const GLOBAL_UI_UTILITIES = new Map([
+  ["icon", "全局图标语义类，供基础图标尺寸和历史页面样式复用。"],
+  ["icon-button", "全局图标按钮基础语义类，公共 IconButton 与弹层关闭入口共享。"],
+  ["muted", "全局弱化文字语义类，供宿主页面和公共元件共享。"],
+  ["sr-only", "全局无障碍隐藏文本 utility。"],
+  ["primary", "全局按钮主要操作 modifier。"],
+  ["tertiary", "全局按钮次要操作 modifier。"],
+  ["ghost", "全局按钮弱化操作 modifier。"],
+  ["danger", "全局按钮危险操作 modifier。"],
+  ["sm", "全局按钮紧凑尺寸 modifier。"],
+  ["secondary-surface", "全局二级表面 modifier，供浮层和选择菜单复用。"],
+  ["back-link", "全局返回链接语义类。"],
 ]);
 
 const EXCEPTIONS = [
@@ -154,8 +172,23 @@ function staticTemplateClasses(filePath, source) {
   const classes = [];
   for (const node of templateElements(filePath, source)) {
     for (const prop of node.props || []) {
-      if (prop.type !== 6 || prop.name !== "class" || !prop.value?.content) continue;
-      classes.push(...prop.value.content.split(/\s+/u).filter(Boolean));
+      if (prop.type === 6) {
+        const isClassAttribute = prop.name === "class"
+          || prop.name === "class-name"
+          || /(?:^|-)(?:class|className)$/u.test(prop.name);
+        if (isClassAttribute && prop.value?.content) {
+          classes.push(...prop.value.content.split(/\s+/u).filter(Boolean));
+        }
+        continue;
+      }
+      if (prop.type !== 7 || prop.name !== "bind" || prop.arg?.type !== 4 || prop.arg.content !== "class") continue;
+      const expression = String(prop.exp?.content || "");
+      // 收集对象 key、数组中的字符串和字符串表达式中的固定 token；动态值本身
+      // 仍由公开 prop/属性契约控制，无法在静态 inventory 中推导。
+      for (const match of expression.matchAll(/(?:^|[\[\]{}():,?]|\|\|)\s*["']([^"']+)["']/gu)) {
+        classes.push(...match[1].split(/\s+/u).filter(Boolean));
+      }
+      for (const match of expression.matchAll(/\b([A-Za-z][A-Za-z0-9_-]*)\s*:/gu)) classes.push(match[1]);
     }
   }
   return classes;
@@ -164,32 +197,38 @@ function staticTemplateClasses(filePath, source) {
 /** 从公共注册表读取实际登记的 SFC，建立公共组件类归属清单。 */
 export function readPublicUiOwnership(root) {
   const classes = new Set(MIGRATED_COMPONENT_CLASSES);
-  const registerPath = path.join(root, "frontend", "src", "ui", "register.ts");
-  if (!fs.existsSync(registerPath)) return { classes };
-  const registerSource = fs.readFileSync(registerPath, "utf8");
-  const imports = new Map();
-  for (const match of registerSource.matchAll(/import\s+([A-Za-z_$][\w$]*)\s+from\s+["'](\.\/(?:primitives|composites)\/[^"']+\.vue)["']/gu)) {
-    imports.set(match[1], match[2]);
-  }
-  const registryStart = registerSource.indexOf("NEXUS_PUBLIC_ELEMENTS");
-  const registryEnd = registryStart >= 0 ? registerSource.indexOf("} as const", registryStart) : -1;
-  const registrySource = registryStart >= 0 && registryEnd > registryStart
-    ? registerSource.slice(registryStart, registryEnd)
-    : registerSource;
-  for (const match of registrySource.matchAll(/["'](nxp-[a-z0-9-]+)["']\s*:\s*([A-Za-z_$][\w$]*)/gu)) {
-    const relativeFile = imports.get(match[2]);
-    if (!relativeFile) continue;
-    const componentPath = path.resolve(path.dirname(registerPath), relativeFile);
-    if (!fs.existsSync(componentPath)) continue;
+  const owners = new Map();
+  const globalUtilities = new Map(GLOBAL_UI_UTILITIES);
+  const uiRoot = path.join(root, "frontend", "src", "ui");
+  if (!fs.existsSync(uiRoot)) return { classes, owners, globalUtilities };
+  const uiFiles = [];
+  const walk = directory => {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      const fullPath = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        if (!GENERATED_DIRECTORIES.has(entry.name)) walk(fullPath);
+      } else if (entry.name.endsWith(".vue")) {
+        uiFiles.push(fullPath);
+      }
+    }
+  };
+  walk(uiRoot);
+  for (const componentPath of uiFiles) {
+    if (path.basename(componentPath) === "UiLab.vue") continue;
     const componentSource = fs.readFileSync(componentPath, "utf8");
-    // Namespaced classes are component-owned. Generic tokens such as muted,
-    // icon and modal remain global utility/layout vocabulary and are not
-    // treated as private implementation selectors by this boundary.
-    for (const className of staticTemplateClasses(componentPath, componentSource)) {
-      if (className.startsWith("nxp-")) classes.add(className);
+    const ownerPath = normalizePath(path.relative(root, componentPath));
+    const classNames = [...staticTemplateClasses(componentPath, componentSource)];
+    for (const transition of componentSource.matchAll(/<Transition\b[^>]*\bname\s*=\s*["']([^"']+)["']/gu)) {
+      for (const suffix of ["enter-active", "leave-active", "enter-from", "leave-to"]) classNames.push(`${transition[1]}-${suffix}`);
+    }
+    for (const className of classNames) {
+      classes.add(className);
+      if (globalUtilities.has(className)) continue;
+      if (!owners.has(className)) owners.set(className, new Set());
+      owners.get(className).add(ownerPath);
     }
   }
-  return { classes };
+  return { classes, owners, globalUtilities };
 }
 
 function addFinding(findings, { path: filePath, source, offset, ruleId, kind, token, severity = "error", classification = "violation", reason = "" }) {
@@ -326,10 +365,13 @@ function scanInteractiveRoles(filePath, source, findings) {
 }
 
 function scanComponentClassUsage(filePath, source, findings, ownership) {
-  if (filePath.startsWith("frontend/src/ui/") || filePath.endsWith(".css")) return;
+  if (filePath.endsWith(".css")) return;
   for (const match of source.matchAll(STATIC_CLASS_ATTRIBUTE)) {
     for (const token of match[1].split(/\s+/u).filter(Boolean)) {
-      if (!ownership.classes.has(token) && !/^nxp-[A-Za-z0-9_-]+$/u.test(token)) continue;
+      if (ownership.globalUtilities?.has(token)) continue;
+      const owners = ownership.owners?.get(token);
+      const isOwnedByCurrentFile = owners?.has(filePath) === true;
+      if (isOwnedByCurrentFile || (!owners && !ownership.classes.has(token) && !/^nxp-[A-Za-z0-9_-]+$/u.test(token))) continue;
       addFinding(findings, {
         path: filePath,
         source,
@@ -376,35 +418,54 @@ function splitSelectorList(value) {
   return selectors.filter(Boolean);
 }
 
-function styleSelectorIsDescendantOfPublicControl(selector, ownership) {
+function styleSelectorIsDescendantOfPublicControl(selector, ownership, filePath) {
   const normalized = selector.replace(/\s+/gu, " ").trim();
   if (!normalized) return false;
   // A class emitted by a registered public SFC is an internal implementation
-  // selector regardless of whether it appears below a public element,
-  // inside :is(), or in a group. The nxp-* fallback covers temporary roots
-  // used by the CLI fixture and classes not represented by a static template.
-  for (const match of normalized.matchAll(/\.([A-Za-z0-9_-]+)\b/gu)) {
-    if (ownership.classes.has(match[1]) || /^nxp-[A-Za-z0-9_-]+$/u.test(match[1])) return true;
+  // selector unless the current SFC owns that class. The nxp-* fallback covers
+  // temporary roots used by the CLI fixture and classes not represented by a
+  // static template.
+  const classMatches = [...normalized.matchAll(/\.([A-Za-z0-9_-]+)\b/gu)];
+  const externallyOwnedClasses = [];
+  const locallyOwnedClasses = [];
+  for (const match of classMatches) {
+    const token = match[1];
+    if (ownership.globalUtilities?.has(token)) continue;
+    if (ownership.owners?.get(token)?.has(filePath)) locallyOwnedClasses.push(token);
+    else if (ownership.classes.has(token) || /^nxp-[A-Za-z0-9_-]+$/u.test(token)) externallyOwnedClasses.push(token);
   }
-
   const publicElement = /(?:^|[\s>+~,(])nxp-[a-z0-9-]+(?=[:.#\[\s>+~),]|$)/iu.exec(normalized);
-  if (!publicElement) return false;
+  // A public component may use a modifier owned by another public component
+  // on its own root (for example `.nxp-card.is-secondary`). A descendant or
+  // sibling combinator still crosses the public DOM boundary and must fail.
+  if (locallyOwnedClasses.length && !/[\s>+~]/u.test(normalized.replace(/\[[^\]]*\]/gu, ""))) return false;
+  if (!publicElement) return externallyOwnedClasses.length > 0;
+  const publicTag = /nxp-[a-z0-9-]+/iu.exec(publicElement[0])?.[0] || "";
   const publicEnd = publicElement.index + publicElement[0].length;
   const remainder = normalized.slice(publicEnd);
   // A public custom-element root may be styled for layout/state, including a
-  // business modifier on that same host. A whitespace/combinator after the
-  // tag crosses into the component's light-DOM implementation.
-  return /^\s|^[>+~]/u.test(remainder);
+  // business modifier on that same host. A combinator followed by a class or
+  // native element crosses into the component's light-DOM implementation;
+  // selecting another public root remains a layout-level operation.
+  const remainderTrimmed = remainder.trim();
+  const crossesPublicRoot = /^\s|^[>+~]/u.test(remainder);
+  if (!remainderTrimmed || (!crossesPublicRoot && /^[.:#\[]/u.test(remainderTrimmed))) return false;
+  const descendant = remainderTrimmed.replace(/^[>+~]\s*/u, "");
+  if (!descendant) return false;
+  const descendantClass = /^\.([A-Za-z0-9_-]+)/u.exec(descendant)?.[1];
+  if (descendantClass
+    && ownership.owners?.get(publicTag)?.has(filePath)
+    && ownership.owners?.get(descendantClass)?.has(filePath)) return false;
+  return !/^nxp-[a-z0-9-]+(?=[:.#\[\s>+~),]|$)/iu.test(descendant);
 }
 
 function scanStyleSelectors(filePath, source, findings, ownership, offsetBase = 0) {
-  if (filePath.startsWith("frontend/src/ui/")) return;
   const withoutComments = source.replace(/\/\*[\s\S]*?\*\//gu, match => " ".repeat(match.length));
   for (const match of withoutComments.matchAll(/([^{}]+)\{/gu)) {
     const rawSelector = match[1].trim();
     if (!rawSelector || rawSelector.startsWith("@")) continue;
     for (const selector of splitSelectorList(rawSelector)) {
-      if (!styleSelectorIsDescendantOfPublicControl(selector, ownership)) continue;
+      if (!styleSelectorIsDescendantOfPublicControl(selector, ownership, filePath)) continue;
       const localOffset = match.index + match[1].indexOf(selector);
       addFinding(findings, {
         path: filePath,

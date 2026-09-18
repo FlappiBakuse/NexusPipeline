@@ -5,7 +5,7 @@ import { spawnSync } from "node:child_process";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
-import { readProductionSources, scanFrontendBoundaries, scanSource } from "../../tools/frontend-boundaries.mjs";
+import { readProductionSources, readPublicUiOwnership, scanFrontendBoundaries, scanSource } from "../../tools/frontend-boundaries.mjs";
 
 const toolPath = fileURLToPath(new URL("../../tools/frontend-boundaries.mjs", import.meta.url));
 
@@ -120,6 +120,55 @@ test("component ownership catches migrated generic implementation classes and al
     "<template><span class=\"nxp-badge\" /></template><style>.nxp-badge { display: inline-flex; }</style>",
   );
   assert.equal(internal.some(item => item.ruleId === "private-style-selector"), false);
+});
+
+test("owner-aware public UI scanning rejects cross-component classes and keeps own roots local", () => {
+  const ownership = readPublicUiOwnership(process.cwd());
+  assert.equal(ownership.classes instanceof Set, true);
+  assert.equal(ownership.owners instanceof Map, true);
+  assert.equal(ownership.globalUtilities instanceof Map, true);
+
+  const crossComponentClass = scanSource(
+    "frontend/src/features/example/Example.vue",
+    "<template><div class=\"nxp-switch-control\" /></template>",
+    { ownership },
+  );
+  assert.equal(crossComponentClass.some(item => item.ruleId === "private-component-class-usage" && item.token === "nxp-switch-control"), true);
+
+  const ownClass = scanSource(
+    "frontend/src/ui/primitives/NxpSwitch.vue",
+    "<template><div class=\"nxp-switch-control\" /></template>",
+    { ownership },
+  );
+  assert.equal(ownClass.some(item => item.ruleId === "private-component-class-usage"), false);
+
+  const crossComponentStyle = scanSource(
+    "frontend/src/ui/composites/NxpSwitchSetting.vue",
+    "<style>.nxp-switch-setting-root > .nxp-switch-control { display: flex; }</style>",
+    { ownership },
+  );
+  assert.equal(crossComponentStyle.some(item => item.ruleId === "private-style-selector" && item.token.includes("nxp-switch-control")), true);
+
+  const ownRootAndPublicRoot = scanSource(
+    "frontend/src/ui/composites/NxpScheduleCard.vue",
+    "<style>.nxp-schedule-card { display: block; } .nxp-schedule-day-buttons > nxp-button { width: 100%; }</style>",
+    { ownership },
+  );
+  assert.equal(ownRootAndPublicRoot.some(item => item.ruleId === "private-style-selector"), false);
+});
+
+test("drag handles use the public data hook while legacy classes remain private", () => {
+  const accepted = scanSource(
+    "frontend/src/features/example/Example.vue",
+    "<template><div data-drag-handle>重排</div></template>",
+  );
+  assert.equal(accepted.some(item => item.severity === "error"), false);
+
+  const rejected = scanSource(
+    "frontend/src/features/example/Example.vue",
+    "<template><button class=\"drag-handle\" type=\"button\">重排</button></template>",
+  );
+  assert.equal(rejected.some(item => item.ruleId === "private-component-class-usage" && item.token === "drag-handle"), true);
 });
 
 test("bridge static assembly cannot recreate migrated public component classes", () => {

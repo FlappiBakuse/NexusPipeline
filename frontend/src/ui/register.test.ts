@@ -116,7 +116,7 @@ describe("public Nexus elements", () => {
     ]));
 
     const handle = await mountElement("nxp-drag-handle", { label: "重排" });
-    expect(handle.querySelector("button.drag-handle")?.getAttribute("aria-label")).toBe("重排");
+    expect(handle.querySelector("button[data-drag-handle]")?.getAttribute("aria-label")).toBe("重排");
     handle.remove();
 
     const row = await mountElement("nxp-entity-row", { "item-id": "item-1" });

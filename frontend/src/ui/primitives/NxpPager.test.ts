@@ -23,8 +23,8 @@ describe("NxpPager", () => {
       },
     });
 
-    expect(wrapper.get("nav").classes()).toContain("pager");
-    expect(wrapper.get(".pager-info").text()).toContain("45");
+    expect(wrapper.get("nav").classes()).toContain("nxp-pager");
+    expect(wrapper.get(".nxp-pager-info").text()).toContain("45");
     expect(wrapper.get("[aria-current='page']").text()).toBe("2");
     expect(wrapper.findAll(".nxp-pager-controls > button")).toHaveLength(5);
 

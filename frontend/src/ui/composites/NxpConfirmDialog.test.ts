@@ -20,11 +20,11 @@ describe("NxpConfirmDialog", () => {
 
     expect(wrapper.get("[role='dialog']").attributes("aria-label")).toBe("删除项目");
     expect(wrapper.get(".nxp-confirm-message").text()).toBe("确认删除？");
-    expect(wrapper.get(".modal-footer .ghost").text()).toBe("返回");
-    expect(wrapper.get(".modal-footer .danger").text()).toBe("删除");
+    expect(wrapper.get(".nxp-modal-footer .ghost").text()).toBe("返回");
+    expect(wrapper.get(".nxp-modal-footer .danger").text()).toBe("删除");
 
-    await wrapper.get(".modal-footer .ghost").trigger("click");
-    await wrapper.get(".modal-footer .danger").trigger("click");
+    await wrapper.get(".nxp-modal-footer .ghost").trigger("click");
+    await wrapper.get(".nxp-modal-footer .danger").trigger("click");
 
     expect(wrapper.emitted("cancel")).toHaveLength(1);
     expect(wrapper.emitted("confirm")).toHaveLength(1);
@@ -38,10 +38,10 @@ describe("NxpConfirmDialog", () => {
     });
     await nextTick();
 
-    expect(wrapper.find(".modal-close").exists()).toBe(false);
-    expect(wrapper.get(".modal-footer .ghost").attributes("disabled")).toBeDefined();
-    expect(wrapper.get(".modal-footer .primary").attributes("disabled")).toBeDefined();
-    expect(wrapper.get(".modal-footer .primary").attributes("aria-busy")).toBe("true");
+    expect(wrapper.find(".nxp-modal-close").exists()).toBe(false);
+    expect(wrapper.get(".nxp-modal-footer .ghost").attributes("disabled")).toBeDefined();
+    expect(wrapper.get(".nxp-modal-footer .primary").attributes("disabled")).toBeDefined();
+    expect(wrapper.get(".nxp-modal-footer .primary").attributes("aria-busy")).toBe("true");
     await wrapper.get(".nxp-modal").trigger("keydown", { key: "Escape" });
     expect(wrapper.emitted("close")).toBeUndefined();
     wrapper.unmount();

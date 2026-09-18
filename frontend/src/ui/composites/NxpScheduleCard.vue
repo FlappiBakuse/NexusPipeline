@@ -39,11 +39,11 @@ function toggle() {
 <template>
   <article
     class="nxp-schedule-card"
-    :class="{ 'is-open': props.expanded }"
+    :class="{ 'nxp-schedule-card-open': props.expanded }"
     :data-dnd-id="props.itemId || undefined"
   >
     <div class="nxp-schedule-head">
-      <NxpDragHandle :label="props.dragLabel" :title="props.dragTitle" />
+      <NxpDragHandle class="nxp-schedule-drag-handle" :label="props.dragLabel" :title="props.dragTitle" />
       <NxpButton
         class="nxp-schedule-summary"
         type="button"
@@ -104,7 +104,7 @@ function toggle() {
   gap: 10px;
   padding: 13px 0;
 }
-.nxp-schedule-head > .nxp-drag-handle {
+.nxp-schedule-head > .nxp-schedule-drag-handle {
   flex: 0 0 auto;
   align-self: flex-start;
   margin: 2px 0 0;
@@ -199,31 +199,35 @@ function toggle() {
   border-radius: 0;
   background: transparent;
   color: inherit;
+  --nx-button-width: 100%;
+  --nx-button-min-width: 0;
+  --nx-button-min-height: 40px;
+  --nx-button-padding: 0 6px;
+  --nx-button-radius: var(--nx-radius-md, var(--radius-md));
+  --nx-button-border-color: var(--content-control-border, var(--nx-color-border, var(--border)));
+  --nx-button-background: var(--content-control, var(--nx-color-surface));
+  --nx-button-color: var(--nx-color-muted, var(--muted));
+  --nx-button-hover-background: var(--content-control-hover, var(--nx-color-surface));
 }
-.nxp-schedule-day-buttons > nxp-button > .nxp-button {
-  width: 100%;
-  min-width: 0;
-  min-height: 40px;
-  padding: 0 6px;
-  border-color: var(--content-control-border, var(--nx-color-border, var(--border)));
-  border-radius: var(--nx-radius-md, var(--radius-md));
-  background: var(--content-control, var(--nx-color-surface));
-  color: var(--nx-color-muted, var(--muted));
+.nxp-schedule-day-buttons > nxp-button:hover {
+  --nx-button-background: var(--content-control-hover, var(--nx-color-surface));
 }
-.nxp-schedule-day-buttons > button:hover,
-.nxp-schedule-day-buttons > nxp-button:hover > .nxp-button {
+.nxp-schedule-day-buttons > nxp-button[aria-pressed="true"] {
+  --nx-button-border-color: var(--nx-color-accent, var(--accent));
+  --nx-button-background: var(--nx-color-accent-soft, var(--accent-soft));
+  --nx-button-color: var(--nx-color-accent, var(--accent));
+}
+.nxp-schedule-day-buttons > button:hover {
   background: var(--content-control-hover, var(--nx-color-surface));
 }
-.nxp-schedule-day-buttons > button[aria-pressed="true"],
-.nxp-schedule-day-buttons > nxp-button[aria-pressed="true"] > .nxp-button,
-.nxp-schedule-day-buttons > nxp-button > .nxp-button[aria-pressed="true"] {
+.nxp-schedule-day-buttons > button[aria-pressed="true"] {
   border-color: var(--nx-color-accent, var(--accent));
   background: var(--nx-color-accent-soft, var(--accent-soft));
   color: var(--nx-color-accent, var(--accent));
 }
 .nxp-schedule-day-buttons > button:focus-visible,
 .nxp-schedule-day-buttons > button:focus-within,
-.nxp-schedule-day-buttons > nxp-button > .nxp-button:focus-visible {
+.nxp-schedule-day-buttons > nxp-button:focus-within {
   outline: none;
   box-shadow: var(--nx-focus-ring, var(--focus));
 }

@@ -142,7 +142,7 @@ watch(() => props.open, value => {
         @click.stop="props.open ? emit('close') : emit('open')"
       >
         <span data-nxp-date-range-label>{{ rangeDisplay }}</span>
-        <span class="nxp-date-range-icon" aria-hidden="true"><NxpIcon name="calendar" /></span>
+        <span class="nxp-date-range-icon" aria-hidden="true"><NxpIcon name="calendar" class-name="nxp-date-range-icon-svg" /></span>
       </button>
       <NxpDialogPopover
         :open="props.open"
@@ -201,7 +201,7 @@ watch(() => props.open, value => {
 .nxp-date-range-display:hover, .nxp-date-range-display[aria-expanded="true"] { border-color: var(--accent, var(--nx-color-primary)); background: var(--content-control-hover, var(--nx-color-surface)); }
 .nxp-date-range-display > [data-nxp-date-range-label] { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nxp-date-range-icon { position: absolute; top: 50%; right: 12px; display: inline-flex; pointer-events: none; transform: translateY(-50%); color: var(--accent, var(--nx-color-primary)); }
-.nxp-date-range-icon .icon, .nxp-date-range-icon .nxp-icon { width: 16px; height: 16px; }
+.nxp-date-range-icon-svg { width: 16px; height: 16px; }
 .nxp-date-range-popover { position: absolute; top: calc(100% + 8px); left: 0; z-index: 70; display: grid; container-name: nxp-date-range-popover; container-type: inline-size; min-width: min(100%, 520px); gap: var(--space-3, var(--nx-space-3, 12px)); padding: var(--space-3, var(--nx-space-3, 12px)); border: 1px solid var(--content-control-border, var(--nx-color-border)); border-radius: var(--radius-md, var(--nx-radius-md, 8px)); background: var(--content-card, var(--nx-color-surface)); box-shadow: var(--shadow, 0 16px 40px rgb(0 0 0 / 28%)); }
 .nxp-date-range-toolbar { display: grid; grid-template-columns: 40px minmax(0, 1fr) 40px; align-items: center; gap: var(--space-2, var(--nx-space-2, 8px)); }
 .nxp-date-range-toolbar strong { min-width: 0; color: var(--text, var(--nx-color-text)); font-size: 13px; text-align: center; }

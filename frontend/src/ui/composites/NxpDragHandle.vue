@@ -16,7 +16,7 @@ const props = withDefaults(defineProps<{
 
 <template>
   <button
-    class="drag-handle nxp-drag-handle"
+    class="nxp-drag-handle"
     type="button"
     :tabindex="props.tabIndex"
     :aria-label="props.label"

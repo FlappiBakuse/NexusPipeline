@@ -229,7 +229,7 @@ function toggleDay(timeSet: QueueDraft["timeSets"][number], day: number) {
               class="list-item task-row"
               :data-dnd-id="String(index)"
             >
-              <NxpDragHandle :label="translate('common.reorder.keyboard_help')" /><NxpSelect
+              <NxpDragHandle class="task-drag-handle" :label="translate('common.reorder.keyboard_help')" /><NxpSelect
                 :id="'qm-task-' + index"
                 class="task-script-select"
                 v-model="task.scriptInstanceId"

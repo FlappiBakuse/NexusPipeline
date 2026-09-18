@@ -112,3 +112,20 @@ function cancel(element: Element) {
     <slot />
   </Transition>
 </template>
+
+<style>
+.app-collapse-enter-active,
+.app-collapse-leave-active {
+  overflow: hidden;
+  max-height: 1800px;
+  will-change: max-height, opacity, transform;
+  transition: max-height var(--nx-motion-duration-normal, .22s) var(--nx-motion-ease, ease), opacity var(--nx-motion-duration-normal, .22s) var(--nx-motion-ease, ease), transform var(--nx-motion-duration-normal, .22s) var(--nx-motion-ease, ease);
+}
+
+.app-collapse-enter-from,
+.app-collapse-leave-to {
+  max-height: 0;
+  opacity: 0;
+  transform: translateY(-4px);
+}
+</style>

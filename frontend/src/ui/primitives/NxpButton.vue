@@ -29,9 +29,22 @@ nxp-button > .nxp-button { flex: 1 1 auto; min-width: 0; }
   min-width: 0;
   vertical-align: middle;
 }
+.nxp-button {
+  width: var(--nx-button-width, auto);
+  min-width: var(--nx-button-min-width, auto);
+  min-height: var(--nx-button-min-height, var(--control-height, var(--nx-control-height, 40px)));
+  padding: var(--nx-button-padding, 0 15px);
+  border-color: var(--nx-button-border-color, var(--content-control-border, var(--nx-color-border)));
+  border-radius: var(--nx-button-radius, var(--radius-md, var(--nx-radius-md)));
+  background: var(--nx-button-background, transparent);
+  color: var(--nx-button-color, var(--text, var(--nx-color-text)));
+}
+.nxp-button:not(.primary):not(.ghost):not(.danger):hover {
+  background: var(--nx-button-hover-background, var(--content-control-hover, var(--nx-color-surface)));
+}
 .nxp-button[aria-pressed="true"] {
-  border-color: var(--accent, var(--nx-color-accent));
-  background: var(--accent-soft, var(--nx-color-accent-soft));
-  color: var(--accent, var(--nx-color-accent));
+  border-color: var(--nx-button-pressed-border-color, var(--accent, var(--nx-color-accent)));
+  background: var(--nx-button-pressed-background, var(--accent-soft, var(--nx-color-accent-soft)));
+  color: var(--nx-button-pressed-color, var(--accent, var(--nx-color-accent)));
 }
 </style>
