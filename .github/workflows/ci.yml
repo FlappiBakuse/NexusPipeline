@@ -54,7 +54,7 @@ jobs:
       execution_plan: ${{ steps.domains.outputs.execution_plan }}
     steps:
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 20
 
@@ -73,7 +73,7 @@ jobs:
         run: node tools/ci-lock.mjs plugins.lock.json
 
       - name: 检出官方插件固定基线
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: FlappiBakuse/NexusPipeline-Plugins
           ref: ${{ steps.plugins-lock.outputs.ref }}
@@ -124,7 +124,7 @@ jobs:
       NEXUS_CI_BUILD_INPUTS_DIGEST: ${{ needs.changes.outputs.build_inputs_digest }}
     steps:
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 安装 Node.js
         uses: actions/setup-node@v4
@@ -192,7 +192,7 @@ jobs:
       NEXUS_CI_BUILD_INPUTS_DIGEST: ${{ needs.changes.outputs.build_inputs_digest }}
     steps:
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 安装 .NET 8 SDK
         uses: actions/setup-dotnet@v4
@@ -267,7 +267,7 @@ jobs:
       NEXUS_CI_BUILD_INPUTS_DIGEST: ${{ needs.changes.outputs.build_inputs_digest }}
     steps:
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 读取官方插件固定基线
         id: plugins-lock
@@ -276,7 +276,7 @@ jobs:
         run: node tools/ci-lock.mjs plugins.lock.json
 
       - name: 检出官方插件文档交叉校验基线
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: FlappiBakuse/NexusPipeline-Plugins
           ref: ${{ steps.plugins-lock.outputs.ref }}
@@ -350,7 +350,7 @@ jobs:
       NEXUS_CI_BUILD_INPUTS_DIGEST: ${{ needs.changes.outputs.build_inputs_digest }}
     steps:
       - name: 检出宿主代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 读取官方插件固定基线
         id: plugins-lock
@@ -359,7 +359,7 @@ jobs:
         run: node tools/ci-lock.mjs plugins.lock.json
 
       - name: 检出官方插件仓库（Frontend API 契约夹具）
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: FlappiBakuse/NexusPipeline-Plugins
           ref: ${{ steps.plugins-lock.outputs.ref }}
@@ -452,7 +452,7 @@ jobs:
       NEXUS_CI_BUILD_INPUTS_DIGEST: ${{ needs.changes.outputs.build_inputs_digest }}
     steps:
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 安装 .NET 8 SDK
         uses: actions/setup-dotnet@v4
@@ -549,7 +549,7 @@ jobs:
       NEXUS_CI_BUILD_INPUTS_DIGEST: ${{ needs.changes.outputs.build_inputs_digest }}
     steps:
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 读取官方插件固定基线
         id: plugins-lock
@@ -558,7 +558,7 @@ jobs:
         run: node tools/ci-lock.mjs plugins.lock.json
 
       - name: 检出官方插件固定基线
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: FlappiBakuse/NexusPipeline-Plugins
           ref: ${{ steps.plugins-lock.outputs.ref }}
@@ -661,7 +661,7 @@ jobs:
       NEXUS_CI_BUILD_INPUTS_DIGEST: ${{ needs.changes.outputs.build_inputs_digest }}
     steps:
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 安装 .NET 8 SDK
         uses: actions/setup-dotnet@v4
@@ -755,7 +755,7 @@ jobs:
       NEXUS_CI_BUILD_INPUTS_DIGEST: ${{ needs.changes.outputs.build_inputs_digest }}
     steps:
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 安装 .NET 8 SDK
         uses: actions/setup-dotnet@v4
@@ -849,7 +849,7 @@ jobs:
       NEXUS_CI_BUILD_INPUTS_DIGEST: ${{ needs.changes.outputs.build_inputs_digest }}
     steps:
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -951,7 +951,7 @@ jobs:
       NEXUS_CI_COUNTERPART_SHA: ${{ needs.changes.outputs.counterpart_sha }}
     steps:
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 安装 .NET 8 SDK
         uses: actions/setup-dotnet@v4
@@ -1015,7 +1015,7 @@ jobs:
       NEXUS_CI_COUNTERPART_SHA: ${{ needs.changes.outputs.counterpart_sha }}
     steps:
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 安装 .NET 8 SDK
         uses: actions/setup-dotnet@v4
@@ -1093,7 +1093,7 @@ jobs:
       NEXUS_CI_BUILD_INPUTS_DIGEST: ${{ needs.changes.outputs.build_inputs_digest }}
     steps:
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 安装 .NET 8 SDK
         uses: actions/setup-dotnet@v4
@@ -1112,7 +1112,7 @@ jobs:
         run: node tools/ci-lock.mjs plugins.lock.json
 
       - name: 检出官方插件固定基线
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: FlappiBakuse/NexusPipeline-Plugins
           ref: ${{ steps.plugins-lock.outputs.ref }}
@@ -1211,7 +1211,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 安装 Node.js
         uses: actions/setup-node@v4
