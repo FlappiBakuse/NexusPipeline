@@ -43,7 +43,6 @@ test("registry is unique and contains only runnable, existing suites", () => {
     }
   }
 });
-
 test("registry does not treat shared fixtures or directories as a test file", () => {
   const paths = JSON.stringify(TEST_DOMAIN_REGISTRY);
   assert.doesNotMatch(paths, /tests[\\/]fixtures[\\/][^" ]+\.csproj/u);
@@ -52,4 +51,3 @@ test("registry does not treat shared fixtures or directories as a test file", ()
     for (const testPath of group.testPaths) assert.doesNotMatch(testPath, /(?:^|[\\/])(?:bin|obj|node_modules)(?:[\\/]|$)/u);
   }
 });
-
