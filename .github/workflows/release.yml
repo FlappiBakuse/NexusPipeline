@@ -1,0 +1,104 @@
+name: Host Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing approved release tag to publish
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: host-release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build approved tag
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - name: Verify tag and build production package
+        shell: pwsh
+        run: |
+          if ('${{ inputs.tag }}' -notmatch '^v[0-9]+\.[0-9]+\.[0-9]+(?:-(?:beta|rc)\.[0-9]+)?$') { throw 'tag 格式无效' }
+          git merge-base --is-ancestor '${{ inputs.tag }}' 'origin/${{ github.event.repository.default_branch }}'
+          if ($LASTEXITCODE -ne 0) { throw 'tag 不在默认分支当前历史中' }
+          cmd /d /c build.cmd
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          foreach ($name in @('config', 'data', 'history', 'logs')) {
+            if (Test-Path "release\$name") { throw "发布目录包含受保护运行数据：$name" }
+          }
+          $version = '${{ inputs.tag }}'.Substring(1)
+          $zipName = "NexusPipeline-$version-win-x64.zip"
+          $zipPath = Join-Path $PWD "release\$zipName"
+          if (Test-Path $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
+          Compress-Archive -Path 'release\*' -DestinationPath $zipPath -CompressionLevel Optimal
+          $hash = (Get-FileHash $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          $hash | Set-Content ("$zipPath.sha256") -Encoding ascii -NoNewline
+      - name: Upload package evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: nexus-pipeline-${{ inputs.tag }}
+          path: |
+            release/NexusPipeline-*-win-x64.zip
+            release/NexusPipeline-*-win-x64.zip.sha256
+          if-no-files-found: error
+
+  publish:
+    name: Publish approved release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    environment: host-release
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: nexus-pipeline-${{ inputs.tag }}
+          path: release
+      - name: Publish release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag='${{ inputs.tag }}'
+          version="${tag#v}"
+          zip_asset="NexusPipeline-${version}-win-x64.zip"
+          sha_asset="${zip_asset}.sha256"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            prerelease_args=()
+            if [[ "$tag" =~ ^v0\. || "$tag" =~ -(beta|rc)\.[0-9]+$ ]]; then prerelease_args+=(--prerelease); fi
+            gh release create "$tag" --verify-tag --title "$tag" --generate-notes "${prerelease_args[@]}"
+          fi
+          for asset in "$zip_asset" "$sha_asset"; do
+            existing_url="$(gh release view "$tag" --json assets --jq ".assets[] | select(.name == \"$asset\") | .url")"
+            if [[ -n "$existing_url" ]]; then
+              existing_file="$(mktemp)"
+              trap 'rm -f "$existing_file"' EXIT
+              gh api "$existing_url" --header 'Accept: application/octet-stream' > "$existing_file"
+              if ! cmp -s "$existing_file" "release/$asset"; then
+                echo "拒绝覆盖同 tag 的不同字节资产：$asset" >&2
+                exit 1
+              fi
+              rm -f "$existing_file"
+              trap - EXIT
+              echo "复用同字节资产：$asset"
+            else
+              gh release upload "$tag" "release/$asset"
+            fi
+          done

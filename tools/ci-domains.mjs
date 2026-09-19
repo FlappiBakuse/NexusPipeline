@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+export { globToRegExp } from "./path-glob.mjs";
 
 /**
  * CI 影响域清单：门禁分组与各自的触发路径。
@@ -16,43 +17,14 @@ import crypto from "node:crypto";
  * Web 控制面、进程与日志工具、插件加载、构建与测试入口。改动其中任意一条都会同时影响
  * 四个 System 域，因此在四个 System 域的 `paths` 里显式列出。
  */
-function escapeRegExp(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-}
-
-/** The single path-pattern compiler shared by impact selection and summary validation. */
-export function globToRegExp(glob) {
-  const segments = String(glob).split("/");
-  let source = "^";
-  for (let index = 0; index < segments.length; index++) {
-    const segment = segments[index];
-    const isLast = index === segments.length - 1;
-    if (segment === "**") {
-      if (isLast) {
-        source += ".*";
-        break;
-      }
-      source += "(?:[^/]+/)*";
-      continue;
-    }
-    source += escapeRegExp(segment).replaceAll("\\*", "[^/]*");
-    if (!isLast) source += "/";
-  }
-  return new RegExp(`${source}$`, "u");
-}
-
 export const SYSTEM_SHARED_PATHS = [
   "src/*.cs",
   "src/*.manifest",
   "src/NexusPipeline.ico",
-  "src/Application/**",
-  "src/Extensibility/**",
-  "src/Localization/**",
-  "src/Models/**",
-  "src/Persistence/**",
-  "src/Plugins/**",
-  "src/Utilities/**",
-  "src/Web/**",
+  "src/Host/**",
+  "src/Modules/Plugins/**",
+  "src/Platform/**",
+  "src/Shared/**",
   "*.csproj",
   "src/**/*.csproj",
   "global.json",
@@ -133,22 +105,21 @@ export const CI_DOMAINS = [
     ],
     paths: [
       "src/NexusPipeline.Plugin.Abstractions/**",
-      "src/Plugins/**",
+      "src/Modules/Plugins/**",
       "frontend/src/plugin-bridge/**",
       "frontend/src/ui/**",
       "tools/frontend-boundaries.mjs",
       "tests/tools/frontend-boundaries.test.mjs",
       "docs/PLUGIN_API.md",
-      "tests/NexusPipeline.Tests/PluginExtensionContractTests.cs",
-      "tests/NexusPipeline.Tests/PluginCapabilityTests.cs",
-      "tests/NexusPipeline.Tests/PluginContributionRouteTests.cs",
-      "tests/NexusPipeline.Tests/PluginAvailabilityPolicyTests.cs",
-      "tests/NexusPipeline.Tests/PluginHostServicesTests.cs",
-      "tests/NexusPipeline.Tests/PluginManagementParityTests.cs",
-      "tests/NexusPipeline.Tests/PluginManagerTests.cs",
-      "tests/NexusPipeline.Tests/PluginRepositoryCatalogTests.cs",
-      "tests/NexusPipeline.Tests/PluginInstallRecoveryTests.cs",
-      "tests/NexusPipeline.Tests/PluginConfigValidatorTests.cs",
+      "tests/NexusPipeline.Tests/Plugins/PluginExtensionContractTests.cs",
+      "tests/NexusPipeline.Tests/Plugins/PluginCapabilityTests.cs",
+      "tests/NexusPipeline.Tests/ControlPlane/PluginContributionRouteTests.cs",
+      "tests/NexusPipeline.Tests/Plugins/PluginHostServicesTests.cs",
+      "tests/NexusPipeline.Tests/Plugins/PluginManagementParityTests.cs",
+      "tests/NexusPipeline.Tests/Plugins/PluginManagerTests.cs",
+      "tests/NexusPipeline.Tests/Plugins/PluginRepositoryCatalogTests.cs",
+      "tests/NexusPipeline.Tests/Plugins/PluginInstallRecoveryTests.cs",
+      "tests/NexusPipeline.Tests/Plugins/PluginConfigValidatorTests.cs",
     ],
   },
   {
@@ -163,7 +134,7 @@ export const CI_DOMAINS = [
       "frontend/src/platform/**",
       "frontend/src/plugin-bridge/**",
       "frontend/src/ui/**",
-      "src/Web/**",
+      "src/ControlPlane/**",
       "tests/e2e/**",
     ],
   },
@@ -174,33 +145,14 @@ export const CI_DOMAINS = [
     testPaths: ["tests/run.mjs admin system runtime control config plugins"],
     paths: [
       ...SYSTEM_SHARED_PATHS,
-      "src/Cli/**",
-      "src/Mcp/**",
-      "src/Services/AppearanceLegacyMigration.cs",
-      "src/Services/Audit.cs",
-      "src/Services/ConfigStoreMetadata.cs",
-      "src/Services/ConfigSwap/**",
-      "src/Services/ConfigSwapPaths.cs",
-      "src/Services/ConfigSwapPrimitives.cs",
-      "src/Services/ConfigSwapSession.cs",
-      "src/Services/ConfigWorkDirMaintenance.cs",
-      "src/Services/Configuration/**",
-      "src/Services/Diagnostics/**",
-      "src/Services/EntityNameRules.cs",
-      "src/Services/FirewallRule.cs",
-      "src/Services/HostInstance.cs",
-      "src/Services/HostRestartCoordinator.cs",
-      "src/Services/Limits.cs",
-      "src/Services/NativePathPickerService.cs",
-      "src/Services/NetInfo.cs",
-      "src/Services/Networking/**",
-      "src/Services/Notification/**",
-      "src/Services/PluginAvailability.cs",
-      "src/Services/Realtime/**",
-      "src/Services/SmtpSender.cs",
-      "src/Services/TaskRegistration.cs",
-      "src/Services/UserConfigManager.cs",
-      "src/Services/WebhookSender.cs",
+      "src/ControlPlane/**",
+      "src/Modules/Configuration/**",
+      "src/Modules/Diagnostics/**",
+      "src/Modules/Notifications/**",
+      "src/Modules/Queues/**",
+      "src/Modules/Scripts/**",
+      "src/Modules/Settings/**",
+      "src/Modules/Users/**",
       "tests/system/mcp-smoke.mjs",
       "tests/system/runtime-smoke.mjs",
       "tests/system/config-smoke.mjs",
@@ -214,16 +166,14 @@ export const CI_DOMAINS = [
     testPaths: ["tests/run.mjs admin system execution judge"],
     paths: [
       ...SYSTEM_SHARED_PATHS,
-      "src/Services/DispatchCenter.cs",
-      "src/Services/Execution/**",
-      "src/Services/History/**",
-      "src/Services/Judgement/**",
-      "src/Services/LogMonitor.cs",
-      "src/Services/Realtime/**",
-      "src/Services/RunSession.cs",
-      "src/Services/Scheduling/**",
-      "src/Services/ScriptBindingCleanup.cs",
-      "src/Services/UserBindingOverrideResolver.cs",
+      "src/Modules/Execution/*.cs",
+      "src/Modules/Execution/Contracts/**",
+      "src/Modules/Execution/Judgement/**",
+      "src/Modules/Execution/Monitoring/**",
+      "src/Modules/Execution/Realtime/**",
+      "src/Modules/Execution/Runtime/**",
+      "src/Modules/History/**",
+      "src/Modules/Scheduling/**",
       "tests/system/execution-resilience.mjs",
       "tests/system/fixtures/**",
       "tests/system/judge-smoke.mjs",
@@ -236,8 +186,7 @@ export const CI_DOMAINS = [
     testPaths: ["tests/run.mjs admin system emulator"],
     paths: [
       ...SYSTEM_SHARED_PATHS,
-      "src/Services/EmulatorDrivers.cs",
-      "src/Services/EmulatorSupport.cs",
+      "src/Modules/Execution/Targets/**",
       "tests/e2e/tests/fixtures/adb-stub.cmd",
       "tests/e2e/tests/fixtures/mumu-manager-stub.cmd",
       "tests/system/emulator-smoke.mjs",
@@ -250,7 +199,7 @@ export const CI_DOMAINS = [
     testPaths: ["tests/run.mjs admin system update"],
     paths: [
       ...SYSTEM_SHARED_PATHS,
-      "src/Services/Update/**",
+      "src/Modules/Updates/**",
       "update-policy.json",
       "tools/validate-update-policy-history.mjs",
       "tests/system/startup-update-smoke.mjs",
@@ -340,16 +289,16 @@ export function plannedExclusions(kind, key, mode) {
  * 细分选择。它们放在同一模块中，路径归属、依赖方向和测试入口可以由工具与文档检查共同读取。
  */
 export const HOST_TEST_AREAS = [
-  { key: "core", paths: ["src/Models/**", "src/RuntimeContext.cs", "src/Utilities/**"], testPaths: ["RuntimeContextQueryTests.cs", "RuntimeEntityStateTests.cs", "RuntimeInitializationBoundaryTests.cs", "RuntimeTests.cs", "EntityNameRulesTests.cs", "LimitsTests.cs", "NexusVersionTests.cs", "HostInstanceTests.cs", "LocalizationTests.cs", "NativePathPickerServiceTests.cs", "RuleTests.cs"] },
-  { key: "persistence", paths: ["src/Persistence/**", "src/Services/ConfigStoreMetadata.cs", "src/Services/ConfigSwap/**"], testPaths: ["JsonStoreTests.cs", "ScriptPersistenceTests.cs", "RuntimeStateLayoutTests.cs"] },
-  { key: "config", paths: ["src/Services/Configuration/**", "src/Services/ConfigSwap*.cs", "src/Services/ConfigWorkDirMaintenance.cs"], testPaths: ["Config*.cs", "ExtraConfigSyncTests.cs", "UserIdRecoveryTests.cs", "BindingAndSchedulerTests.cs", "UserBindingOverrideTests.cs", "UserGlobalSettingsValidationTests.cs", "ScriptBindingCleanupTests.cs"] },
-  { key: "execution", paths: ["src/Services/Execution/**", "src/Services/RunSession.cs", "src/Services/DispatchCenter.cs"], testPaths: ["Execution*.cs", "RunAttemptResultTests.cs", "RunScreenshotStoreTests.cs", "ProcessTreeTests.cs", "RecentScreenshotCacheTests.cs", "ParallelAdmissionTests.cs", "RegressionTests.cs", "SelfManagedPcLaunchTests.cs", "EmulatorSupportTests.cs"] },
-  { key: "scheduling", paths: ["src/Services/Scheduling/**", "src/Services/TaskRegistration.cs"], testPaths: ["Scheduler*.cs", "RunDaysTests.cs"] },
-  { key: "judgement", paths: ["src/Services/Judgement/**", "src/Services/KeywordRule.cs", "src/Services/Rule*.cs"], testPaths: ["Judge*.cs", "SessionJudgeTests.cs", "KeywordRuleTests.cs", "ResultCollectorTests.cs", "LogPatternTests.cs"] },
-  { key: "plugins", paths: ["src/Plugins/**", "src/NexusPipeline.Plugin.Abstractions/**"], testPaths: ["Plugin*.cs", "DataSpecializedPlugin*.cs", "EmulatorPluginSupportTests.cs", "ManagedPluginTests.cs", "AppearanceLegacyMigrationTests.cs", "OfficialPluginSourcePathTests.cs"] },
-  { key: "update", paths: ["src/Services/Update/**", "update-policy.json"], testPaths: ["Update*.cs", "StartupUpdate*.cs", "RestartCommandTests.cs"] },
-  { key: "control", paths: ["src/Web/**", "src/Cli/**", "src/Mcp/**", "src/Services/Realtime/**"], testPaths: ["WebApiContractTests.cs", "CliControlContractTests.cs", "Mcp*.cs", "RealtimeEventBusTests.cs", "HostRestartCoordinatorTests.cs"] },
-  { key: "observability", paths: ["src/Services/Diagnostics/**", "src/Services/History/**", "src/Services/Notification/**", "src/Services/LogMonitor.cs", "src/Utilities/Logger.cs"], testPaths: ["Diagnostic*.cs", "HistoryServiceTests.cs", "Notification*.cs", "LogMonitorTests.cs", "LoggerTests.cs", "WebhookSenderTests.cs", "ProxyConfigurationTests.cs", "SmtpSenderTests.cs", "NetworkUtilityTests.cs"] },
+  { key: "core", paths: ["src/Host/**", "src/Shared/**", "src/Platform/**"], testPaths: ["Host/RuntimeContextQueryTests.cs", "Host/RuntimeEntityStateTests.cs", "Host/RuntimeInitializationBoundaryTests.cs", "Host/HostInstanceTests.cs", "Host/HostLifecycleLocalizationTests.cs", "Platform/NativePathPickerServiceTests.cs", "Platform/RuntimeGuardsTests.cs", "Platform/ProcessCleanupResultTests.cs", "Shared/EntityNameRulesTests.cs", "Shared/LocalizationTests.cs", "Shared/NexusVersionTests.cs"] },
+  { key: "persistence", paths: ["src/Modules/**/Persistence/**", "src/Modules/Configuration/Snapshots/**"], testPaths: ["Platform/JsonStoreTests.cs", "Platform/RuntimeStateLayoutTests.cs", "Scripts/ScriptPersistenceTests.cs"] },
+  { key: "config", paths: ["src/Modules/Configuration/**", "src/Modules/Settings/**", "src/Modules/Users/**", "src/Modules/Scripts/**", "src/Modules/Queues/**"], testPaths: ["Configuration/**/*.cs", "Settings/**/*.cs", "Users/User*.cs", "Users/ScriptBindingCleanupTests.cs", "Queues/**/*.cs", "Scripts/ScriptInstanceTests.cs", "Scripts/ScriptPluginAvailabilityTests.cs", "Scripts/ScriptSpecInputOverrideTests.cs"] },
+  { key: "execution", paths: ["src/Modules/Execution/**"], testPaths: ["Execution/AdbEndpointPolicyTests.cs", "Execution/AdmissionFailurePolicyTests.cs", "Execution/AttemptHookPolicyTests.cs", "Execution/EmulatorSupportTests.cs", "Execution/Execution*.cs", "Execution/HostMaintenanceLeaseTests.cs", "Execution/LogCandidateStartPolicyTests.cs", "Execution/ParallelAdmissionTests.cs", "Execution/PendingSystemActionTests.cs", "Execution/PerUserExecutionPlanTests.cs", "Platform/ProcessTreeTests.cs", "Execution/RecentScreenshotCacheTests.cs", "Execution/RunAttemptResultTests.cs", "Execution/RunScreenshotStoreTests.cs", "Execution/RuntimeWorkerTests.cs", "Execution/SelfManagedPcLaunchTests.cs", "Execution/UnavailablePluginExecutionTests.cs"] },
+  { key: "scheduling", paths: ["src/Modules/Scheduling/**"], testPaths: ["Scheduling/**/*.cs", "Users/RunDaysTests.cs"] },
+  { key: "judgement", paths: ["src/Modules/Execution/Judgement/**", "src/Modules/Execution/Monitoring/**"], testPaths: ["Execution/Judge*.cs", "Execution/SessionJudgeTests.cs", "Execution/KeywordRuleTests.cs", "Execution/ResultCollectorTests.cs", "Execution/LogPatternTests.cs"] },
+  { key: "plugins", paths: ["src/Modules/Plugins/**", "src/NexusPipeline.Plugin.Abstractions/**"], testPaths: ["Plugins/**/*.cs", "Execution/EmulatorPluginSupportTests.cs"] },
+  { key: "update", paths: ["src/Modules/Updates/**", "update-policy.json"], testPaths: ["Updates/**/*.cs", "Host/RestartCommandTests.cs"] },
+  { key: "control", paths: ["src/ControlPlane/**", "src/Modules/Execution/Realtime/**"], testPaths: ["ControlPlane/**/*.cs", "Execution/RealtimeEventBusTests.cs", "Host/HostRestartCoordinatorTests.cs"] },
+  { key: "observability", paths: ["src/Modules/Diagnostics/**", "src/Modules/History/**", "src/Modules/Notifications/**", "src/Modules/Execution/Monitoring/**", "src/Platform/**"], testPaths: ["Diagnostics/**/*.cs", "History/**/*.cs", "Notifications/**/*.cs", "Execution/LogMonitorTests.cs", "Platform/NetworkUtilityTests.cs", "Platform/ProxyConfigurationTests.cs", "Shared/LoggerTests.cs"] },
 ];
 
 export const FRONTEND_TEST_GROUPS = [
@@ -389,7 +338,7 @@ export const SYSTEM_TEST_GROUPS = [
 
 export const GOVERNANCE_DOMAINS = [
   { key: "docs-links-contracts", paths: ["docs/**", "README.md", "CHANGELOG.md", "tools/docs-index.mjs", "tests/tools/docs-index.test.mjs"], testPaths: ["tests/documentation/documentation-consistency.mjs", "tests/tools/docs-index.test.mjs"] },
-  { key: "i18n-functional", paths: ["frontend/public/i18n/**", "src/Localization/**"], testPaths: ["tests/documentation/i18n-*.mjs"] },
+  { key: "i18n-functional", paths: ["frontend/public/i18n/**", "src/Shared/Localization/**"], testPaths: ["tests/documentation/i18n-*.mjs"] },
   { key: "architecture-boundaries", paths: ["tools/frontend-boundaries.mjs", "tests/tools/**"], testPaths: ["tests/tools/ci-domains.test.mjs", "tests/tools/frontend-boundaries.test.mjs"] },
   { key: "test-policy", paths: ["AGENTS.md", "tests/documentation/test-policy-consistency.mjs"], testPaths: ["tests/documentation/test-policy-consistency.mjs"] },
   { key: "ci-tooling", paths: [".github/workflows/**", "tools/ci-*.mjs", "tools/artifact-manifest.mjs", "tools/test-selection.mjs", "tools/test-results.mjs", "tests/run.mjs", "tests/tools/ci-summary.test.mjs", "tests/tools/artifact-manifest.test.mjs", "tests/tools/test-results.test.mjs", "tests/tools/runner-manifest.test.mjs"], testPaths: ["tests/tools/ci-domains.test.mjs", "tests/tools/ci-fingerprint.test.mjs", "tests/tools/ci-summary.test.mjs", "tests/tools/artifact-manifest.test.mjs", "tests/tools/test-results.test.mjs", "tests/tools/runner-manifest.test.mjs"] },

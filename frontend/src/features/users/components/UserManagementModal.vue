@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref } from "vue";
 import { isAbortError } from "../../../platform/api";
+import { projectSpecializedCapabilities } from "../../../platform/specialized-capabilities";
 import { state } from "../../../platform/page-state";
 import { scriptPluginStatus, scriptPluginUnavailableMessage } from "../../scripts/utils/pluginStatus";
 import { renderPluginSlot } from "@bridge/index";
@@ -319,7 +320,10 @@ function openConfigEdit(binding: Binding) {
     scriptId: binding.scriptInstanceId,
     userName: current.name,
     scriptName: bindingName(binding),
-    freshAvailable: pluginStatus?.plugin?.noFreshConfig !== true,
+    freshAvailable: projectSpecializedCapabilities(
+      pluginStatus?.plugin?.capabilities,
+      pluginStatus?.plugin ?? undefined,
+    ).allowFreshConfig,
   });
 }
 

@@ -1,0 +1,466 @@
+using NexusPipeline.ControlPlane.Cli;
+using NexusPipeline.ControlPlane.Http;
+using NexusPipeline.ControlPlane.Mcp;
+using NexusPipeline.Host.Composition;
+using NexusPipeline.Host.Initialization;
+using NexusPipeline.Host.Tray;
+using NexusPipeline.Host;
+using NexusPipeline.Modules.Updates;
+using NexusPipeline.Platform.Storage;
+using NexusPipeline.Shared.Logging;
+
+namespace NexusPipeline.Host.Lifecycle;
+
+internal static class StartupPipeline
+{
+    private static Control? _serviceExitDispatcher;
+    private static readonly ManualResetEventSlim WebOnlyExitRequested = new(false);
+
+    internal static void RunService()
+    {
+        using Mutex? mutex = AcquireSingleInstanceMutex();
+        if (mutex is null)
+        {
+            Logger.Info("检测到 NexusPipeline 已在运行，本次启动退出（可在托盘图标打开管理页面）。");
+            TrayApp.OpenWeb();
+            return;
+        }
+        if (!PrepareHostedStart())
+        {
+            // 更新 worker 必须等当前进程真正终止后才能替换宿主 EXE。
+            // Environment.Exit 保持启动阶段持有的互斥体直到进程终止，避免 using
+            // 提前释放互斥体而让 worker 在当前 EXE 仍被映射时开始交换。
+            Environment.Exit(0);
+            return;
+        }
+
+        Application.EnableVisualStyles();
+        Application.SetCompatibleTextRenderingDefault(false);
+        using var exitDispatcher = new Control();
+        _ = exitDispatcher.Handle;
+        Volatile.Write(ref _serviceExitDispatcher, exitDispatcher);
+        try
+        {
+            HostCompositionRoot ctx = HostCompositionRoot.Instance;
+            if (!HostedRuntimeInitializer.Initialize(ctx))
+            {
+                ClearServicePid();
+                return;
+            }
+            StartupUpdateDisposition updateDisposition = RunStartupUpdateGate(ctx);
+            if (updateDisposition == StartupUpdateDisposition.RestartForUpdate)
+            {
+                // 启动阶段没有消息循环；让进程退出释放互斥体和 EXE 映像，更新 worker 才能安全交换文件。
+                Environment.Exit(0);
+                return;
+            }
+            if (updateDisposition == StartupUpdateDisposition.AbortUnsafeRecovery)
+            {
+                ClearServicePid();
+                return;
+            }
+            Bootstrap.PrepareStartupPluginUpdates(ctx);
+            Bootstrap.StartServices();
+
+            WebServerOptions webOptions = WebServerOptions.FromSettings(
+                ctx.Settings.LightweightMode,
+                ctx.Settings.AllowRemoteAccess);
+            WebServer? web = Bootstrap.StartWebWithRetry(ctx.Settings.WebPort, webOptions);
+            if (web is not null)
+            {
+                Bootstrap.AfterWebStarted(web);
+                if (webOptions.ServeWebUi && ctx.Settings.AutoOpenBrowser)
+                {
+                    TrayApp.OpenWeb(web.Port);
+                }
+            }
+            McpHost? mcp = web is null ? null : Bootstrap.StartMcp();
+            if (!webOptions.ServeWebUi)
+            {
+                Logger.Info("轻量运行模式：Control API 已启动并仅绑定 127.0.0.1，不提供 Web UI 与浏览器。");
+            }
+            if (web is null)
+            {
+                Logger.Error("[错误] Control API 启动失败，服务无法提供控制面。");
+                Bootstrap.Shutdown(null, mcp);
+                ClearServicePid();
+                return;
+            }
+
+#if NEXUS_TEST_HOST
+            StartTestHostExitMonitor();
+#endif
+            Application.Run(new TrayApp());
+            ShutdownHosted(web, mcp, "NexusPipeline 已退出。");
+        }
+        finally
+        {
+            Interlocked.CompareExchange(ref _serviceExitDispatcher, null, exitDispatcher);
+        }
+    }
+
+    /// <summary>将后台请求投递到承载 WinForms 消息循环的宿主线程，确保服务能正常退出并执行关闭清理。</summary>
+    internal static bool TryRequestServiceExit()
+    {
+        Control? dispatcher = Volatile.Read(ref _serviceExitDispatcher);
+        if (dispatcher is null || dispatcher.IsDisposed)
+        {
+            Logger.Warn("[退出] 宿主 STA dispatcher 尚未就绪，无法提交服务退出请求。");
+            return false;
+        }
+        try
+        {
+            dispatcher.BeginInvoke((MethodInvoker)Application.Exit);
+            return true;
+        }
+        catch (InvalidOperationException ex)
+        {
+            Logger.Warn($"[退出] 投递宿主 STA 退出请求失败：{ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>让仅网页模式走正常 shutdown 流程，以便安全停止插件后台任务后释放单实例互斥体。</summary>
+    internal static bool TryRequestWebOnlyExit()
+    {
+        WebOnlyExitRequested.Set();
+        return true;
+    }
+
+    /// <summary>返回当前宿主实例使用的单实例互斥体名称；Test Host 按系统测试运行时隔离，生产保持固定名称。</summary>
+    internal static string SingleInstanceMutexName
+    {
+        get
+        {
+#if NEXUS_TEST_HOST
+            string scope = Environment.GetEnvironmentVariable("NEXUS_SYSTEM_RUNTIME_NAME")?.Trim() ?? "";
+            return string.IsNullOrWhiteSpace(scope)
+                ? "NexusPipeline.TestHost.SingleInstance"
+                : $"NexusPipeline.TestHost.SingleInstance.{scope}";
+#else
+            return "NexusPipeline.SingleInstance";
+#endif
+        }
+    }
+
+    /// <summary>
+    /// 创建单实例互斥体并取得所有权：处理「服务被强杀后互斥体被遗弃」——构造函数会抛
+    /// AbandonedMutexException（所有权已授予本线程），此时先打开同一互斥体释放遗弃所有权再重试一次，
+    /// 避免强杀后首次启动即崩溃（曾需启动两次）。已有实例在运行时返回 null。
+    /// </summary>
+    internal static Mutex? AcquireSingleInstanceMutex()
+    {
+        string name = SingleInstanceMutexName;
+        for (int attempt = 0; attempt < 2; attempt++)
+        {
+            try
+            {
+                var mutex = new Mutex(true, name, out bool createdNew);
+                if (createdNew)
+                {
+                    return mutex;
+                }
+                mutex.Dispose();
+                return null;
+            }
+            catch (AbandonedMutexException ex)
+            {
+                Logger.Warn($"[警告] 接管上次异常退出残留的单实例互斥体（{ex.Message}），正在重试启动...");
+                try
+                {
+                    using var stale = new Mutex(false, name);
+                    stale.ReleaseMutex();
+                }
+                catch (Exception e)
+                {
+                    Logger.Debug($"释放遗弃互斥体失败：{e.Message}");
+                }
+            }
+        }
+        Logger.Error("[错误] 获取单实例互斥体失败（两次尝试均被遗弃状态占用）。");
+        return null;
+    }
+
+    /// <summary>自动重启分支：等待旧进程释放单实例互斥体（旧进程收到退出指令后 ~1 秒退出并释放，
+    /// 强杀残留的遗弃互斥体视为已获得），随后进入常驻服务模式。
+    /// 交接标识来自拉起本进程的旧进程，控制面前端据此确认新实例已经接管服务。</summary>
+    internal static int RunRestart(string? handoffId = null, bool webOnly = false, bool keepWebOnlyAlive = false)
+    {
+        HostInstance.AdoptRestartHandoff(handoffId);
+        Logger.Info("[重启] 正在等待旧进程退出...");
+        try
+        {
+            using var probe = new Mutex(false, SingleInstanceMutexName);
+            DateTime deadline = DateTime.Now.AddSeconds(30);
+            while (DateTime.Now < deadline)
+            {
+                try
+                {
+                    if (probe.WaitOne(500))
+                    {
+                        try
+                        {
+                            probe.ReleaseMutex();
+                        }
+                        catch (Exception ex)
+                        {
+                            Logger.Debug($"释放互斥体失败：{ex.Message}");
+                        }
+                        break;
+                    }
+                }
+                catch (AbandonedMutexException)
+                {
+                    break;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[重启] 等待旧进程退出异常（继续启动）：{ex.Message}");
+        }
+        if (webOnly)
+        {
+            RunWebOnly(keepWebOnlyAlive
+                ? new[] { ApplicationHost.KeepWebOnlyAliveArgument }
+                : Array.Empty<string>());
+        }
+        else
+        {
+            RunService();
+        }
+        return 0;
+    }
+
+    internal static int RunWebOnly(string[] args)
+    {
+        ApplicationHost.IsWebOnly = true;
+        ApplicationHost.KeepWebOnlyAlive = args.Any(argument =>
+            argument.Equals(ApplicationHost.KeepWebOnlyAliveArgument, StringComparison.OrdinalIgnoreCase));
+        // web 模式同样抢单实例互斥——常驻服务已在运行时直接退出（防两实例双写配置/数据）。
+        using Mutex? mutex = AcquireSingleInstanceMutex();
+        if (mutex is null)
+        {
+            int? existingPort = CliTransport.FindServicePort(HostCompositionRoot.Instance.Settings.WebPort);
+            if (existingPort is not null)
+            {
+                Logger.Info($"检测到已有 NexusPipeline 服务，复用 Web 端口 {existingPort.Value}。");
+                TrayApp.OpenWeb(existingPort.Value);
+                return 0;
+            }
+            Logger.Warn("[错误] 检测到 NexusPipeline 已在运行，但未能发现其 Web 端口；本次网页模式退出。");
+            Console.WriteLine(CliText.Get("startup.service_running_no_port", "[错误] 检测到已有 NexusPipeline 服务，但无法发现 Web 端口，请查看服务日志。"));
+            return 1;
+        }
+        // web 模式同样执行更新事务启动收尾；worker 接管后当前进程必须立即终止。
+        if (!PrepareHostedStart())
+        {
+            // 与 service 模式保持相同的退出语义：互斥体和当前 EXE 的文件句柄
+            // 在 worker 开始交换前一并由进程终止释放。
+            Environment.Exit(0);
+            return 0;
+        }
+        HostCompositionRoot ctx = HostCompositionRoot.Instance;
+        if (!HostedRuntimeInitializer.Initialize(ctx))
+        {
+            ClearServicePid();
+            return 1;
+        }
+        StartupUpdateDisposition updateDisposition = RunStartupUpdateGate(ctx);
+        if (updateDisposition == StartupUpdateDisposition.RestartForUpdate)
+        {
+            Environment.Exit(0);
+            return 0;
+        }
+        if (updateDisposition == StartupUpdateDisposition.AbortUnsafeRecovery)
+        {
+            ClearServicePid();
+            return 1;
+        }
+        Bootstrap.PrepareStartupPluginUpdates(ctx);
+        Bootstrap.StartServices();
+        WebServer? web = Bootstrap.StartWebWithRetry(
+            ctx.Settings.WebPort,
+            new WebServerOptions(ServeWebUi: !ctx.Settings.LightweightMode, AllowRemoteAccess: ctx.Settings.AllowRemoteAccess));
+        if (web is null)
+        {
+            ClearServicePid();
+            Console.WriteLine(CliText.Get("startup.web_unavailable", "[错误] 无法启动 Web 服务（端口均被占用）。"));
+            return 1;
+        }
+        Bootstrap.AfterWebStarted(web);
+        McpHost? mcp = Bootstrap.StartMcp();
+        Console.WriteLine(CliText.Get("startup.web_started", "Web 界面：http://127.0.0.1:{port}/（按回车停止）", ("port", web.Port)));
+        if (ctx.Settings.AutoOpenBrowser)
+        {
+            try
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo($"http://127.0.0.1:{web.Port}/")
+                {
+                    UseShellExecute = true,
+                });
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"自动打开浏览器失败：{ex.Message}");
+            }
+        }
+        WaitForWebOnlyStop(ApplicationHost.KeepWebOnlyAlive);
+        ShutdownHosted(web, mcp);
+        return 0;
+    }
+
+    /// <summary>
+    /// 常驻模式（service/web）共享的启动不变量：准备当前运行时目录 → 更新事务启动收尾 → 写 service.pid。
+    /// 返回 false 表示更新收尾已拉起 apply-update 子进程或完成回滚，本进程应立即退出。
+    /// </summary>
+    private static bool PrepareHostedStart()
+    {
+        AppPaths.RuntimeState.EnsureDirectories();
+        if (UpdateApply.RunStartupFinalization(ApplicationHost.IsWebOnly, SingleInstanceMutexName))
+        {
+            return false;
+        }
+        WriteServicePid();
+        return true;
+    }
+
+    private static StartupUpdateDisposition RunStartupUpdateGate(HostCompositionRoot ctx)
+    {
+        return new StartupUpdateCoordinator(
+            () => ctx.Settings,
+            ctx.Resolve<UpdateService>(),
+            ctx.Resolve<UpdateAutomationService>()).RunBeforeServices();
+    }
+
+    /// <summary>常驻模式（service/web）共享的关闭不变量：等待任务/编辑会话安全结束 → 停服务 → 清 service.pid。</summary>
+    private static void ShutdownHosted(WebServer? web, McpHost? mcp, string? exitLog = null)
+    {
+        WaitForSafeShutdown();
+        Bootstrap.Shutdown(web, mcp);
+        ClearServicePid();
+        if (exitLog is not null)
+        {
+            Logger.Info(exitLog);
+        }
+    }
+
+    private static void WriteServicePid()
+    {
+        try
+        {
+            File.WriteAllText(AppPaths.ServicePidPath, Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture) + Environment.NewLine);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[运行时] 写入 service.pid 失败：{ex.Message}");
+        }
+    }
+
+    private static void ClearServicePid()
+    {
+        try
+        {
+            if (File.Exists(AppPaths.ServicePidPath))
+            {
+                File.Delete(AppPaths.ServicePidPath);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[运行时] 清理 service.pid 失败：{ex.Message}");
+        }
+    }
+
+    private static void WaitForWebOnlyStop(bool keepAliveWhenStdinCloses)
+    {
+#if NEXUS_TEST_HOST
+        string? testHostExitFile = TestHostExitFilePath();
+        if (testHostExitFile is not null)
+        {
+            while (!File.Exists(testHostExitFile) && !WebOnlyExitRequested.IsSet)
+            {
+                Thread.Sleep(100);
+            }
+            return;
+        }
+#endif
+        if (keepAliveWhenStdinCloses)
+        {
+            WebOnlyExitRequested.Wait();
+            return;
+        }
+
+        // 将控制台输入放在后台读取，使自动安全重启能唤醒主线程并执行 ShutdownHosted。
+        Task<string?> input = Task.Run(() => Console.ReadLine());
+        int signal = WaitHandle.WaitAny(new[]
+        {
+            WebOnlyExitRequested.WaitHandle,
+            ((IAsyncResult)input).AsyncWaitHandle,
+        });
+        if (input.IsFaulted)
+        {
+            _ = input.Exception;
+            if (signal != 0)
+            {
+                // 无效 stdin（如 stdio:ignore）保持服务运行，等待安全重启信号或外部终止。
+                WebOnlyExitRequested.Wait();
+            }
+        }
+    }
+
+    private static void WaitForSafeShutdown()
+    {
+        DateTime nextNotice = DateTime.MinValue;
+        while (!Bootstrap.CanStopServices(out string reason))
+        {
+            if (DateTime.Now >= nextNotice)
+            {
+                Logger.Warn(Bootstrap.LocalizeExitLog(
+                    "exit.waiting_for_safe_shutdown",
+                    "Waiting for runs or edit sessions to finish before stopping the host: {reason}",
+                    reason));
+                nextNotice = DateTime.Now.AddSeconds(5);
+            }
+            Thread.Sleep(500);
+        }
+    }
+
+#if NEXUS_TEST_HOST
+    private static string? TestHostExitFilePath()
+    {
+        string? value = Environment.GetEnvironmentVariable("NEXUS_TEST_HOST_EXIT_FILE")?.Trim();
+        return string.IsNullOrWhiteSpace(value) ? null : value;
+    }
+
+    private static void StartTestHostExitMonitor()
+    {
+        string? exitFile = TestHostExitFilePath();
+        if (exitFile is null)
+        {
+            return;
+        }
+        _ = Task.Run(async () =>
+        {
+            while (true)
+            {
+                if (File.Exists(exitFile))
+                {
+                    try
+                    {
+                        Application.Exit();
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Debug($"Test Host 退出信号处理失败：{ex.Message}");
+                    }
+                    return;
+                }
+                await Task.Delay(100).ConfigureAwait(false);
+            }
+        });
+    }
+#endif
+
+
+}

@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { expectedTestSelectors, globToRegExp } from "./ci-domains.mjs";
+import { expectedTestSelectors } from "./ci-domains.mjs";
+import { globToRegExp } from "./path-glob.mjs";
 
 const IGNORED_DIRECTORIES = new Set([".git", "node_modules", "dist", "bin", "obj", ".artifacts"]);
 

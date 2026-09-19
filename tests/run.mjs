@@ -4,7 +4,7 @@ import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { FRONTEND_TEST_GROUPS, GOVERNANCE_DOMAINS, HOST_TEST_AREAS, SYSTEM_TEST_GROUPS, logicalGroupId } from "../tools/ci-domains.mjs";
-import { globToRegExp } from "../tools/ci-changes.mjs";
+import { globToRegExp } from "../tools/path-glob.mjs";
 import { createBuildFingerprint } from "../tools/ci-fingerprint.mjs";
 import { validateExecutionPlan } from "../tools/ci-summary.mjs";
 import { createArtifactManifest, createNoArtifactManifest, verifyArtifactManifest } from "../tools/artifact-manifest.mjs";
@@ -22,7 +22,7 @@ const playwrightCli = path.join(e2eDir, "node_modules", "playwright", "cli.js");
 const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
 const TEST_HOST_ENV_KEYS = ["NEXUS_TEST_HOST", "NEXUS_TEST_HOST_DIR", "NEXUS_TEST_HOST_EXIT_FILE"];
 const MODE_SUITES = new Set(["default", "ui", "system", "all"]);
-const CI_MANIFEST_COMMANDS = new Set(["unit", "frontend", "contract", "docs", "tooling", "syntax", "build", "codex", "admin"]);
+const CI_MANIFEST_COMMANDS = new Set(["unit", "frontend", "contract", "docs", "tooling", "syntax", "build", "release", "codex", "admin"]);
 const ciExecution = {
   testCount: 0,
   passed: 0,
@@ -942,6 +942,81 @@ async function runBuild() {
   return code;
 }
 
+async function runArchitectureCheck() {
+  return runCheckedProcess(
+    "architecture",
+    "dotnet",
+    [
+      "run",
+      "--project", "tools\\NexusPipeline.Architecture\\NexusPipeline.Architecture.csproj",
+      "--no-restore",
+      "--",
+      "analyze",
+      "--root", projectRoot,
+      "--mode", "production",
+    ],
+    { cwd: projectRoot },
+  );
+}
+
+const RELEASE_GATE_GROUPS = ["core", "frontend-contract", "ui-runtime", "execution-emulator", "update-acceptance"];
+const RELEASE_GROUPS = [...RELEASE_GATE_GROUPS, "all"];
+
+async function runRelease(group) {
+  if (group === "all") {
+    for (const gate of RELEASE_GATE_GROUPS) {
+      const code = await runRelease(gate);
+      if (code !== 0) return code;
+    }
+    return 0;
+  }
+  if (!RELEASE_GROUPS.includes(group)) {
+    console.error(`未知 release 分组：${group || "(空)"}`);
+    console.error(`可用分组：${RELEASE_GROUPS.join(" | ")}`);
+    return 2;
+  }
+  const steps = {
+    core: [
+      ["production build", () => runBuild()],
+      ["unit/component", () => runUnitCommand([])],
+      ["documentation", () => runDocs()],
+      ["tooling", () => runTooling()],
+      ["syntax", () => runSyntax()],
+      ["architecture", () => runArchitectureCheck()],
+    ],
+    "frontend-contract": [
+      ["frontend build and tests", () => runWeb()],
+      ["official plugin contract", () => runContracts()],
+    ],
+    "ui-runtime": [
+      ["administrator permission", async () => requireAdmin("Release UI Runtime", "release ui-runtime") ? 0 : 2],
+      ["administrator UI smoke", () => runUi("admin", [])],
+      ["administrator runtime/control/config/plugins", () => runSystem("admin", ["runtime", "control", "config", "plugins"])],
+    ],
+    "execution-emulator": [
+      ["administrator permission", async () => requireAdmin("Release Execution Emulator", "release execution-emulator") ? 0 : 2],
+      ["administrator execution/judge/emulator", () => runSystem("admin", ["execution", "judge", "emulator"])],
+    ],
+    "update-acceptance": [
+      ["update-policy history", () => runCheckedProcess("update-policy-history", nodeCommand, ["tools\\validate-update-policy-history.mjs"], { cwd: projectRoot })],
+      ["administrator update smoke", () => runSystem("admin", ["update"])],
+      ["Test Host realtime update", () => runSystem("codex", ["update", "--realtime"])],
+      ["production administrator realtime execution", () => runSystem("admin", ["execution", "--realtime"])],
+    ],
+  }[group];
+  try {
+    for (const [label, step] of steps) {
+      console.error(`[Release ${group}] 开始 ${label}`);
+      const code = await step();
+      console.error(`[Release ${group}] 结束 ${label}：exit=${code}`);
+      if (code !== 0) return code;
+    }
+    return 0;
+  } finally {
+    retainTestHostForRun = false;
+  }
+}
+
 async function runDefault(mode, { permissionChecked = false } = {}) {
   if (mode === "admin" && !permissionChecked && !requireAdmin("管理员默认门禁", "admin default")) return 2;
   for (const step of [runUnit, runWeb, runContracts, runDocs, runTooling, runSyntax, runBuild]) {
@@ -1332,6 +1407,8 @@ function printUsage() {
   console.error(`  node tests\\run.mjs unit [--group ${HOST_TEST_AREAS.map(area => area.key).join("|")}]`);
   console.error(`  node tests\\run.mjs frontend [--group ${FRONTEND_TEST_GROUPS.map(group => group.key).join("|")}]`);
   console.error("  node tests\\run.mjs list --json");
+  console.error(`  node tests\\run.mjs release <${RELEASE_GROUPS.join("|")}>`);
+  console.error("  node tests\\run.mjs dev <default|ui|system|all>");
   console.error("  node tests\\run.mjs web|contract|docs|tooling|syntax|build");
   console.error("system 省略分组时运行全部 suite；指定分组时按影响域运行，可用 --group <分组> 重复指定。");
   console.error("system --dry 只列出将要执行的 suite，不构建也不启动运行时。");
@@ -1395,6 +1472,17 @@ try {
       break;
     case "build":
       exitCode = await runBuild();
+      break;
+    case "release":
+      if (args.length !== 1) {
+        printUsage();
+        exitCode = 2;
+      } else {
+        exitCode = await runRelease(args[0].toLowerCase());
+      }
+      break;
+    case "dev":
+      exitCode = await runMode("codex", args.length > 0 ? args : ["all"]);
       break;
     case "codex":
       exitCode = await runMode("codex", args);

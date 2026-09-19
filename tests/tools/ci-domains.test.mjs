@@ -11,9 +11,9 @@ import { expectedTestFiles } from "../../tools/test-selection.mjs";
 test('测试分组包含传递调用方并对未知路径全量兜底', () => {
   assert.deepEqual(selectTestGroups('frontend', ['frontend/src/ui/primitives/NxpButton.vue']), ['ui', 'bridge', 'platform', 'features']);
   assert.deepEqual(selectTestGroups('frontend', ['frontend/src/features/history/HistoryPage.vue']), ['features']);
-  assert.deepEqual(selectTestGroups('host', ['src/Services/Update/UpdateService.cs']), ['update', 'control']);
+  assert.deepEqual(selectTestGroups('host', ['src/Modules/Updates/UpdateService.cs']), ['update', 'control']);
   assert.deepEqual(selectTestGroups('host', ['src/new-subsystem/New.cs']), HOST_TEST_AREAS.map(area => area.key));
-  assert.ok(selectTestGroups('host', ['src/Services/Judgement/Judge.cs']).includes('scheduling'));
+  assert.ok(selectTestGroups('host', ['src/Modules/Execution/Judgement/JudgeScriptRunner.cs']).includes('scheduling'));
 });
 
 test('宿主测试容器名称与分组执行过滤器一致', () => {
@@ -113,13 +113,13 @@ test("Vue 组件改动触发 frontend 与 ui", () => {
 });
 
 test("MuMu 驱动改动只触发 system_emulator 的 System 门禁", () => {
-  const files = ["src/Services/EmulatorDrivers.cs"];
+  const files = ["src/Modules/Execution/Targets/EmulatorDrivers.cs"];
   assertRepoFiles(files);
   assertFlags(files, { host: true, system_emulator: true, system_update: false, system_execution: false, system_runtime: false });
 });
 
 test("UpdateService 改动只触发 system_update 的 System 门禁", () => {
-  const files = ["src/Services/Update/UpdateService.cs"];
+  const files = ["src/Modules/Updates/UpdateService.cs"];
   assertRepoFiles(files);
   assertFlags(files, { host: true, system_update: true, system_emulator: false, system_execution: false, system_runtime: false });
 });
@@ -141,13 +141,13 @@ test("update-policy.json 改动触发 host 与 system_update 门禁", () => {
 });
 
 test("ExecutionService 改动只触发 system_execution 的 System 门禁", () => {
-  const files = ["src/Services/Execution/ExecutionCoordinator.cs"];
+  const files = ["src/Modules/Execution/ExecutionCoordinator.cs"];
   assertRepoFiles(files);
   assertFlags(files, { host: true, system_execution: true, system_emulator: false, system_update: false, system_runtime: false });
 });
 
 test("MCP 改动只触发 system_runtime 的 System 门禁", () => {
-  const files = ["src/Mcp/McpHost.cs"];
+  const files = ["src/ControlPlane/Mcp/McpHost.cs"];
   assertRepoFiles(files);
   assertFlags(files, { host: true, system_runtime: true, system_update: false, system_execution: false, system_emulator: false });
 });
@@ -182,9 +182,9 @@ test("未命中任何域的改动按全量门禁兜底", () => {
 });
 
 test("Windows 分隔符的改动路径与正斜杠等价", () => {
-  const expected = flagsOf(["src/Services/Update/UpdateService.cs"]);
-  assert.deepEqual(flagsOf(["src\\Services\\Update\\UpdateService.cs"]), expected);
-  assert.deepEqual(flagsOf([".\\src/Services/Update/UpdateService.cs"]), expected);
+  const expected = flagsOf(["src/Modules/Updates/UpdateService.cs"]);
+  assert.deepEqual(flagsOf(["src\\Modules\\Updates\\UpdateService.cs"]), expected);
+  assert.deepEqual(flagsOf([".\\src/Modules/Updates/UpdateService.cs"]), expected);
 });
 
 test("已命中路径与未知路径混合时按全量门禁处理", () => {
@@ -289,17 +289,13 @@ test("dry-run 不写 GITHUB_OUTPUT 哨兵文件", () => {
 
 test("横切路径逐条命中四个 System 域", () => {
   const samples = {
-    "src/*.cs": "src/Bootstrap.cs",
+    "src/*.cs": "src/GlobalUsings.cs",
     "src/*.manifest": "src/app.manifest",
     "src/NexusPipeline.ico": "src/NexusPipeline.ico",
-    "src/Application/**": "src/Application/ApplicationHost.cs",
-    "src/Extensibility/**": "src/Extensibility/PluginContracts.cs",
-    "src/Localization/**": "src/Localization/HostLocalization.cs",
-    "src/Models/**": "src/Models/AppSettings.cs",
-    "src/Persistence/**": "src/Persistence/ConfigStore.cs",
-    "src/Plugins/**": "src/Plugins/Runtime/PluginManager.cs",
-    "src/Utilities/**": "src/Utilities/Logger.cs",
-    "src/Web/**": "src/Web/WebServer.cs",
+    "src/Host/**": "src/Host/Lifecycle/Bootstrap.cs",
+    "src/Modules/Plugins/**": "src/Modules/Plugins/Runtime/PluginManager.cs",
+    "src/Platform/**": "src/Platform/Processes/ExecutablePathRules.cs",
+    "src/Shared/**": "src/Shared/Localization/HostLocalization.cs",
     "*.csproj": "NexusPipeline.csproj",
     "src/**/*.csproj": "src/NexusPipeline.csproj",
     "global.json": "global.json",

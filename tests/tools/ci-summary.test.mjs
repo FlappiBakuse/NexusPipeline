@@ -276,7 +276,7 @@ test("C08：未声明的 skip 与未计划排除均失败", () => {
   assert.equal(result.ok, false);
   assert.match(result.issues.join("\n"), /skip|排除/u);
 
-  const updatePlan = planFor(["src/Services/Update/UpdateService.cs"]);
+  const updatePlan = planFor(["src/Modules/Updates/UpdateService.cs"]);
   const updateManifest = manifestFor(updatePlan, "system-update");
   const updateGroup = updateManifest.groups.find(item => item.groupId === "system:update");
   updateGroup.exclusions = [...updateGroup.exclusions, "unplanned:test"];
@@ -290,14 +290,14 @@ test("C08：未声明的 skip 与未计划排除均失败", () => {
 });
 
 test("C09：计划声明的 System Update 模式排除可被逐组核对", () => {
-  const plan = planFor(["src/Services/Update/UpdateService.cs"]);
+  const plan = planFor(["src/Modules/Updates/UpdateService.cs"]);
   const result = evaluateRequiredSummary(inputFor(plan));
   assert.equal(result.ok, true, result.issues.join("\n"));
   assert.ok(result.excludedGroups.includes("system:update"));
 });
 
 test("F2-01：计划的两个 System Update 文件漏跑一个时失败并列出缺失", () => {
-  const plan = planFor(["src/Services/Update/UpdateService.cs"]);
+  const plan = planFor(["src/Modules/Updates/UpdateService.cs"]);
   const input = inputFor(plan);
   const manifest = input.jobs["system-update"];
   const group = manifest.groups.find(item => item.groupId === "system:update");
@@ -315,7 +315,7 @@ test("F2-01：计划的两个 System Update 文件漏跑一个时失败并列出
 });
 
 test("F2-01：一个许可排除不能覆盖七个实际 skipped case", () => {
-  const plan = planFor(["src/Services/Update/UpdateService.cs"]);
+  const plan = planFor(["src/Modules/Updates/UpdateService.cs"]);
   const input = inputFor(plan);
   const group = input.jobs["system-update"].groups.find(item => item.groupId === "system:update");
   Object.assign(group, {
@@ -334,7 +334,7 @@ test("F2-01：一个许可排除不能覆盖七个实际 skipped case", () => {
 });
 
 test("F2-01：skip 数量相同但身份错误时失败", () => {
-  const plan = planFor(["src/Services/Update/UpdateService.cs"]);
+  const plan = planFor(["src/Modules/Updates/UpdateService.cs"]);
   const input = inputFor(plan);
   const group = input.jobs["system-update"].groups.find(item => item.groupId === "system:update");
   Object.assign(group, {
@@ -444,7 +444,7 @@ test("计划摘要和结构校验拒绝未知域与篡改 digest", () => {
   tampered.counterpartSha = "1".repeat(40);
   assert.equal(validateExecutionPlan(tampered).ok, false);
 
-  const tamperedGroups = planFor(["src/Services/Update/UpdateService.cs"]);
+  const tamperedGroups = planFor(["src/Modules/Updates/UpdateService.cs"]);
   tamperedGroups.testGroups.host = ["update"];
   tamperedGroups.planDigest = executionPlanDigest(tamperedGroups);
   assert.equal(validateExecutionPlan(tamperedGroups).ok, false);

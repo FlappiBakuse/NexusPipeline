@@ -1,61 +1,57 @@
-# AGENTS.md
+# AGENTS.md — NexusPipeline
 
-NexusPipeline（枢链）是 Windows 上的本地游戏自动化脚本管家：C#/.NET 8 WinForms 托盘程序、HttpListener Web 服务和由 Vite 构建为静态资源的 Vue/TypeScript 前端。核心代码位于 `src/`，前端源码位于 `frontend/`，运行时插件位于 `plugins/`，独立插件仓库位于相邻的 `NexusPipeline-Plugins/`，测试位于 `tests/`。
+继承 Workspace/AGENTS.md；冲突时 Workspace 约束优先。NexusPipeline 是 .NET 8 Windows WinForms 托盘程序、HttpListener 服务与 Vue/TypeScript 静态前端。相邻 NexusPipeline-Plugins 维护官方插件。两个仓库独立版本、协同契约。
 
-## 权威文档路由
+## 定位与所有权
 
-| 需要知道什么 | 阅读 |
-|---|---|
-| 用户功能、安装、快速使用 | [README.md](README.md) |
-| 当前产品行为、不变量、已接受约束、模块边界与代码定位 | [docs/architecture/README.md](docs/architecture/README.md)（兼容入口：[docs/DESIGN.md](docs/DESIGN.md)） |
-| 开发环境、构建、调试、协作规范和发布流程 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) |
-| 测试层级、完整命令和质量门禁 | [docs/TESTING.md](docs/TESTING.md) |
-| Web/CLI/MCP 控制面能力现状 | [docs/CONTROL_PLANE.md](docs/CONTROL_PLANE.md) |
-| 贡献要点速览 | [CONTRIBUTING.md](CONTRIBUTING.md) |
-| 当前开发计划与未解决问题 | [docs/STATUS.md](docs/STATUS.md) |
-| Plugin SDK、manifest 和扩展契约 | [docs/reference/plugin-api/README.md](docs/reference/plugin-api/README.md)（兼容入口：[docs/PLUGIN_API.md](docs/PLUGIN_API.md)） |
-| 版本历史 | [CHANGELOG.md](CHANGELOG.md) |
+先检查 Git/用户改动，读取 docs/architecture/README.md、docs/TESTING.md 及所属专题。存在 docs/backend-map.json 时先定位 owner；迁移期间用本次教程逐文件卡对照旧路径与新路径。完整测试命令的长期权威入口为 docs/testing/commands.md，经 docs/TESTING.md 导航。
 
-## Agent 强制规则
+目标顶层为 Host、ControlPlane、Modules、Platform、Shared；独立 NexusPipeline.Plugin.Abstractions 保留。Modules 依次包含 Settings、Plugins、Scripts、Users、Queues、Configuration、History、Notifications、Execution、Scheduling、Updates、Diagnostics。Settings 表示宿主设置；Configuration 表示被自动化目标的配置。
 
-- 动手前在项目目录检查 `git status --short --branch` 和 `git rev-parse HEAD`，保留用户已有改动；Workspace 根目录不是 Git 仓库。
-- 版本开发开始时按用户指定版本同步项目版本号；架构重构、新功能和破坏性版本开工前创建本地 `backup/vX.Y.Z-*` 还原点。备份 tag 不推送。
-- 未经用户明确授权，不执行 commit、push、tag、Pull Request 或 Release；版本开发期间不自行拆分发布。
-- `config/`、`data/`、`history/`、`logs/` 和测试 runtime 属于用户或运行时现场。阅读时脱敏，修改和测试时使用隔离目录，禁止把凭据、账号、日志和运行产物加入版本库。
-- 文档任务保持文档范围。发现代码、测试和 DESIGN 的行为描述不一致时，先核对事实；需要改变产品行为时停止该冲突项并向用户报告。
-- 修改行为前阅读对应的[架构专题](docs/architecture/README.md)，修改测试前阅读 TESTING，修改插件前阅读[插件 API 索引](docs/reference/plugin-api/README.md)，发布前阅读 DEVELOPMENT 的发布流程章节。
-- 新增或修改可管理能力时核对并更新 [docs/CONTROL_PLANE.md](docs/CONTROL_PLANE.md)，为 Web、CLI、MCP 记录明确状态、风险边界和对应测试。
-- 新增 UI 行为时先评估 Unit、Component、Web Logic 或 System Smoke 的覆盖位置；UI Smoke 只保留无法由低层稳定证明的核心工作流。
-- LLM 或自动化代理不得新增持久化视觉回归测试、截图基线或像素/布局断言；临时浏览器或手工验证脚本只能放在操作系统临时目录，验证结束后删除且不得加入 Git。持久化 UI 测试只覆盖功能结果、ARIA、焦点、状态、提交、路由、API 效果和生命周期。
-- 提交代码时按功能边界拆分为可独立验证、审查和回退的变更单元，并在获得提交授权后分别提交；禁止把无关功能、测试和文档累积为一个 mega commit。
-- 测试失败时保留失败证据并修复根因；禁止通过自动重试、跳过失败或静默重定向掩盖失败。完整测试命令只维护在 `docs/TESTING.md`。
+Host/Composition 创建和释放唯一容器。长期实例不捕获 IServiceProvider。AutomationDefinitionState 在 Host/State 保留 scripts/queues/users 的唯一同步边界；模块经明确 typed port 操作，禁止复制第二套实体集合或将三类状态改成互不协调的锁。Settings 保持 clone→验证→落盘成功→发布新引用。
 
-## Windows 与工具链注意事项
+ControlPlane 负责路由、参数、授权、调用用例和响应；图标读取、avatar、文件浏览、历史文件读取经明确服务调用。反射路由可保留，绑定实例由组合根提供；不因重构切换 ASP.NET Core。CLI 继续走常驻服务 Control API。MCP 注入具体用例，不持有整个 RuntimeContext。
 
-- 生产程序和需要真实系统资源的运行边界保持管理员上下文；`admin default` / `admin ui` / `admin system` / `admin all` 是正式门禁，必须在 Administrator / High Integrity 或 System Integrity 执行。`codex` 模式是受限 Codex 的本地反馈路径：UI/System 使用 `NexusTestHost=true` 的 Test Host，不要求管理员权限，并在输出中标明反馈语义。管理员入口检查 `S-1-16-12288`（High）或 `S-1-16-16384`（System）；权限不足返回 exit code `2`，不得降级、UAC 提权或 skip。仓库不包含 Broker、VM、TestLauncher 或令牌降级器。
-- 控制台、管道和文件保持 UTF-8；启动 cmd/bat 时提供并消费有效的 stdout/stderr；`build.cmd` 和 `tests/e2e/run-e2e.cmd` 保持非交互，不加入无条件 `pause`。
-- 以显式路径开头的脚本 `Args` 表示运行时启动目标，`?` 后是目标参数；Args 不使用引号表达路径。
-- 能用 Python 完成的测试、批量文件操作、数据处理和临时脚本使用 Python；项目既有的 `.cmd`、`.ps1`、`dotnet`、`node` 和 `npm` 流程按原入口运行。
-- 重构建前确认没有残留的 `nexus-pipeline` 进程锁定 `release/nexus-pipeline.exe`。清理时使用已核对的精确路径。
+RunRecord 与完成态 RunScreenshot 归 History；运行中的 Execution 状态归 Execution。NotificationDispatcher 的队列通知允许依赖 Queues。Plugins 获取 Host 版本使用注入的版本值；禁止为读版本反向依赖 Updates。Platform 网络服务只接受平台代理选项，不读取 AppSettings。
 
-## 前端硬约束
+## Windows 与验证
 
-- `frontend/` 是宿主前端源码的唯一入口，使用 Vue 3、TypeScript、Vite 和项目内 Nexus UI 组件；Node/npm 只用于开发与发布构建，运行时只托管构建生成的静态文件。
-- `frontend/dist/` 构建结果同步到发布包 `wwwroot/`；最终用户不需要 Node/npm。源码、构建产物和发布静态目录之间的同步由 `build.cmd` 负责。
-- 可复用交互控件优先使用 `frontend/src/ui/primitives/`，对插件开放的稳定控件以 `nxp-*` Native Custom Elements 注册。插件只能依赖 Frontend API 1.5、公开 slot 和这些公共元素，不得依赖 Vue 内部组件、宿主私有 class 或内部实现。
-- 宿主平台服务位于 `frontend/src/platform/`，启动编排位于 `frontend/src/app/bootstrap.ts`；`frontend/src` 不引用 `wwwroot/` 源码，宿主源码与发布静态目录之间没有源码依赖。
-- 插件桥接实现位于 `frontend/src/plugin-bridge/`，只通过 `plugin-bridge/host-adapter.ts` 使用宿主平台服务；宿主 `app/**`、`features/**`、`ui/**` 只经 `@bridge/index` facade 使用 slot 与生命周期能力，不直接引用桥接内部模块。
-- 业务页面的编排放在 `frontend/src/features/<domain>/<Domain>Page.vue`；复杂事务进入同域 `components/`、请求进入 `services/`、纯转换进入 `utils/`。新增请求与状态不放进页面之外的可变全局单例。
-- 页面支持 360px、768px 和 1280px 视口，触控目标至少 40px；轮询经 `frontend/src/platform/page-state.ts` 管理并在路由离开时清理。
-- 主题、弹窗、Toast、焦点和无障碍行为遵循现有界面约束；新增样式复用 CSS 变量和既有紧凑列表模式。基础元素样式在 `frontend/src/styles/app.css`，布局与 shell 样式在 `frontend/src/styles/shell.css`，Nexus UI 元件样式保留在组件 SFC 中。
+生产程序与正式运行资源验证使用 Administrator / High Integrity 或 System Integrity；权限检查不足 exit 2，禁止自动 UAC、降级或 skip。受限反馈保留 codex 模式与 NexusTestHost=true/asInvoker，结果不替代 production admin 资格。
 
-## 最短验证入口
-
-按 [docs/TESTING.md](docs/TESTING.md) 执行与修改范围对应的门禁。受限 Codex 可运行 `unit`、`web`、`docs`、`syntax`，并通过显式 `codex` 模式运行本地 UI/System 反馈；正式管理员验证使用显式 `admin` 模式并要求 Administrator / High Integrity 或 System Integrity。涉及真实进程、端口、解释器、模拟器、managed plugin 或更新事务时，在本地反馈后由 GitHub Administrator CI 执行 System Smoke。发布前必须确认 GitHub 上的 `admin default`、`admin ui` 和适用的 `admin system` 均以 exit code `0` 完成：
+新 release 入口完成前使用现存 node tests/run.mjs unit、web、contract、docs、tooling、syntax、build，以及显式 codex/admin system。新入口完成后 Host 最终为：
 
 ```text
-node tests\run.mjs codex all
-node tests\run.mjs admin all
+node tests/run.mjs release core
+node tests/run.mjs release frontend-contract
+node tests/run.mjs release ui-runtime
+node tests/run.mjs release execution-emulator
+node tests/run.mjs release update-acceptance
 ```
 
-Codex 本地 UI Smoke 使用 `node tests\run.mjs codex ui`；管理员 UI Smoke 使用 `node tests\run.mjs admin ui`；`tests\system\run-system.cmd` 与 `tests\e2e\run-e2e.cmd` 保留为 Codex 反馈模式兼容转发入口。服务普通运行状态位于 `.nxp\runtime\` 与 `.nxp\state\`，更新事务目录仍按原协议留在安装根目录。
+H1–H5 不共享测试通过缓存。H3/H4 为 production admin、timeScale=10；H5 的 Test Host update 与 production admin execution 为 timeScale=1，分别记录。所有 System 组必须覆盖 runtime/control/config/execution/judge/emulator/plugins/update。组选择不得导致实际 suite 为空仍报通过。
+
+production 和 Test Host 构建必须使用隔离输出/中间目录，测试进程仅绑定隔离数据与端口。重构建前核对本次进程是否锁定 release/nexus-pipeline.exe；不得结束用户现有实例。命令保持非交互、可见日志和退出码，不添加 pause。
+
+src/Shared/Localization/Resources 移动时显式保持嵌入资源 LogicalName；.csproj 的程序集名、版本、入口 manifest/icon 及 InternalsVisibleTo 不随 namespace 改变。用户文件路径和 JSON 字段名不按目录结构替换。
+
+## 插件与全局设置
+
+专项只声明 Host 能力，前端行为由宿主实现。managed Frontend API 保持1.5；Plugin API 及 Abstractions 项目已有版本元数据不在本轮自行递增或互相强制等同。Config Editor/Validator 的后端 Jint 脚本继续保留。
+
+pluginRepository.channel 文件配置属于 Settings；消费与更新规则属于 Plugins。通过重启应用配置；普通设置 API 显式拒绝修改该字段。安装来源、pending、缓存、同版本更新和通道切换均按 Workspace 规则。新增持久字段同步严格白名单、clone、save/load、ApplyOne、ownership 构造和恢复测试。
+
+## 前端约束
+
+frontend/ 为唯一宿主前端源码；Vite dist 由 build.cmd 同步到 wwwroot，最终用户无需 Node/npm。保持 platform 服务、app/bootstrap.ts 和 features/<domain> 的职责；业务请求不放入无生命周期的全局单例。
+
+可复用控件使用 frontend/src/ui/primitives；插件稳定控件使用 nxp-* Native Custom Elements。插件桥接仅通过 plugin-bridge/host-adapter.ts 使用宿主平台；app/features/ui 通过 @bridge/index facade 使用桥接，不直接引用内部模块。插件不得依赖 Vue 内部组件或私有 class。
+
+专项 capability→Host 组件的选择由已验证能力声明驱动，禁止按插件名/游戏名硬编码分支，禁止运行专项包浏览器代码。既有 resolve.inputs 保持宿主声明式表单。
+
+页面保留360/768/1280视口适配、至少40px触控目标、主题/焦点/ARIA与紧凑列表规范。轮询经 platform/page-state 管理并在离开时释放。验证产品行为，遵守 Workspace UI Smoke 数量与视觉测试约束。
+
+## 长期文档路由
+
+用户功能看 README；结构看 docs/architecture/README.md；构建发布看 docs/DEVELOPMENT.md；验证看 docs/TESTING.md；Web/CLI/MCP 看 docs/CONTROL_PLANE.md；插件契约看 docs/reference/plugin-api/README.md；未完成看 docs/STATUS.md；历史看 CHANGELOG.md。
+
+任何公开能力变更同步控制面能力表和两个仓库插件文档。实际 commit/push/PR/Release 与规则启用始终受 Workspace 授权要求约束。

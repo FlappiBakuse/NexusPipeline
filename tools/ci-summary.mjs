@@ -13,11 +13,11 @@ import {
   SYSTEM_TEST_GROUPS,
   TEST_DOMAIN_CONSUMERS,
   expectedTestSelectors,
-  globToRegExp,
   logicalGroupId,
   plannedExclusions,
   testSelectionIdentity,
 } from "./ci-domains.mjs";
+import { globToRegExp } from "./path-glob.mjs";
 import { validateArtifactManifestShape } from "./artifact-manifest.mjs";
 import { expectedTestFiles } from "./test-selection.mjs";
 

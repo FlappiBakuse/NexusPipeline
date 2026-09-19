@@ -53,7 +53,7 @@ function registryIds(registry) {
 
 test("host and web locale registries remain synchronized", () => {
   const web = JSON.parse(read("frontend/public/i18n/locales.json"));
-  const host = JSON.parse(read("src/Localization/Resources/locales.json"));
+  const host = JSON.parse(read("src/Shared/Localization/Resources/locales.json"));
   assert.equal(web.default, host.default);
   assert.deepEqual(registryIds(web), registryIds(host));
   assert.deepEqual(registryIds(web), LOCALES);

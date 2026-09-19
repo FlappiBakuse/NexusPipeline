@@ -23,9 +23,9 @@
 
 ## 代码定位
 
-- 后端组合根与启动：`src/Application`、`src/RuntimeContext.cs`、`src/Bootstrap.cs`。
-- 运行、调度和配置：`src/Services/Execution`、`src/Services/Scheduling`、`src/Services/ConfigSwap`、`src/Persistence`。
-- 控制面与插件：`src/Web`、`src/Cli`、`src/Mcp`、`src/Plugins`、`src/NexusPipeline.Plugin.Abstractions`。
+- 后端组合根与启动：`src/Host`、`src/Host/Composition/RuntimeContext.cs`、`src/Host/Lifecycle/Bootstrap.cs`。
+- 运行、调度和配置：`src/Modules/Execution`、`src/Modules/Scheduling`、`src/Modules/Configuration`、`src/Platform/Storage`。
+- 控制面与插件：`src/ControlPlane`、`src/Modules/Plugins`、`src/NexusPipeline.Plugin.Abstractions`。
 - 前端与公开元件：`frontend/src/app`、`frontend/src/platform`、`frontend/src/plugin-bridge`、`frontend/src/ui`。
 - 测试入口、影响域和文档索引：`tests/run.mjs`、`tools/ci-domains.mjs`、`tools/docs-index.mjs`。
 

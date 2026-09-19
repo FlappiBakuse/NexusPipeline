@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, reactive, ref, watch } from "vue";
 import { isAbortError } from "../../platform/api";
+import { projectSpecializedCapabilities } from "../../platform/specialized-capabilities";
 import { renderPluginSlot } from "@bridge/index";
 import { disposePluginSlot } from "@bridge/index";
 import { t } from "../../platform/i18n";
@@ -72,9 +73,12 @@ const currentPlugin = computed(() =>
       String(draft.pluginType || "").toLowerCase(),
   ),
 );
-const emulatorAllowed = computed(() => !draft.pluginType || currentPlugin.value?.supportsEmulator === true);
+const currentSpecializedCapabilities = computed(() =>
+  projectSpecializedCapabilities(currentPlugin.value?.capabilities, currentPlugin.value),
+);
+const emulatorAllowed = computed(() => !draft.pluginType || currentSpecializedCapabilities.value.supportsEmulator);
 const selfManagedPc = computed(
-  () => draft.gameMode !== "emulator" && currentPlugin.value?.selfManagedPcLaunch === true,
+  () => draft.gameMode !== "emulator" && currentSpecializedCapabilities.value.selfManagedPcLaunch,
 );
 const showSelfManagedPcHint = computed(
   () => selfManagedPc.value && String(currentPlugin.value?.name || "").trim().toLowerCase() !== "baah",

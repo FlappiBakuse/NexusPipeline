@@ -16,6 +16,11 @@ node tests\run.mjs docs
 node tests\run.mjs tooling
 node tests\run.mjs syntax
 node tests\run.mjs build
+node tests\run.mjs release core
+node tests\run.mjs release frontend-contract
+node tests\run.mjs release ui-runtime
+node tests\run.mjs release execution-emulator
+node tests\run.mjs release update-acceptance
 ```
 
 `tooling` 校验 CI 影响域、结果汇总与计数、构建指纹、前端边界扫描器、源码编码和更新策略，并扫描实际宿主前端源码。首次使用时执行 `npm ci --prefix tools` 安装解析器依赖。`changes` 作业在判定影响域之前验证影响域映射。
@@ -52,7 +57,7 @@ node tests\run.mjs codex system [runtime|control|config|execution|judge|emulator
 
 `codex` 使用 `NexusTestHost=true` 的 `asInvoker` Test Host；`admin` 使用生产 release，并要求 Administrator / High Integrity 或 System Integrity。权限不足返回 exit code `2`，不降级运行。
 
-v0.16.6 版本验收需要在 GitHub Actions 的 `workflow_dispatch` 中按需启用 `test_host_acceptance` 与 `admin_execution_acceptance`，分别执行独立的 Test Host Update 和管理员 Execution 专属模式：
+每次 Release Qualification 的 H5 固定执行独立的 Test Host Update 和管理员 Execution 专属模式：
 
 ```text
 NEXUS_SYSTEM_SMOKE=1 NEXUS_TIME_SCALE=1 node tests\run.mjs codex system --group update --realtime
@@ -77,8 +82,8 @@ System Smoke 的 `emulator` suite 覆盖宿主内置 Generic ADB、MuMuManager�
 1. 修改宿主代码、测试或前端纯函数后运行 Unit/Component、Web Logic、Docs、Syntax、UI Smoke（适用时）和 `build.cmd` 的适用组合。
 2. 涉及配置交换、Windows 进程、端口、解释器、插件、模拟器或更新事务时，追加 `node tests\run.mjs codex system`；宿主模拟器系统边界通过 TestPlugin 验证 provider 注册到执行及清理，厂商驱动行为由官方扩展插件测试覆盖。
 3. 发布前在适用的 CI 触发路径中由管理员上下文执行 `node tests\run.mjs admin default`、`admin ui` 和适用的 `admin system`，并核对每项 exit code 为 `0`；版本验收另执行上面的 Test Host `update --realtime`，计划任务与手动回归会执行完整组合。
-4. 两仓库的宿主—插件契约发生变化时，在插件仓库执行 `python tools/repository.py validate-source`、`node tools/Test-FrontendPlugins.mjs` 和 `python -m unittest discover -s tools/tests -v`，并核对两仓库文档、manifest 和测试。
-5. 修改 `frontend/src/plugin-bridge/**`、`frontend/src/platform/appearance.ts`、公开 `nxp-*` 元素或 Frontend API 契约时，必须执行 `NexusPipeline-Plugins/tools/Test-FrontendPlugins.mjs` 和宿主 `node tests/run.mjs contract`。前者使用 mock host 验证插件业务与生命周期，从实际宿主检出的 `NEXUS_PUBLIC_ELEMENTS` 读取公开清单；后者加载真实公共元素完成装配交互验证。两仓库 CI 分别通过 `plugins.lock.json` 和 `host.lock.json` 固定对方 commit；手动候选验证支持完整 SHA 输入。managed-code 构建与打包共享宿主锁定规则。
+4. 两仓库的宿主—插件契约发生变化时，在插件仓库执行固定 P1/P2/P3：`python tools/repository.py qualification --group source --base main`、`qualification --group frontend-managed` 和 `qualification --group candidate`，并核对两仓库文档、manifest 和测试。
+5. 修改 `frontend/src/plugin-bridge/**`、`frontend/src/platform/appearance.ts`、公开 `nxp-*` 元素或 Frontend API 契约时，必须执行 `NexusPipeline-Plugins/tools/Test-FrontendPlugins.mjs` 和宿主 `node tests/run.mjs contract`。前者使用 mock host 验证插件业务与生命周期，从实际宿主检出的 `NEXUS_PUBLIC_ELEMENTS` 读取公开清单；后者加载真实公共元素完成装配交互验证。两仓库 Qualification 各自固定一次对端官方完整 SHA；Plugins 的 `host.lock.json` 只保存 API/locale 兼容元数据，不再承载浮动或旧式 commit 锁。managed-code 构建与打包共享该次 SDK 来源。
 
    脚本当前校验：`frontend.apiVersion` 必须为 1.5、宿主私有结构 class 拒绝、`nxp-*` 元素必须来自公开元素集合、插件不得复制 Nexus UI 组件，并按插件页面形态检查公开契约。slot 插件验证 renderer、所需公开控件和 cleanup；GameCheckIn route 页面验证导航/页面注册、任务 API 行为、离开后资源释放和再次进入。CustomWallpaper 额外覆盖插件级壁纸运行时：激活即应用背景与配色、离开设置页面保留全局外观、页面访问不触发随机轮换、按时间轮换在无设置页面时继续生效、只有插件停用才清理外观与计时器。
 

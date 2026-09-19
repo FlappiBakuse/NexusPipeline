@@ -57,6 +57,7 @@ export interface Plugin {
   name?: string;
   displayName?: string;
   kind?: string;
+  capabilities?: unknown;
   configuredEnabled?: boolean;
   runtimeEnabled?: boolean;
   state?: string;

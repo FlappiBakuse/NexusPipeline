@@ -1,0 +1,196 @@
+name: Release Qualification
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Same-repository PR number targeting main
+        required: true
+        type: string
+      expected_head_sha:
+        description: Exact PR head SHA H
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: host-release-qualification-${{ inputs.expected_head_sha }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: qualification-preflight
+    runs-on: ubuntu-latest
+    environment: qualification-control
+    outputs:
+      head_sha: ${{ steps.resolve.outputs.head_sha }}
+      base_sha: ${{ steps.resolve.outputs.base_sha }}
+      workflow_sha: ${{ steps.resolve.outputs.workflow_sha }}
+      contract_sha: ${{ steps.resolve.outputs.contract_sha }}
+      check_id: ${{ steps.resolve.outputs.check_id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Resolve official Plugins contract input and start App check
+        id: resolve
+        env:
+          QUALIFICATION_TOKEN: ${{ secrets.QUALIFICATION_APP_TOKEN }}
+          QUALIFICATION_APP_ID: ${{ vars.QUALIFICATION_APP_ID }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          EXPECTED_HEAD_SHA: ${{ inputs.expected_head_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          C="$(git rev-parse HEAD)"
+          P="$(git ls-remote https://github.com/FlappiBakuse/NexusPipeline-Plugins.git refs/heads/main | awk '{print $1}')"
+          test "${#P}" -eq 40
+          python tools/qualification_control.py preflight \
+            --pr-number "$PR_NUMBER" \
+            --expected-head-sha "$EXPECTED_HEAD_SHA" \
+            --workflow-sha "$C" \
+            --contract-sha "$P" \
+            --app-id "$QUALIFICATION_APP_ID" > preflight.json
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          with open("preflight.json", encoding="utf-8") as stream:
+              value = json.load(stream)
+          print(f"head_sha={value['headSha']}")
+          print(f"base_sha={value['baseSha']}")
+          print(f"workflow_sha={value['workflowSha']}")
+          print(f"contract_sha={value['contractSourceSha']}")
+          print(f"check_id={value['checkId']}")
+          PY
+
+  H1:
+    name: H1
+    needs: preflight
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.head_sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.424"
+      - name: Run H1 core
+        run: node tests/run.mjs release core
+
+  H2:
+    name: H2
+    needs: preflight
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.head_sha }}
+          fetch-depth: 0
+      - uses: actions/checkout@v4
+        with:
+          repository: FlappiBakuse/NexusPipeline-Plugins
+          ref: ${{ needs.preflight.outputs.contract_sha }}
+          path: NexusPipeline-Plugins
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.424"
+      - name: Run H2 frontend contract
+        env:
+          NEXUS_OFFICIAL_PLUGINS_ROOT: ${{ github.workspace }}\NexusPipeline-Plugins
+        run: node tests/run.mjs release frontend-contract
+
+  H3:
+    name: H3
+    needs: preflight
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.head_sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.424"
+      - name: Run H3 UI and runtime
+        run: node tests/run.mjs release ui-runtime
+
+  H4:
+    name: H4
+    needs: preflight
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.head_sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.424"
+      - name: Run H4 execution and emulator
+        run: node tests/run.mjs release execution-emulator
+
+  H5:
+    name: H5
+    needs: preflight
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.preflight.outputs.head_sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.424"
+      - name: Run H5 update acceptance and both realtime segments
+        run: node tests/run.mjs release update-acceptance
+
+  qualification-result:
+    name: qualification-result
+    if: ${{ always() && needs.preflight.result == 'success' }}
+    needs: [preflight, H1, H2, H3, H4, H5]
+    runs-on: ubuntu-latest
+    environment: qualification-control
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Finish external App check
+        env:
+          QUALIFICATION_TOKEN: ${{ secrets.QUALIFICATION_APP_TOKEN }}
+        run: >-
+          python tools/qualification_control.py finish
+          --pr-number "${{ inputs.pr_number }}"
+          --head-sha "${{ needs.preflight.outputs.head_sha }}"
+          --base-sha "${{ needs.preflight.outputs.base_sha }}"
+          --workflow-sha "${{ needs.preflight.outputs.workflow_sha }}"
+          --run-id "${{ github.run_id }}"
+          --check-id "${{ needs.preflight.outputs.check_id }}"
+          --app-id "${{ vars.QUALIFICATION_APP_ID }}"
+          --sdk-source-sha "${{ needs.preflight.outputs.contract_sha }}"
+          --contract-source-sha "${{ needs.preflight.outputs.contract_sha }}"

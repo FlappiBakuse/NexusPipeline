@@ -15,11 +15,11 @@ import {
   SYSTEM_TEST_GROUPS,
   TEST_DOMAIN_CONSUMERS,
   expectedTestSelectors,
-  globToRegExp,
   logicalGroupId,
   plannedExclusions,
   testSelectionIdentity,
 } from "./ci-domains.mjs";
+import { globToRegExp } from "./path-glob.mjs";
 import { expectedTestFiles } from "./test-selection.mjs";
 import { validateExecutionPlan } from "./ci-summary.mjs";
 
@@ -175,7 +175,7 @@ function selectedLogicalGroups({ result, testGroups, all }) {
   return groups;
 }
 
-export { globToRegExp };
+export { globToRegExp } from "./path-glob.mjs";
 
 const DOMAIN_MATCHERS = CI_DOMAINS.map(domain => ({
   key: domain.key,
