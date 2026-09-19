@@ -313,6 +313,24 @@ internal sealed class RuntimeQueueScheduleSnapshotReader : IQueueScheduleSnapsho
     public IReadOnlyList<DispatchQueue> SnapshotForScheduling() => _queues.Snapshot();
 }
 
+/// <summary>队列模块只读取用户参与计数，不直接依赖 Users 模块。</summary>
+internal sealed class RuntimeQueueUserParticipationReader : IQueueUserParticipationReader
+{
+    private readonly AutomationDefinitionState _state;
+
+    public RuntimeQueueUserParticipationReader(AutomationDefinitionState state)
+    {
+        _state = state;
+    }
+
+    public int CountParticipatingBindings(string scriptId)
+    {
+        return _state.SnapshotUsers().Sum(user => user.Bindings.Count(binding =>
+            string.Equals(binding.ScriptInstanceId, scriptId, StringComparison.Ordinal)
+            && UserBindingOverrideResolver.Resolve(user, binding).Participates));
+    }
+}
+
 /// <summary>Host adapter for the two scheduler invalidation ports.</summary>
 internal sealed class RuntimePlansChanged : IScriptPlansChanged, IQueuePlansChanged, IUserPlansChanged
 {

@@ -35,11 +35,15 @@ public static class DebtBaseline
         return new DebtComparison(added, removed, retained);
     }
 
-    private static string Key(ArchitectureViolation violation) => string.Join('|',
+    public static string IdentityKey(ArchitectureViolation violation) => string.Join('|',
+        violation.Mode,
+        violation.ProjectKind,
         violation.RuleId,
         violation.StableFileId,
         violation.OriginalSymbolId,
         violation.TargetSymbolId,
         violation.NormalizedSyntaxHash,
         violation.OccurrenceOrdinal);
+
+    private static string Key(ArchitectureViolation violation) => IdentityKey(violation);
 }

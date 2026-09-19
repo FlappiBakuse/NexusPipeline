@@ -6,8 +6,6 @@ import {
   api,
   createUserBinding,
   deleteScript,
-  isAdminMode,
-  isAdministrator,
   makeFixture,
   projectRoot,
   prepareRuntime,
@@ -43,10 +41,7 @@ const timeScale = process.env.NEXUS_TIME_SCALE || "10";
 
 before(async () => {
   if (!enabled) return;
-  if (isAdminMode) {
-    assert.ok(isAdministrator(), "管理员 System Smoke 必须在 Administrator / High Integrity 终端运行");
-  }
-  prepareRuntime();
+  await prepareRuntime();
   startRuntime([], { NEXUS_TIME_SCALE: timeScale });
   await waitForService();
 });

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from qualification_control import QualificationError, collect_gate_results, read_pull_request, resolve_candidate
+from tools.qualification_control import QualificationError, collect_gate_results, read_pull_request, resolve_candidate
 
 
 H = "a" * 40
@@ -47,15 +47,15 @@ class QualificationControlTests(unittest.TestCase):
 
     def test_collect_gate_results_rejects_skipped_gate(self) -> None:
         jobs = [
-            {"name": "H1", "status": "completed", "conclusion": "success", "run_attempt": 1},
-            {"name": "H2", "status": "completed", "conclusion": "skipped", "run_attempt": 1},
-            {"name": "H3", "status": "completed", "conclusion": "success", "run_attempt": 1},
-            {"name": "H4", "status": "completed", "conclusion": "success", "run_attempt": 1},
-            {"name": "H5", "status": "completed", "conclusion": "success", "run_attempt": 1},
+            {"name": "H1", "run_id": 12, "status": "completed", "conclusion": "success", "run_attempt": 2, "steps": [{"name": "Execute gate", "status": "completed", "conclusion": "success"}]},
+            {"name": "H2", "run_id": 12, "status": "completed", "conclusion": "skipped", "run_attempt": 2, "steps": [{"name": "Execute gate", "status": "completed", "conclusion": "success"}]},
+            {"name": "H3", "run_id": 12, "status": "completed", "conclusion": "success", "run_attempt": 2, "steps": [{"name": "Execute gate", "status": "completed", "conclusion": "success"}]},
+            {"name": "H4", "run_id": 12, "status": "completed", "conclusion": "success", "run_attempt": 2, "steps": [{"name": "Execute gate", "status": "completed", "conclusion": "success"}]},
+            {"name": "H5", "run_id": 12, "status": "completed", "conclusion": "success", "run_attempt": 2, "steps": [{"name": "Execute gate", "status": "completed", "conclusion": "success"}]},
         ]
-        api = FakeApi({("GET", "/repos/FlappiBakuse/NexusPipeline/actions/runs/12/attempts/1/jobs?per_page=100&page=1"): {"jobs": jobs}})
+        api = FakeApi({("GET", "/repos/FlappiBakuse/NexusPipeline/actions/runs/12/attempts/2/jobs?per_page=100&page=1"): {"jobs": jobs}})
         with self.assertRaisesRegex(QualificationError, "H2"):
-            collect_gate_results("FlappiBakuse/NexusPipeline", 12, "secret", request_fn=api)
+            collect_gate_results("FlappiBakuse/NexusPipeline", 12, "secret", run_attempt=2, request_fn=api)
 
 
 if __name__ == "__main__":

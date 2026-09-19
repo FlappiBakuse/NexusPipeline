@@ -15,31 +15,36 @@ namespace NexusPipeline.Host.Initialization;
 /// </summary>
 internal static class HostedRuntimeInitializer
 {
-    public static bool Initialize(HostCompositionRoot ctx)
+    public static bool Initialize(HostRuntime runtime)
     {
         try
         {
-            ctx.ReloadSettings(ConfigLoadMode.Repair);
-            ctx.ReloadData();
+            runtime.ReloadSettings(ConfigLoadMode.Repair);
+            runtime.ReloadData();
             PluginNameMigration.Apply(
-                ctx.Settings,
-                ctx.EntityState.SnapshotScripts(),
-                ctx.ReplaceSettings,
-                scripts => ctx.EntityState.Mutate(state =>
+                runtime.Settings,
+                runtime.EntityState.SnapshotScripts(),
+                runtime.ReplaceSettings,
+                scripts => runtime.EntityState.Mutate(state =>
                 {
                     state.Scripts.Clear();
                     state.Scripts.AddRange(scripts.Select(script => script.Clone()));
                 }));
-            RuntimeDataReconciler.Reconcile(ctx);
+            RuntimeDataReconciler.Reconcile(runtime);
 
             // 崩溃恢复仅常驻服务执行（manage/web/CLI 由运行时自愈 RecoverIfNeeded 兜底）。
             ConfigSwapSession.ConfigureRecovery(
-                ctx.EntityState.FindScript,
-                ctx.EntityState.SnapshotUsers,
-                ctx.Resolve<UserCommands>().TryCommitPendingConfigInput);
+                runtime.EntityState.FindScript,
+                runtime.EntityState.SnapshotUsers,
+                mark => mark.PendingConfigInput is not null
+                    && runtime.UserCommands.CommitPendingConfigInput(
+                        mark.UserId,
+                        mark.ScriptId,
+                        mark.PendingConfigInput.Name,
+                        mark.PendingConfigInput.Value).Succeeded);
             ConfigWorkDirMaintenance.SweepRuntimeStaging();
-            ConfigRecoveryService.RecoverInterrupted(ctx.EntityState.SnapshotUsers());
-            WindowsScheduledTaskRegistration.Sync(ctx.Settings.AutoStart);
+            ConfigRecoveryService.RecoverInterrupted(runtime.EntityState.SnapshotUsers());
+            WindowsScheduledTaskRegistration.Sync(runtime.Settings.AutoStart);
             return true;
         }
         catch (Exception ex)

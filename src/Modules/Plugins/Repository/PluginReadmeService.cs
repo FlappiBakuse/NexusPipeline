@@ -111,10 +111,9 @@ internal sealed class PluginReadmeService
         try
         {
             using HttpClient client = _createClient(uri);
-            using HttpResponseMessage response = await new RemoteResourcePolicy("").GetAsync(
+            using HttpResponseMessage response = await new RemoteResourcePolicy(PluginRemoteResourceRules.ForReadme(uri)).GetAsync(
                 client,
                 uri,
-                RemoteResourceKind.ReleaseAssetResource,
                 "NexusPipeline-plugin-readme/" + item.Name + "/" + item.Version,
                 cancellationToken,
                 request => AddConditionalHeaders(request, cachedEntry?.ETag, cachedEntry?.LastModified)).ConfigureAwait(false);

@@ -27,7 +27,7 @@
 - 运行、调度和配置：`src/Modules/Execution`、`src/Modules/Scheduling`、`src/Modules/Configuration`、`src/Platform/Storage`。
 - 控制面与插件：`src/ControlPlane`、`src/Modules/Plugins`、`src/NexusPipeline.Plugin.Abstractions`。
 - 前端与公开元件：`frontend/src/app`、`frontend/src/platform`、`frontend/src/plugin-bridge`、`frontend/src/ui`。
-- 测试入口、影响域和文档索引：`tests/run.mjs`、`tools/ci-domains.mjs`、`tools/docs-index.mjs`。
+- 测试入口、测试 registry、反馈 scope 和文档索引：`tests/run.mjs`、`tests/registry.mjs`、`tools/ci-scope.mjs`、`tools/docs-index.mjs`。
 
 完整命令与测试层级见[测试索引](testing/README.md)。
 

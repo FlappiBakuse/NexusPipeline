@@ -4,6 +4,7 @@ using NexusPipeline.ControlPlane.Cli.Commands;
 using NexusPipeline.ControlPlane.Cli;
 using NexusPipeline.Host.Initialization;
 using NexusPipeline.Host.Lifecycle;
+using NexusPipeline.Host.Composition;
 using NexusPipeline.Modules.Updates;
 using NexusPipeline.Platform.Windows;
 using NexusPipeline.Shared.Logging;
@@ -90,44 +91,54 @@ internal static class ApplicationHost
             return initializationResult;
         }
 
-        if (args.Length == 0)
+        CliTransport.ConfigureStartupPort(() => RuntimeInitializer.InitialSettings.WebPort);
+        HostRuntime runtime = HostCompositionRoot.Create(RuntimeInitializer.InitialSettings);
+        try
         {
-            StartupPipeline.RunService();
-            return 0;
-        }
+            if (args.Length == 0)
+            {
+                StartupPipeline.RunService(runtime);
+                return 0;
+            }
 
-        switch (args[0].ToLowerInvariant())
+            switch (args[0].ToLowerInvariant())
+            {
+                case "service":
+                    StartupPipeline.RunService(runtime);
+                    return 0;
+                case "manage":
+                    MainMenu.Show();
+                    return 0;
+                case "status":
+                case "help":
+                case "-h":
+                case "--help":
+                    return CliCommandRouter.Run(args);
+                case "web":
+                    return StartupPipeline.RunWebOnly(runtime, args.Skip(1).ToArray());
+                case "restart":
+                    return StartupPipeline.RunRestart(
+                        runtime,
+                        ReadRestartHandoff(args),
+                        ReadRestartWebOnly(args),
+                        ReadRestartKeepWebOnlyAlive(args));
+                case "apply-update":
+                    return RunUpdateApplyCli(args.Skip(1).ToArray());
+                case "recover-update":
+                    return UpdateApply.RunRecoveryWorker(ReadRestartWebOnly(args), StartupPipeline.SingleInstanceMutexName);
+                case "register":
+                    WindowsScheduledTaskRegistration.Register();
+                    return 0;
+                case "unregister":
+                    WindowsScheduledTaskRegistration.Unregister();
+                    return 0;
+                default:
+                    return CliCommandRouter.Run(args);
+            }
+        }
+        finally
         {
-            case "service":
-                StartupPipeline.RunService();
-                return 0;
-            case "manage":
-                MainMenu.Show();
-                return 0;
-            case "status":
-            case "help":
-            case "-h":
-            case "--help":
-                return CliCommandRouter.Run(args);
-            case "web":
-                return StartupPipeline.RunWebOnly(args.Skip(1).ToArray());
-            case "restart":
-                return StartupPipeline.RunRestart(
-                    ReadRestartHandoff(args),
-                    ReadRestartWebOnly(args),
-                    ReadRestartKeepWebOnlyAlive(args));
-            case "apply-update":
-                return RunUpdateApplyCli(args.Skip(1).ToArray());
-            case "recover-update":
-                return UpdateApply.RunRecoveryWorker(ReadRestartWebOnly(args), StartupPipeline.SingleInstanceMutexName);
-            case "register":
-                WindowsScheduledTaskRegistration.Register();
-                return 0;
-            case "unregister":
-                WindowsScheduledTaskRegistration.Unregister();
-                return 0;
-            default:
-                return CliCommandRouter.Run(args);
+            runtime.DisposeAsync().AsTask().GetAwaiter().GetResult();
         }
     }
 

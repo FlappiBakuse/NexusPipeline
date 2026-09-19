@@ -2,9 +2,8 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using NexusPipeline.Modules.Queues;
+using NexusPipeline.Modules.Queues.Contracts;
 using NexusPipeline.Modules.Scripts;
-using NexusPipeline.Modules.Users.Bindings;
-using NexusPipeline.Modules.Users;
 namespace NexusPipeline.Modules.Queues.Validation;
 
 
@@ -39,7 +38,7 @@ internal static class QueueCompositionPolicy
     /// <summary>队列任务的启用绑定总数：各任务引用脚本的启用绑定数之和，每个任务至少计 1。</summary>
     public static int QueueTotalUsers(
         IReadOnlyList<ScriptInstance> scripts,
-        IReadOnlyList<NexusUser> users,
+        IQueueUserParticipationReader users,
         DispatchQueue queue)
     {
         return queue.Tasks.Sum(task =>
@@ -49,9 +48,7 @@ internal static class QueueCompositionPolicy
             {
                 return 1;
             }
-            int enabled = users.Sum(user => user.Bindings.Count(binding =>
-                UserBindingOverrideResolver.Resolve(user, binding).Participates
-                && string.Equals(binding.ScriptInstanceId, script.Id, StringComparison.Ordinal)));
+            int enabled = users.CountParticipatingBindings(script.Id);
             return enabled < 1 ? 1 : enabled;
         });
     }

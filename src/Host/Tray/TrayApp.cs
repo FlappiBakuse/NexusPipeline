@@ -1,8 +1,8 @@
 using System.Diagnostics;
 using NexusPipeline.ControlPlane.Cli;
 using NexusPipeline.ControlPlane.Http;
-using NexusPipeline.Host.Composition;
-using NexusPipeline.Host.Lifecycle;
+using NexusPipeline.Modules.Settings;
+using NexusPipeline.Modules.Settings.Persistence;
 using NexusPipeline.Shared.Localization;
 using NexusPipeline.Shared.Logging;
 
@@ -11,9 +11,11 @@ namespace NexusPipeline.Host.Tray;
 internal class TrayApp : ApplicationContext
 {
     private readonly NotifyIcon _icon;
+    private readonly HostRuntime _runtime;
 
-    public TrayApp()
+    public TrayApp(HostRuntime runtime)
     {
+        _runtime = runtime;
         _icon = new NotifyIcon
         {
             // 托盘使用 exe 内置品牌图标（侧边栏 N 徽章），提取失败回退系统默认图标。
@@ -22,7 +24,7 @@ internal class TrayApp : ApplicationContext
             Visible = true,
             ContextMenuStrip = BuildMenu(),
         };
-        _icon.DoubleClick += (_, _) => OpenWeb();
+        _icon.DoubleClick += (_, _) => OpenManagedWeb();
     }
 
     private static Icon ExtractAppIcon()
@@ -47,8 +49,8 @@ internal class TrayApp : ApplicationContext
         var openWebItem = new ToolStripMenuItem(
             HostLocalization.TranslateNamed("tray.open_web", "打开管理页面", locale: LocaleCatalog.HostLocale),
             null,
-            (_, _) => OpenWeb());
-        if (HostCompositionRoot.Instance.Settings.LightweightMode)
+            (_, _) => OpenManagedWeb());
+        if (_runtime.Settings.LightweightMode)
         {
             openWebItem.Enabled = false;
             openWebItem.ToolTipText = HostLocalization.TranslateNamed(
@@ -71,7 +73,7 @@ internal class TrayApp : ApplicationContext
             null,
             (_, _) =>
         {
-            if (Bootstrap.TryRequestDirectExit())
+            if (_runtime.Bootstrap.TryRequestDirectExit())
             {
                 _icon.Visible = false;
             }
@@ -79,10 +81,10 @@ internal class TrayApp : ApplicationContext
         return menu;
     }
 
-    public static void OpenWeb()
+    private void OpenManagedWeb()
     {
         // （P11）：轻量模式防御（双击图标同样走此入口）
-        if (HostCompositionRoot.Instance.Settings.LightweightMode)
+        if (_runtime.Settings.LightweightMode)
         {
             Logger.Warn(HostLocalization.TranslateNamed(
                 "tray.lightweight_open_failed",
@@ -92,8 +94,17 @@ internal class TrayApp : ApplicationContext
         }
         // 用实际监听端口（设置页改端口未重启 / 启动时端口冲突自动 +1 时与 Settings.WebPort 不一致）。
         int port = WebServer.Current?.Port
-            ?? CliTransport.FindServicePort(HostCompositionRoot.Instance.Settings.WebPort)
-            ?? HostCompositionRoot.Instance.Settings.WebPort;
+            ?? CliTransport.FindServicePort(_runtime.Settings.WebPort)
+            ?? _runtime.Settings.WebPort;
+        OpenWeb(port);
+    }
+
+    public static void OpenWeb()
+    {
+        AppSettings settings = AppSettingsStore.Load(ConfigLoadMode.ReadOnly);
+        int port = WebServer.Current?.Port
+            ?? CliTransport.FindServicePort(settings.WebPort)
+            ?? settings.WebPort;
         OpenWeb(port);
     }
 

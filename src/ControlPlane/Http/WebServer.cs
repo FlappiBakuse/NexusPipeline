@@ -10,6 +10,7 @@ using NexusPipeline.Modules.Scripts.UseCases;
 using NexusPipeline.Modules.Queues.UseCases;
 using NexusPipeline.Modules.Users.UseCases;
 using NexusPipeline.Modules.Configuration.Editing;
+using NexusPipeline.Modules.Configuration.Validation;
 using NexusPipeline.Modules.Diagnostics;
 using NexusPipeline.Modules.Execution;
 using NexusPipeline.Modules.Execution.Realtime;
@@ -95,6 +96,7 @@ internal sealed class WebServer : IDisposable
     private readonly IReadOnlyDictionary<string, ApiRouteCatalog.BoundRoute> _routes;
     private readonly ISettingsProvider _settings;
     private readonly PluginManager _plugins;
+    private readonly IAccessTokenPort _accessToken;
 
     internal WebServer(IHttpRouteBindings routeBindings)
     {
@@ -102,6 +104,7 @@ internal sealed class WebServer : IDisposable
         _routes = routeBindings.Routes;
         _settings = routeBindings.Settings;
         _plugins = routeBindings.Plugins;
+        _accessToken = routeBindings.AccessToken;
     }
 
     internal static IReadOnlyList<string> RegisteredApiRouteNames =>
@@ -163,6 +166,8 @@ internal sealed class WebServer : IDisposable
                 var type when type == typeof(PluginUserGlobalSettingsService) => routeBindings.PluginUserGlobalSettings,
                 var type when type == typeof(Scheduler) => routeBindings.Scheduler,
                 var type when type == typeof(ISettingsProvider) => routeBindings.Settings,
+                var type when type == typeof(IHostRestartPort) => routeBindings.Restart,
+                var type when type == typeof(IAccessTokenPort) => routeBindings.AccessToken,
                 var type when type == typeof(UpdateService) => routeBindings.Updates,
                 var type when type == typeof(UpdateAutomationService) => routeBindings.UpdateAutomation,
                 var type when type == typeof(INativePathPicker) => routeBindings.NativePathPicker,
@@ -645,7 +650,7 @@ internal sealed class WebServer : IDisposable
             return false;
         }
         string? token = null;
-        if (SecretStore.TryDecrypt(settings.AccessToken, out string? plain) && !string.IsNullOrWhiteSpace(plain))
+        if (_accessToken.TryDecrypt(settings.AccessToken, out string? plain) && !string.IsNullOrWhiteSpace(plain))
         {
             token = plain;
         }
@@ -701,12 +706,11 @@ internal sealed class WebServer : IDisposable
                 await HttpHelper.ErrorAsync(context, "request_too_large", 413, new { maxMb = maxBodyBytes / (1024 * 1024) }).ConfigureAwait(false);
                 return;
             }
-            using var reader = new StreamReader(context.Request.InputStream, context.Request.ContentEncoding ?? Encoding.UTF8);
-            var buffer = new char[81920];
-            var text = new StringBuilder();
+            byte[] buffer = new byte[81920];
+            var bytes = new List<byte>();
             int total = 0;
             int read;
-            while ((read = await reader.ReadAsync(buffer).ConfigureAwait(false)) > 0)
+            while ((read = await context.Request.InputStream.ReadAsync(buffer.AsMemory(), token).ConfigureAwait(false)) > 0)
             {
                 total += read;
                 if (total > maxBodyBytes)
@@ -714,9 +718,9 @@ internal sealed class WebServer : IDisposable
                     await HttpHelper.ErrorAsync(context, "request_too_large", 413, new { maxMb = maxBodyBytes / (1024 * 1024) }).ConfigureAwait(false);
                     return;
                 }
-                text.Append(buffer, 0, read);
+                bytes.AddRange(buffer.AsSpan(0, read).ToArray());
             }
-            body = text.ToString();
+            body = (context.Request.ContentEncoding ?? Encoding.UTF8).GetString(bytes.ToArray());
         }
 
         if (segments.Length == 0)

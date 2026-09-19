@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text.Json.Nodes;
+using NexusPipeline.ControlPlane.Http.Services;
 using NexusPipeline.Host.Lifecycle;
 using NexusPipeline.Modules.Settings.UseCases;
 using NexusPipeline.Modules.Settings.Contracts;
@@ -24,7 +25,8 @@ internal static class ApiSettingsHandler
         string body,
         SettingsCommands settingsCommands,
         ISettingsProvider settingsProvider,
-        OutboundHttpClientProvider outboundHttp)
+        OutboundHttpClientProvider outboundHttp,
+        IHostRestartPort restartPort)
     {
         AppSettings settings = settingsProvider.Current;
         if (method == "GET")
@@ -106,7 +108,7 @@ internal static class ApiSettingsHandler
         if (method == "POST" && seg.Length == 2 && seg[1].ToLowerInvariant() == "restart")
         {
             int newPort = settingsProvider.Current.WebPort;
-            RestartRequestResult restart = Bootstrap.RequestRestart(Audit.Web);
+            RestartRequestResult restart = restartPort.Request(Audit.Web);
             if (!restart.Accepted)
             {
                 int status = restart.Code == "operation_forbidden" ? 400 : 409;

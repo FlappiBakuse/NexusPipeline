@@ -1,14 +1,13 @@
-using NexusPipeline.ControlPlane.Http;
 using NexusPipeline.Modules.Configuration.Paths;
 using NexusPipeline.Modules.Configuration.Scripting;
+using NexusPipeline.Modules.Configuration.Snapshots;
+using NexusPipeline.Modules.Scripts;
 using NexusPipeline.Modules.Scripts.Contracts;
 using NexusPipeline.Modules.Scripts.Resolution;
-using NexusPipeline.Modules.Scripts;
 using NexusPipeline.Modules.Users.Contracts;
 using NexusPipeline.Shared.Logging;
-using NexusPipeline.Modules.Configuration.Snapshots;
 
-namespace NexusPipeline.Modules.Scripts.Validation;
+namespace NexusPipeline.Modules.Configuration.Validation;
 
 /// <summary>
 /// 保存脚本实例后的专项配置校验（script-save 语境）：对每个绑定用户以其 store 为根运行插件的

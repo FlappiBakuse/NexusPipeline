@@ -7,8 +7,6 @@ import path from "node:path";
 import {
   api,
   executionMode,
-  isAdminMode,
-  isAdministrator,
   prepareRuntime,
   projectRoot,
   runtimeDir,
@@ -149,9 +147,8 @@ function findPlugin(plugins) {
 
 before(async () => {
   if (!enabled) return;
-  if (isAdminMode) assert.ok(isAdministrator(), "管理员 plugin Smoke 必须在 Administrator / High Integrity 终端运行");
   await startPluginRepositoryStub();
-  prepareRuntime();
+  await prepareRuntime();
   fs.mkdirSync(path.join(runtimeDir, "plugins"), { recursive: true });
   fs.writeFileSync(path.join(runtimeDir, "plugins", "acceptance-witness.txt"), "keep-through-plugin-lifecycle", "utf8");
   startRuntime();

@@ -125,8 +125,8 @@ test("backend user-output adapters share the localized operation-error contract"
 
   const bootstrap = read("src/Host/Lifecycle/Bootstrap.cs");
   assert.match(bootstrap, /HostLocalization\.TranslateNamed/iu);
-  const exitBoundaryStart = bootstrap.indexOf("internal static bool CanStopServices");
-  const exitBoundaryEnd = bootstrap.indexOf("internal static bool TryRequestRestart");
+  const exitBoundaryStart = bootstrap.indexOf("CanStopServices(out string reasonCode)");
+  const exitBoundaryEnd = bootstrap.indexOf("TryRequestRestart(string auditSource)");
   assert.ok(exitBoundaryStart >= 0 && exitBoundaryEnd > exitBoundaryStart, "Bootstrap exit boundary must remain auditable");
   assertNoChineseStringLiterals(bootstrap.slice(exitBoundaryStart, exitBoundaryEnd), "Bootstrap exit boundary");
   assertNoChineseOutputArguments(

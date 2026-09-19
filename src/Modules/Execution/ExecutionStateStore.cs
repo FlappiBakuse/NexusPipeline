@@ -1,3 +1,5 @@
+using NexusPipeline.Modules.Configuration.Contracts;
+
 namespace NexusPipeline.Modules.Execution;
 
 /// <summary>
@@ -682,12 +684,6 @@ internal sealed record ExecutionStateSnapshot(
     int EditSessionCount,
     int CompletionIntentCount,
     bool PendingSystemAction);
-
-internal sealed record ExecutionLeaseReference(
-    string RunId,
-    string Kind,
-    string TargetId,
-    string TargetName);
 
 /// <summary>宿主维护租约。处置租约后重新开放执行与编辑准入。</summary>
 internal sealed class HostMaintenanceLease : IDisposable

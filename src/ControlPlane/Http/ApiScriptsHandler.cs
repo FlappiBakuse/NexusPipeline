@@ -12,6 +12,7 @@ using NexusPipeline.Shared.Logging;
 using NexusPipeline.Shared.Results;
 using NexusPipeline.Shared.Serialization;
 using NexusPipeline.Modules.Configuration.Editing;
+using NexusPipeline.Modules.Configuration.Validation;
 using NexusPipeline.Platform.Storage;
 
 namespace NexusPipeline.ControlPlane.Http;

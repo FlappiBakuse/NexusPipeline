@@ -1,32 +1,20 @@
+using NexusPipeline.Modules.Plugins;
 using NexusPipeline.Modules.Scripts;
-using NexusPipeline.Modules.Settings.Persistence;
+using NexusPipeline.Modules.Scripts.Persistence;
 using NexusPipeline.Modules.Settings;
+using NexusPipeline.Modules.Settings.Persistence;
 using NexusPipeline.Platform.Storage;
 using NexusPipeline.Shared.Logging;
-using NexusPipeline.Modules.Scripts.Persistence;
 
-namespace NexusPipeline.Modules.Plugins;
+namespace NexusPipeline.Host.Initialization;
 
 /// <summary>当前插件机器名迁移表。机器名是持久化契约，迁移集中在宿主启动阶段执行。</summary>
 internal static class PluginNameMigration
 {
-    internal const string LegacyMaaStellaSora = "maastellasora";
-    internal const string MaaStellaSora = "maas";
+    internal const string LegacyMaaStellaSora = PluginNameCanonicalization.LegacyMaaStellaSora;
+    internal const string MaaStellaSora = PluginNameCanonicalization.MaaStellaSora;
 
-    internal static string Canonicalize(string? name)
-    {
-        string value = name?.Trim() ?? "";
-        return value.Equals(LegacyMaaStellaSora, StringComparison.OrdinalIgnoreCase)
-            ? MaaStellaSora
-            : value;
-    }
-
-    internal static string? LegacyNameFor(string canonicalName)
-    {
-        return canonicalName.Equals(MaaStellaSora, StringComparison.OrdinalIgnoreCase)
-            ? LegacyMaaStellaSora
-            : null;
-    }
+    internal static string Canonicalize(string? name) => PluginNameCanonicalization.Canonicalize(name);
 
     internal static void Apply(
         AppSettings settings,
@@ -44,17 +32,17 @@ internal static class PluginNameMigration
         AppSettings candidate = settings.Clone();
         Dictionary<string, PluginPreference> preferences = candidate.PluginPreferences;
         string? legacyKey = preferences.Keys.FirstOrDefault(key =>
-            key.Equals(LegacyMaaStellaSora, StringComparison.OrdinalIgnoreCase));
+            key.Equals(PluginNameCanonicalization.LegacyMaaStellaSora, StringComparison.OrdinalIgnoreCase));
         if (legacyKey is null)
         {
             return;
         }
 
         bool canonicalExists = preferences.Keys.Any(key =>
-            key.Equals(MaaStellaSora, StringComparison.OrdinalIgnoreCase));
+            key.Equals(PluginNameCanonicalization.MaaStellaSora, StringComparison.OrdinalIgnoreCase));
         if (!canonicalExists)
         {
-            preferences[MaaStellaSora] = preferences[legacyKey];
+            preferences[PluginNameCanonicalization.MaaStellaSora] = preferences[legacyKey];
         }
         else
         {
@@ -62,7 +50,7 @@ internal static class PluginNameMigration
         }
 
         foreach (string key in preferences.Keys
-                     .Where(key => key.Equals(LegacyMaaStellaSora, StringComparison.OrdinalIgnoreCase))
+                     .Where(key => key.Equals(PluginNameCanonicalization.LegacyMaaStellaSora, StringComparison.OrdinalIgnoreCase))
                      .ToArray())
         {
             preferences.Remove(key);
@@ -88,11 +76,11 @@ internal static class PluginNameMigration
         int changed = 0;
         foreach (ScriptInstance script in migrated)
         {
-            if (!string.Equals(script.PluginType, LegacyMaaStellaSora, StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(script.PluginType, PluginNameCanonicalization.LegacyMaaStellaSora, StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
-            script.PluginType = MaaStellaSora;
+            script.PluginType = PluginNameCanonicalization.MaaStellaSora;
             changed++;
         }
         if (changed == 0)
@@ -121,14 +109,14 @@ internal static class PluginNameMigration
         }
 
         MoveDirectoryIfNeeded(
-            Path.Combine(pluginsRoot, LegacyMaaStellaSora),
-            Path.Combine(pluginsRoot, MaaStellaSora));
+            Path.Combine(pluginsRoot, PluginNameCanonicalization.LegacyMaaStellaSora),
+            Path.Combine(pluginsRoot, PluginNameCanonicalization.MaaStellaSora));
         MoveFileIfNeeded(
-            Path.Combine(pluginsRoot, LegacyMaaStellaSora + ".json"),
-            Path.Combine(pluginsRoot, MaaStellaSora + ".json"));
+            Path.Combine(pluginsRoot, PluginNameCanonicalization.LegacyMaaStellaSora + ".json"),
+            Path.Combine(pluginsRoot, PluginNameCanonicalization.MaaStellaSora + ".json"));
         MoveFileIfNeeded(
-            Path.Combine(pluginsRoot, LegacyMaaStellaSora + ".secrets.json"),
-            Path.Combine(pluginsRoot, MaaStellaSora + ".secrets.json"));
+            Path.Combine(pluginsRoot, PluginNameCanonicalization.LegacyMaaStellaSora + ".secrets.json"),
+            Path.Combine(pluginsRoot, PluginNameCanonicalization.MaaStellaSora + ".secrets.json"));
     }
 
     private static void MoveDirectoryIfNeeded(string source, string destination)

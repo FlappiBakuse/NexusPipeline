@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { TEST_DOMAIN_REGISTRY } from "./ci-domains.mjs";
+import { TEST_DOMAIN_REGISTRY } from "../tests/registry.mjs";
 import { collectAnchors, findMarkdownLinks } from "./markdown.mjs";
 
 export const DOCS_INDEX_SCHEMA_VERSION = 1;

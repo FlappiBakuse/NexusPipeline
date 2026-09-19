@@ -5,6 +5,7 @@ using NexusPipeline.Modules.Scripts.UseCases;
 using NexusPipeline.Modules.Queues.UseCases;
 using NexusPipeline.Modules.Users.UseCases;
 using NexusPipeline.Modules.Configuration.Editing;
+using NexusPipeline.Modules.Configuration.Validation;
 using NexusPipeline.Modules.Scripts.Queries;
 using NexusPipeline.Modules.Scripts.Validation;
 using NexusPipeline.Modules.Scripts;
@@ -52,6 +53,8 @@ internal sealed class HttpRouteBindings : IHttpRouteBindings
         ISettingsProvider settings,
         UpdateService updates,
         UpdateAutomationService updateAutomation,
+        IHostRestartPort restart,
+        IAccessTokenPort accessToken,
         INativePathPicker nativePathPicker,
         UserAssetService userAssets,
         OutboundHttpClientProvider outboundHttp,
@@ -81,6 +84,8 @@ internal sealed class HttpRouteBindings : IHttpRouteBindings
         Settings = settings;
         Updates = updates;
         UpdateAutomation = updateAutomation;
+        Restart = restart;
+        AccessToken = accessToken;
         NativePathPicker = nativePathPicker;
         UserAssets = userAssets;
         OutboundHttp = outboundHttp;
@@ -133,6 +138,10 @@ internal sealed class HttpRouteBindings : IHttpRouteBindings
     public UpdateService Updates { get; }
 
     public UpdateAutomationService UpdateAutomation { get; }
+
+    public IHostRestartPort Restart { get; }
+
+    public IAccessTokenPort AccessToken { get; }
 
     public INativePathPicker NativePathPicker { get; }
 

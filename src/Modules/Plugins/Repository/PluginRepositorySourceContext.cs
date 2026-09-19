@@ -16,7 +16,7 @@ internal sealed record PluginRepositorySourceContext(string Channel, string Cata
             "stable" => Stable,
             "develop" => new PluginRepositorySourceContext(
                 "develop",
-                "https://raw.githubusercontent.com/FlappiBakuse/NexusPipeline-Plugins/develop/catalog.json"),
+                "https://github.com/FlappiBakuse/NexusPipeline-Plugins/releases/download/plugins-develop/catalog.json"),
             _ => throw new ArgumentOutOfRangeException(nameof(channel), channel, "插件仓库通道无效"),
         };
     }

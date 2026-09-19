@@ -70,9 +70,19 @@ internal static class PluginInstallRecovery
     {
         lock (Sync)
         {
-            return LoadOwnership(path ?? AppPaths.PluginOwnershipPath).Plugins
-                .GroupBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
-                .ToDictionary(group => group.Key, group => group.Last(), StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                return LoadOwnership(path ?? AppPaths.PluginOwnershipPath).Plugins
+                    .GroupBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(group => group.Key, group => group.Last(), StringComparer.OrdinalIgnoreCase);
+            }
+            catch (Exception ex) when (ex is InvalidDataException or JsonException or IOException)
+            {
+                // 归属记录是安全边界而不是启动必需配置。复制旧客户端/损坏文件时，
+                // 只放弃商店接管能力并保留原文件，不能让状态页因异常而永久停在连接中。
+                Logger.Warn($"[插件] ownership.json 无法按当前格式读取，已按未托管处理：{ex.Message}");
+                return new Dictionary<string, PluginOwnership>(StringComparer.OrdinalIgnoreCase);
+            }
         }
     }
 

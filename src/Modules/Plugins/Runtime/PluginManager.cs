@@ -368,12 +368,12 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
 
     private string ResolveLoadedPluginName(string name)
     {
-        string canonical = PluginNameMigration.Canonicalize(name);
+            string canonical = PluginNameCanonicalization.Canonicalize(name);
         if (ResolveLoadedPluginNameHasActual(canonical))
         {
             return canonical;
         }
-        string? legacy = PluginNameMigration.LegacyNameFor(canonical);
+        string? legacy = PluginNameCanonicalization.LegacyNameFor(canonical);
         return legacy is not null && ResolveLoadedPluginNameHasActual(legacy)
             ? legacy
             : canonical;

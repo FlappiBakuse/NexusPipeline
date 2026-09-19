@@ -1,6 +1,5 @@
 using System.Globalization;
 using System.Text.Json;
-using NexusPipeline.Host.Composition;
 using NexusPipeline.Modules.Settings.Persistence;
 using NexusPipeline.Modules.Settings.Validation;
 using NexusPipeline.Modules.Settings;
@@ -17,6 +16,8 @@ namespace NexusPipeline.Host.Initialization;
 /// </summary>
 internal static class RuntimeInitializer
 {
+    public static AppSettings InitialSettings { get; private set; } = new();
+
     public static int Initialize()
     {
         InitializeEarlyHostLocale();
@@ -38,8 +39,7 @@ internal static class RuntimeInitializer
         UpdateApply.CleanupWorkerImages();
         // 先加载约束，再加载设置（Normalize 使用固定的历史保留天数上限）。
         Limits.Load();
-        HostCompositionRoot ctx = HostCompositionRoot.Instance;
-        ctx.ReloadSettings(ConfigLoadMode.ReadOnly);
+        InitialSettings = AppSettingsStore.Load(ConfigLoadMode.ReadOnly);
         // 只读设置加载失败时会回退默认语言；重新读取安全的启动语言，保证后续 fatal 输出仍遵循系统语言。
         InitializeEarlyHostLocale();
         if (Limits.Fatals.Count > 0)

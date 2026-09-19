@@ -1,6 +1,5 @@
 using NexusPipeline.Modules.Queues;
 using NexusPipeline.Modules.Queues.Contracts;
-using NexusPipeline.Modules.Scheduling;
 
 namespace NexusPipeline.Modules.Queues.Queries;
 
@@ -12,25 +11,25 @@ internal sealed record QueueReadModel(
 internal sealed class QueueQueries
 {
     private readonly IQueueRepository _queues;
-    private readonly Scheduler _scheduler;
+    private readonly IQueueScheduleProjection _schedule;
 
-    public QueueQueries(IQueueRepository queues, Scheduler scheduler)
+    public QueueQueries(IQueueRepository queues, IQueueScheduleProjection schedule)
     {
         _queues = queues;
-        _scheduler = scheduler;
+        _schedule = schedule;
     }
 
     public IReadOnlyList<QueueReadModel> List()
     {
         return _queues.Snapshot()
             .OrderBy(queue => queue.Index)
-            .Select(queue => new QueueReadModel(queue, _scheduler.NextTriggerFor(queue)))
+            .Select(queue => new QueueReadModel(queue, _schedule.NextTriggerFor(queue)))
             .ToList();
     }
 
     public QueueReadModel? Find(string id)
     {
         DispatchQueue? queue = _queues.FindById(id);
-        return queue is null ? null : new QueueReadModel(queue, _scheduler.NextTriggerFor(queue));
+        return queue is null ? null : new QueueReadModel(queue, _schedule.NextTriggerFor(queue));
     }
 }

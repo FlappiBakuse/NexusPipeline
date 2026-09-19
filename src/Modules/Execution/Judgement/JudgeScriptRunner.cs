@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using NexusPipeline.ControlPlane.Http;
+using NexusPipeline.Modules.Configuration.Scripting;
 using NexusPipeline.Modules.History.Contracts;
 using NexusPipeline.Modules.Scripts;
 using NexusPipeline.Modules.Users.Contracts;

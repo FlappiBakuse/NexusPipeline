@@ -339,7 +339,7 @@ internal static class PluginConfigPath
 {
     public static string For(string pluginName)
     {
-        string safe = PluginNameMigration.Canonicalize(pluginName);
+        string safe = PluginNameCanonicalization.Canonicalize(pluginName);
         foreach (char c in Path.GetInvalidFileNameChars())
         {
             safe = safe.Replace(c, '_');

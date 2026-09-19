@@ -1,11 +1,14 @@
 using NexusPipeline.Modules.Plugins.Runtime;
 using NexusPipeline.Shared.Common;
+using System.Text.RegularExpressions;
 
 namespace NexusPipeline.Modules.Plugins.Repository;
 
 /// <summary>插件商店展示、自动更新和实际暂存共用的版本与来源判定。</summary>
 internal static class PluginUpdatePolicy
 {
+    private static readonly Regex Sha256Pattern = new("^[0-9a-fA-F]{64}$", RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
     internal static PluginUpdateDecision Evaluate(
         PluginSummary? installed,
         PluginOwnership? ownership,
@@ -31,6 +34,17 @@ internal static class PluginUpdatePolicy
                 "插件候选来源与当前仓库通道不一致");
         }
 
+        PluginCompatibilityResult compatibility = PluginRepositoryCatalog.EvaluateCompatibility(
+            entry,
+            hostVersion ?? HostVersionInfo.Current.CurrentVersion);
+        if (!compatibility.Compatible)
+        {
+            return Blocked(
+                PluginUpdateDecisionKind.Incompatible,
+                compatibility.Code ?? "incompatible",
+                compatibility.Reason);
+        }
+
         if (installed is null)
         {
             return new PluginUpdateDecision(
@@ -46,6 +60,14 @@ internal static class PluginUpdatePolicy
                 PluginUpdateDecisionKind.Unmanaged,
                 "unmanaged",
                 "插件安装归属未验证，不能由商店接管");
+        }
+
+        if (!Sha256Pattern.IsMatch(ownership.Sha256))
+        {
+            return Blocked(
+                PluginUpdateDecisionKind.Unmanaged,
+                "ownership_invalid",
+                "插件安装归属缺少有效 SHA256，不能作为已验证 preview 接管");
         }
 
         if (!PluginStoreProjector.IsCatalogArtifactMatch(installed.ArtifactName, entry.ArtifactName)
@@ -64,17 +86,6 @@ internal static class PluginUpdatePolicy
                 PluginUpdateDecisionKind.OwnershipMismatch,
                 "ownership_mismatch",
                 "插件实际 manifest 版本与已验证安装归属不一致");
-        }
-
-        PluginCompatibilityResult compatibility = PluginRepositoryCatalog.EvaluateCompatibility(
-            entry,
-            hostVersion ?? HostVersionInfo.Current.CurrentVersion);
-        if (!compatibility.Compatible)
-        {
-            return Blocked(
-                PluginUpdateDecisionKind.Incompatible,
-                compatibility.Code ?? "incompatible",
-                compatibility.Reason);
         }
 
         int versionComparison = PluginRepositoryCatalog.CompareVersions(entry.Version, installed.Version);

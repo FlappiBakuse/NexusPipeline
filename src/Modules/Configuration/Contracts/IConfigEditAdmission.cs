@@ -1,5 +1,3 @@
-using NexusPipeline.Modules.Execution;
-
 namespace NexusPipeline.Modules.Configuration.Contracts;
 
 /// <summary>配置编辑使用的执行租约与会话门禁端口。</summary>

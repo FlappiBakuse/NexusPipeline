@@ -29,12 +29,20 @@ public sealed class FileOwnerResolver
         var segments = relative.Split('/', StringSplitOptions.RemoveEmptyEntries);
         if (segments.Length >= 2 && string.Equals(segments[0], "src", StringComparison.OrdinalIgnoreCase))
         {
+            if (relative.EndsWith("/GlobalUsings.cs", StringComparison.OrdinalIgnoreCase)) return "Host";
             if (string.Equals(segments[1], "Host", StringComparison.OrdinalIgnoreCase)) return "Host";
             if (string.Equals(segments[1], "ControlPlane", StringComparison.OrdinalIgnoreCase)) return "ControlPlane";
             if (string.Equals(segments[1], "Platform", StringComparison.OrdinalIgnoreCase)) return "Platform";
             if (string.Equals(segments[1], "Shared", StringComparison.OrdinalIgnoreCase)) return "Shared";
             if (string.Equals(segments[1], "Modules", StringComparison.OrdinalIgnoreCase) && segments.Length >= 3) return segments[2];
             if (string.Equals(segments[1], "NexusPipeline.Plugin.Abstractions", StringComparison.OrdinalIgnoreCase)) return "PluginSdk";
+        }
+
+        if (segments.Length >= 1 && string.Equals(segments[0], "tests", StringComparison.OrdinalIgnoreCase))
+        {
+            return segments.Length >= 2 && string.Equals(segments[1], "fixtures", StringComparison.OrdinalIgnoreCase)
+                ? "TestFixtures"
+                : "Tests";
         }
 
         return "Unassigned";
@@ -44,6 +52,10 @@ public sealed class FileOwnerResolver
     {
         var absolute = Path.IsPathRooted(path) ? Path.GetFullPath(path) : Path.GetFullPath(Path.Combine(_root, path));
         var relative = Path.GetRelativePath(_root, absolute);
+        if (relative.StartsWith("..", StringComparison.Ordinal) || Path.IsPathRooted(relative))
+        {
+            throw new InvalidOperationException($"Source path is outside architecture root: {path}");
+        }
         return relative.Replace('\\', '/');
     }
 

@@ -7,9 +7,7 @@ import path from "node:path";
 import {
   api,
   deleteScript,
-  isAdminMode,
   fetchWithTimeout,
-  isAdministrator,
   makeFixture,
   prepareRuntime,
   runtimeDir,
@@ -35,10 +33,7 @@ let requestId = 0;
 
 before(async () => {
   if (!enabled) return;
-  if (isAdminMode) {
-    assert.ok(isAdministrator(), "管理员 System Smoke 必须在 Administrator / High Integrity 终端运行");
-  }
-  prepareRuntime();
+  await prepareRuntime();
   writeSettings({ mcpEnabled: false });
   startRuntime();
   await waitForService();

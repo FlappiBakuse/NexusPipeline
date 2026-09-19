@@ -110,7 +110,7 @@ internal sealed class PluginRepositoryCatalogCache
             throw new PluginRepositoryException("repository_unavailable", "插件 catalog 地址无效");
         }
 
-        var policy = new RemoteResourcePolicy(source);
+        var policy = new RemoteResourcePolicy(PluginRemoteResourceRules.ForCatalog(uri));
         using HttpClient client = outbound.CreateClient(
             uri,
             TimeSpan.FromSeconds(30),
@@ -118,7 +118,6 @@ internal sealed class PluginRepositoryCatalogCache
         using HttpResponseMessage response = await policy.GetAsync(
             client,
             uri,
-            RemoteResourceKind.ManifestResource,
             "NexusPipeline-plugin-catalog/" + _hostVersion.CurrentVersion,
             cancellationToken,
             request => AddConditionalHeaders(

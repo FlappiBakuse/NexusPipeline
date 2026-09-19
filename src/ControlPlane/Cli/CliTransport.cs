@@ -5,7 +5,6 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using NexusPipeline.ControlPlane.Contracts;
 using NexusPipeline.Host;
-using NexusPipeline.Modules.Settings.Persistence;
 using NexusPipeline.Modules.Settings;
 using NexusPipeline.Platform.Storage;
 using NexusPipeline.Shared.Localization;
@@ -18,6 +17,8 @@ namespace NexusPipeline.ControlPlane.Cli;
 /// 消除「manage 菜单进程内直调 vs CLI 走 HTTP」双执行通道割裂——菜单调度统一经常驻服务执行，Web 端可见）。</summary>
 internal static class CliTransport
 {
+    private static Func<int> _readStartupPort = static () => new AppSettings().WebPort;
+
     public static readonly TimeSpan DefaultControlTimeout = TimeSpan.FromSeconds(5);
 
     public static readonly TimeSpan NotificationTestTimeout = TimeSpan.FromMinutes(2);
@@ -26,10 +27,21 @@ internal static class CliTransport
 
     public static readonly TimeSpan PluginRepositoryTimeout = TimeSpan.FromMinutes(2);
 
+    /// <summary>
+    /// The process entry point supplies the read-only startup settings before CLI
+    /// dispatch. Keeping this as a narrow port avoids making the control-plane
+    /// transport know the Settings persistence implementation.
+    /// </summary>
+    internal static void ConfigureStartupPort(Func<int> readPort)
+    {
+        ArgumentNullException.ThrowIfNull(readPort);
+        Volatile.Write(ref _readStartupPort, readPort);
+    }
+
     /// <summary>确保常驻服务可达：探测失败时自动拉起服务进程并等待（最多 30 秒）。轻量模式同样提供仅本机的 Control API。</summary>
     public static int? EnsureService()
     {
-        int port = AppSettingsStore.Load(ConfigLoadMode.ReadOnly).WebPort;
+        int port = _readStartupPort();
         int? existing = FindServicePort(port);
         if (existing is not null)
         {

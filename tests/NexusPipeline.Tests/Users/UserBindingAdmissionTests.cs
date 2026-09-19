@@ -1,5 +1,7 @@
 using Xunit;
 using NexusPipeline.Host.Composition;
+using NexusPipeline.Host.Composition.Adapters;
+using NexusPipeline.Modules.Configuration.Exchange;
 using NexusPipeline.Modules.Execution;
 using NexusPipeline.Modules.Scripts;
 using NexusPipeline.Modules.Users.Contracts;
@@ -13,6 +15,26 @@ namespace NexusPipeline.Tests.Users;
 
 public sealed class UserBindingAdmissionTests
 {
+    [Fact]
+    public void ScriptConfigGateAdapter_DisposeReleasesAcquiredGate()
+    {
+        string scriptId = "regression-gate-adapter-" + Guid.NewGuid().ToString("N");
+        try
+        {
+            IDisposable? acquired = new ScriptConfigGateAdapter().TryAcquire(scriptId);
+            Assert.NotNull(acquired);
+            acquired!.Dispose();
+
+            using ScriptConfigGate.Lease probe = ScriptConfigGate.Get(scriptId);
+            Assert.True(probe.Wait(0));
+            probe.Release();
+        }
+        finally
+        {
+            ScriptConfigGate.Remove(scriptId);
+        }
+    }
+
     [Fact]
     public void AddBinding_RejectsWhenAnyUserOfScriptIsRunning()
     {

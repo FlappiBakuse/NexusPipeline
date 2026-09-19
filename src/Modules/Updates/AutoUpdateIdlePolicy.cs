@@ -1,6 +1,6 @@
 using NexusPipeline.Modules.Configuration.Exchange;
 using NexusPipeline.Modules.Execution;
-using NexusPipeline.Modules.Scheduling;
+using NexusPipeline.Modules.Scheduling.Contracts;
 using NexusPipeline.Shared.Logging;
 
 namespace NexusPipeline.Modules.Updates;
@@ -20,12 +20,6 @@ internal sealed record AutoUpdateIdleAttempt(
 }
 
 /// <summary>阻止闲时自动应用的稳定业务原因，供日志、Web 与 MCP 共享。</summary>
-internal sealed record AutoUpdateIdleBlocker(
-    string Code,
-    string Message,
-    string? QueueName,
-    DateTime? TriggerTime);
-
 /// <summary>
 /// 自动更新维护门禁：先在宿主准入协调域内取得维护租约，再检查调度器状态。
 /// Scheduler 的 occurrence 注册也使用同一协调域，因此二次检查与租约转交保持在同一竞态边界内。
@@ -33,9 +27,9 @@ internal sealed record AutoUpdateIdleBlocker(
 internal sealed class AutoUpdateIdlePolicy
 {
     private readonly ExecutionDispatcher _center;
-    private readonly Scheduler _scheduler;
+    private readonly ISchedulerIdleReader _scheduler;
 
-    public AutoUpdateIdlePolicy(ExecutionDispatcher center, Scheduler scheduler)
+    public AutoUpdateIdlePolicy(ExecutionDispatcher center, ISchedulerIdleReader scheduler)
     {
         _center = center;
         _scheduler = scheduler;

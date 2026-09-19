@@ -154,12 +154,34 @@ internal sealed class UpdateService
         return TestHooks.UpdateSourceUrl ?? settings.UpdateSourceUrl ?? "";
     }
 
+    /// <summary>
+    /// 启动对象图在更新收尾之前创建；收尾成功后重新确认恢复现场，避免已删除的 version marker
+    /// 让本次安全启动永久停留在 RecoveryPending，导致更新后的宿主跳过下一次启动检查。
+    /// </summary>
+    internal void RefreshStartupRecoveryState()
+    {
+        lock (_gate)
+        {
+            if (_state == UpdateState.RecoveryPending && !HasRecoveryArtifacts())
+            {
+                _state = UpdateState.Idle;
+                _error = "";
+            }
+        }
+    }
+
     public UpdateStatusSnapshot GetStatus()
     {
         lock (_gate)
         {
             return BuildSnapshotLocked();
         }
+    }
+
+    /// <summary>控制面开始一次新的手动更新操作前清除上次启动尝试标记。</summary>
+    internal void ClearStartupAttempt()
+    {
+        new StartupUpdateAttemptStore().Clear();
     }
 
     /// <summary>

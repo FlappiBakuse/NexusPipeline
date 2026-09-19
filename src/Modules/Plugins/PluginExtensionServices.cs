@@ -102,7 +102,7 @@ internal sealed class PluginScopedDataStore : IPluginScopedDataStore
 
     public PluginScopedDataStore(string pluginName)
     {
-        _pluginName = ValidateSegment(PluginNameMigration.Canonicalize(pluginName), "插件名", 64);
+        _pluginName = ValidateSegment(PluginNameCanonicalization.Canonicalize(pluginName), "插件名", 64);
         _root = Path.GetFullPath(Path.Combine(AppPaths.ConfigDir, "plugins", _pluginName, "scopes"));
     }
 

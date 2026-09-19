@@ -9,7 +9,7 @@
 | Node.js | 24.x | 前端构建、Web Logic、System Smoke 和 Playwright 测试 |
 
 - 网页管理界面由 `frontend/` 中的 Vue/TypeScript/Vite 源码构建为纯静态 ES modules；运行程序只加载构建结果，源码构建需要 Node.js/npm。
-- 正式程序以管理员身份运行，构建产物带 `requireAdministrator` 清单；Codex 本地 UI/System 反馈使用 `NexusTestHost=true` 的 Test Host，GitHub Administrator Gate 使用生产 release 并在 Administrator / High Integrity 或 System Integrity 下执行。
+- 正式程序以管理员身份运行，构建产物带 `requireAdministrator` 清单；本地与 Qualification 的功能测试统一使用 `NexusTestHost=true` 的 asInvoker Test Host，完整性等级只用于诊断，不选择或过滤测试。
 - `tests/e2e/` 已声明 Playwright 依赖；安装和运行方式见[测试命令](../testing/commands.md)。
 
 
@@ -64,18 +64,17 @@ dotnet publish src\NexusPipeline.csproj -c Release -r win-x64 --self-contained f
 
 ## 测试入口
 
-测试分层与归属见[测试索引](../testing/README.md)和[测试政策](../testing/policy.md)，命令、CI 顺序、System Smoke 和清理要求见[测试命令](../testing/commands.md)。统一入口为 `node tests/run.mjs codex <suite>` 或 `node tests/run.mjs admin <suite>`；每次改动按照修改范围执行对应模式；涉及进程、端口、解释器、模拟器、插件或更新事务时，先运行 Codex System Smoke，再由 GitHub Administrator Gate 验证生产 release。
+测试分层与归属见[测试索引](../testing/README.md)和[测试政策](../testing/policy.md)，命令、Qualification 顺序、System Smoke 和清理要求见[测试命令](../testing/commands.md)。统一入口为 `node tests/run.mjs dev <suite>` 或 `node tests/run.mjs release <gate>`；每次改动按照修改范围执行对应范围；涉及进程、端口、解释器、模拟器、插件或更新事务时，追加 Test Host System Smoke。
 
-System Smoke 可按影响域只跑受影响的 suite；省略分组等于全部 suite，`--dry` 只列出将要执行的 suite：
+System Smoke 可按 registry 分组运行；省略分组等于全部 suite，每次调用都真实构建并启动隔离运行时：
 
 ```text
-node tests\run.mjs codex system runtime
-node tests\run.mjs codex system execution emulator
-node tests\run.mjs codex system --group update --realtime
-node tests\run.mjs codex system --dry
+node tests\run.mjs dev system runtime
+node tests\run.mjs dev system execution emulator
+node tests\run.mjs dev system --group update --realtime
 ```
 
-CI 按影响域决定各 Gate 是否执行，路径清单唯一来源为 `tools/ci-domains.mjs`，判定入口为 `tools/ci-changes.mjs`；改动列表不可用、未命中任何影响域或命中共享路径时按全量门禁执行。每周计划与手动触发执行全量回归。
+PR Feedback 仅由 `tools/ci-scope.mjs` 选择 core、frontend-contract、runtime、update 四个反馈范围；scope 工具、runner、workflow、依赖锁或未知改动按全量反馈处理。最终 Qualification 不读取 diff，固定执行五个 release Gate。
 
 
 
@@ -97,8 +96,7 @@ CI 按影响域决定各 Gate 是否执行，路径清单唯一来源为 `tools/
 | `NEXUS_TIME_SCALE` | 缩放宿主等待时长；判断脚本单次 30 秒上限保持真实墙钟语义 |
 | `NEXUS_SYSTEM_ACTION_DRYRUN=1` | 记录休眠、重启或关机请求，不执行真实系统操作 |
 | `NEXUS_SYSTEM_SMOKE=1` | 启用通过统一 runner 选择的 System Smoke suite |
-| `NEXUS_TEST_MODE=codex` | 选择本地 Test Host 反馈语义，由统一 runner 设置 |
-| `NEXUS_TEST_MODE=admin` | 选择生产 Administrator Gate 语义，由统一 runner 设置 |
+| `NEXUS_TEST_MODE=test-host` | 选择 Test Host 反馈语义，由统一 runner 设置 |
 | `NEXUS_PLUGIN_CATALOG_URL` | 将插件 catalog 指向本地测试源；生产环境不设置 |
 | `NEXUS_TEST_UPDATE_PAUSE_PHASE` / `NEXUS_TEST_UPDATE_PAUSE_FILE` | 仅测试宿主使用：在指定更新 journal 阶段写入外部暂停信号，供故障注入测试强杀 worker |
 
@@ -106,7 +104,7 @@ CI 按影响域决定各 Gate 是否执行，路径清单唯一来源为 `tools/
 
 - 控制台、管道和文件使用 UTF-8；批处理和中文文件操作应保持无 BOM 的 UTF-8。
 - 无控制台父进程启动 cmd/bat 时必须提供并消费重定向的 stdout/stderr；构建和测试脚本保持非交互，不加入无条件 `pause`。
-- 正式脚本运行和 Administrator UI/System Gate 必须在管理员上下文中完成；Codex UI/System 反馈使用 Test Host。每个 suite 使用隔离 runtime 验证脚本与解释器边界；目标程序返回 Win32Exception 740 时应明确失败，保留正式运行边界。
+- 正式程序仍需管理员上下文；每个 UI/System suite 使用隔离 Test Host runtime 验证脚本与解释器边界。目标程序返回 Win32Exception 740 时应明确失败，保留正式运行边界。
 - 以显式路径开头的 `Args` 表示运行时启动目标，`?` 后为目标参数；Args 不使用引号表达路径。
 - 使用 `cmd.exe` 运行批处理时，注意工作目录和环境变量继承；运行进程残留会锁定 `release\nexus-pipeline.exe`。
 
@@ -146,7 +144,7 @@ CI 按影响域决定各 Gate 是否执行，路径清单唯一来源为 `tools/
 
 | 现象 | 排查方向 |
 |---|---|
-| 启动即退出 | 正式程序确认管理员上下文；管理员测试检查隔离 runtime、启动日志和 exit code |
+| 启动即退出 | 正式程序确认管理员上下文；Test Host 测试检查隔离 runtime、启动日志和 exit code |
 | 检测到已在运行 | 检查任务管理器中的残留进程；确认单实例互斥体没有被其他服务占用 |
 | Web 打不开 | 确认服务正在运行、端口正确，轻量模式不会启动 Web |
 | 重构建失败或 exe 被锁定 | 停止对应服务进程后重新构建 |

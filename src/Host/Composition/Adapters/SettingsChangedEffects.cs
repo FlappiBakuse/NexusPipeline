@@ -1,4 +1,3 @@
-using NexusPipeline.Host.Lifecycle;
 using NexusPipeline.Modules.Settings;
 using NexusPipeline.Modules.Settings.Contracts;
 using NexusPipeline.Modules.Updates;
@@ -10,10 +9,12 @@ namespace NexusPipeline.Host.Composition.Adapters;
 internal sealed class SettingsChangedEffects : ISettingsChangedEffects
 {
     private readonly UpdateAutomationService _updates;
+    private readonly HostLifecycleBridge _lifecycle;
 
-    public SettingsChangedEffects(UpdateAutomationService updates)
+    public SettingsChangedEffects(UpdateAutomationService updates, HostLifecycleBridge lifecycle)
     {
         _updates = updates;
+        _lifecycle = lifecycle;
     }
 
     public void Apply(AppSettings previous, AppSettings current)
@@ -24,6 +25,6 @@ internal sealed class SettingsChangedEffects : ISettingsChangedEffects
         }
         WindowsScheduledTaskRegistration.Sync(current.AutoStart);
         _updates.OnSettingsChanged(previous, current);
-        Bootstrap.OnSettingsChanged(previous, current);
+        _lifecycle.OnSettingsChanged(previous, current);
     }
 }

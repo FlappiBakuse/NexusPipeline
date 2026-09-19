@@ -11,6 +11,7 @@ if errorlevel 1 goto frontend_failed
 call npm run build --prefix "%~dp0frontend"
 if errorlevel 1 goto frontend_failed
 for /f "usebackq delims=" %%h in (`node "%~dp0tools\source-hash.mjs"`) do set SRC_HASH=%%h
+if "%NEXUS_FORCE_PRODUCTION%"=="1" goto do_publish
 if not exist "%~dp0release\nexus-pipeline.exe" goto do_publish
 if not exist "%~dp0.build-src-hash" goto do_publish
 set /p OLD_HASH=<"%~dp0.build-src-hash"

@@ -6,7 +6,7 @@ using NexusPipeline.Modules.History;
 using NexusPipeline.Modules.Queues.Contracts;
 using NexusPipeline.Modules.Queues;
 using NexusPipeline.Modules.Settings.Contracts;
-using NexusPipeline.Modules.Updates;
+using NexusPipeline.Modules.Scheduling.Contracts;
 using NexusPipeline.Modules.Users.Bindings;
 using NexusPipeline.Modules.Users.Contracts;
 using NexusPipeline.Modules.Users;
@@ -14,7 +14,7 @@ using NexusPipeline.Shared.Logging;
 
 namespace NexusPipeline.Modules.Scheduling;
 
-internal sealed class Scheduler : IDisposable
+internal sealed class Scheduler : IDisposable, IQueueScheduleProjection, ISchedulerIdleReader, IUserScheduleProjection
 {
     private readonly object _sync = new();
 
@@ -191,7 +191,7 @@ internal sealed class Scheduler : IDisposable
     /// 返回阻止闲时自动更新的首个调度原因。调用方可在宿主维护协调锁内调用，
     /// 以保证 occurrence 注册与维护租约之间没有检查后到登记前的窗口。
     /// </summary>
-    internal AutoUpdateIdleBlocker? GetAutoUpdateBlocker(TimeSpan horizon, DateTime? nowOverride = null)
+    public AutoUpdateIdleBlocker? GetAutoUpdateBlocker(TimeSpan horizon, DateTime? nowOverride = null)
     {
         DateTime now = nowOverride ?? DateTime.Now;
         DateTime until = now.Add(horizon < TimeSpan.Zero ? TimeSpan.Zero : horizon);
@@ -273,6 +273,12 @@ internal sealed class Scheduler : IDisposable
     public DateTime? NextTriggerFor(DispatchQueue queue)
     {
         return SchedulerTriggerPlanner.NextTriggerFor(queue, DateTime.Now);
+    }
+
+    /// <summary>用户卡片使用的最近定时队列投影；只考虑已启用绑定引用的脚本。</summary>
+    public (string QueueName, DateTime TriggerTime)? NextTriggerForUser(NexusUser user)
+    {
+        return NextTriggerForUser(user, _queues.Snapshot());
     }
 
     /// <summary>用户卡片使用的最近定时队列投影；只考虑已启用绑定引用的脚本。</summary>

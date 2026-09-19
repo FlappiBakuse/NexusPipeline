@@ -19,11 +19,11 @@ namespace NexusPipeline.Host.Initialization;
 /// </summary>
 internal static class RuntimeDataReconciler
 {
-    public static void Reconcile(HostCompositionRoot ctx)
+    public static void Reconcile(HostRuntime runtime)
     {
-        ctx.EntityState.Mutate(state =>
+        runtime.EntityState.Mutate(state =>
         {
-            if (ctx.EntityState.LastScriptsLoadWasAuthoritative)
+            if (runtime.EntityState.LastScriptsLoadWasAuthoritative)
             {
                 HashSet<string> scriptIds = state.Scripts
                     .Select(script => script.Id)

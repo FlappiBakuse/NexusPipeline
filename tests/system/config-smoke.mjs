@@ -5,8 +5,6 @@ import path from "node:path";
 import {
   api,
   executionMode,
-  isAdminMode,
-  isAdministrator,
   prepareRuntime,
   runtimeDir,
   startRuntime,
@@ -19,8 +17,7 @@ const skip = enabled ? false : "设置 NEXUS_SYSTEM_SMOKE=1 后运行";
 
 before(async () => {
   if (!enabled) return;
-  if (isAdminMode) assert.ok(isAdministrator(), "管理员 config Smoke 必须在 Administrator / High Integrity 终端运行");
-  prepareRuntime();
+  await prepareRuntime();
   startRuntime();
   await waitForService();
 });

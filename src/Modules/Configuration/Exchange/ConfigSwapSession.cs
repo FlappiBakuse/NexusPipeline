@@ -6,7 +6,6 @@ using NexusPipeline.Host.Composition;
 using NexusPipeline.Modules.Configuration.Paths;
 using NexusPipeline.Modules.Configuration.Recovery;
 using NexusPipeline.Modules.Configuration.Snapshots;
-using NexusPipeline.Modules.Execution.Judgement;
 using NexusPipeline.Modules.Scripts;
 using NexusPipeline.Modules.Users;
 using NexusPipeline.Platform.Storage;
@@ -33,7 +32,7 @@ internal static class ConfigSwapSession
                 ? Path.GetFullPath(configPath)
                 : null;
         }
-        return JudgeScriptRunner.ResolveWithin(configPath, rel);
+        return ConfigPathSafety.ResolveWithin(configPath, rel);
     }
 
     /// <summary>应用配置替换：把 script 目录内文件复制覆盖到 config 对应位置；首次替换前备份原始内容到 swap-backup（含 .meta 记录 configPath 与新增文件清单）。</summary>
@@ -45,7 +44,7 @@ internal static class ConfigSwapSession
         List<string> newFiles = ReadMetaNewFiles(metaPath);
         foreach (string rel in replacements)
         {
-            string? source = JudgeScriptRunner.ResolveWithin(scriptDir, rel);
+            string? source = ConfigPathSafety.ResolveWithin(scriptDir, rel);
             if (source is null || !File.Exists(source))
             {
                 Logger.Warn($"[警告] 配置替换源文件无效（{rel}），跳过");

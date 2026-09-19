@@ -1,6 +1,7 @@
 using Xunit;
 using NexusPipeline.ControlPlane.Http;
 using NexusPipeline.Modules.Execution;
+using NexusPipeline.Modules.Scheduling.Contracts;
 using NexusPipeline.Modules.Settings;
 using NexusPipeline.Modules.Updates;
 

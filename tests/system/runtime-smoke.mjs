@@ -9,10 +9,8 @@ import {
   api,
   createUserBinding,
   deleteScript,
-  isAdminMode,
   executionMode,
   fetchWithTimeout,
-  isAdministrator,
   isRuntimeAlive,
   makeFixture,
   prepareRuntime,
@@ -92,10 +90,7 @@ function runCliAsync(args, input = "", timeout = 20000) {
 
 before(async () => {
   if (!enabled) return;
-  if (isAdminMode) {
-    assert.ok(isAdministrator(), "管理员 System Smoke 必须在 Administrator / High Integrity 终端运行");
-  }
-  prepareRuntime();
+  await prepareRuntime();
   startRuntime();
   await waitForService();
 });
@@ -143,10 +138,7 @@ test("SSE 事件端点返回首帧 stream.ready 与稳定包络", { skip }, asyn
   }
 });
 
-test(`${executionMode === "admin" ? "管理员生产 release" : "Codex Test Host"} 可在无 URLACL 的 loopback 随机端口提供 status API`, { skip, concurrency: false }, async () => {
-  if (isAdminMode) {
-    assert.ok(isAdministrator(), "管理员 HTTP Probe 必须在 Administrator / High Integrity 终端运行");
-  }
+test("Test Host 可在无 URLACL 的 loopback 随机端口提供 status API", { skip, concurrency: false }, async () => {
   const settingsPath = path.join(runtimeDir, "config", "settings.json");
   const originalSettings = fs.existsSync(settingsPath)
     ? fs.readFileSync(settingsPath, "utf8")
@@ -492,6 +484,7 @@ test("配置端口被占用时服务回退到下一个可用端口", { skip }, a
 
 test("非法 limits 配置触发 fatal startup 并可恢复", { skip }, async () => {
   await stopRuntime();
+  await stopRuntime();
   const limitsPath = path.join(runtimeDir, "config", "limits.json");
   fs.mkdirSync(path.dirname(limitsPath), { recursive: true });
   fs.writeFileSync(limitsPath, "{\"MaxScripts\":0}", "utf8");
@@ -500,6 +493,7 @@ test("非法 limits 配置触发 fatal startup 并可恢复", { skip }, async ()
     ? await new Promise(resolve => child.once("exit", code => resolve(code)))
     : await new Promise(resolve => setTimeout(() => resolve(isRuntimeAlive(child.pid) ? 0 : 1), 1000));
   assert.notEqual(exitCode, 0);
+  await stopRuntime();
   fs.rmSync(limitsPath, { force: true });
   startRuntime();
   await waitForService();

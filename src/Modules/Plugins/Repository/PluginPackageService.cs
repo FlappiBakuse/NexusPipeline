@@ -5,7 +5,6 @@ using NexusPipeline.Modules.Plugins.Managed;
 using NexusPipeline.Modules.Plugins;
 using NexusPipeline.Platform.Networking;
 using NexusPipeline.Platform.Storage;
-using NexusPipeline.Platform.Testing;
 using NexusPipeline.Shared.Common;
 
 namespace NexusPipeline.Modules.Plugins.Repository;
@@ -126,16 +125,12 @@ internal sealed class PluginPackageService
             packageUri,
             TimeSpan.FromMinutes(10),
             allowAutoRedirect: false);
-        // 生产包仍按默认 GitHub 资产策略校验；系统测试的回环包源必须显式绑定到
-        // TestHooks 配置的同源前缀，不能因测试地址而放宽任意下载地址。
-        string policySource = packageUri.IsLoopback && TestHooks.PluginPackageBaseUrl is not null
-            ? TestHooks.PluginPackageBaseUrl
-            : "";
-        var policy = new RemoteResourcePolicy(policySource);
+        // catalog 校验已经把回环包限制到 TestHooks 配置的前缀；网络策略的声明来源
+        // 必须是本次已校验的具体 ZIP URI，否则“目录前缀”会错误拒绝合法首跳。
+        var policy = new RemoteResourcePolicy(PluginRemoteResourceRules.ForPackage(packageUri));
         using HttpResponseMessage response = await policy.GetAsync(
             client,
             packageUri,
-            RemoteResourceKind.ReleaseAssetResource,
             "NexusPipeline-plugin/" + entry.Name + "/" + entry.Version,
             cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)

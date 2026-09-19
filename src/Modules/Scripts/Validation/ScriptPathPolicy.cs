@@ -1,7 +1,6 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using NexusPipeline.Modules.Execution.Targets;
 using NexusPipeline.Modules.Plugins.Contracts;
 using NexusPipeline.Modules.Scripts;
 using NexusPipeline.Platform.Processes;
@@ -28,7 +27,7 @@ internal static class ScriptPathPolicy
         {
             return $"脚本根目录不存在或不是文件夹：{root}";
         }
-        if (EmulatorSupport.IsEmulator(script) && specialized
+        if (IsEmulator(script) && specialized
             && !capabilities.SupportsEmulator(script.PluginType))
         {
             return "该专项插件不支持安卓模拟器启动方式（请在 plugin.json 的 capabilities 中声明 emulator）";
@@ -54,9 +53,9 @@ internal static class ScriptPathPolicy
                 return $"日志路径格式不合法（不允许包含 引号/尖括号/竖线/问号）：{script.LogPath}";
             }
         }
-        if (EmulatorSupport.IsEmulator(script))
+        if (IsEmulator(script))
         {
-            if (!EmulatorSupport.IsValidAdbAddress(script.GameExe))
+            if (!IsValidAdbAddress(script.GameExe))
             {
                 return $"模拟器ADB地址格式不正确（应为 主机:端口，如 127.0.0.1:16384）：{script.GameExe}";
             }
@@ -126,5 +125,24 @@ internal static class ScriptPathPolicy
             return false;
         }
         return path.IndexOfAny(new[] { '"', '<', '>', '|', '?' }) < 0;
+    }
+
+    private static bool IsEmulator(ScriptInstance script)
+    {
+        return string.Equals(script.GameMode, "emulator", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsValidAdbAddress(string value)
+    {
+        string normalized = value.Trim();
+        int separator = normalized.LastIndexOf(':');
+        if (separator <= 0 || separator == normalized.Length - 1 || normalized.IndexOf(':') != separator)
+        {
+            return false;
+        }
+        string host = normalized[..separator].Trim();
+        return Uri.CheckHostName(host) is UriHostNameType.Dns or UriHostNameType.IPv4 or UriHostNameType.IPv6
+            && int.TryParse(normalized[(separator + 1)..], out int port)
+            && port is >= 1 and <= 65535;
     }
 }

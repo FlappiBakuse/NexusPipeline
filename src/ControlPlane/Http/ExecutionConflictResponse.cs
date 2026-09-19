@@ -1,4 +1,5 @@
 using System.Net;
+using NexusPipeline.Modules.Configuration.Contracts;
 using NexusPipeline.Modules.Execution;
 
 namespace NexusPipeline.ControlPlane.Http;

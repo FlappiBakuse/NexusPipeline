@@ -43,6 +43,11 @@ internal static class SpecializedPluginContract
             error = $"专项插件 {artifact} 禁止声明 frontend 字段（包括 null）";
             return false;
         }
+        if (root.ContainsKey("entryAssembly") || root.ContainsKey("entryType"))
+        {
+            error = $"专项插件 {artifact} 禁止声明 managed-code 入口字段";
+            return false;
+        }
         if (root["capabilities"] is not null and not JsonArray)
         {
             error = $"专项插件 {artifact} 的 capabilities 必须是数组";
@@ -90,6 +95,17 @@ internal static class SpecializedPluginContract
             }
 
             string artifact = root["artifactName"]?.ToString()?.Trim() ?? Path.GetFileName(pluginDir);
+            foreach (string directory in Directory.EnumerateDirectories(pluginDir, "*", SearchOption.AllDirectories))
+            {
+                string relativeDirectory = Path.GetRelativePath(pluginDir, directory).Replace(Path.DirectorySeparatorChar, '/').Replace(Path.AltDirectorySeparatorChar, '/');
+                string[] directoryParts = relativeDirectory.Split('/', StringSplitOptions.RemoveEmptyEntries);
+                if (directoryParts.Any(part => string.Equals(part, "frontend", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(part, "web", StringComparison.OrdinalIgnoreCase)))
+                {
+                    error = $"专项插件 {artifact} 禁止浏览器目录：{relativeDirectory}";
+                    return false;
+                }
+            }
             foreach (string file in Directory.EnumerateFiles(pluginDir, "*", SearchOption.AllDirectories))
             {
                 string relative = Path.GetRelativePath(pluginDir, file).Replace(Path.DirectorySeparatorChar, '/').Replace(Path.AltDirectorySeparatorChar, '/');

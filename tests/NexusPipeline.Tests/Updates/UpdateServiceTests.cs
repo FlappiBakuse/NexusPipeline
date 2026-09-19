@@ -255,6 +255,21 @@ public sealed class UpdateServiceTests : IAsyncLifetime
             () => _exited = true);
     }
 
+    [Fact]
+    public void RefreshStartupRecoveryStateReturnsToIdleAfterFinalizationRemovesArtifacts()
+    {
+        string marker = Path.Combine(_installDir!, ".nxp-version");
+        File.WriteAllText(marker, "0.16.7\n");
+        UpdateService service = NewService();
+
+        Assert.Equal(UpdateState.RecoveryPending, service.State);
+
+        File.Delete(marker);
+        service.RefreshStartupRecoveryState();
+
+        Assert.Equal(UpdateState.Idle, service.State);
+    }
+
     private static async Task WaitStateAsync(UpdateService service, UpdateState state, int timeoutMs = 15000)
     {
         DateTime deadline = DateTime.Now.AddMilliseconds(timeoutMs);

@@ -17,10 +17,10 @@ internal sealed record ExecutionPreviewResponse(
 /// <summary>运行中游戏画面的受控读取服务。只解析宿主保存的当前运行目标，不接受客户端进程/窗口/ADB 参数。</summary>
 internal sealed class ExecutionPreviewService
 {
-    private readonly Func<ExecutionDispatcher> _center;
-    private readonly Func<PluginManager> _plugins;
+    private readonly ExecutionDispatcher _center;
+    private readonly PluginManager _plugins;
 
-    public ExecutionPreviewService(Func<ExecutionDispatcher> center, Func<PluginManager> plugins)
+    public ExecutionPreviewService(ExecutionDispatcher center, PluginManager plugins)
     {
         _center = center;
         _plugins = plugins;
@@ -31,15 +31,15 @@ internal sealed class ExecutionPreviewService
         string pluginName,
         CancellationToken cancellationToken = default)
     {
-        if (!_plugins().IsKnownPlugin(pluginName)
-            || !_plugins().HasCapability(pluginName, PluginCapabilityKeys.ExecutionPreviewClient)
-            || !_plugins().IsEnabled(pluginName)
-            || !_plugins().HasFrontend(pluginName))
+        if (!_plugins.IsKnownPlugin(pluginName)
+            || !_plugins.HasCapability(pluginName, PluginCapabilityKeys.ExecutionPreviewClient)
+            || !_plugins.IsEnabled(pluginName)
+            || !_plugins.HasFrontend(pluginName))
         {
             return new ExecutionPreviewResponse(404, Error: "执行预览插件不可用");
         }
 
-        RunningExecution? execution = _center().Active.FirstOrDefault(item =>
+        RunningExecution? execution = _center.Active.FirstOrDefault(item =>
             string.Equals(item.Id, runId, StringComparison.OrdinalIgnoreCase));
         if (execution is null)
         {

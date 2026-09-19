@@ -1,6 +1,7 @@
 using NexusPipeline.ControlPlane.Http;
 using NexusPipeline.Modules.Configuration.Exchange;
 using NexusPipeline.Modules.Execution;
+using NexusPipeline.Modules.Scheduling.Contracts;
 using NexusPipeline.Modules.Settings;
 using NexusPipeline.Platform.Testing;
 using NexusPipeline.Shared.Logging;

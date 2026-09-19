@@ -1,5 +1,3 @@
-using NexusPipeline.Modules.Configuration.Exchange;
-using NexusPipeline.Modules.Configuration.Recovery;
 using NexusPipeline.Modules.Scheduling;
 using NexusPipeline.Modules.Scripts;
 using NexusPipeline.Modules.Settings.Validation;
@@ -7,8 +5,6 @@ using NexusPipeline.Modules.Users.Contracts;
 using NexusPipeline.Modules.Users;
 using NexusPipeline.Shared.Logging;
 using NexusPipeline.Shared.Results;
-using NexusPipeline.Modules.Configuration.Editing;
-using NexusPipeline.Modules.Configuration.Paths;
 using NexusPipeline.Modules.Users.Persistence;
 
 namespace NexusPipeline.Modules.Users.UseCases;
@@ -342,14 +338,15 @@ internal sealed partial class UserCommands
     internal OperationResult<UserScriptBinding> CommitPendingConfigInput(
         string userId,
         string scriptId,
-        ConfigEditPendingInput pending)
+        string name,
+        string value)
     {
-        if (string.IsNullOrWhiteSpace(pending.Name)
-            || string.IsNullOrWhiteSpace(pending.Value)
-            || pending.Name.Length > 128
-            || pending.Value.Length > 512
-            || pending.Name.Any(character => !char.IsLetterOrDigit(character) && character != '_')
-            || pending.Value.Any(char.IsControl))
+        if (string.IsNullOrWhiteSpace(name)
+            || string.IsNullOrWhiteSpace(value)
+            || name.Length > 128
+            || value.Length > 512
+            || name.Any(character => !char.IsLetterOrDigit(character) && character != '_')
+            || value.Any(char.IsControl))
         {
             return Validation<UserScriptBinding>("配置输入值格式无效");
         }
@@ -371,7 +368,7 @@ internal sealed partial class UserCommands
                         return;
                     }
                     Dictionary<string, string> oldInputs = new(binding.ConfigInputs, StringComparer.OrdinalIgnoreCase);
-                    binding.ConfigInputs[pending.Name] = pending.Value;
+                    binding.ConfigInputs[name] = value;
                     try
                     {
                         UserDefinitionStore.SaveUsers(state.Users);
@@ -394,12 +391,6 @@ internal sealed partial class UserCommands
         {
             return Internal<UserScriptBinding>(ex);
         }
-    }
-
-    internal bool TryCommitPendingConfigInput(ConfigSessionMark mark)
-    {
-        return mark.PendingConfigInput is not null
-            && CommitPendingConfigInput(mark.UserId, mark.ScriptId, mark.PendingConfigInput).Succeeded;
     }
 
     public OperationResult<bool> DeleteBinding(

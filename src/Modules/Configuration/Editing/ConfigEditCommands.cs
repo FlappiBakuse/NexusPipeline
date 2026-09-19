@@ -4,7 +4,7 @@ using NexusPipeline.Modules.Configuration.Exchange;
 using NexusPipeline.Modules.Configuration.Paths;
 using NexusPipeline.Modules.Configuration.Recovery;
 using NexusPipeline.Modules.Configuration.Scripting;
-using NexusPipeline.Modules.Execution;
+using NexusPipeline.Modules.Configuration.Validation;
 using NexusPipeline.Modules.Plugins.Contracts;
 using NexusPipeline.Modules.Plugins.DataSpecialized;
 using NexusPipeline.Modules.Scripts.Contracts;
@@ -686,7 +686,8 @@ internal sealed class ConfigEditCommands
                 OperationResult<UserScriptBinding> bindingResult = _userCommands.CommitPendingConfigInput(
                     sessionUserKey,
                     session.Script.Id,
-                    pendingInput);
+                    pendingInput.Name,
+                    pendingInput.Value);
                 if (!bindingResult.Succeeded)
                 {
                     return Validation<ConfigEditCompleted>(

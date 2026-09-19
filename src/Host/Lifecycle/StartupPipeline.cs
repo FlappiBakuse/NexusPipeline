@@ -16,7 +16,7 @@ internal static class StartupPipeline
     private static Control? _serviceExitDispatcher;
     private static readonly ManualResetEventSlim WebOnlyExitRequested = new(false);
 
-    internal static void RunService()
+    internal static void RunService(HostRuntime runtime)
     {
         using Mutex? mutex = AcquireSingleInstanceMutex();
         if (mutex is null)
@@ -25,7 +25,7 @@ internal static class StartupPipeline
             TrayApp.OpenWeb();
             return;
         }
-        if (!PrepareHostedStart())
+        if (!PrepareHostedStart(runtime))
         {
             // 更新 worker 必须等当前进程真正终止后才能替换宿主 EXE。
             // Environment.Exit 保持启动阶段持有的互斥体直到进程终止，避免 using
@@ -41,13 +41,12 @@ internal static class StartupPipeline
         Volatile.Write(ref _serviceExitDispatcher, exitDispatcher);
         try
         {
-            HostCompositionRoot ctx = HostCompositionRoot.Instance;
-            if (!HostedRuntimeInitializer.Initialize(ctx))
+            if (!HostedRuntimeInitializer.Initialize(runtime))
             {
                 ClearServicePid();
                 return;
             }
-            StartupUpdateDisposition updateDisposition = RunStartupUpdateGate(ctx);
+            StartupUpdateDisposition updateDisposition = RunStartupUpdateGate(runtime);
             if (updateDisposition == StartupUpdateDisposition.RestartForUpdate)
             {
                 // 启动阶段没有消息循环；让进程退出释放互斥体和 EXE 映像，更新 worker 才能安全交换文件。
@@ -59,22 +58,22 @@ internal static class StartupPipeline
                 ClearServicePid();
                 return;
             }
-            Bootstrap.PrepareStartupPluginUpdates(ctx);
-            Bootstrap.StartServices();
+            runtime.Bootstrap.PrepareStartupPluginUpdates();
+            runtime.Start();
 
             WebServerOptions webOptions = WebServerOptions.FromSettings(
-                ctx.Settings.LightweightMode,
-                ctx.Settings.AllowRemoteAccess);
-            WebServer? web = Bootstrap.StartWebWithRetry(ctx.Settings.WebPort, webOptions);
+                runtime.Settings.LightweightMode,
+                runtime.Settings.AllowRemoteAccess);
+            WebServer? web = runtime.Bootstrap.StartWebWithRetry(runtime.Settings.WebPort, webOptions);
             if (web is not null)
             {
-                Bootstrap.AfterWebStarted(web);
-                if (webOptions.ServeWebUi && ctx.Settings.AutoOpenBrowser)
+                runtime.Bootstrap.AfterWebStarted(web);
+                if (webOptions.ServeWebUi && runtime.Settings.AutoOpenBrowser)
                 {
                     TrayApp.OpenWeb(web.Port);
                 }
             }
-            McpHost? mcp = web is null ? null : Bootstrap.StartMcp();
+            McpHost? mcp = web is null ? null : runtime.Bootstrap.StartMcp();
             if (!webOptions.ServeWebUi)
             {
                 Logger.Info("轻量运行模式：Control API 已启动并仅绑定 127.0.0.1，不提供 Web UI 与浏览器。");
@@ -82,7 +81,7 @@ internal static class StartupPipeline
             if (web is null)
             {
                 Logger.Error("[错误] Control API 启动失败，服务无法提供控制面。");
-                Bootstrap.Shutdown(null, mcp);
+                runtime.Stop(null, mcp);
                 ClearServicePid();
                 return;
             }
@@ -90,8 +89,8 @@ internal static class StartupPipeline
 #if NEXUS_TEST_HOST
             StartTestHostExitMonitor();
 #endif
-            Application.Run(new TrayApp());
-            ShutdownHosted(web, mcp, "NexusPipeline 已退出。");
+            Application.Run(new TrayApp(runtime));
+            ShutdownHosted(runtime, web, mcp, "NexusPipeline 已退出。");
         }
         finally
         {
@@ -184,7 +183,7 @@ internal static class StartupPipeline
     /// <summary>自动重启分支：等待旧进程释放单实例互斥体（旧进程收到退出指令后 ~1 秒退出并释放，
     /// 强杀残留的遗弃互斥体视为已获得），随后进入常驻服务模式。
     /// 交接标识来自拉起本进程的旧进程，控制面前端据此确认新实例已经接管服务。</summary>
-    internal static int RunRestart(string? handoffId = null, bool webOnly = false, bool keepWebOnlyAlive = false)
+    internal static int RunRestart(HostRuntime runtime, string? handoffId = null, bool webOnly = false, bool keepWebOnlyAlive = false)
     {
         HostInstance.AdoptRestartHandoff(handoffId);
         Logger.Info("[重启] 正在等待旧进程退出...");
@@ -221,18 +220,18 @@ internal static class StartupPipeline
         }
         if (webOnly)
         {
-            RunWebOnly(keepWebOnlyAlive
+            RunWebOnly(runtime, keepWebOnlyAlive
                 ? new[] { ApplicationHost.KeepWebOnlyAliveArgument }
                 : Array.Empty<string>());
         }
         else
         {
-            RunService();
+            RunService(runtime);
         }
         return 0;
     }
 
-    internal static int RunWebOnly(string[] args)
+    internal static int RunWebOnly(HostRuntime runtime, string[] args)
     {
         ApplicationHost.IsWebOnly = true;
         ApplicationHost.KeepWebOnlyAlive = args.Any(argument =>
@@ -241,7 +240,7 @@ internal static class StartupPipeline
         using Mutex? mutex = AcquireSingleInstanceMutex();
         if (mutex is null)
         {
-            int? existingPort = CliTransport.FindServicePort(HostCompositionRoot.Instance.Settings.WebPort);
+            int? existingPort = CliTransport.FindServicePort(runtime.Settings.WebPort);
             if (existingPort is not null)
             {
                 Logger.Info($"检测到已有 NexusPipeline 服务，复用 Web 端口 {existingPort.Value}。");
@@ -253,20 +252,19 @@ internal static class StartupPipeline
             return 1;
         }
         // web 模式同样执行更新事务启动收尾；worker 接管后当前进程必须立即终止。
-        if (!PrepareHostedStart())
+        if (!PrepareHostedStart(runtime))
         {
             // 与 service 模式保持相同的退出语义：互斥体和当前 EXE 的文件句柄
             // 在 worker 开始交换前一并由进程终止释放。
             Environment.Exit(0);
             return 0;
         }
-        HostCompositionRoot ctx = HostCompositionRoot.Instance;
-        if (!HostedRuntimeInitializer.Initialize(ctx))
+        if (!HostedRuntimeInitializer.Initialize(runtime))
         {
             ClearServicePid();
             return 1;
         }
-        StartupUpdateDisposition updateDisposition = RunStartupUpdateGate(ctx);
+        StartupUpdateDisposition updateDisposition = RunStartupUpdateGate(runtime);
         if (updateDisposition == StartupUpdateDisposition.RestartForUpdate)
         {
             Environment.Exit(0);
@@ -277,21 +275,21 @@ internal static class StartupPipeline
             ClearServicePid();
             return 1;
         }
-        Bootstrap.PrepareStartupPluginUpdates(ctx);
-        Bootstrap.StartServices();
-        WebServer? web = Bootstrap.StartWebWithRetry(
-            ctx.Settings.WebPort,
-            new WebServerOptions(ServeWebUi: !ctx.Settings.LightweightMode, AllowRemoteAccess: ctx.Settings.AllowRemoteAccess));
+        runtime.Bootstrap.PrepareStartupPluginUpdates();
+        runtime.Start();
+        WebServer? web = runtime.Bootstrap.StartWebWithRetry(
+            runtime.Settings.WebPort,
+            new WebServerOptions(ServeWebUi: !runtime.Settings.LightweightMode, AllowRemoteAccess: runtime.Settings.AllowRemoteAccess));
         if (web is null)
         {
             ClearServicePid();
             Console.WriteLine(CliText.Get("startup.web_unavailable", "[错误] 无法启动 Web 服务（端口均被占用）。"));
             return 1;
         }
-        Bootstrap.AfterWebStarted(web);
-        McpHost? mcp = Bootstrap.StartMcp();
+        runtime.Bootstrap.AfterWebStarted(web);
+        McpHost? mcp = runtime.Bootstrap.StartMcp();
         Console.WriteLine(CliText.Get("startup.web_started", "Web 界面：http://127.0.0.1:{port}/（按回车停止）", ("port", web.Port)));
-        if (ctx.Settings.AutoOpenBrowser)
+        if (runtime.Settings.AutoOpenBrowser)
         {
             try
             {
@@ -306,7 +304,7 @@ internal static class StartupPipeline
             }
         }
         WaitForWebOnlyStop(ApplicationHost.KeepWebOnlyAlive);
-        ShutdownHosted(web, mcp);
+        ShutdownHosted(runtime, web, mcp);
         return 0;
     }
 
@@ -314,30 +312,31 @@ internal static class StartupPipeline
     /// 常驻模式（service/web）共享的启动不变量：准备当前运行时目录 → 更新事务启动收尾 → 写 service.pid。
     /// 返回 false 表示更新收尾已拉起 apply-update 子进程或完成回滚，本进程应立即退出。
     /// </summary>
-    private static bool PrepareHostedStart()
+    private static bool PrepareHostedStart(HostRuntime runtime)
     {
         AppPaths.RuntimeState.EnsureDirectories();
         if (UpdateApply.RunStartupFinalization(ApplicationHost.IsWebOnly, SingleInstanceMutexName))
         {
             return false;
         }
+        runtime.UpdateService.RefreshStartupRecoveryState();
         WriteServicePid();
         return true;
     }
 
-    private static StartupUpdateDisposition RunStartupUpdateGate(HostCompositionRoot ctx)
+    private static StartupUpdateDisposition RunStartupUpdateGate(HostRuntime runtime)
     {
         return new StartupUpdateCoordinator(
-            () => ctx.Settings,
-            ctx.Resolve<UpdateService>(),
-            ctx.Resolve<UpdateAutomationService>()).RunBeforeServices();
+            () => runtime.Settings,
+            runtime.UpdateService,
+            runtime.UpdateAutomation).RunBeforeServices();
     }
 
     /// <summary>常驻模式（service/web）共享的关闭不变量：等待任务/编辑会话安全结束 → 停服务 → 清 service.pid。</summary>
-    private static void ShutdownHosted(WebServer? web, McpHost? mcp, string? exitLog = null)
+    private static void ShutdownHosted(HostRuntime runtime, WebServer? web, McpHost? mcp, string? exitLog = null)
     {
-        WaitForSafeShutdown();
-        Bootstrap.Shutdown(web, mcp);
+        WaitForSafeShutdown(runtime);
+        runtime.Stop(web, mcp);
         ClearServicePid();
         if (exitLog is not null)
         {
@@ -409,10 +408,10 @@ internal static class StartupPipeline
         }
     }
 
-    private static void WaitForSafeShutdown()
+    private static void WaitForSafeShutdown(HostRuntime runtime)
     {
         DateTime nextNotice = DateTime.MinValue;
-        while (!Bootstrap.CanStopServices(out string reason))
+        while (!runtime.Bootstrap.CanStopServices(out string reason))
         {
             if (DateTime.Now >= nextNotice)
             {

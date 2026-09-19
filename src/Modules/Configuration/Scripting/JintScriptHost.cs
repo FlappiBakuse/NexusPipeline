@@ -1,6 +1,6 @@
 using Jint;
 
-namespace NexusPipeline.Modules.Execution.Judgement;
+namespace NexusPipeline.Modules.Configuration.Scripting;
 
 /// <summary>Jint 脚本宿主的 API 面；调用方仍负责为每个脚本配置文件和写入策略。</summary>
 internal enum JintScriptHostProfile

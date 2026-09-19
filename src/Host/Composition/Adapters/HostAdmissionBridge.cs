@@ -1,3 +1,4 @@
+using NexusPipeline.Modules.Configuration.Contracts;
 using NexusPipeline.Modules.Execution;
 using NexusPipeline.Modules.Execution.Contracts;
 using NexusPipeline.Modules.Plugins.Contracts;

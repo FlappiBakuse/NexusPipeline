@@ -268,22 +268,22 @@
     {
       "id": "testing.commands",
       "path": "testing/commands.md",
-      "summary": "Unit、Web、Docs、System、UI 与全量门禁命令",
+      "summary": "Unit、Frontend、Docs、System 与五个 Qualification Gate 命令",
       "topics": ["命令", "门禁", "构建", "回归"],
       "aliases": ["测试命令", "质量门禁"],
       "codePaths": ["tests/run.mjs", ".github/workflows/release-qualification.yml"],
-      "testDomains": ["governanceDomains.ci-tooling"],
+      "testDomains": ["governanceDomains.tooling"],
       "authorityFor": ["test-commands"],
       "status": "current"
     },
     {
       "id": "testing.domains",
       "path": "testing/domains.md",
-      "summary": "影响域、逻辑测试组、物理 CI Job 与清理边界",
+      "summary": "测试 registry、PR Feedback 范围与 Qualification 清理边界",
       "topics": ["影响域", "CI", "逻辑组", "清理"],
       "aliases": ["测试域选择", "CI 计划"],
-      "codePaths": ["tools/ci-domains.mjs", "tools/ci-changes.mjs", ".github/workflows/release-qualification.yml"],
-      "testDomains": ["governanceDomains.ci-tooling"],
+      "codePaths": ["tests/registry.mjs", "tools/ci-scope.mjs", ".github/workflows/release-qualification.yml"],
+      "testDomains": ["governanceDomains.tooling"],
       "authorityFor": ["test-domain-selection"],
       "status": "current"
     },
@@ -316,7 +316,7 @@
       "topics": ["开发", "构建", "发布", "协作"],
       "aliases": ["开发文档", "开发流程"],
       "codePaths": ["docs/DEVELOPMENT.md", "build.cmd", "tests/run.mjs"],
-      "testDomains": ["governanceDomains.docs-links-contracts", "governanceDomains.ci-tooling"],
+      "testDomains": ["governanceDomains.docs-links-contracts", "governanceDomains.tooling"],
       "authorityFor": ["development-navigation"],
       "status": "current"
     },
@@ -349,7 +349,7 @@
       "topics": ["发布", "Pre-release", "资产", "SHA256"],
       "aliases": ["发布流程", "发行流程"],
       "codePaths": ["build.cmd", ".github/workflows/release-qualification.yml"],
-      "testDomains": ["hostAreas.update", "governanceDomains.ci-tooling"],
+      "testDomains": ["hostAreas.update", "governanceDomains.tooling"],
       "authorityFor": ["development-release"],
       "status": "current"
     },
@@ -370,8 +370,8 @@
       "summary": "本轮架构边界、公共 UI、当前格式与测试治理决定",
       "topics": ["ADR", "决策", "架构边界", "测试治理"],
       "aliases": ["开发决定", "版本决策"],
-      "codePaths": ["tools/frontend-boundaries.mjs", "tools/ci-domains.mjs"],
-      "testDomains": ["governanceDomains.architecture-boundaries", "governanceDomains.ci-tooling"],
+      "codePaths": ["tools/frontend-boundaries.mjs", "tests/registry.mjs"],
+      "testDomains": ["governanceDomains.architecture-boundaries", "governanceDomains.tooling"],
       "authorityFor": ["v0166-development-decision"],
       "status": "current"
     }

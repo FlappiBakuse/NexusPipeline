@@ -5,8 +5,6 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   api,
-  isAdminMode,
-  isAdministrator,
   prepareRuntime,
   projectRoot,
   releaseDir,
@@ -25,7 +23,7 @@ import { killProcessTree, waitForExit } from "../support/windows-process.mjs";
 /**
  * 内建更新 System Smoke（下一候选版本）：在隔离安装副本上验证 apply-update 的
  * 「备份 → 交换 → 重拉」、config/history/用户插件目录原样保留、启动收尾清理、失败回滚与 defer 自动应用。
- * 运行方式：通过 `node tests\\run.mjs codex system` 或 `node tests\\run.mjs admin system` 执行。
+ * 运行方式：通过 `node tests\\run.mjs release update-acceptance` 执行。
  */
 const enabled = process.env.NEXUS_SYSTEM_SMOKE === "1";
 const skipReason = process.env.NEXUS_SYSTEM_SMOKE !== "1"
@@ -38,11 +36,6 @@ const backupDir = path.join(runtimeDir, ".nxp-backup", "previous");
 const versionFile = path.join(runtimeDir, ".nxp-version");
 const taskFile = path.join(updateDir, "task.json");
 const updateVersion = deriveCandidateVersion(readProjectVersion(projectRoot));
-const faultInjectionSkip = !enabled
-  ? skipReason
-  : process.env.NEXUS_TEST_HOST === "1"
-    ? false
-    : "SwapReady 故障注入需要 Codex 测试宿主";
 const stagingRoot = path.join(updateDir, "staging", updateVersion);
 
 function writeTask(mode, stagedDir = stagingRoot) {
@@ -164,12 +157,9 @@ async function stopRuntimeHard() {
 
 before(async () => {
   if (!enabled) return;
-  if (isAdminMode) {
-    assert.ok(isAdministrator(), "管理员 System Smoke 必须在 Administrator / High Integrity 终端运行");
-  }
   // 先兜底清理上一轮残留的 runtime 进程（apply 重拉的服务进程若未清完会锁死 runtime 目录，导致 rmSync EPERM）。
   await stopRuntimeHard();
-  prepareRuntime();
+  await prepareRuntime();
   prepareLegacyInstall();
 });
 
@@ -215,9 +205,9 @@ test("apply-update：备份→交换→保留插件与数据→重拉宿主→�
   await stopRuntimeHard();
 });
 
-test("update:swap-ready | 故障注入：SwapReady 阶段强杀 worker 后启动回滚并清理现场", { skip: faultInjectionSkip, concurrency: false }, async () => {
+test("update:swap-ready | 故障注入：SwapReady 阶段强杀 worker 后启动回滚并清理现场", { skip, concurrency: false }, async () => {
   await stopRuntimeHard();
-  prepareRuntime();
+  await prepareRuntime();
   prepareLegacyInstall();
   prepareStaging();
   writeTask("apply");

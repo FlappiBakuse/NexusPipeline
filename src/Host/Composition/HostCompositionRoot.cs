@@ -10,6 +10,7 @@ using NexusPipeline.Modules.Diagnostics;
 using NexusPipeline.Modules.Diagnostics.Contracts;
 using NexusPipeline.Modules.Configuration.Contracts;
 using NexusPipeline.Modules.Configuration.Editing;
+using NexusPipeline.Modules.Configuration.Validation;
 using NexusPipeline.Modules.Execution.Contracts;
 using NexusPipeline.Modules.Execution.Realtime;
 using NexusPipeline.Modules.Execution;
@@ -26,6 +27,7 @@ using NexusPipeline.Modules.Queues.Queries;
 using NexusPipeline.Modules.Queues.UseCases;
 using NexusPipeline.Modules.Queues;
 using NexusPipeline.Modules.Scheduling;
+using NexusPipeline.Modules.Scheduling.Contracts;
 using NexusPipeline.Modules.Scripts.Contracts;
 using NexusPipeline.Modules.Scripts.Queries;
 using NexusPipeline.Modules.Scripts.Resolution;
@@ -48,21 +50,46 @@ using NexusPipeline.Modules.Queues.Persistence;
 using NexusPipeline.Modules.Scripts.Persistence;
 using NexusPipeline.Modules.Users.Persistence;
 using NexusPipeline.Shared.Common;
+using NexusPipeline.Shared.Logging;
 
 namespace NexusPipeline.Host.Composition;
 
-/// <summary>组合根过渡实现：持有当前 Host 对象图；实体状态由 <see cref="AutomationDefinitionState"/> 唯一持有。</summary>
+/// <summary>组合根：只负责一次性组装 Host 对象图；进程生命周期由 <see cref="HostRuntime"/> 持有。</summary>
 internal class HostCompositionRoot
 {
-    public static HostCompositionRoot Instance { get; } = new();
+#if NEXUS_TEST_HOST
+    // Test-only compatibility for legacy unit fixtures. Production code has no global root.
+    private static readonly Lazy<HostRuntime> TestRuntime = new(() => Create(new AppSettings()));
+    public static HostCompositionRoot Instance => TestRuntime.Value.Composition;
+#endif
 
     private readonly ServiceProvider _services;
     private readonly AutomationDefinitionState _entityState = new();
-    private readonly SettingsState _settingsState = new(new AppSettings());
+    private readonly SettingsState _settingsState;
     private readonly HostAdmissionBridge _admissionBridge;
+    private readonly HostLifecycleBridge _lifecycle;
 
-    private HostCompositionRoot()
+    public static HostRuntime Create(AppSettings initialSettings)
     {
+        ArgumentNullException.ThrowIfNull(initialSettings);
+        var lifecycle = new HostLifecycleBridge();
+        var composition = new HostCompositionRoot(initialSettings, lifecycle);
+        var runtime = new HostRuntime(composition);
+        var bootstrap = new Bootstrap(
+            runtime,
+            composition.Get<PluginAutoUpdateService>(),
+            composition.Get<UpdateAutomationService>(),
+            StartupPipeline.TryRequestServiceExit,
+            StartupPipeline.TryRequestWebOnlyExit);
+        runtime.BindBootstrap(bootstrap);
+        lifecycle.BindOnce(bootstrap);
+        return runtime;
+    }
+
+    private HostCompositionRoot(AppSettings initialSettings, HostLifecycleBridge lifecycle)
+    {
+        _settingsState = new(initialSettings.Clone());
+        _lifecycle = lifecycle;
         _admissionBridge = new HostAdmissionBridge(_settingsState);
         ServiceCollection collection = new();
         collection.AddSingleton(_entityState);
@@ -103,6 +130,7 @@ internal class HostCompositionRoot
             provider.GetRequiredService<PluginManager>()));
         collection.AddSingleton<IQueueScheduleSnapshotReader>(provider => new RuntimeQueueScheduleSnapshotReader(
             provider.GetRequiredService<IQueueRepository>()));
+        collection.AddSingleton<IQueueUserParticipationReader>(_ => new RuntimeQueueUserParticipationReader(_entityState));
         collection.AddSingleton<ISettingsProvider>(_settingsState);
         collection.AddSingleton<IControlPlaneStatusReader, ControlPlaneStatusAdapter>();
         collection.AddSingleton<OutboundHttpClientProvider>(_ => new OutboundHttpClientProvider(
@@ -147,12 +175,12 @@ internal class HostCompositionRoot
         collection.AddSingleton<RealtimeEventBus>();
         collection.AddSingleton<ExecutionValidator>();
         collection.AddSingleton<ExecutionPreviewService>(provider => new ExecutionPreviewService(
-            () => provider.GetRequiredService<ExecutionDispatcher>(),
-            () => provider.GetRequiredService<PluginManager>()));
+            provider.GetRequiredService<ExecutionDispatcher>(),
+            provider.GetRequiredService<PluginManager>()));
         collection.AddSingleton<SystemActionExecutor>(provider => new SystemActionExecutor(
             provider.GetRequiredService<ExecutionStateStore>(),
             provider.GetRequiredService<RealtimeEventBus>(),
-            new ApplicationExitRequestAdapter()));
+            new ApplicationExitRequestAdapter(_lifecycle.TryRequestCompletionExit)));
         collection.AddSingleton<ExecutionRunner>(provider => new ExecutionRunner(
             provider.GetRequiredService<IUserRepository>(),
             provider.GetRequiredService<IHistoryStore>(),
@@ -179,6 +207,9 @@ internal class HostCompositionRoot
             provider.GetRequiredService<ISchedulerStateStore>(),
             provider.GetRequiredService<IUserRunDaysMaintenance>(),
             provider.GetRequiredService<IAdmissionCoordination>()));
+        collection.AddSingleton<ISchedulerIdleReader>(provider => provider.GetRequiredService<Scheduler>());
+        collection.AddSingleton<IQueueScheduleProjection>(provider => provider.GetRequiredService<Scheduler>());
+        collection.AddSingleton<IUserScheduleProjection>(provider => provider.GetRequiredService<Scheduler>());
         collection.AddSingleton<RuntimePlansChanged>(provider => new RuntimePlansChanged(
             provider.GetRequiredService<Scheduler>()));
         collection.AddSingleton<IScriptPlansChanged>(provider => provider.GetRequiredService<RuntimePlansChanged>());
@@ -204,7 +235,7 @@ internal class HostCompositionRoot
             provider.GetRequiredService<IQueuePlansChanged>(),
             provider.GetRequiredService<IQueueMutationAdmission>(),
             provider.GetRequiredService<IScriptRepository>(),
-            provider.GetRequiredService<IUserSnapshotReader>(),
+            provider.GetRequiredService<IQueueUserParticipationReader>(),
             provider.GetRequiredService<IPluginAvailability>(),
             provider.GetRequiredService<IQueueDataMaintenance>()));
         collection.AddSingleton<IScriptDeletionTransaction>(provider => new AutomationDefinitionTransactions(
@@ -243,20 +274,28 @@ internal class HostCompositionRoot
         collection.AddSingleton<UpdateService>(provider => new UpdateService(
             () => Settings,
             AppPaths.AppRoot,
-            () => Bootstrap.CanRequestDirectExit(out _),
-            Bootstrap.TryRequestUpdateExit,
-            () => Bootstrap.TryAcquireUpdateMaintenanceLease(),
+            () => _lifecycle.CanRequestDirectExit(out _),
+            _lifecycle.TryRequestUpdateExit,
+            _lifecycle.TryAcquireUpdateMaintenanceLease,
             provider.GetRequiredService<OutboundHttpClientProvider>(),
             () => ApplicationHost.IsWebOnly));
         collection.AddSingleton<AutoUpdateIdlePolicy>(provider => new AutoUpdateIdlePolicy(
             provider.GetRequiredService<ExecutionDispatcher>(),
-            provider.GetRequiredService<Scheduler>()));
+            provider.GetRequiredService<ISchedulerIdleReader>()));
         collection.AddSingleton<UpdateAutomationService>(provider => new UpdateAutomationService(
             () => Settings,
             provider.GetRequiredService<UpdateService>(),
             provider.GetRequiredService<AutoUpdateIdlePolicy>()));
+        collection.AddSingleton<PluginAutoUpdateService>(provider => new PluginAutoUpdateService(
+            () => Settings,
+            provider.GetRequiredService<PluginRepositoryService>(),
+            provider.GetRequiredService<AutoUpdateIdlePolicy>().TryAcquire,
+            lease => _lifecycle.RequestRestartWithLease(lease, Audit.System)));
         collection.AddSingleton<ISettingsChangedEffects>(provider => new SettingsChangedEffects(
-            provider.GetRequiredService<UpdateAutomationService>()));
+            provider.GetRequiredService<UpdateAutomationService>(),
+            _lifecycle));
+        collection.AddSingleton<IHostRestartPort>(_ => new HostRestartPortAdapter(_lifecycle));
+        collection.AddSingleton<IAccessTokenPort, AccessTokenPortAdapter>();
         collection.AddSingleton<SettingsCommands>(provider => new SettingsCommands(
             _settingsState,
             provider.GetRequiredService<ISettingsMutationGate>(),
@@ -284,6 +323,8 @@ internal class HostCompositionRoot
             provider.GetRequiredService<ISettingsProvider>(),
             provider.GetRequiredService<UpdateService>(),
             provider.GetRequiredService<UpdateAutomationService>(),
+            provider.GetRequiredService<IHostRestartPort>(),
+            provider.GetRequiredService<IAccessTokenPort>(),
             provider.GetRequiredService<INativePathPicker>(),
             provider.GetRequiredService<UserAssetService>(),
             provider.GetRequiredService<OutboundHttpClientProvider>(),
@@ -291,7 +332,11 @@ internal class HostCompositionRoot
             provider.GetRequiredService<ScriptFileBrowser>()));
         collection.AddSingleton<ExecutionExplainService>();
         collection.AddSingleton<DiagnosticsService>();
-        _services = collection.BuildServiceProvider();
+        _services = collection.BuildServiceProvider(new ServiceProviderOptions
+        {
+            ValidateOnBuild = true,
+            ValidateScopes = true,
+        });
         _admissionBridge.BindOnce(_services.GetRequiredService<ExecutionDispatcher>());
     }
 
@@ -317,6 +362,12 @@ internal class HostCompositionRoot
     public NotificationDispatcher Notifications => Resolve<NotificationDispatcher>();
 
     public Scheduler Scheduler => Resolve<Scheduler>();
+
+    internal UpdateService UpdateService => Resolve<UpdateService>();
+
+    internal UpdateAutomationService UpdateAutomation => Resolve<UpdateAutomationService>();
+
+    internal UserCommands UserCommands => Resolve<UserCommands>();
 
     internal HttpRouteBindings HttpRoutes => Resolve<HttpRouteBindings>();
 
@@ -345,10 +396,14 @@ internal class HostCompositionRoot
     }
 
     /// <summary>服务解析出口：按类型解析已注册服务；未注册类型抛出异常。</summary>
-    public T Resolve<T>() where T : notnull
+    internal T Resolve<T>() where T : notnull
     {
         return _services.GetRequiredService<T>();
     }
+
+    internal T Get<T>() where T : notnull => _services.GetRequiredService<T>();
+
+    internal ValueTask DisposeAsync() => _services.DisposeAsync();
 
     public void ReloadSettings(ConfigLoadMode mode = ConfigLoadMode.Repair)
     {

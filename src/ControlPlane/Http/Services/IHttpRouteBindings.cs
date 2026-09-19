@@ -3,6 +3,7 @@ using NexusPipeline.Modules.Scripts.UseCases;
 using NexusPipeline.Modules.Queues.UseCases;
 using NexusPipeline.Modules.Users.UseCases;
 using NexusPipeline.Modules.Configuration.Editing;
+using NexusPipeline.Modules.Configuration.Validation;
 using NexusPipeline.Modules.Scripts.Queries;
 using NexusPipeline.Modules.Scripts.Validation;
 using NexusPipeline.Modules.Scripts;
@@ -75,6 +76,10 @@ internal interface IHttpRouteBindings
     UpdateService Updates { get; }
 
     UpdateAutomationService UpdateAutomation { get; }
+
+    IHostRestartPort Restart { get; }
+
+    IAccessTokenPort AccessToken { get; }
 
     INativePathPicker NativePathPicker { get; }
 

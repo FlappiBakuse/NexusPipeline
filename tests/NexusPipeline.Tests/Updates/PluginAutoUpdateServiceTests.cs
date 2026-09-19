@@ -4,6 +4,7 @@ using NexusPipeline.ControlPlane.Http;
 using NexusPipeline.Host.Lifecycle;
 using NexusPipeline.Modules.Execution;
 using NexusPipeline.Modules.Plugins.Repository;
+using NexusPipeline.Modules.Scheduling.Contracts;
 using NexusPipeline.Modules.Settings;
 using NexusPipeline.Modules.Updates;
 using NexusPipeline.Platform.Storage;

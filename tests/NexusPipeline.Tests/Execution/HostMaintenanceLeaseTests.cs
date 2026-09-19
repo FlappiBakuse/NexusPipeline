@@ -1,4 +1,5 @@
 using Xunit;
+using NexusPipeline.Modules.Configuration.Contracts;
 using NexusPipeline.Modules.Execution;
 namespace NexusPipeline.Tests.Execution;
 

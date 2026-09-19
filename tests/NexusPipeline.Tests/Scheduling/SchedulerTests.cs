@@ -7,6 +7,7 @@ using NexusPipeline.Modules.History;
 using NexusPipeline.Modules.Queues.Contracts;
 using NexusPipeline.Modules.Queues;
 using NexusPipeline.Modules.Scheduling;
+using NexusPipeline.Modules.Scheduling.Contracts;
 using NexusPipeline.Modules.Scripts.Contracts;
 using NexusPipeline.Modules.Scripts;
 using NexusPipeline.Modules.Settings.Contracts;

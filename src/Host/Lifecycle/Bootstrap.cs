@@ -22,23 +22,52 @@ using NexusPipeline.Modules.Configuration.Recovery;
 namespace NexusPipeline.Host.Lifecycle;
 
 /// <summary>服务启动/停止编排：插件、历史清理、调度器、配置恢复、更新自动化与 Web 服务。</summary>
-internal static class Bootstrap
+internal sealed class Bootstrap
 {
     internal const string ActiveRunsReason = "active_runs";
     internal const string ConfigEditSessionsReason = "config_edit_sessions";
     internal const string PendingSystemActionReason = "pending_system_action";
 
-    private static readonly object RestartSync = new();
+    private readonly object _restartSync = new();
+    private readonly HostRuntime _runtime;
+    private readonly PluginAutoUpdateService _pluginAutoUpdateService;
+    private readonly UpdateAutomationService _updates;
+    private readonly Func<bool> _requestServiceExit;
+    private readonly Func<bool> _requestWebOnlyExit;
+    private HostRestartCoordinator? _restartCoordinator;
+    private bool _startupRecoveryReady;
+    private bool _startupRecoveryFailed;
+    private int _servicesStarted;
+    private int _shutdownCompleted;
 
-    private static HostRestartCoordinator? _restartCoordinator;
-    private static PluginAutoUpdateService? _pluginAutoUpdateService;
-    private static bool _startupRecoveryReady;
-    private static bool _startupRecoveryFailed;
+    internal Bootstrap(
+        HostRuntime runtime,
+        PluginAutoUpdateService pluginAutoUpdateService,
+        UpdateAutomationService updates,
+        Func<bool> requestServiceExit,
+        Func<bool> requestWebOnlyExit)
+    {
+        _runtime = runtime;
+        _pluginAutoUpdateService = pluginAutoUpdateService;
+        _updates = updates;
+        _requestServiceExit = requestServiceExit;
+        _requestWebOnlyExit = requestWebOnlyExit;
+    }
 
     /// <summary>加载插件、清理过期历史、启动调度器、配置恢复重试与更新自动化。</summary>
-    public static void StartServices()
+    public void StartServices()
     {
-        HostCompositionRoot ctx = HostCompositionRoot.Instance;
+        if (Volatile.Read(ref _shutdownCompleted) != 0)
+        {
+            throw new InvalidOperationException("Host services cannot start after shutdown.");
+        }
+
+        if (Interlocked.CompareExchange(ref _servicesStarted, 1, 0) != 0)
+        {
+            throw new InvalidOperationException("Host services have already started.");
+        }
+        try
+        {
         bool pendingApplied;
         if (_startupRecoveryReady)
         {
@@ -59,22 +88,28 @@ internal static class Bootstrap
         }
         if (pendingApplied)
         {
-            GetPluginAutoUpdateService(ctx).OnStartupInstallRecoveryCompleted();
+            _pluginAutoUpdateService.OnStartupInstallRecoveryCompleted();
         }
         AppearanceLegacyMigration.ApplyOnce();
-        ctx.Plugins.LoadAll();
-        ctx.History.Cleanup(ctx.Settings.HistoryRetentionDays);
-        ctx.Scheduler.Start();
+        _runtime.Plugins.LoadAll();
+        _runtime.History.Cleanup(_runtime.Settings.HistoryRetentionDays);
+        _runtime.Scheduler.Start();
         ConfigRecoveryService.StartRecoveryRetry();
-        ctx.Resolve<UpdateAutomationService>().Start();
+        _updates.Start();
         if (pendingApplied)
         {
-            GetPluginAutoUpdateService(ctx).Start();
+            _pluginAutoUpdateService.Start();
+        }
+        }
+        catch
+        {
+            Volatile.Write(ref _servicesStarted, 0);
+            throw;
         }
     }
 
     /// <summary>在 Bootstrap 加载插件前运行启动期插件更新检查与暂存。</summary>
-    internal static bool PrepareStartupPluginUpdates(HostCompositionRoot ctx)
+    internal bool PrepareStartupPluginUpdates()
     {
         // 现有 journal 必须先在当前进程中完成；只有成功后，RepositoryService
         // 才能按启动时冻结的 channel 查询 catalog 并创建新的暂存事务。
@@ -86,42 +121,24 @@ internal static class Bootstrap
             Logger.Warn("[插件] 启动恢复失败，禁止本次启动创建新的插件仓库事务。");
             return false;
         }
-        GetPluginAutoUpdateService(ctx).RunStartupBeforePlugins();
+        _pluginAutoUpdateService.RunStartupBeforePlugins();
         return true;
     }
 
-    internal static void OnSettingsChanged(AppSettings previous, AppSettings current)
+    internal void OnSettingsChanged(AppSettings previous, AppSettings current)
     {
-        PluginAutoUpdateService? updater;
-        lock (RestartSync)
-        {
-            updater = _pluginAutoUpdateService;
-        }
-        updater?.OnSettingsChanged(previous, current);
-    }
-
-    private static PluginAutoUpdateService GetPluginAutoUpdateService(HostCompositionRoot ctx)
-    {
-        lock (RestartSync)
-        {
-            _pluginAutoUpdateService ??= new PluginAutoUpdateService(
-                () => ctx.Settings,
-                ctx.Resolve<PluginRepositoryService>(),
-                ctx.Resolve<AutoUpdateIdlePolicy>().TryAcquire,
-                lease => RequestRestartWithLease(lease, Audit.System));
-            return _pluginAutoUpdateService;
-        }
+        _pluginAutoUpdateService.OnSettingsChanged(previous, current);
     }
 
     /// <summary>启动 Web 服务：端口被占用自动 +1 重试（最多 20 次）。每次重试新建实例（HttpListener 或托管 loopback transport 启动失败后不可复用）；非端口冲突异常直接返回 null（不崩溃）。失败返回 null。</summary>
-    public static WebServer? StartWebWithRetry(int basePort, WebServerOptions? options = null)
+    public WebServer? StartWebWithRetry(int basePort, WebServerOptions? options = null)
     {
         int port = basePort;
         for (int attempt = 0; attempt < 20; attempt++)
         {
             try
             {
-                var web = new WebServer(HostCompositionRoot.Instance.HttpRoutes);
+                var web = new WebServer(_runtime.HttpRoutes);
                 web.Start(port, options);
                 return web;
             }
@@ -141,7 +158,7 @@ internal static class Bootstrap
     }
 
     /// <summary>Web 服务启动成功后的收尾：远程访问模式确保实际监听端口的 TCP 入站规则存在。</summary>
-    public static void AfterWebStarted(WebServer web)
+    public void AfterWebStarted(WebServer web)
     {
         if (web.AllowsRemoteAccess)
         {
@@ -149,10 +166,9 @@ internal static class Bootstrap
         }
     }
 
-    internal static bool CanStopServices(out string reasonCode)
+    internal bool CanStopServices(out string reasonCode)
     {
-        HostCompositionRoot ctx = HostCompositionRoot.Instance;
-        if (ctx.Center.Active.Count > 0)
+        if (_runtime.Center.Active.Count > 0)
         {
             reasonCode = ActiveRunsReason;
             return false;
@@ -166,13 +182,13 @@ internal static class Bootstrap
         return true;
     }
 
-    internal static bool CanRequestDirectExit(out string reasonCode)
+    internal bool CanRequestDirectExit(out string reasonCode)
     {
         if (!CanStopServices(out reasonCode))
         {
             return false;
         }
-        if (HostCompositionRoot.Instance.Center.CurrentSystemAction is not null)
+        if (_runtime.Center.CurrentSystemAction is not null)
         {
             reasonCode = PendingSystemActionReason;
             return false;
@@ -218,25 +234,24 @@ internal static class Bootstrap
     }
 
     /// <summary>按设置启动内嵌 MCP；MCP 端口冲突不自动漂移，失败不影响 Control API。</summary>
-    public static McpHost? StartMcp()
+    public McpHost? StartMcp()
     {
-        HostCompositionRoot ctx = HostCompositionRoot.Instance;
-        if (!ctx.Settings.McpEnabled)
+        if (!_runtime.Settings.McpEnabled)
         {
             return null;
         }
         var mcp = new McpHost(
-            ctx.CreateMcpToolContext(() => TryRequestRestart(Audit.Mcp)));
-        return mcp.TryStart(ctx.Settings.McpPort) ? mcp : null;
+            _runtime.CreateMcpToolContext(() => TryRequestRestart(Audit.Mcp)));
+        return mcp.TryStart(_runtime.Settings.McpPort) ? mcp : null;
     }
 
-    internal static (HostMaintenanceLease? Lease, string? Reason) TryAcquireUpdateMaintenanceLease()
+    internal (HostMaintenanceLease? Lease, string? Reason) TryAcquireUpdateMaintenanceLease()
     {
-        HostMaintenanceLease? lease = HostCompositionRoot.Instance.Center.TryAcquireMaintenanceLease(out string reason);
+        HostMaintenanceLease? lease = _runtime.Center.TryAcquireMaintenanceLease(out string reason);
         return (lease, lease is null ? reason : null);
     }
 
-    internal static bool TryRequestDirectExit()
+    internal bool TryRequestDirectExit()
     {
         if (CanRequestDirectExit(out string reasonCode))
         {
@@ -265,7 +280,7 @@ internal static class Bootstrap
         return false;
     }
 
-    internal static bool TryRequestCompletionExit()
+    internal bool TryRequestCompletionExit()
     {
         if (!CanStopServices(out string reasonCode))
         {
@@ -280,12 +295,12 @@ internal static class Bootstrap
     }
 
     /// <summary>统一的服务重启入口，供 Web、CLI 间接调用和 MCP 共享原子维护租约。</summary>
-    internal static bool TryRequestRestart(string auditSource)
+    internal bool TryRequestRestart(string auditSource)
     {
         return RequestRestart(auditSource).Accepted;
     }
 
-    internal static RestartRequestResult RequestRestart(string auditSource)
+    internal RestartRequestResult RequestRestart(string auditSource)
     {
         if (ApplicationHost.IsWebOnly)
         {
@@ -293,7 +308,7 @@ internal static class Bootstrap
                 "operation_forbidden",
                 "当前为仅网页模式（web），不支持自动重启，请手动重启");
         }
-        int newPort = HostCompositionRoot.Instance.Settings.WebPort;
+        int newPort = _runtime.Settings.WebPort;
         HostRestartCoordinator coordinator = GetRestartCoordinator();
         RestartRequestResult result = coordinator.Request(auditSource, newPort);
         if (!result.Accepted)
@@ -304,11 +319,11 @@ internal static class Bootstrap
     }
 
     /// <summary>将自动更新闲时策略已取得的维护租约转交给统一重启流程。</summary>
-    internal static RestartRequestResult RequestRestartWithLease(
+    internal RestartRequestResult RequestRestartWithLease(
         HostMaintenanceLease lease,
         string auditSource)
     {
-        int newPort = HostCompositionRoot.Instance.Settings.WebPort;
+        int newPort = _runtime.Settings.WebPort;
         HostRestartCoordinator coordinator = GetRestartCoordinator();
         RestartRequestResult result = coordinator.RequestWithLease(auditSource, newPort, lease);
         if (!result.Accepted)
@@ -318,19 +333,19 @@ internal static class Bootstrap
         return result;
     }
 
-    private static HostRestartCoordinator GetRestartCoordinator()
+    private HostRestartCoordinator GetRestartCoordinator()
     {
-        lock (RestartSync)
+        lock (_restartSync)
         {
             _restartCoordinator ??= new HostRestartCoordinator(
                 acquireMaintenance: () =>
                 {
-                    HostMaintenanceLease? lease = HostCompositionRoot.Instance.Center.TryAcquireMaintenanceLease(out string reason);
+                    HostMaintenanceLease? lease = _runtime.Center.TryAcquireMaintenanceLease(out string reason);
                     return (lease, lease is null ? reason : null);
                 },
                 launchChild: LaunchRestartChild,
                 requestExit: () => ApplicationHost.IsWebOnly
-                    ? StartupPipeline.TryRequestWebOnlyExit()
+                    ? _requestWebOnlyExit()
                     : RequestRestartExit(),
                 delay: duration => Thread.Sleep(TestHooks.ScaledMs((int)Math.Max(1, duration.TotalMilliseconds))),
                 launchDelay: TimeSpan.FromSeconds(1));
@@ -341,7 +356,7 @@ internal static class Bootstrap
     internal static string[] BuildRestartArguments(string handoffId, bool webOnly) =>
         ApplicationHost.BuildRestartArguments(handoffId, webOnly);
 
-    private static bool LaunchRestartChild(string handoffId)
+    private bool LaunchRestartChild(string handoffId)
     {
         string exePath = Environment.ProcessPath ?? "";
         if (string.IsNullOrWhiteSpace(exePath))
@@ -363,9 +378,9 @@ internal static class Bootstrap
         return child is not null;
     }
 
-    private static bool RequestRestartExit()
+    private bool RequestRestartExit()
     {
-        return StartupPipeline.TryRequestServiceExit();
+        return _requestServiceExit();
     }
 
     /// <summary>
@@ -373,7 +388,7 @@ internal static class Bootstrap
     /// web 模式没有 WinForms 消息循环（Application.Exit 无效），直接延时退出进程——单实例互斥体随进程终止释放，
     /// apply-update 子进程接管切换。
     /// </summary>
-    internal static bool TryRequestUpdateExit()
+    internal bool TryRequestUpdateExit()
     {
         if (ApplicationHost.IsWebOnly)
         {
@@ -388,15 +403,14 @@ internal static class Bootstrap
     }
 
     /// <summary>停止调度器、配置恢复重试、Web 服务与全部插件；分步保护：单步异常不影响其余清理步骤执行。</summary>
-    public static void Shutdown(WebServer? web)
+    public void Shutdown(WebServer? web)
     {
         Shutdown(web, null);
     }
 
-    public static void Shutdown(WebServer? web, McpHost? mcp)
+    public void Shutdown(WebServer? web, McpHost? mcp, bool force = false)
     {
-        HostCompositionRoot ctx = HostCompositionRoot.Instance;
-        if (!CanStopServices(out string reasonCode))
+        if (!force && !CanStopServices(out string reasonCode))
         {
             Logger.Warn(LocalizeExitLog(
                 "exit.shutdown_blocked",
@@ -404,17 +418,18 @@ internal static class Bootstrap
                 reasonCode));
             return;
         }
+        if (Interlocked.Exchange(ref _shutdownCompleted, 1) != 0)
+        {
+            return;
+        }
+        Volatile.Write(ref _servicesStarted, 0);
+
+        // Stop producers and new admissions first. The normal caller has already
+        // waited for active runs/edit sessions through CanStopServices; force is
+        // reserved for a failed startup/Dispose path where no public work may leak.
         try
         {
-            mcp?.Stop();
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn($"[警告] MCP 服务停止异常：{ex.Message}");
-        }
-        try
-        {
-            _pluginAutoUpdateService?.Stop();
+            _pluginAutoUpdateService.Stop();
         }
         catch (Exception ex)
         {
@@ -422,7 +437,7 @@ internal static class Bootstrap
         }
         try
         {
-            ctx.Resolve<UpdateAutomationService>().Stop();
+            _updates.Stop();
         }
         catch (Exception ex)
         {
@@ -430,7 +445,7 @@ internal static class Bootstrap
         }
         try
         {
-            ctx.Scheduler.Stop();
+            _runtime.Scheduler.Stop();
         }
         catch (Exception ex)
         {
@@ -454,7 +469,15 @@ internal static class Bootstrap
         }
         try
         {
-            ctx.Plugins.ShutdownAll();
+            mcp?.Stop();
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[警告] MCP 服务停止异常：{ex.Message}");
+        }
+        try
+        {
+            _runtime.Plugins.ShutdownAll();
         }
         catch (Exception ex)
         {

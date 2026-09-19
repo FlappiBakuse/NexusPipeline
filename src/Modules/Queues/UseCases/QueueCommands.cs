@@ -11,8 +11,6 @@ using NexusPipeline.Shared.Naming;
 using NexusPipeline.Shared.Results;
 using NexusPipeline.Modules.Queues.Persistence;
 using NexusPipeline.Modules.Queues.Validation;
-using NexusPipeline.Modules.Users.Contracts;
-using NexusPipeline.Modules.Users;
 
 namespace NexusPipeline.Modules.Queues.UseCases;
 
@@ -25,7 +23,7 @@ internal sealed class QueueCommands
     private readonly IQueuePlansChanged _plansChanged;
     private readonly IQueueMutationAdmission _admission;
     private readonly IScriptRepository _scripts;
-    private readonly IUserSnapshotReader _users;
+    private readonly IQueueUserParticipationReader _users;
     private readonly IPluginAvailability _pluginAvailability;
     private readonly IQueueDataMaintenance _dataMaintenance;
 
@@ -36,7 +34,7 @@ internal sealed class QueueCommands
         IQueuePlansChanged plansChanged,
         IQueueMutationAdmission admission,
         IScriptRepository scripts,
-        IUserSnapshotReader users,
+        IQueueUserParticipationReader users,
         IPluginAvailability pluginAvailability,
         IQueueDataMaintenance dataMaintenance)
     {
@@ -68,7 +66,6 @@ internal sealed class QueueCommands
                 _state.Mutate(queues =>
                 {
                     IReadOnlyList<ScriptInstance> scripts = _scripts.Snapshot();
-                    IReadOnlyList<NexusUser> users = _users.Snapshot();
                     error = Limits.CheckQueueCount(queues.Count)
                         ?? Limits.CheckNameBytes(candidate.Name, AppFixedLimits.MaxEntityNameBytes, "队列名称");
                     if (error is null && EntityNameRules.HasConflict(queues, candidate.Name, queue => queue.Name))
@@ -78,7 +75,7 @@ internal sealed class QueueCommands
                     }
                     error ??= Limits.CheckTimeSets(candidate.TimeSets.Count)
                         ?? CheckTimeFormat(candidate)
-                        ?? Limits.CheckQueueTotalUsers(QueueCompositionPolicy.QueueTotalUsers(scripts, users, candidate))
+                        ?? Limits.CheckQueueTotalUsers(QueueCompositionPolicy.QueueTotalUsers(scripts, _users, candidate))
                         ?? CheckQueuePluginAvailability(scripts, candidate)
                         ?? QueueCompositionPolicy.CheckQueueMix(scripts, candidate);
                     if (error is null)
@@ -140,7 +137,6 @@ internal sealed class QueueCommands
                     _state.Mutate(queues =>
                     {
                         IReadOnlyList<ScriptInstance> scripts = _scripts.Snapshot();
-                        IReadOnlyList<NexusUser> users = _users.Snapshot();
                         existing = queues.FirstOrDefault(queue =>
                             string.Equals(queue.Id, queueId, StringComparison.OrdinalIgnoreCase));
                         if (existing is null)
@@ -163,7 +159,7 @@ internal sealed class QueueCommands
                             }
                             error ??= Limits.CheckTimeSets(candidate.TimeSets.Count)
                                 ?? CheckTimeFormat(candidate)
-                                ?? Limits.CheckQueueTotalUsers(QueueCompositionPolicy.QueueTotalUsers(scripts, users, candidate))
+                                ?? Limits.CheckQueueTotalUsers(QueueCompositionPolicy.QueueTotalUsers(scripts, _users, candidate))
                                 ?? CheckQueuePluginAvailability(scripts, candidate)
                                 ?? QueueCompositionPolicy.CheckQueueMix(scripts, candidate);
                         }

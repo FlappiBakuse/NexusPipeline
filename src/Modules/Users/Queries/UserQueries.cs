@@ -1,6 +1,3 @@
-using NexusPipeline.Modules.Queues;
-using NexusPipeline.Modules.Queues.Contracts;
-using NexusPipeline.Modules.Scheduling;
 using NexusPipeline.Modules.Scripts.Queries;
 using NexusPipeline.Modules.Scripts;
 using NexusPipeline.Modules.Users.Bindings;
@@ -56,29 +53,25 @@ internal sealed record UserReadModel(
 internal sealed class UserQueries
 {
     private readonly IUserSnapshotReader _users;
-    private readonly IQueueRepository _queues;
     private readonly ScriptQueries _scripts;
-    private readonly Scheduler _scheduler;
+    private readonly IUserScheduleProjection _schedule;
 
     public UserQueries(
         IUserSnapshotReader users,
-        IQueueRepository queues,
         ScriptQueries scripts,
-        Scheduler scheduler)
+        IUserScheduleProjection schedule)
     {
         _users = users;
-        _queues = queues;
         _scripts = scripts;
-        _scheduler = scheduler;
+        _schedule = schedule;
     }
 
     public IReadOnlyList<UserReadModel> List()
     {
         List<ScriptInstance> scripts = _scripts.ListEffective().ToList();
-        List<DispatchQueue> queues = _queues.Snapshot().ToList();
         return _users.Snapshot()
             .OrderBy(user => user.Index)
-            .Select(user => Build(user, scripts, queues))
+            .Select(user => Build(user, scripts))
             .ToList();
     }
 
@@ -96,7 +89,7 @@ internal sealed class UserQueries
         {
             return null;
         }
-        return Build(user, _scripts.ListEffective(), _queues.Snapshot());
+        return Build(user, _scripts.ListEffective());
     }
 
     public IReadOnlyList<UserBindingReadModel>? ListBindings(string userId)
@@ -111,10 +104,9 @@ internal sealed class UserQueries
 
     private UserReadModel Build(
         NexusUser user,
-        IReadOnlyList<ScriptInstance> scripts,
-        IReadOnlyList<DispatchQueue> queues)
+        IReadOnlyList<ScriptInstance> scripts)
     {
-        (string QueueName, DateTime TriggerTime)? next = _scheduler.NextTriggerForUser(user, queues);
+        (string QueueName, DateTime TriggerTime)? next = _schedule.NextTriggerForUser(user);
         List<UserBindingReadModel> bindings = user.Bindings
             .Select(binding => BuildBinding(user, binding, scripts))
             .ToList();

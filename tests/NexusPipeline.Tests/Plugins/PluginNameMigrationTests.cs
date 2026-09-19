@@ -2,6 +2,7 @@ using System.Text.Json.Nodes;
 using Xunit;
 using NexusPipeline.ControlPlane.Http;
 using NexusPipeline.Host.Composition;
+using NexusPipeline.Host.Initialization;
 using NexusPipeline.Modules.Notifications;
 using NexusPipeline.Modules.Plugins.DataSpecialized;
 using NexusPipeline.Modules.Plugins.Runtime;
