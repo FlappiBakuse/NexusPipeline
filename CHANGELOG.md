@@ -2,7 +2,9 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本使用 `major.minor.patch`、`-beta.N` 或 `-rc.N` 的受限格式；GitHub Release 分类遵循宿主项目发布策略：`major=0` 或带 `-beta.N` / `-rc.N` 后缀的版本为 Pre-release，`major>=1` 且无后缀的版本为正式 Release。
 
-## v0.16.7（Pre-release，待发布）
+## v0.16.7（Pre-release）
+
+发布日期：2026-09-20。发行资产见 [v0.16.7](https://github.com/FlappiBakuse/NexusPipeline/releases/tag/v0.16.7)。
 
 ### 架构与插件通道
 
@@ -14,6 +16,8 @@
 - 功能测试统一使用隔离 Test Host，完整资格固定执行 H1–H5，包括更新与执行真实计时验收；正式发行仍要求管理员运行。
 - 架构按 production/test-host 独立查环，测试实例显式释放；测试进程按创建身份确权，超时有界收尾。
 - 新检出自动准备测试依赖；发布器独立核验生产 EXE、包边界及远端下载字节，资格证明绑定精确提交和 App。
+- 修复短脚本退出与最终日志读取的时序问题，以及测试目录准备时进程已退出的清理竞态。
+- 两仓库专用 App、受保护 Environment 和 main Ruleset 已启用；Host Release、插件 stable/develop 发布及真实预览下载安装闭环通过。发布资产命名和纯 SHA 文件与更新器契约一致。
 
 ## v0.16.6（Pre-release）
 
