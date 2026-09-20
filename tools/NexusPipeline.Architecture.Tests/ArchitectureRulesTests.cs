@@ -39,6 +39,20 @@ public sealed class ArchitectureRulesTests
     }
 
     [Fact]
+    public void TarjanDoesNotMergeProductionAndTestHostModes()
+    {
+        var edges = new[]
+        {
+            Edge("Settings", "Plugins", mode: "production"),
+            Edge("Plugins", "Settings", mode: "test-host"),
+        };
+
+        var components = BoundaryRules.FindStronglyConnectedComponents(edges);
+
+        Assert.DoesNotContain(components, component => component.SetEquals(new[] { "Settings", "Plugins" }));
+    }
+
+    [Fact]
     public void StableMethodIdentityIncludesContainingTypeAndParameterTypes()
     {
         var tree = CSharpSyntaxTree.ParseText("namespace Demo; class Sample { public void Run(int value) { } }");
@@ -70,10 +84,10 @@ public sealed class ArchitectureRulesTests
             ProjectKind = "host",
         };
 
-    private static DependencyEdge Edge(string source, string target)
+    private static DependencyEdge Edge(string source, string target, string mode = "production")
         => new("src/test.cs", source, "source", "target", target, "test", 1)
         {
-            Mode = "production",
+            Mode = mode,
             ProjectKind = "host",
         };
 }

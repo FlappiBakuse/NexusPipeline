@@ -75,7 +75,6 @@ public static class BoundaryRules
         }
 
         var declarationGroups = declarations
-            .Where(declaration => !IsTestProject(declaration.ProjectKind))
             .GroupBy(declaration => (declaration.Mode, declaration.ProjectKind, declaration.SymbolId));
         foreach (var duplicate in declarationGroups.Where(group => group.Count() > 1))
         {
@@ -135,18 +134,22 @@ public static class BoundaryRules
             }
         }
 
-        foreach (var cycle in FindStronglyConnectedComponents(edges.Where(edge => !IsTestProject(edge.ProjectKind))))
+        foreach (var modeEdges in edges
+            .Where(edge => !IsTestProject(edge.ProjectKind))
+            .GroupBy(edge => edge.Mode, StringComparer.Ordinal))
         {
-            if (cycle.Count < 2) continue;
-            foreach (var edge in edges.Where(edge => cycle.Contains(edge.SourceOwner)
-                && cycle.Contains(edge.TargetOwner)
-                && edge.SourceOwner != edge.TargetOwner
-                && !IsTestProject(edge.ProjectKind)))
+            foreach (var cycle in FindStronglyConnectedComponents(modeEdges))
             {
-                var model = models.FirstOrDefault(item => item.FilePath == edge.SourceFile && item.Mode == edge.Mode && item.ProjectKind == edge.ProjectKind);
-                if (model is null) continue;
-                Add("A008", model, FindNode(model, edge.Line), edge.SourceSymbol, edge.TargetSymbol,
-                    $"Module dependency cycle: {string.Join(" -> ", cycle.OrderBy(item => item, StringComparer.Ordinal))}", edge.TargetSymbol);
+                if (cycle.Count < 2) continue;
+                foreach (var edge in modeEdges.Where(edge => cycle.Contains(edge.SourceOwner)
+                    && cycle.Contains(edge.TargetOwner)
+                    && edge.SourceOwner != edge.TargetOwner))
+                {
+                    var model = models.FirstOrDefault(item => item.FilePath == edge.SourceFile && item.Mode == edge.Mode && item.ProjectKind == edge.ProjectKind);
+                    if (model is null) continue;
+                    Add("A008", model, FindNode(model, edge.Line), edge.SourceSymbol, edge.TargetSymbol,
+                        $"Module dependency cycle: {string.Join(" -> ", cycle.OrderBy(item => item, StringComparer.Ordinal))}", edge.TargetSymbol);
+                }
             }
         }
 
@@ -161,32 +164,36 @@ public static class BoundaryRules
 
     public static IReadOnlyList<IReadOnlySet<string>> FindStronglyConnectedComponents(IEnumerable<DependencyEdge> edges)
     {
-        var graph = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        var graph = new Dictionary<(string Mode, string Owner), HashSet<(string Mode, string Owner)>>();
         foreach (var edge in edges.Where(edge => IsModule(edge.SourceOwner) && IsModule(edge.TargetOwner)))
         {
-            if (!graph.TryGetValue(edge.SourceOwner, out var targets))
+            var source = (edge.Mode, edge.SourceOwner);
+            var target = (edge.Mode, edge.TargetOwner);
+            if (!graph.TryGetValue(source, out var targets))
             {
-                targets = new HashSet<string>(StringComparer.Ordinal);
-                graph[edge.SourceOwner] = targets;
+                targets = new HashSet<(string Mode, string Owner)>();
+                graph[source] = targets;
             }
-            targets.Add(edge.TargetOwner);
-            graph.TryAdd(edge.TargetOwner, new HashSet<string>(StringComparer.Ordinal));
+            targets.Add(target);
+            graph.TryAdd(target, new HashSet<(string Mode, string Owner)>());
         }
 
         var index = 0;
-        var stack = new Stack<string>();
-        var onStack = new HashSet<string>(StringComparer.Ordinal);
-        var indices = new Dictionary<string, int>(StringComparer.Ordinal);
-        var lowLinks = new Dictionary<string, int>(StringComparer.Ordinal);
+        var stack = new Stack<(string Mode, string Owner)>();
+        var onStack = new HashSet<(string Mode, string Owner)>();
+        var indices = new Dictionary<(string Mode, string Owner), int>();
+        var lowLinks = new Dictionary<(string Mode, string Owner), int>();
         var components = new List<IReadOnlySet<string>>();
 
-        void Visit(string node)
+        void Visit((string Mode, string Owner) node)
         {
             indices[node] = index;
             lowLinks[node] = index++;
             stack.Push(node);
             onStack.Add(node);
-            foreach (var target in graph[node].OrderBy(item => item, StringComparer.Ordinal))
+            foreach (var target in graph[node]
+                .OrderBy(item => item.Mode, StringComparer.Ordinal)
+                .ThenBy(item => item.Owner, StringComparer.Ordinal))
             {
                 if (!indices.ContainsKey(target))
                 {
@@ -201,17 +208,19 @@ public static class BoundaryRules
 
             if (lowLinks[node] != indices[node]) return;
             var component = new HashSet<string>(StringComparer.Ordinal);
-            string value;
+            (string Mode, string Owner) value;
             do
             {
                 value = stack.Pop();
                 onStack.Remove(value);
-                component.Add(value);
-            } while (!string.Equals(value, node, StringComparison.Ordinal));
+                component.Add(value.Owner);
+            } while (value != node);
             components.Add(component);
         }
 
-        foreach (var node in graph.Keys.OrderBy(item => item, StringComparer.Ordinal))
+        foreach (var node in graph.Keys
+            .OrderBy(item => item.Mode, StringComparer.Ordinal)
+            .ThenBy(item => item.Owner, StringComparer.Ordinal))
         {
             if (!indices.ContainsKey(node)) Visit(node);
         }
@@ -224,6 +233,7 @@ public static class BoundaryRules
         Action<string, SyntaxModelFact, SyntaxNode?, string, string, string, string?> add)
     {
         if (model.FilePath.EndsWith("/GlobalUsings.cs", StringComparison.OrdinalIgnoreCase)) return;
+        if (model.FilePath.EndsWith("/AssemblyInfo.cs", StringComparison.OrdinalIgnoreCase)) return;
         var root = model.Tree.GetRoot();
         var namespaces = root.DescendantNodes().OfType<BaseNamespaceDeclarationSyntax>().ToArray();
         var expected = ExpectedNamespace(model.FilePath);
@@ -252,6 +262,10 @@ public static class BoundaryRules
         SyntaxModelFact model,
         Action<string, SyntaxModelFact, SyntaxNode?, string, string, string, string?> add)
     {
+        // Tests may resolve the explicit composition fixture to exercise a real
+        // host graph. Locator rules constrain production/control-plane code;
+        // test calls are intentionally outside the product dependency policy.
+        if (IsTestProject(model.ProjectKind)) return;
         if (model.FilePath.StartsWith("src/Host/Composition/", StringComparison.Ordinal)
             || model.FilePath.Equals("src/Host/Composition", StringComparison.Ordinal)) return;
         foreach (var node in model.Tree.GetRoot().DescendantNodes())
@@ -363,6 +377,10 @@ public static class BoundaryRules
         if (parts[0] == "tests" && parts.Length >= 3 && parts[1] == "NexusPipeline.Tests")
         {
             return string.Join('.', new[] { "NexusPipeline", "Tests" }.Concat(parts.Skip(2).SkipLast(1)));
+        }
+        if (parts[0] == "tests" && parts.Length >= 4 && parts[1] == "fixtures")
+        {
+            return string.Join('.', new[] { parts[2] }.Concat(parts.Skip(3).SkipLast(1)));
         }
         return null;
     }

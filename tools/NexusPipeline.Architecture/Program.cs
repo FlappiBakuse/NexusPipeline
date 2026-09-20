@@ -131,16 +131,12 @@ internal static class Program
                 collection.Diagnostics.Select(diagnostic => $"{diagnostic.FilePath}:{diagnostic.Line}: {diagnostic.Message}")));
         }
 
-        var businessModels = models.Where(model => !IsTestProject(model.ProjectKind)).ToArray();
-        var businessDeclarations = declarations.Where(declaration => !IsTestProject(declaration.ProjectKind)).ToArray();
-        var businessEdges = collection.Edges.Where(edge => !IsTestProject(edge.ProjectKind)).ToArray();
-        var violations = BoundaryRules.Evaluate(businessModels, businessDeclarations, businessEdges, owners);
+        // Structure/locator rules must inspect both product and test-host graphs.
+        // Product dependency rules are filtered inside BoundaryRules so test edges
+        // cannot create production boundary debt.
+        var violations = BoundaryRules.Evaluate(models, declarations, collection.Edges, owners);
         return new AnalysisResult(root, mode, facts, models, declarations, collection.Edges, violations, loaded.WorkspaceDiagnostics);
     }
-
-    private static bool IsTestProject(string projectKind)
-        => projectKind.Equals("tests", StringComparison.OrdinalIgnoreCase)
-            || projectKind.StartsWith("test-", StringComparison.OrdinalIgnoreCase);
 
     private static object BuildReport(AnalysisResult analysis, string status, DebtComparison? comparison = null)
         => new
