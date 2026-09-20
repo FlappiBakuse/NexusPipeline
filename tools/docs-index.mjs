@@ -121,7 +121,11 @@ function runGit(checkout, args) {
 function resolveGitRevision(checkout, ref) {
   if (!ref || ref.startsWith("-") || /\s/u.test(ref)) return "";
   const result = runGit(checkout, ["rev-parse", "--verify", `${ref}^{commit}`]);
-  return result?.status === 0 ? String(result.stdout || "").trim() : "";
+  if (result?.status === 0) return String(result.stdout || "").trim();
+  // Detached CI checkouts may only expose the remote-tracking branch.
+  // Resolve that exact branch; never substitute the candidate HEAD.
+  const remote = runGit(checkout, ["rev-parse", "--verify", `refs/remotes/origin/${ref}^{commit}`]);
+  return remote?.status === 0 ? String(remote.stdout || "").trim() : "";
 }
 
 function listGitPaths(checkout, revision) {
