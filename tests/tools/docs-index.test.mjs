@@ -73,10 +73,20 @@ test("cross-repository links resolve fixed historical objects and source line an
     runGit(["add", "."]);
     runGit(["commit", "-qm", "历史对象"]);
     const historicalSha = runGit(["rev-parse", "HEAD"]);
+    runGit(["update-ref", "refs/remotes/origin/docs-baseline", historicalSha]);
 
     fs.writeFileSync(path.join(checkout, "docs/guide.md"), "# 当前标题\n\n当前说明。\n", "utf8");
     runGit(["add", "."]);
     runGit(["commit", "-qm", "当前对象"]);
+    runGit(["checkout", "--detach"]);
+
+    const remoteResult = validateCrossRepositoryLinks([{
+      file: "remote-fixture.md",
+      text: "[远端分支](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/docs-baseline/docs/guide.md#历史标题)",
+    }], { root: fixtureRoot, workspaceRoot: fixtureRoot });
+    assert.deepEqual(remoteResult.issues, []);
+    assert.equal(remoteResult.checked[0].resolvedSha, historicalSha);
+    assert.notEqual(runGit(["rev-parse", "HEAD"]), historicalSha);
 
     const result = validateCrossRepositoryLinks([
       {
