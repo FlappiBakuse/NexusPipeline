@@ -223,6 +223,11 @@ jobs:
           expected="$(tr -d '\r\n' < "$sha_asset")"
           actual="$(sha256sum "$zip_asset" | cut -d' ' -f1)"
           test "$expected" = "$actual"
+          python "$GITHUB_WORKSPACE/NexusPipeline/tools/host_release.py" verify-package \
+            --package "$zip_asset" \
+            --metadata "$metadata" \
+            --expected-source-sha "$SOURCE_SHA" \
+            --expected-tag "$TAG"
           api="https://api.github.com/repos/$GH_REPO/releases/tags/$TAG"
           response_file="$(mktemp)"
           status="$(curl -sS -o "$response_file" -w '%{http_code}' -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "$api")"
@@ -249,6 +254,24 @@ jobs:
             else
               gh release upload "$TAG" "$asset" --repo "$GH_REPO"
             fi
+          done
+          release_json="$(gh api "repos/$GH_REPO/releases/$release_id")"
+          for asset in "$zip_asset" "$sha_asset"; do
+            asset_url="$(jq -r --arg name "$asset" '.assets[]? | select(.name == $name) | .url' <<<"$release_json" | head -n 1)"
+            test -n "$asset_url"
+            received="$(mktemp)"
+            curl -sS -f -L -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/octet-stream' "$asset_url" -o "$received"
+            cmp -s "$received" "$asset" || { echo "远端资产下载后字节不一致：$asset" >&2; exit 1; }
+            if [ "$asset" = "$zip_asset" ]; then
+              python "$GITHUB_WORKSPACE/NexusPipeline/tools/host_release.py" verify-package \
+                --package "$received" \
+                --metadata "$metadata" \
+                --expected-source-sha "$SOURCE_SHA" \
+                --expected-tag "$TAG"
+            else
+              test "$(sha256sum "$received" | cut -d' ' -f1)" = "$(sha256sum "$asset" | cut -d' ' -f1)"
+            fi
+            rm -f "$received"
           done
           gh api --method PATCH "repos/$GH_REPO/releases/$release_id" -F draft=false
           test "$(gh api "repos/$GH_REPO/releases/$release_id" --jq '.draft')" = false

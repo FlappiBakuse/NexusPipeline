@@ -349,6 +349,10 @@ internal static class StartupPipeline
         try
         {
             File.WriteAllText(AppPaths.ServicePidPath, Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture) + Environment.NewLine);
+#if NEXUS_TEST_HOST
+            string? exitFile = TestHostExitFilePath();
+            if (exitFile is not null) WriteTestHostIdentity(exitFile);
+#endif
         }
         catch (Exception ex)
         {
@@ -432,13 +436,33 @@ internal static class StartupPipeline
         return string.IsNullOrWhiteSpace(value) ? null : value;
     }
 
+    private static void WriteTestHostIdentity(string exitFile)
+    {
+        string? nonce = Environment.GetEnvironmentVariable("NEXUS_TEST_OWNERSHIP_NONCE");
+        if (!string.IsNullOrWhiteSpace(nonce))
+        {
+            using var process = System.Diagnostics.Process.GetCurrentProcess();
+            string receiptPath = exitFile + ".identity.json";
+            string temporaryPath = receiptPath + "." + process.Id + ".tmp";
+            Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(receiptPath))!);
+            File.WriteAllText(temporaryPath, System.Text.Json.JsonSerializer.Serialize(new
+            {
+                nonce,
+                runId = Environment.GetEnvironmentVariable("NEXUS_TEST_RUN_ID") ?? "",
+                pid = process.Id,
+                executablePath = Environment.ProcessPath,
+                processStartTimeUtc = process.StartTime.ToUniversalTime().ToString("O"),
+                instanceId = HostInstance.Id,
+                restartHandoffId = HostInstance.RestartHandoffId,
+            }));
+            File.Move(temporaryPath, receiptPath, overwrite: true);
+        }
+    }
+
     private static void StartTestHostExitMonitor()
     {
         string? exitFile = TestHostExitFilePath();
-        if (exitFile is null)
-        {
-            return;
-        }
+        if (exitFile is null) return;
         _ = Task.Run(async () =>
         {
             while (true)

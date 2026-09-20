@@ -132,70 +132,155 @@ export function copyReleaseArtifacts(releaseDir, runtimeDir, { pluginDirectories
   }
 }
 
-export function createRunMarker(markerPath, executablePath, pid) {
-  const identity = readProcessIdentity(pid);
+const spawnedRegistrations = new WeakMap();
+
+export function createRunMarker(markerPath, executablePath, child, { nonce = randomUUID(), identityFile = null, handoffExecutablePath = executablePath, runId = process.env.NEXUS_TEST_RUN_ID || "", identityReader = readProcessIdentity } = {}) {
+  const pid = child?.pid;
   const marker = {
     schemaVersion: 1,
-    nonce: randomUUID(),
+    nonce,
+    identityFile,
+    runId,
     executablePath: path.normalize(path.resolve(executablePath)),
+    handoffExecutablePath: path.normalize(path.resolve(handoffExecutablePath)),
     pid: Number(pid),
     startedAtUtc: new Date().toISOString(),
-    processStartTimeUtc: identity?.startTime || "",
+    processStartTimeUtc: "",
   };
   if (!Number.isInteger(marker.pid) || marker.pid <= 0) throw new Error(`非法运行 PID：${pid}`);
   fs.mkdirSync(path.dirname(markerPath), { recursive: true });
   fs.writeFileSync(markerPath, `${JSON.stringify(marker, null, 2)}\n`, "utf8");
+  // This registration is tied to the live ChildProcess, never to a PID read
+  // later during cleanup. Once captured, creation time is immutable.
+  const registration = (async () => {
+    const deadline = Date.now() + 5000;
+    do {
+      if (child.exitCode !== null || child.signalCode !== null) return;
+      const identity = identityReader(pid);
+      if (child.exitCode !== null || child.signalCode !== null) return;
+      if (identity?.startTime && sameExecutable(identity.executablePath, executablePath)) {
+        const current = readRunMarker(markerPath);
+        if (current?.nonce !== nonce || current.pid !== pid) throw new Error("启动身份登记时 marker 已变化");
+        fs.writeFileSync(markerPath, `${JSON.stringify({ ...marker, processStartTimeUtc: identity.startTime }, null, 2)}\n`, "utf8");
+        return;
+      }
+      await sleep(50);
+    } while (Date.now() < deadline);
+    throw new Error(`无法确认本次子进程启动身份：PID=${pid}`);
+  })();
+  // Keep rejection observable by waitForRunMarker without unhandled rejection.
+  spawnedRegistrations.set(child, registration.then(() => null, error => error));
   return marker;
+}
+
+export async function waitForRunMarker(child) {
+  const error = child ? await spawnedRegistrations.get(child) : null;
+  if (error) throw error;
 }
 
 export function readRunMarker(markerPath) {
   try {
     const marker = JSON.parse(fs.readFileSync(markerPath, "utf8"));
-    if (marker?.schemaVersion !== 1 || !marker.nonce || !Number.isInteger(marker.pid)) return null;
+    if (marker?.schemaVersion !== 1 || !marker.nonce || !Number.isInteger(marker.pid) || marker.pid <= 0) return null;
     return marker;
   } catch {
     return null;
   }
 }
 
-export function ownsProcess(markerPath, pid) {
-  const marker = readRunMarker(markerPath);
-  if (!marker || marker.pid !== Number(pid)) return false;
-  const identity = readProcessIdentity(pid);
-  if (!identity || !identity.executablePath) return false;
-  if (path.normalize(path.resolve(identity.executablePath)).toLowerCase()
-      !== path.normalize(path.resolve(marker.executablePath)).toLowerCase()) {
-    return false;
-  }
-  return !marker.processStartTimeUtc
-    || !identity.startTime
-    || marker.processStartTimeUtc === identity.startTime;
+export const OWNERSHIP = Object.freeze({
+  OWNED: "OWNED",
+  NOT_OWNED: "NOT_OWNED",
+  UNKNOWN: "UNKNOWN",
+  EXITED: "EXITED",
+});
+
+function sameExecutable(left, right) {
+  if (typeof left !== "string" || typeof right !== "string" || !left || !right) return false;
+  try {
+    return fs.realpathSync.native(left).toLowerCase() === fs.realpathSync.native(right).toLowerCase();
+  } catch { return false; }
 }
 
-/** 重启会把同一 runtime executable 作为旧宿主的子进程拉起；用父 PID + 完整路径核对交接身份。 */
-export function ownsRestartedProcess(markerPath, pid) {
+/** Register only a process presenting this run's receipt and matching OS identity. */
+export function registerHandoffProcess(markerPath, pid, { identityReader = readProcessIdentity, expectedInstanceId, expectedHandoffId } = {}) {
   const marker = readRunMarker(markerPath);
-  if (!marker || marker.pid === Number(pid)) return false;
-  const identity = readProcessIdentity(pid);
-  if (!identity || identity.parentPid !== marker.pid || !identity.executablePath) return false;
-  return path.normalize(path.resolve(identity.executablePath)).toLowerCase()
-    === path.normalize(path.resolve(marker.executablePath)).toLowerCase();
+  if (!marker || pid === marker.pid || marker.handoffProcesses?.some(item => item.pid === pid)) return;
+  let receipt;
+  try { receipt = JSON.parse(fs.readFileSync(marker.identityFile, "utf8")); } catch { return; }
+  let identity;
+  try { identity = identityReader(pid); } catch { return; }
+  if (!receipt?.instanceId || receipt.nonce !== marker.nonce || receipt.runId !== marker.runId
+      || receipt.pid !== pid || !receipt.processStartTimeUtc || !identity?.startTime
+      || receipt.processStartTimeUtc !== identity.startTime
+      || !sameExecutable(identity.executablePath, marker.handoffExecutablePath || marker.executablePath)
+      || !sameExecutable(receipt.executablePath, marker.handoffExecutablePath || marker.executablePath)
+      || (expectedInstanceId && receipt.instanceId !== expectedInstanceId)
+      || (expectedHandoffId && receipt.restartHandoffId !== expectedHandoffId)) return;
+  fs.writeFileSync(markerPath, `${JSON.stringify({ ...marker, handoffProcesses: [...(marker.handoffProcesses || []), receipt] }, null, 2)}\n`, "utf8");
+}
+
+function processAlive(pid, reader) {
+  try {
+    return Boolean(reader(Number(pid)));
+  } catch {
+    return null;
+  }
+}
+
+export function inspectProcessOwnership(markerPath, pid, { identityReader = readProcessIdentity, aliveReader = isProcessAliveSafe } = {}) {
+  const marker = readRunMarker(markerPath);
+  const numericPid = Number(pid);
+  if (!Number.isInteger(numericPid) || numericPid <= 0) return OWNERSHIP.UNKNOWN;
+  const alive = processAlive(numericPid, aliveReader);
+  if (alive === false) return OWNERSHIP.EXITED;
+  if (alive === null) return OWNERSHIP.UNKNOWN;
+  if (!marker || marker.pid !== numericPid) return OWNERSHIP.UNKNOWN;
+  let identity;
+  try { identity = identityReader(numericPid); } catch { return OWNERSHIP.UNKNOWN; }
+  if (!identity?.executablePath || !marker.executablePath || !marker.processStartTimeUtc || !identity.startTime) return OWNERSHIP.UNKNOWN;
+  if (!sameExecutable(identity.executablePath, marker.executablePath)) return OWNERSHIP.NOT_OWNED;
+  return marker.processStartTimeUtc === identity.startTime ? OWNERSHIP.OWNED : OWNERSHIP.NOT_OWNED;
+}
+
+/** Parent PID alone never authorizes a restarted process. */
+export function inspectRestartedProcessOwnership(markerPath, pid, { identityReader = readProcessIdentity, aliveReader = isProcessAliveSafe } = {}) {
+  return inspectHandoffProcessOwnership(markerPath, pid, { identityReader, aliveReader });
 }
 
 /** 重启交接确认后记录的新 PID：完整路径和 OS 启动时间均来自本次 status 已核验实例。 */
-export function ownsHandoffProcess(markerPath, pid) {
+export function inspectHandoffProcessOwnership(markerPath, pid, { identityReader = readProcessIdentity, aliveReader = isProcessAliveSafe } = {}) {
   const marker = readRunMarker(markerPath);
-  const handoff = marker?.handoffProcesses?.find(item => item?.pid === Number(pid));
-  if (!handoff || !handoff.executablePath) return false;
-  const identity = readProcessIdentity(pid);
-  if (!identity?.executablePath
-      || path.normalize(path.resolve(identity.executablePath)).toLowerCase()
-        !== path.normalize(path.resolve(handoff.executablePath)).toLowerCase()) {
-    return false;
-  }
-  return !handoff.processStartTimeUtc
-    || !identity.startTime
-    || handoff.processStartTimeUtc === identity.startTime;
+  const numericPid = Number(pid);
+  if (!Number.isInteger(numericPid) || numericPid <= 0) return OWNERSHIP.UNKNOWN;
+  const alive = processAlive(numericPid, aliveReader);
+  if (alive === false) return OWNERSHIP.EXITED;
+  if (alive === null) return OWNERSHIP.UNKNOWN;
+  const handoff = marker?.handoffProcesses?.find(item => item?.pid === numericPid);
+  if (!handoff || !handoff.executablePath || !handoff.processStartTimeUtc) return OWNERSHIP.UNKNOWN;
+  let identity;
+  try { identity = identityReader(numericPid); } catch { return OWNERSHIP.UNKNOWN; }
+  if (!identity?.executablePath || !identity.startTime) return OWNERSHIP.UNKNOWN;
+  if (!sameExecutable(identity.executablePath, handoff.executablePath)) return OWNERSHIP.NOT_OWNED;
+  return handoff.processStartTimeUtc === identity.startTime ? OWNERSHIP.OWNED : OWNERSHIP.NOT_OWNED;
+}
+
+export function ownsProcess(markerPath, pid) {
+  return inspectProcessOwnership(markerPath, pid) === OWNERSHIP.OWNED;
+}
+
+export function ownsRestartedProcess(markerPath, pid) {
+  return inspectRestartedProcessOwnership(markerPath, pid) === OWNERSHIP.OWNED;
+}
+
+export function ownsHandoffProcess(markerPath, pid) {
+  return inspectHandoffProcessOwnership(markerPath, pid) === OWNERSHIP.OWNED;
+}
+
+function runtimeOwnershipStatus(markerPath, marker, pid) {
+  if (Number(pid) === marker.pid) return inspectProcessOwnership(markerPath, pid);
+  if (marker.handoffProcesses?.some(item => item?.pid === Number(pid))) return inspectHandoffProcessOwnership(markerPath, pid);
+  return inspectRestartedProcessOwnership(markerPath, pid);
 }
 
 export async function ensureOwnedRuntimeDirectory(runtimeDir, markerPath, pidFilePath) {
@@ -203,7 +288,7 @@ export async function ensureOwnedRuntimeDirectory(runtimeDir, markerPath, pidFil
     fs.mkdirSync(runtimeDir, { recursive: true });
     return;
   }
-  const marker = readRunMarker(markerPath);
+  let marker = readRunMarker(markerPath);
   if (!marker) {
     throw new Error(`拒绝清理缺少本次运行 marker 的目录：${runtimeDir}`);
   }
@@ -212,16 +297,23 @@ export async function ensureOwnedRuntimeDirectory(runtimeDir, markerPath, pidFil
     : [];
   const pids = [...new Set([marker.pid, readPidFile(pidFilePath), ...handoffPids]
     .filter(pid => Number.isInteger(pid) && pid > 0))];
+  for (const pid of pids) registerHandoffProcess(markerPath, pid);
+  marker = readRunMarker(markerPath);
   for (const pid of pids) {
     if (!isProcessAliveSafe(pid)) continue;
-    if (!ownsProcess(markerPath, pid)
-        && !ownsRestartedProcess(markerPath, pid)
-        && !ownsHandoffProcess(markerPath, pid)) {
-      throw new Error(`拒绝清理 marker 未匹配的运行进程：PID=${pid}`);
+    const status = runtimeOwnershipStatus(markerPath, marker, pid);
+    if (status !== OWNERSHIP.OWNED) {
+      throw new Error(`拒绝清理运行进程：PID=${pid}，ownership=${status}`);
     }
-    killProcessTree(pid);
+    if (!killProcessTree(pid)) {
+      throw new Error(`运行进程树终止未确认：PID=${pid}`);
+    }
   }
-  for (const pid of pids) await waitForExit(pid, 10000, 250);
+  for (const pid of pids) {
+    if (!await waitForExit(pid, 10000, 250)) {
+      throw new Error(`运行进程退出未确认，保留现场：PID=${pid}`);
+    }
+  }
   fs.rmSync(runtimeDir, { recursive: true, force: true, maxRetries: 120, retryDelay: 250 });
   fs.mkdirSync(runtimeDir, { recursive: true });
 }
@@ -244,11 +336,24 @@ export function installEmulatorStubs(runtimeDir, fixtureDir) {
  * 受控停止本层拉起的服务进程：Test Host 模式先写退出文件，
  * 再走 stdin EOF 退出，最后按 service.pid 与子进程 PID 做隔离进程树清理。
  */
-export async function stopSpawnedService({ child, exitFile, pidFilePath, markerPath, exitWaitPollMs = 250 }) {
+export async function stopSpawnedService({ child, exitFile, pidFilePath, markerPath, exitWaitPollMs = 250, identityReader = readProcessIdentity, aliveReader = isProcessAliveSafe, terminator = killProcessTree, exitWaiter = waitForExit }) {
+  await waitForRunMarker(child);
   // 在发出退出信号前固定当前 service.pid；服务优雅退出时可能先删除 PID 文件，
   // 仅在等待 child 后重新读取会漏掉仍在收尾的更新重拉服务。
   const initialMarked = readPidFile(pidFilePath);
   const hasKnownProcess = Number.isInteger(initialMarked) || Number.isInteger(child?.pid);
+  let marker = markerPath ? readRunMarker(markerPath) : null;
+  const candidatePids = [...new Set([initialMarked, child?.pid].filter(pid => Number.isInteger(pid) && pid > 0))];
+  if (candidatePids.some(pid => aliveReader(pid)) && (!markerPath || !marker)) {
+    throw new Error(`拒绝清理缺少有效运行 marker 的进程：markerPath=${markerPath || "missing"}`);
+  }
+  for (const pid of candidatePids) {
+    if (!aliveReader(pid)) continue;
+    registerHandoffProcess(markerPath, pid, { identityReader });
+    const inspector = pid === marker.pid ? inspectProcessOwnership : inspectHandoffProcessOwnership;
+    const status = inspector(markerPath, pid, { identityReader, aliveReader });
+    if (status !== OWNERSHIP.OWNED && status !== OWNERSHIP.EXITED) throw new Error(`拒绝发送退出信号：PID=${pid}，ownership=${status}`);
+  }
   if (hasKnownProcess && process.env.NEXUS_TEST_MODE?.trim().toLowerCase() === "test-host") {
     fs.mkdirSync(path.dirname(exitFile), { recursive: true });
     fs.writeFileSync(exitFile, "stop\n", "utf8");
@@ -256,7 +361,7 @@ export async function stopSpawnedService({ child, exitFile, pidFilePath, markerP
   if (child?.stdin && !child.stdin.destroyed) {
     try {
       child.stdin.end();
-      await waitForExit(child.pid, 5000, exitWaitPollMs);
+      await exitWaiter(child.pid, 5000, exitWaitPollMs);
     } catch {
       // 受控退出失败时继续使用隔离 PID 清理。
     }
@@ -268,29 +373,22 @@ export async function stopSpawnedService({ child, exitFile, pidFilePath, markerP
   if (child?.pid) pids.add(Number(child.pid));
   const owned = [...pids].filter(pid => Number.isInteger(pid) && pid > 0);
   for (const pid of owned) {
-    if (!isProcessAliveSafe(pid)) continue;
-    if (!markerPath
-        || ownsProcess(markerPath, pid)
-        || ownsRestartedProcess(markerPath, pid)
-        || ownsHandoffProcess(markerPath, pid)) {
-      killProcessTree(pid);
-    } else {
-      // 受控退出信号可能正好在身份读取之间让进程退出；再次确认后可安全忽略已退出 PID。
-      if (!isProcessAliveSafe(pid)) continue;
-      const marker = readRunMarker(markerPath);
-      const identity = readProcessIdentity(pid);
-      throw new Error([
-        `拒绝清理未通过运行 marker 身份核验的进程：PID=${pid}`,
-        `markerPath=${markerPath}`,
-        `initialMarked=${initialMarked ?? "unknown"}`,
-        `marked=${marked ?? "unknown"}`,
-        `childPid=${child?.pid ?? "unknown"}`,
-        `marker=${marker ? JSON.stringify(marker) : "missing"}`,
-        `identity=${identity ? JSON.stringify(identity) : "unavailable"}`,
-      ].join("；"));
+    if (!aliveReader(pid)) continue;
+    const inspector = pid === marker.pid ? inspectProcessOwnership : inspectHandoffProcessOwnership;
+    const status = inspector(markerPath, pid, { identityReader, aliveReader });
+    if (status === OWNERSHIP.EXITED) continue;
+    if (status !== OWNERSHIP.OWNED) {
+      throw new Error(`拒绝清理未通过运行 marker 身份核验的进程：PID=${pid}，ownership=${status}`);
+    }
+    if (!terminator(pid)) {
+      throw new Error(`受控停止未确认进程树已终止：PID=${pid}`);
     }
   }
-  for (const pid of owned) await waitForExit(pid, 10000, 250);
+  for (const pid of owned) {
+    if (!await exitWaiter(pid, 10000, 250)) {
+      throw new Error(`受控停止未确认进程已退出：PID=${pid}`);
+    }
+  }
   // 保留 marker 作为下一次 prepareRuntime 的 ownership 证据；下一次会先核验所有
   // 记录的 PID 已退出，再清理整个隔离目录。无 marker 的目录永远不因本流程被删除。
 }

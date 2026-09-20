@@ -1,6 +1,5 @@
 import test, { after, before } from "node:test";
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import {
@@ -12,6 +11,7 @@ import {
   runtimeExe,
   sleep,
   startRuntime,
+  startUpdateWorker,
   systemWebPort,
   stopRuntime,
   waitFor,
@@ -77,11 +77,7 @@ async function runApplyWorker(stagedDir) {
   fs.copyFileSync(runtimeExe, workerExe);
   try {
     const result = await new Promise(resolve => {
-      const worker = spawn(workerExe, ["apply-update", "--staged", stagedDir], {
-        cwd: runtimeDir,
-        stdio: "ignore",
-        windowsHide: true,
-      });
+      const worker = startUpdateWorker(workerExe, ["apply-update", "--staged", stagedDir]);
       worker.once("error", error => resolve({ status: null, error }));
       worker.once("exit", (status, signal) => resolve({ status, signal }));
     });
@@ -103,15 +99,9 @@ async function runApplyWorkerUntilPhase(stagedDir, phase) {
   let worker = null;
   try {
     const resultPromise = new Promise(resolve => {
-      worker = spawn(workerExe, ["apply-update", "--staged", stagedDir], {
-        cwd: runtimeDir,
-        env: {
-          ...process.env,
+      worker = startUpdateWorker(workerExe, ["apply-update", "--staged", stagedDir], {
           NEXUS_TEST_UPDATE_PAUSE_PHASE: phase,
           NEXUS_TEST_UPDATE_PAUSE_FILE: pauseFile,
-        },
-        stdio: "ignore",
-        windowsHide: true,
       });
       worker.once("error", error => resolve({ status: null, signal: null, error }));
       worker.once("exit", (status, signal) => resolve({ status, signal, error: null }));
@@ -124,8 +114,10 @@ async function runApplyWorkerUntilPhase(stagedDir, phase) {
     const result = await resultPromise;
     return { ...result, observedPhase: phase };
   } finally {
-    if (worker?.pid) {
-      killProcessTree(worker.pid);
+    if (worker?.pid && worker.exitCode === null && worker.signalCode === null) {
+      if (!killProcessTree(worker.pid) || !await waitForExit(worker.pid, 10000, 50)) {
+        throw new Error("更新 worker 收尾未确认，保留故障现场");
+      }
     }
     fs.rmSync(pauseFile, { force: true });
     fs.rmSync(workerExe, { force: true, maxRetries: 20, retryDelay: 250 });
@@ -194,7 +186,7 @@ test("apply-update：备份→交换→保留插件与数据→重拉宿主→�
   assert.equal(fs.existsSync(path.join(runtimeDir, "history", "2099-01-01", "00-00-00.json")), true);
 
   // 新实例启动：收尾清理 + 服务可达。
-  startRuntime(["web"]);
+  // The owned apply worker already relaunched the host with this run's receipt.
   await waitForService(null, 60000);
   await waitFor(() => !fs.existsSync(versionFile), 30000);
   assertMarkersCleaned();

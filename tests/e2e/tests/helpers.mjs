@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,6 +9,7 @@ import {
 import {
   copyReleaseArtifacts,
   createRunMarker,
+  waitForRunMarker,
   ensureOwnedRuntimeDirectory,
   findAvailablePort,
   installEmulatorStubs,
@@ -55,15 +57,13 @@ export let baseUrl = configuredBaseUrl
 export const JSON_HDR = { "Content-Type": "application/json" };
 export const PING_GAME = "C:\\Windows\\System32\\PING.EXE";
 
-/** 测试插件仓库：兼容 CI 工作区子目录、本地相邻仓库和显式路径。 */
+/** 测试插件仓库与 contract 使用同一个显式来源。 */
 export function pluginRepositoryRoot() {
-  const configured = process.env.NEXUS_PLUGIN_REPO_ROOT?.trim();
-  const candidates = [
-    configured ? (path.isAbsolute(configured) ? configured : path.resolve(projectRoot, configured)) : null,
-    path.join(projectRoot, "NexusPipeline-Plugins"),
-    path.resolve(projectRoot, "..", "NexusPipeline-Plugins"),
-  ].filter(Boolean);
-  return candidates.find(candidate => fs.existsSync(path.join(candidate, "catalog.json"))) || candidates[0];
+  const configured = process.env.NEXUS_OFFICIAL_PLUGINS_ROOT?.trim();
+  if (!configured) throw new Error("必须显式设置 NEXUS_OFFICIAL_PLUGINS_ROOT");
+  const repository = path.resolve(projectRoot, configured);
+  if (!fs.existsSync(path.join(repository, "catalog.json"))) throw new Error(`插件仓库缺少 catalog.json：${repository}`);
+  return repository;
 }
 
 let child = null;
@@ -107,16 +107,19 @@ export function startService() {
   env.NEXUS_TEST_HOST = "1";
   env.NEXUS_TEST_HOST_DIR = testHostDir;
   env.NEXUS_TEST_HOST_EXIT_FILE = testHostExitFile;
+  env.NEXUS_TEST_OWNERSHIP_NONCE = randomUUID();
+  env.NEXUS_SYSTEM_RUNTIME_NAME = `ui-${createHash("sha256").update(fs.realpathSync.native(runtimeDir).toLowerCase()).digest("hex").slice(0, 24)}`;
   child = spawn(runtimeExe, ["web"], {
     cwd: runtimeDir,
     stdio: ["pipe", "ignore", "ignore"],
     env,
     windowsHide: true,
   });
-  createRunMarker(runMarkerPath, runtimeExe, child.pid);
+  createRunMarker(runMarkerPath, runtimeExe, child, { nonce: env.NEXUS_TEST_OWNERSHIP_NONCE, identityFile: `${testHostExitFile}.identity.json`, runId });
 }
 
 export async function waitForService(timeoutMs = 30000) {
+  await waitForRunMarker(child);
   const deadline = Date.now() + timeoutMs;
   let lastFailure = "未尝试";
   while (Date.now() < deadline) {

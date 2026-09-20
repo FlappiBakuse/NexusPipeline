@@ -44,6 +44,13 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: FlappiBakuse/NexusPipeline-Plugins
+          ref: main
+          path: NexusPipeline-Plugins
+          fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: "24"
@@ -51,6 +58,8 @@ jobs:
         with:
           dotnet-version: "8.0.x"
       - name: Run core feedback
+        env:
+          NEXUS_OFFICIAL_PLUGINS_ROOT: ${{ github.workspace }}\NexusPipeline-Plugins
         run: node tests/run.mjs release core
 
   frontend-contract:
@@ -91,6 +100,13 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: FlappiBakuse/NexusPipeline-Plugins
+          ref: main
+          path: NexusPipeline-Plugins
+          fetch-depth: 1
+          persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: "24"
@@ -100,6 +116,7 @@ jobs:
       - name: Run runtime feedback
         env:
           NEXUS_TIME_SCALE: "10"
+          NEXUS_OFFICIAL_PLUGINS_ROOT: ${{ github.workspace }}\NexusPipeline-Plugins
         run: |
           node tests/run.mjs release ui-runtime
           node tests/run.mjs release execution-emulator

@@ -29,8 +29,10 @@ test("访问令牌入口：生成、显示切换和状态回读", async ({ page 
   await expect(token).toHaveAttribute("type", "password");
   await page.getByTestId("toggle-token-visibility").click();
   await expect(token).toHaveAttribute("type", "text");
-  const settings = await (await api("GET", "/api/settings")).json();
-  expect(settings.status.remote.tokenSet).toBeTruthy();
+  await expect.poll(
+    async () => (await (await api("GET", "/api/settings")).json()).status.remote.tokenSet,
+    { timeout: 10000 },
+  ).toBeTruthy();
 });
 
 test("远程访问开关：切换后同步 API 状态", async ({ page }) => {

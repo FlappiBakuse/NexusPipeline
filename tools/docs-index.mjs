@@ -121,7 +121,11 @@ function runGit(checkout, args) {
 function resolveGitRevision(checkout, ref) {
   if (!ref || ref.startsWith("-") || /\s/u.test(ref)) return "";
   const result = runGit(checkout, ["rev-parse", "--verify", `${ref}^{commit}`]);
-  return result?.status === 0 ? String(result.stdout || "").trim() : "";
+  if (result?.status === 0) return String(result.stdout || "").trim();
+  // A fresh clone may have only the remote-tracking branch, not a local branch.
+  // Never substitute HEAD or another revision for a missing historical object.
+  const remote = runGit(checkout, ["rev-parse", "--verify", `refs/remotes/origin/${ref}^{commit}`]);
+  return remote?.status === 0 ? String(remote.stdout || "").trim() : "";
 }
 
 function listGitPaths(checkout, revision) {
@@ -157,6 +161,7 @@ function fragmentExists(content, fragment) {
 export function validateCrossRepositoryLinks(documents, {
   root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."),
   workspaceRoot = path.resolve(root, ".."),
+  checkouts = {},
 } = {}) {
   const issues = [];
   const baselines = {};
@@ -167,7 +172,9 @@ export function validateCrossRepositoryLinks(documents, {
     for (const link of findMarkdownLinks(text)) {
       const target = repositoryTarget(link.rawTarget);
       if (!target) continue;
-      const checkout = findCheckout(root, workspaceRoot, target.repository);
+      const checkout = checkouts[target.repository]
+        ? path.resolve(checkouts[target.repository])
+        : findCheckout(root, workspaceRoot, target.repository);
       if (!checkout) {
         issues.push("无法完成跨仓库检查：未找到 " + target.repository + " checkout（" + fileLabel + " -> " + link.rawTarget + "）");
         continue;
