@@ -92,14 +92,35 @@ jobs:
           ref: ${{ needs.preflight.outputs.head_sha }}
           fetch-depth: 0
           persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: FlappiBakuse/NexusPipeline-Plugins
+          ref: ${{ needs.preflight.outputs.contract_sha }}
+          path: NexusPipeline-Plugins
+          fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: "24"
       - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
         with:
           dotnet-version: "8.0.424"
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.13"
       - name: Execute gate
         run: node tests/run.mjs release core
+        env:
+          NEXUS_OFFICIAL_PLUGINS_ROOT: ${{ github.workspace }}\NexusPipeline-Plugins
+      - name: Preserve native gate reports
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: qualification-H1-${{ github.run_id }}-${{ github.run_attempt }}
+          path: tests/.artifacts/runs/*/reports/**
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14
 
   H2:
     name: H2
@@ -124,10 +145,22 @@ jobs:
       - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
         with:
           dotnet-version: "8.0.424"
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.13"
       - name: Execute gate
         env:
           NEXUS_OFFICIAL_PLUGINS_ROOT: ${{ github.workspace }}\NexusPipeline-Plugins
         run: node tests/run.mjs release frontend-contract
+      - name: Preserve native gate reports
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: qualification-H2-${{ github.run_id }}-${{ github.run_attempt }}
+          path: tests/.artifacts/runs/*/reports/**
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14
 
   H3:
     name: H3
@@ -139,14 +172,35 @@ jobs:
           ref: ${{ needs.preflight.outputs.head_sha }}
           fetch-depth: 0
           persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: FlappiBakuse/NexusPipeline-Plugins
+          ref: ${{ needs.preflight.outputs.contract_sha }}
+          path: NexusPipeline-Plugins
+          fetch-depth: 1
+          persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: "24"
       - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
         with:
           dotnet-version: "8.0.424"
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.13"
       - name: Execute gate
         run: node tests/run.mjs release ui-runtime
+        env:
+          NEXUS_OFFICIAL_PLUGINS_ROOT: ${{ github.workspace }}\NexusPipeline-Plugins
+      - name: Preserve native gate reports
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: qualification-H3-${{ github.run_id }}-${{ github.run_attempt }}
+          path: tests/.artifacts/runs/*/reports/**
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14
 
   H4:
     name: H4
@@ -164,8 +218,20 @@ jobs:
       - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
         with:
           dotnet-version: "8.0.424"
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.13"
       - name: Execute gate
         run: node tests/run.mjs release execution-emulator
+      - name: Preserve native gate reports
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: qualification-H4-${{ github.run_id }}-${{ github.run_attempt }}
+          path: tests/.artifacts/runs/*/reports/**
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14
 
   H5:
     name: H5
@@ -183,8 +249,20 @@ jobs:
       - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
         with:
           dotnet-version: "8.0.424"
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.13"
       - name: Execute gate
         run: node tests/run.mjs release update-acceptance
+      - name: Preserve native gate reports
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: qualification-H5-${{ github.run_id }}-${{ github.run_attempt }}
+          path: tests/.artifacts/runs/*/reports/**
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 14
 
   qualification-result:
     name: qualification-result

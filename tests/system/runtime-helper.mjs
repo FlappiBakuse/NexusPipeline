@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,6 +11,10 @@ import {
 import {
   copyReleaseArtifacts,
   createRunMarker,
+  waitForRunMarker,
+  registerHandoffProcess,
+  inspectHandoffProcessOwnership,
+  OWNERSHIP,
   ensureOwnedRuntimeDirectory,
   fetchWithTimeout,
   installEmulatorStubs,
@@ -96,6 +101,14 @@ export function isRuntimeAlive(pid) {
 }
 
 export function startRuntime(args = [], extraEnv = {}) {
+  return startOwnedRuntimeProcess(runtimeExe, args.length === 0 ? ["web"] : args, extraEnv);
+}
+
+export function startUpdateWorker(executable, args, extraEnv = {}) {
+  return startOwnedRuntimeProcess(executable, args, extraEnv);
+}
+
+function startOwnedRuntimeProcess(executable, launchArgs, extraEnv) {
   stdout = "";
   stderr = "";
   fs.rmSync(testHostExitFile, { force: true });
@@ -120,9 +133,12 @@ export function startRuntime(args = [], extraEnv = {}) {
   env.NEXUS_TEST_HOST = "1";
   env.NEXUS_TEST_HOST_DIR = testHostDir;
   env.NEXUS_TEST_HOST_EXIT_FILE = testHostExitFile;
+  env.NEXUS_TEST_OWNERSHIP_NONCE = randomUUID();
+  // Keep the same mutex across this install's restart/update, but never share
+  // it with another checkout or a preserved failed run of the same suite.
+  env.NEXUS_SYSTEM_RUNTIME_NAME = `system-${createHash("sha256").update(fs.realpathSync.native(runtimeDir).toLowerCase()).digest("hex").slice(0, 24)}`;
   // System Smoke 统一使用 web 模式：stdin EOF 可触发受控退出，重启测试不依赖管理员 taskkill。
-  const launchArgs = args.length === 0 ? ["web"] : args;
-  child = spawn(runtimeExe, launchArgs, {
+  child = spawn(executable, launchArgs, {
     cwd: runtimeDir,
     env,
     stdio: ["pipe", "pipe", "pipe"],
@@ -131,7 +147,7 @@ export function startRuntime(args = [], extraEnv = {}) {
   child.stdout?.on("data", chunk => { stdout += chunk.toString(); });
   child.stderr?.on("data", chunk => { stderr += chunk.toString(); });
   child.on("error", error => { stderr += error.stack || error.message; });
-  createRunMarker(runMarkerPath, runtimeExe, child.pid);
+  createRunMarker(runMarkerPath, executable, child, { nonce: env.NEXUS_TEST_OWNERSHIP_NONCE, identityFile: `${testHostExitFile}.identity.json`, handoffExecutablePath: runtimeExe, runId });
   return child;
 }
 
@@ -160,6 +176,7 @@ export function runtimeDiagnostic() {
 }
 
 export async function waitForService(url = null, timeoutMs = 30000) {
+  await waitForRunMarker(child);
   const deadline = Date.now() + timeoutMs;
   let lastError = "";
   let attempts = 0;
@@ -221,37 +238,13 @@ function formatRestartObservation(observation) {
   ].join(" ");
 }
 
-function adoptRestartedProcessMarker() {
+function adoptRestartedProcessMarker(status) {
   const pid = readPidFile(servicePidPath);
   if (!pid) {
     throw new Error("重启服务已响应但缺少当前 service.pid，拒绝接管清理身份");
   }
-  const identity = readProcessIdentity(pid);
-  if (!identity?.executablePath
-      || path.normalize(path.resolve(identity.executablePath)).toLowerCase()
-        !== path.normalize(path.resolve(runtimeExe)).toLowerCase()) {
-    throw new Error(`重启服务 PID 未匹配本次 runtime executable，拒绝接管清理：PID=${pid}`);
-  }
-  const marker = readRunMarker(runMarkerPath);
-  if (!marker) {
-    throw new Error("重启服务已响应但本次 runtime marker 缺失，拒绝接管清理身份");
-  }
-  const handoffProcesses = Array.isArray(marker.handoffProcesses)
-    ? marker.handoffProcesses.filter(item => Number.isInteger(item?.pid) && item.pid > 0)
-    : [];
-  const nextHandoff = {
-    pid,
-    executablePath: path.normalize(path.resolve(identity.executablePath)),
-    processStartTimeUtc: identity.startTime || "",
-  };
-  const nextMarker = {
-    ...marker,
-    handoffProcesses: [
-      ...handoffProcesses.filter(item => item.pid !== pid),
-      nextHandoff,
-    ],
-  };
-  fs.writeFileSync(runMarkerPath, `${JSON.stringify(nextMarker, null, 2)}\n`, "utf8");
+  registerHandoffProcess(runMarkerPath, pid, { expectedInstanceId: status.instanceId, expectedHandoffId: status.restartHandoffId });
+  if (inspectHandoffProcessOwnership(runMarkerPath, pid) !== OWNERSHIP.OWNED) throw new Error(`重启交接身份未确认：PID=${pid}`);
 }
 
 /**
@@ -344,7 +337,7 @@ export async function waitForRestartedService(options = {}) {
       rememberRestartObservation(observations, observation);
       lastError = observation.result;
       if (observation.matched) {
-        adoptRestartedProcessMarker();
+        adoptRestartedProcessMarker(observation.payload);
         return observation.payload;
       }
     }

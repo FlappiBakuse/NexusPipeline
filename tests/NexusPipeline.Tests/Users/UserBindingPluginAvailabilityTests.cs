@@ -22,8 +22,15 @@ using NexusPipeline.Modules.Configuration.Paths;
 namespace NexusPipeline.Tests.Users;
 
 
-public sealed class UserBindingPluginAvailabilityTests
+public sealed class UserBindingPluginAvailabilityTests : IClassFixture<HostTestScope>
 {
+    private readonly HostCompositionRoot _context;
+
+    public UserBindingPluginAvailabilityTests(HostTestScope host)
+    {
+        _context = host.Composition;
+    }
+
 
     [Fact]
     public void AddBinding_MissingSpecializedPluginIsRejectedBeforeSnapshot()
@@ -33,8 +40,8 @@ public sealed class UserBindingPluginAvailabilityTests
         var script = SpecializedScript(scriptId, "缺失插件新增绑定");
         var user = new NexusUser { Id = userId, Name = "用户甲" };
 
-        using var scope = new RuntimeDataScope(script, user);
-        OperationResult<UserScriptBinding> result = HostCompositionRoot.Instance.Resolve<UserCommands>().AddBinding(
+        using var scope = new RuntimeDataScope(_context, script, user);
+        OperationResult<UserScriptBinding> result = _context.Resolve<UserCommands>().AddBinding(
             user.Id,
             new UserScriptBinding { ScriptInstanceId = script.Id });
 
@@ -58,8 +65,8 @@ public sealed class UserBindingPluginAvailabilityTests
         };
         var user = new NexusUser { Id = userId, Name = "用户甲", Bindings = new List<UserScriptBinding> { binding } };
 
-        using var scope = new RuntimeDataScope(script, user);
-        OperationResult<UserScriptBinding> result = HostCompositionRoot.Instance.Resolve<UserCommands>().UpdateBinding(
+        using var scope = new RuntimeDataScope(_context, script, user);
+        OperationResult<UserScriptBinding> result = _context.Resolve<UserCommands>().UpdateBinding(
             user.Id,
             script.Id,
             new UserBindingUpdateRequest(
@@ -95,8 +102,8 @@ public sealed class UserBindingPluginAvailabilityTests
             },
         };
 
-        using var scope = new RuntimeDataScope(script, user);
-        OperationResult<UserScriptBinding> result = HostCompositionRoot.Instance.Resolve<UserCommands>().UpdateBinding(
+        using var scope = new RuntimeDataScope(_context, script, user);
+        OperationResult<UserScriptBinding> result = _context.Resolve<UserCommands>().UpdateBinding(
             user.Id,
             scriptId,
             new UserBindingUpdateRequest(
@@ -127,8 +134,8 @@ public sealed class UserBindingPluginAvailabilityTests
             },
         };
 
-        using var scope = new RuntimeDataScope(script, user);
-        OperationResult<UserScriptBinding> result = HostCompositionRoot.Instance.Resolve<UserCommands>().UpdateBinding(
+        using var scope = new RuntimeDataScope(_context, script, user);
+        OperationResult<UserScriptBinding> result = _context.Resolve<UserCommands>().UpdateBinding(
             user.Id,
             scriptId,
             new UserBindingUpdateRequest(
@@ -175,8 +182,8 @@ public sealed class UserBindingPluginAvailabilityTests
             },
         };
 
-        using var scope = new RuntimeDataScope(script, userA, userB);
-        OperationResult<UserScriptBinding> result = HostCompositionRoot.Instance.Resolve<UserCommands>().UpdateBinding(
+        using var scope = new RuntimeDataScope(_context, script, userA, userB);
+        OperationResult<UserScriptBinding> result = _context.Resolve<UserCommands>().UpdateBinding(
             userA.Id,
             scriptId,
             new UserBindingUpdateRequest(
@@ -208,8 +215,8 @@ public sealed class UserBindingPluginAvailabilityTests
             },
         };
 
-        using var scope = new RuntimeDataScope(script, user);
-        OperationResult<bool> result = HostCompositionRoot.Instance.Resolve<UserCommands>().DeleteBinding(user.Id, script.Id);
+        using var scope = new RuntimeDataScope(_context, script, user);
+        OperationResult<bool> result = _context.Resolve<UserCommands>().DeleteBinding(user.Id, script.Id);
 
         Assert.True(result.Succeeded);
         Assert.Empty(user.Bindings);
@@ -323,7 +330,7 @@ public sealed class UserBindingPluginAvailabilityTests
 
     private sealed class RuntimeDataScope : IDisposable
     {
-        private readonly HostCompositionRoot _context = HostCompositionRoot.Instance;
+        private readonly HostCompositionRoot _context;
         private readonly List<ScriptInstance> _previousScripts;
         private readonly List<DispatchQueue> _previousQueues;
         private readonly List<NexusUser> _previousUsers;
@@ -331,8 +338,9 @@ public sealed class UserBindingPluginAvailabilityTests
         private readonly byte[]? _usersFile;
         private readonly string _scriptDataDir;
 
-        public RuntimeDataScope(ScriptInstance script, params NexusUser[] users)
+        public RuntimeDataScope(HostCompositionRoot context, ScriptInstance script, params NexusUser[] users)
         {
+            _context = context;
             _previousScripts = _context.EntityState.SnapshotScripts();
             _previousQueues = _context.EntityState.SnapshotQueues();
             _previousUsers = _context.EntityState.SnapshotUsers();

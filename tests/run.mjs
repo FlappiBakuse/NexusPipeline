@@ -1,11 +1,10 @@
-import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { globToRegExp } from "../tools/path-glob.mjs";
 import { parseTapResults, parseTrxResults, parseVitestResults, parsePlaywrightResults } from "../tools/test-results.mjs";
-import { getIntegrityLevel, killProcessTree } from "./support/windows-process.mjs";
-import { quoteWindowsArg } from "./support/windows-command.mjs";
+import { getIntegrityLevel } from "./support/windows-process.mjs";
+import { getProcessRunnerState, resetProcessRunnerState, runProcess as runOwnedProcess } from "./support/process-runner.mjs";
 import { findAvailablePort } from "./support/test-runtime.mjs";
 import { gateSequence, runtimePolicy } from "./support/runtime-policy.mjs";
 import { FRONTEND_TEST_GROUPS, GOVERNANCE_DOMAINS, HOST_TEST_AREAS, SYSTEM_TEST_GROUPS, validateRegistry } from "./registry.mjs";
@@ -34,6 +33,9 @@ const MODE_SUITES = new Set(["default", "ui", "system", "all"]);
 let reportSequence = 0;
 
 const buildPromises = new Map();
+const preparedNpmWorkspaces = new Set();
+const preparedGateDependencies = new Set();
+let officialPluginsRoot = null;
 
 function normalizePath(file) {
   return path.relative(projectRoot, file).replaceAll("\\", "/");
@@ -93,63 +95,73 @@ function systemSuites(groups = []) {
 }
 
 function runProcess(command, args, options = {}) {
-  return new Promise(resolve => {
-    const timeoutMs = Number.isFinite(options.timeoutMs) && options.timeoutMs > 0 ? options.timeoutMs : null;
-    const timeoutCode = options.timeoutCode ?? 124;
-    const isShim = process.platform === "win32" && /\.(?:cmd|bat)$/iu.test(command);
-    const spawnCommand = isShim ? (process.env.ComSpec || "cmd.exe") : command;
-    const spawnArgs = isShim
-      ? ["/d", "/s", "/c", "call", quoteWindowsArg(command), ...args.map(quoteWindowsArg)]
-      : args;
-    const childEnv = { ...(options.env || process.env) };
-    for (const key of Object.keys(childEnv)) {
-      if (key.toUpperCase().startsWith("NEXUS_CI_")) delete childEnv[key];
-    }
-    const label = [command, ...args].join(" ");
-    let settled = false;
-    let timedOut = false;
-    let timeoutHandle = null;
-    const finish = code => {
-      if (settled) return;
-      settled = true;
-      if (timeoutHandle) clearTimeout(timeoutHandle);
-      resolve(code);
-    };
-    const child = spawn(spawnCommand, spawnArgs, {
-      cwd: options.cwd || projectRoot,
-      env: childEnv,
-      stdio: options.onOutput ? ["inherit", "pipe", "pipe"] : options.stdio || "inherit",
-      windowsHide: true,
-      windowsVerbatimArguments: isShim,
-    });
-    if (options.onOutput) {
-      child.stdout.setEncoding("utf8");
-      child.stderr.setEncoding("utf8");
-      child.stdout.on("data", chunk => { process.stdout.write(chunk); options.onOutput(chunk); });
-      child.stderr.on("data", chunk => { process.stderr.write(chunk); });
-    }
-    child.once("error", error => {
-      console.error(`[错误] 启动 ${command} 失败：${error.message}`);
-      finish(timedOut ? timeoutCode : 1);
-    });
-    child.once("close", (code, signal) => {
-      if (timedOut) return finish(timeoutCode);
-      if (signal) {
-        console.error(`[错误] ${command} 被信号 ${signal} 终止`);
-        return finish(1);
-      }
-      finish(code ?? 1);
-    });
-    if (timeoutMs !== null) {
-      timeoutHandle = setTimeout(() => {
-        if (settled) return;
-        timedOut = true;
-        console.error(`[错误] ${label} 超时（${timeoutMs}ms），正在终止本次进程树`);
-        if (child.pid && process.platform === "win32") killProcessTree(child.pid);
-        else child.kill("SIGTERM");
-      }, timeoutMs);
-    }
+  return runOwnedProcess(command, args, { defaultCwd: projectRoot, ...options });
+}
+
+async function ensureNpmWorkspace(directory) {
+  const workspace = path.resolve(directory);
+  if (preparedNpmWorkspaces.has(workspace)) return 0;
+  const lockfile = path.join(workspace, "package-lock.json");
+  if (!fs.existsSync(lockfile)) {
+    console.error(`[依赖] 缺少 package-lock.json：${workspace}`);
+    return 1;
+  }
+  const code = await runProcess(npmCommand, ["ci", "--no-audit", "--no-fund"], {
+    cwd: workspace,
+    timeoutMs: 15 * 60 * 1000,
   });
+  if (code !== 0) {
+    console.error(`[依赖] npm ci 失败：${workspace}`);
+    return code;
+  }
+  preparedNpmWorkspaces.add(workspace);
+  return 0;
+}
+
+function resolveOfficialPluginsRoot() {
+  const configured = process.env.NEXUS_OFFICIAL_PLUGINS_ROOT?.trim();
+  if (!configured) throw new Error("frontend-contract 必须显式设置 NEXUS_OFFICIAL_PLUGINS_ROOT，禁止猜测官方 Plugins 根目录。");
+  const candidate = path.resolve(configured);
+  if (!fs.existsSync(path.join(candidate, "package-lock.json"))) {
+    throw new Error(`官方 Plugins 根目录缺少 package-lock.json：${candidate}`);
+  }
+  if (!fs.existsSync(path.join(candidate, "tools", "Test-FrontendPlugins.mjs"))) {
+    throw new Error(`官方 Plugins 根目录缺少 tools/Test-FrontendPlugins.mjs：${candidate}`);
+  }
+  return candidate;
+}
+
+async function prepareGateDependencies(group) {
+  if (preparedGateDependencies.has(group)) return 0;
+  const workspaces = [frontendDir, toolsDir];
+  if (group === "frontend-contract") {
+    officialPluginsRoot = officialPluginsRoot || resolveOfficialPluginsRoot();
+    workspaces.push(officialPluginsRoot);
+  }
+  if (group === "ui-runtime") workspaces.push(e2eDir);
+  if (group === "execution-emulator" || group === "update-acceptance") {
+    workspaces.splice(0, workspaces.length, frontendDir);
+  }
+  for (const workspace of [...new Set(workspaces)]) {
+    const code = await ensureNpmWorkspace(workspace);
+    if (code !== 0) return code;
+  }
+  if (group === "frontend-contract") {
+    const code = await runProcess(npmCommand, ["run", "build:frontend"], {
+      cwd: officialPluginsRoot,
+      timeoutMs: 15 * 60 * 1000,
+    });
+    if (code !== 0) return code;
+  }
+  if (group === "ui-runtime") {
+    const code = await runProcess(nodeCommand, [playwrightCli, "install", "chromium"], {
+      cwd: e2eDir,
+      timeoutMs: 15 * 60 * 1000,
+    });
+    if (code !== 0) return code;
+  }
+  preparedGateDependencies.add(group);
+  return 0;
 }
 
 async function runReported(command, args, options = {}, format = "tap", context = {}) {
@@ -210,7 +222,9 @@ async function runUnit(groups = []) {
 }
 
 async function runFrontend(groups = []) {
-  let code = await runProcess(npmCommand, ["run", "typecheck"], { cwd: frontendDir });
+  let code = await ensureNpmWorkspace(frontendDir);
+  if (code !== 0) return code;
+  code = await runProcess(npmCommand, ["run", "typecheck"], { cwd: frontendDir });
   if (code !== 0) return code;
   const selectedFiles = frontendTestFiles(groups);
   if (groups.length > 0 && selectedFiles.length === 0) {
@@ -236,13 +250,17 @@ async function runFrontendBuild() {
 }
 
 async function runContracts() {
-  const candidates = [
-    process.env.NEXUS_OFFICIAL_PLUGINS_ROOT,
-    path.join(projectRoot, "NexusPipeline-Plugins"),
-    path.resolve(projectRoot, "..", "NexusPipeline-Plugins"),
-  ].filter(Boolean).map(candidate => path.resolve(candidate));
-  const officialPluginsRoot = candidates.find(candidate => fs.existsSync(path.join(candidate, "tools", "Test-FrontendPlugins.mjs"))) || candidates[0];
-  let code = await runReported(npmCommand, ["run", "test", "--", "--config", "vitest.contract.config.ts"], { cwd: frontendDir }, "vitest", {
+  let code = await ensureNpmWorkspace(frontendDir);
+  if (code !== 0) return code;
+  officialPluginsRoot = officialPluginsRoot || resolveOfficialPluginsRoot();
+  code = await ensureNpmWorkspace(officialPluginsRoot);
+  if (code !== 0) return code;
+  code = await runProcess(npmCommand, ["run", "build:frontend"], {
+    cwd: officialPluginsRoot,
+    timeoutMs: 15 * 60 * 1000,
+  });
+  if (code !== 0) return code;
+  code = await runReported(npmCommand, ["run", "test", "--", "--config", "vitest.contract.config.ts"], { cwd: frontendDir }, "vitest", {
     expectedFiles: ["frontend/contracts/official-plugins.test.ts"],
     invokedFiles: ["frontend/contracts/official-plugins.test.ts"],
   });
@@ -266,9 +284,11 @@ async function runDocs() {
 }
 
 async function runTooling() {
+  let code = await ensureNpmWorkspace(toolsDir);
+  if (code !== 0) return code;
   const nodeTests = matchingFiles(["tests/tools/*.test.mjs"]);
   if (nodeTests.length === 0) return 1;
-  let code = await runReported(nodeCommand, ["--test", ...nodeTests], {}, "tap", {
+  code = await runReported(nodeCommand, ["--test", ...nodeTests], {}, "tap", {
     expectedFiles: nodeTests.map(normalizePath),
     invokedFiles: nodeTests.map(normalizePath),
   });
@@ -288,6 +308,8 @@ async function runSyntax() {
 }
 
 async function runBuild() {
+  const dependencyCode = await prepareGateDependencies("core");
+  if (dependencyCode !== 0) return dependencyCode;
   const key = `production:${runId}`;
   if (!buildPromises.has(key)) {
     buildPromises.set(key, buildProductionCore());
@@ -312,10 +334,10 @@ async function verifyEmbeddedManifest(executable, expectedLevel) {
 async function runArchitectureCheck() {
   const project = "tools\\NexusPipeline.Architecture\\NexusPipeline.Architecture.csproj";
   const architectureTests = "tools\\NexusPipeline.Architecture.Tests\\NexusPipeline.Architecture.Tests.csproj";
-  const restoreCommon = ["--nologo", "-m:1", "-nr:false", "-p:NuGetAudit=false", "-p:RestoreIgnoreFailedSources=true", "-p:NexusArchitectureMode=production"];
+  const restoreCommon = ["--nologo", "-m:1", "-nr:false", "-p:NuGetAudit=false", "-p:RestoreIgnoreFailedSources=true"];
   let code = await runProcess("dotnet", [
     "restore", "src\\NexusPipeline.csproj", ...restoreCommon,
-    "-p:NexusTestHost=false",
+    "-p:NexusTestHost=false", "-p:NexusArchitectureMode=production",
   ], { cwd: projectRoot });
   if (code !== 0) return code;
   code = await runProcess("dotnet", [
@@ -447,6 +469,8 @@ function parseSystemArgs(args) {
 }
 
 async function runUi() {
+  const dependencyCode = await prepareGateDependencies("ui-runtime");
+  if (dependencyCode !== 0) return dependencyCode;
   let code = await runBuild();
   if (code !== 0) return code;
   code = await buildTestHost();
@@ -539,6 +563,8 @@ async function runRelease(group) {
     return 0;
   }
   if (!RELEASE_GATE_GROUPS.includes(group)) return 2;
+  const dependencyCode = await prepareGateDependencies(group);
+  if (dependencyCode !== 0) return dependencyCode;
   const steps = {
     core: [runBuild, runUnit, runDocs, runTooling, runSyntax, runArchitectureCheck],
     "frontend-contract": [runFrontend, runContracts],
@@ -584,6 +610,7 @@ function printUsage() {
 
 const [command = "", ...args] = process.argv.slice(2);
 let exitCode = 2;
+resetProcessRunnerState();
 try {
   switch (command.toLowerCase()) {
     case "unit": {
@@ -614,8 +641,13 @@ try {
   exitCode = 1;
 } finally {
   if (command.toLowerCase() === "dev" || command.toLowerCase() === "release") {
-    cleanEmulatorFixturePlugin();
-    cleanTestHost();
+    const runnerState = getProcessRunnerState();
+    if (runnerState.cleanupComplete) {
+      cleanEmulatorFixturePlugin();
+      cleanTestHost();
+    } else {
+      console.error(`[清理] 进程树清理未确认完成，保留 Test Host/fixture 现场：${runnerState.cleanupFailures.join("；")}`);
+    }
   }
 }
 process.exitCode = exitCode;

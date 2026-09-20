@@ -15,11 +15,19 @@ using NexusPipeline.Modules.Settings;
 using NexusPipeline.Modules.Users;
 using NexusPipeline.Platform.Storage;
 using NexusPipeline.Modules.Scripts.Persistence;
+using NexusPipeline.Tests.Support;
 
 namespace NexusPipeline.Tests.Plugins;
 
-public sealed class PluginNameMigrationTests
+public sealed class PluginNameMigrationTests : IClassFixture<HostTestScope>
 {
+    private readonly HostCompositionRoot _context;
+
+    public PluginNameMigrationTests(HostTestScope host)
+    {
+        _context = host.Composition;
+    }
+
     [Theory]
     [InlineData("maastellasora", "maas")]
     [InlineData("MAASTELLASORA", "maas")]
@@ -64,8 +72,8 @@ public sealed class PluginNameMigrationTests
     [Fact]
     public void Apply_MigratesPersistedScriptBindingAcrossReload()
     {
-        using var sandbox = new MigrationSandbox();
-        HostCompositionRoot context = HostCompositionRoot.Instance;
+        using var sandbox = new MigrationSandbox(_context);
+        HostCompositionRoot context = _context;
         var script = new ScriptInstance
         {
             Id = "migration-script",
@@ -86,7 +94,7 @@ public sealed class PluginNameMigrationTests
     [Fact]
     public void Apply_MigratesPluginPreferenceAndPreservesValueAcrossReload()
     {
-        using var sandbox = new MigrationSandbox();
+        using var sandbox = new MigrationSandbox(_context);
         AppSettings settings = new()
         {
             PluginPreferences = new Dictionary<string, PluginPreference>(StringComparer.OrdinalIgnoreCase)
@@ -96,11 +104,11 @@ public sealed class PluginNameMigrationTests
         };
         sandbox.SaveSettings(settings);
 
-        ApplyMigration(HostCompositionRoot.Instance);
+        ApplyMigration(_context);
 
-        Assert.False(HostCompositionRoot.Instance.Settings.PluginPreferences[PluginNameMigration.MaaStellaSora].Enabled);
+        Assert.False(_context.Settings.PluginPreferences[PluginNameMigration.MaaStellaSora].Enabled);
         Assert.DoesNotContain(
-            HostCompositionRoot.Instance.Settings.PluginPreferences.Keys,
+            _context.Settings.PluginPreferences.Keys,
             key => key.Equals(PluginNameMigration.LegacyMaaStellaSora, StringComparison.OrdinalIgnoreCase));
             AppSettings reloaded = AppSettingsStore.Load(ConfigLoadMode.ReadOnly);
         Assert.False(reloaded.PluginPreferences[PluginNameMigration.MaaStellaSora].Enabled);
@@ -112,7 +120,7 @@ public sealed class PluginNameMigrationTests
     [Fact]
     public void Apply_CanonicalPreferenceWinsAndLegacyPreferenceIsRemovedOnConflict()
     {
-        using var sandbox = new MigrationSandbox();
+        using var sandbox = new MigrationSandbox(_context);
         AppSettings settings = new()
         {
             PluginPreferences = new Dictionary<string, PluginPreference>(StringComparer.OrdinalIgnoreCase)
@@ -123,11 +131,11 @@ public sealed class PluginNameMigrationTests
         };
         sandbox.SaveSettings(settings);
 
-        ApplyMigration(HostCompositionRoot.Instance);
+        ApplyMigration(_context);
 
-        Assert.True(HostCompositionRoot.Instance.Settings.PluginPreferences[PluginNameMigration.MaaStellaSora].Enabled);
+        Assert.True(_context.Settings.PluginPreferences[PluginNameMigration.MaaStellaSora].Enabled);
         Assert.DoesNotContain(
-            HostCompositionRoot.Instance.Settings.PluginPreferences.Keys,
+            _context.Settings.PluginPreferences.Keys,
             key => key.Equals(PluginNameMigration.LegacyMaaStellaSora, StringComparison.OrdinalIgnoreCase));
             AppSettings reloaded = AppSettingsStore.Load(ConfigLoadMode.ReadOnly);
         Assert.True(reloaded.PluginPreferences[PluginNameMigration.MaaStellaSora].Enabled);
@@ -139,7 +147,7 @@ public sealed class PluginNameMigrationTests
     [Fact]
     public void Apply_MovesScopedDirectoryAndManagedConfigFilesToCanonicalNames()
     {
-        using var sandbox = new MigrationSandbox();
+        using var sandbox = new MigrationSandbox(_context);
         string pluginsRoot = Path.Combine(AppPaths.ConfigDir, "plugins");
         string legacyDirectory = Path.Combine(pluginsRoot, PluginNameMigration.LegacyMaaStellaSora);
         string canonicalDirectory = Path.Combine(pluginsRoot, PluginNameMigration.MaaStellaSora);
@@ -154,7 +162,7 @@ public sealed class PluginNameMigrationTests
         File.WriteAllText(Path.Combine(pluginsRoot, "maastellasora.json"), "{\"config\":\"legacy\"}");
         File.WriteAllText(Path.Combine(pluginsRoot, "maastellasora.secrets.json"), "{\"secret\":\"legacy\"}");
 
-        ApplyMigration(HostCompositionRoot.Instance);
+        ApplyMigration(_context);
 
         Assert.False(Directory.Exists(legacyDirectory));
         Assert.Equal("{\"value\":\"legacy\"}", File.ReadAllText(Path.Combine(canonicalDirectory, "scope.json")));
@@ -167,7 +175,7 @@ public sealed class PluginNameMigrationTests
     [Fact]
     public void Apply_PreservesBothNamesWhenCanonicalStorageAlreadyExists()
     {
-        using var sandbox = new MigrationSandbox();
+        using var sandbox = new MigrationSandbox(_context);
         string pluginsRoot = Path.Combine(AppPaths.ConfigDir, "plugins");
         string legacyDirectory = Path.Combine(pluginsRoot, PluginNameMigration.LegacyMaaStellaSora);
         string canonicalDirectory = Path.Combine(pluginsRoot, PluginNameMigration.MaaStellaSora);
@@ -182,7 +190,7 @@ public sealed class PluginNameMigrationTests
         File.WriteAllText(Path.Combine(pluginsRoot, "maastellasora.json"), "legacy-config");
         File.WriteAllText(Path.Combine(pluginsRoot, "maas.json"), "canonical-config");
 
-        ApplyMigration(HostCompositionRoot.Instance);
+        ApplyMigration(_context);
 
         Assert.True(Directory.Exists(legacyDirectory));
         Assert.Equal("legacy", File.ReadAllText(Path.Combine(legacyDirectory, "scope.json")));
@@ -246,7 +254,7 @@ public sealed class PluginNameMigrationTests
 
     private sealed class MigrationSandbox : IDisposable
     {
-        private readonly HostCompositionRoot _context = HostCompositionRoot.Instance;
+        private readonly HostCompositionRoot _context;
         private readonly AppSettings _settings;
         private readonly List<ScriptInstance> _scripts;
         private readonly List<DispatchQueue> _queues;
@@ -256,8 +264,9 @@ public sealed class PluginNameMigrationTests
         private readonly Dictionary<string, byte[]?> _fileBackups = new(StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, string?> _directoryBackups = new(StringComparer.OrdinalIgnoreCase);
 
-        public MigrationSandbox()
+        public MigrationSandbox(HostCompositionRoot context)
         {
+            _context = context;
             _settings = _context.Settings.Clone();
             _scripts = _context.EntityState.SnapshotScripts();
             _queues = _context.EntityState.SnapshotQueues();

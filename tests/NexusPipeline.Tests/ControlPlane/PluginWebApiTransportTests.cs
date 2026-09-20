@@ -9,6 +9,7 @@ using NexusPipeline.Modules.Plugins.Runtime;
 using NexusPipeline.Modules.Settings;
 using NexusPipeline.Platform.Storage;
 using NexusPipeline.Shared.Logging;
+using NexusPipeline.Tests.Support;
 
 namespace NexusPipeline.Tests.ControlPlane;
 
@@ -16,12 +17,19 @@ namespace NexusPipeline.Tests.ControlPlane;
 /// 插件自有 Web API 的生产传输契约：请求体按内容类型投影为 JsonBody 或 OpenBodyStream，
 /// 二进制响应按受限 Content-Type 回传，超限请求在读取前拒绝。
 /// </summary>
-public sealed class PluginWebApiTransportTests
+public sealed class PluginWebApiTransportTests : IClassFixture<HostTestScope>
 {
+    private readonly HostCompositionRoot _context;
+
+    public PluginWebApiTransportTests(HostTestScope host)
+    {
+        _context = host.Composition;
+    }
+
     [Fact]
     public void BinaryRequest_IsReadableThroughOpenBodyStream()
     {
-        using var fixture = new WebApiPluginFixture();
+        using var fixture = new WebApiPluginFixture(_context);
         byte[] payload = Encoding.UTF8.GetBytes("fixture-binary-request-body");
 
         StubResponse response = fixture.Send(
@@ -40,7 +48,7 @@ public sealed class PluginWebApiTransportTests
     [Fact]
     public void JsonRequest_IsProjectedAsJsonBodyAndKeepsRawLength()
     {
-        using var fixture = new WebApiPluginFixture();
+        using var fixture = new WebApiPluginFixture(_context);
         byte[] payload = Encoding.UTF8.GetBytes("{\"name\":\"外观\",\"count\":3}");
 
         StubResponse response = fixture.Send(
@@ -61,7 +69,7 @@ public sealed class PluginWebApiTransportTests
     [Fact]
     public void BinaryResponse_IsServedWithTheDeclaredAllowedContentType()
     {
-        using var fixture = new WebApiPluginFixture();
+        using var fixture = new WebApiPluginFixture(_context);
 
         StubResponse response = fixture.Send("GET", "binary/image");
 
@@ -75,7 +83,7 @@ public sealed class PluginWebApiTransportTests
     [Fact]
     public void BinaryResponse_OutsideTheAllowedContentTypes_IsReportedAsPluginError()
     {
-        using var fixture = new WebApiPluginFixture();
+        using var fixture = new WebApiPluginFixture(_context);
 
         StubResponse response = fixture.Send("GET", "binary/document");
 
@@ -87,7 +95,7 @@ public sealed class PluginWebApiTransportTests
     [Fact]
     public void Request_AboveTheHostLimit_IsRejectedBeforeThePluginHandlerRuns()
     {
-        using var fixture = new WebApiPluginFixture();
+        using var fixture = new WebApiPluginFixture(_context);
 
         StubResponse response = fixture.Send(
             "POST",
@@ -162,10 +170,12 @@ public sealed class PluginWebApiTransportTests
     {
         private const string PluginName = "fixture-web-api";
 
+        private readonly HostCompositionRoot _context;
         private readonly string _pluginDirectory;
 
-        public WebApiPluginFixture()
+        public WebApiPluginFixture(HostCompositionRoot context)
         {
+            _context = context;
             const string artifactName = "FixtureWebApi";
             _pluginDirectory = Path.Combine(AppPaths.PluginsDir, artifactName);
             DeleteDirectory(_pluginDirectory);
@@ -188,10 +198,10 @@ public sealed class PluginWebApiTransportTests
               "capabilities": ["background-jobs"]
             }
             """);
-            AppSettings settings = HostCompositionRoot.Instance.Settings;
+            AppSettings settings = _context.Settings;
             settings.PluginPreferences ??= new Dictionary<string, PluginPreference>(StringComparer.OrdinalIgnoreCase);
             settings.PluginPreferences[PluginName] = new PluginPreference { Enabled = true };
-            PluginManager manager = HostCompositionRoot.Instance.Plugins;
+            PluginManager manager = _context.Plugins;
             manager.LoadAll();
             if (!manager.IsEnabled(PluginName))
             {
@@ -222,7 +232,7 @@ public sealed class PluginWebApiTransportTests
                     method,
                     new[] { "plugin-api", PluginName }.Concat(route.Split('/')).ToArray(),
                     "",
-                    HostCompositionRoot.Instance.Plugins)
+                    _context.Plugins)
                 .WaitAsync(TimeSpan.FromSeconds(15))
                 .GetAwaiter()
                 .GetResult();
@@ -235,8 +245,8 @@ public sealed class PluginWebApiTransportTests
         {
             try
             {
-                HostCompositionRoot.Instance.Settings.PluginPreferences?.Remove(PluginName);
-                HostCompositionRoot.Instance.Plugins.LoadAll();
+                _context.Settings.PluginPreferences?.Remove(PluginName);
+                _context.Plugins.LoadAll();
             }
             catch (Exception ex)
             {

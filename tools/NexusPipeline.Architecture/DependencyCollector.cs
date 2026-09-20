@@ -45,8 +45,8 @@ public static class DependencyCollector
         IReadOnlyList<DeclarationFact> declarations)
     {
         var declarationBySymbol = declarations
-            .GroupBy(declaration => declaration.SymbolId, StringComparer.Ordinal)
-            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
+            .GroupBy(declaration => (declaration.Mode, declaration.SymbolId))
+            .ToDictionary(group => group.Key, group => group.First());
         var edges = new List<DependencyEdge>();
         var diagnostics = new List<DependencyDiagnostic>();
 
@@ -72,7 +72,7 @@ public static class DependencyCollector
                         if (string.IsNullOrWhiteSpace(targetSymbol)) continue;
                         if (targetSymbol is "class" or "struct" or "unmanaged" or "notnull") continue;
                         if (string.Equals(targetSymbol, sourceSymbol, StringComparison.Ordinal)) continue;
-                        var targetDeclaration = declarationBySymbol.GetValueOrDefault(targetSymbol);
+                        var targetDeclaration = declarationBySymbol.GetValueOrDefault((model.Mode, targetSymbol));
                         var targetOwner = targetDeclaration?.Owner
                             ?? (IsLocalNexusSymbol(normalized.Symbol) ? "Unassigned" : "external");
                         if (targetOwner == "Unassigned")

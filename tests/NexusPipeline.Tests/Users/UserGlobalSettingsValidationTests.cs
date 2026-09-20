@@ -6,11 +6,19 @@ using NexusPipeline.Modules.Users.UseCases;
 using NexusPipeline.Modules.Users;
 using NexusPipeline.Platform.Storage;
 using NexusPipeline.Shared.Results;
+using NexusPipeline.Tests.Support;
 
 namespace NexusPipeline.Tests.Users;
 
-public sealed class UserGlobalSettingsValidationTests
+public sealed class UserGlobalSettingsValidationTests : IClassFixture<HostTestScope>
 {
+    private readonly HostCompositionRoot _context;
+
+    public UserGlobalSettingsValidationTests(HostTestScope host)
+    {
+        _context = host.Composition;
+    }
+
     [Fact]
     public void Disabled_categories_do_not_validate_their_payload()
     {
@@ -19,9 +27,9 @@ public sealed class UserGlobalSettingsValidationTests
             Id = "global-settings-disabled-" + Guid.NewGuid().ToString("N"),
             Name = "全局设置测试用户",
         };
-        using var scope = new UserGlobalSettingsScope(user);
+        using var scope = new UserGlobalSettingsScope(_context, user);
 
-        OperationResult<UserBindingOverrides> result = HostCompositionRoot.Instance.Resolve<UserCommands>().UpdateGlobalSettings(
+        OperationResult<UserBindingOverrides> result = _context.Resolve<UserCommands>().UpdateGlobalSettings(
             user.Id,
             new UserBindingOverrides
             {
@@ -45,9 +53,9 @@ public sealed class UserGlobalSettingsValidationTests
     public void Enabled_general_category_rejects_invalid_run_days_with_specific_code()
     {
         var user = NewUser();
-        using var scope = new UserGlobalSettingsScope(user);
+        using var scope = new UserGlobalSettingsScope(_context, user);
 
-        OperationResult<UserBindingOverrides> result = HostCompositionRoot.Instance.Resolve<UserCommands>().UpdateGlobalSettings(
+        OperationResult<UserBindingOverrides> result = _context.Resolve<UserCommands>().UpdateGlobalSettings(
             user.Id,
             new UserBindingOverrides
             {
@@ -62,9 +70,9 @@ public sealed class UserGlobalSettingsValidationTests
     public void Enabled_general_category_rejects_zero_success_limit_with_specific_code()
     {
         var user = NewUser();
-        using var scope = new UserGlobalSettingsScope(user);
+        using var scope = new UserGlobalSettingsScope(_context, user);
 
-        OperationResult<UserBindingOverrides> result = HostCompositionRoot.Instance.Resolve<UserCommands>().UpdateGlobalSettings(
+        OperationResult<UserBindingOverrides> result = _context.Resolve<UserCommands>().UpdateGlobalSettings(
             user.Id,
             new UserBindingOverrides
             {
@@ -79,9 +87,9 @@ public sealed class UserGlobalSettingsValidationTests
     public void Enabled_notification_category_rejects_invalid_smtp_with_specific_code()
     {
         var user = NewUser();
-        using var scope = new UserGlobalSettingsScope(user);
+        using var scope = new UserGlobalSettingsScope(_context, user);
 
-        OperationResult<UserBindingOverrides> result = HostCompositionRoot.Instance.Resolve<UserCommands>().UpdateGlobalSettings(
+        OperationResult<UserBindingOverrides> result = _context.Resolve<UserCommands>().UpdateGlobalSettings(
             user.Id,
             new UserBindingOverrides
             {
@@ -104,15 +112,16 @@ public sealed class UserGlobalSettingsValidationTests
 
     private sealed class UserGlobalSettingsScope : IDisposable
     {
-        private readonly HostCompositionRoot _context = HostCompositionRoot.Instance;
+        private readonly HostCompositionRoot _context;
         private readonly List<ScriptInstance> _previousScripts;
         private readonly List<DispatchQueue> _previousQueues;
         private readonly List<NexusUser> _previousUsers;
         private readonly bool _usersFileExists;
         private readonly byte[]? _usersFile;
 
-        public UserGlobalSettingsScope(NexusUser user)
+        public UserGlobalSettingsScope(HostCompositionRoot context, NexusUser user)
         {
+            _context = context;
             _previousScripts = _context.EntityState.SnapshotScripts();
             _previousQueues = _context.EntityState.SnapshotQueues();
             _previousUsers = _context.EntityState.SnapshotUsers();

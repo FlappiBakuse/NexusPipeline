@@ -19,8 +19,15 @@ using NexusPipeline.Tests.Support;
 namespace NexusPipeline.Tests.Scripts;
 
 
-public sealed class ScriptPluginAvailabilityTests
+public sealed class ScriptPluginAvailabilityTests : IClassFixture<HostTestScope>
 {
+    private readonly HostCompositionRoot _context;
+
+    public ScriptPluginAvailabilityTests(HostTestScope host)
+    {
+        _context = host.Composition;
+    }
+
     [Fact]
     public void Policy_DistinguishesGenericMissingWrongKindDisabledAndEnabledPlugins()
     {
@@ -161,7 +168,7 @@ public sealed class ScriptPluginAvailabilityTests
 
     private sealed class RuntimeDataScope : IDisposable
     {
-        private readonly HostCompositionRoot _context = HostCompositionRoot.Instance;
+        private readonly HostCompositionRoot _context;
         private readonly List<ScriptInstance> _previousScripts;
         private readonly List<DispatchQueue> _previousQueues;
         private readonly List<NexusUser> _previousUsers;
@@ -169,8 +176,9 @@ public sealed class ScriptPluginAvailabilityTests
         private readonly byte[]? _usersFile;
         private readonly string _scriptDataDir;
 
-        public RuntimeDataScope(ScriptInstance script, params NexusUser[] users)
+        public RuntimeDataScope(HostCompositionRoot context, ScriptInstance script, params NexusUser[] users)
         {
+            _context = context;
             _previousScripts = _context.EntityState.SnapshotScripts();
             _previousQueues = _context.EntityState.SnapshotQueues();
             _previousUsers = _context.EntityState.SnapshotUsers();

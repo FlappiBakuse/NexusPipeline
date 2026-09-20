@@ -6,9 +6,8 @@
 
 ## 当前未完成事项
 
-- 远端启用仍待维护者配置和验收：两个仓库的默认分支、main Ruleset、Qualification/Publisher App、受保护 Environment、workflow 启用及首次 bootstrap PR 尚未由本地开发会话执行。状态为 `CONFIGURATION_PENDING`，不能当作本地 Qualification 已完成或已启用远端门禁。
-- 真实 GitHub preview/stable 发布、Host Release 和 Host 消费 preview 的端到端闭环尚未执行；没有版本与正式发布授权时保持 `RELEASE_OPERATION_NOT_REQUESTED`。
-- 本机已完成当前源码的本地 Qualification；普通终端与托管 runner 的实际权限差异、远端 App check、规则和资产下载证据仍分别记录，不在本文件伪造为 PASS。
+- 两个仓库已安装资格控制面并配置独立 Qualification/Publisher App 与受保护 Environment；main Ruleset 和产品候选的完整远端资格仍待验收，不能以初始化 CI 代替产品资格。
+- v0.16.7 已获发布授权；真实 GitHub preview/stable 发布、Host Release 和 Host 消费 preview 的端到端闭环尚待执行，完成前不认定版本已发布。
 
 公共 UI 元件由对应 SFC 维护 DOM、交互和内部样式；feature 负责业务布局、状态与公开 props/events，插件通过注册的 `nxp-*` 元件消费宿主能力。
 
@@ -26,10 +25,6 @@
 - [ ] 完成更新事务的进一步故障注入矩阵，覆盖长时间运行、文件锁和异常退出组合。
 - [ ] 持续维护运行时版本动态展示、真实计时回归和 Release 资产校验。
 - [ ] 在 NexusPipeline-Plugins 的 `EmulatorSupport` 插件完成雷电、夜神和 BlueStacks 真机验证；实例识别、ADB 路由、启动/前台查询/截图/应用停止与安全关闭矩阵由[插件发行指南](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/docs/RELEASING.md)维护。宿主 System Smoke 覆盖 Generic ADB、MuMuManager 和 managed-code provider 跨边界调用。
-
-## 补充审阅缺陷状态
-
-补充包审阅报告中的 F01–F23、F25–F30 已在当前 `develop` 提交中完成实现，并由 Host release gate、Plugins P1/P2/P3 及对应单元/结构测试覆盖。F24 属于 GitHub 远端配置，不在本地源码提交中标记完成；真实远端证据按上方 `CONFIGURATION_PENDING` 保留。
 
 ## 维护规则
 

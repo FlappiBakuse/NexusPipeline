@@ -112,6 +112,12 @@ jobs:
           path: NexusPipeline
           fetch-depth: 0
           persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ needs.preflight.outputs.workflow_sha }}
+          path: release-controller
+          fetch-depth: 1
+          persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: "24"
@@ -127,7 +133,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          python tools/host_release.py --root . --tag $env:RELEASE_TAG --source-sha $env:SOURCE_SHA --output $env:PUBLISH_ROOT --build
+          python ../release-controller/tools/host_release.py --root . --tag $env:RELEASE_TAG --source-sha $env:SOURCE_SHA --output $env:PUBLISH_ROOT --build
       - name: Upload package evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
@@ -141,7 +147,7 @@ jobs:
   publish:
     name: Publish approved release
     needs: [preflight, build]
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     environment: host-release
     permissions:
       contents: read
@@ -172,6 +178,7 @@ jobs:
           permission-contents: read
           permission-pull-requests: read
       - name: Re-verify qualification immediately before write
+        shell: bash
         env:
           QUALIFICATION_TOKEN: ${{ steps.qualification-token.outputs.token }}
           GH_REPO: FlappiBakuse/NexusPipeline
@@ -217,19 +224,32 @@ jobs:
           test "$(jq -r .sourceSha "$metadata")" = "$SOURCE_SHA"
           test "$(jq -r .tag "$metadata")" = "$TAG"
           test "$(jq -r .mode "$metadata")" = production
-          zip_asset="NexusPipeline-$(jq -r .version "$metadata")-win-x64.zip"
+          zip_asset="NexusPipeline-$(jq -r .tag "$metadata")-win-x64.zip"
           sha_asset="$zip_asset.sha256"
           test -f "$zip_asset" -a -f "$sha_asset"
           expected="$(tr -d '\r\n' < "$sha_asset")"
           actual="$(sha256sum "$zip_asset" | cut -d' ' -f1)"
           test "$expected" = "$actual"
+          python "$GITHUB_WORKSPACE/NexusPipeline/tools/host_release.py" verify-package \
+            --package "$zip_asset" \
+            --metadata "$metadata" \
+            --expected-source-sha "$SOURCE_SHA" \
+            --expected-tag "$TAG"
           api="https://api.github.com/repos/$GH_REPO/releases/tags/$TAG"
           response_file="$(mktemp)"
           status="$(curl -sS -o "$response_file" -w '%{http_code}' -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "$api")"
           if [ "$status" = 404 ]; then
-            prerelease=false
-            if [[ "$TAG" =~ ^v0\. || "$TAG" =~ -(beta|rc)\.[0-9]+$ ]]; then prerelease=true; fi
-            release_json="$(gh api --method POST "repos/$GH_REPO/releases" -f tag_name="$TAG" -f target_commitish="$SOURCE_SHA" -f name="$TAG" -f body="sourceSha=$SOURCE_SHA" -F draft=true -F prerelease="$prerelease")"
+            # Tag lookup omits drafts; recover an existing draft by its immutable ID.
+            matches="$(gh api --paginate "repos/$GH_REPO/releases?per_page=100" | jq -s --arg tag "$TAG" '[.[][] | select(.tag_name == $tag)]')"
+            count="$(jq length <<<"$matches")"
+            test "$count" -le 1 || { echo "同 tag 存在多个 Release，拒绝猜测恢复目标" >&2; exit 1; }
+            if [ "$count" = 1 ]; then
+              release_json="$(jq '.[0]' <<<"$matches")"
+            else
+              prerelease=false
+              if [[ "$TAG" =~ ^v0\. || "$TAG" =~ -(beta|rc)\.[0-9]+$ ]]; then prerelease=true; fi
+              release_json="$(gh api --method POST "repos/$GH_REPO/releases" -f tag_name="$TAG" -f target_commitish="$SOURCE_SHA" -f name="$TAG" -f body="sourceSha=$SOURCE_SHA" -F draft=true -F prerelease="$prerelease")"
+            fi
           elif [ "$status" = 200 ]; then
             release_json="$(cat "$response_file")"
           else
@@ -249,6 +269,24 @@ jobs:
             else
               gh release upload "$TAG" "$asset" --repo "$GH_REPO"
             fi
+          done
+          release_json="$(gh api "repos/$GH_REPO/releases/$release_id")"
+          for asset in "$zip_asset" "$sha_asset"; do
+            asset_url="$(jq -r --arg name "$asset" '.assets[]? | select(.name == $name) | .url' <<<"$release_json" | head -n 1)"
+            test -n "$asset_url"
+            received="$(mktemp)"
+            curl -sS -f -L -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/octet-stream' "$asset_url" -o "$received"
+            cmp -s "$received" "$asset" || { echo "远端资产下载后字节不一致：$asset" >&2; exit 1; }
+            if [ "$asset" = "$zip_asset" ]; then
+              python "$GITHUB_WORKSPACE/NexusPipeline/tools/host_release.py" verify-package \
+                --package "$received" \
+                --metadata "$metadata" \
+                --expected-source-sha "$SOURCE_SHA" \
+                --expected-tag "$TAG"
+            else
+              test "$(sha256sum "$received" | cut -d' ' -f1)" = "$(sha256sum "$asset" | cut -d' ' -f1)"
+            fi
+            rm -f "$received"
           done
           gh api --method PATCH "repos/$GH_REPO/releases/$release_id" -F draft=false
           test "$(gh api "repos/$GH_REPO/releases/$release_id" --jq '.draft')" = false

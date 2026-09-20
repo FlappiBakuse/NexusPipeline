@@ -8,16 +8,24 @@ using Xunit;
 using NexusPipeline.ControlPlane.Http;
 using NexusPipeline.ControlPlane.Mcp;
 using NexusPipeline.Host.Composition;
+using NexusPipeline.Tests.Support;
 
 namespace NexusPipeline.Tests.ControlPlane;
 
-public sealed class McpProtocolTests
+public sealed class McpProtocolTests : IClassFixture<HostTestScope>
 {
+    private readonly HostCompositionRoot _context;
+
+    public McpProtocolTests(HostTestScope host)
+    {
+        _context = host.Composition;
+    }
+
     [Fact]
     public async Task EmbeddedHttpHost_discovers_core_tools_and_returns_structured_result()
     {
         int port = GetFreePort();
-        using var host = new McpHost(HostCompositionRoot.Instance.CreateMcpToolContext(requestRestart: null));
+        using var host = new McpHost(_context.CreateMcpToolContext(requestRestart: null));
         Assert.True(host.TryStart(port));
         try
         {
@@ -104,7 +112,7 @@ public sealed class McpProtocolTests
         int port = GetFreePort();
         using var listener = new TcpListener(IPAddress.Loopback, port);
         listener.Start();
-        using var host = new McpHost(HostCompositionRoot.Instance.CreateMcpToolContext(requestRestart: null));
+        using var host = new McpHost(_context.CreateMcpToolContext(requestRestart: null));
 
         Assert.False(host.TryStart(port));
         Assert.False(host.IsRunning);

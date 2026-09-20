@@ -8,7 +8,7 @@ import { validateCrossRepositoryLinks, validateMap, loadMap } from "../../tools/
 import { GOVERNANCE_DOMAINS, HOST_TEST_AREAS, SYSTEM_TEST_GROUPS, TEST_DOMAIN_REGISTRY } from "../registry.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const SKIP_DIRECTORIES = new Set([".git", "node_modules", "bin", "obj", "release", "tests/.artifacts"]);
+const SKIP_DIRECTORIES = new Set([".git", "node_modules", "bin", "obj", "release", "NexusPipeline-Plugins", "tests/.artifacts"]);
 const EVERGREEN_DOCUMENTS = [
   "AGENTS.md",
   "README.md",
@@ -89,6 +89,7 @@ test("cross-repository documentation links resolve against the checked-out fixed
   const result = validateCrossRepositoryLinks(documents, {
     root: ROOT,
     workspaceRoot: path.resolve(ROOT, ".."),
+    checkouts: { "NexusPipeline-Plugins": process.env.NEXUS_OFFICIAL_PLUGINS_ROOT?.trim() },
   });
   assert.deepEqual(result.issues, [], result.issues.join("\n"));
   assert.ok(result.checked.length > 0, "至少应校验一条跨仓库文档链接");

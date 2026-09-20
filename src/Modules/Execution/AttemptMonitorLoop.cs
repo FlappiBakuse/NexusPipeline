@@ -120,6 +120,15 @@ internal sealed class AttemptMonitorLoop
                     break;
                 }
 
+                // Observe completion before draining logs: a short-lived process may
+                // create its first/final log after a previous discovery pass and then exit.
+                // Never combine a new exit observation with an older missing-log snapshot.
+                bool scriptExited = attemptMonitor.IsScriptExited(
+                    process,
+                    launchExe,
+                    session.ProcessOwnership,
+                    excludeGame,
+                    processSnapshot);
                 state.Monitor = logEnv.RefreshMonitor(state.Monitor);
 
                 string newContent = attemptMonitor.ReadLog(state.Monitor);
@@ -194,12 +203,6 @@ internal sealed class AttemptMonitorLoop
                     break;
                 }
 
-                bool scriptExited = attemptMonitor.IsScriptExited(
-                    process,
-                    launchExe,
-                    session.ProcessOwnership,
-                    excludeGame,
-                    processSnapshot);
                 if (scriptExited)
                 {
                     state.Result = terminator.OnScriptExited(state.Monitor is null, !string.IsNullOrWhiteSpace(session.Script.LogPath), skipFinalJudge);

@@ -8,6 +8,25 @@ namespace NexusPipeline.Architecture.Tests;
 public sealed class ArchitectureRulesTests
 {
     [Fact]
+    public void BackendMapUsesRepositoryLfRegardlessOfPlatform()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "nxp-map-newline-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var path = Path.Combine(directory, "map.json");
+            var value = new { schemaVersion = 2, files = new[] { "src/Test.cs" } };
+            BackendMapWriter.Write(value, path);
+            Assert.DoesNotContain("\r", File.ReadAllText(path));
+            Assert.EndsWith("\n", File.ReadAllText(path));
+            Assert.True(BackendMapWriter.Matches(value, path));
+            File.WriteAllText(path, File.ReadAllText(path).Replace("Test.cs", "Other.cs"));
+            Assert.False(BackendMapWriter.Matches(value, path));
+        }
+        finally { Directory.Delete(directory, recursive: true); }
+    }
+
+    [Fact]
     public void DebtBaselineDoesNotAbsorbAnAddedOccurrence()
     {
         var baseline = Violation(occurrence: 0);
@@ -36,6 +55,20 @@ public sealed class ArchitectureRulesTests
 
         Assert.Contains(components, component => component.SetEquals(new[] { "Settings", "Plugins" }));
         Assert.DoesNotContain(components, component => component.Contains("Queues") && component.Contains("Scheduling"));
+    }
+
+    [Fact]
+    public void TarjanDoesNotMergeProductionAndTestHostModes()
+    {
+        var edges = new[]
+        {
+            Edge("Settings", "Plugins", mode: "production"),
+            Edge("Plugins", "Settings", mode: "test-host"),
+        };
+
+        var components = BoundaryRules.FindStronglyConnectedComponents(edges);
+
+        Assert.DoesNotContain(components, component => component.SetEquals(new[] { "Settings", "Plugins" }));
     }
 
     [Fact]
@@ -70,10 +103,10 @@ public sealed class ArchitectureRulesTests
             ProjectKind = "host",
         };
 
-    private static DependencyEdge Edge(string source, string target)
+    private static DependencyEdge Edge(string source, string target, string mode = "production")
         => new("src/test.cs", source, "source", "target", target, "test", 1)
         {
-            Mode = "production",
+            Mode = mode,
             ProjectKind = "host",
         };
 }

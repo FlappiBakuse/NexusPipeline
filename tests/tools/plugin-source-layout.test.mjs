@@ -2,17 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
-
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-const pluginRepositoryCandidates = [
-  path.join(repoRoot, "NexusPipeline-Plugins"),
-  path.resolve(repoRoot, "..", "NexusPipeline-Plugins"),
-];
 
 function findPluginRepository() {
-  const repository = pluginRepositoryCandidates.find(candidate => fs.existsSync(path.join(candidate, "catalog.json")));
-  assert.ok(repository, `未找到官方插件仓库 catalog.json，已检查：${pluginRepositoryCandidates.join(", ")}`);
+  const configured = process.env.NEXUS_OFFICIAL_PLUGINS_ROOT?.trim();
+  assert.ok(configured, "必须显式设置 NEXUS_OFFICIAL_PLUGINS_ROOT，禁止猜测官方 Plugins 根目录");
+  const repository = path.resolve(configured);
+  assert.ok(fs.existsSync(path.join(repository, "catalog.json")), `官方插件仓库缺少 catalog.json：${repository}`);
   return repository;
 }
 

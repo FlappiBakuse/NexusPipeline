@@ -10,11 +10,19 @@ using NexusPipeline.Modules.Users;
 using NexusPipeline.Platform.Storage;
 using NexusPipeline.Shared.Results;
 using NexusPipeline.Modules.Configuration.Snapshots;
+using NexusPipeline.Tests.Support;
 namespace NexusPipeline.Tests.Users;
 
 
-public sealed class UserBindingAdmissionTests
+public sealed class UserBindingAdmissionTests : IClassFixture<HostTestScope>
 {
+    private readonly HostCompositionRoot _context;
+
+    public UserBindingAdmissionTests(HostTestScope host)
+    {
+        _context = host.Composition;
+    }
+
     [Fact]
     public void ScriptConfigGateAdapter_DisposeReleasesAcquiredGate()
     {
@@ -38,7 +46,7 @@ public sealed class UserBindingAdmissionTests
     [Fact]
     public void AddBinding_RejectsWhenAnyUserOfScriptIsRunning()
     {
-        HostCompositionRoot context = HostCompositionRoot.Instance;
+        HostCompositionRoot context = _context;
         string scriptId = "regression-running-" + Guid.NewGuid().ToString("N");
         string targetUserId = Guid.NewGuid().ToString("N");
         string runningUserId = Guid.NewGuid().ToString("N");
@@ -109,7 +117,7 @@ public sealed class UserBindingAdmissionTests
     {
         // v0.12.8：绑定不再建立配置快照、不做任何文件动作；配置缺失也必须绑定成功，
         // 初始快照延迟到首次编辑配置（显式选择方式）或首次运行（复用现场配置）时建立。
-        HostCompositionRoot context = HostCompositionRoot.Instance;
+        HostCompositionRoot context = _context;
         string scriptId = "regression-snapshot-" + Guid.NewGuid().ToString("N");
         string userId = Guid.NewGuid().ToString("N");
         var script = new ScriptInstance
