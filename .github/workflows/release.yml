@@ -112,6 +112,12 @@ jobs:
           path: NexusPipeline
           fetch-depth: 0
           persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ needs.preflight.outputs.workflow_sha }}
+          path: release-controller
+          fetch-depth: 1
+          persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: "24"
@@ -127,7 +133,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          python tools/host_release.py --root . --tag $env:RELEASE_TAG --source-sha $env:SOURCE_SHA --output $env:PUBLISH_ROOT --build
+          python ../release-controller/tools/host_release.py --root . --tag $env:RELEASE_TAG --source-sha $env:SOURCE_SHA --output $env:PUBLISH_ROOT --build
       - name: Upload package evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
@@ -218,7 +224,7 @@ jobs:
           test "$(jq -r .sourceSha "$metadata")" = "$SOURCE_SHA"
           test "$(jq -r .tag "$metadata")" = "$TAG"
           test "$(jq -r .mode "$metadata")" = production
-          zip_asset="NexusPipeline-$(jq -r .version "$metadata")-win-x64.zip"
+          zip_asset="NexusPipeline-$(jq -r .tag "$metadata")-win-x64.zip"
           sha_asset="$zip_asset.sha256"
           test -f "$zip_asset" -a -f "$sha_asset"
           expected="$(tr -d '\r\n' < "$sha_asset")"

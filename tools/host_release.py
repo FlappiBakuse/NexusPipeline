@@ -124,7 +124,7 @@ def archive_production(
     tag = normalized_tag(tag)
     version = tag[1:]
     output_dir.mkdir(parents=True, exist_ok=True)
-    zip_path = output_dir / f"NexusPipeline-{version}-win-x64.zip"
+    zip_path = output_dir / f"NexusPipeline-{tag}-win-x64.zip"
     if zip_path.exists():
         zip_path.unlink()
     files = []

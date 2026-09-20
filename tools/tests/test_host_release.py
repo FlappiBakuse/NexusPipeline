@@ -73,6 +73,8 @@ class HostReleaseTests(unittest.TestCase):
             (production / "config" / "secret.json").unlink()
             (production / "config").rmdir()
             first = archive_production(production, output, "v1.2.3", source_sha="a" * 40, manifest_path=root / "src" / "app.manifest")
+            self.assertEqual(Path(first["zip"]).name, "NexusPipeline-v1.2.3-win-x64.zip")
+            self.assertEqual(Path(first["sha"]).name, "NexusPipeline-v1.2.3-win-x64.zip.sha256")
             first_bytes = Path(first["zip"]).read_bytes()
             second = archive_production(production, output, "v1.2.3", source_sha="a" * 40, manifest_path=root / "src" / "app.manifest")
             self.assertEqual(first_bytes, Path(second["zip"]).read_bytes())
