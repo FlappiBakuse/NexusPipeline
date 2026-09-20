@@ -6,8 +6,8 @@
 
 ## 当前未完成事项
 
-- 远端启用仍待维护者配置和验收：两个仓库的默认分支、main Ruleset、Qualification/Publisher App、受保护 Environment、workflow 启用及首次 bootstrap PR 尚未由本地开发会话执行。状态为 `CONFIGURATION_PENDING`，不能当作本地 Qualification 已完成或已启用远端门禁。
-- 真实 GitHub preview/stable 发布、Host Release 和 Host 消费 preview 的端到端闭环尚未执行；没有版本与正式发布授权时保持 `RELEASE_OPERATION_NOT_REQUESTED`。
+- 两个仓库已安装资格控制面并配置独立 Qualification/Publisher App 与受保护 Environment；main Ruleset 和产品候选的完整远端资格仍待验收，不能以初始化 CI 代替产品资格。
+- v0.16.7 已获发布授权；真实 GitHub preview/stable 发布、Host Release 和 Host 消费 preview 的端到端闭环尚待执行，完成前不认定版本已发布。
 
 公共 UI 元件由对应 SFC 维护 DOM、交互和内部样式；feature 负责业务布局、状态与公开 props/events，插件通过注册的 `nxp-*` 元件消费宿主能力。
 
