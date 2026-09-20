@@ -14,6 +14,11 @@ from pathlib import Path
 from typing import Any, Callable
 from xml.etree import ElementTree
 
+try:
+    from .pe_manifest import verify_embedded_manifest
+except ImportError:
+    from pe_manifest import verify_embedded_manifest
+
 
 REPOSITORY = "FlappiBakuse/NexusPipeline"
 VERSION_PATTERN = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(beta|rc)\.(0|[1-9]\d*))?$")
@@ -161,6 +166,7 @@ def build_production(root: Path, output_dir: Path, *, source_sha: str, dotnet: s
     subprocess.run(["npm", "run", "typecheck", "--prefix", str(frontend)], cwd=root, check=True)
     subprocess.run(["npm", "run", "build", "--prefix", str(frontend)], cwd=root, check=True)
     subprocess.run([dotnet, "publish", str(root / "src" / "NexusPipeline.csproj"), "--configuration", "Release", "--runtime", "win-x64", "--self-contained", "false", "-p:PublishSingleFile=true", "-p:DebugType=none", "-p:DebugSymbols=false", "-p:NexusTestHost=false", "--output", str(production_root)], cwd=root, check=True)
+    verify_embedded_manifest(production_root / "nexus-pipeline.exe", "requireAdministrator")
     wwwroot = production_root / "wwwroot"
     if wwwroot.exists():
         shutil.rmtree(wwwroot)

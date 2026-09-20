@@ -31,10 +31,9 @@ const reportRoot = path.join(runRoot, "reports");
 const RELEASE_GATE_GROUPS = gateSequence("all");
 const RELEASE_GROUPS = [...RELEASE_GATE_GROUPS, "all"];
 const MODE_SUITES = new Set(["default", "ui", "system", "all"]);
-let productionBuildPromise = null;
-let frontendBuildPromise = null;
-let testHostBuildPromise = null;
 let reportSequence = 0;
+
+const buildPromises = new Map();
 
 function normalizePath(file) {
   return path.relative(projectRoot, file).replaceAll("\\", "/");
@@ -229,8 +228,11 @@ async function runFrontend(groups = []) {
 }
 
 async function runFrontendBuild() {
-  if (!frontendBuildPromise) frontendBuildPromise = runProcess(npmCommand, ["run", "build"], { cwd: frontendDir });
-  return frontendBuildPromise;
+  const key = `frontend:${runId}`;
+  if (!buildPromises.has(key)) {
+    buildPromises.set(key, runProcess(npmCommand, ["run", "build"], { cwd: frontendDir }));
+  }
+  return buildPromises.get(key);
 }
 
 async function runContracts() {
@@ -286,8 +288,25 @@ async function runSyntax() {
 }
 
 async function runBuild() {
-  if (!productionBuildPromise) productionBuildPromise = runProcess(path.join(projectRoot, "build.cmd"), [], { timeoutMs: 15 * 60 * 1000 });
-  return productionBuildPromise;
+  const key = `production:${runId}`;
+  if (!buildPromises.has(key)) {
+    buildPromises.set(key, buildProductionCore());
+  }
+  return buildPromises.get(key);
+}
+
+async function buildProductionCore() {
+  const code = await runProcess(path.join(projectRoot, "build.cmd"), [], { timeoutMs: 15 * 60 * 1000 });
+  if (code !== 0) return code;
+  return verifyEmbeddedManifest(path.join(projectRoot, "release", "nexus-pipeline.exe"), "requireAdministrator");
+}
+
+async function verifyEmbeddedManifest(executable, expectedLevel) {
+  return runProcess(pythonCommand, [
+    "tools\\pe_manifest.py",
+    "--exe", executable,
+    "--expected-level", expectedLevel,
+  ], { cwd: projectRoot });
 }
 
 async function runArchitectureCheck() {
@@ -321,8 +340,9 @@ async function runArchitectureCheck() {
 }
 
 function buildTestHost() {
-  if (!testHostBuildPromise) testHostBuildPromise = buildTestHostCore();
-  return testHostBuildPromise;
+  const key = `test-host:${runId}`;
+  if (!buildPromises.has(key)) buildPromises.set(key, buildTestHostCore());
+  return buildPromises.get(key);
 }
 
 async function buildTestHostCore() {
@@ -336,6 +356,8 @@ async function buildTestHostCore() {
     "-o", testHostDir, "--nologo", "-m:1", "-nr:false",
   ], { timeoutMs: 15 * 60 * 1000 });
   if (publishCode !== 0) return publishCode;
+  const manifestCode = await verifyEmbeddedManifest(path.join(testHostDir, "nexus-pipeline.exe"), "asInvoker");
+  if (manifestCode !== 0) return manifestCode;
   fs.cpSync(path.join(frontendDir, "dist"), path.join(testHostDir, "wwwroot"), { recursive: true });
   fs.mkdirSync(path.join(testHostDir, "plugins"), { recursive: true });
   console.error(`[Test Host] 构建完成：${path.join(testHostDir, "nexus-pipeline.exe")}`);
@@ -344,7 +366,7 @@ async function buildTestHostCore() {
 
 function cleanTestHost() {
   fs.rmSync(testHostDir, { recursive: true, force: true, maxRetries: 120, retryDelay: 250 });
-  testHostBuildPromise = null;
+  buildPromises.delete(`test-host:${runId}`);
 }
 
 function cleanEmulatorFixturePlugin() {

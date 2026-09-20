@@ -1,7 +1,7 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-rem This produces the production release used by Administrator Gate; Codex Feedback builds a separate Test Host.
+rem This produces the production release package. Functional qualification uses a separate Test Host.
 rem Plugin repository is maintained separately; frontend source is built into static files before publishing.
 rem .build-src-hash records the host source and frontend source fingerprint used to skip unchanged publishes.
 call npm ci --prefix "%~dp0frontend" --no-audit --no-fund
@@ -28,7 +28,7 @@ mkdir "%~dp0release\plugins" >nul 2>nul
 echo.
 echo Build OK: %~dp0release\nexus-pipeline.exe
 echo Production executable uses the requireAdministrator manifest.
-echo Codex Feedback Smoke uses an isolated asInvoker Test Host; Administrator Gate uses this production release.
+echo Functional qualification uses an isolated asInvoker Test Host; this executable remains the production requireAdministrator build.
 echo Runtime data directories are created on first launch.
 exit /b 0
 
