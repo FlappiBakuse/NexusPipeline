@@ -284,13 +284,13 @@ export function ownsHandoffProcess(markerPath, pid) {
   return inspectHandoffProcessOwnership(markerPath, pid) === OWNERSHIP.OWNED;
 }
 
-function runtimeOwnershipStatus(markerPath, marker, pid) {
-  if (Number(pid) === marker.pid) return inspectProcessOwnership(markerPath, pid);
-  if (marker.handoffProcesses?.some(item => item?.pid === Number(pid))) return inspectHandoffProcessOwnership(markerPath, pid);
-  return inspectRestartedProcessOwnership(markerPath, pid);
+function runtimeOwnershipStatus(markerPath, marker, pid, readers) {
+  if (Number(pid) === marker.pid) return inspectProcessOwnership(markerPath, pid, readers);
+  if (marker.handoffProcesses?.some(item => item?.pid === Number(pid))) return inspectHandoffProcessOwnership(markerPath, pid, readers);
+  return inspectRestartedProcessOwnership(markerPath, pid, readers);
 }
 
-export async function ensureOwnedRuntimeDirectory(runtimeDir, markerPath, pidFilePath) {
+export async function ensureOwnedRuntimeDirectory(runtimeDir, markerPath, pidFilePath, { identityReader = readProcessIdentity, aliveReader = isProcessAliveSafe, terminator = killProcessTree, exitWaiter = waitForExit } = {}) {
   if (!fs.existsSync(runtimeDir)) {
     fs.mkdirSync(runtimeDir, { recursive: true });
     return;
@@ -304,20 +304,21 @@ export async function ensureOwnedRuntimeDirectory(runtimeDir, markerPath, pidFil
     : [];
   const pids = [...new Set([marker.pid, readPidFile(pidFilePath), ...handoffPids]
     .filter(pid => Number.isInteger(pid) && pid > 0))];
-  for (const pid of pids) registerHandoffProcess(markerPath, pid);
+  for (const pid of pids) registerHandoffProcess(markerPath, pid, { identityReader });
   marker = readRunMarker(markerPath);
   for (const pid of pids) {
-    if (!isProcessAliveSafe(pid)) continue;
-    const status = runtimeOwnershipStatus(markerPath, marker, pid);
+    if (!aliveReader(pid)) continue;
+    const status = runtimeOwnershipStatus(markerPath, marker, pid, { identityReader, aliveReader });
+    if (status === OWNERSHIP.EXITED) continue;
     if (status !== OWNERSHIP.OWNED) {
       throw new Error(`拒绝清理运行进程：PID=${pid}，ownership=${status}`);
     }
-    if (!killProcessTree(pid)) {
+    if (!terminator(pid)) {
       throw new Error(`运行进程树终止未确认：PID=${pid}`);
     }
   }
   for (const pid of pids) {
-    if (!await waitForExit(pid, 10000, 250)) {
+    if (!await exitWaiter(pid, 10000, 250)) {
       throw new Error(`运行进程退出未确认，保留现场：PID=${pid}`);
     }
   }
