@@ -169,7 +169,11 @@ test("ER00 每日成功运行上限：达到上限后写入 skipped 且不再次
   });
   try {
     const first = await runScript(script.id);
-    assert.equal(recordStatus(first), "success");
+    assert.equal(recordStatus(first), "success", JSON.stringify({
+      resultCode: first.resultCode || first.ResultCode,
+      resultDetail: first.resultDetail || first.ResultDetail,
+      attempts: recordDetails(first),
+    }));
     const second = await runScript(script.id);
     assert.equal(recordStatus(second), "skipped");
     assert.equal(recordAttempts(second), 0);

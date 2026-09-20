@@ -8,6 +8,25 @@ namespace NexusPipeline.Architecture.Tests;
 public sealed class ArchitectureRulesTests
 {
     [Fact]
+    public void BackendMapUsesRepositoryLfRegardlessOfPlatform()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "nxp-map-newline-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var path = Path.Combine(directory, "map.json");
+            var value = new { schemaVersion = 2, files = new[] { "src/Test.cs" } };
+            BackendMapWriter.Write(value, path);
+            Assert.DoesNotContain("\r", File.ReadAllText(path));
+            Assert.EndsWith("\n", File.ReadAllText(path));
+            Assert.True(BackendMapWriter.Matches(value, path));
+            File.WriteAllText(path, File.ReadAllText(path).Replace("Test.cs", "Other.cs"));
+            Assert.False(BackendMapWriter.Matches(value, path));
+        }
+        finally { Directory.Delete(directory, recursive: true); }
+    }
+
+    [Fact]
     public void DebtBaselineDoesNotAbsorbAnAddedOccurrence()
     {
         var baseline = Violation(occurrence: 0);

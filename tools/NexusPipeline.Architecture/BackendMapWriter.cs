@@ -162,7 +162,7 @@ public static class BackendMapWriter
         {
             WriteIndented = true,
             DefaultIgnoreCondition = JsonIgnoreCondition.Never,
-        }) + Environment.NewLine;
+        }).Replace("\r\n", "\n", StringComparison.Ordinal) + "\n";
 
     private static IReadOnlyList<EntryPoint> CollectEntryPoints(IReadOnlyList<SyntaxModelFact> models)
     {
