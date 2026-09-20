@@ -1,15 +1,23 @@
 using Xunit;
 using NexusPipeline.Host.Composition;
 using NexusPipeline.Modules.Plugins.Runtime;
+using NexusPipeline.Tests.Support;
 
 namespace NexusPipeline.Tests.Plugins;
 
-public sealed class PluginManagerTests
+public sealed class PluginManagerTests : IClassFixture<HostTestScope>
 {
+    private readonly HostCompositionRoot _context;
+
+    public PluginManagerTests(HostTestScope host)
+    {
+        _context = host.Composition;
+    }
+
     [Fact]
     public void LoadAll_DoesNotExposeRemovedBuiltInPlugins()
     {
-        PluginManager manager = HostCompositionRoot.Instance.Plugins;
+        PluginManager manager = _context.Plugins;
         manager.LoadAll();
         string[] firstNames = manager.PluginSummaries.Select(plugin => plugin.Name).OrderBy(name => name).ToArray();
 
@@ -24,7 +32,7 @@ public sealed class PluginManagerTests
     [Fact]
     public void ManagementProjection_IsCachedUntilInvalidated()
     {
-        PluginManager manager = HostCompositionRoot.Instance.Plugins;
+        PluginManager manager = _context.Plugins;
         manager.LoadAll();
 
         IReadOnlyList<PluginManagementView> first = manager.PluginManagementViews;

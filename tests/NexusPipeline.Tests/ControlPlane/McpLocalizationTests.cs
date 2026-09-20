@@ -10,11 +10,19 @@ using NexusPipeline.Modules.Users.UseCases;
 using NexusPipeline.Modules.Users;
 using NexusPipeline.Shared.Localization;
 using NexusPipeline.Shared.Results;
+using NexusPipeline.Tests.Support;
 
 namespace NexusPipeline.Tests.ControlPlane;
 
-public sealed class McpLocalizationTests
+public sealed class McpLocalizationTests : IClassFixture<HostTestScope>
 {
+    private readonly HostCompositionRoot _context;
+
+    public McpLocalizationTests(HostTestScope host)
+    {
+        _context = host.Composition;
+    }
+
     [Fact]
     public void EnglishMcpValidationFailureDoesNotLeakSourceLanguageMessage()
     {
@@ -53,14 +61,14 @@ public sealed class McpLocalizationTests
     {
         using IDisposable locale = LocaleContext.Push(LocaleCatalog.EnglishLocale);
 
-        string userPayload = McpToolResult.From(HostCompositionRoot.Instance.Resolve<UserCommands>().Create("invalid/name", "")).StructuredContent?.ToString() ?? "";
-        string settingsPayload = McpToolResult.From(HostCompositionRoot.Instance.Resolve<UserCommands>().UpdateGlobalSettings(
+        string userPayload = McpToolResult.From(_context.Resolve<UserCommands>().Create("invalid/name", "")).StructuredContent?.ToString() ?? "";
+        string settingsPayload = McpToolResult.From(_context.Resolve<UserCommands>().UpdateGlobalSettings(
             "missing-user",
             new UserBindingOverrides
             {
                 General = new UserGeneralOverride { SyncEnabled = true, RunDays = -2 },
             })).StructuredContent?.ToString() ?? "";
-        string scriptPayload = McpToolResult.From(HostCompositionRoot.Instance.Resolve<ScriptCommands>().Create(new ScriptInstance())).StructuredContent?.ToString() ?? "";
+        string scriptPayload = McpToolResult.From(_context.Resolve<ScriptCommands>().Create(new ScriptInstance())).StructuredContent?.ToString() ?? "";
 
         Assert.DoesNotContain("用户名", userPayload);
         Assert.Contains("username", userPayload.ToLowerInvariant());

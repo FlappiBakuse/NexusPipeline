@@ -174,14 +174,16 @@ public sealed class CliControlContractTests
         string root = FindProjectRoot();
         string[] adapterDirectories =
         {
-            Path.Combine(root, "src", "Cli"),
-            Path.Combine(root, "src", "Web"),
+            Path.Combine(root, "src", "ControlPlane", "Cli"),
+            Path.Combine(root, "src", "ControlPlane", "Http"),
         };
         string[] forbidden = { "DataStore.Save", "ConfigStore.Save" };
 
         foreach (string directory in adapterDirectories)
         {
-            foreach (string file in Directory.EnumerateFiles(directory, "*.cs", SearchOption.TopDirectoryOnly))
+            string[] files = Directory.GetFiles(directory, "*.cs", SearchOption.AllDirectories);
+            Assert.NotEmpty(files);
+            foreach (string file in files)
             {
                 string contents = File.ReadAllText(file);
                 foreach (string marker in forbidden)

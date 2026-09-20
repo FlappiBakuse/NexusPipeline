@@ -118,7 +118,7 @@ internal sealed class NoopNotificationService : INotificationService
     }
 internal sealed class RuntimeDataScope : IDisposable
     {
-        private readonly HostCompositionRoot _context = HostCompositionRoot.Instance;
+        private readonly HostCompositionRoot _context;
         private readonly List<ScriptInstance> _previousScripts;
         private readonly List<DispatchQueue> _previousQueues;
         private readonly List<NexusUser> _previousUsers;
@@ -126,8 +126,9 @@ internal sealed class RuntimeDataScope : IDisposable
         private readonly byte[]? _usersFile;
         private readonly string _scriptDataDir;
 
-        public RuntimeDataScope(ScriptInstance script, params NexusUser[] users)
+        public RuntimeDataScope(HostCompositionRoot context, ScriptInstance script, params NexusUser[] users)
         {
+            _context = context;
             _previousScripts = _context.EntityState.SnapshotScripts();
             _previousQueues = _context.EntityState.SnapshotQueues();
             _previousUsers = _context.EntityState.SnapshotUsers();

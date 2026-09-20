@@ -6,16 +6,24 @@ using NexusPipeline.Modules.Scheduling;
 using NexusPipeline.Modules.Scripts;
 using NexusPipeline.Modules.Users.Contracts;
 using NexusPipeline.Modules.Users;
+using NexusPipeline.Tests.Support;
 namespace NexusPipeline.Tests.Scheduling;
 
 
-public sealed class PendingBindingTests
+public sealed class PendingBindingTests : IClassFixture<HostTestScope>
 {
+    private readonly HostCompositionRoot _context;
+
+    public PendingBindingTests(HostTestScope host)
+    {
+        _context = host.Composition;
+    }
+
 
     [Fact]
     public void PendingFrozenPlan_BlocksOnlyMatchingUserAndScriptBinding()
     {
-        HostCompositionRoot context = HostCompositionRoot.Instance;
+        HostCompositionRoot context = _context;
         string scriptId = "regression-pending-" + Guid.NewGuid().ToString("N");
         string unrelatedScriptId = "regression-unrelated-" + Guid.NewGuid().ToString("N");
         string userId = Guid.NewGuid().ToString("N");

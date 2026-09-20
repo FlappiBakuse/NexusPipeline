@@ -57,12 +57,6 @@ namespace NexusPipeline.Host.Composition;
 /// <summary>组合根：只负责一次性组装 Host 对象图；进程生命周期由 <see cref="HostRuntime"/> 持有。</summary>
 internal class HostCompositionRoot
 {
-#if NEXUS_TEST_HOST
-    // Test-only compatibility for legacy unit fixtures. Production code has no global root.
-    private static readonly Lazy<HostRuntime> TestRuntime = new(() => Create(new AppSettings()));
-    public static HostCompositionRoot Instance => TestRuntime.Value.Composition;
-#endif
-
     private readonly ServiceProvider _services;
     private readonly AutomationDefinitionState _entityState = new();
     private readonly SettingsState _settingsState;

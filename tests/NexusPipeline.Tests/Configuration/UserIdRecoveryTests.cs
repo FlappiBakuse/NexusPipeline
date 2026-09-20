@@ -5,11 +5,19 @@ using NexusPipeline.Modules.Configuration.Paths;
 using NexusPipeline.Modules.Configuration.Recovery;
 using NexusPipeline.Modules.Users;
 using NexusPipeline.Platform.Storage;
+using NexusPipeline.Tests.Support;
 
 namespace NexusPipeline.Tests.Configuration;
 
-public sealed class UserIdRecoveryTests
+public sealed class UserIdRecoveryTests : IClassFixture<HostTestScope>
 {
+    private readonly HostCompositionRoot _context;
+
+    public UserIdRecoveryTests(HostTestScope host)
+    {
+        _context = host.Composition;
+    }
+
     [Fact]
     public void ConfigRunSession_UsesUserIdDirectory_AndKeepsDisplayNamePathSeparate()
     {
@@ -46,7 +54,7 @@ public sealed class UserIdRecoveryTests
     [Fact]
     public void Recovery_IgnoresUnboundUserIdResidue()
     {
-        HostCompositionRoot context = HostCompositionRoot.Instance;
+        HostCompositionRoot context = _context;
         // v0.10.0（B2）：恢复数据源由组合根装配；测试直接构造等价适配器。
         ConfigSwapSession.ConfigureRecovery(context.EntityState.FindScript, context.EntityState.SnapshotUsers);
         string scriptId = "regression-recovery-" + Guid.NewGuid().ToString("N");
@@ -102,4 +110,3 @@ public sealed class UserIdRecoveryTests
         }
     }
 }
-
