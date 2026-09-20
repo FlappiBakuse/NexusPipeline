@@ -144,7 +144,7 @@ def archive_production(
             archive.writestr(info, data)
     digest = hashlib.sha256(zip_path.read_bytes()).hexdigest()
     sha_path = output_dir / f"{zip_path.name}.sha256"
-    sha_path.write_text(digest + "\n", encoding="ascii")
+    sha_path.write_bytes(digest.encode("ascii"))
     metadata = {
         "schemaVersion": 1,
         "sourceSha": source_sha,

@@ -239,9 +239,17 @@ jobs:
           response_file="$(mktemp)"
           status="$(curl -sS -o "$response_file" -w '%{http_code}' -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "$api")"
           if [ "$status" = 404 ]; then
-            prerelease=false
-            if [[ "$TAG" =~ ^v0\. || "$TAG" =~ -(beta|rc)\.[0-9]+$ ]]; then prerelease=true; fi
-            release_json="$(gh api --method POST "repos/$GH_REPO/releases" -f tag_name="$TAG" -f target_commitish="$SOURCE_SHA" -f name="$TAG" -f body="sourceSha=$SOURCE_SHA" -F draft=true -F prerelease="$prerelease")"
+            # Tag lookup omits drafts; recover an existing draft by its immutable ID.
+            matches="$(gh api --paginate "repos/$GH_REPO/releases?per_page=100" | jq -s --arg tag "$TAG" '[.[][] | select(.tag_name == $tag)]')"
+            count="$(jq length <<<"$matches")"
+            test "$count" -le 1 || { echo "同 tag 存在多个 Release，拒绝猜测恢复目标" >&2; exit 1; }
+            if [ "$count" = 1 ]; then
+              release_json="$(jq '.[0]' <<<"$matches")"
+            else
+              prerelease=false
+              if [[ "$TAG" =~ ^v0\. || "$TAG" =~ -(beta|rc)\.[0-9]+$ ]]; then prerelease=true; fi
+              release_json="$(gh api --method POST "repos/$GH_REPO/releases" -f tag_name="$TAG" -f target_commitish="$SOURCE_SHA" -f name="$TAG" -f body="sourceSha=$SOURCE_SHA" -F draft=true -F prerelease="$prerelease")"
+            fi
           elif [ "$status" = 200 ]; then
             release_json="$(cat "$response_file")"
           else
