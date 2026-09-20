@@ -141,7 +141,7 @@ jobs:
   publish:
     name: Publish approved release
     needs: [preflight, build]
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     environment: host-release
     permissions:
       contents: read
@@ -172,6 +172,7 @@ jobs:
           permission-contents: read
           permission-pull-requests: read
       - name: Re-verify qualification immediately before write
+        shell: bash
         env:
           QUALIFICATION_TOKEN: ${{ steps.qualification-token.outputs.token }}
           GH_REPO: FlappiBakuse/NexusPipeline
