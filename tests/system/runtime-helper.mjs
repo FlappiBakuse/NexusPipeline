@@ -1,35 +1,41 @@
 import { spawn } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  isAdministrator,
   isProcessAlive,
-  killProcessTree,
   readPidFile,
+  readProcessIdentity,
 } from "../support/windows-process.mjs";
 import {
   copyReleaseArtifacts,
+  createRunMarker,
+  waitForRunMarker,
+  registerHandoffProcess,
+  inspectHandoffProcessOwnership,
+  OWNERSHIP,
+  ensureOwnedRuntimeDirectory,
   fetchWithTimeout,
   installEmulatorStubs,
   requireExecutionMode,
+  readRunMarker,
   resolveTestHostDir,
   resolveTestHostExitFile,
   sleep,
   stopSpawnedService,
 } from "../support/test-runtime.mjs";
 
-export { isAdministrator, fetchWithTimeout };
+export { fetchWithTimeout };
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const projectRoot = path.resolve(here, "..", "..");
-const productionReleaseDir = path.join(projectRoot, "release");
 const executionMode = requireExecutionMode("System Smoke");
 export { executionMode };
-export const isCodexMode = executionMode === "codex";
-export const isAdminMode = executionMode === "admin";
+export const runId = process.env.NEXUS_TEST_RUN_ID?.trim()
+  || `standalone-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 export const testHostDir = resolveTestHostDir(projectRoot);
-export const releaseDir = isCodexMode ? testHostDir : productionReleaseDir;
+export const releaseDir = testHostDir;
 const configuredWebPort = Number(process.env.NEXUS_SYSTEM_WEB_PORT?.trim() || "58731");
 if (!Number.isInteger(configuredWebPort) || configuredWebPort < 1024 || configuredWebPort > 65535) {
   throw new Error(`非法 NEXUS_SYSTEM_WEB_PORT：${process.env.NEXUS_SYSTEM_WEB_PORT}`);
@@ -39,9 +45,10 @@ const runtimeName = process.env.NEXUS_SYSTEM_RUNTIME_NAME || "runtime";
 if (!/^[A-Za-z0-9_-]+$/.test(runtimeName)) {
   throw new Error(`非法 NEXUS_SYSTEM_RUNTIME_NAME：${runtimeName}`);
 }
-export const runtimeDir = path.join(here, runtimeName);
+export const runtimeDir = path.join(projectRoot, "tests", ".artifacts", "runs", runId, runtimeName);
 export const runtimeExe = path.join(runtimeDir, "nexus-pipeline.exe");
 export const servicePidPath = path.join(runtimeDir, ".nxp", "runtime", "service.pid");
+export const runMarkerPath = path.join(runtimeDir, ".nxp", "test-run-marker.json");
 export const testHostExitFile = resolveTestHostExitFile(
   projectRoot,
   path.join(runtimeDir, ".nxp", "test-host.exit"),
@@ -70,19 +77,8 @@ export function serviceUrl() {
   return baseUrl;
 }
 
-function ownedPids() {
-  const pids = new Set();
-  const marked = readPidFile(servicePidPath);
-  if (marked) pids.add(marked);
-  if (child?.pid) pids.add(Number(child.pid));
-  return [...pids].filter(pid => Number.isInteger(pid) && pid > 0);
-}
-
-export function prepareRuntime() {
-  // 测试只清理自身 runtime 写入的 service.pid 所指向进程，避免全局进程扫描误杀用户实例。
-  for (const pid of ownedPids()) killProcessTree(pid);
-  fs.rmSync(runtimeDir, { recursive: true, force: true, maxRetries: 120, retryDelay: 250 });
-  fs.mkdirSync(runtimeDir, { recursive: true });
+export async function prepareRuntime() {
+  await ensureOwnedRuntimeDirectory(runtimeDir, runMarkerPath, servicePidPath);
   const sourceExe = path.join(releaseDir, "nexus-pipeline.exe");
   if (!fs.existsSync(sourceExe)) {
     throw new Error(`${releaseDir}/nexus-pipeline.exe 不存在，请先运行 node tests/run.mjs ${executionMode} system`);
@@ -105,9 +101,17 @@ export function isRuntimeAlive(pid) {
 }
 
 export function startRuntime(args = [], extraEnv = {}) {
+  return startOwnedRuntimeProcess(runtimeExe, args.length === 0 ? ["web"] : args, extraEnv);
+}
+
+export function startUpdateWorker(executable, args, extraEnv = {}) {
+  return startOwnedRuntimeProcess(executable, args, extraEnv);
+}
+
+function startOwnedRuntimeProcess(executable, launchArgs, extraEnv) {
   stdout = "";
   stderr = "";
-  if (isCodexMode) fs.rmSync(testHostExitFile, { force: true });
+  fs.rmSync(testHostExitFile, { force: true });
   const localNoProxy = [process.env.NO_PROXY, process.env.no_proxy, "127.0.0.1", "localhost"]
     .filter(Boolean)
     .join(",");
@@ -122,18 +126,19 @@ export function startRuntime(args = [], extraEnv = {}) {
     HTTPS_PROXY: "",
     http_proxy: "",
     https_proxy: "",
-    NEXUS_TEST_MODE: executionMode,
+    NEXUS_TEST_MODE: "test-host",
+    NEXUS_TEST_RUN_ID: runId,
     ...extraEnv,
   };
-  for (const key of ["NEXUS_TEST_HOST", "NEXUS_TEST_HOST_DIR", "NEXUS_TEST_HOST_EXIT_FILE"]) delete env[key];
-  if (isCodexMode) {
-    env.NEXUS_TEST_HOST = "1";
-    env.NEXUS_TEST_HOST_DIR = testHostDir;
-    env.NEXUS_TEST_HOST_EXIT_FILE = testHostExitFile;
-  }
+  env.NEXUS_TEST_HOST = "1";
+  env.NEXUS_TEST_HOST_DIR = testHostDir;
+  env.NEXUS_TEST_HOST_EXIT_FILE = testHostExitFile;
+  env.NEXUS_TEST_OWNERSHIP_NONCE = randomUUID();
+  // Keep the same mutex across this install's restart/update, but never share
+  // it with another checkout or a preserved failed run of the same suite.
+  env.NEXUS_SYSTEM_RUNTIME_NAME = `system-${createHash("sha256").update(fs.realpathSync.native(runtimeDir).toLowerCase()).digest("hex").slice(0, 24)}`;
   // System Smoke 统一使用 web 模式：stdin EOF 可触发受控退出，重启测试不依赖管理员 taskkill。
-  const launchArgs = args.length === 0 ? ["web"] : args;
-  child = spawn(runtimeExe, launchArgs, {
+  child = spawn(executable, launchArgs, {
     cwd: runtimeDir,
     env,
     stdio: ["pipe", "pipe", "pipe"],
@@ -142,6 +147,7 @@ export function startRuntime(args = [], extraEnv = {}) {
   child.stdout?.on("data", chunk => { stdout += chunk.toString(); });
   child.stderr?.on("data", chunk => { stderr += chunk.toString(); });
   child.on("error", error => { stderr += error.stack || error.message; });
+  createRunMarker(runMarkerPath, executable, child, { nonce: env.NEXUS_TEST_OWNERSHIP_NONCE, identityFile: `${testHostExitFile}.identity.json`, handoffExecutablePath: runtimeExe, runId });
   return child;
 }
 
@@ -151,6 +157,7 @@ export async function stopRuntime() {
     child: currentChild,
     exitFile: testHostExitFile,
     pidFilePath: servicePidPath,
+    markerPath: runMarkerPath,
     exitWaitPollMs: 100,
   });
   child = null;
@@ -169,6 +176,7 @@ export function runtimeDiagnostic() {
 }
 
 export async function waitForService(url = null, timeoutMs = 30000) {
+  await waitForRunMarker(child);
   const deadline = Date.now() + timeoutMs;
   let lastError = "";
   let attempts = 0;
@@ -228,6 +236,15 @@ function formatRestartObservation(observation) {
     `actualPort=${observation.actualPort || "-"}`,
     `result=${observation.result || "-"}`,
   ].join(" ");
+}
+
+function adoptRestartedProcessMarker(status) {
+  const pid = readPidFile(servicePidPath);
+  if (!pid) {
+    throw new Error("重启服务已响应但缺少当前 service.pid，拒绝接管清理身份");
+  }
+  registerHandoffProcess(runMarkerPath, pid, { expectedInstanceId: status.instanceId, expectedHandoffId: status.restartHandoffId });
+  if (inspectHandoffProcessOwnership(runMarkerPath, pid) !== OWNERSHIP.OWNED) throw new Error(`重启交接身份未确认：PID=${pid}`);
 }
 
 /**
@@ -319,7 +336,10 @@ export async function waitForRestartedService(options = {}) {
     for (const observation of results) {
       rememberRestartObservation(observations, observation);
       lastError = observation.result;
-      if (observation.matched) return observation.payload;
+      if (observation.matched) {
+        adoptRestartedProcessMarker(observation.payload);
+        return observation.payload;
+      }
     }
 
     const waitMs = deadline - Date.now();

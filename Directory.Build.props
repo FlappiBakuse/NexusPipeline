@@ -1,0 +1,21 @@
+<Project>
+  <PropertyGroup>
+    <!-- Keep every project from re-including another project's generated obj/bin files. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);**/obj/**;**/bin/**</DefaultItemExcludes>
+  </PropertyGroup>
+
+  <!-- Keep the Test Host restore/intermediate graph separate from production for every SDK project. -->
+  <PropertyGroup Condition="'$(NexusTestHost)' == 'true'">
+    <BaseIntermediateOutputPath>$(MSBuildThisFileDirectory)obj\test-host\$(MSBuildProjectName)\</BaseIntermediateOutputPath>
+    <MSBuildProjectExtensionsPath>$(BaseIntermediateOutputPath)</MSBuildProjectExtensionsPath>
+    <BaseOutputPath>$(MSBuildThisFileDirectory)bin\test-host\$(MSBuildProjectName)\</BaseOutputPath>
+  </PropertyGroup>
+
+  <!-- Keep Roslyn's production architecture graph independent per project; a global
+       extensions path would make the Host and SDK overwrite each other's assets. -->
+  <PropertyGroup Condition="'$(NexusArchitectureMode)' == 'production' and '$(NexusTestHost)' != 'true'">
+    <BaseIntermediateOutputPath>$(MSBuildThisFileDirectory)obj\architecture\production\$(MSBuildProjectName)\</BaseIntermediateOutputPath>
+    <MSBuildProjectExtensionsPath>$(BaseIntermediateOutputPath)</MSBuildProjectExtensionsPath>
+    <BaseOutputPath>$(MSBuildThisFileDirectory)bin\architecture\production\$(MSBuildProjectName)\</BaseOutputPath>
+  </PropertyGroup>
+</Project>

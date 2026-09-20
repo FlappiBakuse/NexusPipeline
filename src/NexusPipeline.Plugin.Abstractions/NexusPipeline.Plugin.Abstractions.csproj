@@ -7,6 +7,7 @@
     <RootNamespace>NexusPipeline.Plugin.Abstractions</RootNamespace>
     <AssemblyName>NexusPipeline.Plugin.Abstractions</AssemblyName>
     <Version>1.7.0</Version>
+    <DefaultItemExcludes>$(DefaultItemExcludes);obj/**;bin/**</DefaultItemExcludes>
   </PropertyGroup>
 
 </Project>

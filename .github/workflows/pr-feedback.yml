@@ -1,0 +1,142 @@
+name: PR Feedback
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: host-pr-feedback-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  scope:
+    name: classify feedback scope
+    runs-on: ubuntu-latest
+    outputs:
+      core: ${{ steps.scope.outputs.core }}
+      frontend_contract: ${{ steps.scope.outputs.frontend_contract }}
+      runtime: ${{ steps.scope.outputs.runtime }}
+      update: ${{ steps.scope.outputs.update }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "24"
+      - id: scope
+        shell: bash
+        run: |
+          node tools/ci-scope.mjs --base "${{ github.event.pull_request.base.sha }}" --head "${{ github.event.pull_request.head.sha }}" --github-output "$GITHUB_OUTPUT"
+
+  core:
+    name: Feedback core
+    needs: scope
+    if: needs.scope.outputs.core == 'true'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: FlappiBakuse/NexusPipeline-Plugins
+          ref: main
+          path: NexusPipeline-Plugins
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "24"
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
+        with:
+          dotnet-version: "8.0.x"
+      - name: Run core feedback
+        env:
+          NEXUS_OFFICIAL_PLUGINS_ROOT: ${{ github.workspace }}\NexusPipeline-Plugins
+        run: node tests/run.mjs release core
+
+  frontend-contract:
+    name: Feedback frontend contract
+    needs: scope
+    if: needs.scope.outputs.frontend_contract == 'true'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: FlappiBakuse/NexusPipeline-Plugins
+          ref: ${{ github.event.repository.default_branch }}
+          path: NexusPipeline-Plugins
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "24"
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
+        with:
+          dotnet-version: "8.0.x"
+      - name: Run frontend contract feedback
+        env:
+          NEXUS_OFFICIAL_PLUGINS_ROOT: ${{ github.workspace }}\NexusPipeline-Plugins
+        run: node tests/run.mjs release frontend-contract
+
+  runtime:
+    name: Feedback runtime
+    needs: scope
+    if: needs.scope.outputs.runtime == 'true'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          repository: FlappiBakuse/NexusPipeline-Plugins
+          ref: main
+          path: NexusPipeline-Plugins
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "24"
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
+        with:
+          dotnet-version: "8.0.x"
+      - name: Run runtime feedback
+        env:
+          NEXUS_TIME_SCALE: "10"
+          NEXUS_OFFICIAL_PLUGINS_ROOT: ${{ github.workspace }}\NexusPipeline-Plugins
+        run: |
+          node tests/run.mjs release ui-runtime
+          node tests/run.mjs release execution-emulator
+
+  update:
+    name: Feedback update
+    needs: scope
+    if: needs.scope.outputs.update == 'true'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "24"
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
+        with:
+          dotnet-version: "8.0.x"
+      - name: Run update feedback
+        run: node tests/run.mjs release update-acceptance

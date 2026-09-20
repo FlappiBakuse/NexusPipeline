@@ -41,14 +41,14 @@ function assertNoChineseOutputArguments(source, pattern, label) {
 }
 
 test("backend user-output adapters share the localized operation-error contract", () => {
-  const english = JSON.parse(read("src/Localization/Resources/en-US.json"));
-  const chinese = JSON.parse(read("src/Localization/Resources/zh-CN.json"));
+  const english = JSON.parse(read("src/Shared/Localization/Resources/en-US.json"));
+  const chinese = JSON.parse(read("src/Shared/Localization/Resources/zh-CN.json"));
   assert.deepEqual(Object.keys(english).sort(), Object.keys(chinese).sort(), "host locale resources must have identical keys");
 
-  const operationResult = read("src/Application/Contracts/OperationResult.cs");
-  const mcpResult = read("src/Mcp/McpToolResult.cs");
-  const mcpHost = read("src/Mcp/McpHost.cs");
-  const cliOutput = read("src/Cli/CliOutput.cs");
+  const operationResult = read("src/Shared/Results/OperationResult.cs");
+  const mcpResult = read("src/ControlPlane/Mcp/McpToolResult.cs");
+  const mcpHost = read("src/ControlPlane/Mcp/McpHost.cs");
+  const cliOutput = read("src/ControlPlane/Cli/CliOutput.cs");
   assert.match(operationResult, /MessageKey/iu);
   assert.match(operationResult, /MessageArgs/iu);
   assert.match(mcpResult, /TranslateOperationError/iu);
@@ -58,10 +58,10 @@ test("backend user-output adapters share the localized operation-error contract"
   assert.match(cliOutput, /TranslateUserMessage/iu);
 
   const sourceFiles = [
-    "src/Mcp/McpMutationTools.cs",
-    "src/Mcp/McpReadOnlyTools.cs",
-    "src/Mcp/McpToolContext.cs",
-    "src/Mcp/McpPolicy.cs",
+    "src/ControlPlane/Mcp/McpMutationTools.cs",
+    "src/ControlPlane/Mcp/McpReadOnlyTools.cs",
+    "src/ControlPlane/Mcp/McpToolContext.cs",
+    "src/ControlPlane/Mcp/McpPolicy.cs",
   ];
   for (const relativePath of sourceFiles) {
     const source = read(relativePath);
@@ -84,7 +84,15 @@ test("backend user-output adapters share the localized operation-error contract"
     assert.ok(Object.hasOwn(english, key), `missing host localization key: ${key}`);
   }
 
-  for (const relativePath of ["src/Application/Commands", "src/Mcp", "src/Cli"].flatMap(walk)) {
+  for (const relativePath of [
+    "src/Modules/Scripts/UseCases",
+    "src/Modules/Queues/UseCases",
+    "src/Modules/Users/UseCases",
+    "src/Modules/Settings/UseCases",
+    "src/Modules/Configuration/Editing",
+    "src/ControlPlane/Mcp",
+    "src/ControlPlane/Cli",
+  ].flatMap(walk)) {
     const source = read(relativePath);
     for (const match of source.matchAll(/(?:OperationResult(?:<[^>]+>)?|McpToolResult)\.Failure\(\s*["']([a-z][a-z0-9_]*)["']/giu)) {
       assert.ok(Object.hasOwn(english, `api.error.${match[1]}`), `${relativePath} uses an unregistered user error code: ${match[1]}`);
@@ -108,17 +116,17 @@ test("backend user-output adapters share the localized operation-error contract"
     assert.ok(Object.hasOwn(english, key), `missing host lifecycle localization key: ${key}`);
   }
 
-  const runtimeInitializer = read("src/Application/RuntimeInitializer.cs");
+  const runtimeInitializer = read("src/Host/Initialization/RuntimeInitializer.cs");
   assertNoChineseStringLiterals(runtimeInitializer, "RuntimeInitializer");
   assertNoChineseOutputArguments(
     runtimeInitializer,
     /(?:MessageBox\.Show|Console\.Error\.WriteLine)\(([\s\S]*?)\);/gu,
     "RuntimeInitializer user output");
 
-  const bootstrap = read("src/Bootstrap.cs");
+  const bootstrap = read("src/Host/Lifecycle/Bootstrap.cs");
   assert.match(bootstrap, /HostLocalization\.TranslateNamed/iu);
-  const exitBoundaryStart = bootstrap.indexOf("internal static bool CanStopServices");
-  const exitBoundaryEnd = bootstrap.indexOf("internal static bool TryRequestRestart");
+  const exitBoundaryStart = bootstrap.indexOf("CanStopServices(out string reasonCode)");
+  const exitBoundaryEnd = bootstrap.indexOf("TryRequestRestart(string auditSource)");
   assert.ok(exitBoundaryStart >= 0 && exitBoundaryEnd > exitBoundaryStart, "Bootstrap exit boundary must remain auditable");
   assertNoChineseStringLiterals(bootstrap.slice(exitBoundaryStart, exitBoundaryEnd), "Bootstrap exit boundary");
   assertNoChineseOutputArguments(
@@ -126,7 +134,7 @@ test("backend user-output adapters share the localized operation-error contract"
     /MessageBox\.Show\(([\s\S]*?)\);/gu,
     "Bootstrap user output");
 
-  const tray = read("src/TrayApp.cs");
+  const tray = read("src/Host/Tray/TrayApp.cs");
   assert.match(tray, /Text\s*=\s*HostLocalization\.TranslateNamed/iu);
   assert.doesNotMatch(tray, /Text\s*=\s*["'][^"'\r\n]*[\u3400-\u9fff]/u, "Tray icon text must use localized output");
   assert.doesNotMatch(

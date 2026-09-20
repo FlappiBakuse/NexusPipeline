@@ -4,6 +4,7 @@ export interface ScriptPluginRecord {
   name?: string;
   displayName?: string;
   kind?: string;
+  capabilities?: unknown;
   state?: string;
   runtimeEnabled?: boolean;
   noFreshConfig?: boolean;

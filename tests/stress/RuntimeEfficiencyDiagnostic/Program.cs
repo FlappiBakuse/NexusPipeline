@@ -1,10 +1,23 @@
 using System.Diagnostics;
 using System.Text.Json;
-using NexusPipeline.App.Abstractions;
-using NexusPipeline.Models;
-using NexusPipeline.Services;
-using NexusPipeline.Services.Execution;
-using NexusPipeline.Services.Update;
+using NexusPipeline.Host;
+using NexusPipeline.Modules.Execution.Contracts;
+using NexusPipeline.Modules.Execution.Monitoring;
+using NexusPipeline.Modules.Execution;
+using NexusPipeline.Modules.History.Contracts;
+using NexusPipeline.Modules.History;
+using NexusPipeline.Modules.Plugins.Contracts;
+using NexusPipeline.Modules.Queues.Contracts;
+using NexusPipeline.Modules.Queues;
+using NexusPipeline.Modules.Scheduling;
+using NexusPipeline.Modules.Scripts.Contracts;
+using NexusPipeline.Modules.Scripts;
+using NexusPipeline.Modules.Settings.Contracts;
+using NexusPipeline.Modules.Settings;
+using NexusPipeline.Modules.Users.Contracts;
+using NexusPipeline.Modules.Users;
+using NexusPipeline.Tests.Scheduling;
+using NexusPipeline.Tests.Support;
 
 namespace NexusPipeline.StressDiagnostics;
 

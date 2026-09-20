@@ -50,7 +50,7 @@
 
 运行时文件系统的统一约定（新增或调整持久化路径时必须遵循，并同步更新本节、[配置专题](configuration.md#运行时目录与快照)和[运行状态目录](#运行状态目录)的布局树）：
 
-1. **单一事实源**：全部路径常量集中在 `src/Persistence/AppPaths.cs` 与 `src/Services/ConfigSwapPaths.cs`，业务代码不得自行拼接安装根相对路径。
+1. **单一事实源**：全部路径常量集中在 `src/Platform/Storage/RuntimeStateLayout.cs` 与 `src/Modules/Configuration/Paths/ConfigSwapPaths.cs`，业务代码不得自行拼接安装根相对路径。
 2. **目录分类归位**：目录按生命周期分四类——常驻持久（config/、user-assets/、plugins/、data 持久层、.nxp/state/）、常驻可重建（.nxp/runtime/、按保留期滚动的 logs/ 与 history/）、会话事务临时（data work/、.nxp/runtime/staging/）、隔离归档（data-trash/、judge-scripts/orphaned/）。**临时类必须有明确的清理路径**（收尾清理或启动清扫），隔离现场在确认提交前保留。
 3. **命名约定**：目录与普通数据文件一律 kebab-case（`data-trash`、`swap-backup`、`store-txn`、`store-meta.json`），**禁止 dot 后缀命名**（`store.previous` 这类"目录带扩展名"的形式不允许出现，dot 后缀仅允许作为文件扩展名本身，如 `.json`、`.log`、`.jpg` 与临时文件的 `.tmp`）；进程内部隐藏标记用 dot 前缀（`.nxp/`、`.session`、`.session.bak` 与 swap-backup 内的 `.meta` 清单）；数据文件名为 `<名称>.json`（磁盘 JSON 一律 PascalCase 字段 + UTF-8 + 原子写）。隔离/归档条目命名 `<主名>-<yyyyMMddHHmmssfff>-<Guid:N>`，staging 子目录命名 `<名称>.<Guid:N>`。
 4. **损坏保全**：JSON 解析失败时原文件改名为 `*.corrupt-<时间戳>-<guid>` 保留现场，等待人工处理，不被后续保存覆盖；快照事务 manifest/commit 损坏时写入阻断标记，拒绝继续猜测写入。

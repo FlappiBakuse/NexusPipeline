@@ -1,0 +1,195 @@
+using NexusPipeline.Modules.Configuration.Exchange;
+using NexusPipeline.Modules.Configuration.Snapshots;
+using NexusPipeline.Platform.Storage;
+using NexusPipeline.Shared.Logging;
+
+namespace NexusPipeline.Modules.Configuration.Paths;
+
+/// <summary>
+/// 数据目录管理层（从 UserConfigManager 拆出）：data/{脚本Id}/{UserId} 各类子目录的定位与清理。
+/// 当前格式空闲态只保留一份权威快照 store 与小型 store-meta.json；
+/// work/ 下保留运行现场与增量 store-txn，提交完成后事务目录清理。
+/// </summary>
+internal static class ConfigPaths
+{
+    /// <summary>会话事务工作区目录名。</summary>
+    public const string WorkDirName = "work";
+
+    public static string UserDir(string scriptId, string userKey)
+    {
+        return Path.Combine(AppPaths.DataDir, scriptId, userKey);
+    }
+
+    /// <summary>会话事务工作区：仅会话期间存在；无用户时兜底 data/{脚本Id}/work。</summary>
+    public static string WorkDir(string scriptId, string? userName)
+    {
+        return string.IsNullOrWhiteSpace(userName)
+            ? Path.Combine(AppPaths.DataDir, scriptId, WorkDirName)
+            : Path.Combine(UserDir(scriptId, userName), WorkDirName);
+    }
+
+    public static string StoreDir(string scriptId, string userKey)
+    {
+        return Path.Combine(UserDir(scriptId, userKey), "store");
+    }
+
+    /// <summary>附加配置路径的按用户快照目录：store-extra/&lt;x+声明路径短哈希&gt;。目录名与声明顺序无关，
+    /// 声明路径变化即视为新快照（首次自动采用现场），旧目录保留不自动删除。</summary>
+    public static string StoreExtraDir(string scriptId, string userKey, string declaredPath)
+    {
+        return Path.Combine(UserDir(scriptId, userKey), "store-extra", ExtraKey(declaredPath));
+    }
+
+    /// <summary>附加配置路径的运行/编辑前现场备份目录（对称于主配置 work/original）；Prepare 时移入，Restore 时还原。</summary>
+    public static string OriginalExtraDir(string scriptId, string userKey, string declaredPath)
+    {
+        return Path.Combine(WorkDir(scriptId, userKey), "original-extra", ExtraKey(declaredPath));
+    }
+
+    /// <summary>附加配置快照事务目录：每条声明路径独立保存 manifest/stage/backup/commit。</summary>
+    public static string ExtraStoreTransactionDir(string scriptId, string userKey, string declaredPath)
+    {
+        return Path.Combine(WorkDir(scriptId, userKey), "extra-store-txn", ExtraKey(declaredPath));
+    }
+
+    public static string ExtraStoreTransactionManifestPath(string scriptId, string userKey, string declaredPath) =>
+        Path.Combine(ExtraStoreTransactionDir(scriptId, userKey, declaredPath), "manifest.json");
+
+    public static string ExtraStoreTransactionStageDir(string scriptId, string userKey, string declaredPath) =>
+        Path.Combine(ExtraStoreTransactionDir(scriptId, userKey, declaredPath), "stage");
+
+    public static string ExtraStoreTransactionBackupDir(string scriptId, string userKey, string declaredPath) =>
+        Path.Combine(ExtraStoreTransactionDir(scriptId, userKey, declaredPath), "backup");
+
+    public static string ExtraStoreTransactionCommitPath(string scriptId, string userKey, string declaredPath) =>
+        Path.Combine(ExtraStoreTransactionDir(scriptId, userKey, declaredPath), "commit.json");
+
+    public static string OriginalExtraRoot(string scriptId, string userKey) =>
+        Path.Combine(WorkDir(scriptId, userKey), "original-extra");
+
+    /// <summary>附加配置路径的稳定短键：x + 规范化路径的 SHA256 前 12 位。</summary>
+    public static string ExtraKey(string declaredPath)
+    {
+        return ConfigStoreMetadata.HashLocator(declaredPath)[..12].Insert(0, "x");
+    }
+
+    /// <summary>用户快照元数据；记录 profile/配置定位指纹，不保存插件 profile 内容。</summary>
+    public static string StoreMetadataPath(string scriptId, string userKey)
+    {
+        return Path.Combine(UserDir(scriptId, userKey), "store-meta.json");
+    }
+
+    public static string CacheDir(string scriptId, string userKey)
+    {
+        return Path.Combine(WorkDir(scriptId, userKey), "original");
+    }
+
+    /// <summary>配置编辑事务隔离区：保存被隔离候选的原始文件或目录。</summary>
+    public static string EditIsolationDir(string scriptId, string userKey)
+    {
+        return Path.Combine(WorkDir(scriptId, userKey), "edit-isolation");
+    }
+
+    /// <summary>配置编辑事务隔离区的稳定候选项目录。</summary>
+    public static string EditIsolationEntryDir(string scriptId, string userKey, string candidatePath)
+    {
+        return Path.Combine(EditIsolationDir(scriptId, userKey), ExtraKey(candidatePath));
+    }
+
+    /// <summary>判断脚本专用目录（可读写）；无用户时兜底 data/{脚本Id}/work/script。</summary>
+    public static string ScriptDir(string scriptId, string? userName)
+    {
+        return Path.Combine(WorkDir(scriptId, userName), "script");
+    }
+
+    /// <summary>配置替换备份目录（无用户交换时用于还原；有用户时由配置交换机制还原，备份作双保险）。</summary>
+    public static string ReplaceBackupDir(string scriptId, string? userName)
+    {
+        return Path.Combine(WorkDir(scriptId, userName), "swap-backup");
+    }
+
+    /// <summary>配置快照增量事务目录：manifest/stage/rollback/commit 只保存本轮变更。</summary>
+    public static string StoreTransactionDir(string scriptId, string userKey)
+    {
+        return Path.Combine(WorkDir(scriptId, userKey), "store-txn");
+    }
+
+    public static string StoreTransactionManifestPath(string scriptId, string userKey) =>
+        Path.Combine(StoreTransactionDir(scriptId, userKey), "manifest.json");
+
+    public static string StoreTransactionStageDir(string scriptId, string userKey) =>
+        Path.Combine(StoreTransactionDir(scriptId, userKey), "stage");
+
+    public static string StoreTransactionRollbackDir(string scriptId, string userKey) =>
+        Path.Combine(StoreTransactionDir(scriptId, userKey), "rollback");
+
+    public static string StoreTransactionCommitPath(string scriptId, string userKey) =>
+        Path.Combine(StoreTransactionDir(scriptId, userKey), "commit.json");
+
+    /// <summary>损坏事务的人工处理阻断标记；存在时禁止继续写入该用户快照。</summary>
+    public static string StoreTransactionBlockedPath(string scriptId, string userKey) =>
+        Path.Combine(UserDir(scriptId, userKey), ".store-txn-blocked.json");
+
+    /// <summary>准备判断脚本目录：清空重建（运行开始调用）。</summary>
+    public static void PrepareScriptDir(string scriptId, string? userName)
+    {
+        string dir = ScriptDir(scriptId, userName);
+        ConfigSwapPrimitives.TryDeleteDir(dir);
+        try
+        {
+            Directory.CreateDirectory(dir);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[警告] 准备判断脚本目录失败（{dir}）：{ex.Message}");
+        }
+    }
+
+    /// <summary>运行结束清理：清空判断脚本目录与配置替换备份目录。</summary>
+    public static void CleanupScriptArea(string scriptId, string? userName)
+    {
+        ConfigSwapPrimitives.TryDeleteDir(ScriptDir(scriptId, userName));
+    }
+
+    /// <summary>删除脚本时将其全部数据目录移入应用根目录下的隔离区，保留人工恢复机会。</summary>
+    public static bool RemoveScriptData(string scriptId)
+    {
+        string dir = Path.Combine(AppPaths.DataDir, scriptId);
+        try
+        {
+            if (!Directory.Exists(dir))
+            {
+                return true;
+            }
+            string trashRoot = Path.Combine(AppPaths.AppRoot, "data-trash");
+            Directory.CreateDirectory(trashRoot);
+            string target = Path.Combine(trashRoot, $"{scriptId}-{DateTime.Now:yyyyMMdd-HHmmssfff}-{Guid.NewGuid():N}");
+            Directory.Move(dir, target);
+            Logger.Info($"脚本数据目录已移入隔离区：{target}");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[警告] 隔离脚本数据目录失败（{dir}，原数据保留）：{ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>删除用户绑定时清理其 UserId 数据目录。</summary>
+    public static void RemoveUserData(string scriptId, string userKey)
+    {
+        string dir = UserDir(scriptId, userKey);
+        try
+        {
+            if (Directory.Exists(dir))
+            {
+                Directory.Delete(dir, recursive: true);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[警告] 清理用户数据目录失败（{dir}）：{ex.Message}");
+        }
+    }
+
+}

@@ -7,8 +7,6 @@ import {
   adbStub,
   createUserBinding,
   deleteScript,
-  isAdminMode,
-  isAdministrator,
   makeFixture,
   mumuStub,
   prepareRuntime,
@@ -73,10 +71,7 @@ function enableEmulatorPluginFixture() {
 
 before(async () => {
   if (!enabled) return;
-  if (isAdminMode) {
-    assert.ok(isAdministrator(), "管理员 System Smoke 必须在 Administrator / High Integrity 终端运行");
-  }
-  prepareRuntime();
+  await prepareRuntime();
   installEmulatorPluginFixture();
   startRuntime([], defaultEmulatorEnv);
   await waitForService();

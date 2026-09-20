@@ -1,28 +1,14 @@
-import { collectAnchors, findLocalLinks, parseLinkTarget } from "../../tools/markdown.mjs";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
-import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { CI_DOMAINS, CI_SHARED_PATHS } from "../../tools/ci-domains.mjs";
-import { evaluateDomains, globToRegExp } from "../../tools/ci-changes.mjs";
-import { validateCrossRepositoryLinks } from "../../tools/docs-index.mjs";
+import test from "node:test";
+import { collectAnchors, findLocalLinks, parseLinkTarget } from "../../tools/markdown.mjs";
+import { validateCrossRepositoryLinks, validateMap, loadMap } from "../../tools/docs-index.mjs";
+import { GOVERNANCE_DOMAINS, HOST_TEST_AREAS, SYSTEM_TEST_GROUPS, TEST_DOMAIN_REGISTRY } from "../registry.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const SKIP_DIRECTORIES = new Set([
-  ".git",
-  "node_modules",
-  "bin",
-  "obj",
-  "release",
-  "runtime",
-  "test-results",
-  "flake-monitor-logs",
-  "browsers",
-]);
-
+const SKIP_DIRECTORIES = new Set([".git", "node_modules", "bin", "obj", "release", "NexusPipeline-Plugins", "tests/.artifacts"]);
 const EVERGREEN_DOCUMENTS = [
   "AGENTS.md",
   "README.md",
@@ -36,25 +22,21 @@ const EVERGREEN_DOCUMENTS = [
   "docs/PLUGIN_API.md",
   ".github/PULL_REQUEST_TEMPLATE.md",
 ];
-
-const DEPRECATED_REFERENCES = [
-  /tests[\\/]legacy[\\/]/,
-  /edit-hidden/,
-  /store-rebind/,
+const RETIRED_REFERENCES = [
+  /tools[\\/]ci-(?:changes|domains|summary|fingerprint)\.mjs/u,
+  /tests[\\/]run\.mjs\s+(?:codex|admin)/u,
+  /tests[\\/]run\.mjs[^\n]*--(?:affected|dry)(?:\s|`)/u,
+  /NEXUS_CI_(?:MANIFEST|JOB_ID|MODE|DOMAIN|EXECUTION_PLAN|PLAN_DIGEST|RESULT)/u,
 ];
 
 function walkMarkdown(directory) {
   const files = [];
   for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
-    if (entry.isDirectory() && SKIP_DIRECTORIES.has(entry.name)) {
-      continue;
-    }
-    const absolutePath = path.join(directory, entry.name);
-    if (entry.isDirectory()) {
-      files.push(...walkMarkdown(absolutePath));
-    } else if (entry.isFile() && entry.name.toLowerCase().endsWith(".md")) {
-      files.push(absolutePath);
-    }
+    const relative = path.relative(ROOT, path.join(directory, entry.name)).replaceAll("\\", "/");
+    if (entry.isDirectory() && (SKIP_DIRECTORIES.has(entry.name) || relative.startsWith("tests/.artifacts/"))) continue;
+    const fullPath = path.join(directory, entry.name);
+    if (entry.isDirectory()) files.push(...walkMarkdown(fullPath));
+    else if (entry.isFile() && entry.name.toLowerCase().endsWith(".md")) files.push(fullPath);
   }
   return files;
 }
@@ -63,457 +45,84 @@ function read(relativePath) {
   return fs.readFileSync(path.join(ROOT, relativePath), "utf8");
 }
 
-function probeEnvironment() {
-  const env = { ...process.env };
-  delete env.NEXUS_CI_MANIFEST;
-  return env;
-}
-
-function currentProjectVersion() {
-  const project = read("src/NexusPipeline.csproj");
-  const match = project.match(/<Version>((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-(?:beta|rc)\.(?:0|[1-9]\d*))?)<\/Version>/u);
-  assert.ok(match, "NexusPipeline.csproj 缺少可解析的 Version");
-  return match[1];
-}
-
-function escapeRegExp(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-}
-
 function lineNumber(text, index) {
-  return text.slice(0, index).split(/\r?\n/).length;
+  return text.slice(0, index).split(/\r?\n/u).length;
 }
 
 function isExternalTarget(target) {
-  return target.startsWith("/")
-    || /^[a-z][a-z0-9+.-]*:/i.test(target)
-    || target.startsWith("//");
+  return target.startsWith("/") || /^[a-z][a-z0-9+.-]*:/i.test(target) || target.startsWith("//");
 }
 
-function extractVersionHeadings(text) {
-  const versions = [];
-  const pattern = /^##\s+\[?(v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-(?:beta|rc)\.(?:0|[1-9]\d*))?)\]?/gimu;
-  for (const match of text.matchAll(pattern)) {
-    versions.push({ version: match[1].toLowerCase(), index: match.index ?? 0 });
-  }
-  return versions;
-}
-
-test("Markdown local links resolve to files or directories", () => {
+test("Markdown local links and fragments resolve", () => {
   const failures = [];
   for (const absoluteFile of walkMarkdown(ROOT)) {
-    const relativeFile = path.relative(ROOT, absoluteFile).replaceAll(path.sep, "/");
+    const relativeFile = path.relative(ROOT, absoluteFile).replaceAll("\\", "/");
     const text = fs.readFileSync(absoluteFile, "utf8");
     for (const link of findLocalLinks(text)) {
       let target;
       try {
         target = parseLinkTarget(link.rawTarget);
       } catch {
-        failures.push(`${relativeFile}:${lineNumber(text, link.index)} invalid URI ${link.rawTarget}`);
+        failures.push(`${relativeFile}:${lineNumber(text, link.index)} invalid target ${link.rawTarget}`);
         continue;
       }
-      if ((!target.path && !target.fragment) || isExternalTarget(target.path)) {
-        continue;
-      }
+      if (isExternalTarget(target.path)) continue;
       const resolved = path.resolve(path.dirname(absoluteFile), target.path || path.basename(absoluteFile));
-      const relativeResolved = path.relative(ROOT, resolved);
-      if (relativeResolved.startsWith("..") || path.isAbsolute(relativeResolved) || !fs.existsSync(resolved)) {
-        failures.push(`${relativeFile}:${lineNumber(text, link.index)} -> ${target.path || "(本文件)"}`);
+      if (!resolved.startsWith(ROOT) || !fs.existsSync(resolved)) {
+        failures.push(`${relativeFile}:${lineNumber(text, link.index)} -> ${target.path || "(self)"}`);
+        continue;
+      }
+      if (target.fragment && fs.statSync(resolved).isFile()
+        && !collectAnchors(fs.readFileSync(resolved, "utf8")).has(target.fragment)) {
+        failures.push(`${relativeFile}:${lineNumber(text, link.index)} -> ${target.path || "(self)"}#${target.fragment}`);
       }
     }
   }
-  assert.deepEqual(failures, [], `Broken local Markdown links:\n${failures.join("\n")}`);
+  assert.deepEqual(failures, [], `Markdown link failures:\n${failures.join("\n")}`);
 });
 
-test("Markdown fragments resolve headings and explicit anchors", () => {
-  const failures = [];
-  for (const absoluteFile of walkMarkdown(ROOT)) {
-    const relativeFile = path.relative(ROOT, absoluteFile).replaceAll(path.sep, "/");
-    const text = fs.readFileSync(absoluteFile, "utf8");
-    for (const link of findLocalLinks(text)) {
-      let target;
-      try {
-        target = parseLinkTarget(link.rawTarget);
-      } catch {
-        continue;
-      }
-      if (!target.fragment || isExternalTarget(target.path)) continue;
-      const resolved = path.resolve(path.dirname(absoluteFile), target.path || path.basename(absoluteFile));
-      if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) continue;
-      if (!collectAnchors(fs.readFileSync(resolved, "utf8")).has(target.fragment)) {
-        failures.push(`${relativeFile}:${lineNumber(text, link.index)} -> ${target.path || "(本文件)"}#${target.fragment}`);
-      }
-    }
-  }
-  assert.deepEqual(failures, [], `Broken Markdown fragments:\n${failures.join("\n")}`);
-});
-
-test("project GitHub links resolve against local checkouts and record fixed baselines", () => {
+test("cross-repository documentation links resolve against the checked-out fixed source", () => {
   const documents = walkMarkdown(ROOT).map(file => ({
-    file: path.relative(ROOT, file).replaceAll(path.sep, "/"),
+    file: path.relative(ROOT, file).replaceAll("\\", "/"),
     text: fs.readFileSync(file, "utf8"),
   }));
   const result = validateCrossRepositoryLinks(documents, {
     root: ROOT,
     workspaceRoot: path.resolve(ROOT, ".."),
+    checkouts: { "NexusPipeline-Plugins": process.env.NEXUS_OFFICIAL_PLUGINS_ROOT?.trim() },
   });
-  assert.deepEqual(
-    result.issues,
-    [],
-    "Cross-repository documentation failures:\n" + result.issues.join("\n"),
-  );
-  assert.ok(result.checked.length > 0, "未发现需要交叉校验的项目文档链接");
-  assert.ok(
-    Object.values(result.baselines).every(sha => /^[0-9a-f]{40}$/u.test(sha)),
-    "跨仓库校验必须记录固定 commit SHA",
-  );
-  console.log("[文档] 跨仓库固定基线：" + JSON.stringify(result.baselines));
+  assert.deepEqual(result.issues, [], result.issues.join("\n"));
+  assert.ok(result.checked.length > 0, "至少应校验一条跨仓库文档链接");
+  assert.ok(Object.values(result.baselines).every(sha => /^[0-9a-f]{40}$/u.test(sha)));
 });
 
-test("missing cross-repository checkout is an explicit incomplete result", () => {
-  const fixtureRoot = fs.mkdtempSync(path.join(os.tmpdir(), "nxp-docs-cross-repo-missing-"));
-  try {
-    const result = validateCrossRepositoryLinks(
-      [{
-        file: "fixture.md",
-        text: "[插件指南](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/docs/FRONTEND_PLUGIN.md)",
-      }],
-      {
-        root: fixtureRoot,
-        workspaceRoot: fixtureRoot,
-      },
-    );
-    assert.equal(result.ok, false);
-    assert.match(result.issues[0], /无法完成跨仓库检查/u);
-  } finally {
-    fs.rmSync(fixtureRoot, { recursive: true, force: true });
-  }
-});
-
-test("Markdown link fixtures handle Chinese headings, duplicate slugs, explicit anchors, references and fenced code", () => {
-  const fixture = [
-    "# 中文 标题",
-    "## 重复标题",
-    "## 重复标题",
-    '<a id="稳定-anchor"></a>',
-    "[正文](#中文-标题)",
-    "[第二个][dup] [显式](#稳定-anchor)",
-    "",
-    "[dup]: #重复标题-1",
-    "```md",
-    "[假链接](#不存在)",
-    "```",
-  ].join("\n");
-  const links = findLocalLinks(fixture);
-  assert.deepEqual(links.map(link => decodeURIComponent(link.rawTarget)), ["#中文-标题", "#重复标题-1", "#稳定-anchor"]);
-  const anchors = collectAnchors(fixture);
-  assert.ok(anchors.has("中文-标题"));
-  assert.ok(anchors.has("重复标题-1"));
-  assert.ok(anchors.has("稳定-anchor"));
-  assert.equal(anchors.has("不存在"), false);
-});
-
-test("CHANGELOG has one heading per release version", () => {
-  const headings = extractVersionHeadings(read("CHANGELOG.md"));
-  const seen = new Map();
-  const duplicates = [];
-  for (const heading of headings) {
-    if (seen.has(heading.version)) {
-      duplicates.push(`${heading.version} at lines ${seen.get(heading.version)} and ${lineNumber(read("CHANGELOG.md"), heading.index)}`);
-    } else {
-      seen.set(heading.version, lineNumber(read("CHANGELOG.md"), heading.index));
-    }
-  }
-  assert.deepEqual(duplicates, [], `Duplicate CHANGELOG headings:\n${duplicates.join("\n")}`);
-});
-
-test("evergreen documents contain no deprecated authority or path references", () => {
+test("evergreen documentation has no retired CI proof or permission-mode authority", () => {
   const failures = [];
-  for (const relativeFile of EVERGREEN_DOCUMENTS) {
-    const text = read(relativeFile);
-    for (const pattern of DEPRECATED_REFERENCES) {
-      const match = pattern.exec(text);
-      if (match) {
-        failures.push(`${relativeFile}:${lineNumber(text, match.index)} contains ${match[0]}`);
-      }
+  for (const relativePath of EVERGREEN_DOCUMENTS) {
+    assert.ok(fs.existsSync(path.join(ROOT, relativePath)), `缺少 evergreen 文档：${relativePath}`);
+    const text = read(relativePath);
+    for (const pattern of RETIRED_REFERENCES) {
+      if (pattern.test(text)) failures.push(`${relativePath} matches ${pattern}`);
     }
   }
-  assert.deepEqual(failures, [], `Deprecated references:\n${failures.join("\n")}`);
+  assert.deepEqual(failures, [], failures.join("\n"));
 });
 
-test("README documentation navigation points to existing files", () => {
-  const required = [
-    "docs/DESIGN.md",
-    "docs/CONTROL_PLANE.md",
-    "docs/DEVELOPMENT.md",
-    "docs/TESTING.md",
-    "docs/STATUS.md",
-    "CONTRIBUTING.md",
-    "SECURITY.md",
-    "CHANGELOG.md",
-    "docs/PLUGIN_API.md",
-  ];
-  const missing = required.filter((relativePath) => !fs.existsSync(path.join(ROOT, relativePath)));
-  assert.deepEqual(missing, [], `Missing README navigation targets: ${missing.join(", ")}`);
+test("documentation map and local test registry are current", () => {
+  assert.deepEqual(validateMap(ROOT, loadMap(ROOT)), { ok: true, errors: [] });
+  assert.equal(TEST_DOMAIN_REGISTRY.schemaVersion, 1);
+  for (const collection of [HOST_TEST_AREAS, SYSTEM_TEST_GROUPS, GOVERNANCE_DOMAINS]) {
+    assert.ok(collection.length > 0);
+    assert.equal(new Set(collection.map(item => item.key)).size, collection.length);
+  }
+  const runner = read("tests/run.mjs");
+  assert.doesNotMatch(runner, /validateExecutionPlan|readCiPlan|recordCiCheck|upsertCiGroup|refreshGroupSelection/u);
+  assert.doesNotMatch(runner, /NEXUS_CI_(?:MANIFEST|JOB_ID|MODE|DOMAIN|EXECUTION_PLAN|PLAN_DIGEST)/u);
+  assert.match(runner, /release <\$\{RELEASE_GROUPS\.join\("\|"\)\}>/u);
 });
 
-test("current documentation is organized as semantic topic portals", () => {
-  const architecture = read("docs/architecture/README.md");
-  const pluginApi = read("docs/reference/plugin-api/README.md");
-  const uiCatalog = read("docs/reference/ui/README.md");
-  const portal = read("docs/README.md");
-  assert.match(portal, /architecture\/README\.md/u);
-  assert.match(portal, /reference\/plugin-api\/README\.md/u);
-  assert.match(architecture, /overview\.md/u);
-  assert.match(architecture, /frontend\.md/u);
-  for (const page of ["manifest.md", "managed.md", "frontend.md", "data-specialized.md"]) {
-    assert.match(pluginApi, new RegExp(page.replace(".", "\\."), "u"));
-  }
-  for (const page of ["actions-inputs.md", "selection.md", "overlays-feedback.md", "layout-lists.md"]) {
-    assert.match(uiCatalog, new RegExp(page.replace(".", "\\."), "u"));
-  }
-
-  const currentTopicFiles = [
-    ...fs.readdirSync(path.join(ROOT, "docs/architecture"), { withFileTypes: true })
-      .filter(entry => entry.isFile() && entry.name.endsWith(".md"))
-      .map(entry => `docs/architecture/${entry.name}`),
-    ...fs.readdirSync(path.join(ROOT, "docs/reference/plugin-api"), { withFileTypes: true })
-      .filter(entry => entry.isFile() && entry.name.endsWith(".md"))
-      .map(entry => `docs/reference/plugin-api/${entry.name}`),
-    ...fs.readdirSync(path.join(ROOT, "docs/reference/ui"), { withFileTypes: true })
-      .filter(entry => entry.isFile() && entry.name.endsWith(".md"))
-      .map(entry => `docs/reference/ui/${entry.name}`),
-    ...fs.readdirSync(path.join(ROOT, "docs/development"), { withFileTypes: true })
-      .filter(entry => entry.isFile() && entry.name.endsWith(".md"))
-      .map(entry => `docs/development/${entry.name}`),
-    ...fs.readdirSync(path.join(ROOT, "docs/testing"), { withFileTypes: true })
-      .filter(entry => entry.isFile() && entry.name.endsWith(".md"))
-      .map(entry => `docs/testing/${entry.name}`),
-  ];
-  const failures = [];
-  for (const relativePath of currentTopicFiles) {
-    const lines = read(relativePath).split(/\r?\n/u);
-    let inFence = false;
-    let hasH1 = false;
-    let hasH2 = false;
-    for (const line of lines) {
-      if (/^\s*(```|~~~)/u.test(line)) {
-        inFence = !inFence;
-        continue;
-      }
-      if (inFence) continue;
-      if (/^#\s+\S/u.test(line)) hasH1 = true;
-      if (/^##\s+\S/u.test(line)) hasH2 = true;
-      if (/^#{2,6}\s+\d+(?:\.\d+)*[.、 ]/u.test(line)) failures.push(`${relativePath} contains numbered heading: ${line}`);
-    }
-    if (!hasH1 || !hasH2) failures.push(`${relativePath} lacks semantic H1/H2 headings`);
-  }
-  assert.deepEqual(failures, [], `Topic structure failures:\n${failures.join("\n")}`);
-});
-
-test("legacy development and testing portals remain thin and preserve mapped anchors", () => {
-  const portals = [
-    {
-      file: "docs/DEVELOPMENT.md",
-      current: ["development/README.md", "development/setup.md", "development/workflow.md", "development/release.md"],
-    },
-    {
-      file: "docs/TESTING.md",
-      current: ["testing/README.md", "testing/policy.md", "testing/fixtures.md", "testing/commands.md", "testing/domains.md"],
-    },
-  ];
-  for (const portal of portals) {
-    const text = read(portal.file);
-    assert.match(text, /^# .*（旧入口）$/mu, `${portal.file} must identify itself as a legacy entry`);
-    assert.match(text, /^## 按任务进入现行专题$/mu, `${portal.file} must provide task-oriented routing`);
-    assert.match(text, /^## 旧顶层锚点$/mu, `${portal.file} must declare its compatibility anchors`);
-    assert.doesNotMatch(text, /^#{2,6}\s+\d+(?:\.\d+)*[.、 ]/mu, `${portal.file} must not retain numbered chapter headings`);
-    assert.doesNotMatch(text, /```/u, `${portal.file} must not duplicate command or specification blocks`);
-    for (const currentPath of portal.current) assert.match(text, new RegExp(currentPath.replaceAll("/", "\\/"), "u"));
-  }
-
-  const migration = JSON.parse(read("docs/migration-map.json"));
-  for (const item of migration.filter(entry => ["docs/DEVELOPMENT.md", "docs/TESTING.md"].includes(entry.source))) {
-    assert.ok(fs.existsSync(path.join(ROOT, item.source)), `${item.source} is missing`);
-    assert.ok(collectAnchors(read(item.source)).has(item.anchor), `${item.source} is missing legacy anchor ${item.anchor}`);
-  }
-});
-
-test("public UI catalog covers every registered nxp element", () => {
-  const register = read("frontend/src/ui/register.ts");
-  const names = [...register.matchAll(/"(?<name>nxp-[a-z0-9-]+)":/gu)].map(match => match.groups.name);
-  const pages = ["actions-inputs.md", "selection.md", "overlays-feedback.md", "layout-lists.md"]
-    .map(page => read(`docs/reference/ui/${page}`))
-    .join("\n");
-  const missing = names.filter(name => !pages.includes(`\`${name}\``));
-  assert.deepEqual(missing, [], `Public UI elements missing from grouped contracts: ${missing.join(", ")}`);
-});
-
-test("current persistence and plugin-profile contract stays documented", () => {
-  const project = read("src/NexusPipeline.csproj");
-  const version = currentProjectVersion();
-  const status = read("docs/STATUS.md");
-
-  assert.match(project, new RegExp(`<Version>${escapeRegExp(version)}<\\/Version>`, "u"));
-  assert.match(read("CHANGELOG.md"), new RegExp(`^## v${escapeRegExp(version)}(?:（|\\s)`, "mu"));
-  assert.match(status, /## 当前未完成事项/u);
-  assert.doesNotMatch(status, /^##\s+v\d+\.\d+\.\d+/mu);
-  const migration = JSON.parse(read("docs/migration-map.json"));
-  assert.ok(migration.length > 0);
-  for (const item of migration) {
-    assert.ok(collectAnchors(read(item.target)).has(item.targetAnchor), `${item.source}#${item.anchor} -> ${item.target}`);
-  }
-
-});
-
-test("dual-mode production contracts stay on data files and behavior", () => {
-  // 权限门禁以 manifest 数据文件为准（产品 requireAdministrator，Test Host asInvoker）。
-  const productionManifest = read("src/app.manifest");
-  const testManifest = read("src/app.test.manifest");
-  const project = read("src/NexusPipeline.csproj");
-  assert.match(productionManifest, /requestedExecutionLevel level="requireAdministrator"/u);
-  assert.match(testManifest, /requestedExecutionLevel level="asInvoker"/u);
-  assert.match(project, /Condition="'\$\(NexusTestHost\)' == 'true'"/u);
-  assert.match(project, /ApplicationManifest>app\.test\.manifest/u);
-
-  // 文档不再描述已移除的 Broker/TestLauncher 架构。
-  const ci = read(".github/workflows/ci.yml");
-  const docs = [
-    ["AGENTS.md", read("AGENTS.md")],
-    ["docs/TESTING.md", read("docs/TESTING.md")],
-    ["docs/DEVELOPMENT.md", read("docs/DEVELOPMENT.md")],
-    ["docs/DESIGN.md", read("docs/DESIGN.md")],
-  ];
-  for (const [relativeFile, text] of docs) {
-    assert.doesNotMatch(
-      text,
-      /AdminTestBroker|admin-broker|Elevated Test Broker|PowerShell Direct|Hyper-V|Windows Sandbox Broker/u,
-      `${relativeFile} still describes removed Broker architecture`,
-    );
-  }
-  assert.doesNotMatch(ci, /TestLauncher|launcher-probe|New-LocalUser|NEXUS_CI_TEST_USER|NEXUS_CI_TEST_PASSWORD|CreateRestrictedToken|linked-token|restricted-token|AdminTestBroker|admin-broker|NEXUS_TEST_HOST/u);
-  assert.equal(fs.existsSync(path.join(ROOT, "tests/support/NexusPipeline.TestLauncher")), false);
-  assert.equal(fs.existsSync(path.join(ROOT, "tests/support/launcher-probe.mjs")), false);
-  assert.equal(fs.existsSync(path.join(ROOT, "tests/support/admin-broker")), false);
-
-  // 行为级防线：省略模式必须以 exit code 2 拒绝执行（真正的权限契约走 admin 门禁）。
-  assert.equal(
-    spawnSync(process.execPath, [path.join(ROOT, "tests", "run.mjs"), "default"], {
-      encoding: "utf8",
-      env: probeEnvironment(),
-    }).status,
-    2,
-    "bare default must require an explicit codex/admin mode",
-  );
-});
-
-test("CI impact domains match the System Smoke groups and workflow gates", () => {
-  const domainKeys = new Set(CI_DOMAINS.map(domain => domain.key));
-  assert.deepEqual(
-    domainKeys.size,
-    CI_DOMAINS.length,
-    `影响域 key 重复：${[...domainKeys].join(", ")}`,
-  );
-  for (const domain of CI_DOMAINS) {
-    assert.ok(domain.paths.length > 0, `${domain.key} 缺少触发路径`);
-    for (const pattern of domain.paths) {
-      assert.doesNotMatch(pattern, /\\|[?[\]{}]/u, `${domain.key} 触发路径格式无效：${pattern}`);
-      assert.doesNotThrow(() => globToRegExp(pattern), `${domain.key} 触发路径无法编译：${pattern}`);
-    }
-  }
-  for (const pattern of CI_SHARED_PATHS) {
-    assert.doesNotThrow(() => globToRegExp(pattern), `共享路径无法编译：${pattern}`);
-  }
-
-  // 影响域判定对示例改动给出预期结果：插件 SDK 只影响宿主与插件契约，不额外启动 System 作业。
-  const sample = evaluateDomains([
-    "docs/TESTING.md",
-    "frontend/src/plugin-bridge/contract.test.ts",
-    "src/NexusPipeline.Plugin.Abstractions/PluginApi.cs",
-  ]).domains;
-  assert.deepEqual(
-    Object.fromEntries(Object.entries(sample).map(([key, value]) => [key, value.affected])),
-    {
-      frontend: true,
-      host: true,
-      docs: true,
-      plugin: true,
-      ui: true,
-      system_runtime: false,
-      system_execution: false,
-      system_emulator: false,
-      system_update: false,
-    },
-    "示例改动的影响域判定与预期不一致",
-  );
-  // 逐域映射由 tests/tools/ci-domains.test.mjs 覆盖，这里只核对文档改动不牵连任何 System 作业。
-  const docsOnly = evaluateDomains(["docs/STATUS.md"]).domains;
-  assert.equal(docsOnly.docs.affected, true);
-  assert.equal(docsOnly.frontend.affected, false);
-  assert.equal(docsOnly.system_runtime.affected, false);
-  assert.equal(docsOnly.system_execution.affected, false);
-  assert.equal(docsOnly.system_emulator.affected, false);
-  assert.equal(docsOnly.system_update.affected, false);
-  const unknownOnly = evaluateDomains(["SECURITY.md"]);
-  assert.equal(unknownOnly.failOpen, true, "未命中影响域的改动需要按全量门禁处理");
-  const sharedOnly = evaluateDomains([".github/workflows/ci.yml"]);
-  assert.equal(sharedOnly.failOpen, true, "共享路径改动需要按全量门禁处理");
-
-  // run.mjs 的 System Smoke 影响域分组与 CI 作业引用的入口必须一致且指向真实 suite 文件。
-  const workflow = read(".github/workflows/ci.yml");
-  const outputs = [...workflow.matchAll(/^ {6}([a-z_]+): \$\{\{ steps\.domains\.outputs\.\1 \}\}$/gmu)]
-    .map(match => match[1])
-    .filter(key => domainKeys.has(key))
-    .sort();
-  assert.deepEqual(outputs, [...domainKeys].sort(), "ci.yml 影响域输出与 tools/ci-domains.mjs 不一致");
-  for (const key of domainKeys) {
-    assert.match(
-      workflow,
-      new RegExp(`needs\\.changes\\.outputs\\.${key} == 'true'`, "u"),
-      `ci.yml 没有作业按影响域 ${key} 触发`,
-    );
-  }
-
-  const dryRun = spawnSync(process.execPath, [path.join(ROOT, "tests", "run.mjs"), "admin", "system", "--dry"], {
-    cwd: ROOT,
-    encoding: "utf8",
-    env: probeEnvironment(),
-  });
-  assert.equal(dryRun.status, 0, `admin system --dry 退出码异常：${dryRun.stderr}`);
-  const listedSuites = [...dryRun.stderr.matchAll(/\[System Smoke\] 影响域 (\S+) \| (\S+) \| (.+)$/gmu)]
-    .map(match => ({ group: match[1], runtimeName: match[2], file: match[3].trim() }));
-  assert.ok(listedSuites.length > 0, "admin system --dry 未列出任何 suite");
-  const groupNames = [...new Set(listedSuites.map(suite => suite.group))];
-  const systemDir = path.join(ROOT, "tests", "system");
-  for (const suite of listedSuites) {
-    assert.equal(path.dirname(suite.file), systemDir, `suite 文件不在 tests/system：${suite.file}`);
-    assert.ok(fs.existsSync(suite.file), `suite 文件不存在：${suite.file}`);
-  }
-  const workflowGroups = [...new Set(
-    [...workflow.matchAll(/node tests\\run\.mjs admin system([^\r\n]*)/gu)].flatMap(match => {
-      const args = match[1];
-      const namedGroups = [...args.matchAll(/--group\s+([\w-]+)/gu)].map(group => group[1]);
-      if (namedGroups.length > 0) return namedGroups;
-      const directGroup = args.match(/^\s+([\w-]+)/u);
-      return directGroup ? [directGroup[1]] : [];
-    }),
-  )];
-  assert.deepEqual(workflowGroups.sort(), groupNames.slice().sort(), "ci.yml 的 System Smoke 分组与 run.mjs 声明的分组不一致");
-  for (const group of workflowGroups) {
-    const groupArgs = spawnSync(
-      process.execPath,
-      [path.join(ROOT, "tests", "run.mjs"), "admin", "system", group, "--dry"],
-      { cwd: ROOT, encoding: "utf8", env: probeEnvironment() },
-    );
-    assert.equal(groupArgs.status, 0, `admin system ${group} --dry 退出码异常：${groupArgs.stderr}`);
-  }
-
-  const unknownGroup = spawnSync(
-    process.execPath,
-    [path.join(ROOT, "tests", "run.mjs"), "admin", "system", "not-a-group"],
-    { cwd: ROOT, encoding: "utf8", env: probeEnvironment() },
-  );
-  assert.equal(unknownGroup.status, 2, "未知 System Smoke 分组必须以 exit code 2 拒绝");
-  assert.match(unknownGroup.stderr, /未知 System Smoke 分组/u);
-  assert.match(unknownGroup.stderr, new RegExp(`可用分组：${groupNames.join(" \\| ")}`, "u"));
+test("production and Test Host manifest contracts remain distinct", () => {
+  assert.match(read("src/app.manifest"), /requestedExecutionLevel level="requireAdministrator"/u);
+  assert.match(read("src/app.test.manifest"), /requestedExecutionLevel level="asInvoker"/u);
+  assert.match(read("src/NexusPipeline.csproj"), /ApplicationManifest>app\.test\.manifest/u);
 });

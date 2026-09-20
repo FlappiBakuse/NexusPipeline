@@ -1,15 +1,17 @@
 # 项目状态（Status）
 
-**更新日期**：2026-09-18｜**发布模式**：`major=0` 或带 `-beta.N` / `-rc.N` 后缀的版本为 Pre-release；`major>=1` 且无后缀的版本为正式 Release；v1.0.0 起仅 PR 合入
+**更新日期**：2026-09-20｜**发布模式**：`major=0` 或带 `-beta.N` / `-rc.N` 后缀的版本为 Pre-release；`major>=1` 且无后缀的版本为正式 Release。源码进入 `main` 必须经过 PR、当前候选的完整 Qualification 与 squash merge；日常开发目标为 `develop`。
 
-> 本文件记录尚未完成的开发计划、活跃技术验证和当前未解决问题。已完成版本以 [CHANGELOG.md](../CHANGELOG.md)、代码和测试结果为准。开工前先阅读项目 `AGENTS.md`，创建本地 `backup/vX.Y.Z-dev` 标签并同步版本号。
+> 本文件记录尚未完成的开发计划、活跃技术验证和当前未解决问题。已完成版本以 [CHANGELOG.md](../CHANGELOG.md)、代码和测试结果为准。版本号只在用户明确指定时修改；开发检查点保存在仓库外，不以 Git 标签代替文件备份。
 
 ## 当前未完成事项
 
-- 公共 UI 元件由对应 SFC 维护 DOM、交互和内部样式；feature 负责业务布局、状态与公开 props/events，插件通过注册的 `nxp-*` 元件消费宿主能力。
+- 两个仓库已安装资格控制面并配置独立 Qualification/Publisher App 与受保护 Environment；main Ruleset 和产品候选的完整远端资格仍待验收，不能以初始化 CI 代替产品资格。
+- v0.16.7 已获发布授权；真实 GitHub preview/stable 发布、Host Release 和 Host 消费 preview 的端到端闭环尚待执行，完成前不认定版本已发布。
 
-- 当前版本治理与验证结果记录在 [CHANGELOG.md](../CHANGELOG.md)；后续工作聚焦下方插件生态扩展、技术验证和已知问题台账。
-- 前端架构现状以[架构索引](architecture/README.md)和[前端架构专题](architecture/frontend.md)为准；插件契约调整以[插件 API 索引](reference/plugin-api/README.md)为准。
+公共 UI 元件由对应 SFC 维护 DOM、交互和内部样式；feature 负责业务布局、状态与公开 props/events，插件通过注册的 `nxp-*` 元件消费宿主能力。
+
+当前版本治理与验证结果记录在 [CHANGELOG.md](../CHANGELOG.md)；后续工作聚焦下方插件生态扩展和专项技术验证。前端架构现状以[架构索引](architecture/README.md)和[前端架构专题](architecture/frontend.md)为准；插件契约调整以[插件 API 索引](reference/plugin-api/README.md)为准。
 
 ## 后续功能：插件生态扩展
 
@@ -23,19 +25,6 @@
 - [ ] 完成更新事务的进一步故障注入矩阵，覆盖长时间运行、文件锁和异常退出组合。
 - [ ] 持续维护运行时版本动态展示、真实计时回归和 Release 资产校验。
 - [ ] 在 NexusPipeline-Plugins 的 `EmulatorSupport` 插件完成雷电、夜神和 BlueStacks 真机验证；实例识别、ADB 路由、启动/前台查询/截图/应用停止与安全关闭矩阵由[插件发行指南](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/docs/RELEASING.md)维护。宿主 System Smoke 覆盖 Generic ADB、MuMuManager 和 managed-code provider 跨边界调用。
-
-## 已知问题台账
-
-只记录当前仍未解决、能够影响当前版本或需要专项验证的缺陷与技术风险。已修复问题的版本归属见 [CHANGELOG.md](../CHANGELOG.md)；产品有意保持的行为见 [DESIGN.md](DESIGN.md) 的「已接受的设计约束」。
-
-状态说明：
-
-- **稳定复现**：固定输入、确定调用顺序或最小测试场景可以重复命中。
-- **待专项复现**：风险方向已经确认，但需要 Windows 文件系统时序、进程生命周期或长时运行等专用环境才能进一步定量。
-- **调查中**：现象或影响范围已知，复现条件尚未收敛。
-
-| 编号 | 风险描述 | 当前代码与证据 | 影响 | 后续动作 | 状态 |
-|---|---|---|---|---|---|
 
 ## 维护规则
 

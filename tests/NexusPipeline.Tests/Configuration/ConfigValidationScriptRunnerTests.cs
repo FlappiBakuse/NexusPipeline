@@ -1,0 +1,337 @@
+using System.Text.Json;
+using Xunit;
+using NexusPipeline.ControlPlane.Http;
+using NexusPipeline.Modules.Configuration.Recovery;
+using NexusPipeline.Modules.Configuration.Scripting;
+using NexusPipeline.Modules.Plugins.DataSpecialized;
+using NexusPipeline.Modules.Scripts;
+using NexusPipeline.Modules.Users.Contracts;
+using NexusPipeline.Modules.Users;
+
+namespace NexusPipeline.Tests.Configuration;
+
+public sealed class ConfigValidationScriptRunnerTests
+{
+    private static string MakeTempDir()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "np-config-validator-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        return root;
+    }
+
+    private static ScriptInstance MakeScript()
+    {
+        return new ScriptInstance
+        {
+            Id = "script-validator",
+            Name = "配置校验测试",
+            PluginType = "fixture-validator",
+            RootPath = "D:/games/fixture",
+            MainExe = "D:/games/fixture/game.exe",
+            Args = "--profile default",
+            ConfigPath = "D:/games/fixture/config.json",
+            LogPath = "D:/games/fixture/run.log",
+            LaunchGame = true,
+            GameMode = "pc",
+            GameExe = "D:/games/game.exe",
+            GameArgs = "--windowed",
+            GameWaitSeconds = 12,
+            ForceCloseGame = true,
+            MaxAttempts = 4,
+            LogStallTimeoutMinutes = 6,
+            TotalTimeoutMinutes = 90,
+            AutoUpdateConfig = false,
+        };
+    }
+
+    private static ConfigValidatorDescriptor Descriptor(string code, string root)
+    {
+        return new ConfigValidatorDescriptor(
+            "fixture-validator",
+            root,
+            Path.Combine(root, "config-validator.js"),
+            code);
+    }
+
+    [Fact]
+    public void BuildInputUsesStableLowerCamelDtoAndIncludesSnapshotMetadata()
+    {
+        ScriptInstance script = MakeScript();
+        var user = new ResolvedScriptUser(
+            "user-1",
+            "用户甲",
+            new UserScriptBinding { ScriptInstanceId = script.Id });
+        string json = ConfigValidationScriptRunner.BuildInput(
+            script,
+            user,
+            [new ConfigValidationFile("config.json", 12), new ConfigValidationFile("profiles/user.json", 34)]);
+
+        using JsonDocument document = JsonDocument.Parse(json);
+        JsonElement root = document.RootElement;
+        Assert.Equal("script-validator", root.GetProperty("script").GetProperty("id").GetString());
+        Assert.Equal("fixture-validator", root.GetProperty("script").GetProperty("pluginType").GetString());
+        Assert.False(root.GetProperty("script").GetProperty("autoUpdateConfig").GetBoolean());
+        Assert.Equal("user-1", root.GetProperty("user").GetProperty("userId").GetString());
+        Assert.Equal("用户甲", root.GetProperty("user").GetProperty("userName").GetString());
+        Assert.Equal("profiles/user.json", root.GetProperty("snapshot").GetProperty("files")[1].GetProperty("path").GetString());
+        Assert.Equal(34, root.GetProperty("snapshot").GetProperty("files")[1].GetProperty("size").GetInt64());
+    }
+
+    [Fact]
+    public async Task JavaScriptReadsListsWritesUtf8AndQueuesFeedback()
+    {
+        string root = MakeTempDir();
+        try
+        {
+            File.WriteAllText(Path.Combine(root, "config.json"), "旧配置");
+            string code = """
+                if (!nexus.exists('config.json')) throw new Error('missing');
+                if (nexus.readFile('config.json') !== '旧配置') throw new Error('read');
+                if (!nexus.listFiles().includes('config.json')) throw new Error('list');
+                nexus.writeFile('profiles/user.json', '新配置✓');
+                nexus.toast('已自动修复配置', 'success');
+                nexus.notify('配置检查', '发现未使用字段，保留当前配置。', 'warning');
+                """;
+
+            ConfigValidationResult result = await ConfigValidationScriptRunner.ExecuteAsync(
+                Descriptor(code, root),
+                MakeScript(),
+                null,
+                root);
+
+            Assert.True(result.Ran);
+            Assert.Equal("", result.Error);
+            Assert.Contains("profiles/user.json", result.ChangedFiles);
+            Assert.Equal("新配置✓", File.ReadAllText(Path.Combine(root, "profiles", "user.json")));
+            Assert.Equal("已自动修复配置", Assert.Single(result.Toasts).Message);
+            Assert.Equal("warning", Assert.Single(result.Notifications).Kind);
+            Assert.Empty(Directory.GetFiles(root, "*.nexus-validator-*.tmp", SearchOption.AllDirectories));
+        }
+        finally
+        {
+            DeleteExact(root);
+        }
+    }
+
+    [Fact]
+    public async Task InvalidPathsAndOversizedFilesAreRejectedWithoutEscapingStore()
+    {
+        string root = MakeTempDir();
+        string outside = Path.Combine(Path.GetDirectoryName(root)!, "np-validator-escape-" + Guid.NewGuid().ToString("N") + ".txt");
+        try
+        {
+            File.WriteAllText(Path.Combine(root, "config.json"), "配置");
+            string absolute = JsonSerializer.Serialize(outside);
+            string code = $$"""
+                if (nexus.readFile('../outside.txt') !== null) throw new Error('escape-read');
+                if (nexus.exists('../outside.txt')) throw new Error('escape-exists');
+                if (nexus.writeFile('../outside.txt', 'blocked')) throw new Error('escape-write');
+                if (nexus.writeFile({{absolute}}, 'blocked')) throw new Error('absolute-write');
+                if (nexus.readFile('missing.json') !== null) throw new Error('missing-read');
+                """;
+
+            ConfigValidationResult result = await ConfigValidationScriptRunner.ExecuteAsync(
+                Descriptor(code, root),
+                MakeScript(),
+                null,
+                root);
+
+            Assert.True(result.Ran);
+            Assert.Equal("", result.Error);
+            Assert.False(File.Exists(outside));
+            Assert.Empty(result.ChangedFiles);
+        }
+        finally
+        {
+            DeleteExact(outside);
+            DeleteExact(root);
+        }
+    }
+
+    [Fact]
+    public async Task ValidatorErrorDoesNotRollbackEarlierAtomicWrites()
+    {
+        string root = MakeTempDir();
+        try
+        {
+            string code = "nexus.writeFile('first.json', '保留'); throw new Error('after-write');";
+            ConfigValidationResult result = await ConfigValidationScriptRunner.ExecuteAsync(
+                Descriptor(code, root),
+                MakeScript(),
+                null,
+                root);
+
+            Assert.Contains("执行失败", result.Error);
+            Assert.Equal("保留", File.ReadAllText(Path.Combine(root, "first.json")));
+            Assert.Contains("first.json", result.ChangedFiles);
+        }
+        finally
+        {
+            DeleteExact(root);
+        }
+    }
+
+    [Fact]
+    public async Task SyntaxAndTimeoutErrorsAreReportedAsNonBlockingResults()
+    {
+        string root = MakeTempDir();
+        try
+        {
+            ConfigValidationResult syntax = await ConfigValidationScriptRunner.ExecuteAsync(
+                Descriptor("const = ;", root),
+                MakeScript(),
+                null,
+                root);
+            Assert.Contains("执行失败", syntax.Error);
+
+            ConfigValidationResult timeout = await ConfigValidationScriptRunner.ExecuteAsync(
+                Descriptor("while (true) {}", root),
+                MakeScript(),
+                null,
+                root);
+            Assert.Contains("超时", timeout.Error);
+        }
+        finally
+        {
+            DeleteExact(root);
+        }
+    }
+
+    [Fact]
+    public void BuildInputIncludesTriggerAndExtraSnapshots()
+    {
+        ScriptInstance script = MakeScript();
+        var extras = new List<ConfigValidationExtraSnapshot>();
+        string json = ConfigValidationScriptRunner.BuildInput(
+            script,
+            null,
+            [new ConfigValidationFile("config.json", 12)],
+            "script-save",
+            extras);
+
+        using JsonDocument document = JsonDocument.Parse(json);
+        JsonElement root = document.RootElement;
+        Assert.Equal("script-save", root.GetProperty("trigger").GetString());
+        Assert.Empty(root.GetProperty("extras").EnumerateArray());
+    }
+
+    [Fact]
+    public async Task ExtraSnapshotIsReadableButWriteProtected()
+    {
+        string root = MakeTempDir();
+        string extraStore = MakeTempDir();
+        try
+        {
+            File.WriteAllText(Path.Combine(root, "config.json"), "主配置");
+            File.WriteAllText(Path.Combine(extraStore, "software_config.json"), "{\"SAVE_LOG_TO_FILE\":false}");
+            string code = """
+                if (!nexus.listFiles().includes('@extra0/software_config.json')) throw new Error('list');
+                if (nexus.readFile('@extra0/software_config.json') === null) throw new Error('read');
+                if (!nexus.exists('@extra0/software_config.json')) throw new Error('exists');
+                if (nexus.readFile('@extra9/anything.json') !== null) throw new Error('index');
+                if (nexus.writeFile('@extra0/software_config.json', 'blocked')) throw new Error('extra-write');
+                nexus.writeFile('config.json', '主配置新值');
+                """;
+            var extras = new List<ConfigValidationExtraSnapshot>
+            {
+                new("D:/games/DATA/CONFIGS/software_config.json", extraStore),
+            };
+
+            ConfigValidationResult result = await ConfigValidationScriptRunner.ExecuteAsync(
+                Descriptor(code, root),
+                MakeScript(),
+                null,
+                root,
+                "script-save",
+                extras);
+
+            Assert.True(result.Ran);
+            Assert.Equal("", result.Error);
+            Assert.Equal("{\"SAVE_LOG_TO_FILE\":false}", File.ReadAllText(Path.Combine(extraStore, "software_config.json")));
+            Assert.Equal("主配置新值", File.ReadAllText(Path.Combine(root, "config.json")));
+        }
+        finally
+        {
+            DeleteExact(root);
+            DeleteExact(extraStore);
+        }
+    }
+
+    [Fact]
+    public void EditPreparationScriptCanWriteExtraWorkingCopy_ButCannotWriteMainConfig()
+    {
+        string root = MakeTempDir();
+        string extraFile = Path.Combine(root, "User", "config.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(extraFile)!);
+        File.WriteAllText(extraFile, "{\"selected\":\"old\"}");
+        try
+        {
+            var mark = new ConfigSessionMark
+            {
+                ScriptId = "script-validator",
+                UserId = "user-1",
+                ConfigPath = Path.Combine(root, "main.json"),
+                ConfigKind = "missing",
+                SessionPhase = "edit",
+                EditMode = "fresh",
+                ExtraConfigPaths =
+                [
+                    new ConfigSessionExtraPath
+                    {
+                        Path = extraFile,
+                        OriginalKind = "file",
+                    },
+                ],
+                PendingConfigInput = new ConfigEditPendingInput
+                {
+                    Name = "config",
+                    Value = "NexusPipeline",
+                },
+            };
+            string code = """
+                if (nexus.input.mode !== 'fresh') throw new Error('mode');
+                if (nexus.input.configInputName !== 'config') throw new Error('input-name');
+                if (nexus.input.configInputValue !== 'NexusPipeline') throw new Error('input-value');
+                if (nexus.writeFile('main.json', 'blocked')) throw new Error('main-write');
+                if (!nexus.writeFile('@extra0/config.json', '{\"selected\":\"NexusPipeline\"}')) throw new Error('extra-write');
+                """;
+            var descriptor = new ConfigEditorDescriptor(
+                "fixture-validator",
+                root,
+                Path.Combine(root, "config-editor.js"),
+                code);
+
+            ConfigValidationResult result = ConfigEditPreparationScriptRunner.Execute(
+                descriptor,
+                MakeScript(),
+                new ResolvedScriptUser(
+                    "user-1",
+                    "用户甲",
+                    new UserScriptBinding { ScriptInstanceId = "script-validator" }),
+                mark,
+                "fresh");
+
+            Assert.True(result.Ran);
+            Assert.Equal("", result.Error);
+            Assert.False(File.Exists(Path.Combine(root, "main.json")));
+            Assert.Equal("{\"selected\":\"NexusPipeline\"}", File.ReadAllText(extraFile));
+            Assert.Contains("@extra0/config.json", result.ChangedFiles);
+        }
+        finally
+        {
+            DeleteExact(root);
+        }
+    }
+
+    private static void DeleteExact(string path)
+    {
+        try
+        {
+            if (File.Exists(path)) File.Delete(path);
+            else if (Directory.Exists(path)) Directory.Delete(path, recursive: true);
+        }
+        catch
+        {
+        }
+    }
+}

@@ -1,0 +1,277 @@
+name: Host Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing approved release tag to publish
+        required: true
+        type: string
+      pr_number:
+        description: Same-repository merged PR carrying the qualified source
+        required: true
+        type: string
+      head_sha:
+        description: Qualified PR head H
+        required: true
+        type: string
+      base_sha:
+        description: Historical qualification base B
+        required: true
+        type: string
+      check_id:
+        description: Host Release Qualification check id
+        required: true
+        type: string
+      qualification_run_id:
+        description: Completed Host Release Qualification run id
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: host-release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: Verify approved tag and qualification
+    runs-on: ubuntu-latest
+    environment: qualification-control
+    outputs:
+      source_sha: ${{ steps.resolve.outputs.source_sha }}
+      workflow_sha: ${{ steps.resolve.outputs.workflow_sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: NexusPipeline
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.13"
+      - name: Create qualification App token
+        id: qualification-token
+        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547
+        with:
+          app-id: ${{ vars.QUALIFICATION_APP_ID }}
+          private-key: ${{ secrets.QUALIFICATION_APP_PRIVATE_KEY }}
+          owner: FlappiBakuse
+          repositories: NexusPipeline
+          permission-actions: read
+          permission-checks: read
+          permission-contents: read
+          permission-pull-requests: read
+      - name: Verify tag and merged qualification
+        id: resolve
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          QUALIFICATION_TOKEN: ${{ steps.qualification-token.outputs.token }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          HEAD_SHA: ${{ inputs.head_sha }}
+          BASE_SHA: ${{ inputs.base_sha }}
+          CHECK_ID: ${{ inputs.check_id }}
+          QUALIFICATION_RUN_ID: ${{ inputs.qualification_run_id }}
+          QUALIFICATION_APP_ID: ${{ vars.QUALIFICATION_APP_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_EVENT_NAME" = "workflow_dispatch"
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$RELEASE_TAG" != *$'\n'*
+          M="$(git -C NexusPipeline rev-parse "refs/tags/${RELEASE_TAG}^{commit}")"
+          test "${#M}" -eq 40
+          export MERGED_SHA="$M"
+          python -c 'import os,sys; sys.path.insert(0,"NexusPipeline/tools"); from pathlib import Path; from host_release import verify_tag; assert verify_tag(Path("NexusPipeline"), os.environ["RELEASE_TAG"]) == os.environ["MERGED_SHA"]'
+          python NexusPipeline/tools/qualification_control.py verify-merged \
+            --repository FlappiBakuse/NexusPipeline \
+            --pr-number "$PR_NUMBER" \
+            --merged-sha "$M" \
+            --base-sha "$BASE_SHA" \
+            --head-sha "$HEAD_SHA" \
+            --check-id "$CHECK_ID" \
+            --app-id "$QUALIFICATION_APP_ID" \
+            --run-id "$QUALIFICATION_RUN_ID" \
+            --token-env QUALIFICATION_TOKEN
+          echo "source_sha=$M" >> "$GITHUB_OUTPUT"
+          echo "workflow_sha=$GITHUB_WORKFLOW_SHA" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build approved production package
+    needs: preflight
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ needs.preflight.outputs.source_sha }}
+          path: NexusPipeline
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "24"
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
+        with:
+          dotnet-version: "8.0.424"
+      - name: Execute production build
+        working-directory: NexusPipeline
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          SOURCE_SHA: ${{ needs.preflight.outputs.source_sha }}
+          PUBLISH_ROOT: .artifacts/publish/${{ github.run_id }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          python tools/host_release.py --root . --tag $env:RELEASE_TAG --source-sha $env:SOURCE_SHA --output $env:PUBLISH_ROOT --build
+      - name: Upload package evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: nexus-pipeline-${{ inputs.tag }}
+          path: |
+            NexusPipeline/.artifacts/publish/${{ github.run_id }}/NexusPipeline-*-win-x64.zip
+            NexusPipeline/.artifacts/publish/${{ github.run_id }}/NexusPipeline-*-win-x64.zip.sha256
+            NexusPipeline/.artifacts/publish/${{ github.run_id }}/build-metadata.json
+          if-no-files-found: error
+
+  publish:
+    name: Publish approved release
+    needs: [preflight, build]
+    runs-on: ubuntu-latest
+    environment: host-release
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ needs.preflight.outputs.workflow_sha }}
+          path: NexusPipeline
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.13"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: nexus-pipeline-${{ inputs.tag }}
+          path: NexusPipeline/.artifacts/publish/${{ github.run_id }}
+      - name: Create qualification App token
+        id: qualification-token
+        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547
+        with:
+          app-id: ${{ vars.QUALIFICATION_APP_ID }}
+          private-key: ${{ secrets.QUALIFICATION_APP_PRIVATE_KEY }}
+          owner: FlappiBakuse
+          repositories: NexusPipeline
+          permission-actions: read
+          permission-checks: read
+          permission-contents: read
+          permission-pull-requests: read
+      - name: Re-verify qualification immediately before write
+        env:
+          QUALIFICATION_TOKEN: ${{ steps.qualification-token.outputs.token }}
+          GH_REPO: FlappiBakuse/NexusPipeline
+          PR_NUMBER: ${{ inputs.pr_number }}
+          SOURCE_SHA: ${{ needs.preflight.outputs.source_sha }}
+          BASE_SHA: ${{ inputs.base_sha }}
+          HEAD_SHA: ${{ inputs.head_sha }}
+          CHECK_ID: ${{ inputs.check_id }}
+          QUALIFICATION_RUN_ID: ${{ inputs.qualification_run_id }}
+          QUALIFICATION_APP_ID: ${{ vars.QUALIFICATION_APP_ID }}
+        run: >-
+          python NexusPipeline/tools/qualification_control.py verify-merged
+          --repository "$GH_REPO"
+          --pr-number "$PR_NUMBER"
+          --merged-sha "$SOURCE_SHA"
+          --base-sha "$BASE_SHA"
+          --head-sha "$HEAD_SHA"
+          --check-id "$CHECK_ID"
+          --app-id "$QUALIFICATION_APP_ID"
+          --run-id "$QUALIFICATION_RUN_ID"
+          --token-env QUALIFICATION_TOKEN
+      - name: Create release publisher App token
+        id: publisher-token
+        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547
+        with:
+          app-id: ${{ vars.HOST_RELEASE_PUBLISHER_APP_ID }}
+          private-key: ${{ secrets.HOST_RELEASE_PUBLISHER_PRIVATE_KEY }}
+          owner: FlappiBakuse
+          repositories: NexusPipeline
+          permission-contents: write
+      - name: Publish immutable release assets
+        env:
+          GH_TOKEN: ${{ steps.publisher-token.outputs.token }}
+          GH_REPO: FlappiBakuse/NexusPipeline
+          TAG: ${{ inputs.tag }}
+          SOURCE_SHA: ${{ needs.preflight.outputs.source_sha }}
+          PUBLISH_ROOT: NexusPipeline/.artifacts/publish/${{ github.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$PUBLISH_ROOT"
+          metadata="build-metadata.json"
+          test "$(jq -r .sourceSha "$metadata")" = "$SOURCE_SHA"
+          test "$(jq -r .tag "$metadata")" = "$TAG"
+          test "$(jq -r .mode "$metadata")" = production
+          zip_asset="NexusPipeline-$(jq -r .version "$metadata")-win-x64.zip"
+          sha_asset="$zip_asset.sha256"
+          test -f "$zip_asset" -a -f "$sha_asset"
+          expected="$(tr -d '\r\n' < "$sha_asset")"
+          actual="$(sha256sum "$zip_asset" | cut -d' ' -f1)"
+          test "$expected" = "$actual"
+          python "$GITHUB_WORKSPACE/NexusPipeline/tools/host_release.py" verify-package \
+            --package "$zip_asset" \
+            --metadata "$metadata" \
+            --expected-source-sha "$SOURCE_SHA" \
+            --expected-tag "$TAG"
+          api="https://api.github.com/repos/$GH_REPO/releases/tags/$TAG"
+          response_file="$(mktemp)"
+          status="$(curl -sS -o "$response_file" -w '%{http_code}' -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "$api")"
+          if [ "$status" = 404 ]; then
+            prerelease=false
+            if [[ "$TAG" =~ ^v0\. || "$TAG" =~ -(beta|rc)\.[0-9]+$ ]]; then prerelease=true; fi
+            release_json="$(gh api --method POST "repos/$GH_REPO/releases" -f tag_name="$TAG" -f target_commitish="$SOURCE_SHA" -f name="$TAG" -f body="sourceSha=$SOURCE_SHA" -F draft=true -F prerelease="$prerelease")"
+          elif [ "$status" = 200 ]; then
+            release_json="$(cat "$response_file")"
+          else
+            cat "$response_file" >&2
+            echo "读取同 tag Release 失败：HTTP $status" >&2
+            exit 1
+          fi
+          release_id="$(jq -r .id <<<"$release_json")"
+          test "$release_id" != null -a "$release_id" != ""
+          for asset in "$zip_asset" "$sha_asset"; do
+            existing_url="$(jq -r --arg name "$asset" '.assets[]? | select(.name == $name) | .url' <<<"$release_json" | head -n 1)"
+            if [ -n "$existing_url" ]; then
+              existing="$(mktemp)"
+              curl -sS -L -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/octet-stream' "$existing_url" -o "$existing"
+              cmp -s "$existing" "$asset" || { echo "拒绝覆盖同 tag 的不同字节资产：$asset" >&2; exit 1; }
+              rm -f "$existing"
+            else
+              gh release upload "$TAG" "$asset" --repo "$GH_REPO"
+            fi
+          done
+          release_json="$(gh api "repos/$GH_REPO/releases/$release_id")"
+          for asset in "$zip_asset" "$sha_asset"; do
+            asset_url="$(jq -r --arg name "$asset" '.assets[]? | select(.name == $name) | .url' <<<"$release_json" | head -n 1)"
+            test -n "$asset_url"
+            received="$(mktemp)"
+            curl -sS -f -L -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/octet-stream' "$asset_url" -o "$received"
+            cmp -s "$received" "$asset" || { echo "远端资产下载后字节不一致：$asset" >&2; exit 1; }
+            if [ "$asset" = "$zip_asset" ]; then
+              python "$GITHUB_WORKSPACE/NexusPipeline/tools/host_release.py" verify-package \
+                --package "$received" \
+                --metadata "$metadata" \
+                --expected-source-sha "$SOURCE_SHA" \
+                --expected-tag "$TAG"
+            else
+              test "$(sha256sum "$received" | cut -d' ' -f1)" = "$(sha256sum "$asset" | cut -d' ' -f1)"
+            fi
+            rm -f "$received"
+          done
+          gh api --method PATCH "repos/$GH_REPO/releases/$release_id" -F draft=false
+          test "$(gh api "repos/$GH_REPO/releases/$release_id" --jq '.draft')" = false

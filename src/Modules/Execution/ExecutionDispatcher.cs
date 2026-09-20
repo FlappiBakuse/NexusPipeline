@@ -1,0 +1,223 @@
+using NexusPipeline.ControlPlane.Http;
+using NexusPipeline.Modules.Execution.Contracts;
+using NexusPipeline.Modules.Configuration.Contracts;
+using NexusPipeline.Modules.Execution.Realtime;
+using NexusPipeline.Modules.Queues;
+using NexusPipeline.Modules.Scheduling;
+using NexusPipeline.Modules.Scripts;
+using NexusPipeline.Shared.Logging;
+
+namespace NexusPipeline.Modules.Execution;
+
+/// <summary>
+/// 执行门面：保持既有 Web/CLI/Scheduler 入口不变，只负责门禁、运行登记和取消。
+/// 具体校验由 <see cref="ExecutionValidator"/> 负责，后台生命周期由 <see cref="ExecutionRunner"/> 负责。
+/// </summary>
+internal sealed class ExecutionDispatcher : IExecutionService, IFrozenQueueExecutionService, IAdmissionCoordination, IConfigEditAdmission
+{
+    private readonly ExecutionStateStore _state;
+    private readonly ExecutionPlanBuilder _plans;
+    private readonly ExecutionRunner _runner;
+    private readonly SystemActionExecutor _systemActions;
+
+    private readonly RealtimeEventBus? _realtime;
+
+    public ExecutionDispatcher(
+        ExecutionStateStore state,
+        ExecutionPlanBuilder plans,
+        ExecutionRunner runner,
+        SystemActionExecutor systemActions,
+        RealtimeEventBus? realtime = null)
+    {
+        _state = state;
+        _plans = plans;
+        _runner = runner;
+        _systemActions = systemActions;
+        _realtime = realtime;
+    }
+
+    public IReadOnlyList<RunningExecution> Active => _state.Active;
+
+    public RunningExecution? Find(string id) => _state.Find(id);
+
+    /// <summary>查找运行任务：先查运行中列表，再查已结束列表，供 CLI 轮询结果。</summary>
+    public RunningExecution? FindAny(string id) => _state.FindAny(id);
+
+    /// <summary>当前待执行的系统操作，供 Web 展示倒计时和取消入口。</summary>
+    public PendingSystemAction? CurrentSystemAction => _systemActions.Current;
+
+    /// <summary>查询活动执行对脚本/用户数据的租约引用，供配置 CRUD 返回稳定的 409 冲突信息。</summary>
+    public IReadOnlyList<ExecutionLeaseReference> FindLeases(string scriptId, string? userName = null)
+        => _state.FindLeases(scriptId, userName);
+
+    public T WithAdmissionCoordination<T>(Func<T> action)
+        => _state.WithAdmissionCoordination(action);
+
+    public void WithAdmissionCoordination(Action action)
+        => _state.WithAdmissionCoordination(() =>
+        {
+            action();
+            return true;
+        });
+
+    public HostMaintenanceLease? TryAcquireMaintenanceLease(out string reason)
+        => _state.TryAcquireMaintenanceLease(out reason);
+
+    public bool TryExecuteLeaseMutation(
+        string scriptId,
+        string? userName,
+        Action mutation,
+        out IReadOnlyList<ExecutionLeaseReference> leases,
+        out string? failureCode)
+        => _state.TryExecuteLeaseMutation(scriptId, userName, mutation, out leases, out failureCode);
+
+    public bool TryExecuteHostConfigurationMutation(Action mutation, out string? failureCode)
+        => _state.TryExecuteHostConfigurationMutation(mutation, out failureCode);
+
+    public bool TryExecuteQueueLeaseMutation(
+        string queueId,
+        Action mutation,
+        out IReadOnlyList<ExecutionLeaseReference> leases,
+        out string? failureCode)
+        => _state.TryExecuteQueueLeaseMutation(queueId, mutation, out leases, out failureCode);
+
+    public bool TryExecuteAnyQueueLeaseMutation(
+        Action mutation,
+        out IReadOnlyList<ExecutionLeaseReference> leases,
+        out string? failureCode)
+        => _state.TryExecuteAnyQueueLeaseMutation(mutation, out leases, out failureCode);
+
+    public bool TryBeginEditSession(string scriptId, string userName, string configPath, out string? conflict)
+        => _state.TryBeginEditSession(scriptId, userName, configPath, out conflict);
+
+    public void EndEditSession(string scriptId, string userName)
+        => _state.EndEditSession(scriptId, userName);
+
+    public bool CancelSystemAction(string source = Audit.Web) => _systemActions.Cancel(source);
+
+    public RunningExecution StartScript(string scriptId, string mode, string source = Audit.System, string? userName = null)
+    {
+        return _state.WithAdmissionCoordination(() =>
+        {
+            ScriptExecutionPlan plan = _plans.BuildScript(scriptId, userName);
+            ScriptInstance script = plan.Script;
+            var exec = new RunningExecution
+            {
+                Kind = "script",
+                TargetId = script.Id,
+                TargetName = script.Name,
+                Mode = mode,
+                TotalTasks = plan.TotalTasks,
+                CurrentScriptName = script.Name,
+                CurrentStatus = "排队等待中...",
+            };
+            Register(exec, plan.Admission, source);
+            AttachRealtime(exec);
+            Task task = Task.Run(() => _runner.RunScriptAsync(exec, plan));
+            exec.Completion = task;
+            return exec;
+        });
+    }
+
+    public RunningExecution StartQueue(string queueId, string mode, string source = Audit.System)
+    {
+        return _state.WithAdmissionCoordination(() =>
+        {
+            QueueExecutionPlan plan = _plans.BuildQueue(queueId);
+            return StartQueue(plan, mode, source);
+        });
+    }
+
+    /// <summary>使用调度器在 trigger 时冻结的计划提交准入，运行期间不再回读队列/脚本仓储。</summary>
+    public RunningExecution StartQueue(QueueExecutionPlan plan, string mode, string source = Audit.System)
+    {
+        return _state.WithAdmissionCoordination(() =>
+        {
+            DispatchQueue queue = plan.Queue;
+            var exec = new RunningExecution
+            {
+                Kind = "queue",
+                TargetId = queue.Id,
+                TargetName = queue.Name,
+                Mode = mode,
+                TotalTasks = plan.TotalTasks,
+                CurrentStatus = "排队等待中...",
+            };
+            Register(exec, plan.Admission, source);
+            AttachRealtime(exec);
+            Task task = Task.Run(() => _runner.RunQueueAsync(exec, plan));
+            exec.Completion = task;
+            return exec;
+        });
+    }
+
+    public void Cancel(string runId, string source = Audit.System)
+    {
+        RunningExecution? exec = Find(runId);
+        if (exec is null)
+        {
+            throw new InvalidOperationException($"未找到运行中的任务：{runId}");
+        }
+        Audit.Log(source, $"取消运行{ExecKindText(exec)}", exec.TargetName);
+        try
+        {
+            exec.Cts.Cancel();
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"取消信号发送失败（{exec.TargetName}），任务可能仍在运行：{ex.Message}");
+        }
+    }
+
+    /// <summary>提供执行校验使用的静态进程检测入口。</summary>
+    public static bool IsScriptRunning(ScriptInstance? script) => ExecutionValidator.IsScriptRunning(script);
+
+    private void Register(RunningExecution exec, ExecutionAdmissionProfile profile, string source)
+    {
+        if (!_state.TryRegister(exec, profile, out ExecutionAdmissionFailure? failure))
+        {
+            throw new ExecutionAdmissionException(failure!);
+        }
+        Audit.Log(source, $"执行{ExecKindText(exec)}", $"{exec.TargetName}（模式：{(exec.Mode == "auto" ? "自动" : "手动")}）");
+    }
+
+    private void AttachRealtime(RunningExecution exec)
+    {
+        if (_realtime is null)
+        {
+            return;
+        }
+
+        exec.AttachRealtimeObservers(
+            snapshot =>
+            {
+                _realtime.Publish(
+                    RealtimeEventNames.RunStatus,
+                    RealtimeEventProjection.RunStatus(snapshot, active: true));
+                PublishHostStatus();
+            },
+            entry => _realtime.PublishLog(exec.Id, entry));
+
+        _realtime.Publish(
+            RealtimeEventNames.RunStatus,
+            RealtimeEventProjection.RunStatus(exec.SnapshotStatus(), active: true));
+        PublishHostStatus();
+    }
+
+    private void PublishHostStatus()
+    {
+        if (_realtime is null)
+        {
+            return;
+        }
+        _realtime.Publish(
+            RealtimeEventNames.HostStatus,
+            RealtimeEventProjection.HostStatus(
+                _state.Active.Select(exec => exec.SnapshotStatus()).ToList()));
+    }
+
+    private static string ExecKindText(RunningExecution exec)
+    {
+        return exec.Kind == "queue" ? "调度队列" : "脚本实例";
+    }
+}

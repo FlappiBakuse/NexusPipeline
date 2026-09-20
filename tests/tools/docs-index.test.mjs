@@ -22,7 +22,7 @@ test("task keywords route to current authority with code and test directions", (
   const results = findTopics(map, "配置恢复");
   assert.ok(results.some(topic => topic.id === "architecture.configuration"));
   const topic = results.find(item => item.id === "architecture.configuration");
-  assert.ok(topic.codePaths.includes("src/Services/ConfigSwapPrimitives.cs"));
+  assert.ok(topic.codePaths.includes("src/Modules/Configuration/Exchange/ConfigSwapPrimitives.cs"));
   assert.ok(topic.testDomains.includes("systemGroups.config"));
 });
 

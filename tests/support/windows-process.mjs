@@ -26,16 +26,43 @@ export function getIntegrityLevel() {
   return "Unknown";
 }
 
-/** High and System are the administrator boundaries required by production. */
+/** Permission is diagnostic only; the runner never uses it to select or skip tests. */
 export function isAdministrator() {
   const level = getIntegrityLevel();
   return level === "High" || level === "System";
 }
 
-export function requireAdministrator(label = "该测试入口", command = "default") {
-  if (isAdministrator()) return true;
-  console.error(`[错误] ${label}需要 Administrator / High Integrity。当前终端权限不足，正式门禁未执行。请在管理员终端执行：node tests\\run.mjs ${command}`);
-  return false;
+/** Return OS-observed process identity for marker-protected cleanup. */
+export function readProcessIdentity(pid) {
+  const numericPid = Number(pid);
+  if (!Number.isInteger(numericPid) || numericPid <= 0) return null;
+  if (process.platform !== "win32") {
+    try {
+      return {
+        pid: numericPid,
+        executablePath: fs.realpathSync(`/proc/${numericPid}/exe`),
+        parentPid: null,
+      };
+    } catch {
+      return null;
+    }
+  }
+  const script = `$p=Get-Process -Id ${numericPid} -ErrorAction SilentlyContinue; $w=Get-CimInstance Win32_Process -Filter 'ProcessId = ${numericPid}' -ErrorAction SilentlyContinue; if ($null -ne $p) { [pscustomobject]@{ pid=$p.Id; executablePath=$p.Path; startTime=$p.StartTime.ToUniversalTime().ToString('o'); parentPid=if ($null -ne $w) { [int]$w.ParentProcessId } else { 0 } } | ConvertTo-Json -Compress }`;
+  const result = run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script]);
+  if (result.status !== 0 || !String(result.stdout || "").trim()) return null;
+  try {
+    const identity = JSON.parse(String(result.stdout).trim());
+    return Number(identity?.pid) === numericPid && typeof identity?.executablePath === "string"
+      ? {
+          pid: numericPid,
+          executablePath: identity.executablePath,
+          startTime: identity.startTime || "",
+          parentPid: Number.isInteger(Number(identity.parentPid)) ? Number(identity.parentPid) : null,
+        }
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 export function readPidFile(filePath) {
@@ -55,6 +82,15 @@ export function isProcessAlive(pid) {
     const output = `${result.stdout || ""}\n${result.stderr || ""}`;
     if (result.status === 0 && new RegExp(`"${numericPid}"`).test(output)) return true;
     if (result.status === 0 && /INFO:|没有运行的任务|no tasks/i.test(output)) return false;
+    const powershell = run("powershell.exe", [
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      `$p=Get-Process -Id ${numericPid} -ErrorAction SilentlyContinue; if ($null -eq $p) { 'absent' } else { 'present' }`,
+    ]);
+    const state = String(powershell.stdout || "").trim().toLowerCase();
+    if (powershell.status === 0 && state === "present") return true;
+    if (powershell.status === 0 && state === "absent") return false;
   }
   try {
     process.kill(numericPid, 0);

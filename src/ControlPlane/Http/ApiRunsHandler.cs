@@ -1,0 +1,60 @@
+using System.Net;
+using NexusPipeline.Modules.Execution;
+
+namespace NexusPipeline.ControlPlane.Http;
+
+/// <summary>运行任务列表 API；详情与取消继续由 dispatch/cancel 路由提供。</summary>
+[ApiRoute("runs")]
+internal static class ApiRunsHandler
+{
+    public static async Task Handle(
+        HttpListenerContext context,
+        string method,
+        string[] seg,
+        string body,
+        ExecutionDispatcher dispatchCenter)
+    {
+        if (method != "GET" || seg.Length != 1)
+        {
+            await HttpHelper.MethodNotAllowedAsync(context).ConfigureAwait(false);
+            return;
+        }
+
+        var running = dispatchCenter.Active
+            .Select(exec =>
+            {
+                RunningExecutionSnapshot snapshot = exec.Snapshot();
+                return new
+                {
+                    snapshot.Id,
+                    snapshot.Kind,
+                    snapshot.TargetId,
+                    snapshot.TargetName,
+                    snapshot.Mode,
+                    snapshot.Status,
+                    snapshot.StartedAt,
+                    snapshot.FinishedAt,
+                    snapshot.TotalTasks,
+                    snapshot.DoneTasks,
+                    snapshot.CurrentScriptName,
+                    snapshot.CurrentScriptId,
+                    snapshot.CurrentStatus,
+                    snapshot.CurrentAttempt,
+                    snapshot.CurrentMaxAttempts,
+                    persistenceWarning = snapshot.PersistenceWarning,
+                    logTail = snapshot.LogTail,
+                    logEntries = snapshot.LogEntries.Select(ToLogEntry).ToArray(),
+                };
+            })
+            .ToList();
+        await HttpHelper.WriteJsonAsync(context, running).ConfigureAwait(false);
+    }
+
+    private static object ToLogEntry(ExecutionLogEntry entry) => new
+    {
+        sequence = entry.Sequence,
+        timestamp = entry.Timestamp,
+        level = entry.Level.ToString().ToLowerInvariant(),
+        text = entry.FormattedText,
+    };
+}

@@ -7,8 +7,6 @@ import path from "node:path";
 import {
   api,
   executionMode,
-  isAdminMode,
-  isAdministrator,
   prepareRuntime,
   projectRoot,
   runtimeDir,
@@ -23,11 +21,9 @@ const skip = enabled ? false : "设置 NEXUS_SYSTEM_SMOKE=1 后运行";
 const pluginName = "bettergi";
 const artifactName = "BetterGI";
 const pluginVersions = ["0.2.9", "0.2.10"];
-const pluginRepositoryRoot = process.env.NEXUS_PLUGIN_REPO_ROOT?.trim()
-  ? (path.isAbsolute(process.env.NEXUS_PLUGIN_REPO_ROOT.trim())
-    ? process.env.NEXUS_PLUGIN_REPO_ROOT.trim()
-    : path.resolve(projectRoot, process.env.NEXUS_PLUGIN_REPO_ROOT.trim()))
-  : path.resolve(projectRoot, "..", "NexusPipeline-Plugins");
+const configuredPluginRoot = process.env.NEXUS_OFFICIAL_PLUGINS_ROOT?.trim();
+if (enabled && !configuredPluginRoot) throw new Error("必须显式设置 NEXUS_OFFICIAL_PLUGINS_ROOT");
+const pluginRepositoryRoot = path.resolve(projectRoot, configuredPluginRoot || ".");
 const packageRoot = path.join(pluginRepositoryRoot, "packages", artifactName);
 const pluginStateDir = path.join(runtimeDir, ".nxp", "state", "plugins");
 const pendingPath = path.join(pluginStateDir, "pending.json");
@@ -149,9 +145,8 @@ function findPlugin(plugins) {
 
 before(async () => {
   if (!enabled) return;
-  if (isAdminMode) assert.ok(isAdministrator(), "管理员 plugin Smoke 必须在 Administrator / High Integrity 终端运行");
   await startPluginRepositoryStub();
-  prepareRuntime();
+  await prepareRuntime();
   fs.mkdirSync(path.join(runtimeDir, "plugins"), { recursive: true });
   fs.writeFileSync(path.join(runtimeDir, "plugins", "acceptance-witness.txt"), "keep-through-plugin-lifecycle", "utf8");
   startRuntime();

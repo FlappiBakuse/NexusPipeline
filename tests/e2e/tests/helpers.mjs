@@ -1,14 +1,17 @@
 import { spawn } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   isProcessAlive,
-  killProcessTree,
-  readPidFile,
 } from "../../support/windows-process.mjs";
 import {
   copyReleaseArtifacts,
+  createRunMarker,
+  waitForRunMarker,
+  ensureOwnedRuntimeDirectory,
+  findAvailablePort,
   installEmulatorStubs,
   requireExecutionMode,
   resolveTestHostDir,
@@ -19,20 +22,20 @@ import {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const projectRoot = path.resolve(__dirname, "..", "..", "..");
-const productionReleaseDir = path.join(projectRoot, "release");
 const testMode = requireExecutionMode("E2E");
 export const executionMode = testMode;
-export const isCodexMode = testMode === "codex";
-export const isAdminMode = testMode === "admin";
+export const runId = process.env.NEXUS_TEST_RUN_ID?.trim()
+  || `standalone-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 export const testHostDir = resolveTestHostDir(projectRoot);
-export const runtimeDir = path.join(__dirname, "..", "runtime");
+export const runtimeDir = path.join(projectRoot, "tests", ".artifacts", "runs", runId, "ui");
 export const runtimeExe = path.join(runtimeDir, "nexus-pipeline.exe");
 export const servicePidPath = path.join(runtimeDir, ".nxp", "runtime", "service.pid");
+export const runMarkerPath = path.join(runtimeDir, ".nxp", "test-run-marker.json");
 export const testHostExitFile = resolveTestHostExitFile(
   projectRoot,
   path.join(runtimeDir, ".nxp", "test-host.exit"),
 );
-export const releaseDir = isCodexMode ? testHostDir : productionReleaseDir;
+export const releaseDir = testHostDir;
 const configuredBaseUrl = process.env.NEXUS_E2E_BASE_URL?.trim();
 const configuredWebPort = (() => {
   if (!configuredBaseUrl) return null;
@@ -48,84 +51,77 @@ const configuredWebPort = (() => {
   }
   return port;
 })();
-export const baseUrl = configuredBaseUrl
+export let baseUrl = configuredBaseUrl
   ? `${configuredBaseUrl.replace(/\/+$/u, "")}/`
-  : "http://127.0.0.1:58731/";
+  : "";
 export const JSON_HDR = { "Content-Type": "application/json" };
 export const PING_GAME = "C:\\Windows\\System32\\PING.EXE";
 
-/** 测试插件仓库：兼容 CI 工作区子目录、本地相邻仓库和显式路径。 */
+/** 测试插件仓库与 contract 使用同一个显式来源。 */
 export function pluginRepositoryRoot() {
-  const configured = process.env.NEXUS_PLUGIN_REPO_ROOT?.trim();
-  const candidates = [
-    configured ? (path.isAbsolute(configured) ? configured : path.resolve(projectRoot, configured)) : null,
-    path.join(projectRoot, "NexusPipeline-Plugins"),
-    path.resolve(projectRoot, "..", "NexusPipeline-Plugins"),
-  ].filter(Boolean);
-  return candidates.find(candidate => fs.existsSync(path.join(candidate, "catalog.json"))) || candidates[0];
+  const configured = process.env.NEXUS_OFFICIAL_PLUGINS_ROOT?.trim();
+  if (!configured) throw new Error("必须显式设置 NEXUS_OFFICIAL_PLUGINS_ROOT");
+  const repository = path.resolve(projectRoot, configured);
+  if (!fs.existsSync(path.join(repository, "catalog.json"))) throw new Error(`插件仓库缺少 catalog.json：${repository}`);
+  return repository;
 }
 
 let child = null;
 
-function ownedPids() {
-  const pids = new Set();
-  const marked = readPidFile(servicePidPath);
-  if (marked) pids.add(marked);
-  if (child?.pid) pids.add(Number(child.pid));
-  return [...pids].filter(pid => Number.isInteger(pid) && pid > 0);
-}
-
-export function setupRuntime() {
-  for (const pid of ownedPids()) killProcessTree(pid);
-  fs.rmSync(runtimeDir, { recursive: true, force: true, maxRetries: 120, retryDelay: 250 });
-  fs.mkdirSync(runtimeDir, { recursive: true });
-  if (configuredWebPort !== null) {
-    fs.mkdirSync(path.join(runtimeDir, "config"), { recursive: true });
-    fs.writeFileSync(
-      path.join(runtimeDir, "config", "settings.json"),
-      JSON.stringify({ WebPort: configuredWebPort }, null, 2),
-      "utf8",
-    );
-  }
+export async function setupRuntime() {
+  await ensureOwnedRuntimeDirectory(runtimeDir, runMarkerPath, servicePidPath);
+  const webPort = configuredWebPort ?? await findAvailablePort();
+  if (!baseUrl) baseUrl = `http://127.0.0.1:${webPort}/`;
+  fs.mkdirSync(path.join(runtimeDir, "config"), { recursive: true });
+  fs.writeFileSync(
+    path.join(runtimeDir, "config", "settings.json"),
+    JSON.stringify({ WebPort: webPort }, null, 2),
+    "utf8",
+  );
   const sourceExe = path.join(releaseDir, "nexus-pipeline.exe");
-  if (!fs.existsSync(sourceExe)) throw new Error(`${releaseDir}/nexus-pipeline.exe 不存在，请先运行 node tests/run.mjs ${executionMode} ui`);
-  copyReleaseArtifacts(releaseDir, runtimeDir);
+  if (!fs.existsSync(sourceExe)) throw new Error(`${releaseDir}/nexus-pipeline.exe 不存在，请先运行 node tests/run.mjs release ui-runtime`);
   const repositoryPlugins = path.join(pluginRepositoryRoot(), "plugins");
-  const runtimePlugins = path.join(runtimeDir, "plugins");
-  fs.mkdirSync(runtimePlugins, { recursive: true });
-  if (fs.existsSync(repositoryPlugins)) fs.cpSync(repositoryPlugins, runtimePlugins, { recursive: true });
   const frontendFixture = path.join(__dirname, "fixtures", "frontend-plugin");
-  if (fs.existsSync(frontendFixture)) fs.cpSync(frontendFixture, path.join(runtimePlugins, "FrontendFixture"), { recursive: true });
+  const pluginDirectories = fs.existsSync(repositoryPlugins)
+    ? fs.readdirSync(repositoryPlugins, { withFileTypes: true })
+      .filter(entry => entry.isDirectory())
+      .map(entry => path.join(repositoryPlugins, entry.name))
+    : [];
+  if (fs.existsSync(frontendFixture)) pluginDirectories.push(frontendFixture);
+  copyReleaseArtifacts(releaseDir, runtimeDir, { pluginDirectories });
 
   installEmulatorStubs(runtimeDir, path.join(__dirname, "fixtures"));
 }
 
 export function startService() {
   fs.rmSync(servicePidPath, { force: true });
-  if (isCodexMode) fs.rmSync(testHostExitFile, { force: true });
+  fs.rmSync(testHostExitFile, { force: true });
   const env = {
     ...process.env,
     NEXUS_SYSTEM_ACTION_DRYRUN: process.env.NEXUS_SYSTEM_ACTION_DRYRUN || "1",
     NEXUS_ADB_EXE: process.env.NEXUS_ADB_EXE || path.join(runtimeDir, "adb-stub", "adb-stub.cmd"),
     NEXUS_MUMU_MANAGER_EXE: process.env.NEXUS_MUMU_MANAGER_EXE || path.join(runtimeDir, "mumu-stub", "mumu-manager-stub.cmd"),
   };
-  for (const key of ["NEXUS_TEST_HOST", "NEXUS_TEST_HOST_DIR", "NEXUS_TEST_HOST_EXIT_FILE"]) delete env[key];
-  env.NEXUS_TEST_MODE = testMode;
-  if (isCodexMode) {
-    env.NEXUS_TEST_HOST = "1";
-    env.NEXUS_TEST_HOST_DIR = testHostDir;
-    env.NEXUS_TEST_HOST_EXIT_FILE = testHostExitFile;
-  }
+  env.NEXUS_TEST_MODE = "test-host";
+  env.NEXUS_TEST_RUN_ID = runId;
+  env.NEXUS_TEST_HOST = "1";
+  env.NEXUS_TEST_HOST_DIR = testHostDir;
+  env.NEXUS_TEST_HOST_EXIT_FILE = testHostExitFile;
+  env.NEXUS_TEST_OWNERSHIP_NONCE = randomUUID();
+  env.NEXUS_SYSTEM_RUNTIME_NAME = `ui-${createHash("sha256").update(fs.realpathSync.native(runtimeDir).toLowerCase()).digest("hex").slice(0, 24)}`;
   child = spawn(runtimeExe, ["web"], {
     cwd: runtimeDir,
     stdio: ["pipe", "ignore", "ignore"],
     env,
     windowsHide: true,
   });
+  createRunMarker(runMarkerPath, runtimeExe, child, { nonce: env.NEXUS_TEST_OWNERSHIP_NONCE, identityFile: `${testHostExitFile}.identity.json`, runId });
 }
 
 export async function waitForService(timeoutMs = 30000) {
+  await waitForRunMarker(child);
   const deadline = Date.now() + timeoutMs;
+  let lastFailure = "未尝试";
   while (Date.now() < deadline) {
     try {
       const response = await fetch(baseUrl + "api/status");
@@ -133,17 +129,19 @@ export async function waitForService(timeoutMs = 30000) {
       // Node 24 的 undici 在该连接关闭时会触发内部断言崩溃，宿主侧写响应也会因连接中断失败。
       await response.arrayBuffer();
       if (response.ok) return;
-    } catch {
+      lastFailure = `HTTP ${response.status}`;
+    } catch (error) {
       // 启动窗口内端口尚未监听。
+      lastFailure = error instanceof Error ? error.message : String(error);
     }
     await sleep(250);
   }
-  throw new Error(`服务未在 ${timeoutMs}ms 内启动`);
+  throw new Error(`服务未在 ${timeoutMs}ms 内启动：baseUrl=${baseUrl || "<empty>"}，last=${lastFailure}`);
 }
 
 export async function stopService() {
   const current = child;
-  await stopSpawnedService({ child: current, exitFile: testHostExitFile, pidFilePath: servicePidPath });
+  await stopSpawnedService({ child: current, exitFile: testHostExitFile, pidFilePath: servicePidPath, markerPath: runMarkerPath });
   child = null;
 }
 

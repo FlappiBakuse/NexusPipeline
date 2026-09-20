@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { TEST_DOMAIN_REGISTRY } from "./ci-domains.mjs";
+import { TEST_DOMAIN_REGISTRY } from "../tests/registry.mjs";
 import { collectAnchors, findMarkdownLinks } from "./markdown.mjs";
 
 export const DOCS_INDEX_SCHEMA_VERSION = 1;
@@ -161,6 +161,7 @@ function fragmentExists(content, fragment) {
 export function validateCrossRepositoryLinks(documents, {
   root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."),
   workspaceRoot = path.resolve(root, ".."),
+  checkouts = {},
 } = {}) {
   const issues = [];
   const baselines = {};
@@ -171,7 +172,9 @@ export function validateCrossRepositoryLinks(documents, {
     for (const link of findMarkdownLinks(text)) {
       const target = repositoryTarget(link.rawTarget);
       if (!target) continue;
-      const checkout = findCheckout(root, workspaceRoot, target.repository);
+      const checkout = checkouts[target.repository]
+        ? path.resolve(checkouts[target.repository])
+        : findCheckout(root, workspaceRoot, target.repository);
       if (!checkout) {
         issues.push("无法完成跨仓库检查：未找到 " + target.repository + " checkout（" + fileLabel + " -> " + link.rawTarget + "）");
         continue;

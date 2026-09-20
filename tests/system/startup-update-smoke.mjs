@@ -156,7 +156,7 @@ async function close(server) {
 
 beforeEach(async () => {
   if (!enabled) return;
-  prepareRuntime();
+  await prepareRuntime();
 });
 
 afterEach(async () => {
