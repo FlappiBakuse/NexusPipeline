@@ -124,7 +124,7 @@ def archive_production(
     tag = normalized_tag(tag)
     version = tag[1:]
     output_dir.mkdir(parents=True, exist_ok=True)
-    zip_path = output_dir / f"NexusPipeline-{version}-win-x64.zip"
+    zip_path = output_dir / f"NexusPipeline-{tag}-win-x64.zip"
     if zip_path.exists():
         zip_path.unlink()
     files = []
@@ -144,7 +144,7 @@ def archive_production(
             archive.writestr(info, data)
     digest = hashlib.sha256(zip_path.read_bytes()).hexdigest()
     sha_path = output_dir / f"{zip_path.name}.sha256"
-    sha_path.write_text(digest + "\n", encoding="ascii")
+    sha_path.write_bytes(digest.encode("ascii"))
     metadata = {
         "schemaVersion": 1,
         "sourceSha": source_sha,

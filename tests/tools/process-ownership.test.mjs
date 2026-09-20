@@ -5,12 +5,44 @@ import path from "node:path";
 import test from "node:test";
 import {
   OWNERSHIP,
+  ensureOwnedRuntimeDirectory,
   inspectHandoffProcessOwnership,
   inspectProcessOwnership,
   inspectRestartedProcessOwnership,
   registerHandoffProcess,
   stopSpawnedService,
 } from "../support/test-runtime.mjs";
+
+test("runtime preparation accepts a confirmed exit race but preserves unknown or reused processes", async () => {
+  for (const state of ["exited", "unknown", "reused", "exit-unconfirmed"]) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "nxp-prepare-exit-"));
+    try {
+      const markerPath = path.join(root, "marker.json");
+      fs.writeFileSync(markerPath, JSON.stringify({ schemaVersion: 1, nonce: "nonce", pid: 101,
+        executablePath: process.execPath, processStartTimeUtc: "original" }));
+      const sentinel = path.join(root, "evidence.txt");
+      fs.writeFileSync(sentinel, "preserve until exit confirmed");
+      let probes = 0;
+      let kills = 0;
+      let waits = 0;
+      const operation = ensureOwnedRuntimeDirectory(root, markerPath, path.join(root, "absent.pid"), {
+        aliveReader: () => ++probes === 1 || !["exited", "exit-unconfirmed"].includes(state),
+        identityReader: () => state === "reused" ? { executablePath: process.execPath, startTime: "new" } : null,
+        terminator: () => { kills++; return true; },
+        exitWaiter: async () => { waits++; return state !== "exit-unconfirmed"; },
+      });
+      if (state === "exited") {
+        await operation;
+        assert.deepEqual(fs.readdirSync(root), []);
+        assert.equal(waits, 1);
+      } else {
+        await assert.rejects(operation, /拒绝清理运行进程|运行进程退出未确认/);
+        assert.equal(fs.readFileSync(sentinel, "utf8"), "preserve until exit confirmed");
+      }
+      assert.equal(kills, 0);
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  }
+});
 
 test("process ownership treats missing or unverifiable start times as unknown", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "nxp-ownership-"));
