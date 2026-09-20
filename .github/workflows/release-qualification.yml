@@ -31,7 +31,7 @@ jobs:
       contract_sha: ${{ steps.resolve.outputs.contract_sha }}
       check_id: ${{ steps.resolve.outputs.check_id }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ github.workflow_sha }}
           fetch-depth: 0
@@ -87,12 +87,12 @@ jobs:
     needs: preflight
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ needs.preflight.outputs.head_sha }}
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: FlappiBakuse/NexusPipeline-Plugins
           ref: ${{ needs.preflight.outputs.contract_sha }}
@@ -127,12 +127,12 @@ jobs:
     needs: preflight
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ needs.preflight.outputs.head_sha }}
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: FlappiBakuse/NexusPipeline-Plugins
           ref: ${{ needs.preflight.outputs.contract_sha }}
@@ -167,12 +167,12 @@ jobs:
     needs: preflight
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ needs.preflight.outputs.head_sha }}
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: FlappiBakuse/NexusPipeline-Plugins
           ref: ${{ needs.preflight.outputs.contract_sha }}
@@ -207,7 +207,7 @@ jobs:
     needs: preflight
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ needs.preflight.outputs.head_sha }}
           fetch-depth: 0
@@ -238,7 +238,7 @@ jobs:
     needs: preflight
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ needs.preflight.outputs.head_sha }}
           fetch-depth: 0
@@ -271,7 +271,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: qualification-control
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ needs.preflight.outputs.workflow_sha }}
           fetch-depth: 1
