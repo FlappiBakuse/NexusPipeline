@@ -238,6 +238,11 @@ export function inspectProcessOwnership(markerPath, pid, { identityReader = read
   if (!marker || marker.pid !== numericPid) return OWNERSHIP.UNKNOWN;
   let identity;
   try { identity = identityReader(numericPid); } catch { return OWNERSHIP.UNKNOWN; }
+  // The process can finish between the liveness probe and the OS identity query.
+  // Only a fresh, definitive absence is EXITED; inaccessible live identities stay UNKNOWN.
+  if (!identity?.executablePath || !identity.startTime) {
+    return processAlive(numericPid, aliveReader) === false ? OWNERSHIP.EXITED : OWNERSHIP.UNKNOWN;
+  }
   if (!identity?.executablePath || !marker.executablePath || !marker.processStartTimeUtc || !identity.startTime) return OWNERSHIP.UNKNOWN;
   if (!sameExecutable(identity.executablePath, marker.executablePath)) return OWNERSHIP.NOT_OWNED;
   return marker.processStartTimeUtc === identity.startTime ? OWNERSHIP.OWNED : OWNERSHIP.NOT_OWNED;
@@ -260,7 +265,9 @@ export function inspectHandoffProcessOwnership(markerPath, pid, { identityReader
   if (!handoff || !handoff.executablePath || !handoff.processStartTimeUtc) return OWNERSHIP.UNKNOWN;
   let identity;
   try { identity = identityReader(numericPid); } catch { return OWNERSHIP.UNKNOWN; }
-  if (!identity?.executablePath || !identity.startTime) return OWNERSHIP.UNKNOWN;
+  if (!identity?.executablePath || !identity.startTime) {
+    return processAlive(numericPid, aliveReader) === false ? OWNERSHIP.EXITED : OWNERSHIP.UNKNOWN;
+  }
   if (!sameExecutable(identity.executablePath, handoff.executablePath)) return OWNERSHIP.NOT_OWNED;
   return handoff.processStartTimeUtc === identity.startTime ? OWNERSHIP.OWNED : OWNERSHIP.NOT_OWNED;
 }

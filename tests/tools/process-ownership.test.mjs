@@ -31,6 +31,32 @@ test("process ownership treats missing or unverifiable start times as unknown", 
   }
 });
 
+test("identity query racing graceful exit requires a fresh definitive absence", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "nxp-exit-race-"));
+  try {
+    const markerPath = path.join(root, "marker.json");
+    fs.writeFileSync(markerPath, JSON.stringify({
+      schemaVersion: 1, nonce: "nonce", pid: 101, executablePath: process.execPath,
+      processStartTimeUtc: "original",
+      handoffProcesses: [{ pid: 202, executablePath: process.execPath, processStartTimeUtc: "handoff" }],
+    }));
+    for (const [inspect, pid] of [[inspectProcessOwnership, 101], [inspectHandoffProcessOwnership, 202]]) {
+      for (const stillAlive of [false, true, "unavailable"]) {
+        let probes = 0;
+        const result = inspect(markerPath, pid, {
+          identityReader: () => null,
+          aliveReader: () => {
+            if (++probes === 1) return true;
+            if (stillAlive === "unavailable") throw new Error("inspection unavailable");
+            return stillAlive;
+          },
+        });
+        assert.equal(result, stillAlive === false ? OWNERSHIP.EXITED : OWNERSHIP.UNKNOWN);
+      }
+    }
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
 test("cleanup never refreshes reused or missing identities and verifies before signalling", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "nxp-cleanup-ownership-"));
   const previousMode = process.env.NEXUS_TEST_MODE;
