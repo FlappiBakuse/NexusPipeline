@@ -9,6 +9,7 @@ import { disposePluginSlot } from "@bridge/index";
 import { t } from "../../../platform/i18n";
 import { clearFieldError, setRequiredFieldError, toast } from "../../../platform/toast";
 import NxpBadge from "../../../ui/primitives/NxpBadge.vue";
+import TaskPlanPreview from "./TaskPlanPreview.vue";
 import NxpEmptyState from "../../../ui/primitives/NxpEmptyState.vue";
 import NxpEntityIcon from "../../../ui/primitives/NxpEntityIcon.vue";
 import NxpIcon from "../../../ui/primitives/NxpIcon.vue";
@@ -510,6 +511,7 @@ onMounted(() => {
                   <NxpButton class="um-edit-config" type="button" :class="{ 'is-unavailable': Boolean(bindingStatus(binding)) }" @click.stop="openConfigEdit(binding)">
                     <span class="um-edit-config-copy"><strong>{{ t("users.edit_configuration") }}</strong><span class="muted">{{ t("users.binding.config_open_help") }}</span></span><span class="um-edit-config-arrow" aria-hidden="true"><NxpIcon name="chevronRight" /></span>
                   </NxpButton>
+                  <TaskPlanPreview v-if="bindingPluginStatus(binding)?.specialized" :user-id="draft.id" :script-id="binding.scriptInstanceId" />
                   <section class="um-binding-option-section">
                     <div class="section-heading">
                       <div>

@@ -6,6 +6,8 @@ export interface HistoryAttempt { number: number; status?: string; reason?: stri
 export interface HistoryLog { number?: number; logTotalLines?: number; logText?: string; logTail?: string; durationMs?: number | null; screenshots?: HistoryScreenshot[] }
 export interface HistoryPlugin { title?: string; id?: string; pluginName?: string; pluginDisplayName?: string; badges?: Array<{ label?: string; tone?: string; title?: string }>; fields?: Array<{ label?: string; value?: string }> }
 export interface HistoryRecord {
+  userId?: string;
+  taskReport?: import('./taskTypes').TaskReport;
   id?: string;
   scriptName?: string;
   queueName?: string;

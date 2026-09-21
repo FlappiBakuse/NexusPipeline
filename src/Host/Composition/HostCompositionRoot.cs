@@ -294,6 +294,7 @@ internal class HostCompositionRoot
             _settingsState,
             provider.GetRequiredService<ISettingsMutationGate>(),
             provider.GetRequiredService<ISettingsChangedEffects>()));
+        collection.AddSingleton<NexusPipeline.Modules.Users.Contracts.ITaskQueryProjection, TaskQueryProjection>();
         collection.AddSingleton<HttpRouteBindings>(provider => new HttpRouteBindings(
             provider.GetRequiredService<SettingsCommands>(),
             provider.GetRequiredService<ScriptCommands>(),
@@ -323,7 +324,8 @@ internal class HostCompositionRoot
             provider.GetRequiredService<UserAssetService>(),
             provider.GetRequiredService<OutboundHttpClientProvider>(),
             provider.GetRequiredService<ScriptIconService>(),
-            provider.GetRequiredService<ScriptFileBrowser>()));
+            provider.GetRequiredService<ScriptFileBrowser>(),
+            provider.GetRequiredService<NexusPipeline.Modules.Users.Contracts.ITaskQueryProjection>()));
         collection.AddSingleton<ExecutionExplainService>();
         collection.AddSingleton<DiagnosticsService>();
         _services = collection.BuildServiceProvider(new ServiceProviderOptions

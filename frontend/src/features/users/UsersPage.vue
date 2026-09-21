@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import { isAbortError } from "../../platform/api";
+import { api, isAbortError } from "../../platform/api";
+import { openEventStream, type EventStreamHandle } from "../../platform/events";
+import type { TaskUserSummary } from "../history/utils/taskTypes";
 import { renderPluginSlot } from "@bridge/index";
 import { disposePluginSlot } from "@bridge/index";
 import { t } from "../../platform/i18n";
@@ -21,6 +23,7 @@ import { listUserBadges, listUsers, listScripts, getStatus, createUser as create
 import type { Badge, Plugin, Script, User, UserBadges } from "./utils/userTypes";
 
 const users = ref<User[]>([]);
+const taskSummaries = ref(new Map<string, TaskUserSummary>());
 const scripts = ref<Script[]>([]);
 const plugins = ref<Plugin[]>([]);
 const badgesByUser = ref(new Map<string, Badge[]>());
@@ -41,6 +44,28 @@ const userManager = ref<InstanceType<typeof UserManagementModal> | null>(null);
 let disposed = false;
 let countdownTimer: ReturnType<typeof setInterval> | null = null;
 let restoreAttempted = false;
+let taskStream: EventStreamHandle | null = null;
+let taskRefresh: ReturnType<typeof setTimeout> | null = null;
+let taskController: AbortController | null = null;
+let taskRefreshPending = false;
+async function refreshTaskSummaries() {
+  if (disposed) return;
+  if (taskController) { taskRefreshPending = true; return; }
+  taskRefreshPending = false;
+  const controller = new AbortController(); taskController = controller;
+  try {
+    const tasks = await api("GET", "/api/users/task-summaries", undefined, controller.signal) as TaskUserSummary[];
+    if (!disposed) taskSummaries.value = new Map(tasks.map(item => [item.userId, item]));
+  } catch (reason) {
+    if (!disposed && !isAbortError(reason)) taskSummaries.value = new Map();
+  } finally {
+    if (taskController === controller) taskController = null;
+    if (taskRefreshPending) scheduleTaskRefresh();
+  }
+}
+function scheduleTaskRefresh() {
+  if (!taskRefresh && !disposed) taskRefresh = setTimeout(() => { taskRefresh = null; void refreshTaskSummaries(); }, 150);
+}
 
 const sortedUsers = computed(() =>
   users.value.slice().sort((a, b) => (a.index ?? 0) - (b.index ?? 0)),
@@ -105,14 +130,16 @@ async function load() {
   loading.value = true;
   error.value = "";
   try {
-    const [userData, scriptData, status, badgeData] = (await Promise.all([
+    const [userData, scriptData, status, badgeData, tasks] = (await Promise.all([
       listUsers(),
       listScripts(),
       getStatus(),
       listUserBadges(),
-    ])) as [User[], Script[], { plugins?: Plugin[] }, UserBadges[]];
+      api("GET", "/api/users/task-summaries"),
+    ])) as [User[], Script[], { plugins?: Plugin[] }, UserBadges[], TaskUserSummary[]];
     if (disposed) return;
     users.value = Array.isArray(userData) ? userData : [];
+    taskSummaries.value = new Map((Array.isArray(tasks) ? tasks : []).map(item => [item.userId, item]));
     scripts.value = Array.isArray(scriptData) ? scriptData : [];
     plugins.value = Array.isArray(status?.plugins) ? status.plugins : [];
     badgesByUser.value = new Map(
@@ -289,10 +316,16 @@ onMounted(() => {
   setTopbarTitle(t("users.user_management"));
   countdownTimer = setInterval(refreshCountdowns, 1000);
   void load();
+  taskStream = openEventStream({
+    onEvent: event => { if (event.type === "task-report-changed" || event.type === "run.status") scheduleTaskRefresh(); },
+    onReady: refreshTaskSummaries,
+    onMissed: refreshTaskSummaries,
+  });
 });
 
 onBeforeUnmount(() => {
   disposed = true;
+  taskStream?.close(); taskController?.abort(); if (taskRefresh) clearTimeout(taskRefresh);
   if (countdownTimer) clearInterval(countdownTimer);
   countdownRefresh.dispose();
   const slots =
@@ -341,6 +374,7 @@ onBeforeUnmount(() => {
             v-for="user in sortedUsers"
             :key="user.id"
             :user="user"
+            :task-summary="taskSummaries.get(user.id)"
             :badges="badgesByUser.get(user.id) || []"
             :next-label="countdownByUser[user.id] || remainingLabel(user.nextRunAt || '')"
             :initials="initials(user.name)"

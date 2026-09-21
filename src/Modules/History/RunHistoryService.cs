@@ -36,7 +36,7 @@ internal sealed record HistorySummary(
     double? SuccessRate,
     IReadOnlyList<HistoryDailySummary> Daily);
 
-internal class RunHistoryService : IHistoryStore
+internal partial class RunHistoryService : IHistoryStore
 {
     private const int ScreenshotCapacity = 8;
     private static readonly string[] KnownStatuses = { "success", "failed", "partial", "cancelled", "skipped" };
@@ -72,6 +72,7 @@ internal class RunHistoryService : IHistoryStore
         {
             lock (Sync)
             {
+                EnsureTaskIndex();
                 string dateName = persisted.StartTime.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
                 string dayDir = Path.Combine(_historyDir, dateName);
                 string userDirName = SafeSegment(persisted.UserName, "未指定用户");
@@ -139,6 +140,9 @@ internal class RunHistoryService : IHistoryStore
                     JsonSerializer.Serialize(persisted, JsonOpts.Indented));
                 Directory.Move(temporaryDir, finalDir);
                 temporaryDir = null;
+                IndexTaskRecord(persisted);
+                SaveTaskIndex();
+                CompleteTaskCheckpoint(persisted.Id);
             }
             return new HistorySaveResult(persisted.Clone(), null);
         }
@@ -521,23 +525,10 @@ internal class RunHistoryService : IHistoryStore
     /// <summary>按 Id 查找历史记录；默认窗口与历史保留上限一致。</summary>
     public RunRecord? FindById(string id, int days = 0)
     {
-        if (days <= 0)
-        {
-            days = AppFixedLimits.HistoryRetentionDaysMax;
-        }
         lock (Sync)
         {
-            for (int offset = days - 1; offset >= 0; offset--)
-            {
-                DateTime date = DateTime.Today.AddDays(-offset);
-                foreach (RunRecord record in ReadDayRecords(date))
-                {
-                    if (record.Id == id)
-                    {
-                        return record;
-                    }
-                }
-            }
+            EnsureTaskIndex();
+            if (_recordIndex!.TryGetValue(id, out var record) && RecordExists(record)) return record.Clone();
         }
         return null;
     }
@@ -580,6 +571,7 @@ internal class RunHistoryService : IHistoryStore
 
         lock (Sync)
         {
+            EnsureTaskIndex();
             if (Directory.Exists(_historyDir))
             {
                 foreach (string directory in Directory.GetDirectories(_historyDir))

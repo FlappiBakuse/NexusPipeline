@@ -23,8 +23,20 @@ internal static class ApiUsersHandler
         UserCommands userCommands,
         ConfigEditCommands configEditCommands,
         UserQueries userQueries,
-        UserAssetService userAssets)
+        UserAssetService userAssets,
+        ITaskQueryProjection taskQueries)
     {
+        if (method == "GET" && seg.Length == 2 && seg[1] == "task-summaries")
+        {
+            await HttpHelper.WriteJsonAsync(context, taskQueries.Summaries()).ConfigureAwait(false);
+            return;
+        }
+        if (method == "GET" && seg.Length == 5 && seg[2] == "bindings" && seg[4] == "task-plan")
+        {
+            await HttpHelper.WriteJsonAsync(context, await taskQueries.PreviewAsync(
+                Uri.UnescapeDataString(seg[1]), Uri.UnescapeDataString(seg[3]), CancellationToken.None).ConfigureAwait(false)).ConfigureAwait(false);
+            return;
+        }
         if (method == "GET" && seg.Length == 1)
         {
             await WriteUsersAsync(context, userQueries, userAssets).ConfigureAwait(false);

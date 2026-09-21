@@ -196,7 +196,8 @@ internal sealed class ExecutionDispatcher : IExecutionService, IFrozenQueueExecu
                     RealtimeEventProjection.RunStatus(snapshot, active: true));
                 PublishHostStatus();
             },
-            entry => _realtime.PublishLog(exec.Id, entry));
+            entry => _realtime.PublishLog(exec.Id, entry),
+            change => _realtime.Publish(RealtimeEventNames.TaskReportChanged, change));
 
         _realtime.Publish(
             RealtimeEventNames.RunStatus,

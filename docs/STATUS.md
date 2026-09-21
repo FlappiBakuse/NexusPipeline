@@ -14,6 +14,8 @@
 
 ## 后续功能：插件生态扩展
 
+- [ ] 专项插件 discover/judge/retry 改为共享源码、按阶段生成固定入口，减少重复载荷；原因、范围与验收条件记录在 NexusPipeline-Plugins 的 `docs/TASK_ADAPTERS.md`。
+
 - [ ] 为更多官方 managed-code 插件补充 mock HTTP 与事件回归测试。
 - [ ] 继续完善插件设置贡献的字段校验、错误呈现和目录元数据检查。
 - [ ] 持续验证用户级插件数据清理、密钥保护和升级后的当前数据访问。

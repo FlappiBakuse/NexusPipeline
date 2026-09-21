@@ -123,3 +123,5 @@ Web 默认端口被占用时会顺延到可用端口；实际端口可在状态�
 ## License
 
 [MIT](LICENSE) © 2026 FlappiBakuse
+
+专项任务支持只读任务预览、日志证据、受控选择重试和历史报告，详见[专项任务协议](docs/reference/plugin-api/task-protocol.md)。

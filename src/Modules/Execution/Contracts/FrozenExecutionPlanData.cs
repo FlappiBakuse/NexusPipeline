@@ -1,4 +1,5 @@
 using System.Text.Json;
+using NexusPipeline.Modules.Plugins.Contracts;
 using NexusPipeline.Modules.Queues;
 using NexusPipeline.Modules.Scripts;
 using NexusPipeline.Modules.Scripts.Contracts;
@@ -33,6 +34,8 @@ internal sealed class FrozenQueueTaskData
 
 internal sealed class FrozenResolvedScriptSpecData
 {
+    public TaskProtocolDescriptor? TaskProtocol { get; set; }
+
     public string PluginVersion { get; set; } = "";
 
     public string ProfileHash { get; set; } = "";
@@ -53,6 +56,7 @@ internal sealed class FrozenResolvedScriptSpecData
     {
         return new FrozenResolvedScriptSpecData
         {
+            TaskProtocol = spec.TaskProtocol is {} protocol ? protocol with { ReadResources = protocol.ReadResources.ToArray() } : null,
             PluginVersion = spec.PluginVersion,
             ProfileHash = spec.ProfileHash,
             Error = spec.Error,
@@ -85,6 +89,7 @@ internal sealed class FrozenResolvedScriptSpecData
             ProfileHash,
             Error)
         {
+            TaskProtocol = TaskProtocol is {} protocol ? protocol with { ReadResources = protocol.ReadResources.ToArray() } : null,
             ExtraConfigPaths = ExtraConfigPaths,
             ConfigInputCandidates = ConfigInputCandidates,
             ConfigInputName = ConfigInputName,

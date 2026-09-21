@@ -49,6 +49,9 @@ public class RunHistoryScreenshot
 
 public class RunRecord
 {
+    /// <summary>Versioned immutable task facts; absent for legacy runs. Contains no raw configuration.</summary>
+    public System.Text.Json.Nodes.JsonObject? TaskReport { get; set; }
+
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
 
     public string ScriptInstanceId { get; set; } = "";

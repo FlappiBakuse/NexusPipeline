@@ -32,6 +32,7 @@ internal static class SpecializedPluginContract
     public static bool TryValidateManifest(JsonObject root, out string? error)
     {
         error = null;
+        if (!TaskProtocolManifest.TryValidate(root, out error)) return false;
         string artifact = root["artifactName"]?.ToString()?.Trim() ?? "<unknown>";
         string kind = root["kind"]?.ToString()?.Trim().ToLowerInvariant() ?? "";
         if (kind != "data-specialized")
@@ -193,6 +194,13 @@ internal static class SpecializedPluginContract
                 return closure;
             }
             queue.Enqueue(value);
+        }
+
+        if (root["taskProtocol"] is JsonObject protocol)
+        {
+            _ = TaskProtocolManifest.Freeze(root, pluginDir);
+            queue.Enqueue(protocol["discoverScript"]!.GetValue<string>());
+            queue.Enqueue(protocol["retryScript"]!.GetValue<string>());
         }
 
         while (queue.Count > 0)

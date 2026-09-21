@@ -12,6 +12,17 @@ internal sealed class ResultCollector
     private bool _truncated;
     private int _attemptStart;
     private int _fullLogUtf8Bytes;
+    private readonly object _sync = new();
+    internal int Length { get { lock (_sync) return _fullLog.Length; } }
+    internal (string Text, bool Truncated) SnapshotAttemptTail(int maximum)
+    {
+        lock (_sync)
+        {
+            int count = Math.Max(0, _fullLog.Length - _attemptStart);
+            int length = Math.Min(count, maximum);
+            return (_fullLog.ToString(_attemptStart + count - length, length), count > maximum || _truncated);
+        }
+    }
 
     public StringBuilder FullLog => _fullLog;
 
@@ -30,6 +41,10 @@ internal sealed class ResultCollector
     }
 
     public void Append(string line)
+    {
+        lock (_sync) AppendLocked(line);
+    }
+    private void AppendLocked(string line)
     {
         if (_truncated)
         {
@@ -55,6 +70,6 @@ internal sealed class ResultCollector
 
     public void CompleteAttempt()
     {
-        _attemptSegments.Add(_fullLog.ToString(_attemptStart, _fullLog.Length - _attemptStart));
+        lock (_sync) _attemptSegments.Add(_fullLog.ToString(_attemptStart, _fullLog.Length - _attemptStart));
     }
 }

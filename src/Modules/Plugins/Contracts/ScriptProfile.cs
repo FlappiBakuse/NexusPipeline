@@ -5,6 +5,8 @@ namespace NexusPipeline.Modules.Plugins.Contracts;
 /// <summary>专项插件按当前插件文件推导出的运行时配置快照。</summary>
 internal sealed class ScriptProfile
 {
+    public TaskProtocolDescriptor? TaskProtocol { get; set; }
+
     public string MainExe { get; set; } = "";
 
     public string Args { get; set; } = "";

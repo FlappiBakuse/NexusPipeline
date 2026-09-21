@@ -161,6 +161,8 @@ internal sealed class PluginManifest
                 }
             }
 
+            if (!TaskProtocolManifest.TryValidate(root, out error)) return false;
+
             var result = new PluginManifest
             {
                 SchemaVersion = schemaVersion,

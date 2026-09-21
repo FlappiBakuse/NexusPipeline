@@ -206,6 +206,13 @@ internal sealed class ExecutionRunner
                         runUser,
                         runUser.Spec ?? resolvedSpec,
                         _http);
+                    session.TaskReportChanged = exec.UpdateTaskReport;
+                    if (_history is ITaskHistoryCheckpoints checkpoints)
+                        session.TaskCheckpointChanged = checkpoint =>
+                        {
+                            try { checkpoints.SaveTaskCheckpoint(checkpoint); }
+                            catch (Exception ex) { exec.SetPersistenceWarning("Task checkpoint: " + ex.GetType().Name); }
+                        };
 
                     try
                     {
@@ -380,6 +387,11 @@ internal sealed class ExecutionRunner
         HistorySaveResult result;
         try
         {
+            if (_history is ITaskHistoryCheckpoints checkpoints)
+            {
+                try { checkpoints.SaveTaskCheckpoint(record); }
+                catch (Exception ex) { exec.SetPersistenceWarning("Task checkpoint: " + ex.GetType().Name); }
+            }
             result = _history.Save(record, attemptLogs, screenshots);
         }
         catch (Exception ex)

@@ -42,6 +42,33 @@ internal sealed class RunningExecution
     private Action<RunningExecutionStatusSnapshot>? _statusObserver;
 
     private Action<ExecutionLogEntry>? _logObserver;
+    private Action<object>? _taskObserver;
+    private readonly Dictionary<string, System.Text.Json.Nodes.JsonObject> _taskReports = new(StringComparer.Ordinal);
+    private long _taskRevision;
+
+    internal void UpdateTaskReport(System.Text.Json.Nodes.JsonObject report)
+    {
+        object change;
+        Action<object>? observer;
+        lock (_stateSync)
+        {
+            string recordId = report["runId"]!.GetValue<string>();
+            _taskReports[recordId] = (System.Text.Json.Nodes.JsonObject)report.DeepClone();
+            change = new { runId = Id, recordId, revision = ++_taskRevision };
+            observer = _taskObserver;
+        }
+        try { observer?.Invoke(change); }
+        catch (Exception ex) { Logger.Warn($"[实时事件] 任务观察器失败（{Id}）：{ex.Message}"); }
+    }
+
+    internal object SnapshotTasks()
+    {
+        lock (_stateSync) return new { runId = Id, revision = _taskRevision, reports = _taskReports.Values.Select(r => r.DeepClone()).ToArray() };
+    }
+    internal IReadOnlyList<System.Text.Json.Nodes.JsonObject> SnapshotTaskReports()
+    {
+        lock (_stateSync) return _taskReports.Values.Select(r => (System.Text.Json.Nodes.JsonObject)r.DeepClone()).ToArray();
+    }
 
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
 
@@ -406,7 +433,8 @@ internal sealed class RunningExecution
 
     internal void AttachRealtimeObservers(
         Action<RunningExecutionStatusSnapshot> statusObserver,
-        Action<ExecutionLogEntry> logObserver)
+        Action<ExecutionLogEntry> logObserver,
+        Action<object>? taskObserver = null)
     {
         ArgumentNullException.ThrowIfNull(statusObserver);
         ArgumentNullException.ThrowIfNull(logObserver);
@@ -414,6 +442,7 @@ internal sealed class RunningExecution
         {
             _statusObserver = statusObserver;
             _logObserver = logObserver;
+            _taskObserver = taskObserver;
         }
     }
 

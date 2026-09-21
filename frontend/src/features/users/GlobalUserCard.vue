@@ -1,16 +1,19 @@
 <script setup lang="ts">
+import { t } from "../../platform/i18n";
 import NxpBadge from "../../ui/primitives/NxpBadge.vue";
 import NxpButton from "../../ui/primitives/NxpButton.vue";
 import NxpCard from "../../ui/primitives/NxpCard.vue";
 import NxpIcon from "../../ui/primitives/NxpIcon.vue";
 import NxpActionGroup from "../../ui/composites/NxpActionGroup.vue";
 import NxpDragHandle from "../../ui/composites/NxpDragHandle.vue";
+import type { TaskUserSummary } from "../history/utils/taskTypes";
 
 type Translator = (
   key: string,
   args?: Record<string, unknown>,
   fallback?: string,
 ) => string;
+function openRecord(id: string) { window.location.hash = `/history?recordId=${encodeURIComponent(id)}`; }
 
 interface GlobalUserCardUser {
   id: string;
@@ -35,6 +38,7 @@ defineProps<{
   nextLabel: string;
   initials: string;
   translate: Translator;
+  taskSummary?: TaskUserSummary;
 }>();
 
 const emit = defineEmits<{
@@ -81,6 +85,10 @@ const emit = defineEmits<{
         <strong class="global-user-name">{{ user.name }}</strong>
       </div>
       <div class="meta-line global-user-meta">
+        <NxpBadge role="button" tabindex="0" class="task-summary-action" @click.stop="taskSummary?.recordId ? openRecord(taskSummary.recordId) : emit('manage', user)" @keydown.enter.stop.prevent="taskSummary?.recordId ? openRecord(taskSummary.recordId) : emit('manage', user)" @keydown.space.stop.prevent="taskSummary?.recordId ? openRecord(taskSummary.recordId) : emit('manage', user)" :tone="taskSummary?.tone === 'ok' || taskSummary?.tone === 'warn' || taskSummary?.tone === 'bad' ? taskSummary.tone : 'muted'">
+            {{ translate('tasks.title') }} · {{ t(`tasks.summary.${taskSummary?.reason === 'no_bindings' ? 'no_bindings' : taskSummary?.tone === 'muted' ? taskSummary.reason : taskSummary?.tone || 'not_run'}`) }}
+        </NxpBadge>
+        <NxpBadge v-if="taskSummary?.activeCount" tone="blue">{{ translate('common.running') }} · {{ taskSummary.activeCount }}</NxpBadge>
         <NxpBadge tone="muted">{{
           translate("users.binding.scripts_count", {
             count: user.bindingCount ?? (user.bindings || []).length,
@@ -136,3 +144,9 @@ const emit = defineEmits<{
     </NxpActionGroup>
   </NxpCard>
 </template>
+
+<style scoped>
+.task-summary-action { position: relative; cursor: pointer; white-space: normal; }
+.task-summary-action::after { content: ""; position: absolute; inset: -8px 0; }
+.task-summary-action:hover { filter: brightness(1.12); }
+</style>

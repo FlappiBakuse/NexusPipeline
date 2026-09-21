@@ -45,3 +45,9 @@ frontend/src/app/App.vue → router / stores / features / ui
 3. Vue 页面使用明确的 props/emits、`data-testid` 业务定位和 `onBeforeUnmount` 清理轮询/订阅；路由使用 `router.ts` 的 hash URL 路由表。
 4. 已迁移页面的业务逻辑必须落在对应 `frontend/src/features/<domain>/`，通过组件事件、service 和 page-local state 管理交互；不得把新的业务逻辑扩展到旧 `data-action` 注册表。
 5. 宿主 `app/**`、`features/**`、`ui/**` 与 `platform/**` 不引用 `plugin-bridge/` 内部实现，也不引用 `wwwroot/`；插件能力经 `@bridge/index` facade 与 host-adapter 边界提供，不得恢复 HTML 字符串页面架构。
+
+专项任务预览、历史与实时进度复用 `TaskReportPanel`，仅展示冻结计划中已启用的任务。用户绑定的只读计划位于编辑配置下方，按需展开读取；调度中心使用横向步骤条变体。宿主状态、识别范围、重试风险和原因文案使用宿主词典，内置任务名称有中英文映射，用户自定义及上游动态名称保留原文。用户徽章区分未运行、旧记录、记录删除与已有运行但证据不完整；历史冻结结果不会因插件升级自动改写。
+
+只读任务计划和历史报告通过 `TaskPlanItem` 按父子关系嵌套已启用任务，父任务不展示识别覆盖、重试风险和任务类型。计划与任务卡片复用 `NxpCollapsibleCard` 的箭头和动画，以现有表面变量按深、浅层级交替；说明集中在专项任务标题上方的 `NxpDismissibleNotice`，重新读取计划后恢复提示，刷新入口置于卡片右下角。两处任务卡片使用紧凑高度，历史报告的尝试结果与日志证据直接展示在对应任务卡片内；任务深链接会展开祖先卡片并定位到对应尝试。
+
+调度中心按当前脚本实例 ID 和运行状态筛选专项任务报告，只展示当前实例的横向步骤条。步骤卡片等宽等高，仅保留序号、任务名称和完成状态，无父任务副标题或展开详情；详细证据保留在历史记录。

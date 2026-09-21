@@ -61,6 +61,8 @@ internal sealed class ExecutionCoordinator : RunSession
     private readonly UserHookRunner _userHookRunner;
 
     private volatile bool _budgetExpired;
+    internal Action<System.Text.Json.Nodes.JsonObject>? TaskReportChanged { get; set; }
+    internal Action<RunRecord>? TaskCheckpointChanged { get; set; }
 
     private CancellationToken OperationToken => _operationCts?.Token ?? _token;
 
@@ -188,6 +190,13 @@ internal sealed class ExecutionCoordinator : RunSession
             record.UserName = user.UserName;
         }
         _activeUser = user;
+        if (_resolvedSpec?.TaskProtocol is not null)
+            TaskProtocolRun = new TaskProtocolRun(_resolvedSpec, record.Id, record.UserId) { Changed = report =>
+            {
+                var checkpoint = record.Clone(); checkpoint.TaskReport = report;
+                TaskCheckpointChanged?.Invoke(checkpoint);
+                TaskReportChanged?.Invoke(report);
+            } };
 
         _budgetExpiryCts = new CancellationTokenSource();
         _operationCts = CancellationTokenSource.CreateLinkedTokenSource(_token, _budgetExpiryCts.Token);
@@ -216,8 +225,9 @@ internal sealed class ExecutionCoordinator : RunSession
                 _script.Id,
                 resolvedUser?.UserKey,
                 _script.ConfigPath,
-                _script.HasJudgeScript(),
+                _script.HasJudgeScript() && TaskProtocolRun is null,
                 _resolvedSpec);
+            if (TaskProtocolRun is not null) _configRun.RestoreTaskSelections = TaskProtocolRun.Restore;
             _configRun.PrepareScriptArea();
             if (user is not null && !string.IsNullOrWhiteSpace(_script.ConfigPath))
             {
@@ -236,12 +246,12 @@ internal sealed class ExecutionCoordinator : RunSession
             for (int attemptNo = 1; attemptNo <= maxAttempts; attemptNo++)
             {
                 _attemptChanged?.Invoke(attemptNo, maxAttempts);
-                if (attemptNo > 1 && _configRun.IsPrepared)
+                if (attemptNo > 1 && _configRun.IsPrepared && TaskProtocolRun is null)
                 {
                     string? retryError = _configRun.PrepareForRetry();
                     if (retryError is not null)
                     {
-                        _attemptLogStart = _scriptFullLog.Length;
+                        _attemptLogStart = Results.Length;
                         var retryAttempt = new RunAttempt
                         {
                             Number = attemptNo,
@@ -271,7 +281,7 @@ internal sealed class ExecutionCoordinator : RunSession
                 record.AttemptDetails.Add(attempt);
                 // 段起点设置在「开始」头之前——此前段含「结束」头不含「开始」头（首尾不对称），
                 // 判断脚本输入与按尝试分批落盘的日志段现在从「开始」头起算。
-                _attemptLogStart = _scriptFullLog.Length;
+                _attemptLogStart = Results.Length;
                 AppendScriptLog($"===== 第 {attemptNo}/{maxAttempts} 次尝试 开始（{attempt.StartTime:HH:mm:ss}） =====");
                 _screenshotCapture.BeginAttempt(attemptNo);
 
@@ -304,11 +314,11 @@ internal sealed class ExecutionCoordinator : RunSession
 
                 if (mainExecuted && result.Status != "cancelled"
                     && user is not null && !string.IsNullOrWhiteSpace(user.Binding.PostRunScript)
-                    && AttemptLifecycle.ShouldRunPostRun(
+                    && (TaskProtocolRun is not null ? !user.Binding.PostRunOnFinalOnly : AttemptLifecycle.ShouldRunPostRun(
                         user.Binding.PostRunOnFinalOnly,
                         attemptNo,
                         retryPolicy,
-                        result))
+                        result)))
                 {
                     RunAttemptResult? postResult = await RunUserScriptCoreAsync(user!.Binding.PostRunScript, "任务后", attempt, OperationToken).ConfigureAwait(false);
                     if (postResult is not null)
@@ -317,6 +327,34 @@ internal sealed class ExecutionCoordinator : RunSession
                     }
                 }
 
+                bool taskRetry = false;
+                if (TaskProtocolRun is not null)
+                {
+                    result = TaskProtocolRun.Finish(result, attemptNo);
+                    if (!result.IsFatal && result.Status is not ("success" or "skipped" or "cancelled"))
+                    {
+                        try
+                        {
+                            taskRetry = await TaskProtocolRun.PrepareRetryAsync(maxAttempts, _token.IsCancellationRequested,
+                                _budgetExpired || _budget.IsExpired, OperationToken).ConfigureAwait(false);
+                        }
+                        catch (Exception ex)
+                        {
+                            Logger.Warn($"[专项任务] 安全重试已停止：{ex.GetType().Name}");
+                            taskRetry = false;
+                        }
+                    }
+                    if (!taskRetry && mainExecuted && result.Status != "cancelled"
+                        && user?.Binding.PostRunOnFinalOnly == true && !string.IsNullOrWhiteSpace(user.Binding.PostRunScript))
+                    {
+                        var postResult = await RunUserScriptCoreAsync(user.Binding.PostRunScript, "任务后", attempt, OperationToken).ConfigureAwait(false);
+                        if (postResult is not null)
+                        {
+                            result = RunAttemptResult.MergePostRun(result, postResult);
+                            TaskProtocolRun.SetFinalLifecycleFailure(result.Status == "cancelled");
+                        }
+                    }
+                }
                 attempt.EndTime = DateTime.Now;
                 attempt.Status = result.Status;
                 attempt.Reason = result.Reason;
@@ -334,6 +372,15 @@ internal sealed class ExecutionCoordinator : RunSession
                 Logger.Info($"第 {attemptNo} 次尝试结束：{result.Status}（{result.Reason}）");
                 Results.CompleteAttempt();
 
+                if (TaskProtocolRun is not null)
+                {
+                    record.Status = result.Status;
+                    record.EndTime = DateTime.Now;
+                    record.ResultDetail = result.Reason;
+                    record.TaskReport = TaskProtocolRun.Snapshot();
+                    if (taskRetry) continue;
+                    break;
+                }
                 if (result.Status is "success" or "partial")
                 {
                     record.Status = result.Status;
@@ -385,10 +432,21 @@ internal sealed class ExecutionCoordinator : RunSession
                 string? restoreError = _configRun.FinalizeRun(_script.AutoUpdateConfig);
                 if (restoreError is not null)
                 {
+                    if (TaskProtocolRun is not null)
+                    {
+                        record.Status = "failed"; record.ResultCode = "tasks.recovery_conflict";
+                        TaskProtocolRun.SetFinalLifecycleFailure(false);
+                    }
                     string msg = $"（警告：配置还原失败，现场已保留，详见日志）";
                     record.ResultDetail += msg;
                     Logger.Error($"[错误] 脚本「{_script.Name}」用户「{user?.UserName ?? _userName ?? ""}」配置还原失败：{restoreError}");
                 }
+            }
+            if (TaskProtocolRun is not null)
+            {
+                if (record.Status is "failed" or "cancelled" && TaskProtocolRun.Snapshot()?["lifecycleOutcome"]?.GetValue<string>() == "running")
+                    TaskProtocolRun.SetFinalLifecycleFailure(record.Status == "cancelled");
+                record.TaskReport = TaskProtocolRun.Snapshot();
             }
         }
     }
@@ -409,6 +467,16 @@ internal sealed class ExecutionCoordinator : RunSession
         if (budgetError is not null)
         {
             return budgetError;
+        }
+        if (TaskProtocolRun is not null)
+        {
+            try { await TaskProtocolRun.BeginAsync(attempt.Number, OperationToken).ConfigureAwait(false); }
+            catch (OperationCanceledException) { return RunAttemptResult.Cancelled("任务发现已取消"); }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[专项任务] 配置发现失败：{ex.GetType().Name}");
+                return RunAttemptResult.Fatal("无法建立可信任务计划", "tasks.discovery_failed");
+            }
         }
         // Attempt 起点日志环境：一次性记录日志格式下所有候选的 path/FileId/length；后续通配符轮换按这张快照决定读取起点。
         var logEnv = new AttemptLogEnvironment(_script, modeText);
@@ -508,6 +576,11 @@ internal sealed class ExecutionCoordinator : RunSession
             if (ShouldPublishConsoleData(_script.LogPath))
             {
                 _logLine?.Invoke(data, LogLevelUtil.ParseObserved(data, level));
+                if (TaskProtocolRun is not null)
+                {
+                    TaskProtocolRun.Append("stdout", data + "\n");
+                    AppendScriptLog(data);
+                }
             }
         }
 
@@ -547,11 +620,7 @@ internal sealed class ExecutionCoordinator : RunSession
                     Abs = file.Abs,
                 })
                 .ToList();
-            int logLength = Math.Max(0, _scriptFullLog.Length - _attemptLogStart);
-            bool logTruncated = logLength > JudgeScriptRunner.MaxJudgeLogChars;
-            string logText = logTruncated
-                ? _scriptFullLog.ToString(_attemptLogStart + logLength - JudgeScriptRunner.MaxJudgeLogChars, JudgeScriptRunner.MaxJudgeLogChars)
-                : _scriptFullLog.ToString(_attemptLogStart, logLength);
+            var (logText, logTruncated) = Results.SnapshotAttemptTail(JudgeScriptRunner.MaxJudgeLogChars);
             ScriptInstance scriptSnapshot = _script.Clone();
             ResolvedScriptUser? userSnapshot = _activeUser is null
                 ? null
@@ -598,7 +667,8 @@ internal sealed class ExecutionCoordinator : RunSession
                 OperationToken.ThrowIfCancellationRequested();
             },
              (attemptNumber, trigger, captureToken) => _screenshotStore.CaptureAsync(attemptNumber, trigger, captureToken),
-             _http);
+             _http,
+             TaskProtocolRun is null ? null : TaskProtocolRun.ObserveAsync);
         var terminator = new AttemptTerminator(workers, judge, status => _statusChanged?.Invoke(status));
         await using var workersScope = workers;
 

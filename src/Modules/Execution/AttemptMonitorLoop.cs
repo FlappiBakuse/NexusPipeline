@@ -87,7 +87,7 @@ internal sealed class AttemptMonitorLoop
                 // 自动更新配置首次检测——仅第 1 次尝试、运行开始 15 秒（缩放）后同步一次
                 // config → store（捕获脚本启动后自行更新的任务配置；重试轮不检测）。
                 // 并入主循环避免后台任务与收尾还原的竞态；关/开模式共有。
-                if (!session.FirstSyncDone && attempt.Number == 1 && session.ConfigRun is not null && session.ConfigRun.IsPrepared
+                if (session.TaskProtocolRun is null && !session.FirstSyncDone && attempt.Number == 1 && session.ConfigRun is not null && session.ConfigRun.IsPrepared
                     && RunSession.ShouldRunFirstSync(session.Budget!.ElapsedSeconds, TestHooks.ScaledSeconds(15)))
                 {
                     session.FirstSyncDone = true;
@@ -132,6 +132,13 @@ internal sealed class AttemptMonitorLoop
                 state.Monitor = logEnv.RefreshMonitor(state.Monitor);
 
                 string newContent = attemptMonitor.ReadLog(state.Monitor);
+                if (session.TaskProtocolRun is not null && newContent.Length > 0)
+                {
+                    bool changed = state.LastTaskMonitor is not null && (!ReferenceEquals(state.LastTaskMonitor, state.Monitor) || state.LastTaskEpoch != state.Monitor?.Epoch);
+                    session.TaskProtocolRun.Append("file", newContent, changed);
+                    state.LastTaskMonitor = state.Monitor;
+                    state.LastTaskEpoch = state.Monitor?.Epoch ?? 0;
+                }
                 if (newContent.Length > 0)
                 {
                     state.FirstEntryAt ??= DateTime.Now;
@@ -183,11 +190,15 @@ internal sealed class AttemptMonitorLoop
                 // 批次触发（有新内容）后的同轮最终触发**必须保留**（进程退出是新事实，判断脚本可能
                 // 基于自身状态文件在第二次执行给出最终判定，如计数器——06 spec「进程退出时最终触发」用例）。
                 bool skipFinalJudge = false;
-                if (scriptMode && newContent.Length > 0 && state.Result is null && !judge.IsMarker)
+                if (session.TaskProtocolRun is not null && state.Result is null && !terminator.TerminalObservation && !scriptExited)
                 {
                     workers.QueueJudge(final: false);
                 }
-                else if (scriptMode && newContent.Length == 0 && state.Result is null
+                else if (session.TaskProtocolRun is null && scriptMode && newContent.Length > 0 && state.Result is null && !judge.IsMarker)
+                {
+                    workers.QueueJudge(final: false);
+                }
+                else if (session.TaskProtocolRun is null && scriptMode && newContent.Length == 0 && state.Result is null
                     && state.FirstEntryAt is not null && !judge.IsMarker && (DateTime.Now - judge.LastJudgeAt).TotalSeconds >= TestHooks.ScaledSeconds(30))
                 {
                     state.StallStatusShown = true;
@@ -205,7 +216,8 @@ internal sealed class AttemptMonitorLoop
 
                 if (scriptExited)
                 {
-                    state.Result = terminator.OnScriptExited(state.Monitor is null, !string.IsNullOrWhiteSpace(session.Script.LogPath), skipFinalJudge);
+                    session.TaskProtocolRun?.SetTerminationReason("process_exited");
+                    state.Result = terminator.OnScriptExited(state.Monitor is null, !string.IsNullOrWhiteSpace(session.Script.LogPath), skipFinalJudge, session.TaskProtocolRun is not null);
                     if (state.Result is not null)
                     {
                         break;
@@ -228,7 +240,14 @@ internal sealed class AttemptMonitorLoop
                         session.Script.LogStallTimeoutMinutes);
                     if (stall.Hit)
                     {
-                        state.Result = terminator.OnStall(stall, skipFinalJudge);
+                        if (session.TaskProtocolRun is not null)
+                        {
+                            session.TaskProtocolRun.SetTerminationReason("stall");
+                            state.Result = killScriptAndConfirm()
+                                ? terminator.OnScriptExited(state.Monitor is null, true, false, true)
+                                : RunAttemptResult.Fatal("脚本进程清理未确认，已阻断配置替换与重试");
+                        }
+                        else state.Result = terminator.OnStall(stall, skipFinalJudge);
                         if (state.Result is not null)
                         {
                             break;
@@ -239,6 +258,12 @@ internal sealed class AttemptMonitorLoop
                 if (judge.IsMarker
                     && (DateTime.Now - judge.MarkerSeenAt!.Value).TotalSeconds >= TestHooks.ScaledSeconds(ExitGraceSecondsAfterMarker))
                 {
+                    if (session.TaskProtocolRun is not null && killScriptAndConfirm())
+                    {
+                        session.TaskProtocolRun.SetTerminationReason("marker_timeout");
+                        state.Result = terminator.OnScriptExited(state.Monitor is null, true, false, true);
+                        continue;
+                    }
                     state.Result = killScriptAndConfirm()
                         ? terminator.CreateMarkerResult("完成标志已出现，等待退出超时后已终止脚本，判定成功")
                         : RunAttemptResult.Fatal("脚本进程清理未确认，已阻断配置替换与重试");
@@ -279,5 +304,7 @@ internal sealed class AttemptMonitorLoop
         public bool KeywordScreenshotCaptured { get; set; }
         public DateTime? FirstEntryAt { get; set; }
         public RunAttemptResult? Result { get; set; }
+        public LogMonitor? LastTaskMonitor { get; set; }
+        public int LastTaskEpoch { get; set; }
     }
 }

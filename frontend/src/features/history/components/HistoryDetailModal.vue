@@ -5,6 +5,8 @@ import { t } from "../../../platform/i18n";
 import { renderPluginSlot } from "@bridge/index";
 import { disposePluginSlot } from "@bridge/index";
 import NxpBadge from "../../../ui/primitives/NxpBadge.vue";
+import { taskOutcomeLabel } from "../utils/taskLabels";
+import TaskReportPanel from "./TaskReportPanel.vue";
 import NxpButton from "../../../ui/primitives/NxpButton.vue";
 import NxpEmptyState from "../../../ui/primitives/NxpEmptyState.vue";
 import NxpIcon from "../../../ui/primitives/NxpIcon.vue";
@@ -76,17 +78,19 @@ async function openImage(attempt: HistoryAttempt, screenshot: HistoryScreenshot,
 async function loadFullLog(attemptNumber: number) {
   const record = detailData.value?.record;
   if (!record?.id) return;
+  const requestId = detailRequestId;
   try {
     const data = (await api(
       "GET",
       `/api/history/detail?id=${encodeURIComponent(record.id)}&full=true&attempt=${encodeURIComponent(attemptNumber)}`,
     )) as HistoryDetailPayload;
+    if (requestId !== detailRequestId || detailData.value?.record?.id !== record.id) return;
     const full = data.attemptLogs?.find((item) => item.number === attemptNumber);
     if (!full) return;
     const current = detailData.value?.attemptLogs || [];
     detailData.value = { ...detailData.value, attemptLogs: current.map((item) => (item.number === attemptNumber ? { ...item, ...full } : item)) };
   } catch (reason) {
-    if (!isAbortError(reason)) detailError.value = reason instanceof Error ? reason.message : String(reason);
+    if (requestId === detailRequestId && !isAbortError(reason)) detailError.value = reason instanceof Error ? reason.message : String(reason);
   }
 }
 function attemptLog(attemptNumber: number): HistoryLog | undefined {
@@ -180,8 +184,9 @@ onBeforeUnmount(() => {
           <div class="history-detail-meta-item"><span class="k">{{ t("history.start_time") }}</span><span>{{ formatDateTime(detailData.record.startTime) }}</span></div>
           <div class="history-detail-meta-item"><span class="k">{{ t("history.end_time") }}</span><span>{{ formatDateTime(detailData.record.endTime) }}</span></div>
           <div class="history-detail-meta-item"><span class="k">{{ t("history.duration.label") }}</span><span>{{ formatDurationMs(detailData.record.durationMs) }}</span></div>
-          <div class="history-detail-meta-item history-detail-meta-wide"><span class="k">{{ t("history.result_description") }}</span><span>{{ detailData.record.resultDetail || "-" }}</span></div>
+          <div class="history-detail-meta-item history-detail-meta-wide"><span class="k">{{ t("history.result_description") }}</span><span>{{ detailData.record.taskReport ? taskOutcomeLabel(detailData.record.resultDetail) : detailData.record.resultDetail || "-" }}</span></div>
         </div>
+        <TaskReportPanel :report="detailData.record.taskReport" />
         <section v-if="detailData.record.pluginHistory?.length" class="plugin-history-section">
           <div class="section-heading"><h3>{{ t("history.detail.plugin_info") }}</h3><span class="muted">{{ t("history.screenshot.snapshot_saved") }}</span></div>
           <section v-for="item in detailData.record.pluginHistory" :key="item.id || item.pluginName || item.title" class="subsection plugin-history-detail">
@@ -194,7 +199,7 @@ onBeforeUnmount(() => {
         <div class="history-attempt-list">
           <section v-for="attempt in detailData.record.attemptDetails || []" :key="attempt.number" class="subsection history-attempt-detail">
             <div class="section-heading"><h3>{{ t("common.run.attempt", { attempt: attempt.number }) }}</h3><NxpBadge :tone="statusTone(attempt.status)">{{ statusLabel(attempt.status) }}</NxpBadge></div>
-            <div class="history-attempt-meta"><div><span class="k">{{ t("common.time") }}</span><span>{{ formatDateTime(attempt.startTime) }} - {{ formatDateTime(attempt.endTime) }}</span></div><div><span class="k">{{ t("history.duration.label") }}</span><span>{{ formatDurationMs(attempt.durationMs) }}</span></div><div><span class="k">{{ t("common.reason") }}</span><span>{{ attempt.reason || "-" }}</span></div></div>
+            <div class="history-attempt-meta"><div><span class="k">{{ t("common.time") }}</span><span>{{ formatDateTime(attempt.startTime) }} - {{ formatDateTime(attempt.endTime) }}</span></div><div><span class="k">{{ t("history.duration.label") }}</span><span>{{ formatDurationMs(attempt.durationMs) }}</span></div><div><span class="k">{{ t("common.reason") }}</span><span>{{ detailData.record.taskReport ? taskOutcomeLabel(attempt.reason) : attempt.reason || "-" }}</span></div></div>
             <div v-if="attemptLog(attempt.number)" class="history-log" data-history-log>
               <div class="qk-row">{{ attemptLogIsTail(attempt.number) ? t("history.log.lines_summary.tail", { label: t("history.log.attempt", { attempt: attempt.number }), count: attemptLog(attempt.number)?.logTotalLines || 0, lines: t("history.lines") }) : t("history.log.lines_summary", { label: t("history.log.attempt", { attempt: attempt.number }), count: attemptLog(attempt.number)?.logTotalLines || 0, lines: t("history.lines") }) }}</div>
               <div v-if="attemptLogIsTail(attempt.number)" class="history-log-actions"><span class="muted">{{ t("history.log.tail_only") }}</span><NxpButton class="ghost sm" type="button" @click.stop="loadFullLog(attempt.number)">{{ t("history.view_full_log") }}</NxpButton></div>

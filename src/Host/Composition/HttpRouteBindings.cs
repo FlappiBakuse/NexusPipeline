@@ -59,7 +59,8 @@ internal sealed class HttpRouteBindings : IHttpRouteBindings
         UserAssetService userAssets,
         OutboundHttpClientProvider outboundHttp,
         ScriptIconService scriptIcons,
-        ScriptFileBrowser scriptFileBrowser)
+        ScriptFileBrowser scriptFileBrowser,
+        NexusPipeline.Modules.Users.Contracts.ITaskQueryProjection taskQueries)
     {
         Routes = ApiRouteCatalog.Bind(typeof(WebServer).Assembly, Array.Empty<object>());
         SettingsCommands = settingsCommands;
@@ -91,6 +92,7 @@ internal sealed class HttpRouteBindings : IHttpRouteBindings
         OutboundHttp = outboundHttp;
         ScriptIcons = scriptIcons;
         ScriptFileBrowser = scriptFileBrowser;
+        TaskQueries = taskQueries;
     }
 
     public IReadOnlyDictionary<string, ApiRouteCatalog.BoundRoute> Routes { get; }
@@ -152,4 +154,5 @@ internal sealed class HttpRouteBindings : IHttpRouteBindings
     public ScriptIconService ScriptIcons { get; }
 
     public ScriptFileBrowser ScriptFileBrowser { get; }
+    public NexusPipeline.Modules.Users.Contracts.ITaskQueryProjection TaskQueries { get; }
 }

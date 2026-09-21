@@ -1649,7 +1649,10 @@ body[data-wallpaper="on"][data-theme="light"] {
 .script-grid .script-card {
   grid-template-columns: var(--nx-drag-handle-size) 36px minmax(0, 1fr) auto;
   column-gap: var(--space-2);
+  /* Compensate for the empty space inside the leading drag handle. */
+  padding-inline-start: calc(var(--space-5) - var(--space-2));
 }
+.script-grid .script-card > .nxp-entity-row-content { align-self: center; }
 .script-grid .global-user-card {
   grid-template-columns: var(--nx-drag-handle-size) 40px minmax(0, 1fr) auto;
   column-gap: var(--space-2);
@@ -1661,7 +1664,9 @@ body[data-wallpaper="on"][data-theme="light"] {
   .script-grid .script-card {
     grid-template-columns: var(--nx-drag-handle-touch-size) 36px minmax(0, 1fr);
     column-gap: var(--space-2);
+    padding-inline-start: calc(var(--space-4) - var(--space-2));
   }
+  .script-grid .script-card > .nxp-entity-row-content { grid-column: 3; grid-row: 1; }
   .script-grid .global-user-card {
     grid-template-columns: var(--nx-drag-handle-touch-size) 40px minmax(0, 1fr);
     column-gap: var(--space-2);

@@ -14,6 +14,13 @@ internal static class ApiRunsHandler
         string body,
         ExecutionDispatcher dispatchCenter)
     {
+        if (method == "GET" && seg.Length == 3 && seg[2] == "tasks")
+        {
+            var execution = dispatchCenter.FindAny(Uri.UnescapeDataString(seg[1]));
+            if (execution is null) await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);
+            else await HttpHelper.WriteJsonAsync(context, execution.SnapshotTasks()).ConfigureAwait(false);
+            return;
+        }
         if (method != "GET" || seg.Length != 1)
         {
             await HttpHelper.MethodNotAllowedAsync(context).ConfigureAwait(false);
