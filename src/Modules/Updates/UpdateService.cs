@@ -3,6 +3,7 @@ using System.Reflection;
 using NexusPipeline.ControlPlane.Http;
 using NexusPipeline.Modules.Configuration.Exchange;
 using NexusPipeline.Modules.Configuration.Snapshots;
+using NexusPipeline.Modules.Configuration.Recovery;
 using NexusPipeline.Modules.Execution;
 using NexusPipeline.Modules.Settings;
 using NexusPipeline.Platform.Networking;
@@ -641,6 +642,11 @@ internal sealed class UpdateService
             return false;
         }
         version = _latest.VersionText;
+        if (ConfigUpdateAdmission.HasPendingRecovery(Path.Combine(_installDir, "data")))
+        {
+            failure = UpdateApplyResult.Busy("configuration-recovery-pending", "存在未恢复的配置事务或编辑隔离现场，请先完成配置恢复");
+            return false;
+        }
         stagingDir = _readyStagingDir ?? "";
         if (string.IsNullOrWhiteSpace(stagingDir) || !File.Exists(Path.Combine(stagingDir, "nexus-pipeline.exe")))
         {

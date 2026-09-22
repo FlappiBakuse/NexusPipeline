@@ -4,6 +4,8 @@ using NexusPipeline.Platform.Storage;
 using NexusPipeline.Shared.Logging;
 using NexusPipeline.Shared.Serialization;
 
+using NexusPipeline.Modules.Configuration.Recovery;
+
 namespace NexusPipeline.Modules.Updates;
 
 internal static class UpdatePhase
@@ -141,6 +143,11 @@ internal static class UpdateApply
             }
 
             string installDir = AppPaths.AppRoot;
+            if (ConfigUpdateAdmission.HasPendingRecovery(AppPaths.DataDir))
+            {
+                Logger.Error("[更新] 配置恢复现场尚未清理，保留更新暂存和 journal，拒绝切换版本。");
+                return 1;
+            }
             string stageExe = Path.Combine(stagedDir, "nexus-pipeline.exe");
             if (!Directory.Exists(stagedDir) || !File.Exists(stageExe))
             {
@@ -293,6 +300,11 @@ internal static class UpdateApply
 
         if (pending.Mode == "defer" || pending.Phase == UpdatePhase.Deferred)
         {
+            if (ConfigUpdateAdmission.HasPendingRecovery(AppPaths.DataDir))
+            {
+                Logger.Warn("[更新] 配置恢复尚未完成，保留下次启动更新，继续当前宿主的恢复流程。");
+                return false;
+            }
             if (!IsStagingValid(pending.StagedDir))
             {
                 Logger.Error("[更新] defer staging 无效，保留 journal 供人工处理。");
@@ -321,6 +333,11 @@ internal static class UpdateApply
 
         if (pending.Mode == "apply" && pending.Phase != UpdatePhase.RollbackConfirmed)
         {
+            if (ConfigUpdateAdmission.HasPendingRecovery(AppPaths.DataDir))
+            {
+                Logger.Warn("[更新] 配置恢复尚未完成，保留版本切换与回滚现场。");
+                return false;
+            }
             if (pending.Phase is UpdatePhase.ApplyRequested or UpdatePhase.Deferred
                 && !HasBackupData(AppPaths.UpdateBackupDir))
             {
@@ -393,6 +410,11 @@ internal static class UpdateApply
             return 1;
         }
 
+        if (ConfigUpdateAdmission.HasPendingRecovery(AppPaths.DataDir))
+        {
+            Logger.Error("[更新] 配置恢复现场尚未清理，拒绝用旧版本覆盖当前宿主。");
+            return 1;
+        }
         try
         {
             Rollback(pending with { Mode = "apply", Phase = UpdatePhase.RollbackPending });

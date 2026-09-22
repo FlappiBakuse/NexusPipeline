@@ -118,6 +118,44 @@ public sealed class UpdateApplyFinalizationTests
         }
     }
 
+    [Theory]
+    [InlineData("0.10.1", "{\"version\":1}")]
+    [InlineData("0.10.1", "{\"version\":999}")]
+    [InlineData("9.0.0", "unreadable journal")]
+    public void Finalization_DeferredVersionSwitchPreservesPendingConfiguration(string version, string content)
+    {
+        string owner = Path.Combine(AppPaths.DataDir, "update-admission-" + Guid.NewGuid().ToString("N"));
+        string residue = Path.Combine(owner, "user", "work", "task-selection", "journal.json");
+        string staging = Path.Combine(AppPaths.UpdateDir, "staging", version);
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(residue)!);
+            File.WriteAllText(residue, content);
+            Directory.CreateDirectory(staging);
+            File.WriteAllText(Path.Combine(staging, "nexus-pipeline.exe"), "fixture executable");
+            WriteTask("defer", version, staging);
+            byte[] before = File.ReadAllBytes(AppPaths.UpdateTaskFile);
+            bool spawned = false;
+            UpdateApply.LaunchApplyOverride = _ => spawned = true;
+            Assert.False(UpdateApply.RunStartupFinalization());
+            Assert.False(spawned);
+            Assert.Equal(before, File.ReadAllBytes(AppPaths.UpdateTaskFile));
+            Assert.Equal(content, File.ReadAllText(residue));
+            Assert.Equal("fixture executable", File.ReadAllText(Path.Combine(staging, "nexus-pipeline.exe")));
+            File.Delete(residue);
+            Assert.True(UpdateApply.RunStartupFinalization());
+            Assert.True(spawned);
+            Assert.Equal(version, UpdateTask.Read()!.Version);
+        }
+        finally
+        {
+            UpdateApply.LaunchApplyOverride = null;
+            UpdateTask.Clear();
+            DeleteExact(staging);
+            DeleteExact(owner);
+        }
+    }
+
     [Fact]
     public void Finalization_IncompleteApplyRollsBackFromBackup()
     {
@@ -147,6 +185,47 @@ public sealed class UpdateApplyFinalizationTests
             DeleteExact(AppPaths.UpdateDir);
             DeleteExact(AppPaths.UpdateBackupDir);
             DeleteExact(Path.Combine(AppPaths.AppRoot, "wwwroot"));
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void VersionWorker_DoesNotReplaceFilesWithPendingConfiguration(bool rollback)
+    {
+        string owner = Path.Combine(AppPaths.DataDir, "worker-admission-" + Guid.NewGuid().ToString("N"));
+        string residue = Path.Combine(owner, "user", "work", "task-selection", "journal.json");
+        string staging = Path.Combine(AppPaths.UpdateDir, "staging", "0.10.1");
+        string oldExecutable = Path.Combine(AppPaths.UpdateBackupDir, "nexus-pipeline.exe");
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(residue)!);
+            File.WriteAllText(residue, "unknown journal");
+            Directory.CreateDirectory(staging);
+            File.WriteAllText(Path.Combine(staging, "nexus-pipeline.exe"), "staged executable");
+            if (rollback)
+            {
+                Directory.CreateDirectory(AppPaths.UpdateBackupDir);
+                File.WriteAllText(oldExecutable, "previous executable");
+            }
+            WriteTask("apply", "0.10.1", staging);
+            byte[] before = File.ReadAllBytes(AppPaths.UpdateTaskFile);
+            string mutex = "NexusPipeline.UpdateAdmission.Tests." + Guid.NewGuid().ToString("N");
+            int result = rollback ? UpdateApply.RunRecoveryWorker(mutexName: mutex)
+                : UpdateApply.RunApplyWorker(staging, mutexName: mutex);
+            Assert.Equal(1, result);
+            Assert.Equal(before, File.ReadAllBytes(AppPaths.UpdateTaskFile));
+            Assert.Equal("unknown journal", File.ReadAllText(residue));
+            Assert.Equal("staged executable", File.ReadAllText(Path.Combine(staging, "nexus-pipeline.exe")));
+            if (rollback) Assert.Equal("previous executable", File.ReadAllText(oldExecutable));
+            else Assert.False(Directory.Exists(AppPaths.UpdateBackupDir));
+        }
+        finally
+        {
+            UpdateTask.Clear();
+            DeleteExact(staging);
+            DeleteExact(owner);
+            if (rollback) DeleteExact(AppPaths.UpdateBackupDir);
         }
     }
 
