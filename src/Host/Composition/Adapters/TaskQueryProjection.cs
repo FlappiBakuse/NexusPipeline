@@ -4,6 +4,7 @@ using NexusPipeline.Modules.Configuration.Scripting;
 using NexusPipeline.Modules.Execution.Judgement;
 using NexusPipeline.Modules.Execution;
 using NexusPipeline.Modules.History;
+using NexusPipeline.Modules.Plugins.Contracts;
 using NexusPipeline.Modules.Scripts.Contracts;
 using NexusPipeline.Modules.Scripts.Queries;
 using NexusPipeline.Modules.Scripts.Resolution;
@@ -66,8 +67,12 @@ internal sealed class TaskQueryProjection(UserQueries users, ScriptQueries scrip
                 return File.Exists(file) ? file : saved;
             }).ToArray();
             var view = TaskConfigViewFactory.Capture(config, spec.Script.RootPath, extras, spec.TaskProtocol.ReadResources);
+            TaskExecutionContext context = ExecutionCoordinator.CreateTaskExecutionContext(script, spec, userId, "preview");
             var plan = await TaskDiscoveryService.DiscoverAsync(spec.TaskProtocol, view, script.PluginType, spec.PluginVersion,
-                userId, scriptId, LocaleContext.Current, true, token).ConfigureAwait(false);
+                userId, scriptId, LocaleContext.Current, true, token,
+                executionContext: context,
+                scriptRoot: spec.Script.RootPath,
+                scriptExecutable: spec.Script.MainExe).ConfigureAwait(false);
             var last = history.LatestTasks().SingleOrDefault(r => r.UserId == userId && r.ScriptInstanceId == scriptId);
             return new { plan, stale = last?.Signature is { } signature && signature != plan.Signature,
                 revision = plan.PlanId, configState = "snapshot", readOnly = true };

@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using NexusPipeline.Modules.Plugins.Contracts;
 
 namespace NexusPipeline.Modules.Plugins;
@@ -6,7 +7,7 @@ internal static class TaskProtocolValidation
 {
     internal static void Discovery(TaskDiscovery discovery)
     {
-        Require(discovery.ProtocolVersion is "1.0" or "1.1" && discovery.Type == "discovery", "discovery envelope");
+        Require(discovery.ProtocolVersion is "1.0" or "1.1" or "1.2" && discovery.Type == "discovery", "discovery envelope");
         Require(discovery.Coverage is "complete" or "partial" or "unsupported", "coverage");
         Require(discovery.Tasks is { Length: <= 1024 }, "task count");
         Diagnostics(discovery.Diagnostics, discovery.ProtocolVersion);
@@ -70,6 +71,149 @@ internal static class TaskProtocolValidation
         CheckGraph(tasks, true);
     }
 
+    /// <summary>
+    /// Validates the 1.2 configuration assessment against the frozen manifest and
+    /// the resources that Host actually exposed. A well-shaped but unauthorized
+    /// check is still rejected; it cannot become an implicit pass.
+    /// </summary>
+    internal static void ConfigAssessment(
+        TaskDiscovery discovery,
+        TaskProtocolDescriptor protocol,
+        NexusPipeline.Modules.Configuration.Scripting.TaskConfigView view)
+    {
+        if (protocol.Version != "1.2") return;
+        TaskConfigAssessment? assessment = discovery.ConfigAssessment;
+        Require(assessment is not null, "config assessment required");
+        if (assessment is null) throw new InvalidDataException("protocol_error: config assessment required");
+        Require(assessment.SchemaVersion == "1" && assessment.Checks is { Length: > 0 and <= 128 }, "config assessment envelope");
+
+        var declarations = protocol.ConfigRules.ToDictionary(rule => rule.RuleId, StringComparer.Ordinal);
+        Require(declarations.Count == protocol.ConfigRules.Length && declarations.Count > 0, "config rule declarations");
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var taskIds = discovery.Tasks.Select(task => task.Id).ToHashSet(StringComparer.Ordinal);
+        // Optional manifest resources may be absent from the frozen view. Their
+        // locations are still valid declarations; the script must report
+        // unknown rather than making the assessment envelope invalid.
+        var configIds = view.DeclaredResourceIds
+            .Where(id => id.StartsWith("config:", StringComparison.Ordinal))
+            .ToHashSet(StringComparer.Ordinal);
+        var resourceIds = protocol.ReadResources
+            .Select(resource => resource.Id)
+            .Concat(view.DeclaredResourceIds.Where(id => !id.StartsWith("config:", StringComparison.Ordinal)))
+            .ToHashSet(StringComparer.Ordinal);
+        var environmentIds = protocol.EnvironmentChecks.Select(check => check.Id).ToHashSet(StringComparer.Ordinal);
+        foreach (TaskConfigCheck check in assessment.Checks)
+        {
+            Text(check.RuleId);
+            Require(declarations.TryGetValue(check.RuleId, out TaskConfigRuleDescriptor? declaration), "undeclared config rule");
+            Require(check.Evaluation is "satisfied" or "violated" or "unknown" or "not_applicable", "config evaluation");
+            Require(check.Severity is "info" or "warning" or "error", "config severity");
+            Require(check.ExecutionEffect is "none" or "warn" or "block", "config execution effect");
+            Require(check.Scope is { Count: > 0 and <= 2 }, "config scope");
+            string scopeKey = ValidateScope(check.Scope, taskIds);
+            Require(seen.Add(check.RuleId + "\n" + scopeKey), "duplicate config check");
+            Require(check.Locations is { Count: <= 8 }, "config locations");
+            foreach (JsonNode? location in check.Locations)
+                ValidateLocation(location, configIds, resourceIds, environmentIds);
+            Require(check.Actions is { Count: <= 3 }, "config actions");
+            foreach (JsonNode? action in check.Actions)
+            {
+                Require(action is System.Text.Json.Nodes.JsonObject { Count: 1 } actionObject
+                    && actionObject["kind"]?.GetValue<string>() is "open_binding_editor" or "open_script_settings" or "refresh_plan",
+                    "config action");
+            }
+            if (check.Evaluation is "violated" or "unknown")
+            {
+                Require(check.ReasonText is not null, "config reason text");
+                TaskDisplaySnapshot.ValidateReference(check.ReasonText, protocol.Version);
+            }
+            else
+            {
+                Require(check.ExecutionEffect == "none", "satisfied config effect");
+                if (check.ReasonText is not null) TaskDisplaySnapshot.ValidateReference(check.ReasonText, protocol.Version);
+            }
+            if (check.ExecutionEffect == "block")
+                Require(declaration!.Criticality == "critical_when_applicable", "unapproved config block");
+        }
+        foreach (TaskConfigRuleDescriptor declaration in protocol.ConfigRules.Where(rule => rule.Required))
+            Require(seen.Any(key => key.StartsWith(declaration.RuleId + "\n", StringComparison.Ordinal)), "required config rule missing");
+    }
+
+    private static string ValidateScope(System.Text.Json.Nodes.JsonObject scope, IReadOnlySet<string> taskIds)
+    {
+        string kind = scope["kind"]?.GetValue<string>() ?? "";
+        if (kind is "binding" or "queue")
+        {
+            Require(scope.Count == 1, "config scope fields");
+            return kind;
+        }
+        string? taskId = scope["taskId"]?.GetValue<string>();
+        Require(kind == "task" && scope.Count == 2 && taskId is { Length: > 0 }
+            && taskIds.Contains(taskId), "config task scope");
+        return kind + ":" + taskId;
+    }
+
+    private static void ValidateLocation(
+        JsonNode? location,
+        IReadOnlySet<string> configIds,
+        IReadOnlySet<string> resourceIds,
+        IReadOnlySet<string> environmentIds)
+    {
+        System.Text.Json.Nodes.JsonObject? objectValue = location as System.Text.Json.Nodes.JsonObject;
+        Require(objectValue is not null, "config location");
+        if (objectValue is null) throw new InvalidDataException("protocol_error: config location");
+        string source = objectValue["source"]?.GetValue<string>() ?? "";
+        if (source is "config" or "resource")
+        {
+            string? resourceId = objectValue["resourceId"]?.GetValue<string>();
+            System.Text.Json.Nodes.JsonArray? selector = objectValue["selector"] as System.Text.Json.Nodes.JsonArray;
+            Require(objectValue.Count == 3 && resourceId is { Length: > 0 }
+                && (source == "config"
+                    ? (resourceId.StartsWith("config:", StringComparison.Ordinal) || configIds.Contains(resourceId))
+                    : resourceIds.Contains(resourceId))
+                && selector is not null,
+                "config resource location");
+            ValidateSelector(selector ?? throw new InvalidDataException("protocol_error: config selector"));
+            return;
+        }
+        if (source == "context")
+        {
+            string field = objectValue["field"]?.GetValue<string>() ?? "";
+            Require(objectValue.Count == 2 && System.Text.RegularExpressions.Regex.IsMatch(field, "^[A-Za-z0-9_.:-]{1,160}$"), "config context location");
+            return;
+        }
+        Require(source == "environment" && objectValue.Count == 2
+            && objectValue["inspectionId"]?.GetValue<string>() is { Length: > 0 } inspectionId
+            && environmentIds.Contains(inspectionId), "config environment location");
+    }
+
+    private static void ValidateSelector(System.Text.Json.Nodes.JsonArray selector)
+    {
+        Require(selector.Count is > 0 and <= 32, "config location selector");
+        foreach (JsonNode? token in selector)
+        {
+            if (token is System.Text.Json.Nodes.JsonValue value && value.TryGetValue<string>(out string? property))
+            {
+                Text(property);
+                continue;
+            }
+            System.Text.Json.Nodes.JsonObject? selectorObject = token as System.Text.Json.Nodes.JsonObject;
+            Require(selectorObject is not null, "config selector token");
+            if (selectorObject is null) throw new InvalidDataException("protocol_error: config selector token");
+            if (selectorObject.ContainsKey("by"))
+            {
+                Require(selectorObject.Count == 2 && selectorObject["by"]?.GetValue<string>() is { Length: > 0 }
+                    && selectorObject.ContainsKey("value"), "config identity selector");
+            }
+            else
+            {
+                Require(selectorObject.Count == 3 && selectorObject["index"]?.GetValue<int>() >= 0
+                    && selectorObject["guardKey"]?.GetValue<string>() is { Length: > 0 }
+                    && selectorObject.ContainsKey("guardValue"), "config guard selector");
+            }
+        }
+    }
+
     private static void CheckGraph(Dictionary<string, TaskDefinition> tasks, bool parents)
     {
         var done = new HashSet<string>(StringComparer.Ordinal);
@@ -90,7 +234,7 @@ internal static class TaskProtocolValidation
     internal static void Observation(TaskObservationBatch batch, string runId, string attemptId,
         IReadOnlySet<string> selected, IReadOnlySet<(string, int, long)> evidence)
     {
-        Require(batch.ProtocolVersion is "1.0" or "1.1" && batch.Type == "observation" && batch.RunId == runId && batch.AttemptId == attemptId, "observation identity");
+        Require(batch.ProtocolVersion is "1.0" or "1.1" or "1.2" && batch.Type == "observation" && batch.RunId == runId && batch.AttemptId == attemptId, "observation identity");
         Require(batch.Observations is { Length: <= 2048 }, "observation count");
         Require(batch.RunBoundary is "open" or "ended" or "aborted" or "unknown", "boundary");
         Evidence(batch.BoundaryEvidence, evidence, batch.RunBoundary is "ended" or "aborted");
@@ -110,7 +254,7 @@ internal static class TaskProtocolValidation
         }
         if (batch.Incidents is { } incidents)
         {
-            Require(batch.ProtocolVersion == "1.1" && incidents.Length <= 2048, "incident version/count");
+            Require(batch.ProtocolVersion is "1.1" or "1.2" && incidents.Length <= 2048, "incident version/count");
             var events = new HashSet<string>(StringComparer.Ordinal);
             foreach (var incident in incidents)
             {

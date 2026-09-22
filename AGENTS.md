@@ -6,12 +6,12 @@
 
 NexusPipeline（枢链）是 Windows 本地自动化脚本管家：.NET 8/C# WinForms 托盘、HttpListener 服务、CLI/MCP 控制面，以及构建为静态文件的 Vue 3/TypeScript 前端。最终用户不需要 Node/npm。官方插件仓库为 `FlappiBakuse/NexusPipeline-Plugins`；两个仓库版本独立。单仓库开发不要求特定父目录名称。
 
-开始修改前，在本仓库运行 `git status --short --branch`、`git rev-parse HEAD`，确认用户未提交内容。读取下面与任务有关的最小文档集合；根据 `docs/backend-map.json` 定位唯一 owner，再读对应代码和测试。地图缺失或与实际文件不一致属于治理问题，须修复生成器/输入，不能回退为依赖外部迁移清单。
+开始修改前，在本仓库运行 `git status --short --branch`、`git rev-parse HEAD`，确认用户未提交内容。读取下面与任务有关的最小文档集合；根据 `docs/architecture/README.md` 与 `docs/map.json` 定位专题和责任，再读对应代码和测试。需要逐文件 owner、声明和依赖图时，按架构索引中的正式命令生成 `.generated/architecture/backend-map.json`；该生成物不入仓，也不能回退为依赖外部迁移清单。
 
 | 事项 | 仓库内权威入口 |
 |---|---|
 | 用户行为、安装、管理员运行原因 | `README.md` |
-| 模块、约束与代码定位 | `docs/architecture/README.md`、`docs/backend-map.json` |
+| 模块、约束与代码定位 | `docs/architecture/README.md`、`docs/map.json`；详细生成地图见 `.generated/architecture/backend-map.json` |
 | 环境、构建、发布 | `docs/DEVELOPMENT.md` |
 | 测试政策与完整命令 | `docs/TESTING.md` → `docs/testing/commands.md` |
 | Web/CLI/MCP 的能力与状态 | `docs/CONTROL_PLANE.md` |
@@ -90,6 +90,6 @@ Preview 同版本 hash 变化可更新；hash 相同不因 sourceCommit 变化�
 
 README 描述当前产品，架构文档描述现役结构，TESTING 描述实际入口和测试政策，DEVELOPMENT 描述构建发布，CONTROL_PLANE 列公开能力，STATUS 只保留未完成问题，CHANGELOG 记录已发布历史。完成的迁移教程、版本专项清单、外部会话依赖、旧路径和零调用兼容层不进入长期维护入口。
 
-架构 check 与 map 校验必须进入默认门禁；报告输出不能代替失败退出。保留低层工具和测试，不长期保留迁移债务豁免。修改公开能力同步控制面表、相应测试与官方插件作者文档。
+架构 `check` 与生成地图的 schema、owner、路径和确定性校验必须进入默认门禁；报告输出不能代替失败退出。地图只写入本地 `.generated/architecture/backend-map.json` 或当前 CI run 的 artifact，不放入产品 release。保留低层工具和测试，不长期保留迁移债务豁免。修改公开能力同步控制面表、相应测试与官方插件作者文档。
 
 交付时逐项列明改动、已运行命令/退出码、未运行范围及原因；本地测试通过不等于远端发布已启用，上传候选包不等于发布成功。正式完成前，在无父目录文档、无实施资料包的新 checkout 中验证导航、构建、测试和文档。

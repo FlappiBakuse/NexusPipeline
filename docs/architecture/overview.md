@@ -88,18 +88,11 @@ NexusPipeline 定位为**本地游戏自动化脚本管家**：一个常驻托�
 
 ```
 NexusPipeline/
-├── src/                C# 后端（.NET 8，WinForms 托盘 + HttpListener/Kestrel）
-│   ├── Application/    应用宿主、启动流程、查询、状态与业务端口：ProgramEntry/ApplicationHost/StartupPipeline/RuntimeInitializer/HostedRuntimeInitializer/Queries/State/Abstractions/Repositories
-│   ├── *.cs            组合根基础设施：Bootstrap/RuntimeContext/TrayApp
-│   ├── Models/         领域模型（NexusPipeline.Models）
-│   ├── Services/       服务层（NexusPipeline.Services，按 Execution/Configuration/Judgement/Scheduling/History/Notification/Networking/Update/Diagnostics 分域）
-│   ├── Persistence/    持久化层（NexusPipeline.Persistence）
-│   ├── Utilities/      工具层（NexusPipeline.Utilities）
-│   ├── Extensibility/  宿主内部数据插件 capability 契约（NexusPipeline.Extensibility，internal）
-│   ├── Web/            HTTP 层（NexusPipeline.Web）
-│   ├── Cli/            命令行层（NexusPipeline.Cli）
-│   ├── Mcp/            MCP Streamable HTTP 适配层（NexusPipeline.Mcp）
-│   └── Plugins/        数据化/managed-code 插件发现、加载与 capability 注册（NexusPipeline.Plugins）
+├── src/Host/            C# 进程入口、组合根、初始化、生命周期和跨域适配
+├── src/ControlPlane/    Web、CLI、MCP、认证和响应映射
+├── src/Modules/         领域 owner：Settings/Plugins/Scripts/Users/Queues/Configuration/History/Notifications/Execution/Scheduling/Updates/Diagnostics
+├── src/Platform/         Windows、存储、网络和外部系统适配
+├── src/Shared/           共享结果、日志和基础原语（不承载业务规则）
 ├── src/NexusPipeline.Plugin.Abstractions/  独立 public Plugin API v1.8（无宿主业务引用）
 ├── frontend/           Vue/TypeScript/Vite 前端源码、路由、状态和 Nexus UI 组件
 │   ├── src/app/        App shell、启动编排、令牌提示和插件 route 生命周期
@@ -110,7 +103,7 @@ NexusPipeline/
 │   ├── src/styles/     设计 token、基础元素样式与布局/shell 样式
 │   ├── src/stores/     Pinia 全局状态
 │   └── public/i18n/    宿主 zh-CN/en-US 词典（唯一资源源）
-├── release/wwwroot/    Vite 构建后的发布静态 Web 资源
+├── release/wwwroot/    Vite 构建后的发布静态 Web 资源（生成物）
 ├── .nxp/               安装目录内的内部运行状态（runtime 标记与 state 持久状态）
 ├── tests/
 │   ├── NexusPipeline.Tests/  xUnit 单元测试（通过 InternalsVisibleTo 访问 internal 契约）
@@ -119,7 +112,7 @@ NexusPipeline/
 │   ├── documentation/        Node 内建模块文档一致性检查
 │   ├── support/              Windows 进程、版本解析、测试运行时公共设施
 │   └── stress/               压力与专项诊断资产（不进入默认 CI/发布门禁）
-├── tools/source-hash.mjs      Node 源码指纹计算（排除 bin/obj）
+├── tools/NexusPipeline.Architecture/  MSBuild/Roslyn 架构 check 与地图生成器
 └── tests/run.mjs              统一测试调度入口
 ```
 
@@ -128,21 +121,17 @@ NexusPipeline/
 ### 后端分层与依赖方向
 
 ```
-NexusPipeline（根：Application/Program/Bootstrap/RuntimeContext 组合根）
-   └── Models（领域模型）← Services（服务）← Persistence（持久化）← Utilities（工具，被一切依赖）
-        ↑           ↑            ↑
-NexusPipeline.Web（HTTP 适配层）
-NexusPipeline.Cli（命令行适配层）
-NexusPipeline.Mcp（MCP 适配层）
-NexusPipeline.Extensibility（中立 capability/profile 契约）
-NexusPipeline.Plugins（插件发现、注册与内置实现）
+Host/Composition（唯一组合根）
+   ├── ControlPlane（协议适配） → Modules/*（领域用例与 typed ports）
+   ├── Modules/*（业务 owner） → Shared / Platform / 明确的跨域端口
+   └── PluginSdk（独立公开契约） ← Modules/Plugins（插件运行时）
 ```
 
-- **核心域不得引用 Web/Cli**（例外：`RuntimeContext` 组合根持有 `PluginManager` 实例——组合根允许）。
-- **Web/Cli 只调用核心域服务，不做业务逻辑**，只做参数解析与响应组装。
-- **Plugins 通过数据化 manifest 或独立 Plugin API v1.8 交互**；`NexusPipeline.Plugin.Abstractions` 不引用宿主业务模型，managed-code 插件由 collectible `AssemblyLoadContext` 隔离加载；跨模块的宿主内部 capability/profile 契约位于 `Extensibility/`，数据化专项插件（`DataSpecializedPlugin`）仍为纯数据驱动。
-- **依赖方向顺沿命名空间**：Models 无依赖；Services 依赖 Models/Persistence/Utilities；Persistence 依赖 Utilities。
-- **边界约束**：执行核心、调度器和配置编辑的能力消费通过显式端口连接，运行期实体读取通过 `Application/Queries/` 或 `Application/Abstractions/` 端口完成；实体内存所有权与同步集中在 `Application/State/RuntimeEntityState`，`ConfigSwapRecovery` 的会话恢复通过构造注入的脚本查找与用户快照委托获取数据，不反向查找组合根。`Utilities/Logger` 由设置加载/保存流程显式配置日志等级，不反向读取 `RuntimeContext`。
+- **只有 `Host/Composition/HostCompositionRoot.cs` 创建、解析和释放 DI 容器**；业务模块和控制面不得反向定位组合根。
+- **ControlPlane 只做协议适配**，调用 Modules 的 query/command/typed port，不直接拥有业务存储或实体集合。
+- **Plugins 通过数据化 manifest 或独立 Plugin API v1.8 交互**；`NexusPipeline.Plugin.Abstractions` 不引用宿主业务模型，managed-code 插件由 collectible `AssemblyLoadContext` 隔离加载；跨模块的宿主内部 capability/profile 契约位于 `src/Modules/Plugins/Contracts`，数据化专项插件（`DataSpecializedPlugin`）仍为纯数据驱动。
+- **Modules 之间的依赖必须显式且无环**；执行、调度、配置编辑和插件能力通过 contracts/typed ports 连接，实体内存所有权集中在 `Host/State/AutomationDefinitionState`。
+- **边界约束**：配置恢复通过构造注入的脚本查找与用户快照委托获取数据，不反向查找组合根；共享层不读取宿主容器或具体业务规则。
 
 
 
@@ -159,7 +148,7 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 | `RuntimeStateLayout` | src/Platform/Storage/RuntimeStateLayout.cs | 创建当前 `.nxp` 运行状态目录并提供 service.pid、web.port 和 scheduler-state 路径 |
 | `Bootstrap` | src/Host/Lifecycle/Bootstrap.cs | 服务启动/停止编排、Web 端口重试 |
 | `HostRestartCoordinator` | src/Host/Lifecycle/HostRestartCoordinator.cs | 统一 Web/MCP/CLI 间接重启生命周期；原子取得维护租约、延迟拉起子进程、处理失败释放与旧进程退出延迟 |
-| `RuntimeContext` | src/Host/Composition/RuntimeContext.cs | 组合根：内部 ServiceProvider 注册各领域服务、查询和运行时适配器；设置生命周期与服务解析出口，不拥有实体集合 |
+| `HostCompositionRoot` | src/Host/Composition/HostCompositionRoot.cs | 组合根：内部 ServiceProvider 注册各领域服务、查询和运行时适配器；设置生命周期与服务解析出口，不拥有实体集合 |
 | `RuntimeEntityState` | src/Host/State/AutomationDefinitionState.cs | Scripts/Queues/Users 的唯一内存所有权、同步边界、查找、深拷贝快照、原子执行输入快照与状态替换；不承载业务规则或持久化 |
 | `ScriptQueries` / `QueueQueries` / `UserQueries` | src/Modules/*/Queries/ | 为控制面提供脚本、队列、用户读取用例与业务读取模型；集中有效脚本、调度时间、绑定覆盖和锁状态计算 |
 | `IScriptRepository` / `IQueueRepository` / `IUserRepository` / `IExecutionSnapshotProvider` | src/Modules/*/Contracts/、src/Modules/*/Persistence/ | 执行/调度域读取脚本、队列、启用用户及同一实体状态同步边界内的执行输入快照；运行时适配器直接依赖 `RuntimeEntityState` |
@@ -239,7 +228,7 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 | `JsonStore` | src/Platform/Storage/JsonStore.cs | 读取插件配置、密钥和作用域 JSON；解析损坏时保留原文件并记录恢复现场 |
 | `AppearanceLegacyMigration` | src/Modules/Plugins/Managed/AppearanceLegacyMigration.cs | 旧外观数据的一次性格式搬迁：资产导入原提供方插件的资产 scope，搬迁载荷写入作用域数据，成功标记落盘后可重试 |
 | `OutboundHttpClientProvider` | src/Platform/Networking/ProxyConfiguration.cs | 按最新设置创建外部 HTTP client；支持无代理/系统代理/自定义 HTTP(S) 代理，loopback 强制直连 |
-| `PluginContracts` | src/Extensibility/PluginContracts.cs | 数据插件的 `IPluginCapability`/profile 契约与 `ScriptProfile`；全部 internal；外部代码插件契约位于独立 Plugin API 项目 |
+| `PluginContracts` | src/Modules/Plugins/Contracts/ | 数据插件的 `IPluginCapability`/profile 契约与 `ScriptProfile`；全部 internal；外部代码插件契约位于独立 Plugin API 项目 |
 | `Logger` | src/Shared/Logging/Logger.cs | 分级日志（DEBUG/INFO/WARN/ERROR/FATAL），显式阈值配置，阈值过滤与控制台着色 |
 
 
@@ -254,10 +243,10 @@ NexusPipeline.Plugins（插件发现、注册与内置实现）
 ### 新增 API 的落点
 
 - HTTP 路由：在 `src/ControlPlane/Http/` 新增或扩展 `ApiXxxHandler`，类上标注 `[ApiRoute("资源名")]`（子路由标注在方法上，如 `cancel`）；`WebServer` 启动时反射扫描自动注册，**无需改路由表**。
-- 控制命令：先在 owning service 的 `ApiXxxHandler` 增加资源操作，再由 `CliCommandRouter` 添加参数与响应适配；交互菜单调用正式命令，不直接触碰 `RuntimeContext` 持久化集合。
-- MCP 适配器：在 `src/ControlPlane/Mcp/` 增加类型化工具和投影；只有面向 Agent 的核心子集才进入工具面，其余能力走 CLI；`McpHost` 负责 Streamable HTTP 生命周期，`McpSecurity` 负责 loopback/Host/Origin/体积边界，业务写入必须转入 Application Commands 或既有核心服务。
+- 控制命令：先在 owning module 的 use case/handler 增加资源操作，再由 `CliCommandRouter` 添加参数与响应适配；交互菜单调用正式命令，不直接触碰 `HostCompositionRoot` 或持久化集合。
+- MCP 适配器：在 `src/ControlPlane/Mcp/` 增加类型化工具和投影；只有面向 Agent 的核心子集才进入工具面，其余能力走 CLI；`McpHost` 负责 Streamable HTTP 生命周期，`McpSecurity` 负责 loopback/Host/Origin/体积边界，业务写入必须转入 Modules use cases/commands 或既有核心服务。
 - 轻量控制面：`WebServerOptions.FromSettings` 保留 `/api/*`，关闭静态 Web UI 与远程绑定；Normal 模式继续按设置提供 Web UI/远程访问。
-- 业务服务：核心域 `Services/` 新增服务类，注册到 `RuntimeContext`（组合根）后经 `Resolve<T>()` 或属性访问。
+- 业务服务：在对应 `src/Modules/<owner>/` 增加服务和 typed port，由 `HostCompositionRoot` 完成注册；调用方通过构造注入获取依赖，不使用 `Resolve<T>()` 或全局服务定位器。
 
 
 

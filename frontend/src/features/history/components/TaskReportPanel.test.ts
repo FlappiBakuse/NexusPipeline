@@ -41,6 +41,29 @@ describe("task history", () => {
       wrapper.unmount();
     }
   });
+  it('shows configuration assessment and keeps an admission block separate from task failures', () => {
+    const data = report();
+    data.originalPlan.configAssessment = { schemaVersion: '1', checks: [{
+      ruleId: 'example.configuration', evaluation: 'violated', severity: 'error', executionEffect: 'block',
+      scope: { kind: 'binding' }, locations: [], actions: [{ kind: 'refresh_plan' }],
+      reasonText: { kind: 'literal', value: 'Configuration needs repair' },
+    }] };
+    data.originalPlan.currentReadiness = {
+      state: 'blocked', stale: false, checkedAt: '2026-09-22T00:00:00Z', assessmentId: 'assessment',
+      configRevision: 'revision', contextFingerprint: 'fingerprint',
+    };
+    data.admissionBlocked = { reasonCode: 'tasks.admission_blocked', message: 'blocked' };
+    data.summary = undefined;
+    data.finalTaskResults = [];
+    data.attemptReports = [];
+    data.incidents = [];
+    const wrapper = mount(TaskReportPanel, { props: { report: data } });
+    expect(wrapper.get('[role="alert"]').text()).toContain('tasks.admission_blocked');
+    expect(wrapper.get('[aria-label="tasks.config.title"]').text()).toContain('Configuration needs repair');
+    expect(wrapper.get('[aria-label="tasks.config.title"]').text()).toContain('tasks.readiness.blocked');
+    expect(wrapper.text()).toContain('tasks.progress 0/1');
+    wrapper.unmount();
+  });
   it('retains unassigned incident evidence without attributing it to a task', () => {
     const data = report();
     data.incidents = [{ attemptId: 'first', incident: { id: 'unassigned', taskId: null, scopeId: 'unknown',
@@ -93,7 +116,7 @@ describe("task history", () => {
       { ...base, id: 'child', name: 'Child reward', parentId: 'mail', countsAsUnit: false },
       { ...base, id: 'login', name: 'Login', role: 'technical' },
       { ...base, id: 'not-unit', name: 'Informational', countsAsUnit: false });
-    data.summary.counts = { total: 1, succeeded: 0, skipped: 0, partial: 1 };
+    data.summary!.counts = { total: 1, succeeded: 0, skipped: 0, partial: 1 };
     for (const layout of ['cards', 'steps'] as const) {
       const wrapper = mount(TaskReportPanel, { props: { report: data, layout } });
       expect(wrapper.text()).toContain('tasks.progress 0/1');

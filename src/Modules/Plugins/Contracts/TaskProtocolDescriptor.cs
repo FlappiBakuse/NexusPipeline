@@ -8,7 +8,14 @@ internal sealed record TaskProtocolDescriptor(
     string RetryScript,
     TaskReadResource[] ReadResources)
 {
-    internal TaskDisplaySnapshot? Localization { get; init; }
+    [System.Text.Json.Serialization.JsonInclude]
+    public TaskDisplaySnapshot? Localization { get; init; }
+
+    [System.Text.Json.Serialization.JsonInclude]
+    public TaskConfigRuleDescriptor[] ConfigRules { get; init; } = [];
+
+    [System.Text.Json.Serialization.JsonInclude]
+    public TaskEnvironmentCheckDescriptor[] EnvironmentChecks { get; init; } = [];
 }
 
 internal sealed record TaskReadResource(string Id, string Source, string Path, string Format, bool Required);

@@ -38,7 +38,8 @@ internal sealed class TaskRunReducer
     {
         _plan = TaskProtocolJson.Copy(plan);
         TaskProtocolValidation.Discovery(new TaskDiscovery { ProtocolVersion = plan.ProtocolVersion, Type = "discovery",
-            Coverage = plan.Coverage, Tasks = plan.Tasks, Diagnostics = plan.Diagnostics });
+            Coverage = plan.Coverage, Tasks = plan.Tasks, Diagnostics = plan.Diagnostics,
+            ConfigAssessment = plan.ConfigAssessment });
         _tasks = _plan.Tasks.ToDictionary(t => t.Id, StringComparer.Ordinal);
         RunId = runId;
         foreach (var task in _tasks.Values.Where(t => t.Enabled)) _effective[task.Id] = new(task.Id, "pending", "tasks.not_started", "", 0, []);

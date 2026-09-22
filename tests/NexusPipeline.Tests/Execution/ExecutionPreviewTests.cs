@@ -37,6 +37,26 @@ public sealed class ExecutionPreviewTests
     }
 
     [Fact]
+    public void TaskExecutionContextUsesBoundGameTargetForPreviewAndRuntime()
+    {
+        var script = new ScriptInstance
+        {
+            Id = "script-1",
+            GameMode = "pc",
+            GameExe = "C:\\Games\\game.exe",
+            LaunchGame = false,
+        };
+
+        TaskExecutionContext context = ExecutionCoordinator.CreateTaskExecutionContext(
+            script, resolvedSpec: null, "user-1", "preview");
+
+        Assert.Equal("pc", context.Mode);
+        Assert.Equal("executable", context.GameTarget.Kind);
+        Assert.Equal(script.GameExe, context.GameTarget.Value);
+        Assert.Equal("preview", context.Trigger);
+    }
+
+    [Fact]
     public void RecentPcScreenshotCacheIsDerivedFromEffectiveConsumers()
     {
         var noJudge = new ScriptInstance { GameExe = "game.exe" };

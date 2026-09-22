@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -39,6 +41,27 @@ let officialPluginsRoot = null;
 
 function normalizePath(file) {
   return path.relative(projectRoot, file).replaceAll("\\", "/");
+}
+
+function candidateSha() {
+  const supplied = process.env.GITHUB_SHA?.trim();
+  if (/^[0-9a-f]{40}$/iu.test(supplied || "")) return supplied.toLowerCase();
+  try {
+    const resolved = execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: projectRoot,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    if (/^[0-9a-f]{40}$/iu.test(resolved)) return resolved.toLowerCase();
+  } catch {
+    // The architecture gate below still reports the command failure; metadata
+    // must never silently claim an unbound candidate.
+  }
+  throw new Error("无法解析本次架构候选的 Git SHA");
+}
+
+function sha256File(file) {
+  return createHash("sha256").update(fs.readFileSync(file)).digest("hex");
 }
 
 function recursiveFiles(directory) {
@@ -358,7 +381,36 @@ async function runArchitectureCheck() {
   if (code !== 0) return code;
   code = await runProcess("dotnet", ["run", "--project", project, "--no-build", "--", "check", "--root", projectRoot, "--mode", "both"], { cwd: projectRoot });
   if (code !== 0) return code;
-  return runProcess("dotnet", ["run", "--project", project, "--no-build", "--", "map", "--root", projectRoot, "--mode", "both", "--check", "--out", "docs/backend-map.json"], { cwd: projectRoot });
+
+  const generatedMap = path.join(projectRoot, ".generated", "architecture", "backend-map.json");
+  const repeatedMap = `${generatedMap}.repeat`;
+  fs.rmSync(repeatedMap, { force: true });
+  try {
+    code = await runProcess("dotnet", ["run", "--project", project, "--no-build", "--", "map", "--root", projectRoot, "--mode", "both", "--out", generatedMap], { cwd: projectRoot });
+    if (code !== 0) return code;
+    code = await runProcess("dotnet", ["run", "--project", project, "--no-build", "--", "map", "--root", projectRoot, "--mode", "both", "--out", repeatedMap], { cwd: projectRoot });
+    if (code !== 0) return code;
+    if (!fs.readFileSync(generatedMap).equals(fs.readFileSync(repeatedMap))) {
+      console.error("[architecture] map generation is not deterministic");
+      return 1;
+    }
+    code = await runProcess("dotnet", ["run", "--project", project, "--no-build", "--", "map", "--root", projectRoot, "--mode", "both", "--check", "--out", generatedMap], { cwd: projectRoot });
+    if (code !== 0) return code;
+
+    const artifactDirectory = path.join(reportRoot, "architecture");
+    fs.mkdirSync(artifactDirectory, { recursive: true });
+    const artifactMap = path.join(artifactDirectory, "backend-map.json");
+    fs.copyFileSync(generatedMap, artifactMap);
+    fs.writeFileSync(path.join(artifactDirectory, "backend-map.metadata.json"), `${JSON.stringify({
+      schemaVersion: 1,
+      candidateSha: candidateSha(),
+      mapSha256: sha256File(generatedMap),
+      map: "architecture/backend-map.json",
+    }, null, 2)}\n`, "utf8");
+    return 0;
+  } finally {
+    fs.rmSync(repeatedMap, { force: true });
+  }
 }
 
 function buildTestHost() {

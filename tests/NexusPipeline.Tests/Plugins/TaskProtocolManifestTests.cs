@@ -53,6 +53,21 @@ public sealed class TaskProtocolManifestTests
         }
         finally { Directory.Delete(root, true); }
     }
+
+    [Fact]
+    public void Version12RequiresDiagnosticDeclarationsAndRejectsValidator()
+    {
+        var manifest = Manifest();
+        var protocol = manifest["taskProtocol"]!.AsObject();
+        protocol["version"] = "1.2";
+        protocol["localization"] = JsonNode.Parse("""{"defaultLocale":"zh-CN","messages":{"en-US":"data/i18n/en.json","zh-CN":"data/i18n/zh.json"}}""");
+        protocol["configRules"] = JsonNode.Parse("""[{"id":"example.configuration","required":true,"criticality":"advisory_or_contextual"}]""");
+        protocol["environmentChecks"] = new JsonArray();
+        Assert.True(TaskProtocolManifest.TryValidate(manifest, out _));
+        manifest["configValidator"] = "data/config-validator.js";
+        Assert.False(TaskProtocolManifest.TryValidate(manifest, out _));
+    }
+
     private static JsonObject Manifest() => (JsonObject)JsonNode.Parse("""
         {"kind":"data-specialized","judgeScript":"data/judge.js","minHostVersion":"0.16.8",
          "taskProtocol":{"version":"1.0","discoverScript":"data/discover.js","retryScript":"data/retry.js","readResources":[]}}

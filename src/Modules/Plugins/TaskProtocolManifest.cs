@@ -17,27 +17,22 @@ internal static class TaskProtocolManifest
             if (manifest["taskProtocol"] is not JsonObject protocol)
                 throw new InvalidDataException("taskProtocol must be an object");
             string? version = protocol["version"]?.GetValue<string>();
-            if (version is not ("1.0" or "1.1"))
+            if (version is not ("1.0" or "1.1" or "1.2"))
                 throw new InvalidDataException("unsupported taskProtocol.version");
             if (version == "1.0") Fields(protocol, "version", "discoverScript", "retryScript", "readResources");
             else
             {
-                Fields(protocol, "version", "discoverScript", "retryScript", "readResources", "localization");
-                if (protocol["localization"] is not JsonObject localization) throw new InvalidDataException("localization required");
-                Fields(localization, "defaultLocale", "messages");
-                if (localization["messages"] is not JsonObject { Count: > 0 and <= 16 } messages
-                    || !messages.ContainsKey(localization["defaultLocale"]?.GetValue<string>() ?? ""))
-                    throw new InvalidDataException("invalid localization locales");
-                if (messages.Select(p => p.Key).Distinct(StringComparer.OrdinalIgnoreCase).Count() != messages.Count)
-                    throw new InvalidDataException("duplicate localization locale");
-                foreach (var (locale, asset) in messages)
+                string[] fields = version == "1.2"
+                    ? ["version", "discoverScript", "retryScript", "readResources", "localization", "configRules", "environmentChecks"]
+                    : ["version", "discoverScript", "retryScript", "readResources", "localization"];
+                Fields(protocol, fields);
+                ValidateLocalization(protocol["localization"], version == "1.2");
+                if (version == "1.2")
                 {
-                    if (!System.Text.RegularExpressions.Regex.IsMatch(locale, "^[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8})*$"))
-                        throw new InvalidDataException("invalid localization locale");
-                    string? path = asset?.GetValue<string>();
-                    RelativePath(path);
-                    if (!path!.StartsWith("data/", StringComparison.Ordinal) || !path.EndsWith(".json", StringComparison.Ordinal))
-                        throw new InvalidDataException("localization requires data/*.json");
+                    if (manifest.ContainsKey("configValidator"))
+                        throw new InvalidDataException("taskProtocol 1.2 cannot declare configValidator");
+                    ValidateConfigRules(protocol["configRules"]);
+                    ValidateEnvironmentChecks(protocol["environmentChecks"]);
                 }
             }
             if (!PluginRepositoryCatalog.TryParseVersion(manifest["minHostVersion"]?.GetValue<string>() ?? "", out var minimum)
@@ -116,13 +111,154 @@ internal static class TaskProtocolManifest
             Read(manifest["judgeScript"]!.GetValue<string>()), Read(protocol["retryScript"]!.GetValue<string>()),
             ((JsonArray)protocol["readResources"]!).Select(r => new TaskReadResource(
                 r!["id"]!.GetValue<string>(), r["source"]!.GetValue<string>(), r["path"]!.GetValue<string>(),
-                r["format"]!.GetValue<string>(), r["required"]!.GetValue<bool>())).ToArray()) { Localization = frozen };
+                r["format"]!.GetValue<string>(), r["required"]!.GetValue<bool>())).ToArray())
+        {
+            Localization = frozen,
+            ConfigRules = ReadConfigRules(protocol),
+            EnvironmentChecks = ReadEnvironmentChecks(protocol),
+        };
+    }
+
+    private static void ValidateLocalization(JsonNode? value, bool nestedDirectory)
+    {
+        if (value is not JsonObject localization) throw new InvalidDataException("localization required");
+        Fields(localization, "defaultLocale", "messages");
+        if (localization["messages"] is not JsonObject { Count: > 0 and <= 16 } messages
+            || !messages.ContainsKey(localization["defaultLocale"]?.GetValue<string>() ?? ""))
+            throw new InvalidDataException("invalid localization locales");
+        if (messages.Select(p => p.Key).Distinct(StringComparer.OrdinalIgnoreCase).Count() != messages.Count)
+            throw new InvalidDataException("duplicate localization locale");
+        foreach (var (locale, asset) in messages)
+        {
+            if (!System.Text.RegularExpressions.Regex.IsMatch(locale, "^[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8})*$"))
+                throw new InvalidDataException("invalid localization locale");
+            string? path = asset?.GetValue<string>();
+            RelativePath(path);
+            string prefix = nestedDirectory ? "data/i18n/" : "data/";
+            if (!path!.StartsWith(prefix, StringComparison.Ordinal) || !path.EndsWith(".json", StringComparison.Ordinal))
+                throw new InvalidDataException($"localization requires {prefix}*.json");
+        }
+    }
+
+    private static void ValidateConfigRules(JsonNode? value)
+    {
+        if (value is not JsonArray rules || rules.Count is 0 or > 32)
+            throw new InvalidDataException("taskProtocol.configRules must contain 1..32 rules");
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        foreach (JsonNode? node in rules)
+        {
+            if (node is not JsonObject rule) throw new InvalidDataException("invalid config rule");
+            Fields(rule, "id", "required", "criticality");
+            string id = rule["id"]?.GetValue<string>() ?? "";
+            if (!System.Text.RegularExpressions.Regex.IsMatch(id, "^[A-Za-z0-9_.:-]{1,160}$") || !ids.Add(id))
+                throw new InvalidDataException("invalid or duplicate config rule id");
+            if (rule["criticality"]?.GetValue<string>() is not ("critical_when_applicable" or "advisory_or_contextual"))
+                throw new InvalidDataException("invalid config rule criticality");
+            _ = rule["required"]?.GetValue<bool>() ?? throw new InvalidDataException("config rule.required missing");
+        }
+    }
+
+    private static void ValidateEnvironmentChecks(JsonNode? value)
+    {
+        if (value is not JsonArray checks || checks.Count > 32)
+            throw new InvalidDataException("taskProtocol.environmentChecks must be an array of at most 32 checks");
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        foreach (JsonNode? node in checks)
+        {
+            if (node is not JsonObject check) throw new InvalidDataException("invalid environment check");
+            Fields(check, "id", "source", "expectedKind", "relativeBase", "networkAccess", "followReparsePoints");
+            string id = check["id"]?.GetValue<string>() ?? "";
+            if (!System.Text.RegularExpressions.Regex.IsMatch(id, "^[A-Za-z0-9_.:-]{1,160}$") || !ids.Add(id))
+                throw new InvalidDataException("invalid or duplicate environment check id");
+            if (check["expectedKind"]?.GetValue<string>() is not ("file" or "directory" or "adb_endpoint")
+                || check["relativeBase"]?.GetValue<string>() is not ("script_root" or "config_directory" or "none")
+                || check["networkAccess"]?.GetValue<bool>() != false
+                || check["followReparsePoints"]?.GetValue<bool>() != false)
+                throw new InvalidDataException("invalid environment check policy");
+            if (check["source"] is not JsonObject source) throw new InvalidDataException("environment check source required");
+            string kind = source["kind"]?.GetValue<string>() ?? "";
+            if (kind is "config" or "resource")
+            {
+                Fields(source, "kind", "resourceId", "selector");
+                string resourceId = source["resourceId"]?.GetValue<string>() ?? "";
+                if (resourceId.Length is 0 or > 512 || source["selector"] is not JsonArray selector)
+                    throw new InvalidDataException("invalid environment resource source");
+                ValidateSelectorShape(selector);
+            }
+            else if (kind == "host")
+            {
+                Fields(source, "kind", "field");
+                if (source["field"]?.GetValue<string>() is not ("gameTarget" or "scriptExecutable"))
+                    throw new InvalidDataException("invalid environment host source");
+            }
+            else throw new InvalidDataException("invalid environment source kind");
+        }
+    }
+
+    private static void ValidateSelectorShape(JsonArray selector)
+    {
+        if (selector.Count is 0 or > 32) throw new InvalidDataException("invalid selector length");
+        foreach (JsonNode? token in selector)
+        {
+            if (token is JsonValue value && value.TryGetValue<string>(out string? property))
+            {
+                if (property.Length is 0 or > 256) throw new InvalidDataException("invalid selector property");
+                continue;
+            }
+            if (token is not JsonObject match) throw new InvalidDataException("invalid selector token");
+            if (match.ContainsKey("by"))
+            {
+                if (match.Count != 2 || match["by"]?.GetValue<string>() is not { Length: > 0 } || !match.ContainsKey("value"))
+                    throw new InvalidDataException("invalid identity selector");
+            }
+            else if (match.Count != 3 || match["index"]?.GetValue<int>() < 0
+                || match["guardKey"]?.GetValue<string>() is not { Length: > 0 } || !match.ContainsKey("guardValue"))
+                throw new InvalidDataException("invalid guard selector");
+        }
+    }
+
+    private static TaskConfigRuleDescriptor[] ReadConfigRules(JsonObject protocol)
+    {
+        return protocol["configRules"] is not JsonArray rules
+            ? []
+            : rules.Select(node => new TaskConfigRuleDescriptor(
+                node!["id"]!.GetValue<string>(), node["required"]!.GetValue<bool>(), node["criticality"]!.GetValue<string>())).ToArray();
+    }
+
+    private static TaskEnvironmentCheckDescriptor[] ReadEnvironmentChecks(JsonObject protocol)
+    {
+        if (protocol["environmentChecks"] is not JsonArray checks) return [];
+        return checks.Select(node =>
+        {
+            JsonObject check = node!.AsObject();
+            JsonObject source = check["source"]!.AsObject();
+            string kind = source["kind"]!.GetValue<string>();
+            return new TaskEnvironmentCheckDescriptor(
+                check["id"]!.GetValue<string>(), kind,
+                kind is "config" or "resource" ? source["resourceId"]!.GetValue<string>() : null,
+                kind is "config" or "resource" ? source["selector"]!.DeepClone().AsArray() : null,
+                kind == "host" ? source["field"]!.GetValue<string>() : null,
+                check["expectedKind"]!.GetValue<string>(), check["relativeBase"]!.GetValue<string>(),
+                check["networkAccess"]!.GetValue<bool>(), check["followReparsePoints"]!.GetValue<bool>());
+        }).ToArray();
     }
 
     private static void Fields(JsonObject obj, params string[] fields)
     {
-        if (obj.Any(p => !fields.Contains(p.Key, StringComparer.Ordinal)) || fields.Any(f => !obj.ContainsKey(f)))
-            throw new InvalidDataException("unknown or missing fields");
+        string[] unknown = obj.Select(property => property.Key)
+            .Where(key => !fields.Contains(key, StringComparer.Ordinal))
+            .OrderBy(key => key, StringComparer.Ordinal)
+            .ToArray();
+        string[] missing = fields
+            .Where(field => !obj.ContainsKey(field))
+            .OrderBy(field => field, StringComparer.Ordinal)
+            .ToArray();
+        if (unknown.Length > 0 || missing.Length > 0)
+        {
+            string unknownText = unknown.Length == 0 ? "none" : string.Join(", ", unknown);
+            string missingText = missing.Length == 0 ? "none" : string.Join(", ", missing);
+            throw new InvalidDataException($"unknown or missing fields (unknown: {unknownText}; missing: {missingText})");
+        }
     }
 
     private static void ScriptPath(string? path)

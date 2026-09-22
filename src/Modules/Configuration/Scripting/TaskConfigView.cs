@@ -5,6 +5,7 @@ using System.Text.Json.Nodes;
 namespace NexusPipeline.Modules.Configuration.Scripting;
 
 internal sealed record TaskConfigResource(string Id, string Format);
+internal sealed record TaskDeclaredTarget(string Value, string BaseDirectory);
 
 /// <summary>Owner-local revisions; opaque tokens never expose configuration hashes.</summary>
 internal sealed class TaskConfigView
@@ -12,6 +13,10 @@ internal sealed class TaskConfigView
     private sealed record Entry(string Path, byte[] Bytes, string Revision, string Format, bool Writable);
     private readonly Dictionary<string, Entry> _entries = new(StringComparer.Ordinal);
     internal TaskConfigResource[] ConfigResources => _entries.Where(p => p.Value.Writable).Select(p => new TaskConfigResource(p.Key, p.Value.Format)).ToArray();
+    internal IReadOnlySet<string> DeclaredResourceIds => _entries.Keys.ToHashSet(StringComparer.Ordinal);
+    internal string RevisionToken => Convert.ToHexString(SHA256.HashData(
+        System.Text.Encoding.UTF8.GetBytes(string.Join("\n", _entries.OrderBy(p => p.Key, StringComparer.Ordinal)
+            .Select(p => p.Key + "=" + p.Value.Revision))))).ToLowerInvariant();
 
     internal void AddConfig(string id, string path, string format) => Add(id, path, format, true);
     internal void AddResource(string id, string path, string format) => Add(id, path, format, false);
@@ -46,6 +51,52 @@ internal sealed class TaskConfigView
     {
         if (!_entries.TryGetValue(id, out var entry) || entry.Writable) throw new InvalidDataException("config_unavailable: undeclared read resource");
         return Read(entry);
+    }
+
+    /// <summary>
+    /// Resolve one manifest-authorized selector to a scalar target without exposing
+    /// the source path or document contents to the script. Selectors are evaluated
+    /// against the frozen bytes captured for this view, not the live file.
+    /// </summary>
+    internal bool TryResolveDeclaredTarget(string id, JsonArray selector, out TaskDeclaredTarget? target, out string status)
+    {
+        target = null;
+        status = "not_checked";
+        if (!_entries.TryGetValue(id, out var entry)) return false;
+        try
+        {
+            if (entry.Format is not ("json" or "yaml")) return false;
+            JsonNode? selected = new TaskConfigDocument(entry.Bytes, entry.Format).ReadSelection(selector);
+            if (selected is not JsonValue value || !value.TryGetValue<string>(out string? text))
+            {
+                status = selected is null ? "missing" : "unsupported";
+                return false;
+            }
+            string normalized = text.Trim();
+            if (normalized.Length == 0)
+            {
+                status = "missing";
+                return false;
+            }
+            target = new(normalized, Path.GetDirectoryName(entry.Path) ?? Path.GetPathRoot(entry.Path) ?? "");
+            status = "present";
+            return true;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            status = "access_denied";
+            return false;
+        }
+        catch (InvalidDataException)
+        {
+            status = "not_checked";
+            return false;
+        }
+        catch (IOException)
+        {
+            status = "not_checked";
+            return false;
+        }
     }
 
     private static string Read(Entry entry)

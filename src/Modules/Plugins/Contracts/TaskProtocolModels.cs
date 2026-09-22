@@ -43,6 +43,8 @@ internal sealed record TaskDiscovery
     public required TaskDiagnostic[] Diagnostics { get; init; }
     public TaskSelectionField[] SelectionFields { get; init; } = [];
     public TaskBehaviorField[] BehaviorFields { get; init; } = [];
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public TaskConfigAssessment? ConfigAssessment { get; init; }
 }
 
 internal sealed record TaskPlan(string ProtocolVersion, string PlanId, string Origin, string PluginId,
@@ -53,6 +55,10 @@ internal sealed record TaskPlan(string ProtocolVersion, string PlanId, string Or
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public TaskDisplaySnapshot? DisplaySnapshot { get; init; }
     public TaskSelectionField[] SelectionFields { get; init; } = [];
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public TaskConfigAssessment? ConfigAssessment { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public TaskReadiness? CurrentReadiness { get; init; }
 }
 
 internal sealed record TaskObservation

@@ -116,7 +116,7 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: qualification-H1-${{ github.run_id }}-${{ github.run_attempt }}
+          name: qualification-H1-${{ needs.preflight.outputs.head_sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: tests/.artifacts/runs/*/reports/**
           include-hidden-files: true
           if-no-files-found: warn
@@ -156,7 +156,7 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: qualification-H2-${{ github.run_id }}-${{ github.run_attempt }}
+          name: qualification-H2-${{ needs.preflight.outputs.head_sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: tests/.artifacts/runs/*/reports/**
           include-hidden-files: true
           if-no-files-found: warn
@@ -196,7 +196,7 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: qualification-H3-${{ github.run_id }}-${{ github.run_attempt }}
+          name: qualification-H3-${{ needs.preflight.outputs.head_sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: tests/.artifacts/runs/*/reports/**
           include-hidden-files: true
           if-no-files-found: warn
@@ -227,7 +227,7 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: qualification-H4-${{ github.run_id }}-${{ github.run_attempt }}
+          name: qualification-H4-${{ needs.preflight.outputs.head_sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: tests/.artifacts/runs/*/reports/**
           include-hidden-files: true
           if-no-files-found: warn
@@ -258,7 +258,7 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: qualification-H5-${{ github.run_id }}-${{ github.run_attempt }}
+          name: qualification-H5-${{ needs.preflight.outputs.head_sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: tests/.artifacts/runs/*/reports/**
           include-hidden-files: true
           if-no-files-found: warn

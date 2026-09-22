@@ -17,6 +17,7 @@ internal sealed class TaskProtocolRun
     private readonly string _runId;
     private readonly string _userId;
     private readonly string _journalDirectory;
+    private readonly TaskExecutionContext? _executionContext;
     private readonly object _gate = new();
     private readonly List<JsonObject> _attempts = new();
     private readonly List<TaskDiagnostic> _diagnostics = new();
@@ -31,6 +32,8 @@ internal sealed class TaskProtocolRun
     private bool _protocolFailed;
     private string _lifecycle = "not_started";
     private TaskPlan? _expectedRetryPlan;
+    private TaskPlan? _admissionPlan;
+    private TaskAdmissionBlockedException? _admissionBlocked;
     private string _terminationReason = "none";
     private JsonObject? _cursorState;
     private long _revision;
@@ -48,20 +51,64 @@ internal sealed class TaskProtocolRun
         }
     }
 
-    internal TaskProtocolRun(ResolvedScriptSpec spec, string runId, string userId, string? journalDirectory = null)
+    internal TaskProtocolRun(ResolvedScriptSpec spec, string runId, string userId, string? journalDirectory = null,
+        TaskExecutionContext? executionContext = null)
     {
         _spec = spec; _protocol = spec.TaskProtocol! with { Localization = spec.TaskProtocol!.Localization is { } texts ? TaskProtocolJson.Copy(texts) : null }; _runId = runId; _userId = userId;
+        _executionContext = executionContext;
         _journalDirectory = journalDirectory ?? Path.Combine(ConfigPaths.WorkDir(spec.Script.Id, userId), "task-selection");
     }
 
     private TaskConfigView Capture() => TaskConfigViewFactory.Capture(_spec.Script.ConfigPath,
         _spec.Script.RootPath, _spec.ExtraConfigPaths, _protocol.ReadResources);
 
+    internal bool IsAdmissionBlocked
+    {
+        get { lock (_gate) return _admissionBlocked is not null; }
+    }
+
+    internal bool AdmissionBlockedBeforeAttempt
+    {
+        get { lock (_gate) return _admissionBlocked is not null && _reducer is null; }
+    }
+
+    /// <summary>Runs the read-only 1.2 assessment before an execution attempt is created.</summary>
+    internal async Task PreflightAsync(CancellationToken token)
+    {
+        var view = Capture();
+        var plan = await TaskDiscoveryService.DiscoverAsync(_protocol, view, _spec.Script.PluginType, _spec.PluginVersion,
+            _userId, _spec.Script.Id, "zh-CN", false, token,
+            _executionContext is { } context ? context with { Trigger = "pre_launch" } : null,
+            _spec.Script.RootPath, _spec.Script.MainExe).ConfigureAwait(false);
+        if (plan.CurrentReadiness?.State == "blocked" && plan.ConfigAssessment is { } assessment)
+        {
+            lock (_gate)
+            {
+                _admissionPlan = plan;
+                _admissionBlocked = new TaskAdmissionBlockedException(plan.CurrentReadiness, assessment);
+            }
+            return;
+        }
+            view.VerifyUnchanged();
+        if (plan.Coverage == "unsupported") throw new InvalidDataException("unsupported_schema: cannot establish original task plan");
+    }
+
     internal async Task BeginAsync(int number, CancellationToken token)
     {
         var view = Capture();
         var plan = await TaskDiscoveryService.DiscoverAsync(_protocol, view, _spec.Script.PluginType, _spec.PluginVersion,
-            _userId, _spec.Script.Id, "zh-CN", false, token).ConfigureAwait(false);
+            _userId, _spec.Script.Id, "zh-CN", false, token,
+            _executionContext is { } context ? context with { Trigger = "pre_launch" } : null,
+            _spec.Script.RootPath, _spec.Script.MainExe).ConfigureAwait(false);
+        if (plan.CurrentReadiness?.State == "blocked" && plan.ConfigAssessment is { } assessment)
+        {
+            lock (_gate)
+            {
+                _admissionPlan = plan;
+                _admissionBlocked = new TaskAdmissionBlockedException(plan.CurrentReadiness, assessment);
+            }
+            throw _admissionBlocked;
+        }
         if (plan.Coverage == "unsupported") throw new InvalidDataException("unsupported_schema: cannot establish original task plan");
         if (_reducer is null)
         {
@@ -219,7 +266,19 @@ internal sealed class TaskProtocolRun
         _transaction!.Apply(view, proposed.FilePatches);
         var changed = Capture();
         var plan = await TaskDiscoveryService.DiscoverAsync(_protocol, changed, _spec.Script.PluginType, _spec.PluginVersion,
-            _userId, _spec.Script.Id, "zh-CN", false, token).ConfigureAwait(false);
+            _userId, _spec.Script.Id, "zh-CN", false, token,
+            _executionContext is { } context ? context with { Trigger = "retry" } : null,
+            _spec.Script.RootPath, _spec.Script.MainExe).ConfigureAwait(false);
+        if (plan.CurrentReadiness?.State == "blocked" && plan.ConfigAssessment is { } assessment)
+        {
+            lock (_gate)
+            {
+                _admissionPlan = plan;
+                _admissionBlocked = new TaskAdmissionBlockedException(plan.CurrentReadiness, assessment);
+            }
+            SaveRetry(new("stop", "tasks.admission_blocked", [], [], []), proposed.ReasonText);
+            return false;
+        }
         var original = _reducer.OriginalPlan;
         var expected = original with { Tasks = original.Tasks.Select(t => t with { Enabled = safe.IncludedTaskIds.Contains(t.Id, StringComparer.Ordinal) }).ToArray() };
         if (!SameTasks(plan, expected)) throw new InvalidDataException("configuration_conflict: patched selection does not match safe retry");
@@ -253,6 +312,32 @@ internal sealed class TaskProtocolRun
     {
         lock (_gate)
         {
+            if (_reducer is null && _admissionPlan is { } blockedPlan && _admissionBlocked is { } blocked)
+            {
+                var admissionOnly = new JsonObject
+                {
+                    ["schemaVersion"] = 1,
+                    ["runId"] = _runId,
+                    ["pluginId"] = _spec.Script.PluginType,
+                    ["revision"] = _revision,
+                    ["userId"] = _userId,
+                    ["scriptInstanceId"] = _spec.Script.Id,
+                    ["originalPlan"] = JsonNode.Parse(TaskProtocolJson.Write(blockedPlan)),
+                    ["lifecycleOutcome"] = "not_started",
+                    ["attemptReports"] = new JsonArray(),
+                    ["finalTaskResults"] = new JsonArray(),
+                    ["incidents"] = new JsonArray(),
+                    ["diagnostics"] = JsonNode.Parse(TaskProtocolJson.Write(_diagnostics)),
+                    ["admissionBlocked"] = new JsonObject
+                    {
+                        ["reasonCode"] = "tasks.admission_blocked",
+                        ["message"] = blocked.Message,
+                        ["readiness"] = JsonNode.Parse(TaskProtocolJson.Write(blocked.Readiness)),
+                        ["configAssessment"] = JsonNode.Parse(TaskProtocolJson.Write(blocked.Assessment)),
+                    },
+                };
+                return admissionOnly;
+            }
             if (_reducer is null) return null;
             var attempts = new JsonArray(_attempts.Select(a => a.DeepClone()).ToArray());
             if (_lifecycle == "running") attempts.Add(new JsonObject
@@ -288,6 +373,16 @@ internal sealed class TaskProtocolRun
                 }
                 var display = (localization with { PluginId = _spec.Script.PluginType, PluginVersion = _spec.PluginVersion }).Select(References(report));
                 report["displaySnapshot"] = JsonNode.Parse(TaskProtocolJson.Write(display));
+            }
+            if (_admissionBlocked is { } retryBlocked && _admissionPlan is not null)
+            {
+                report["admissionBlocked"] = new JsonObject
+                {
+                    ["reasonCode"] = "tasks.admission_blocked",
+                    ["message"] = retryBlocked.Message,
+                    ["readiness"] = JsonNode.Parse(TaskProtocolJson.Write(retryBlocked.Readiness)),
+                    ["configAssessment"] = JsonNode.Parse(TaskProtocolJson.Write(retryBlocked.Assessment)),
+                };
             }
             return report;
         }

@@ -67,7 +67,7 @@ MCP 的网络边界独立于 Web 的远程访问设置：Kestrel 只监听 loopb
 
 ## 控制面边界
 
-常驻服务持有 `RuntimeContext`、执行状态和持久化写入。公共初始化只读取约束和设置快照；服务与 Web-only 模式取得单实例互斥体后，统一进入 `HostedRuntimeInitializer`，由其完成实体加载、修复和恢复。Web 与 CLI 都是协议适配层：
+常驻服务由 `HostCompositionRoot` 装配并持有执行状态和持久化端口。公共初始化只读取约束和设置快照；服务与 Web-only 模式取得单实例互斥体后，统一进入 `HostedRuntimeInitializer`，由其完成实体加载、修复和恢复。Web 与 CLI 都是协议适配层：
 
 ```text
 Web 请求      ─┐

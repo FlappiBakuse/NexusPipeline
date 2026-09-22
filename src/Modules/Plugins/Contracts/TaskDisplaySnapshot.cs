@@ -14,7 +14,7 @@ internal sealed record TaskDisplaySnapshot(string PluginId, string PluginVersion
     internal static void ValidateReference(JsonObject? reference, string version)
     {
         if (reference is null) return;
-        TaskProtocolValidation.Require(version == "1.1", "text references require 1.1");
+        TaskProtocolValidation.Require(version is "1.1" or "1.2", "text references require 1.1 or 1.2");
         string? kind = reference["kind"]?.GetValue<string>();
         if (kind == "literal")
         {
@@ -53,7 +53,9 @@ internal sealed record TaskDisplaySnapshot(string PluginId, string PluginVersion
         if (reference is null) return fallback;
         try
         {
-            ValidateReference(reference, "1.1");
+            // Frozen TextRef syntax is shared by 1.1 and 1.2. The snapshot does not
+            // carry a protocol version, so validate the stable superset here.
+            ValidateReference(reference, "1.2");
             if (reference["kind"]!.GetValue<string>() == "literal") return reference["value"]!.GetValue<string>();
             var args = (JsonObject)reference["args"]!;
             string key = reference["key"]!.GetValue<string>();

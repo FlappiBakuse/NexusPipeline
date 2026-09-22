@@ -28,7 +28,13 @@ internal sealed class JintScriptHost
           input,
           readConfig: (id) => __taskResource(__nexusReadConfig(id)),
           readResource: (id) => __taskResource(__nexusReadResource(id)),
+          inspectDeclaredTarget: (id) => __taskInspection(__nexusInspectDeclaredTarget(id)),
         });
+        function __taskInspection(value) {
+          const result = JSON.parse(value);
+          if (!result.ok) throw new Error('environment_unavailable');
+          return result.value;
+        }
         """;
     private const string JudgeGlue = """
         const console = { log: (...args) => args.forEach(a => __nexusLog(typeof a === "string" ? a : JSON.stringify(a))) };

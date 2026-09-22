@@ -56,7 +56,15 @@ internal sealed class FrozenResolvedScriptSpecData
     {
         return new FrozenResolvedScriptSpecData
         {
-            TaskProtocol = spec.TaskProtocol is {} protocol ? protocol with { ReadResources = protocol.ReadResources.ToArray() } : null,
+            TaskProtocol = spec.TaskProtocol is {} protocol ? protocol with
+            {
+                ReadResources = protocol.ReadResources.ToArray(),
+                ConfigRules = protocol.ConfigRules.ToArray(),
+                EnvironmentChecks = protocol.EnvironmentChecks.Select(check => check with
+                {
+                    Selector = check.Selector is null ? null : (System.Text.Json.Nodes.JsonArray)check.Selector.DeepClone(),
+                }).ToArray(),
+            } : null,
             PluginVersion = spec.PluginVersion,
             ProfileHash = spec.ProfileHash,
             Error = spec.Error,
@@ -89,7 +97,15 @@ internal sealed class FrozenResolvedScriptSpecData
             ProfileHash,
             Error)
         {
-            TaskProtocol = TaskProtocol is {} protocol ? protocol with { ReadResources = protocol.ReadResources.ToArray() } : null,
+            TaskProtocol = TaskProtocol is {} protocol ? protocol with
+            {
+                ReadResources = protocol.ReadResources.ToArray(),
+                ConfigRules = protocol.ConfigRules.ToArray(),
+                EnvironmentChecks = protocol.EnvironmentChecks.Select(check => check with
+                {
+                    Selector = check.Selector is null ? null : (System.Text.Json.Nodes.JsonArray)check.Selector.DeepClone(),
+                }).ToArray(),
+            } : null,
             ExtraConfigPaths = ExtraConfigPaths,
             ConfigInputCandidates = ConfigInputCandidates,
             ConfigInputName = ConfigInputName,

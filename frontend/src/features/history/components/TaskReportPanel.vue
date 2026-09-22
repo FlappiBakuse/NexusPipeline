@@ -6,7 +6,7 @@ import NxpScrollArea from "../../../ui/primitives/NxpScrollArea.vue";
 import NxpDismissibleNotice from "../../../ui/composites/NxpDismissibleNotice.vue";
 import TaskPlanItem from "./TaskPlanItem.vue";
 import { resolveTaskText } from "../utils/taskText";
-import type { TaskDefinition, TaskPlan, TaskReport } from "../utils/taskTypes";
+import type { TaskConfigCheck, TaskDefinition, TaskPlan, TaskReport } from "../utils/taskTypes";
 const props = defineProps<{ plan?: TaskPlan; report?: TaskReport; layout?: "cards" | "steps"; stale?: boolean }>();
 const plan = computed(() => props.report?.originalPlan || props.plan);
 const tasks = computed(() => (plan.value?.tasks || []).filter(task => task.enabled).slice().sort((a, b) => a.order - b.order));
@@ -25,10 +25,13 @@ watch(() => [props.plan, props.stale], () => { noticeDismissed.value = false; })
 const focusTaskId = ref("");
 const businessTasks = computed(() => tasks.value.filter(task => !task.parentId && task.role === 'business' && task.countsAsUnit !== false));
 // Frozen Host summary is authoritative. Older reports without total use the same business predicate.
-const businessTotal = computed(() => props.report?.summary.counts.total ?? businessTasks.value.length);
-const finished = computed(() => props.report?.summary.counts.total !== undefined
-  ? (props.report.summary.counts.succeeded || 0) + (props.report.summary.counts.skipped || 0)
+const businessTotal = computed(() => props.report?.summary?.counts.total ?? businessTasks.value.length);
+const finished = computed(() => props.report?.summary?.counts.total !== undefined
+  ? (props.report?.summary?.counts.succeeded || 0) + (props.report?.summary?.counts.skipped || 0)
   : businessTasks.value.filter(task => ['succeeded', 'skipped'].includes(status(task.id))).length);
+const configChecks = computed(() => (plan.value?.configAssessment?.checks || []).filter(check =>
+  check.evaluation !== 'satisfied' && check.evaluation !== 'not_applicable'));
+const readiness = computed(() => plan.value?.currentReadiness);
 const unattributed = computed(() => {
   const latest = new Map<string, NonNullable<TaskReport['incidents']>[number]>();
   for (const event of props.report?.incidents || [])
@@ -64,6 +67,14 @@ function diagnosticOwnerName(id?: string | null) {
   return task ? taskName(task) : '';
 }
 function tone(value: string) { return value === "succeeded" || value === "skipped" ? "ok" : value === "failed" ? "bad" : value === "partial" ? "warn" : value === "running" ? "blue" : "muted"; }
+function readinessTone(value?: string) { return value === 'ready' ? 'ok' : value === 'blocked' ? 'bad' : value === 'attention' ? 'warn' : 'muted'; }
+function readinessLabel(value?: string) { return t(`tasks.readiness.${value || 'unknown'}`); }
+function configCheckText(check: TaskConfigCheck) {
+  return check.reasonText
+    ? resolveTaskText(check.reasonText, props.report?.displaySnapshot || plan.value?.displaySnapshot, getLocale(), check.ruleId)
+    : check.ruleId;
+}
+function configCheckLabel(check: TaskConfigCheck) { return t(`tasks.config.evaluation.${check.evaluation}`); }
 </script>
 <template>
   <section ref="panel" class="task-report" :aria-label="t('tasks.title')">
@@ -77,13 +88,34 @@ function tone(value: string) { return value === "succeeded" || value === "skippe
     </header>
     <p v-if="!plan" class="muted">{{ t('tasks.legacy') }}</p>
     <template v-else>
+      <div v-if="report?.admissionBlocked" class="task-admission-blocked" role="alert">
+        <strong>{{ t('tasks.admission_blocked') }}</strong>
+        <span>{{ t('tasks.admission_blocked_help') }}</span>
+      </div>
+      <section v-if="plan.configAssessment" class="task-config-assessment" :aria-label="t('tasks.config.title')">
+        <header class="task-config-header">
+          <strong>{{ t('tasks.config.title') }}</strong>
+          <NxpBadge :tone="readinessTone(readiness?.state)">{{ readinessLabel(readiness?.state) }}</NxpBadge>
+        </header>
+        <p v-if="readiness?.stale" class="task-config-meta">{{ t('tasks.config.stale') }}</p>
+        <ul v-if="configChecks.length" class="task-config-list">
+          <li v-for="check in configChecks" :key="check.ruleId + ':' + check.scope.kind + ':' + (check.scope.taskId || '')" :data-config-rule="check.ruleId">
+            <div class="task-config-row">
+              <span>{{ configCheckText(check) }}</span>
+              <NxpBadge :tone="check.executionEffect === 'block' ? 'bad' : check.executionEffect === 'warn' ? 'warn' : 'muted'">{{ configCheckLabel(check) }}</NxpBadge>
+            </div>
+            <small>{{ check.ruleId }}</small>
+          </li>
+        </ul>
+        <p v-else class="task-config-meta">{{ t('tasks.config.clear') }}</p>
+      </section>
       <ul v-if="diagnostics.length" class="task-plan-notes" :aria-label="t('tasks.plan_notes')">
         <li v-for="(item, index) in diagnostics" :key="index">
           <span v-if="diagnosticOwnerName(item.taskId)">{{ diagnosticOwnerName(item.taskId) }} · </span>
           {{ item.reasonText ? resolveTaskText(item.reasonText, report?.displaySnapshot || plan.displaySnapshot, getLocale(), item.message) : item.message }}
         </li>
       </ul>
-      <p v-if="report?.summary.recovered && layout !== 'steps'" class="task-notice">{{ t('tasks.recovered') }}</p>
+      <p v-if="report?.summary?.recovered && layout !== 'steps'" class="task-notice">{{ t('tasks.recovered') }}</p>
       <p v-if="!tasks.length" class="muted">{{ t('tasks.empty') }}</p>
       <div v-if="layout !== 'steps'" class="task-list">
         <TaskPlanItem v-for="task in roots" :key="task.id" :task="task" :tasks="plan.tasks" :report="report" :display-snapshot="report?.displaySnapshot || plan.displaySnapshot" :focus-task-id="focusTaskId" />
@@ -114,6 +146,18 @@ function tone(value: string) { return value === "succeeded" || value === "skippe
 </template>
 <style scoped>
 .task-report { min-width: 0; overflow-wrap: anywhere; }
+.task-admission-blocked, .task-config-assessment { margin: 0 0 12px; padding: 12px; border: 1px solid var(--nx-color-border); border-radius: var(--nx-radius-md); background: var(--content-card-soft); }
+.task-admission-blocked { display: grid; gap: 4px; color: var(--bad); }
+.task-admission-blocked span { color: var(--nx-color-muted); font-size: 12px; }
+.task-config-header, .task-config-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.task-config-header { min-height: 24px; }
+.task-config-list { display: grid; gap: 6px; margin: 10px 0 0; padding: 0; list-style: none; }
+.task-config-list li { padding: 8px 0; border-top: 1px solid var(--nx-color-border); }
+.task-config-list li:first-child { border-top: 0; }
+.task-config-list span { min-width: 0; overflow-wrap: anywhere; }
+.task-config-list small, .task-config-meta { color: var(--nx-color-muted); font-size: 12px; }
+.task-config-list small { display: block; margin-top: 3px; }
+.task-config-meta { margin: 8px 0 0; }
 .task-plan-notes { margin: 0 0 12px; padding-inline-start: 20px; font-size: 12px; line-height: 1.6; color: var(--nx-color-muted); overflow-wrap: anywhere; }
 .task-footnote figure { margin: 8px 0; }
 .task-footnote pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }

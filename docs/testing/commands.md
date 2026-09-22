@@ -26,6 +26,8 @@ node tests\run.mjs release update-acceptance
 
 统一 runner 会在对应 Gate 首次运行前执行 `npm ci --no-audit --no-fund`，并要求每个工作区存在 `package-lock.json`；依赖准备失败会直接终止 Gate，不会降级为跳过。
 
+`release core` 的最后一项是架构门禁：对 production 和 Test Host 真实加载 MSBuild/Roslyn 工程执行 `check`，随后生成 `.generated/architecture/backend-map.json`，校验 schema、非空源码集合、owner 路径和预期模式，重复生成结果必须一致；当前 run 的 artifact 中同时保存带候选 SHA 的地图副本。地图不是宿主运行时或 `release/` 的输入。
+
 `tooling` 递归发现并运行现役 Node 工具测试和 `tools/tests/test_*.py`，同时覆盖前端边界、源码编码、更新策略、资格控制与原生报告解析。
 
 统一 runner 保留实时 stdout/stderr、退出码、超时信息和原生 TAP/TRX/Vitest/Playwright 报告。每次运行的报告位于 `tests/.artifacts/runs/<runId>/reports/`；失败时不删除唯一原始报告。

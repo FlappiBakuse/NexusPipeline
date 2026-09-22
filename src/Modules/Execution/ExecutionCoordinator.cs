@@ -117,6 +117,45 @@ internal sealed class ExecutionCoordinator : RunSession
             && !(spec?.SelfManagedPcLaunch == true && !EmulatorSupport.IsEmulator(script));
     }
 
+    private TaskExecutionContext CreateTaskExecutionContext(string userId, string trigger) =>
+        CreateTaskExecutionContext(_script, _resolvedSpec, userId, trigger, _queueId);
+
+    /// <summary>
+    /// Builds the immutable execution facts shared by real runs and read-only task previews.
+    /// Keeping this in one place is important because configuration target checks compare
+    /// plugin-owned paths with the bound ScriptInstance.GameExe.
+    /// </summary>
+    internal static TaskExecutionContext CreateTaskExecutionContext(
+        ScriptInstance script,
+        ResolvedScriptSpec? resolvedSpec,
+        string userId,
+        string trigger,
+        string? queueId = null)
+    {
+        string mode = EmulatorSupport.IsEmulator(script)
+            ? "emulator"
+            : script.GameMode is "pc" or "cloud" ? script.GameMode : "pc";
+        bool hasGameTarget = !string.IsNullOrWhiteSpace(script.GameExe);
+        string targetKind = !hasGameTarget ? "none" : mode == "emulator" ? "adb_endpoint" : "executable";
+        string launchOwner = !script.LaunchGame
+            ? "already_running"
+            : ShouldHostLaunchGame(script, resolvedSpec) ? "host" : "upstream";
+        string queueKind = string.IsNullOrWhiteSpace(queueId) ? "standalone" : "queue";
+        string following = string.IsNullOrWhiteSpace(queueId) ? "no" : "unknown";
+        bool hostWillCloseGame = script.ForceCloseGame && !(resolvedSpec?.SelfManagedPcLaunch == true);
+        return new TaskExecutionContext(
+            userId,
+            script.Id,
+            userId + ":" + script.Id,
+            trigger,
+            mode,
+            launchOwner,
+            new TaskGameTarget(targetKind, hasGameTarget ? script.GameExe : null, null),
+            new TaskQueueContext(queueKind, following),
+            new TaskCleanupContext(true, hostWillCloseGame, "none"),
+            new TaskEffectiveLaunch(script.Id, script.LaunchGame, null, null, null));
+    }
+
     /// <summary>按本次实际解析出的有效判定配置决定是否需要最近 PC 帧缓存。</summary>
     internal static bool NeedsRecentPcScreenshotCache(ScriptInstance script, ResolvedScriptSpec? spec)
     {
@@ -191,7 +230,8 @@ internal sealed class ExecutionCoordinator : RunSession
         }
         _activeUser = user;
         if (_resolvedSpec?.TaskProtocol is not null)
-            TaskProtocolRun = new TaskProtocolRun(_resolvedSpec, record.Id, record.UserId) { Changed = report =>
+            TaskProtocolRun = new TaskProtocolRun(_resolvedSpec, record.Id, record.UserId,
+                executionContext: CreateTaskExecutionContext(record.UserId, "pre_launch")) { Changed = report =>
             {
                 var checkpoint = record.Clone(); checkpoint.TaskReport = report;
                 TaskCheckpointChanged?.Invoke(checkpoint);
@@ -239,6 +279,40 @@ internal sealed class ExecutionCoordinator : RunSession
                     record.ResultDetail = $"用户配置加载失败：{prepError}";
                     record.ResultCode = "run.user_config_load_failed";
                     Logger.Error($"[错误] 脚本「{_script.Name}」用户「{user.UserName}」配置加载失败：{prepError}");
+                    return record;
+                }
+            }
+
+            if (TaskProtocolRun is not null)
+            {
+                try
+                {
+                    await TaskProtocolRun.PreflightAsync(OperationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    record.Status = "cancelled";
+                    record.EndTime = DateTime.Now;
+                    record.ResultDetail = "任务发现已取消";
+                    record.ResultCode = "run.cancelled";
+                    return record;
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warn($"[专项任务] 配置发现失败：{ex.GetType().Name}");
+                    record.Status = "failed";
+                    record.EndTime = DateTime.Now;
+                    record.ResultDetail = "无法建立可信任务计划";
+                    record.ResultCode = "tasks.discovery_failed";
+                    return record;
+                }
+                if (TaskProtocolRun.IsAdmissionBlocked)
+                {
+                    record.Status = "blocked";
+                    record.EndTime = DateTime.Now;
+                    record.ResultDetail = "配置检查未通过，未启动脚本或游戏";
+                    record.ResultCode = "tasks.admission_blocked";
+                    record.TaskReport = TaskProtocolRun.Snapshot();
                     return record;
                 }
             }
@@ -312,7 +386,7 @@ internal sealed class ExecutionCoordinator : RunSession
                     result = await RunAttemptCoreAsync(attempt).ConfigureAwait(false);
                 }
 
-                if (mainExecuted && result.Status != "cancelled"
+                if (mainExecuted && result.Status != "cancelled" && TaskProtocolRun?.IsAdmissionBlocked != true
                     && user is not null && !string.IsNullOrWhiteSpace(user.Binding.PostRunScript)
                     && (TaskProtocolRun is not null ? !user.Binding.PostRunOnFinalOnly : AttemptLifecycle.ShouldRunPostRun(
                         user.Binding.PostRunOnFinalOnly,
@@ -344,7 +418,7 @@ internal sealed class ExecutionCoordinator : RunSession
                             taskRetry = false;
                         }
                     }
-                    if (!taskRetry && mainExecuted && result.Status != "cancelled"
+                    if (!taskRetry && mainExecuted && result.Status != "cancelled" && !TaskProtocolRun.IsAdmissionBlocked
                         && user?.Binding.PostRunOnFinalOnly == true && !string.IsNullOrWhiteSpace(user.Binding.PostRunScript))
                     {
                         var postResult = await RunUserScriptCoreAsync(user.Binding.PostRunScript, "任务后", attempt, OperationToken).ConfigureAwait(false);
@@ -354,6 +428,18 @@ internal sealed class ExecutionCoordinator : RunSession
                             TaskProtocolRun.SetFinalLifecycleFailure(result.Status == "cancelled");
                         }
                     }
+                }
+                if (TaskProtocolRun?.IsAdmissionBlocked == true && TaskProtocolRun.AdmissionBlockedBeforeAttempt)
+                {
+                    record.AttemptDetails.Remove(attempt);
+                    record.Attempts = 0;
+                    record.Status = "blocked";
+                    record.EndTime = DateTime.Now;
+                    record.ResultDetail = "配置检查未通过，未启动脚本或游戏";
+                    record.ResultCode = "tasks.admission_blocked";
+                    Results.CompleteAttempt();
+                    record.TaskReport = TaskProtocolRun.Snapshot();
+                    break;
                 }
                 attempt.EndTime = DateTime.Now;
                 attempt.Status = result.Status;
@@ -472,6 +558,17 @@ internal sealed class ExecutionCoordinator : RunSession
         {
             try { await TaskProtocolRun.BeginAsync(attempt.Number, OperationToken).ConfigureAwait(false); }
             catch (OperationCanceledException) { return RunAttemptResult.Cancelled("任务发现已取消"); }
+            catch (TaskAdmissionBlockedException)
+            {
+                Logger.Info("[专项任务] 配置检查未通过，未启动脚本或游戏");
+                return new RunAttemptResult
+                {
+                    Status = "blocked",
+                    Reason = "配置检查未通过，未启动脚本或游戏",
+                    ReasonCode = "tasks.admission_blocked",
+                    IsFatal = true,
+                };
+            }
             catch (Exception ex)
             {
                 Logger.Warn($"[专项任务] 配置发现失败：{ex.GetType().Name}");
