@@ -6,10 +6,10 @@ internal static class TaskProtocolValidation
 {
     internal static void Discovery(TaskDiscovery discovery)
     {
-        Require(discovery.ProtocolVersion == "1.0" && discovery.Type == "discovery", "discovery envelope");
+        Require(discovery.ProtocolVersion is "1.0" or "1.1" && discovery.Type == "discovery", "discovery envelope");
         Require(discovery.Coverage is "complete" or "partial" or "unsupported", "coverage");
         Require(discovery.Tasks is { Length: <= 1024 }, "task count");
-        Diagnostics(discovery.Diagnostics);
+        Diagnostics(discovery.Diagnostics, discovery.ProtocolVersion);
         Require(discovery.SelectionFields is { Length: <= 2048 }, "selection field count");
         var fields = new HashSet<string>(StringComparer.Ordinal);
         Require(discovery.BehaviorFields is { Length: <= 2048 }, "behavior field count");
@@ -49,6 +49,7 @@ internal static class TaskProtocolValidation
         {
             Require(task is not null, "null task");
             Text(task.Id); Text(task.Name); Text(task.SourceKey); Text(task.RetryUnitId);
+            TaskDisplaySnapshot.ValidateReference(task.NameText, discovery.ProtocolVersion);
             Require(tasks.TryAdd(task.Id, task), "duplicate task identity");
             Require(task.Role is "business" or "technical" or "cleanup", "role");
             Require(task.RetryRisk is "safe" or "conditional" or "unsafe" or "unknown", "risk");
@@ -89,22 +90,40 @@ internal static class TaskProtocolValidation
     internal static void Observation(TaskObservationBatch batch, string runId, string attemptId,
         IReadOnlySet<string> selected, IReadOnlySet<(string, int, long)> evidence)
     {
-        Require(batch.ProtocolVersion == "1.0" && batch.Type == "observation" && batch.RunId == runId && batch.AttemptId == attemptId, "observation identity");
+        Require(batch.ProtocolVersion is "1.0" or "1.1" && batch.Type == "observation" && batch.RunId == runId && batch.AttemptId == attemptId, "observation identity");
         Require(batch.Observations is { Length: <= 2048 }, "observation count");
         Require(batch.RunBoundary is "open" or "ended" or "aborted" or "unknown", "boundary");
         Evidence(batch.BoundaryEvidence, evidence, batch.RunBoundary is "ended" or "aborted");
-        Diagnostics(batch.Diagnostics);
+        Diagnostics(batch.Diagnostics, batch.ProtocolVersion);
         Require(batch.CursorState is null || System.Text.Encoding.UTF8.GetByteCount(batch.CursorState.ToJsonString()) <= 64 * 1024, "adapter cursor limit");
         var ids = new HashSet<string>(StringComparer.Ordinal);
         foreach (var observation in batch.Observations)
         {
             Require(observation is not null, "null observation");
             Text(observation.Id); Text(observation.TaskId); Text(observation.ReasonCode);
+            TaskDisplaySnapshot.ValidateReference(observation.ReasonText, batch.ProtocolVersion);
             Require(ids.Add(observation.Id) && selected.Contains(observation.TaskId), "observation task/id");
             Require(observation.ExecutionOrdinal > 0, "execution ordinal");
             Require(observation.Status is "running" or "succeeded" or "failed" or "skipped" or "blocked" or "unknown", "observation status");
             Require(observation.Status != "skipped" || observation.SkipKind is "satisfied" or "inapplicable", "skip kind");
             Evidence(observation.Evidence, evidence, observation.Status is not "unknown");
+        }
+        if (batch.Incidents is { } incidents)
+        {
+            Require(batch.ProtocolVersion == "1.1" && incidents.Length <= 2048, "incident version/count");
+            var events = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var incident in incidents)
+            {
+                Require(incident is not null, "null incident");
+                Text(incident.Id); Text(incident.ScopeId); Text(incident.ReasonCode);
+                Require(incident.TaskId is null || selected.Contains(incident.TaskId), "incident task");
+                Require(incident.ExecutionOrdinal > 0 && incident.Kind is "transient_error" or "business_error" or "unattributed_error", "incident kind/ordinal");
+                Require(incident.Kind != "unattributed_error" || incident.TaskId is null, "unattributed incident task");
+                Require(incident.Resolution is "open" or "recovered" or "terminal", "incident resolution");
+                Require(events.Add(incident.Id + "\n" + incident.Resolution), "duplicate incident event");
+                TaskDisplaySnapshot.ValidateReference(incident.ReasonText, batch.ProtocolVersion);
+                Evidence(incident.Evidence, evidence, true);
+            }
         }
     }
 
@@ -119,13 +138,14 @@ internal static class TaskProtocolValidation
         }
     }
 
-    private static void Diagnostics(TaskDiagnostic[] items)
+    private static void Diagnostics(TaskDiagnostic[] items, string version)
     {
         Require(items is { Length: <= 128 }, "diagnostic count");
         foreach (var item in items)
         {
             Require(item is not null, "null diagnostic");
             Text(item.Code); Text(item.Message);
+            TaskDisplaySnapshot.ValidateReference(item.ReasonText, version);
             if (item.TaskId is not null) Text(item.TaskId);
         }
     }

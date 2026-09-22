@@ -16,9 +16,30 @@ internal static class TaskProtocolManifest
                 throw new InvalidDataException("taskProtocol requires data-specialized");
             if (manifest["taskProtocol"] is not JsonObject protocol)
                 throw new InvalidDataException("taskProtocol must be an object");
-            Fields(protocol, "version", "discoverScript", "retryScript", "readResources");
-            if (protocol["version"]?.GetValue<string>() != "1.0")
+            string? version = protocol["version"]?.GetValue<string>();
+            if (version is not ("1.0" or "1.1"))
                 throw new InvalidDataException("unsupported taskProtocol.version");
+            if (version == "1.0") Fields(protocol, "version", "discoverScript", "retryScript", "readResources");
+            else
+            {
+                Fields(protocol, "version", "discoverScript", "retryScript", "readResources", "localization");
+                if (protocol["localization"] is not JsonObject localization) throw new InvalidDataException("localization required");
+                Fields(localization, "defaultLocale", "messages");
+                if (localization["messages"] is not JsonObject { Count: > 0 and <= 16 } messages
+                    || !messages.ContainsKey(localization["defaultLocale"]?.GetValue<string>() ?? ""))
+                    throw new InvalidDataException("invalid localization locales");
+                if (messages.Select(p => p.Key).Distinct(StringComparer.OrdinalIgnoreCase).Count() != messages.Count)
+                    throw new InvalidDataException("duplicate localization locale");
+                foreach (var (locale, asset) in messages)
+                {
+                    if (!System.Text.RegularExpressions.Regex.IsMatch(locale, "^[A-Za-z]{2,8}(-[A-Za-z0-9]{1,8})*$"))
+                        throw new InvalidDataException("invalid localization locale");
+                    string? path = asset?.GetValue<string>();
+                    RelativePath(path);
+                    if (!path!.StartsWith("data/", StringComparison.Ordinal) || !path.EndsWith(".json", StringComparison.Ordinal))
+                        throw new InvalidDataException("localization requires data/*.json");
+                }
+            }
             if (!PluginRepositoryCatalog.TryParseVersion(manifest["minHostVersion"]?.GetValue<string>() ?? "", out var minimum)
                 || !PluginRepositoryCatalog.TryParseVersion("0.16.8", out var required)
                 || minimum.CompareTo(required) < 0)
@@ -55,9 +76,9 @@ internal static class TaskProtocolManifest
     {
         if (!TryValidate(manifest, out string? error)) throw new InvalidDataException(error);
         if (manifest["taskProtocol"] is not JsonObject protocol) return null;
-        string Read(string relative)
+        string Read(string relative, bool script = true)
         {
-            ScriptPath(relative);
+            if (script) ScriptPath(relative); else RelativePath(relative);
             string root = Path.GetFullPath(directory);
             string path = Path.GetFullPath(Path.Combine(root, relative));
             for (string? current = path; current is not null; current = Path.GetDirectoryName(current))
@@ -66,17 +87,36 @@ internal static class TaskProtocolManifest
                     throw new InvalidDataException("taskProtocol scripts cannot use reparse points");
                 if (string.Equals(current, root, StringComparison.OrdinalIgnoreCase)) break;
             }
-            if (new FileInfo(path).Length > 2 * 1024 * 1024) throw new InvalidDataException("taskProtocol script too large");
+            if (new FileInfo(path).Length > (script ? 2 * 1024 * 1024 : TaskDisplaySnapshot.ByteBudget)) throw new InvalidDataException("taskProtocol asset too large");
             string source = File.ReadAllText(path);
             if (string.IsNullOrWhiteSpace(source)) throw new InvalidDataException("taskProtocol script empty");
-            if (source.Contains("__NXP_ADAPTATION_REQUIRED__", StringComparison.Ordinal)) throw new InvalidDataException("taskProtocol adapter template is incomplete");
+            if (script && source.Contains("__NXP_ADAPTATION_REQUIRED__", StringComparison.Ordinal)) throw new InvalidDataException("taskProtocol adapter template is incomplete");
             return source;
         }
-        return new("1.0", Read(protocol["discoverScript"]!.GetValue<string>()),
+        TaskDisplaySnapshot? frozen = null;
+        if (protocol["localization"] is JsonObject localization)
+        {
+            var messages = new Dictionary<string, Dictionary<string, string>>(StringComparer.Ordinal);
+            int bytes = 0;
+            foreach (var (locale, path) in ((JsonObject)localization["messages"]!).OrderBy(p => p.Key, StringComparer.Ordinal))
+            {
+                string source = Read(path!.GetValue<string>(), false);
+                bytes += System.Text.Encoding.UTF8.GetByteCount(source);
+                if (bytes > TaskDisplaySnapshot.ByteBudget) throw new InvalidDataException("localization budget exceeded");
+                var entries = TaskProtocolJson.Read<Dictionary<string, string>>(source);
+                if (entries.Count > 4096 || entries.Any(p => !System.Text.RegularExpressions.Regex.IsMatch(p.Key, "^[A-Za-z0-9_.-]{1,160}$") || p.Value is not { Length: > 0 and <= 2048 }))
+                    throw new InvalidDataException("invalid localization messages");
+                messages.Add(locale, entries.OrderBy(p => p.Key, StringComparer.Ordinal).ToDictionary(p => p.Key, p => p.Value));
+            }
+            string hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(
+                TaskProtocolJson.Write(new { defaultLocale = localization["defaultLocale"]!.GetValue<string>(), messages })))).ToLowerInvariant();
+            frozen = new("", "", localization["defaultLocale"]!.GetValue<string>(), hash, messages);
+        }
+        return new(protocol["version"]!.GetValue<string>(), Read(protocol["discoverScript"]!.GetValue<string>()),
             Read(manifest["judgeScript"]!.GetValue<string>()), Read(protocol["retryScript"]!.GetValue<string>()),
             ((JsonArray)protocol["readResources"]!).Select(r => new TaskReadResource(
                 r!["id"]!.GetValue<string>(), r["source"]!.GetValue<string>(), r["path"]!.GetValue<string>(),
-                r["format"]!.GetValue<string>(), r["required"]!.GetValue<bool>())).ToArray());
+                r["format"]!.GetValue<string>(), r["required"]!.GetValue<bool>())).ToArray()) { Localization = frozen };
     }
 
     private static void Fields(JsonObject obj, params string[] fields)

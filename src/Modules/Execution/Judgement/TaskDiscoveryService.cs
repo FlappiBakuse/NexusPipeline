@@ -13,10 +13,11 @@ internal static class TaskDiscoveryService
         string pluginId, string pluginVersion, string userId, string scriptId, string locale, bool preview, CancellationToken token)
     {
         var result = await TaskProtocolScriptRunner.ExecuteAsync<TaskDiscovery>(protocol.DiscoverScript,
-            new { protocolVersion = "1.0", phase = "discover", origin = preview ? "preview" : "run",
+            new { protocolVersion = protocol.Version, phase = "discover", origin = preview ? "preview" : "run",
                 pluginId, userId, scriptInstanceId = scriptId, configResources = view.ConfigResources, locale },
             view.ReadConfig, view.ReadResource, preview, token).ConfigureAwait(false);
         TaskProtocolValidation.Discovery(result);
+        TaskProtocolValidation.Require(result.ProtocolVersion == protocol.Version, "negotiated discovery version");
         var behavior = result.BehaviorFields.Select(field =>
         {
             var resource = view.Snapshot(field.ResourceId);
@@ -25,11 +26,13 @@ internal static class TaskDiscoveryService
         }).OrderBy(field => field.ResourceId, StringComparer.Ordinal).ThenBy(field => field.Selector.ToJsonString(), StringComparer.Ordinal).ToArray();
         view.VerifyUnchanged();
         string signature = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(TaskProtocolJson.Write(new
-        { pluginId, pluginVersion, result.Coverage, result.Tasks, result.SelectionFields, behavior })))).ToLowerInvariant();
-        return new("1.0", Guid.NewGuid().ToString("N"), preview ? "preview" : "run", pluginId,
+        { pluginId, pluginVersion, result.Coverage, Tasks = result.Tasks.Select(t => t with { Name = "", NameText = null }), result.SelectionFields, behavior })))).ToLowerInvariant();
+        return new(protocol.Version, Guid.NewGuid().ToString("N"), preview ? "preview" : "run", pluginId,
             pluginVersion, DateTimeOffset.UtcNow, signature, result.Coverage,
             TaskProtocolJson.Copy(result.Tasks), TaskProtocolJson.Copy(result.Diagnostics))
         { SelectionFields = TaskProtocolJson.Copy(result.SelectionFields),
+            DisplaySnapshot = protocol.Localization is { } texts ? (texts with { PluginId = pluginId, PluginVersion = pluginVersion })
+                .Select(result.Tasks.Select(t => t.NameText).Concat(result.Diagnostics.Select(d => d.ReasonText))) : null,
             BehaviorSignature = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(TaskProtocolJson.Write(behavior)))).ToLowerInvariant() };
     }
 

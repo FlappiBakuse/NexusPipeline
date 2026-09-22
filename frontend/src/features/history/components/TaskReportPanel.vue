@@ -1,24 +1,42 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
-import { t } from "../../../platform/i18n";
+import { getLocale, t } from "../../../platform/i18n";
 import NxpBadge from "../../../ui/primitives/NxpBadge.vue";
 import NxpScrollArea from "../../../ui/primitives/NxpScrollArea.vue";
 import NxpDismissibleNotice from "../../../ui/composites/NxpDismissibleNotice.vue";
 import TaskPlanItem from "./TaskPlanItem.vue";
-import { taskNameKeys } from "../utils/taskLabels";
+import { resolveTaskText } from "../utils/taskText";
 import type { TaskDefinition, TaskPlan, TaskReport } from "../utils/taskTypes";
 const props = defineProps<{ plan?: TaskPlan; report?: TaskReport; layout?: "cards" | "steps"; stale?: boolean }>();
 const plan = computed(() => props.report?.originalPlan || props.plan);
 const tasks = computed(() => (plan.value?.tasks || []).filter(task => task.enabled).slice().sort((a, b) => a.order - b.order));
 const roots = computed(() => tasks.value.filter(task => !task.parentId || !tasks.value.some(parent => parent.id === task.parentId)));
+const diagnostics = computed(() => {
+  const unique = new Map<string, TaskPlan['diagnostics'][number]>();
+  for (const item of [...(plan.value?.diagnostics || []), ...(props.report?.diagnostics || [])]) {
+    const owner = plan.value?.tasks.find(task => task.id === item.taskId);
+    if (owner && !owner.enabled) continue;
+    unique.set(JSON.stringify([item.code, item.taskId, item.message, item.reasonText]), item);
+  }
+  return [...unique.values()];
+});
 const noticeDismissed = ref(false);
 watch(() => [props.plan, props.stale], () => { noticeDismissed.value = false; });
 const focusTaskId = ref("");
-const finished = computed(() => tasks.value.filter(task => ['succeeded', 'skipped'].includes(status(task.id))).length);
+const businessTasks = computed(() => tasks.value.filter(task => !task.parentId && task.role === 'business' && task.countsAsUnit !== false));
+// Frozen Host summary is authoritative. Older reports without total use the same business predicate.
+const businessTotal = computed(() => props.report?.summary.counts.total ?? businessTasks.value.length);
+const finished = computed(() => props.report?.summary.counts.total !== undefined
+  ? (props.report.summary.counts.succeeded || 0) + (props.report.summary.counts.skipped || 0)
+  : businessTasks.value.filter(task => ['succeeded', 'skipped'].includes(status(task.id))).length);
+const unattributed = computed(() => {
+  const latest = new Map<string, NonNullable<TaskReport['incidents']>[number]>();
+  for (const event of props.report?.incidents || [])
+    if (event.incident.taskId === null) latest.set(event.attemptId + ':' + event.incident.id, event);
+  return [...latest.values()];
+});
 function taskName(task: TaskDefinition) {
-  // Runtime/custom labels are content: only translate names from the reviewed built-in adapters.
-  if (!/^(march7th|zzzonedragon|baah|bettergi):/.test(task.id)) return task.name;
-  return t(`tasks.name.${taskNameKeys[task.name] || "custom"}`, {}, task.name);
+  return task.nameText ? resolveTaskText(task.nameText, props.report?.displaySnapshot || plan.value?.displaySnapshot, getLocale(), task.name) : task.name;
 }
 
 const panel = ref<HTMLElement | null>(null);
@@ -38,6 +56,13 @@ watch(() => props.report, async report => {
   focus?.scrollIntoView?.({ block: "nearest" });
 }, { immediate: true });
 function status(id: string) { return props.report?.finalTaskResults.find(r => r.taskId === id)?.status || "pending"; }
+function incidentEvidence(attemptId: string, sourceId: string, epoch: number, sequence: number) {
+  return props.report?.evidenceLines?.find(line => line.attemptId === attemptId && line.sourceId === sourceId && line.epoch === epoch && line.sequence === sequence)?.text || t('tasks.evidence_unavailable');
+}
+function diagnosticOwnerName(id?: string | null) {
+  const task = plan.value?.tasks.find(task => task.id === id);
+  return task ? taskName(task) : '';
+}
 function tone(value: string) { return value === "succeeded" || value === "skipped" ? "ok" : value === "failed" ? "bad" : value === "partial" ? "warn" : value === "running" ? "blue" : "muted"; }
 </script>
 <template>
@@ -47,15 +72,21 @@ function tone(value: string) { return value === "succeeded" || value === "skippe
       <p v-if="plan.coverage !== 'complete'" class="task-warning-copy">{{ t('tasks.coverage_help') }}</p>
     </NxpDismissibleNotice>
     <header class="task-report-header">
-      <div><h3>{{ t('tasks.title') }}</h3><p v-if="plan">{{ t(report ? 'tasks.progress' : 'tasks.enabled_count', { count: tasks.length, done: finished }) }}</p></div>
+      <div><h3>{{ t('tasks.title') }}</h3><p v-if="plan">{{ t(report ? 'tasks.progress' : 'tasks.enabled_count', { count: businessTotal, done: finished }) }}</p></div>
       <NxpBadge v-if="plan && layout !== 'steps'" :tone="plan.coverage === 'complete' ? 'ok' : 'muted'">{{ t(`tasks.coverage.${plan.coverage}`) }}</NxpBadge>
     </header>
     <p v-if="!plan" class="muted">{{ t('tasks.legacy') }}</p>
     <template v-else>
+      <ul v-if="diagnostics.length" class="task-plan-notes" :aria-label="t('tasks.plan_notes')">
+        <li v-for="(item, index) in diagnostics" :key="index">
+          <span v-if="diagnosticOwnerName(item.taskId)">{{ diagnosticOwnerName(item.taskId) }} · </span>
+          {{ item.reasonText ? resolveTaskText(item.reasonText, report?.displaySnapshot || plan.displaySnapshot, getLocale(), item.message) : item.message }}
+        </li>
+      </ul>
       <p v-if="report?.summary.recovered && layout !== 'steps'" class="task-notice">{{ t('tasks.recovered') }}</p>
       <p v-if="!tasks.length" class="muted">{{ t('tasks.empty') }}</p>
       <div v-if="layout !== 'steps'" class="task-list">
-        <TaskPlanItem v-for="task in roots" :key="task.id" :task="task" :tasks="plan.tasks" :report="report" :focus-task-id="focusTaskId" />
+        <TaskPlanItem v-for="task in roots" :key="task.id" :task="task" :tasks="plan.tasks" :report="report" :display-snapshot="report?.displaySnapshot || plan.displaySnapshot" :focus-task-id="focusTaskId" />
       </div>
       <NxpScrollArea v-else-if="layout === 'steps'" direction="horizontal" :aria-label="t('tasks.title')">
         <ol class="task-steps">
@@ -67,11 +98,25 @@ function tone(value: string) { return value === "succeeded" || value === "skippe
         </ol>
       </NxpScrollArea>
       <p v-if="report && layout !== 'steps' && plan.coverage !== 'complete'" class="task-footnote">{{ t('tasks.coverage_help') }}</p>
+      <div v-if="layout !== 'steps' && unattributed.length" class="task-footnote">
+        <p>{{ t('tasks.incident.unattributed') }}</p>
+        <div v-for="event in unattributed" :key="event.attemptId + ':' + event.incident.id">
+          <p>{{ event.incident.reasonText
+            ? resolveTaskText(event.incident.reasonText, report?.displaySnapshot, getLocale(), event.incident.reasonCode) : event.incident.reasonCode }}</p>
+          <figure v-for="proof in event.incident.evidence" :key="`${proof.sourceId}:${proof.epoch}:${proof.sequence}:${proof.ruleId}`">
+            <figcaption>{{ t('tasks.evidence') }} · {{ proof.sourceId }} / {{ proof.epoch }} / {{ proof.sequence }}</figcaption>
+            <pre>{{ incidentEvidence(event.attemptId, proof.sourceId, proof.epoch, proof.sequence) }}</pre>
+          </figure>
+        </div>
+      </div>
     </template>
   </section>
 </template>
 <style scoped>
 .task-report { min-width: 0; overflow-wrap: anywhere; }
+.task-plan-notes { margin: 0 0 12px; padding-inline-start: 20px; font-size: 12px; line-height: 1.6; color: var(--nx-color-muted); overflow-wrap: anywhere; }
+.task-footnote figure { margin: 8px 0; }
+.task-footnote pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
 .task-warning-copy { margin: 0; } .task-warning-copy + .task-warning-copy { margin-top: 6px; }
 .task-report-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 0 12px; flex-wrap: wrap; }
 h3 { margin: 0; font-size: 14px; } .task-report-header p { margin: 5px 0 0; color: var(--nx-color-muted); font-size: 12px; }

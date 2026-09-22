@@ -4,10 +4,15 @@ using NexusPipeline.Modules.Plugins.Contracts;
 namespace NexusPipeline.Modules.Execution.Judgement;
 
 internal sealed record TaskEffectiveResult(string TaskId, string Status, string ReasonCode,
-    string LastAttemptId, int ExecutionOrdinal, TaskEvidence[] Evidence);
+    string LastAttemptId, int ExecutionOrdinal, TaskEvidence[] Evidence)
+{
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public System.Text.Json.Nodes.JsonObject? ReasonText { get; init; }
+}
 internal sealed record TaskSummary(string Tone, string Outcome, Dictionary<string, int> Counts, bool Recovered);
 internal sealed record TaskRetrySelection(string Decision, string ReasonCode, string[] IncludedTaskIds,
     string[] PrerequisiteTaskIds, string[] ExpandedUnitIds);
+internal sealed record TaskIncidentEvent(string AttemptId, TaskIncident Incident);
 
 /// <summary>One run, one owner. Every accepted fact belongs to a host-generated attempt/log identity.</summary>
 internal sealed class TaskRunReducer
@@ -16,6 +21,10 @@ internal sealed class TaskRunReducer
     private readonly Dictionary<string, TaskDefinition> _tasks;
     private readonly Dictionary<string, TaskEffectiveResult> _effective = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> _accepted = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, TaskIncident> _incidents = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _incidentReplays = new(StringComparer.Ordinal);
+    private readonly List<TaskIncidentEvent> _incidentHistory = [];
+    private int _incidentBytes;
     private HashSet<string> _selected = new(StringComparer.Ordinal);
     private HashSet<(string, int, long)> _evidence = new();
     private string _attemptId = "";
@@ -28,7 +37,7 @@ internal sealed class TaskRunReducer
     internal TaskRunReducer(string runId, TaskPlan plan)
     {
         _plan = TaskProtocolJson.Copy(plan);
-        TaskProtocolValidation.Discovery(new TaskDiscovery { ProtocolVersion = "1.0", Type = "discovery",
+        TaskProtocolValidation.Discovery(new TaskDiscovery { ProtocolVersion = plan.ProtocolVersion, Type = "discovery",
             Coverage = plan.Coverage, Tasks = plan.Tasks, Diagnostics = plan.Diagnostics });
         _tasks = _plan.Tasks.ToDictionary(t => t.Id, StringComparer.Ordinal);
         RunId = runId;
@@ -37,6 +46,7 @@ internal sealed class TaskRunReducer
 
     internal TaskPlan OriginalPlan => TaskProtocolJson.Copy(_plan);
     internal TaskEffectiveResult[] AcceptedResults => TaskProtocolJson.Copy(_effective.Values.ToArray());
+    internal TaskIncidentEvent[] IncidentHistory => TaskProtocolJson.Copy(_incidentHistory.ToArray());
     internal TaskEffectiveResult[] Results => TaskProtocolJson.Copy(_effective.Values.Select(r =>
         r with { Status = ReducedStatus(r.TaskId) }).ToArray());
 
@@ -47,7 +57,7 @@ internal sealed class TaskRunReducer
         TaskProtocolValidation.Require(list.Distinct(StringComparer.Ordinal).Count() == list.Length
             && list.All(key => _tasks.TryGetValue(key, out var t) && (t.Enabled || t.Role == "technical")), "attempt selection");
         _selected = list.ToHashSet(StringComparer.Ordinal);
-        _attemptId = id; _attemptNumber = number; _accepted.Clear(); _evidence.Clear(); RunBoundary = "unknown";
+        _attemptId = id; _attemptNumber = number; _accepted.Clear(); _incidents.Clear(); _incidentReplays.Clear(); _evidence.Clear(); RunBoundary = "unknown";
         foreach (string key in _selected) _effective[key] = new(key, "pending", "tasks.awaiting_evidence", id, 0, []);
         Revision++;
     }
@@ -57,12 +67,39 @@ internal sealed class TaskRunReducer
         var available = new HashSet<(string, int, long)>(_evidence);
         foreach (var line in logs.Records) available.Add((line.SourceId, line.Epoch, line.Sequence));
         TaskProtocolValidation.Observation(batch, RunId, _attemptId, _selected, available);
+        TaskProtocolValidation.Require(batch.ProtocolVersion == _plan.ProtocolVersion, "negotiated observation version");
         TaskProtocolValidation.Require(available.Count <= 262144 && _accepted.Count + batch.Observations.Count(o => !_accepted.ContainsKey(o.Id)) <= 65536,
             "resource_limit: attempt evidence ledger");
         // Entire batch is validated before mutation. Invalid replays never acknowledge a cursor.
         foreach (var observation in batch.Observations)
             if (_accepted.TryGetValue(observation.Id, out var previous))
                 TaskProtocolValidation.Require(previous == TaskProtocolJson.Write(observation), "observation id reused with different facts");
+        // Validate incident transitions on a copy before committing any observations or incidents.
+        var pending = new Dictionary<string, TaskIncident>(_incidents, StringComparer.Ordinal);
+        var additions = new List<(string Key, string Json, TaskIncident Incident)>();
+        foreach (var incident in batch.Incidents ?? [])
+        {
+            string replayKey = incident.Id + "\n" + incident.Resolution;
+            string json = TaskProtocolJson.Write(incident);
+            if (_incidentReplays.TryGetValue(replayKey, out var previous))
+            {
+                TaskProtocolValidation.Require(previous == json, "incident event reused with different facts");
+                continue;
+            }
+            if (pending.TryGetValue(incident.Id, out var old))
+                TaskProtocolValidation.Require(old.Resolution == "open" && incident.Resolution is "recovered" or "terminal"
+                    && old.TaskId == incident.TaskId && old.ScopeId == incident.ScopeId && old.ExecutionOrdinal == incident.ExecutionOrdinal
+                    && old.Kind == incident.Kind && old.ReasonCode == incident.ReasonCode
+                    && TaskProtocolJson.Write(old.ReasonText) == TaskProtocolJson.Write(incident.ReasonText)
+                    && old.Evidence.All(e => incident.Evidence.Contains(e))
+                    && incident.Evidence.Any(e => !old.Evidence.Contains(e)), "incident transition");
+            else TaskProtocolValidation.Require(incident.Resolution == "open", "incident must begin open");
+            pending[incident.Id] = incident;
+            additions.Add((replayKey, json, incident));
+        }
+        TaskProtocolValidation.Require(_incidentHistory.Count + additions.Count <= 4096, "resource_limit: incident history");
+        int addedBytes = additions.Sum(e => System.Text.Encoding.UTF8.GetByteCount(TaskProtocolJson.Write(new TaskIncidentEvent(_attemptId, e.Incident))));
+        TaskProtocolValidation.Require(_incidentBytes + addedBytes <= 256 * 1024, "resource_limit: incident bytes");
         foreach (var observation in batch.Observations)
         {
             if (!_accepted.TryAdd(observation.Id, TaskProtocolJson.Write(observation))) continue;
@@ -72,26 +109,34 @@ internal sealed class TaskRunReducer
             if (observation.ExecutionOrdinal == old.ExecutionOrdinal && terminal)
             {
                 if (observation.Status == "running" || observation.Status == old.Status) continue;
-                _effective[observation.TaskId] = old with { Status = "unknown", ReasonCode = "protocol.conflicting_evidence" };
+                _effective[observation.TaskId] = old with { Status = "unknown", ReasonCode = "protocol.conflicting_evidence", ReasonText = null };
                 continue;
             }
             if (old.ExecutionOrdinal > 0 && observation.ExecutionOrdinal > old.ExecutionOrdinal && observation.Status != "running")
             {
-                _effective[observation.TaskId] = old with { Status = "unknown", ReasonCode = "protocol.missing_restart" };
+                _effective[observation.TaskId] = old with { Status = "unknown", ReasonCode = "protocol.missing_restart", ReasonText = null };
                 continue;
             }
             string status = observation.Status;
             if (_tasks[observation.TaskId].Detection == "unsupported" && status is "succeeded" or "skipped") status = "unknown";
             _effective[observation.TaskId] = new(observation.TaskId, status, observation.ReasonCode,
-                _attemptId, observation.ExecutionOrdinal, observation.Evidence.ToArray());
+                _attemptId, observation.ExecutionOrdinal, observation.Evidence.ToArray()) { ReasonText = observation.ReasonText?.DeepClone().AsObject() };
             _hadFailure |= status == "failed";
         }
         _evidence = available;
+        foreach (var entry in additions)
+        {
+            var incident = TaskProtocolJson.Copy(entry.Incident);
+            _incidentReplays.Add(entry.Key, entry.Json);
+            _incidents[incident.Id] = incident;
+            _incidentHistory.Add(new(_attemptId, incident));
+        }
+        _incidentBytes += addedBytes;
         if (batch.RunBoundary is "ended" or "aborted") RunBoundary = batch.RunBoundary;
         else if (RunBoundary is not ("ended" or "aborted")) RunBoundary = batch.RunBoundary;
         if (logs.HasGap)
             foreach (var key in _selected.Where(key => _effective[key].Status is "pending" or "running").ToArray())
-                _effective[key] = _effective[key] with { Status = "unknown", ReasonCode = "logs.gap" };
+                _effective[key] = _effective[key] with { Status = "unknown", ReasonCode = "logs.gap", ReasonText = null };
         Revision++;
     }
 
@@ -101,7 +146,7 @@ internal sealed class TaskRunReducer
         {
             var state = _effective[key];
             if (state.Status is "pending" or "running")
-                _effective[key] = state with { Status = lifecycle == "cancelled" ? "cancelled" : "unknown", ReasonCode = "tasks.no_terminal_evidence" };
+                _effective[key] = state with { Status = lifecycle == "cancelled" ? "cancelled" : "unknown", ReasonCode = "tasks.no_terminal_evidence", ReasonText = null };
         }
         _hadFailure |= lifecycle is "failed" or "interrupted";
         Revision++;

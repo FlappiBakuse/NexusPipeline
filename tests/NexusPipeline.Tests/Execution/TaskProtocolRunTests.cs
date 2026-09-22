@@ -10,6 +10,40 @@ namespace NexusPipeline.Tests.Execution;
 
 public sealed class TaskProtocolRunTests
 {
+    [Fact]
+    public async Task Version11CarriesFrozenNamesAndDynamicReasonsThroughRealJint()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "nxp-task-text-run-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            string config = Path.Combine(root, "config.json");
+            File.WriteAllText(config, """{"tasks":[{"id":"third-party:a","enabled":true}]}""");
+            var texts = new TaskDisplaySnapshot("", "", "en-US", "frozen-hash", new()
+            {
+                ["en-US"] = new() { ["task.name"] = "Frozen task", ["reason.done"] = "Frozen reason", ["unused"] = "Unused" }
+            });
+            var protocol = new TaskProtocolDescriptor("1.1",
+                Discover.Replace("'1.0'", "'1.1'").Replace("name:t.id", "name:t.id,nameText:{kind:'plugin',key:'task.name',args:{},fallback:'Original'}"),
+                Observe.Replace("'1.0'", "'1.1'").Replace("reasonCode:'synthetic.terminal'", "reasonCode:'synthetic.terminal',reasonText:{kind:'plugin',key:'reason.done',args:{},fallback:'Done'}"),
+                Retry.Replace("'1.0'", "'1.1'"), []) { Localization = texts };
+            var script = new ScriptInstance { Id = "fixture", PluginType = "third-party", ConfigPath = config, RootPath = root };
+            var spec = new ResolvedScriptSpec(script, "1.0.0", new(true, "javascript", "plugin-file", "", ""), "fixture") { TaskProtocol = protocol };
+            var run = new TaskProtocolRun(spec, "run", "user", Path.Combine(root, "journal"));
+            texts.Messages["en-US"]["reason.done"] = "Updated package";
+            await run.BeginAsync(1, default);
+            run.Append("stdout", "third-party:a succeeded\n");
+            Assert.Null((await run.ObserveAsync(true, default)).JudgeError);
+            run.Finish(RunAttemptResult.Partial("normal exit"), 1);
+            Assert.Null(run.Restore());
+            var report = run.Snapshot()!;
+            Assert.Equal("Frozen reason", report["displaySnapshot"]!["messages"]!["en-US"]!["reason.done"]!.GetValue<string>());
+            Assert.Equal("third-party", report["displaySnapshot"]!["pluginId"]!.GetValue<string>());
+            Assert.DoesNotContain("unused", report.ToJsonString());
+            Assert.Equal("reason.done", report["finalTaskResults"]![0]!["reasonText"]!["key"]!.GetValue<string>());
+        }
+        finally { Directory.Delete(root, true); }
+    }
     private const string Discover = """
         const resource = input.configResources[0].id;
         const config = nexus.readConfig(resource).document;

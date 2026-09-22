@@ -7,6 +7,66 @@ namespace NexusPipeline.Tests.Execution;
 
 public sealed class TaskRunReducerTests
 {
+    private static TaskIncident Incident(string resolution, long sequence = 1) => new()
+    {
+        Id = "failure", TaskId = "a", ScopeId = "scope-target-a", ExecutionOrdinal = 1,
+        Kind = "business_error", Resolution = resolution, ReasonCode = "instance.failed",
+        Evidence = resolution == "open" ? [new("stdout", 0, sequence, "failure")]
+            : [new("stdout", 0, 1, "failure"), new("stdout", 0, sequence, resolution)],
+    };
+    private static TaskObservationBatch IncidentBatch(params TaskIncident[] incidents) => new()
+    {
+        ProtocolVersion = "1.1", Type = "observation", RunId = "run", AttemptId = "one",
+        Observations = [], Incidents = incidents, RunBoundary = "open", BoundaryEvidence = [], Diagnostics = [],
+    };
+    private static TaskRunReducer IncidentRun()
+    {
+        var run = new TaskRunReducer("run", new("1.1", "plan", "run", "fake", "1.0.0", DateTimeOffset.UtcNow,
+            "signature", "complete", [Task("a"), Task("b")], []));
+        run.BeginAttempt("one", 1, ["a", "b"]);
+        return run;
+    }
+
+    [Fact]
+    public void IncidentRecoveryIsIdempotentAndDoesNotInventTaskSuccess()
+    {
+        var run = IncidentRun();
+        var batch = IncidentBatch(Incident("open"), Incident("recovered", 2));
+        var logs = new TaskLogBatch([new("stdout", 0, 1, "failure"), new("stdout", 0, 2, "target recovery")], false);
+        run.Accept(batch, logs); run.Accept(batch, logs);
+        Assert.Equal(new[] { "open", "recovered" }, run.IncidentHistory.Select(e => e.Incident.Resolution));
+        Assert.All(run.Results, r => Assert.Equal("pending", r.Status));
+        run.FinishAttempt("completed");
+        Assert.Equal("unknown", run.Results.Single(r => r.TaskId == "a").Status);
+        run.BeginAttempt("two", 2, ["a"]);
+        Assert.Equal(2, run.IncidentHistory.Length);
+        Assert.Throws<InvalidDataException>(() => run.Accept(batch with { AttemptId = "two", Incidents = [Incident("recovered", 2)] }, logs));
+    }
+
+    [Theory]
+    [InlineData("task")]
+    [InlineData("scope")]
+    [InlineData("ordinal")]
+    [InlineData("no-new-evidence")]
+    public void InvalidIncidentResolutionRejectsWholeBatchBeforeObservationMutation(string change)
+    {
+        var run = IncidentRun();
+        var logs = new TaskLogBatch([new("stdout", 0, 1, "failure"), new("stdout", 0, 2, "unrelated success")], false);
+        run.Accept(IncidentBatch(Incident("open")), logs);
+        var next = Incident("recovered", 2);
+        next = change switch
+        {
+            "task" => next with { TaskId = "b" },
+            "scope" => next with { ScopeId = "other-target" },
+            "ordinal" => next with { ExecutionOrdinal = 2 },
+            _ => next with { Evidence = Incident("open").Evidence },
+        };
+        var batch = IncidentBatch(next) with { Observations = [new() { Id = "terminal", TaskId = "a", ExecutionOrdinal = 1,
+            Status = "succeeded", ReasonCode = "fixture", Evidence = [new("stdout", 0, 2, "fixture")] }] };
+        Assert.Throws<InvalidDataException>(() => run.Accept(batch, logs));
+        Assert.Equal("pending", run.Results.Single(r => r.TaskId == "a").Status);
+        Assert.Single(run.IncidentHistory);
+    }
     private static TaskDefinition Task(string id, string risk = "safe", string role = "business") => new()
     {
         Id = id, Name = id, SourceKey = id, ParentId = null, Role = role, Enabled = true, Order = 0,

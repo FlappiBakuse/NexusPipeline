@@ -50,7 +50,7 @@ internal sealed class TaskProtocolRun
 
     internal TaskProtocolRun(ResolvedScriptSpec spec, string runId, string userId, string? journalDirectory = null)
     {
-        _spec = spec; _protocol = spec.TaskProtocol!; _runId = runId; _userId = userId;
+        _spec = spec; _protocol = spec.TaskProtocol! with { Localization = spec.TaskProtocol!.Localization is { } texts ? TaskProtocolJson.Copy(texts) : null }; _runId = runId; _userId = userId;
         _journalDirectory = journalDirectory ?? Path.Combine(ConfigPaths.WorkDir(spec.Script.Id, userId), "task-selection");
     }
 
@@ -87,8 +87,8 @@ internal sealed class TaskProtocolRun
     }
 
     private static bool SameTasks(TaskPlan left, TaskPlan right) =>
-        TaskProtocolJson.Write(new { left.Coverage, left.Tasks, left.SelectionFields, left.BehaviorSignature }) ==
-        TaskProtocolJson.Write(new { right.Coverage, right.Tasks, right.SelectionFields, right.BehaviorSignature });
+        TaskProtocolJson.Write(new { left.Coverage, Tasks = left.Tasks.Select(t => t with { Name = "", NameText = null }), left.SelectionFields, left.BehaviorSignature }) ==
+        TaskProtocolJson.Write(new { right.Coverage, Tasks = right.Tasks.Select(t => t with { Name = "", NameText = null }), right.SelectionFields, right.BehaviorSignature });
 
     internal void Append(string source, string text, bool newEpoch = false)
     {
@@ -120,7 +120,7 @@ internal sealed class TaskProtocolRun
                 accepted = _reducer!.AcceptedResults.ToDictionary(r => r.TaskId, r => new { r.ExecutionOrdinal, r.Status }, StringComparer.Ordinal);
             }
             var observation = await TaskProtocolScriptRunner.ExecuteAsync<TaskObservationBatch>(_protocol.ObserveScript,
-                new { protocolVersion = "1.0", phase = "observe", runId = _runId, attemptId = _attemptId,
+                new { protocolVersion = _protocol.Version, phase = "observe", runId = _runId, attemptId = _attemptId,
                     attemptNumber = _attemptNumber, originalPlan = _reducer!.OriginalPlan, attemptTaskIds = _selected,
                     acceptedState = accepted, adapterState = _cursorState, logBatch = batch, isFinalCall = final && !more, terminationReason = final ? terminationReason : "none" },
                 _view!.ReadConfig, _view!.ReadResource, false, deadline.Token).ConfigureAwait(false);
@@ -128,6 +128,7 @@ internal sealed class TaskProtocolRun
             {
                 _reducer!.Accept(observation, batch);
                 var evidence = observation.Observations.SelectMany(o => o.Evidence).Concat(observation.BoundaryEvidence)
+                    .Concat((observation.Incidents ?? []).SelectMany(i => i.Evidence))
                     .Select(e => (e.SourceId, e.Epoch, e.Sequence)).ToHashSet();
                 foreach (var line in batch.Records.Where(l => evidence.Contains((l.SourceId, l.Epoch, l.Sequence))))
                     if (_evidenceLines.Count < 8192) _evidenceLines.TryAdd((_attemptId, line.SourceId, line.Epoch, line.Sequence),
@@ -186,7 +187,10 @@ internal sealed class TaskProtocolRun
     }
 
     private sealed record RetryOutput(string ProtocolVersion, string Type, string Decision, string ReasonCode,
-        string[] IncludedTaskIds, string[] PrerequisiteTaskIds, string[] ExpandedUnitIds, TaskConfigPatch[] FilePatches);
+        string[] IncludedTaskIds, string[] PrerequisiteTaskIds, string[] ExpandedUnitIds, TaskConfigPatch[] FilePatches)
+    {
+        public JsonObject? ReasonText { get; init; }
+    }
 
     internal async Task<bool> PrepareRetryAsync(int maximum, bool cancelled, bool budgetExpired, CancellationToken token)
     {
@@ -195,16 +199,17 @@ internal sealed class TaskProtocolRun
         if (_protocolFailed || safe.Decision == "stop") { SaveRetry(safe); return false; }
         var view = Capture();
         var proposed = await TaskProtocolScriptRunner.ExecuteAsync<RetryOutput>(_protocol.RetryScript,
-            new { protocolVersion = "1.0", phase = "retry", runId = _runId, attemptId = _attemptId,
+            new { protocolVersion = _protocol.Version, phase = "retry", runId = _runId, attemptId = _attemptId,
                 originalPlan = _reducer!.OriginalPlan, taskStates = _reducer.Results.ToDictionary(r => r.TaskId, r => r.Status),
                 attemptsUsed = _attemptNumber, maxAttempts = maximum, cancelled, budgetExhausted = budgetExpired,
                 configResources = view.ConfigResources }, view.ReadConfig, view.ReadResource, false, token).ConfigureAwait(false);
-        if (proposed.ProtocolVersion != "1.0" || proposed.Type != "retry") throw new InvalidDataException("protocol_error: retry envelope");
+        if (proposed.ProtocolVersion != _protocol.Version || proposed.Type != "retry") throw new InvalidDataException("protocol_error: retry envelope");
+        TaskDisplaySnapshot.ValidateReference(proposed.ReasonText, _protocol.Version);
         if (proposed.Decision == "stop")
         {
             if (proposed.IncludedTaskIds.Length + proposed.PrerequisiteTaskIds.Length + proposed.ExpandedUnitIds.Length + proposed.FilePatches.Length != 0)
                 throw new InvalidDataException("protocol_error: stop includes actions");
-            SaveRetry(new("stop", proposed.ReasonCode, [], [], [])); return false;
+            SaveRetry(new("stop", proposed.ReasonCode, [], [], []), proposed.ReasonText); return false;
         }
         if (proposed.Decision != "selective" || !proposed.IncludedTaskIds.SequenceEqual(safe.IncludedTaskIds)
             || !proposed.PrerequisiteTaskIds.Order().SequenceEqual(safe.PrerequisiteTaskIds.Order())
@@ -219,14 +224,15 @@ internal sealed class TaskProtocolRun
         var expected = original with { Tasks = original.Tasks.Select(t => t with { Enabled = safe.IncludedTaskIds.Contains(t.Id, StringComparer.Ordinal) }).ToArray() };
         if (!SameTasks(plan, expected)) throw new InvalidDataException("configuration_conflict: patched selection does not match safe retry");
         _expectedRetryPlan = plan; _selected = safe.IncludedTaskIds;
-        SaveRetry(safe); return true;
+        SaveRetry(safe, proposed.ReasonText); return true;
     }
 
-    private void SaveRetry(TaskRetrySelection selection)
+    private void SaveRetry(TaskRetrySelection selection, JsonObject? reasonText = null)
     {
         if (_attempts.Count == 0) return;
         _attempts[^1]["retryDecision"] = JsonNode.Parse(TaskProtocolJson.Write(new
         { selection.Decision, selection.ReasonCode, selection.IncludedTaskIds, selection.ExpandedUnitIds }));
+        if (reasonText is not null) _attempts[^1]["retryDecision"]!["reasonText"] = reasonText.DeepClone();
         Publish();
     }
 
@@ -241,7 +247,7 @@ internal sealed class TaskProtocolRun
     }
 
     private static JsonArray ResultsJson(IEnumerable<TaskEffectiveResult> results) => (JsonArray)JsonNode.Parse(TaskProtocolJson.Write(
-        results.Select(r => new { r.TaskId, r.Status, r.ReasonCode, r.LastAttemptId, r.Evidence })))!;
+        results.Select(r => new { r.TaskId, r.Status, r.ReasonCode, r.ReasonText, r.LastAttemptId, r.Evidence })))!;
 
     internal JsonObject? Snapshot()
     {
@@ -256,7 +262,7 @@ internal sealed class TaskProtocolRun
                 ["lifecycleOutcome"] = "running",
                 ["taskResults"] = ResultsJson(_reducer.Results.Where(r => r.LastAttemptId == _attemptId)),
             });
-            return new JsonObject
+            var report = new JsonObject
             {
                 ["schemaVersion"] = 1, ["runId"] = _runId, ["pluginId"] = _spec.Script.PluginType,
                 ["revision"] = _revision, ["userId"] = _userId, ["scriptInstanceId"] = _spec.Script.Id,
@@ -264,11 +270,26 @@ internal sealed class TaskProtocolRun
                 ["lifecycleOutcome"] = _lifecycle,
                 ["attemptReports"] = attempts,
                 ["finalTaskResults"] = ResultsJson(_reducer.Results),
+                ["incidents"] = JsonNode.Parse(TaskProtocolJson.Write(_reducer.IncidentHistory)),
                 ["summary"] = JsonNode.Parse(TaskProtocolJson.Write(_reducer.Summarize(_lifecycle))),
                 ["diagnostics"] = JsonNode.Parse(TaskProtocolJson.Write(_diagnostics)),
                 ["evidenceLines"] = JsonNode.Parse(TaskProtocolJson.Write(_evidenceLines.Select(p => new
                 { attemptId = p.Key.Attempt, sourceId = p.Key.Source, epoch = p.Key.Epoch, sequence = p.Key.Sequence, text = p.Value }))),
             };
+            if (_protocol.Localization is { } localization)
+            {
+                IEnumerable<JsonObject?> References(JsonNode? node)
+                {
+                    if (node is JsonObject obj)
+                        foreach (var (key, value) in obj)
+                            if (key is "nameText" or "reasonText") yield return value as JsonObject;
+                            else if (key != "displaySnapshot") foreach (var nested in References(value)) yield return nested;
+                    if (node is JsonArray array) foreach (var item in array) foreach (var nested in References(item)) yield return nested;
+                }
+                var display = (localization with { PluginId = _spec.Script.PluginType, PluginVersion = _spec.PluginVersion }).Select(References(report));
+                report["displaySnapshot"] = JsonNode.Parse(TaskProtocolJson.Write(display));
+            }
+            return report;
         }
     }
 }

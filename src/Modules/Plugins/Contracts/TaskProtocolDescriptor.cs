@@ -6,6 +6,9 @@ internal sealed record TaskProtocolDescriptor(
     string DiscoverScript,
     string ObserveScript,
     string RetryScript,
-    TaskReadResource[] ReadResources);
+    TaskReadResource[] ReadResources)
+{
+    internal TaskDisplaySnapshot? Localization { get; init; }
+}
 
 internal sealed record TaskReadResource(string Id, string Source, string Path, string Format, bool Required);

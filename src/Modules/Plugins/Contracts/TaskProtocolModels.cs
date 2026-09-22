@@ -8,6 +8,8 @@ internal sealed record TaskDefinition
     public required string Id { get; init; }
     public required string SourceKey { get; init; }
     public required string Name { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public System.Text.Json.Nodes.JsonObject? NameText { get; init; }
     public required string? ParentId { get; init; }
     public required string Role { get; init; }
     public required bool Enabled { get; init; }
@@ -21,7 +23,11 @@ internal sealed record TaskDefinition
     public string? ConfigRef { get; init; }
 }
 
-internal sealed record TaskDiagnostic(string Code, string Message, string? TaskId = null);
+internal sealed record TaskDiagnostic(string Code, string Message, string? TaskId = null)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public System.Text.Json.Nodes.JsonObject? ReasonText { get; init; }
+}
 internal sealed record TaskSelectionField(string ResourceId, System.Text.Json.Nodes.JsonArray Selector, string Purpose);
 internal sealed record TaskBehaviorField(string ResourceId, System.Text.Json.Nodes.JsonArray Selector);
 internal sealed record TaskEvidence(string SourceId, int Epoch, long Sequence, string RuleId);
@@ -44,6 +50,8 @@ internal sealed record TaskPlan(string ProtocolVersion, string PlanId, string Or
     TaskDefinition[] Tasks, TaskDiagnostic[] Diagnostics)
 {
     public string BehaviorSignature { get; init; } = "";
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public TaskDisplaySnapshot? DisplaySnapshot { get; init; }
     public TaskSelectionField[] SelectionFields { get; init; } = [];
 }
 
@@ -54,6 +62,8 @@ internal sealed record TaskObservation
     public required int ExecutionOrdinal { get; init; }
     public required string Status { get; init; }
     public required string ReasonCode { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public System.Text.Json.Nodes.JsonObject? ReasonText { get; init; }
     public required TaskEvidence[] Evidence { get; init; }
     public string? SkipKind { get; init; }
 }
@@ -69,6 +79,22 @@ internal sealed record TaskObservationBatch
     public required TaskEvidence[] BoundaryEvidence { get; init; }
     public required TaskDiagnostic[] Diagnostics { get; init; }
     public System.Text.Json.Nodes.JsonObject? CursorState { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public TaskIncident[]? Incidents { get; init; }
+}
+
+internal sealed record TaskIncident
+{
+    public required string Id { get; init; }
+    public required string? TaskId { get; init; }
+    public required string ScopeId { get; init; }
+    public required int ExecutionOrdinal { get; init; }
+    public required string Kind { get; init; }
+    public required string Resolution { get; init; }
+    public required string ReasonCode { get; init; }
+    public required TaskEvidence[] Evidence { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public System.Text.Json.Nodes.JsonObject? ReasonText { get; init; }
 }
 
 internal static class TaskProtocolJson
@@ -84,7 +110,25 @@ internal static class TaskProtocolJson
     {
         if (System.Text.Encoding.UTF8.GetByteCount(json) > 1024 * 1024)
             throw new InvalidDataException("resource_limit: protocol result exceeds 1 MiB");
+        using var document = JsonDocument.Parse(json, new JsonDocumentOptions { MaxDepth = 32 });
+        Check(document.RootElement, false);
         return JsonSerializer.Deserialize<T>(json, Options) ?? throw new InvalidDataException("protocol_error: null output");
+    }
+    private static void Check(JsonElement element, bool legacy)
+    {
+        if (element.ValueKind == JsonValueKind.Array)
+            foreach (var child in element.EnumerateArray()) Check(child, legacy);
+        if (element.ValueKind != JsonValueKind.Object) return;
+        if (element.TryGetProperty("protocolVersion", out var version) && version.ValueKind == JsonValueKind.String
+            && (element.TryGetProperty("type", out _) || element.TryGetProperty("planId", out _))) legacy = version.GetString() == "1.0";
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var property in element.EnumerateObject())
+        {
+            if (!names.Add(property.Name)) throw new InvalidDataException("protocol_error: duplicate member");
+            if (legacy && property.Name is "nameText" or "reasonText" or "incidents")
+                throw new InvalidDataException("protocol_error: text references require 1.1");
+            Check(property.Value, legacy);
+        }
     }
     internal static string Write<T>(T value) => JsonSerializer.Serialize(value, Options);
     internal static T Copy<T>(T value) => Read<T>(Write(value));
