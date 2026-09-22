@@ -10,6 +10,25 @@ namespace NexusPipeline.Tests.Notifications;
 public sealed class NotificationDispatcherTests
 {
     [Fact]
+    public async Task TaskReportNotificationRetainsAccountContextRecipientAndScreenshot()
+    {
+        var settings = new AppSettings { SmtpEnabled = true, SmtpHost = "smtp.example.test", SmtpUser = "fixture", SmtpPassword = "fixture" };
+        var image = new NotificationImage("fixture", "capture.png", "image/png", [1, 2, 3], 1, 1, DateTimeOffset.UtcNow);
+        string? body = null, recipient = null; NotificationImage? captured = null;
+        var dispatcher = new NotificationDispatcher(new TestSettingsProvider(settings), send: (_, message, smtp, _, screenshot) =>
+        { body = message; recipient = smtp; captured = screenshot; return Task.FromResult(true); });
+        var record = new NexusPipeline.Modules.History.RunRecord
+        {
+            UserName = "Fixture account", Attempts = 2, Status = "partial",
+            TaskReport = System.Text.Json.Nodes.JsonNode.Parse("""{"originalPlan":{"tasks":[]},"finalTaskResults":[],"summary":{"counts":{"total":0}}}""")!.AsObject()
+        };
+        await dispatcher.NotifyScriptAsync(new NexusPipeline.Modules.Scripts.ScriptInstance { Name = "Fixture script" }, record,
+            new NexusPipeline.Modules.Users.UserScriptBinding { SmtpTo = "  account@example.test  " }, image);
+        Assert.Contains("Fixture account", body); Assert.Contains("Fixture script", body); Assert.Contains(record.Id, body);
+        Assert.Equal("account@example.test", recipient); Assert.Same(image, captured);
+    }
+
+    [Fact]
     public async Task PluginNotificationUsesHostOwnedDispatcher()
     {
         var dispatcher = new NotificationDispatcher(

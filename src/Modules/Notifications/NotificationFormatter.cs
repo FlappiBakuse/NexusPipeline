@@ -42,7 +42,7 @@ internal static class NotificationFormatter
         }
         lines.Add(HostLocalization.TranslateNamed("notification.script.attempts", $"尝试次数：{record.Attempts}", new Dictionary<string, object?> { ["count"] = record.Attempts }));
         lines.Add(HostLocalization.TranslateNamed("notification.script.final", $"最终状态：{status}", new Dictionary<string, object?> { ["status"] = status }));
-        if (record.TaskReport is not null) lines.AddRange(TaskNotificationFormatter.Format(record.TaskReport));
+        if (record.TaskReport is not null) lines.AddRange(TaskNotificationFormatter.Format(record.TaskReport, record.Id));
         return string.Join("\r\n", lines);
     }
 
@@ -66,7 +66,7 @@ internal static class NotificationFormatter
                 _ => HostLocalization.TranslateNamed("notification.queue.failed", $"失败（{detail}）", new Dictionary<string, object?> { ["detail"] = detail }),
             };
             lines.Add(HostLocalization.TranslateNamed("notification.queue.item", $"· {record.ScriptName}：{status}", new Dictionary<string, object?> { ["name"] = record.ScriptName, ["status"] = status }));
-            if (record.TaskReport is not null) lines.AddRange(TaskNotificationFormatter.Format(record.TaskReport).Select(line => "  " + line));
+            if (record.TaskReport is not null) lines.AddRange(TaskNotificationFormatter.Format(record.TaskReport, record.Id).Select(line => "  " + line));
         }
         return string.Join("\r\n", lines);
     }
