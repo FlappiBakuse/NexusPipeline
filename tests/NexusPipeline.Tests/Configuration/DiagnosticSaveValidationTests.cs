@@ -140,7 +140,7 @@ public sealed class DiagnosticSaveValidationTests
             ["minHostVersion"] = "0.16.8",
             ["resolve"] = "data/resolve.json",
             ["judgeScript"] = "data/judge.js",
-            ["taskProtocol"] = JsonNode.Parse("""{"version":"1.2","discoverScript":"data/discover.js","retryScript":"data/retry.js","readResources":[],"configRules":[{"id":"fixture","required":true,"criticality":"advisory_or_contextual"}],"environmentChecks":[],"localization":{"defaultLocale":"en-US","messages":{"en-US":"data/i18n/en-US.json","zh-CN":"data/i18n/zh-CN.json"}}}"""),
+            ["taskProtocol"] = JsonNode.Parse("""{"version":"0.1.0","discoverScript":"data/discover.js","retryScript":"data/retry.js","readResources":[],"configRules":[{"id":"fixture","required":true,"criticality":"advisory_or_contextual"}],"environmentChecks":[],"localization":{"defaultLocale":"en-US","messages":{"en-US":"data/i18n/en-US.json","zh-CN":"data/i18n/zh-CN.json"}}}"""),
         };
         Directory.CreateDirectory(Path.Combine(root, "data", "i18n"));
         File.WriteAllText(Path.Combine(root, "data", "i18n", "en-US.json"), "{\"fixture\":\"Fixture\"}");
@@ -154,7 +154,7 @@ public sealed class DiagnosticSaveValidationTests
         File.WriteAllText(Path.Combine(root, "data", "discover.js"), fail ? "throw new Error('SECRET_PATH/private/account');" : """
             const doc = nexus.readConfig(input.configResources[0].id).document;
             if(doc.owner !== input.userId) throw new Error('wrong account snapshot');
-            console.log({protocolVersion:'1.2',type:'discovery',coverage:'complete',tasks:[],diagnostics:[],
+            console.log({protocolVersion:'0.1.0',type:'discovery',coverage:'complete',tasks:[],diagnostics:[],
                 configAssessment:{schemaVersion:'1',checks:[{ruleId:'fixture',evaluation:'violated',severity:'warning',executionEffect:'warn',
                 scope:{kind:'binding'},locations:[],actions:[],reasonText:{kind:'literal',value:doc.owner}}]}});
             """);

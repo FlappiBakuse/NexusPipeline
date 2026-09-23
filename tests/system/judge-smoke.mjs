@@ -124,7 +124,7 @@ test("专项协议真实进程：选择重试、原选择恢复、最终计数�
     assert.equal(detail.record.id, record.id);
   } finally { await deleteScript(script.id); }
 });
-test("1.2 重试准入阻断保留真实运行和前置钩子", { skip }, async () => {
+test("0.1.0 重试准入阻断保留真实运行和前置钩子", { skip }, async () => {
   const fixture = makeFixture("retry-admission");
   fixture.exe = path.join(fixture.dir, "task-run.bat");
   const configPath = path.join(fixture.cfg, "config.json");

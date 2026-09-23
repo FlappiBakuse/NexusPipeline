@@ -12,14 +12,14 @@ namespace NexusPipeline.Tests.Execution;
 
 public sealed class TaskConfigAssessmentTests
 {
-    private static JsonObject Discovery(string version = "1.2") => JsonNode.Parse("""
-        {"protocolVersion":"1.2","type":"discovery","coverage":"complete","tasks":[],"diagnostics":[],
+    private static JsonObject Discovery(string version = "0.1.0") => JsonNode.Parse("""
+        {"protocolVersion":"0.1.0","type":"discovery","coverage":"complete","tasks":[],"diagnostics":[],
          "configAssessment":{"schemaVersion":"1","checks":[{"ruleId":"target","evaluation":"satisfied","severity":"info",
          "executionEffect":"none","scope":{"kind":"binding"},"locations":[],"actions":[]}]}}
         """)!.AsObject().AlsoVersion(version);
 
     private static TaskProtocolDescriptor Protocol(JsonObject result, string criticality = "critical_when_applicable") =>
-        new("1.2", "console.log(" + result.ToJsonString() + ");", "", "", [])
+        new("0.1.0", "console.log(" + result.ToJsonString() + ");", "", "", [])
         { ConfigRules = [new("target", true, criticality)] };
 
     private static Task<TaskPlan> Discover(JsonObject result, TaskExecutionContext? context = null,
@@ -28,24 +28,21 @@ public sealed class TaskConfigAssessmentTests
             default, context);
 
     [Theory]
-    [InlineData("1.0", "configAssessment")]
-    [InlineData("1.1", "configAssessment")]
-    [InlineData("1.0", "currentReadiness")]
-    [InlineData("1.1", "currentReadiness")]
-    public void OldVersionsCannotSmuggleDiagnostics(string version, string property)
-    {
-        var node = Discovery(version);
-        if (property != "configAssessment") { node.Remove("configAssessment"); node[property] = new JsonObject(); }
-        Assert.Throws<InvalidDataException>(() => TaskProtocolJson.Read<TaskDiscovery>(node.ToJsonString()));
-    }
-
-    [Theory]
     [InlineData("1.0")]
     [InlineData("1.1")]
-    public void OldVersionsWithoutDiagnosticsRemainValid(string version)
+    [InlineData("1.2")]
+    public void UnreleasedVersionsAreRejected(string version)
     {
-        var node = Discovery(version); node.Remove("configAssessment");
-        TaskProtocolValidation.Discovery(TaskProtocolJson.Read<TaskDiscovery>(node.ToJsonString()));
+        var node = Discovery(version);
+        TaskDiscovery output = TaskProtocolJson.Read<TaskDiscovery>(node.ToJsonString());
+        Assert.Throws<InvalidDataException>(() => TaskProtocolValidation.Discovery(output));
+    }
+
+    [Fact]
+    public async Task CurrentVersionRequiresConfigAssessment()
+    {
+        var node = Discovery(); node.Remove("configAssessment");
+        await Assert.ThrowsAsync<InvalidDataException>(() => Discover(node));
     }
 
     [Theory]

@@ -16,12 +16,12 @@ public sealed class TaskRunReducerTests
     };
     private static TaskObservationBatch IncidentBatch(params TaskIncident[] incidents) => new()
     {
-        ProtocolVersion = "1.1", Type = "observation", RunId = "run", AttemptId = "one",
+        ProtocolVersion = "0.1.0", Type = "observation", RunId = "run", AttemptId = "one",
         Observations = [], Incidents = incidents, RunBoundary = "open", BoundaryEvidence = [], Diagnostics = [],
     };
     private static TaskRunReducer IncidentRun()
     {
-        var run = new TaskRunReducer("run", new("1.1", "plan", "run", "fake", "1.0.0", DateTimeOffset.UtcNow,
+        var run = new TaskRunReducer("run", new("0.1.0", "plan", "run", "fake", "1.0.0", DateTimeOffset.UtcNow,
             "signature", "complete", [Task("a"), Task("b")], []));
         run.BeginAttempt("one", 1, ["a", "b"]);
         return run;
@@ -73,14 +73,14 @@ public sealed class TaskRunReducerTests
         CountsAsUnit = role == "business", RequiredForParent = true, RetryUnitId = id, RetryRisk = risk,
         Dependencies = [], Detection = "supported",
     };
-    private static TaskRunReducer Run(params TaskDefinition[] tasks) => new("run", new("1.0", "plan", "run", "fake", "1.0.0",
+    private static TaskRunReducer Run(params TaskDefinition[] tasks) => new("run", new("0.1.0", "plan", "run", "fake", "1.0.0",
         DateTimeOffset.UtcNow, "signature", "complete", tasks, []));
     private static void Observe(TaskRunReducer reducer, string attempt, params (string Id, string Status)[] facts)
     {
         var logs = facts.Select((_, i) => new TaskLogRecord("stdout", 0, i, "synthetic evidence")).ToArray();
         reducer.Accept(new TaskObservationBatch
         {
-            ProtocolVersion = "1.0", Type = "observation", RunId = "run", AttemptId = attempt,
+            ProtocolVersion = "0.1.0", Type = "observation", RunId = "run", AttemptId = attempt,
             RunBoundary = "open", BoundaryEvidence = [], Diagnostics = [],
             Observations = facts.Select((f, i) => new TaskObservation
             {

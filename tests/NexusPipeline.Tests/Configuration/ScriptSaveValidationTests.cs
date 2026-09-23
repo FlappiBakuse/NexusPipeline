@@ -25,10 +25,7 @@ public sealed class ScriptSaveValidationTests
 {
     [Theory]
     [InlineData(null, true)]
-    [InlineData("1.0", true)]
-    [InlineData("1.1", true)]
-    [InlineData("1.0", false)]
-    [InlineData("1.1", false)]
+    [InlineData(null, false)]
     public async Task SavedBindingsUseOnlyDeclaredLegacyValidator(string? protocolVersion, bool withValidator)
     {
         string pluginRoot = Path.Combine(Path.GetTempPath(), "np-script-save-validator-" + Guid.NewGuid().ToString("N"));
@@ -156,13 +153,8 @@ public sealed class ScriptSaveValidationTests
                 ["retryScript"] = "data/retry.js",
                 ["readResources"] = new JsonArray(),
             };
-            if (protocolVersion == "1.1")
-            {
-                protocol["localization"] = JsonNode.Parse("""{"defaultLocale":"en-US","messages":{"en-US":"data/en-US.json"}}""");
-                File.WriteAllText(Path.Combine(root, "data", "en-US.json"), "{}");
-            }
             manifest["taskProtocol"] = protocol;
-            File.WriteAllText(Path.Combine(root, "data", "discover.js"), "throw new Error('legacy discovery must not replace validator');");
+            File.WriteAllText(Path.Combine(root, "data", "discover.js"), "throw new Error('invalid development protocol must be rejected');");
             File.WriteAllText(Path.Combine(root, "data", "retry.js"), "console.log({});");
         }
         File.WriteAllText(Path.Combine(root, "plugin.json"), manifest.ToJsonString());

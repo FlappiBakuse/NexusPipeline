@@ -17,24 +17,14 @@ internal static class TaskProtocolManifest
             if (manifest["taskProtocol"] is not JsonObject protocol)
                 throw new InvalidDataException("taskProtocol must be an object");
             string? version = protocol["version"]?.GetValue<string>();
-            if (version is not ("1.0" or "1.1" or "1.2"))
+            if (version != "0.1.0")
                 throw new InvalidDataException("unsupported taskProtocol.version");
-            if (version == "1.0") Fields(protocol, "version", "discoverScript", "retryScript", "readResources");
-            else
-            {
-                string[] fields = version == "1.2"
-                    ? ["version", "discoverScript", "retryScript", "readResources", "localization", "configRules", "environmentChecks"]
-                    : ["version", "discoverScript", "retryScript", "readResources", "localization"];
-                Fields(protocol, fields);
-                ValidateLocalization(protocol["localization"], version == "1.2");
-                if (version == "1.2")
-                {
-                    if (manifest.ContainsKey("configValidator"))
-                        throw new InvalidDataException("taskProtocol 1.2 cannot declare configValidator");
-                    ValidateConfigRules(protocol["configRules"]);
-                    ValidateEnvironmentChecks(protocol["environmentChecks"]);
-                }
-            }
+            Fields(protocol, "version", "discoverScript", "retryScript", "readResources", "localization", "configRules", "environmentChecks");
+            ValidateLocalization(protocol["localization"], true);
+            if (manifest.ContainsKey("configValidator"))
+                throw new InvalidDataException("taskProtocol 0.1.0 cannot declare configValidator");
+            ValidateConfigRules(protocol["configRules"]);
+            ValidateEnvironmentChecks(protocol["environmentChecks"]);
             if (!PluginRepositoryCatalog.TryParseVersion(manifest["minHostVersion"]?.GetValue<string>() ?? "", out var minimum)
                 || !PluginRepositoryCatalog.TryParseVersion("0.16.8", out var required)
                 || minimum.CompareTo(required) < 0)
@@ -47,7 +37,7 @@ internal static class TaskProtocolManifest
             foreach (JsonNode? node in resources)
             {
                 if (node is not JsonObject resource) throw new InvalidDataException("invalid read resource");
-                Fields(resource, version == "1.2" && resource.ContainsKey("sha256")
+                Fields(resource, resource.ContainsKey("sha256")
                     ? ["id", "source", "path", "format", "required", "sha256"]
                     : ["id", "source", "path", "format", "required"]);
                 if (resource.ContainsKey("sha256") &&

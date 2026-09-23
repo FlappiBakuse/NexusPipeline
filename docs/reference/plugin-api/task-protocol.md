@@ -1,20 +1,20 @@
 # 专项任务协议
 
-宿主从 `0.16.8` 支持 data-specialized 的 `taskProtocol.version = "1.0"`。完整作者契约、生产适配器源文件、生成器与源码派生夹具由 [官方插件仓库](https://github.com/FlappiBakuse/NexusPipeline-Plugins) 的 `docs/TASK_PROTOCOL.md` 维护。
+宿主从 `0.16.8` 支持 data-specialized 的 `taskProtocol.version = "0.1.0"`。完整作者契约、生产适配器源文件、生成器与源码派生夹具由 [官方插件仓库](https://github.com/FlappiBakuse/NexusPipeline-Plugins) 的 `docs/TASK_PROTOCOL.md` 维护。
 
 宿主责任按现役模块划分：Plugins 验证 manifest 和冻结脚本；Configuration 提供只读 JSON/YAML 视图、CAS 选择补丁与恢复 journal；Execution 按当前运行日志归并任务事实；History 保存不可变 TaskReport、最近结果索引及崩溃检查点；Notifications 统一格式化任务分类；Host 组合适配器协调用户查询。
 
-## 文本引用协议 1.1
+## 首发协议文本引用
 
-宿主源码识别 1.0、1.1 与 1.2。当前八个专项插件声明 1.2，最低 Host 为未发布的 0.16.8 开发构建。旧开发二进制不代表当前候选；未知协议版本必须拒绝，不回退旧 judge。
+宿主仅识别首发专项协议 `0.1.0`；当前八个专项插件均声明该协议，最低 Host 为尚未发布的 0.16.8 开发构建。旧开发版 `1.0`、`1.1`、`1.2` 声明会被拒绝，不回退旧 judge。
 
-1.1 在 `taskProtocol` 中要求 `localization: {defaultLocale, messages}`；messages 将 locale 映射到包内 `data/*.json` 平面字符串词典。最多 16 个语言、每个语言 4096 项，全部词典共 256 KiB；路径、重解析点、重复 key 和词条长度均校验。所有阶段的输出版本必须与 manifest 一致。
+`0.1.0` 在 `taskProtocol` 中要求 `localization: {defaultLocale, messages}`；messages 将 locale 映射到包内 `data/i18n/*.json` 平面字符串词典。最多 16 个语言、每个语言 4096 项，全部词典共 256 KiB；路径、重解析点、重复 key 和词条长度均校验。所有阶段的输出版本必须与 manifest 一致。
 
 任务可附 `nameText`，观察、诊断、重试可附 `reasonText`。引用为 `{kind:"literal",value}` 或 `{kind:"plugin",key,args,fallback}`，不允许 owner；插件身份由 Host 从已解析实例赋予。key 最多 160 个 ASCII 字母、数字、点、横线或下划线；args 最多 16 个字符串/有限数值/布尔值，字符串最多 256 字符；literal/fallback 最多 2048 字符。占位符为 `{argument}`，缺失参数使用回退，不递归解释参数文本。不应把账号、日志或凭据传入参数。
 
 启动时冻结词典；预览和报告的 `displaySnapshot` 保存 pluginId、pluginVersion、defaultLocale、localizationHash 与实际引用的 messages。报告动态原因从启动时词典取值，不读取当前安装目录。快照最多 256 KiB，超过预算仅舍弃翻译，仍保留任务和引用的 fallback。解析顺序为 literal、请求语言、同语言规范化回退、默认语言、fallback、原 name/代码。前端只渲染纯文本，通知另外消除换行。
 
-名称和文本引用不参与行为签名与重试选择比较；稳定 id/sourceKey 才是身份。旧 1.0 输出不接受新字段（包括显式 null），旧历史直接保留原名称和原因代码，不反查游戏名称或重算结果。
+名称和文本引用不参与行为签名与重试选择比较；稳定 id/sourceKey 才是身份。旧历史直接保留原名称和原因代码，不反查游戏名称或重算结果。
 
 ## 用户入口
 
@@ -52,7 +52,7 @@ node tests/run.mjs release all
 
 生产适配器按 `discover`、`observe`、`retry` 独立构建。各入口拒绝错误的 `input.phase`；重试可以复用发现函数来校验当前配置，但发现和观察产物不包含重试执行器。联调验证三个入口的阶段拒绝和真实 Jint 权限边界。
 
-1.1 观察可以携带独立的 `incidents`：包含问题 id、可空 taskId、scopeId、executionOrdinal、kind、resolution、reasonCode、可选 reasonText 和 evidence。首次为 open，只能在保持身份、原因和旧证据且增加证据后变为 recovered/terminal；重放幂等，冲突整批拒绝。问题本身不改变任务状态或重试范围。单批最多 2048 项，运行历史最多 4096 项且累计 256 KiB；报告冻结实际引用的原因词典和问题证据。1.0 严格拒绝新增字段。卡片可展示问题恢复及无法归属的异常，业务计数仍只取归并器任务结果。
+观察可以携带独立的 `incidents`：包含问题 id、可空 taskId、scopeId、executionOrdinal、kind、resolution、reasonCode、可选 reasonText 和 evidence。首次为 open，只能在保持身份、原因和旧证据且增加证据后变为 recovered/terminal；重放幂等，冲突整批拒绝。问题本身不改变任务状态或重试范围。单批最多 2048 项，运行历史最多 4096 项且累计 256 KiB；报告冻结实际引用的原因词典和问题证据。卡片可展示问题恢复及无法归属的异常，业务计数仍只取归并器任务结果。
 
 隔离日志桥的专用联调入口是 `dotnet run --project tools/NexusPipeline.TaskProtocolTests -- --plugin-root <Plugins> --bridge-replay <外部 replay.json>`。事件必须由插件仓库源码分支探针生成；该工具仅把显式测试流送入 TaskLogBuffer、受限 Jint 和归并器，不注册生产日志源，不安装到用户软件，也不表示官方发行支持已验证。
 
@@ -68,7 +68,7 @@ node tests/run.mjs release all
 
 ## 固定运行资源的完整性
 
-仅协议 1.2 的 `readResources` 可添加可选 `sha256`，值为 64 位小写十六进制，且资源必须为 `source: root`、`format: text`。宿主按捕获的原始字节比较，包含 BOM 和换行；`readResource` 增加 `integrity: verified|mismatch`。不匹配时 document 为 null，缺失/不可读仍按资源不可用处理。未声明哈希的资源和旧协议返回形状不变；配置 revision 仍为不透明令牌，不返回内容摘要。既有路径白名单、单文件及总量预算不变。
+`0.1.0` 的 `readResources` 可添加可选 `sha256`，值为 64 位小写十六进制，且资源必须为 `source: root`、`format: text`。宿主按捕获的原始字节比较，包含 BOM 和换行；`readResource` 增加 `integrity: verified|mismatch`。不匹配时 document 为 null，缺失/不可读仍按资源不可用处理。未声明哈希的资源返回形状不变；配置 revision 仍为不透明令牌，不返回内容摘要。既有路径白名单、单文件及总量预算不变。
 
 此声明用于已审查的发行文件。发现时由插件 critical 规则决定阻断；运行阶段 Host 在接受观察前及结束时复核已固定资源，变化或不可读会停止接受后续证据及自动重试，记录运行链异常，保留此前任务事实。它不是对全部 Python 依赖、解释器、加载代码或瞬时替换的完整证明，也不会阻止上游启动器修复/更新；新发行字节必须重新审查。
 
@@ -79,6 +79,6 @@ Host 联调工具的 `--runtime-installations <matrix.json>` 从显式 `cases`�
 
 保存诊断保留完整 `validation.diagnostics`；每项 `shouldNotify` 为 false 时，前端不重复弹出提示。Host 在当前进程内按绑定、规则范围、快照修订、上下文与词典身份去重；修复后再次出现或修订改变会重新提醒。缓存最多保留 1024 个绑定，重启或容量淘汰后可再次提示，不改历史事实。配置整体修订是进程密钥生成的 HMAC 标识，不是可枚举内容摘要；选择事务的单资源 CAS 令牌仍只属于其冻结视图。
 
-保存脚本实例与完成配置编辑都按协商版本选择单一配置校验入口：1.2 使用 `discover` 的配置诊断，即使检查失败也不回退旧接口；1.0/1.1 若仍声明 `configValidator`，继续运行旧只读校验一次。没有 validator 的旧包不声称完成了 1.2 配置诊断。一个绑定的反馈不会因另一个绑定文字相同而被去重。
+保存脚本实例与完成配置编辑都选择单一配置校验入口：声明 `0.1.0` 协议的插件使用 `discover` 配置诊断，即使检查失败也不回退旧接口；没有声明 `taskProtocol` 的旧插件若有 `configValidator`，继续运行旧只读校验一次。一个绑定的反馈不会因另一个绑定文字相同而被去重。
 
-预览的 `configuration_busy`、`cancelled`、`timeout`、`resource_limit` 与 `protocol_error` 分别表示占用/变化、取消、超时、资源预算和插件协议错误，不视作配置通过或业务失败。保存完成后的检查异常仅返回安全摘要，不返回原始脚本异常、文件路径或凭据。1.0/1.1 输出携带 `configAssessment` / `currentReadiness` 会明确拒绝，不能借旧版本启用 1.2。
+预览的 `configuration_busy`、`cancelled`、`timeout`、`resource_limit` 与 `protocol_error` 分别表示占用/变化、取消、超时、资源预算和插件协议错误，不视作配置通过或业务失败。保存完成后的检查异常仅返回安全摘要，不返回原始脚本异常、文件路径或凭据。旧开发版协议声明会明确拒绝；`0.1.0` 的 `configAssessment` 必须完整且通过声明约束。

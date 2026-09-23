@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 
 namespace NexusPipeline.Modules.Plugins.Contracts;
 
-/// <summary>Manifest-owned configuration rule declaration for taskProtocol 1.2.</summary>
+/// <summary>Manifest-owned configuration rule declaration for taskProtocol 0.1.0.</summary>
 internal sealed record TaskConfigRuleDescriptor(string RuleId, bool Required, string Criticality);
 
 /// <summary>Manifest-owned, non-arbitrary environment target declaration.</summary>

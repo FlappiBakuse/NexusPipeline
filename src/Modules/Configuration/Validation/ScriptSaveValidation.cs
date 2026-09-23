@@ -80,7 +80,7 @@ internal sealed class ScriptSaveValidation
                     continue;
                 }
 
-                if (spec.TaskProtocol?.Version == "1.2" && _taskProtocolAssessment is not null)
+                if (spec.TaskProtocol?.Version == "0.1.0" && _taskProtocolAssessment is not null)
                 {
                     if (assessmentBudget.IsCancellationRequested)
                     {

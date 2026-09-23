@@ -8,7 +8,7 @@ namespace NexusPipeline.Tests.Configuration;
 public sealed class ConfigDiagnosticFeedbackTests
 {
     private static TaskPlan Plan(string revision = "r1", string evaluation = "violated", string context = "context") =>
-        new("1.2", Guid.NewGuid().ToString("N"), "preview", "unknown-plugin", "0.1.0", DateTimeOffset.UtcNow, "signature", "complete", [], [])
+        new("0.1.0", Guid.NewGuid().ToString("N"), "preview", "unknown-plugin", "0.1.0", DateTimeOffset.UtcNow, "signature", "complete", [], [])
         {
             ConfigAssessment = new("1", [new("target", evaluation, "warning", evaluation == "satisfied" ? "none" : "warn",
                 new JsonObject { ["kind"] = "binding" }, [], []) { ReasonText = new JsonObject { ["kind"] = "literal", ["value"] = "Finding" } }]),

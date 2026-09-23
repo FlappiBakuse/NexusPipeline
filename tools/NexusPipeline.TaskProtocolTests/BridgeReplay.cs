@@ -25,7 +25,7 @@ internal static class BridgeReplay
                 Order = 0, CountsAsUnit = true, RequiredForParent = false, RetryUnitId = "opaque-task",
                 RetryRisk = "safe", Dependencies = [], Detection = "supported" };
             var other = task with { Id = "other-task", SourceKey = "checkin.other", Name = "Other candidate", RetryUnitId = "other-task", Order = 1 };
-            var plan = new TaskPlan("1.1", "isolated-plan", "discovery", "prototype", "0.0.0", DateTimeOffset.UtcNow,
+            var plan = new TaskPlan("0.1.0", "isolated-plan", "discovery", "prototype", "0.0.0", DateTimeOffset.UtcNow,
                 "isolated-signature", "complete", [task, other], []);
             var reducer = new TaskRunReducer(runId, plan);
             reducer.BeginAttempt(attemptId, 1, [task.Id, other.Id]);
@@ -41,7 +41,7 @@ internal static class BridgeReplay
                 var batch = logs.Peek();
                 if (batch.Records.Length == 0 && !final) { logs.Acknowledge(batch); return; }
                 var output = await TaskProtocolScriptRunner.ExecuteAsync<TaskObservationBatch>(script,
-                    new { protocolVersion = "1.1", phase = "observe", runId, attemptId, originalPlan = plan,
+                    new { protocolVersion = "0.1.0", phase = "observe", runId, attemptId, originalPlan = plan,
                         attemptTaskIds = new[] { task.Id, other.Id }, bridgeSession = session, adapterState = cursor,
                         logBatch = batch, isFinalCall = final && lifecycle != "cancelled" },
                     _ => throw new InvalidDataException("Bridge read config"),

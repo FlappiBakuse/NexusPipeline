@@ -14,14 +14,12 @@ internal static class TaskDiscoveryService
         TaskExecutionContext? executionContext = null, string scriptRoot = "", string scriptExecutable = "")
     {
         TaskExecutionContext context = executionContext ?? TaskExecutionContext.Unknown(userId, scriptId, preview ? "preview" : "pre_launch");
-        TaskEnvironmentProbe? probe = protocol.Version == "1.2"
-            ? new TaskEnvironmentProbe(protocol.EnvironmentChecks, view, context, scriptRoot, scriptExecutable)
-            : null;
+        TaskEnvironmentProbe probe = new(protocol.EnvironmentChecks, view, context, scriptRoot, scriptExecutable);
         var result = await TaskProtocolScriptRunner.ExecuteAsync<TaskDiscovery>(protocol.DiscoverScript,
             new { protocolVersion = protocol.Version, phase = "discover", origin = preview ? "preview" : "run",
                 pluginId, userId, scriptInstanceId = scriptId, configResources = view.ConfigResources, locale,
                 executionContext = context },
-            view.ReadConfig, view.ReadResource, preview, token, probe is null ? null : probe.Inspect).ConfigureAwait(false);
+            view.ReadConfig, view.ReadResource, preview, token, probe.Inspect).ConfigureAwait(false);
         TaskProtocolValidation.Discovery(result);
         TaskProtocolValidation.Require(result.ProtocolVersion == protocol.Version, "negotiated discovery version");
         TaskProtocolValidation.ConfigAssessment(

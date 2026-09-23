@@ -23,13 +23,13 @@ public sealed class TaskProtocolRunTests
             string config = Path.Combine(root, "config.json");
             File.WriteAllText(config,
                 "{\"blocked\":false,\"tasks\":[{\"id\":\"a\",\"enabled\":true},{\"id\":\"b\",\"enabled\":true}]}");
-            string discover = Discover.Replace("'1.0'", "'1.2'").Replace("selectionFields:", """
+            string discover = Discover.Replace("selectionFields:", """
                 configAssessment:{schemaVersion:'1',checks:[{ruleId:'target',evaluation:config.blocked?'violated':'satisfied',
                   severity:'info',executionEffect:config.blocked?'block':'none',scope:{kind:'binding'},
                   locations:[],actions:[],reasonText:{kind:'literal',value:'fixture'}}]},selectionFields:
                 """);
-            var protocol = new TaskProtocolDescriptor("1.2", discover,
-                Observe.Replace("'1.0'", "'1.2'"), Retry.Replace("'1.0'", "'1.2'"), [])
+            var protocol = new TaskProtocolDescriptor("0.1.0", discover,
+                Observe, Retry, [])
             { ConfigRules = [new("target", true, "critical_when_applicable")] };
             var script = new ScriptInstance { Id = "fixture", PluginType = "fictional", ConfigPath = config, RootPath = root };
             var spec = new ResolvedScriptSpec(script, "1.0.0", new(true, "javascript", "plugin-file", "", ""), "fixture")
@@ -73,14 +73,14 @@ public sealed class TaskProtocolRunTests
             string config = Path.Combine(root, "config.json");
             File.WriteAllText(config,
                 "{\"tasks\":[{\"id\":\"a\",\"enabled\":true},{\"id\":\"b\",\"enabled\":true}]}");
-            string discover = Discover.Replace("'1.0'", "'1.2'").Replace("selectionFields:", """
+            string discover = Discover.Replace("selectionFields:", """
                 configAssessment:{schemaVersion:'1',checks:[{ruleId:'selection',
                   evaluation:config.tasks.some(t=>!t.enabled)?'violated':'satisfied',
                   severity:'info',executionEffect:config.tasks.some(t=>!t.enabled)?'block':'none',
                   scope:{kind:'binding'},locations:[],actions:[],reasonText:{kind:'literal',value:'fixture'}}]},selectionFields:
                 """);
-            var protocol = new TaskProtocolDescriptor("1.2", discover,
-                Observe.Replace("'1.0'", "'1.2'"), Retry.Replace("'1.0'", "'1.2'"), [])
+            var protocol = new TaskProtocolDescriptor("0.1.0", discover,
+                Observe, Retry, [])
             { ConfigRules = [new("selection", true, "critical_when_applicable")] };
             var script = new ScriptInstance { Id = "fixture", PluginType = "fictional", ConfigPath = config, RootPath = root };
             var spec = new ResolvedScriptSpec(script, "1.0.0", new(true, "javascript", "plugin-file", "", ""), "fixture")
@@ -121,9 +121,9 @@ public sealed class TaskProtocolRunTests
             File.WriteAllText(config, "{\"tasks\":[{\"id\":\"daily\",\"enabled\":true}]}");
             File.WriteAllText(code, "original");
             string hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(code))).ToLowerInvariant();
-            string discover = Discover.Replace("'1.0'", "'1.2'").Replace("selectionFields:",
+            string discover = Discover.Replace("selectionFields:",
                 "configAssessment:{schemaVersion:'1',checks:[{ruleId:'runtime',evaluation:'satisfied',severity:'info',executionEffect:'none',scope:{kind:'binding'},locations:[],actions:[]}]},selectionFields:");
-            var protocol = new TaskProtocolDescriptor("1.2", discover, Observe.Replace("'1.0'", "'1.2'"), Retry.Replace("'1.0'", "'1.2'"),
+            var protocol = new TaskProtocolDescriptor("0.1.0", discover, Observe, Retry,
                 [new("code", "root", "main.py", "text", true, hash)])
             { ConfigRules = [new("runtime", true, "critical_when_applicable")] };
             var script = new ScriptInstance { Id = "fixture", PluginType = "fictional", ConfigPath = config, RootPath = root };
@@ -149,7 +149,7 @@ public sealed class TaskProtocolRunTests
     }
 
     [Fact]
-    public async Task Version11CarriesFrozenNamesAndDynamicReasonsThroughRealJint()
+    public async Task CurrentProtocolCarriesFrozenNamesAndDynamicReasonsThroughRealJint()
     {
         string root = Path.Combine(Path.GetTempPath(), "nxp-task-text-run-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
@@ -161,10 +161,10 @@ public sealed class TaskProtocolRunTests
             {
                 ["en-US"] = new() { ["task.name"] = "Frozen task", ["reason.done"] = "Frozen reason", ["unused"] = "Unused" }
             });
-            var protocol = new TaskProtocolDescriptor("1.1",
-                Discover.Replace("'1.0'", "'1.1'").Replace("name:t.id", "name:t.id,nameText:{kind:'plugin',key:'task.name',args:{},fallback:'Original'}"),
-                Observe.Replace("'1.0'", "'1.1'").Replace("reasonCode:'synthetic.terminal'", "reasonCode:'synthetic.terminal',reasonText:{kind:'plugin',key:'reason.done',args:{},fallback:'Done'}"),
-                Retry.Replace("'1.0'", "'1.1'"), []) { Localization = texts };
+            var protocol = new TaskProtocolDescriptor("0.1.0",
+                Discover.Replace("name:t.id", "name:t.id,nameText:{kind:'plugin',key:'task.name',args:{},fallback:'Original'}"),
+                Observe.Replace("reasonCode:'synthetic.terminal'", "reasonCode:'synthetic.terminal',reasonText:{kind:'plugin',key:'reason.done',args:{},fallback:'Done'}"),
+                Retry, []) { Localization = texts, ConfigRules = [new("fixture.default", true, "critical_when_applicable")] };
             var script = new ScriptInstance { Id = "fixture", PluginType = "third-party", ConfigPath = config, RootPath = root };
             var spec = new ResolvedScriptSpec(script, "1.0.0", new(true, "javascript", "plugin-file", "", ""), "fixture") { TaskProtocol = protocol };
             var run = new TaskProtocolRun(spec, "run", "user", Path.Combine(root, "journal"));
@@ -192,11 +192,11 @@ public sealed class TaskProtocolRunTests
         {
             string config = Path.Combine(root, "config.json");
             File.WriteAllText(config, "{\"tasks\":[{\"id\":\"daily\",\"enabled\":true}]}");
-            string discover = Discover.Replace("'1.0'", "'1.2'").Replace(
+            string discover = Discover.Replace(
                 "selectionFields:",
                 "configAssessment:{schemaVersion:'1',checks:[{ruleId:'fixture.assessment',evaluation:'satisfied',severity:'info',executionEffect:'none',scope:{kind:'binding'},locations:[],actions:[]}]},selectionFields:");
             var protocol = new TaskProtocolDescriptor(
-                "1.2", discover, Observe.Replace("'1.0'", "'1.2'"), Retry.Replace("'1.0'", "'1.2'"), [])
+                "0.1.0", discover, Observe, Retry, [])
             {
                 ConfigRules = [new TaskConfigRuleDescriptor("fixture.assessment", true, "critical_when_applicable")],
             };
@@ -219,13 +219,14 @@ public sealed class TaskProtocolRunTests
     private const string Discover = """
         const resource = input.configResources[0].id;
         const config = nexus.readConfig(resource).document;
-        console.log({protocolVersion:'1.0',type:'discovery',coverage:'complete',diagnostics:[],
+        console.log({protocolVersion:'0.1.0',type:'discovery',coverage:'complete',diagnostics:[],
+          configAssessment:{schemaVersion:'1',checks:[{ruleId:'fixture.default',evaluation:'satisfied',severity:'info',executionEffect:'none',scope:{kind:'binding'},locations:[],actions:[]}]},
           selectionFields: config.tasks.map(t=>({resourceId:resource,selector:['tasks',{by:'id',value:t.id},'enabled'],purpose:'selection'})),
           tasks:config.tasks.map((t,i)=>({id:t.id,sourceKey:t.id,name:t.id,parentId:null,role:'business',enabled:t.enabled,
             order:i,countsAsUnit:true,requiredForParent:true,retryUnitId:t.id,retryRisk:'safe',dependencies:[],detection:'supported',configRef:resource}))});
         """;
     private const string Observe = """
-        console.log({protocolVersion:'1.0',type:'observation',runId:input.runId,attemptId:input.attemptId,
+        console.log({protocolVersion:'0.1.0',type:'observation',runId:input.runId,attemptId:input.attemptId,
           runBoundary:'open',boundaryEvidence:[],diagnostics:[],
           observations:input.logBatch.records.map(r=>{const p=r.text.split(' ');return {id:'event-'+r.sourceId+'-'+r.epoch+'-'+r.sequence,
             taskId:p[0],executionOrdinal:1,status:p[1],reasonCode:'synthetic.terminal',
@@ -236,7 +237,7 @@ public sealed class TaskProtocolRunTests
         const included=input.originalPlan.tasks.filter(t=>t.enabled&&['failed','blocked'].includes(input.taskStates[t.id])).map(t=>t.id);
         const operations=current.document.tasks.filter(t=>t.enabled!==included.includes(t.id)).map(t=>({selector:['tasks',{by:'id',value:t.id},'enabled'],
           expected:t.enabled,value:included.includes(t.id),purpose:'selection'}));
-        console.log({protocolVersion:'1.0',type:'retry',decision:'selective',reasonCode:'retry.unfinished',
+        console.log({protocolVersion:'0.1.0',type:'retry',decision:'selective',reasonCode:'retry.unfinished',
           includedTaskIds:included,prerequisiteTaskIds:[],expandedUnitIds:[],filePatches:[{resourceId:id,format:'json',expectedRevision:current.revision,operations}]});
         """;
 
@@ -250,7 +251,7 @@ public sealed class TaskProtocolRunTests
             File.WriteAllText(config, "{\"tasks\":[{\"id\":\"a\",\"enabled\":true},{\"id\":\"b\",\"enabled\":true}],\"count\":0}");
             var script = new ScriptInstance { Id = "fixture", PluginType = "fictional", ConfigPath = config, RootPath = root };
             var spec = new ResolvedScriptSpec(script, "1.0.0", new(true, "javascript", "plugin-file", "", ""), "fixture")
-            { TaskProtocol = new("1.0", Discover, Observe, Retry, []) };
+            { TaskProtocol = new("0.1.0", Discover, Observe, Retry, []) { ConfigRules = [new("fixture.default", true, "critical_when_applicable")] } };
             var run = new TaskProtocolRun(spec, "run", "user", Path.Combine(root, "journal"));
             await run.BeginAsync(1, default);
             run.Append("stdout", "a succeeded\nb failed\n");
@@ -285,8 +286,8 @@ public sealed class TaskProtocolRunTests
         try
         {
             string path = Path.Combine(root, "config.json");
-            var protocol = new TaskProtocolDescriptor("1.0", Discover.Replace("selectionFields:",
-                "behaviorFields:[{resourceId:resource,selector:['budget']}],selectionFields:"), Observe, Retry, []);
+            var protocol = new TaskProtocolDescriptor("0.1.0", Discover.Replace("selectionFields:",
+                "behaviorFields:[{resourceId:resource,selector:['budget']}],selectionFields:"), Observe, Retry, []) { ConfigRules = [new("fixture.default", true, "critical_when_applicable")] };
             async Task<TaskPlan> Read(string json)
             {
                 File.WriteAllText(path, json);

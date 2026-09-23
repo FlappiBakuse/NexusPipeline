@@ -8,7 +8,7 @@ using NexusPipeline.Modules.Plugins.Contracts;
 namespace NexusPipeline.Modules.Execution.Judgement;
 
 /// <summary>
-/// Host-owned implementation of taskProtocol 1.2 declared target inspection.
+/// Host-owned implementation of taskProtocol 0.1.0 declared target inspection.
 /// It resolves only frozen resource selectors or the two host fields declared by
 /// the manifest, and returns metadata/status rather than a path or file content.
 /// </summary>

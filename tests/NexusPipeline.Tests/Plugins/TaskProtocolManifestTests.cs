@@ -13,18 +13,17 @@ public sealed class TaskProtocolManifestTests
     [InlineData("{\"kind\":\"plugin\",\"key\":\"a\",\"args\":{},\"fallback\":\"{missing}\"}")]
     public void TextReferencesRejectForeignOwnersAndInvalidArguments(string json)
     {
-        Assert.ThrowsAny<Exception>(() => TaskDisplaySnapshot.ValidateReference(JsonNode.Parse(json)!.AsObject(), "1.1"));
+        Assert.ThrowsAny<Exception>(() => TaskDisplaySnapshot.ValidateReference(JsonNode.Parse(json)!.AsObject(), "0.1.0"));
     }
 
     [Fact]
-    public void LegacyWireRejectsNewTextMembersEvenWhenNull()
+    public void WireRejectsDuplicateMembers()
     {
-        Assert.Throws<InvalidDataException>(() => TaskProtocolJson.Read<JsonObject>("{\"protocolVersion\":\"1.0\",\"type\":\"discovery\",\"tasks\":[{\"nameText\":null}]}"));
         Assert.Throws<InvalidDataException>(() => TaskProtocolJson.Read<JsonObject>("{\"kind\":\"literal\",\"kind\":\"plugin\"}"));
     }
 
     [Fact]
-    public void Version11FreezesDictionaryAndResolvesWithoutPackage()
+    public void CurrentVersionFreezesDictionaryAndResolvesWithoutPackage()
     {
         string root = Path.Combine(Path.GetTempPath(), "nxp-task-text-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(Path.Combine(root, "data"));
@@ -32,17 +31,16 @@ public sealed class TaskProtocolManifestTests
         {
             var manifest = Manifest();
             var protocol = manifest["taskProtocol"]!.AsObject();
-            protocol["localization"] = JsonNode.Parse("""{"defaultLocale":"zh-CN","messages":{"en-US":"data/en.json","zh-CN":"data/zh.json"}}""");
-            Assert.False(TaskProtocolManifest.TryValidate(manifest, out _));
-            protocol["version"] = "1.1";
+            protocol["localization"] = JsonNode.Parse("""{"defaultLocale":"zh-CN","messages":{"en-US":"data/i18n/en.json","zh-CN":"data/i18n/zh.json"}}""");
             Assert.True(TaskProtocolManifest.TryValidate(manifest, out _));
             foreach (string file in new[] { "discover", "judge", "retry" }) File.WriteAllText(Path.Combine(root, "data", file + ".js"), "// fixture");
-            File.WriteAllText(Path.Combine(root, "data", "en.json"), """{"task.name":"Reward {count}","unused":"Unused"}""");
-            File.WriteAllText(Path.Combine(root, "data", "zh.json"), """{"task.name":"奖励 {count}"}""");
+            Directory.CreateDirectory(Path.Combine(root, "data", "i18n"));
+            File.WriteAllText(Path.Combine(root, "data", "i18n", "en.json"), """{"task.name":"Reward {count}","unused":"Unused"}""");
+            File.WriteAllText(Path.Combine(root, "data", "i18n", "zh.json"), """{"task.name":"奖励 {count}"}""");
             var descriptor = TaskProtocolManifest.Freeze(manifest, root)!;
             var reference = JsonNode.Parse("""{"kind":"plugin","key":"task.name","args":{"count":2},"fallback":"Reward"}""")!.AsObject();
             var frozen = descriptor.Localization!.Select([reference]) with { PluginId = "third-party", PluginVersion = "1.2.3" };
-            File.Delete(Path.Combine(root, "data", "en.json"));
+            File.Delete(Path.Combine(root, "data", "i18n", "en.json"));
             var restored = TaskProtocolJson.Copy(frozen);
             Assert.Equal("Reward 2", TaskDisplaySnapshot.Resolve(reference, restored, "en_GB", "raw"));
             Assert.Equal("奖励 2", TaskDisplaySnapshot.Resolve(reference, restored, "fr-FR", "raw"));
@@ -55,11 +53,12 @@ public sealed class TaskProtocolManifestTests
     }
 
     [Fact]
-    public void Version12RequiresDiagnosticDeclarationsAndRejectsValidator()
+    public void CurrentVersionRequiresDiagnosticDeclarationsAndRejectsValidator()
     {
         var manifest = Manifest();
         var protocol = manifest["taskProtocol"]!.AsObject();
-        protocol["version"] = "1.2";
+        protocol.Remove("configRules");
+        Assert.False(TaskProtocolManifest.TryValidate(manifest, out _));
         protocol["localization"] = JsonNode.Parse("""{"defaultLocale":"zh-CN","messages":{"en-US":"data/i18n/en.json","zh-CN":"data/i18n/zh.json"}}""");
         protocol["configRules"] = JsonNode.Parse("""[{"id":"example.configuration","required":true,"criticality":"advisory_or_contextual"}]""");
         protocol["environmentChecks"] = new JsonArray();
@@ -69,23 +68,18 @@ public sealed class TaskProtocolManifestTests
     }
 
     [Theory]
+    [InlineData("0.1.0", "root", "text", true, true)]
     [InlineData("1.0", "root", "text", true, false)]
     [InlineData("1.1", "root", "text", true, false)]
-    [InlineData("1.2", "root", "text", true, true)]
-    [InlineData("1.2", "extraConfig", "text", true, false)]
-    [InlineData("1.2", "root", "json", true, false)]
-    [InlineData("1.2", "root", "text", false, false)]
-    public void ResourceIntegrityRequiresVersion12AndFixedRootText(string version, string source, string format, bool validHash, bool valid)
+    [InlineData("1.2", "root", "text", true, false)]
+    [InlineData("0.1.0", "extraConfig", "text", true, false)]
+    [InlineData("0.1.0", "root", "json", true, false)]
+    [InlineData("0.1.0", "root", "text", false, false)]
+    public void ResourceIntegrityRequiresCurrentVersionAndFixedRootText(string version, string source, string format, bool validHash, bool valid)
     {
         var manifest = Manifest();
         var protocol = manifest["taskProtocol"]!.AsObject();
         protocol["version"] = version;
-        if (version != "1.0") protocol["localization"] = JsonNode.Parse("""{"defaultLocale":"en-US","messages":{"en-US":"data/i18n/en.json"}}""");
-        if (version == "1.2")
-        {
-            protocol["configRules"] = JsonNode.Parse("""[{"id":"runtime","required":true,"criticality":"critical_when_applicable"}]""");
-            protocol["environmentChecks"] = new JsonArray();
-        }
         protocol["readResources"] = new JsonArray(new JsonObject {
             ["id"] = "code", ["source"] = source, ["path"] = "main.py", ["format"] = format,
             ["required"] = false, ["sha256"] = validHash ? new string('a', 64) : "invalid"
@@ -105,7 +99,6 @@ public sealed class TaskProtocolManifestTests
     {
         var manifest = Manifest();
         var protocol = manifest["taskProtocol"]!.AsObject();
-        protocol["version"] = "1.2";
         protocol["localization"] = JsonNode.Parse("""{"defaultLocale":"en-US","messages":{"en-US":"data/i18n/en.json"}}""");
         protocol["configRules"] = JsonNode.Parse("""[{"id":"runtime","required":true,"criticality":"critical_when_applicable"}]""");
         var check = JsonNode.Parse("""{"id":"adb","source":{"kind":"mainConfig","selector":["ip"]},"expectedKind":"adb_endpoint","relativeBase":"none","networkAccess":false,"followReparsePoints":false,"comparison":"adb_endpoint_with_port","secondarySelector":["port"],"defaultValue":"127.0.0.1","secondaryDefaultValue":"5555"}""")!.AsObject();
@@ -121,11 +114,16 @@ public sealed class TaskProtocolManifestTests
 
     private static JsonObject Manifest() => (JsonObject)JsonNode.Parse("""
         {"kind":"data-specialized","judgeScript":"data/judge.js","minHostVersion":"0.16.8",
-         "taskProtocol":{"version":"1.0","discoverScript":"data/discover.js","retryScript":"data/retry.js","readResources":[]}}
+         "taskProtocol":{"version":"0.1.0","discoverScript":"data/discover.js","retryScript":"data/retry.js","readResources":[],
+          "localization":{"defaultLocale":"en-US","messages":{"en-US":"data/i18n/en.json"}},
+          "configRules":[{"id":"fixture.default","required":true,"criticality":"critical_when_applicable"}],"environmentChecks":[]}}
         """)!;
 
     [Theory]
     [InlineData("version", "2.0")]
+    [InlineData("version", "1.0")]
+    [InlineData("version", "1.1")]
+    [InlineData("version", "1.2")]
     [InlineData("discoverScript", "../secret.js")]
     [InlineData("retryScript", "data/retry.py")]
     [InlineData("retryScript", "data/C:retry.js")]
@@ -164,6 +162,8 @@ public sealed class TaskProtocolManifestTests
         Directory.CreateDirectory(Path.Combine(root, "data"));
         try
         {
+            Directory.CreateDirectory(Path.Combine(root, "data", "i18n"));
+            File.WriteAllText(Path.Combine(root, "data", "i18n", "en.json"), "{}");
             foreach (string file in new[] { "discover", "judge", "retry" })
                 File.WriteAllText(Path.Combine(root, "data", file + ".js"), "console.log({});");
             foreach (string file in new[] { "discover", "judge", "retry" })
@@ -185,6 +185,8 @@ public sealed class TaskProtocolManifestTests
         try
         {
             foreach (string file in new[] { "discover", "judge", "retry" }) File.WriteAllText(Path.Combine(root, "data", file + ".js"), "// original");
+            Directory.CreateDirectory(Path.Combine(root, "data", "i18n"));
+            File.WriteAllText(Path.Combine(root, "data", "i18n", "en.json"), "{}");
             var descriptor = TaskProtocolManifest.Freeze(Manifest(), root)!;
             File.WriteAllText(Path.Combine(root, "data", "judge.js"), "// changed");
             Assert.Equal("// original", descriptor.ObserveScript);

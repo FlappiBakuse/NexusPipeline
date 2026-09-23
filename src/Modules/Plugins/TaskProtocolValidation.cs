@@ -7,7 +7,7 @@ internal static class TaskProtocolValidation
 {
     internal static void Discovery(TaskDiscovery discovery)
     {
-        Require(discovery.ProtocolVersion is "1.0" or "1.1" or "1.2" && discovery.Type == "discovery", "discovery envelope");
+        Require(discovery.ProtocolVersion == "0.1.0" && discovery.Type == "discovery", "discovery envelope");
         Require(discovery.Coverage is "complete" or "partial" or "unsupported", "coverage");
         Require(discovery.Tasks is { Length: <= 1024 }, "task count");
         Diagnostics(discovery.Diagnostics, discovery.ProtocolVersion);
@@ -72,7 +72,7 @@ internal static class TaskProtocolValidation
     }
 
     /// <summary>
-    /// Validates the 1.2 configuration assessment against the frozen manifest and
+    /// Validates the configuration assessment against the frozen manifest and
     /// the resources that Host actually exposed. A well-shaped but unauthorized
     /// check is still rejected; it cannot become an implicit pass.
     /// </summary>
@@ -82,11 +82,7 @@ internal static class TaskProtocolValidation
         IReadOnlySet<string> declaredConfigIds,
         IReadOnlySet<string> declaredResourceIds)
     {
-        if (protocol.Version != "1.2")
-        {
-            Require(discovery.ConfigAssessment is null, "configuration diagnostics require 1.2");
-            return;
-        }
+        Require(protocol.Version == "0.1.0", "unsupported task protocol");
         TaskConfigAssessment? assessment = discovery.ConfigAssessment;
         Require(assessment is not null, "config assessment required");
         if (assessment is null) throw new InvalidDataException("protocol_error: config assessment required");
@@ -241,7 +237,7 @@ internal static class TaskProtocolValidation
     internal static void Observation(TaskObservationBatch batch, string runId, string attemptId,
         IReadOnlySet<string> selected, IReadOnlySet<(string, int, long)> evidence)
     {
-        Require(batch.ProtocolVersion is "1.0" or "1.1" or "1.2" && batch.Type == "observation" && batch.RunId == runId && batch.AttemptId == attemptId, "observation identity");
+        Require(batch.ProtocolVersion == "0.1.0" && batch.Type == "observation" && batch.RunId == runId && batch.AttemptId == attemptId, "observation identity");
         Require(batch.Observations is { Length: <= 2048 }, "observation count");
         Require(batch.RunBoundary is "open" or "ended" or "aborted" or "unknown", "boundary");
         Evidence(batch.BoundaryEvidence, evidence, batch.RunBoundary is "ended" or "aborted");
@@ -261,7 +257,7 @@ internal static class TaskProtocolValidation
         }
         if (batch.Incidents is { } incidents)
         {
-            Require(batch.ProtocolVersion is "1.1" or "1.2" && incidents.Length <= 2048, "incident version/count");
+            Require(incidents.Length <= 2048, "incident count");
             var events = new HashSet<string>(StringComparer.Ordinal);
             foreach (var incident in incidents)
             {
