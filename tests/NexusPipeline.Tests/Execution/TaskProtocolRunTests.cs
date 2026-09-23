@@ -63,6 +63,51 @@ public sealed class TaskProtocolRunTests
         finally { Directory.Delete(root, true); }
     }
 
+    [Fact]
+    public async Task RetryPreparationAdmissionKeepsCompletedAttemptFacts()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "nxp-retry-preparation-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            string config = Path.Combine(root, "config.json");
+            File.WriteAllText(config,
+                "{\"tasks\":[{\"id\":\"a\",\"enabled\":true},{\"id\":\"b\",\"enabled\":true}]}");
+            string discover = Discover.Replace("'1.0'", "'1.2'").Replace("selectionFields:", """
+                configAssessment:{schemaVersion:'1',checks:[{ruleId:'selection',
+                  evaluation:config.tasks.some(t=>!t.enabled)?'violated':'satisfied',
+                  severity:'info',executionEffect:config.tasks.some(t=>!t.enabled)?'block':'none',
+                  scope:{kind:'binding'},locations:[],actions:[],reasonText:{kind:'literal',value:'fixture'}}]},selectionFields:
+                """);
+            var protocol = new TaskProtocolDescriptor("1.2", discover,
+                Observe.Replace("'1.0'", "'1.2'"), Retry.Replace("'1.0'", "'1.2'"), [])
+            { ConfigRules = [new("selection", true, "critical_when_applicable")] };
+            var script = new ScriptInstance { Id = "fixture", PluginType = "fictional", ConfigPath = config, RootPath = root };
+            var spec = new ResolvedScriptSpec(script, "1.0.0", new(true, "javascript", "plugin-file", "", ""), "fixture")
+            { TaskProtocol = protocol };
+            var run = new TaskProtocolRun(spec, "run", "user", Path.Combine(root, "journal"));
+
+            await run.BeginAsync(1, default);
+            run.Append("stdout", "a succeeded\nb failed\n");
+            Assert.Null((await run.ObserveAsync(true, default)).JudgeError);
+            RunAttemptResult first = run.Finish(RunAttemptResult.Partial("normal exit"), 1);
+            Assert.Equal("partial", first.Status);
+            Assert.False(await run.PrepareRetryAsync(2, false, false, default));
+            Assert.True(run.IsAdmissionBlocked);
+
+            JsonObject report = run.Snapshot()!;
+            Assert.Single(report["attemptReports"]!.AsArray());
+            Assert.Equal("run:1", report["attemptReports"]![0]!["attemptId"]!.GetValue<string>());
+            Assert.Equal("completed", report["lifecycleOutcome"]!.GetValue<string>());
+            Assert.Equal("failed", report["finalTaskResults"]![1]!["status"]!.GetValue<string>());
+            Assert.Equal("stop", report["attemptReports"]![0]!["retryDecision"]!["decision"]!.GetValue<string>());
+            Assert.Equal("tasks.admission_blocked", report["attemptReports"]![0]!["retryDecision"]!["reasonCode"]!.GetValue<string>());
+            Assert.NotNull(report["admissionBlocked"]);
+            Assert.Null(run.Restore());
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
