@@ -4,6 +4,19 @@
 
 以下命令均在 `NexusPipeline/` 根目录执行：
 
+方案 B 的本地阶段入口已可使用；线上 Required 仍按现行 ruleset 运行旧 Qualification，切换前不要删除旧工作流：
+
+```text
+node tests\run.mjs prepare
+node tests\run.mjs fast
+node tests\run.mjs integration
+node tests\run.mjs all
+```
+
+`prepare` 安装前端和工具工作区的锁定依赖；`fast` 执行后端单测、前端类型检查与单测、官方插件契约、文档、工具、语法和架构检查，不构建生产包。非纯文档的 `fast` 必须通过 `NEXUS_OFFICIAL_PLUGINS_ROOT` 指定固定的官方插件 checkout。`integration` 在 Windows 上构建一次隔离 Test Host，执行 UI 与系统贯通、更新和执行真实计时；不构建生产包。`all` 在同一进程中依次执行 fast 和 integration，复用已准备依赖及 Test Host。生产构建由 `build` 单独执行。
+
+本地 `build.cmd` 只清理程序自有的 `release/wwwroot` 前端输出；重新发布到 `release/` 时保留 `plugins/`、`config/`、`data/`、`history/` 与 `logs/` 等运行数据。正式候选仍在独立的 `.generated/candidate/` 中构建和验包，不读取本地 `release/` 的运行数据。
+
 ```text
 dotnet test tests\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo -m:1
 npm run typecheck --prefix frontend
@@ -28,7 +41,7 @@ node tests\run.mjs release update-acceptance
 
 `release core` 的最后一项是架构门禁：对 production 和 Test Host 真实加载 MSBuild/Roslyn 工程执行 `check`，随后生成 `.generated/architecture/backend-map.json`，校验 schema、非空源码集合、owner 路径和预期模式，重复生成结果必须一致；当前 run 的 artifact 中同时保存带候选 SHA 的地图副本。地图不是宿主运行时或 `release/` 的输入。
 
-`tooling` 递归发现并运行现役 Node 工具测试和 `tools/tests/test_*.py`，同时覆盖前端边界、源码编码、更新策略、资格控制与原生报告解析。
+`tooling` 发现并运行现役 Node 工具测试（文档索引测试由 `docs` 独占）和 `tools/tests/test_*.py`，同时覆盖前端边界、源码编码、更新策略、资格控制与原生报告解析。插件源码布局测试只在 `tooling` 执行。
 
 统一 runner 保留实时 stdout/stderr、退出码、超时信息和原生 TAP/TRX/Vitest/Playwright 报告。每次运行的报告位于 `tests/.artifacts/runs/<runId>/reports/`；失败时不删除唯一原始报告。
 
@@ -36,7 +49,7 @@ node tests\run.mjs release update-acceptance
 
 `core` 的跨仓库文档检查、`frontend-contract` 与 `ui-runtime` 必须通过 `NEXUS_OFFICIAL_PLUGINS_ROOT` 显式指定同一官方插件源码根目录；不会根据相邻目录猜测来源。文档检查需保留链接引用的 Git 历史（CI 使用完整检出）。`contract` 加载官方插件构建模块并注册真实宿主公共元素；入口会在宿主 `frontend/`、宿主 `tools/` 与该插件根目录安装前端依赖，并执行插件仓库的 `npm run build:frontend`。
 
-完整组合入口包括 frontend Vitest、类型检查和前端构建；`frontend` 入口执行完整前端验证。
+`frontend` 入口执行 Vitest 和类型检查；前端生产构建由 `build` 或 Test Host 集成入口按需执行。相同前端源码和锁文件的本地构建可由指纹复用，输入变化会使旧构建失效。
 
 统一组合入口按功能范围选择；所有功能测试均使用隔离的 asInvoker Test Host：
 

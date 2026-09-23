@@ -168,6 +168,19 @@ def _run_checked(command: list[str], cwd: Path, runner: Callable[[list[str], Pat
     subprocess.run(command, cwd=cwd, check=True)
 
 
+def verify_frontend_ready(root: Path) -> None:
+    frontend = root / "frontend"
+    stamp = root / ".generated" / "frontend-build.hash"
+    _require((frontend / "dist" / "index.html").is_file()
+             and (frontend / "dist" / ".vite" / "manifest.json").is_file()
+             and stamp.is_file() and not stamp.is_symlink(), "已准备前端产物缺失")
+    result = subprocess.run(["node", str(root / "tools" / "source-hash.mjs"), "--frontend"],
+                            cwd=root, check=False, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    _require(result.returncode == 0 and re.fullmatch(r"[0-9A-F]{64}", result.stdout.strip()) is not None,
+             "无法验证已准备前端指纹")
+    _require(stamp.read_text(encoding="ascii").strip() == result.stdout.strip(), "已准备前端指纹过期")
+
+
 def build_production(
     root: Path,
     output_dir: Path,
@@ -175,16 +188,19 @@ def build_production(
     source_sha: str,
     dotnet: str = "dotnet",
     runner: Callable[[list[str], Path], None] | None = None,
+    frontend_ready: bool = False,
 ) -> dict[str, Any]:
     root = root.resolve()
     production_root = output_dir.resolve() / "production"
-    if production_root.exists():
-        shutil.rmtree(production_root)
+    _require(not production_root.exists(), f"production 输出目录已存在，拒绝覆盖：{production_root}")
     frontend = root / "frontend"
     npm = "npm.cmd" if os.name == "nt" else "npm"
-    _run_checked([npm, "ci", "--no-audit", "--no-fund"], frontend, runner)
-    _run_checked([npm, "run", "typecheck"], frontend, runner)
-    _run_checked([npm, "run", "build"], frontend, runner)
+    if frontend_ready:
+        verify_frontend_ready(root)
+    else:
+        _run_checked([npm, "ci", "--no-audit", "--no-fund"], frontend, runner)
+        _run_checked([npm, "run", "typecheck"], frontend, runner)
+        _run_checked([npm, "run", "build"], frontend, runner)
     _run_checked([dotnet, "publish", str(root / "src" / "NexusPipeline.csproj"), "--configuration", "Release", "--runtime", "win-x64", "--self-contained", "false", "-p:PublishSingleFile=true", "-p:DebugType=none", "-p:DebugSymbols=false", "-p:NexusTestHost=false", "--output", str(production_root)], root, runner)
     verify_embedded_manifest(production_root / "nexus-pipeline.exe", "requireAdministrator")
     wwwroot = production_root / "wwwroot"
@@ -198,6 +214,173 @@ def build_production(
         source_sha=source_sha,
         manifest_path=root / "src" / "app.manifest",
     )
+
+
+def write_candidate_manifest(
+    root: Path,
+    output_dir: Path,
+    *,
+    source_sha: str,
+    partner_sha: str | None,
+    workflow_sha: str,
+    run_id: int,
+    run_attempt: int,
+) -> dict[str, Any]:
+    root = root.resolve()
+    _require(output_dir.is_dir() and not output_dir.is_symlink(), "Host candidate 目录无效")
+    output_dir = output_dir.resolve()
+    _require(re.fullmatch(r"[0-9a-f]{40}", source_sha) is not None, "candidate source SHA 无效")
+    _require(re.fullmatch(r"[0-9a-f]{40}", workflow_sha) is not None, "candidate workflow SHA 无效")
+    _require(partner_sha is None or re.fullmatch(r"[0-9a-f]{40}", partner_sha) is not None, "candidate partner SHA 无效")
+    _require(type(run_id) is int and run_id > 0 and type(run_attempt) is int and run_attempt > 0, "candidate run/attempt 无效")
+    _require(git_output(root, "rev-parse", "HEAD") == source_sha, "candidate source 与检出 HEAD 不一致")
+    _require(not git_output(root, "status", "--porcelain=v1", "--untracked-files=all"), "candidate 源码工作树不干净")
+    tree_sha = git_output(root, "rev-parse", f"{source_sha}^{{tree}}")
+    tag = "v" + project_version(root)
+    zip_name = f"NexusPipeline-{tag}-win-x64.zip"
+    expected = {zip_name, f"{zip_name}.sha256", "build-metadata.json"}
+    actual = {path.name for path in output_dir.iterdir()}
+    _require(actual == expected and all((output_dir / name).is_file() and not (output_dir / name).is_symlink() for name in expected),
+             f"Host candidate 文件集合无效：{sorted(actual)}")
+    metadata = verify_received_package(output_dir / zip_name, output_dir / "build-metadata.json",
+                                       expected_source_sha=source_sha, expected_tag=tag)
+    _require((output_dir / f"{zip_name}.sha256").read_text(encoding="ascii").strip() == metadata["sha256"], "Host SHA sidecar 与包不一致")
+    files = [
+        {"path": name, "sha256": hashlib.sha256((output_dir / name).read_bytes()).hexdigest(),
+         "sizeBytes": (output_dir / name).stat().st_size}
+        for name in sorted(expected)
+    ]
+    candidate = {
+        "schemaVersion": 1,
+        "repository": REPOSITORY,
+        "channel": "host",
+        "sourceSha": source_sha,
+        "sourceTreeSha": tree_sha,
+        "partnerSha": partner_sha,
+        "producer": {
+            "workflowPath": ".github/workflows/release.yml",
+            "workflowSha": workflow_sha,
+            "runId": run_id,
+            "runAttempt": run_attempt,
+            "jobName": "candidate",
+        },
+        "files": files,
+        "releaseLabel": tag,
+        "distribution": None,
+    }
+    (output_dir / "candidate.json").write_text(json.dumps(candidate, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
+    return candidate
+
+
+def validate_candidate_data(
+    root: Path,
+    output_dir: Path,
+    *,
+    expected_source_sha: str,
+    expected_producer: dict[str, Any],
+    expected_partner_sha: str | None,
+) -> dict[str, Any]:
+    """Check candidate bytes against facts supplied by the caller's trusted API lookup.
+
+    The caller must independently prove the original candidate job succeeded and
+    identify its server-side artifact. This local file check cannot prove either.
+    """
+    root = root.resolve()
+    _require(output_dir.is_dir() and not output_dir.is_symlink(), "Host candidate 目录无效")
+    output_dir = output_dir.resolve()
+    manifest_file = output_dir / "candidate.json"
+    _require(manifest_file.is_file() and not manifest_file.is_symlink(), "Host candidate.json 必须是普通文件")
+    try:
+        candidate = json.loads(manifest_file.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise HostReleaseError("Host candidate.json 缺失或无效") from exc
+    _require(isinstance(candidate, dict) and set(candidate) == {
+        "schemaVersion", "repository", "channel", "sourceSha", "sourceTreeSha", "partnerSha",
+        "producer", "files", "releaseLabel", "distribution",
+    }, "Host candidate 字段集合无效")
+    _require(type(candidate["schemaVersion"]) is int and candidate["schemaVersion"] == 1
+             and candidate["repository"] == REPOSITORY and candidate["channel"] == "host"
+             and candidate["distribution"] is None, "Host candidate 仓库或通道无效")
+    _require(re.fullmatch(r"[0-9a-f]{40}", expected_source_sha) is not None, "可信 source SHA 无效")
+    _require(candidate["sourceSha"] == expected_source_sha, "Host candidate source SHA 与可信来源不符")
+    _require(candidate["sourceTreeSha"] == git_output(root, "rev-parse", f"{expected_source_sha}^{{tree}}"), "Host candidate source tree 不符")
+    _require(expected_partner_sha is None or (isinstance(expected_partner_sha, str)
+             and re.fullmatch(r"[0-9a-f]{40}", expected_partner_sha) is not None),
+             "可信 partner SHA 无效")
+    _require(candidate["partnerSha"] == expected_partner_sha, "Host candidate partner SHA 不符")
+    _require(isinstance(expected_producer, dict) and set(expected_producer) == {
+        "workflowPath", "workflowSha", "runId", "runAttempt", "jobName",
+    }, "可信 producer 身份不完整")
+    _require(expected_producer["workflowPath"] == ".github/workflows/release.yml"
+             and expected_producer["jobName"] == "candidate"
+             and isinstance(expected_producer["workflowSha"], str)
+             and re.fullmatch(r"[0-9a-f]{40}", expected_producer["workflowSha"]) is not None
+             and type(expected_producer["runId"]) is int and expected_producer["runId"] > 0
+             and type(expected_producer["runAttempt"]) is int and expected_producer["runAttempt"] > 0,
+             "可信 producer 身份无效")
+    _require(candidate["producer"] == expected_producer, "Host candidate 原 producer 身份不符")
+    tag = "v" + project_version(root, expected_source_sha)
+    _require(candidate["releaseLabel"] == tag, "Host candidate 版本标签不符")
+    zip_name = f"NexusPipeline-{tag}-win-x64.zip"
+    names = {zip_name, f"{zip_name}.sha256", "build-metadata.json"}
+    actual = {path.name for path in output_dir.iterdir()}
+    _require(actual == names | {"candidate.json"}, "Host candidate 存在缺失或未列入的文件")
+    _require(all((output_dir / name).is_file() and not (output_dir / name).is_symlink() for name in names), "Host candidate 包含非普通文件")
+    listed = candidate["files"]
+    _require(isinstance(listed, list) and len(listed) == len(names)
+             and all(isinstance(item, dict) and set(item) == {"path", "sha256", "sizeBytes"} for item in listed),
+             "Host candidate inventory 无效")
+    by_path = {item["path"]: item for item in listed if isinstance(item["path"], str)}
+    _require(len(by_path) == len(names) and set(by_path) == names, "Host candidate inventory 文件集合不符")
+    for name in names:
+        path = output_dir / name
+        item = by_path[name]
+        _require(item["sha256"] == hashlib.sha256(path.read_bytes()).hexdigest()
+                 and type(item["sizeBytes"]) is int and item["sizeBytes"] == path.stat().st_size,
+                 f"Host candidate inventory 摘要或大小不符：{name}")
+    metadata = verify_received_package(output_dir / zip_name, output_dir / "build-metadata.json",
+                                       expected_source_sha=expected_source_sha, expected_tag=tag)
+    _require((output_dir / f"{zip_name}.sha256").read_text(encoding="ascii").strip() == metadata["sha256"], "Host candidate SHA sidecar 不符")
+    return candidate
+
+
+def extract_candidate_artifact(archive_path: Path, output_dir: Path, *, expected_digest: str) -> None:
+    """Extract only the four approved data files from a server-identified artifact."""
+    _require(re.fullmatch(r"sha256:[0-9a-f]{64}", expected_digest) is not None,
+             "candidate artifact 服务端摘要无效")
+    _require(archive_path.is_file() and not archive_path.is_symlink(), "candidate artifact ZIP 无效")
+    _require(not output_dir.exists() and not output_dir.is_symlink(), "candidate artifact 输出目录已存在")
+    digest = hashlib.sha256()
+    with archive_path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    _require(digest.hexdigest() == expected_digest.removeprefix("sha256:"),
+             "candidate artifact 与服务端 SHA256 不符")
+    try:
+        with zipfile.ZipFile(archive_path) as archive:
+            infos = archive.infolist()
+            names = [info.filename for info in infos]
+            _require(len(infos) == 4 and len(set(names)) == 4 and "candidate.json" in names
+                     and "build-metadata.json" in names,
+                     "candidate artifact 文件集合无效")
+            for info in infos:
+                name = info.filename
+                _require("/" not in name and "\\" not in name and name not in {".", ".."}
+                         and (name in {"candidate.json", "build-metadata.json"}
+                              or re.fullmatch(r"NexusPipeline-v[0-9A-Za-z.+-]+-win-x64\.zip(?:\.sha256)?", name) is not None),
+                         f"candidate artifact 路径无效：{name}")
+                mode = (info.external_attr >> 16) & 0o170000
+                _require(not info.is_dir() and mode in {0, 0o100000}
+                         and 0 <= info.file_size <= MAX_PACKAGE_UNCOMPRESSED_BYTES,
+                         f"candidate artifact 类型或大小无效：{name}")
+            _require(sum(info.file_size for info in infos) <= MAX_PACKAGE_UNCOMPRESSED_BYTES,
+                     "candidate artifact 展开大小超限")
+            output_dir.mkdir(parents=True)
+            for info in infos:
+                with archive.open(info) as source, (output_dir / info.filename).open("xb") as destination:
+                    shutil.copyfileobj(source, destination, 1024 * 1024)
+    except zipfile.BadZipFile as exc:
+        raise HostReleaseError("candidate artifact ZIP 损坏") from exc
 
 
 def _safe_package_entry(name: str) -> str:
@@ -290,7 +473,7 @@ def verify_received_package(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="NexusPipeline Host production release boundary")
-    parser.add_argument("command", nargs="?", choices=("release", "verify-package"), default="release")
+    parser.add_argument("command", nargs="?", choices=("release", "verify-package", "candidate", "extract-candidate", "validate-candidate"), default="release")
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--tag")
     parser.add_argument("--source-sha")
@@ -300,12 +483,69 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--metadata", type=Path)
     parser.add_argument("--expected-source-sha")
     parser.add_argument("--expected-tag")
+    parser.add_argument("--partner-sha")
+    parser.add_argument("--workflow-sha")
+    parser.add_argument("--run-id", type=int)
+    parser.add_argument("--run-attempt", type=int)
+    parser.add_argument("--frontend-ready", action="store_true")
+    parser.add_argument("--artifact-zip", type=Path)
+    parser.add_argument("--expected-digest")
     args = parser.parse_args(argv)
     root = args.root.resolve()
+    if args.command == "extract-candidate":
+        for value, label in ((args.artifact_zip, "--artifact-zip"), (args.output, "--output"),
+                             (args.expected_digest, "--expected-digest")):
+            _require(value is not None, f"{label} is required")
+        extract_candidate_artifact(args.artifact_zip, args.output, expected_digest=args.expected_digest)
+        return 0
+    if args.command == "validate-candidate":
+        for value, label in ((args.output, "--output"), (args.tag, "--tag"),
+                             (args.expected_source_sha, "--expected-source-sha"),
+                             (args.workflow_sha, "--workflow-sha"), (args.run_id, "--run-id"),
+                             (args.run_attempt, "--run-attempt")):
+            _require(value is not None, f"{label} is required")
+        _require(verify_tag(root, args.tag) == args.expected_source_sha,
+                 "既有 tag 未指向原 candidate source")
+        try:
+            declared = json.loads((args.output / "candidate.json").read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise HostReleaseError("candidate.json 缺失或无效") from exc
+        partner = declared.get("partnerSha") if isinstance(declared, dict) else None
+        _require(isinstance(partner, str) and re.fullmatch(r"[0-9a-f]{40}", partner) is not None,
+                 "Host candidate 未声明真实 Plugins 输入 SHA")
+        result = validate_candidate_data(root, args.output, expected_source_sha=args.expected_source_sha,
+                                         expected_producer={"workflowPath": ".github/workflows/release.yml",
+                                                            "workflowSha": args.workflow_sha,
+                                                            "runId": args.run_id, "runAttempt": args.run_attempt,
+                                                            "jobName": "candidate"},
+                                         expected_partner_sha=partner)
+        print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+        return 0
     if args.command == "verify-package":
         for value, label in ((args.package, "--package"), (args.metadata, "--metadata"), (args.expected_source_sha, "--expected-source-sha"), (args.expected_tag, "--expected-tag")):
             _require(value is not None, f"{label} is required")
         result = verify_received_package(args.package, args.metadata, expected_source_sha=args.expected_source_sha, expected_tag=args.expected_tag)
+        print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+        return 0
+    if args.command == "candidate":
+        for value, label in ((args.source_sha, "--source-sha"), (args.output, "--output"),
+                             (args.workflow_sha, "--workflow-sha"), (args.run_id, "--run-id"),
+                             (args.run_attempt, "--run-attempt")):
+            _require(value is not None, f"{label} is required")
+        output = args.output.resolve()
+        _require(output != root and output not in root.parents, "candidate 输出不能覆盖仓库或其父目录")
+        if root in output.parents:
+            _require(output.relative_to(root).parts[0] == ".generated", "仓库内 candidate 输出只允许位于 .generated")
+        _require(not output.exists(), f"candidate 输出目录已存在，拒绝覆盖：{output}")
+        _require(git_output(root, "rev-parse", "HEAD") == args.source_sha, "candidate source 与检出 HEAD 不一致")
+        _require(not git_output(root, "status", "--porcelain=v1", "--untracked-files=all"), "candidate 源码工作树不干净")
+        build_production(root, output, source_sha=args.source_sha, frontend_ready=args.frontend_ready)
+        production = output / "production"
+        _require(production.is_dir() and production.resolve().parent == output, "candidate production 临时目录身份无效")
+        shutil.rmtree(production)
+        result = write_candidate_manifest(root, output, source_sha=args.source_sha,
+                                          partner_sha=args.partner_sha, workflow_sha=args.workflow_sha,
+                                          run_id=args.run_id, run_attempt=args.run_attempt)
         print(json.dumps(result, ensure_ascii=False, sort_keys=True))
         return 0
     for value, label in ((args.tag, "--tag"), (args.source_sha, "--source-sha"), (args.output, "--output")):

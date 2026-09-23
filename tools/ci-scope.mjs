@@ -29,6 +29,14 @@ function all(value = true) {
   return Object.fromEntries(KEYS.map(key => [key, value]));
 }
 
+function isDocumentationPath(file) {
+  return file === "README.md" || file === "CHANGELOG.md" || file.startsWith("docs/");
+}
+
+function classifyFast(changedFiles) {
+  return { docs_only: Array.isArray(changedFiles) && changedFiles.length > 0 && changedFiles.every(isDocumentationPath) };
+}
+
 function markForPath(file) {
   const normalized = file.replaceAll("\\", "/").replace(/^\.\//u, "");
   if (!normalized || normalized.startsWith(".github/")
@@ -86,14 +94,16 @@ function collectChangedFiles(base, head) {
 }
 
 function parseArguments(argv) {
-  const options = { base: "", head: "", output: "" };
+  const options = { base: "", head: "", output: "", mode: "legacy" };
   for (let index = 0; index < argv.length; index++) {
     const arg = argv[index];
     if (arg === "--base") options.base = argv[++index] || "";
     else if (arg === "--head") options.head = argv[++index] || "";
     else if (arg === "--github-output") options.output = argv[++index] || "";
+    else if (arg === "--mode") options.mode = argv[++index] || "";
     else throw new Error(`未知参数：${arg}`);
   }
+  if (!["legacy", "fast"].includes(options.mode)) throw new Error(`未知 scope mode：${options.mode}`);
   return options;
 }
 
@@ -118,18 +128,22 @@ function main(argv) {
   } else {
     for (const file of changedFiles) merge(result, markForPath(file));
   }
-  const lines = KEYS.map(key => `${key}=${result[key] ? "true" : "false"}`);
+  const lines = options.mode === "fast"
+    ? [`docs_only=${classifyFast(changedFiles).docs_only ? "true" : "false"}`]
+    : KEYS.map(key => `${key}=${result[key] ? "true" : "false"}`);
   process.stdout.write(`${lines.join("\n")}\n`);
   if (options.output) fs.appendFileSync(options.output, `${lines.join("\n")}\n`, "utf8");
   return 0;
 }
 
-try {
-  process.exitCode = main(process.argv.slice(2));
-} catch (error) {
-  console.error(`[ci-scope] ${error.message}`);
-  process.stdout.write(`${KEYS.map(key => `${key}=true`).join("\n")}\n`);
-  process.exitCode = 1;
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  try {
+    process.exitCode = main(process.argv.slice(2));
+  } catch (error) {
+    console.error(`[ci-scope] ${error.message}`);
+    process.stdout.write(`${KEYS.map(key => `${key}=true`).join("\n")}\n`);
+    process.exitCode = 1;
+  }
 }
 
-export { markForPath, parseNameStatusZ };
+export { classifyFast, markForPath, parseNameStatusZ };

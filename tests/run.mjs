@@ -29,6 +29,7 @@ const runRoot = path.join(projectRoot, "tests", ".artifacts", "runs", runId);
 const testHostDir = path.join(runRoot, "test-host");
 const emulatorFixturePluginDir = path.join(runRoot, "emulator-fixture");
 const reportRoot = path.join(runRoot, "reports");
+const frontendBuildStamp = path.join(projectRoot, ".generated", "frontend-build.hash");
 const RELEASE_GATE_GROUPS = gateSequence("all");
 const RELEASE_GROUPS = [...RELEASE_GATE_GROUPS, "all"];
 const MODE_SUITES = new Set(["default", "ui", "system", "all"]);
@@ -169,13 +170,6 @@ async function prepareGateDependencies(group) {
     const code = await ensureNpmWorkspace(workspace);
     if (code !== 0) return code;
   }
-  if (group === "frontend-contract") {
-    const code = await runProcess(npmCommand, ["run", "build:frontend"], {
-      cwd: officialPluginsRoot,
-      timeoutMs: 15 * 60 * 1000,
-    });
-    if (code !== 0) return code;
-  }
   if (group === "ui-runtime") {
     const code = await runProcess(nodeCommand, [playwrightCli, "install", "chromium"], {
       cwd: e2eDir,
@@ -260,14 +254,37 @@ async function runFrontend(groups = []) {
     expectedFiles: selectedFiles.map(normalizePath),
     invokedFiles: selectedFiles.map(normalizePath),
   });
-  if (code !== 0) return code;
-  return runFrontendBuild();
+  return code;
 }
 
 async function runFrontendBuild() {
   const key = `frontend:${runId}`;
   if (!buildPromises.has(key)) {
-    buildPromises.set(key, runProcess(npmCommand, ["run", "build"], { cwd: frontendDir }));
+    buildPromises.set(key, (async () => {
+      const sourceHash = () => execFileSync(nodeCommand, [path.join(toolsDir, "source-hash.mjs"), "--frontend"], {
+        cwd: projectRoot,
+        encoding: "utf8",
+      }).trim();
+      const before = sourceHash();
+      if (fs.existsSync(frontendBuildStamp)
+        && fs.readFileSync(frontendBuildStamp, "utf8").trim() === before
+        && fs.existsSync(path.join(frontendDir, "dist", "index.html"))
+        && fs.existsSync(path.join(frontendDir, "dist", ".vite", "manifest.json"))) {
+        console.error(`[Frontend] 复用已验证构建：${before}`);
+        return 0;
+      }
+      fs.rmSync(frontendBuildStamp, { force: true });
+      const code = await runProcess(npmCommand, ["run", "build"], { cwd: frontendDir });
+      if (code !== 0) return code;
+      const after = sourceHash();
+      if (before !== after) {
+        console.error("[Frontend] 构建期间源码变化，拒绝复用该产物");
+        return 1;
+      }
+      fs.mkdirSync(path.dirname(frontendBuildStamp), { recursive: true });
+      fs.writeFileSync(frontendBuildStamp, `${after}\n`, "utf8");
+      return 0;
+    })());
   }
   return buildPromises.get(key);
 }
@@ -290,13 +307,12 @@ async function runContracts() {
   if (code !== 0) return code;
   code = await runProcess(nodeCommand, [path.join(officialPluginsRoot, "tools", "Test-FrontendPlugins.mjs"), "--host-root", projectRoot]);
   if (code !== 0) return code;
-  return runReported(nodeCommand, ["--test", "tests/tools/plugin-source-layout.test.mjs"], {}, "tap", {
-    expectedFiles: ["tests/tools/plugin-source-layout.test.mjs"],
-    invokedFiles: ["tests/tools/plugin-source-layout.test.mjs"],
-  });
+  return 0;
 }
 
 async function runDocs() {
+  const dependencyCode = await ensureNpmWorkspace(toolsDir);
+  if (dependencyCode !== 0) return dependencyCode;
   const files = [...matchingFiles(["tests/documentation/**/*.mjs"]), ...matchingFiles(["tests/tools/docs-index.test.mjs"])]
     .filter((file, index, all) => all.indexOf(file) === index);
   if (files.length === 0) return 1;
@@ -309,7 +325,9 @@ async function runDocs() {
 async function runTooling() {
   let code = await ensureNpmWorkspace(toolsDir);
   if (code !== 0) return code;
-  const nodeTests = matchingFiles(["tests/tools/*.test.mjs"]);
+  // docs-index belongs to runDocs; running it here would repeat the same assertions.
+  const nodeTests = matchingFiles(["tests/tools/*.test.mjs"])
+    .filter(file => path.basename(file) !== "docs-index.test.mjs");
   if (nodeTests.length === 0) return 1;
   code = await runReported(nodeCommand, ["--test", ...nodeTests], {}, "tap", {
     expectedFiles: nodeTests.map(normalizePath),
@@ -341,7 +359,11 @@ async function runBuild() {
 }
 
 async function buildProductionCore() {
-  const code = await runProcess(path.join(projectRoot, "build.cmd"), [], { timeoutMs: 15 * 60 * 1000 });
+  let code = await runProcess(npmCommand, ["run", "typecheck"], { cwd: frontendDir });
+  if (code !== 0) return code;
+  code = await runFrontendBuild();
+  if (code !== 0) return code;
+  code = await runProcess(path.join(projectRoot, "build.cmd"), ["--frontend-ready"], { timeoutMs: 15 * 60 * 1000 });
   if (code !== 0) return code;
   return verifyEmbeddedManifest(path.join(projectRoot, "release", "nexus-pipeline.exe"), "requireAdministrator");
 }
@@ -420,6 +442,8 @@ function buildTestHost() {
 }
 
 async function buildTestHostCore() {
+  const dependencyCode = await ensureNpmWorkspace(frontendDir);
+  if (dependencyCode !== 0) return dependencyCode;
   const code = await runFrontendBuild();
   if (code !== 0) return code;
   fs.rmSync(testHostDir, { recursive: true, force: true, maxRetries: 120, retryDelay: 250 });
@@ -523,9 +547,7 @@ function parseSystemArgs(args) {
 async function runUi() {
   const dependencyCode = await prepareGateDependencies("ui-runtime");
   if (dependencyCode !== 0) return dependencyCode;
-  let code = await runBuild();
-  if (code !== 0) return code;
-  code = await buildTestHost();
+  const code = await buildTestHost();
   if (code !== 0) return code;
   const env = testHostEnvironment({ phase: "default", exitFile: path.join(runRoot, "ui", ".nxp", "test-host.exit") });
   const webPort = await findAvailablePort();
@@ -542,9 +564,7 @@ async function runSystem(args = [], { phase = "accelerated" } = {}) {
   if (parsed.error) { console.error(parsed.error); return 2; }
   const suites = systemSuites(parsed.groups);
   if (suites.length === 0) return 1;
-  let code = await runBuild();
-  if (code !== 0) return code;
-  code = await buildTestHost();
+  let code = await buildTestHost();
   if (code !== 0) return code;
   if (suites.some(suite => suite.group === "emulator")) {
     code = await buildEmulatorFixturePlugin();
@@ -582,6 +602,7 @@ async function runDefault() {
   for (const step of [
     () => runUnit(),
     () => runFrontend(),
+    () => runContracts(),
     () => runDocs(),
     () => runTooling(),
     () => runSyntax(),
@@ -591,6 +612,26 @@ async function runDefault() {
     if (code !== 0) return code;
   }
   return 0;
+}
+
+async function prepareFast() {
+  for (const workspace of [frontendDir, toolsDir]) {
+    const code = await ensureNpmWorkspace(workspace);
+    if (code !== 0) return code;
+  }
+  return 0;
+}
+
+async function runIntegration() {
+  let code = await runUi();
+  if (code !== 0) return code;
+  code = await runSystem();
+  if (code !== 0) return code;
+  code = await runProcess(nodeCommand, ["tools\\validate-update-policy-history.mjs"]);
+  if (code !== 0) return code;
+  code = await runSystem(["update"], { phase: "update-realtime" });
+  if (code !== 0) return code;
+  return runSystem(["execution"], { phase: "execution-realtime" });
 }
 
 async function runDev(suite, args) {
@@ -641,6 +682,10 @@ function listTestPlan() {
   return {
     schemaVersion: 1,
     commands: {
+      prepare: "node tests/run.mjs prepare",
+      fast: "node tests/run.mjs fast",
+      integration: "node tests/run.mjs integration",
+      all: "node tests/run.mjs all",
       dev: "node tests/run.mjs dev <default|ui|system|all>",
       release: `node tests/run.mjs release <${RELEASE_GROUPS.join("|")}>`,
       unit: "node tests/run.mjs unit [--group <area>]",
@@ -654,6 +699,7 @@ function listTestPlan() {
 }
 
 function printUsage() {
+  console.error("用法：node tests\\run.mjs prepare|fast|integration|all");
   console.error("用法：node tests\\run.mjs dev <default|ui|system|all>");
   console.error(`       node tests\\run.mjs release <${RELEASE_GROUPS.join("|")}>`);
   console.error("       node tests\\run.mjs unit|frontend [--group <name>]");
@@ -666,6 +712,15 @@ let exitCode = 2;
 resetProcessRunnerState();
 try {
   switch (command.toLowerCase()) {
+    case "prepare": exitCode = args.length ? 2 : await prepareFast(); break;
+    case "fast": exitCode = args.length ? 2 : await runDefault(); break;
+    case "integration": exitCode = args.length ? 2 : await runIntegration(); break;
+    case "all": {
+      if (args.length) { exitCode = 2; break; }
+      exitCode = await runDefault();
+      if (exitCode === 0) exitCode = await runIntegration();
+      break;
+    }
     case "unit": {
       const parsed = parseNamedGroups(args, HOST_TEST_AREAS.map(area => area.key), "Unit");
       exitCode = parsed.error ? (console.error(parsed.error), 2) : await runUnit(parsed.groups);
@@ -693,7 +748,7 @@ try {
   console.error(`[错误] ${error.stack || error.message}`);
   exitCode = 1;
 } finally {
-  if (command.toLowerCase() === "dev" || command.toLowerCase() === "release") {
+  if (["dev", "release", "integration", "all"].includes(command.toLowerCase())) {
     const runnerState = getProcessRunnerState();
     if (runnerState.cleanupComplete) {
       cleanEmulatorFixturePlugin();
