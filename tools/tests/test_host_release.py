@@ -8,11 +8,52 @@ import hashlib
 from unittest.mock import Mock, patch
 from pathlib import Path
 
-from tools.host_release import HostReleaseError, archive_production, normalized_tag, parse_version, verify_received_package
+from tools.host_release import HostReleaseError, archive_production, normalized_tag, parse_version, validate_candidate_data, verify_received_package, write_candidate_manifest
 from tools import host_release
 
 
 class HostReleaseTests(unittest.TestCase):
+    def test_candidate_inventory_binds_original_producer_and_rejects_extra_files(self) -> None:
+        with tempfile.TemporaryDirectory(prefix='nxp-host-candidate-test-') as temporary:
+            root = Path(temporary)
+            (root / 'src').mkdir()
+            (root / 'src' / 'NexusPipeline.csproj').write_text('<Project><PropertyGroup><Version>1.2.3</Version></PropertyGroup></Project>', encoding='utf-8')
+            output = root / 'candidate'
+            output.mkdir()
+            package = output / 'NexusPipeline-v1.2.3-win-x64.zip'
+            package.write_bytes(b'package')
+            digest = hashlib.sha256(package.read_bytes()).hexdigest()
+            (output / f'{package.name}.sha256').write_text(digest, encoding='ascii')
+            (output / 'build-metadata.json').write_text('{}', encoding='utf-8')
+            def git_result(_root, *args):
+                if args == ('rev-parse', 'HEAD'): return 'a' * 40
+                if args == ('status', '--porcelain=v1', '--untracked-files=all'): return ''
+                if args == ('rev-parse', f"{'a' * 40}^{{tree}}"): return 'b' * 40
+                raise AssertionError(args)
+            with patch.object(host_release, 'git_output', side_effect=git_result), \
+                 patch.object(host_release, 'verify_received_package', return_value={'sha256': digest}):
+                candidate = write_candidate_manifest(root, output, source_sha='a' * 40,
+                    partner_sha='c' * 40, workflow_sha='d' * 40, run_id=12, run_attempt=2)
+                self.assertEqual(candidate['producer']['runAttempt'], 2)
+                self.assertEqual(candidate['sourceTreeSha'], 'b' * 40)
+                self.assertEqual({item['path'] for item in candidate['files']},
+                                 {package.name, package.name + '.sha256', 'build-metadata.json'})
+                self.assertNotIn('candidate.json', {item['path'] for item in candidate['files']})
+                with patch.object(host_release, 'project_version', return_value='1.2.3'):
+                    self.assertEqual(validate_candidate_data(root, output, expected_source_sha='a' * 40,
+                        expected_producer=candidate['producer'], expected_partner_sha='c' * 40), candidate)
+                    with self.assertRaisesRegex(HostReleaseError, 'producer'):
+                        validate_candidate_data(root, output, expected_source_sha='a' * 40,
+                            expected_producer={**candidate['producer'], 'runAttempt': 3}, expected_partner_sha='c' * 40)
+                    with self.assertRaisesRegex(HostReleaseError, 'partner'):
+                        validate_candidate_data(root, output, expected_source_sha='a' * 40,
+                            expected_producer=candidate['producer'], expected_partner_sha=None)
+                (output / 'candidate.json').unlink()
+                (output / 'unexpected.txt').write_text('extra', encoding='utf-8')
+                with self.assertRaisesRegex(HostReleaseError, '文件集合无效'):
+                    write_candidate_manifest(root, output, source_sha='a' * 40,
+                        partner_sha='c' * 40, workflow_sha='d' * 40, run_id=12, run_attempt=2)
+
     def test_writer_rejects_unsafe_layout_before_reading_pe(self) -> None:
         cases = [ ['wwwroot', 'wwwroot/index.html'], ['wwwroot', 'wwwroot/sub/'],
                   ['CON.txt'], ['wwwroot/bad?.js'], ['C:/file'], ['file:ads'],
