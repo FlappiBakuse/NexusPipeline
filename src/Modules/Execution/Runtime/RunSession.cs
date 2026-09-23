@@ -62,6 +62,7 @@ internal class RunSession
     public List<string> AttemptLogs => _results.AttemptSegments;
 
     internal ScriptInstance Script => _script;
+    internal NexusPipeline.Modules.Execution.Judgement.TaskProtocolRun? TaskProtocolRun { get; set; }
     internal string Mode => _mode;
     internal string? UserName => _userName;
     internal string? UserKey => _userKey;

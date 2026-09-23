@@ -5,6 +5,7 @@ internal static class RealtimeEventNames
     internal const string RunStatus = "run.status";
 
     internal const string RunLog = "run.log";
+    internal const string TaskReportChanged = "task-report-changed";
 
     internal const string SystemAction = "system.action";
 

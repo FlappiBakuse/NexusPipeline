@@ -14,3 +14,5 @@
 - 宿主 API 的版本与真实注册表以 `src/NexusPipeline.Plugin.Abstractions`、`frontend/src/plugin-bridge` 和本目录专题为准。
 - Frontend 插件只能消费公开 Frontend API、公开 slot 和 `nxp-*` Native Custom Elements；宿主私有 Vue 组件、私有 class 和内部状态不属于契约。
 - 插件安装和加载的宿主所有权见[插件运行与安装](../../architecture/plugins.md)；具体包校验和作者工作流见相邻插件仓库的[文档门户](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/docs/README.md)。
+
+任务级事实与选择重试见[专项任务协议](task-protocol.md)。

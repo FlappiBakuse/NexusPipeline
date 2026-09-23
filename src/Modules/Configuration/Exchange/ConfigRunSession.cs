@@ -29,6 +29,7 @@ internal sealed class ConfigRunSession
     private bool _processCleanupConfirmed = true;
     private bool _finalizationCompleted;
     private string? _finalizationError;
+    internal Func<string?>? RestoreTaskSelections { get; set; }
 
     public ConfigRunSession(
         string scriptId,
@@ -99,6 +100,7 @@ internal sealed class ConfigRunSession
 
     public void ApplyReplacements(List<string> replacements)
     {
+        if (RestoreTaskSelections is not null) throw new InvalidOperationException("taskProtocol cannot use legacy replaceConfigs");
         ConfigSwapSession.ApplyConfigReplacements(_scriptId, _userKey, _configPath, replacements);
     }
 
@@ -155,6 +157,16 @@ internal sealed class ConfigRunSession
             }
 
             string? restoreError = null;
+            if (RestoreTaskSelections is not null)
+            {
+                restoreError = RestoreTaskSelections();
+                if (restoreError is not null)
+                {
+                    _finalizationError = restoreError;
+                    _finalizationCompleted = true;
+                    return restoreError; // Preserve the user snapshot and the complete recovery site.
+                }
+            }
             foreach (FinalizationStep step in GetFinalizationOrder(autoUpdateConfig))
             {
                 switch (step)

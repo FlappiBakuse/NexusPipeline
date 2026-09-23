@@ -7,6 +7,7 @@ internal enum JintScriptHostProfile
 {
     Judge,
     ConfigValidation,
+    TaskProtocol,
 }
 
 /// <summary>
@@ -15,6 +16,26 @@ internal enum JintScriptHostProfile
 /// </summary>
 internal sealed class JintScriptHost
 {
+    private const string TaskProtocolGlue = """
+        const input = JSON.parse(__NEXUS_INPUT__);
+        const console = { log: (value) => __nexusLog(typeof value === "string" ? value : JSON.stringify(value)) };
+        function __taskResource(value) {
+          const result = JSON.parse(value);
+          if (!result.ok) throw new Error('config_unavailable');
+          return result.value;
+        }
+        const nexus = Object.freeze({
+          input,
+          readConfig: (id) => __taskResource(__nexusReadConfig(id)),
+          readResource: (id) => __taskResource(__nexusReadResource(id)),
+          inspectDeclaredTarget: (id) => __taskInspection(__nexusInspectDeclaredTarget(id)),
+        });
+        function __taskInspection(value) {
+          const result = JSON.parse(value);
+          if (!result.ok) throw new Error('environment_unavailable');
+          return result.value;
+        }
+        """;
     private const string JudgeGlue = """
         const console = { log: (...args) => args.forEach(a => __nexusLog(typeof a === "string" ? a : JSON.stringify(a))) };
         const nexus = {
@@ -47,19 +68,28 @@ internal sealed class JintScriptHost
     private JintScriptHost(Engine engine)
     {
         _engine = engine;
-        _engine.SetValue("__nexusLog", new Action<object?>(value => _outputs.Add(value?.ToString() ?? "")));
+        _engine.SetValue("__nexusLog", new Action<object?>(value =>
+        {
+            string text = value?.ToString() ?? "";
+            if (_boundedOutput && (_outputs.Count > 0 || System.Text.Encoding.UTF8.GetByteCount(text) > 1024 * 1024))
+                throw new InvalidDataException("resource_limit: task protocol must return one JSON result <= 1 MiB");
+            _outputs.Add(text);
+        }));
     }
 
     internal IReadOnlyList<string> Outputs => _outputs;
+    private bool _boundedOutput;
 
     internal static JintScriptHost Create(
         TimeSpan timeout,
         CancellationToken cancellationToken,
-        int? maxStatements = null)
+        int? maxStatements = null,
+        long? maxMemoryBytes = null)
     {
         var host = new JintScriptHost(new Engine(options =>
         {
             options.TimeoutInterval(timeout);
+            if (maxMemoryBytes is long memory) options.LimitMemory(memory);
             if (maxStatements is int limit)
             {
                 options.MaxStatements(limit);
@@ -75,7 +105,13 @@ internal sealed class JintScriptHost
 
     internal void Execute(string code, JintScriptHostProfile profile)
     {
-        _engine.Execute(profile == JintScriptHostProfile.Judge ? JudgeGlue : ConfigValidationGlue);
+        _boundedOutput = profile == JintScriptHostProfile.TaskProtocol;
+        _engine.Execute(profile switch
+        {
+            JintScriptHostProfile.Judge => JudgeGlue,
+            JintScriptHostProfile.TaskProtocol => TaskProtocolGlue,
+            _ => ConfigValidationGlue,
+        });
         _engine.Execute(code);
     }
 }

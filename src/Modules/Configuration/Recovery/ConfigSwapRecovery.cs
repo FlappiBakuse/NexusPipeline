@@ -40,6 +40,12 @@ internal sealed class ConfigSwapRecovery
     {
         ConfigStoreTransactionRecovery.Recover(scriptId, userName);
         ConfigSessionMark? mark = ConfigSessionMark.TryRead(scriptId, userName);
+        if (TaskSelectionResidue(scriptId, userName))
+        {
+            if (mark is null || ScriptProcessRunning(scriptId, userName))
+                throw new IOException("configuration_busy: task selection recovery requires a valid stopped session");
+            RecoverTaskSelections(scriptId, userName, mark);
+        }
         if (mark is null)
         {
             ExtraConfigStoreTransaction.RecoverAll(scriptId, userName);
@@ -175,7 +181,7 @@ internal sealed class ConfigSwapRecovery
         // 避免误删/误覆盖正在使用的配置；记入待办，进程退出后由后台重试循环自动完成恢复。
         bool hasExtraResidue = !string.IsNullOrWhiteSpace(userName)
             && ExtraConfigSync.HasResidue(scriptId, userName);
-        bool hasRecoveryResidue = HasBackupResidue(scriptId, userName)
+        bool hasRecoveryResidue = TaskSelectionResidue(scriptId, userName) || HasBackupResidue(scriptId, userName)
             || (!string.IsNullOrWhiteSpace(userName)
                 && (HasSessionMarkFiles(scriptId, userName)
                     || hasExtraResidue
@@ -206,6 +212,23 @@ internal sealed class ConfigSwapRecovery
             return false;
         }
         bool ok = true;
+        if (TaskSelectionResidue(scriptId, userName))
+        {
+            try
+            {
+                var taskMark = string.IsNullOrWhiteSpace(userName)
+                    ? TaskSelectionTransaction.ReadOwner(Path.Combine(ConfigPaths.WorkDir(scriptId, userName), "task-selection"), scriptId, userName)
+                    : ConfigSessionMark.TryRead(scriptId, userName);
+                if (taskMark is null) throw new IOException("task selection journal requires a session owner");
+                RecoverTaskSelections(scriptId, userName ?? "", taskMark);
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[恢复] 专项任务选择恢复失败，保留现场：{ex.GetType().Name}");
+                EnqueuePendingRecover(scriptId, userName);
+                return false;
+            }
+        }
         if (hasRecoveryResidue && HasBackupResidue(scriptId, userName) && !RecoverBackupQuiet(scriptId, userName))
         {
             ok = false;
@@ -270,11 +293,36 @@ internal sealed class ConfigSwapRecovery
     }
 
     /// <summary>优先用会话标记冻结的启动目标检测进程；恢复阶段不重新解析专项插件。</summary>
+    private static bool TaskSelectionResidue(string scriptId, string? userName) =>
+        Directory.Exists(Path.Combine(ConfigPaths.WorkDir(scriptId, userName), "task-selection"));
+
+    private static void RecoverTaskSelections(string scriptId, string userName, ConfigSessionMark mark)
+    {
+        string directory = Path.Combine(ConfigPaths.WorkDir(scriptId, userName), "task-selection");
+        var allowed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        void Add(string path, int depth)
+        {
+            if (depth > 8 || allowed.Count > 256) throw new InvalidDataException("task recovery resource limit");
+            NexusPipeline.Modules.Configuration.Scripting.TaskConfigView.ValidatePath(path);
+            if (File.Exists(path)) allowed.Add(Path.GetFullPath(path));
+            else foreach (string child in Directory.EnumerateFileSystemEntries(path)) Add(child, depth + 1);
+        }
+        Add(mark.ConfigPath, 0);
+        var transaction = TaskSelectionTransaction.Load(directory, allowed);
+        transaction.Restore();
+        transaction.Complete();
+    }
+
     private bool ScriptProcessRunning(string scriptId, string? userName = null)
     {
         ConfigSessionMark? mark = string.IsNullOrWhiteSpace(userName)
             ? null
             : ConfigSessionMark.TryRead(scriptId, userName);
+        if (mark is null && TaskSelectionResidue(scriptId, userName))
+        {
+            try { mark = TaskSelectionTransaction.ReadOwner(Path.Combine(ConfigPaths.WorkDir(scriptId, userName), "task-selection"), scriptId, userName); }
+            catch (Exception) { return true; } // Unverifiable owner cannot authorize recovery writes.
+        }
         if (mark is not null && !string.IsNullOrWhiteSpace(mark.LaunchExe))
         {
             return !SystemActions.IsExeStoppedStable(mark.LaunchExe, waitIfInitiallyStopped: false);

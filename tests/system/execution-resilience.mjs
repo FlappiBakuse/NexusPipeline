@@ -187,10 +187,19 @@ test("ER00 每日成功运行上限：达到上限后写入 skipped 且不再次
 
 test("ER01 Batch Judge → Final Judge：进程退出后的最终判定仍执行", { skip }, async () => {
   const fixture = makeFixture("er01-batch-final");
+  // Keep the script alive until the first Judge writes its observable counter;
+  // a fixed delay can end before the batch Judge runs on a loaded CI runner.
   writeBatchCode(fixture, [
     "cd /d \"%~dp0\"",
     `echo ER01-BATCH>>\"${fixture.log}\"`,
-    "ping -n 5 127.0.0.1 >nul",
+    "set /a judgeWait=0",
+    ":wait-first-judge",
+    "if exist \"%~dp0count\" goto :judge-observed",
+    "set /a judgeWait+=1",
+    "if %judgeWait% GEQ 20 exit /b 42",
+    "ping -n 2 127.0.0.1 >nul",
+    "goto :wait-first-judge",
+    ":judge-observed",
   ]);
   const script = await createScript(fixture, {
     name: "ER01 Batch Final",
@@ -200,7 +209,11 @@ test("ER01 Batch Judge → Final Judge：进程退出后的最终判定仍执行
   try {
     const record = await runScript(script.id);
     assert.equal(recordAttempts(record), 1);
-    assert.equal(recordStatus(record), "success");
+    assert.equal(recordStatus(record), "success", JSON.stringify({
+      resultCode: record.resultCode || record.ResultCode,
+      resultDetail: record.resultDetail || record.ResultDetail,
+      attempts: recordDetails(record),
+    }));
     assert.match(recordDetails(record).map(item => item.reason || "").join(" | "), /ER01-final-2/);
   } finally {
     await deleteScript(script.id);

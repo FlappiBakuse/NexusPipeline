@@ -35,6 +35,13 @@ export const SYSTEM_TEST_GROUPS = Object.freeze([
   { key: "update", suitePaths: ["tests/system/startup-update-smoke.mjs", "tests/system/update-smoke.mjs"], runtimeNames: ["runtime-startup-update", "runtime-update"] },
 ]);
 
+/** 同一次 H5 的加速与真实计时段必须使用不同运行目录，避免旧 PID 标记误指新进程。 */
+export function systemRuntimeName(baseName, phase) {
+  return phase === "update-realtime" || phase === "execution-realtime"
+    ? `${baseName}-${phase}`
+    : baseName;
+}
+
 export const GOVERNANCE_DOMAINS = Object.freeze([
   { key: "docs-links-contracts", paths: ["docs/**", "README.md", "CHANGELOG.md"], testPaths: ["tests/documentation/documentation-consistency.mjs", "tests/tools/docs-index.test.mjs"] },
   { key: "i18n-functional", paths: ["frontend/public/i18n/**", "src/Shared/Localization/**"], testPaths: ["tests/documentation/i18n-*.mjs"] },

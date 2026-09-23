@@ -14,6 +14,7 @@ internal sealed class AttemptTerminator
     private readonly Action<string> _statusChanged;
 
     private bool _terminalObservation;
+    private bool _taskProtocol;
     private string _terminalFailureReason = "进程退出但未检测到完成标志";
 
     public AttemptTerminator(RuntimeWorkers workers, SessionJudge judge, Action<string> statusChanged)
@@ -33,6 +34,7 @@ internal sealed class AttemptTerminator
         {
             return null;
         }
+        if (_taskProtocol) return RunAttemptResult.Partial("任务证据观察结束", "tasks.observation_complete");
         if (_judge.IsFailure)
         {
             RunAttemptResult failed = RunAttemptResult.Failed(_judge.Reason ?? "日志出现失败关键字，任务判定失败");
@@ -59,8 +61,14 @@ internal sealed class AttemptTerminator
     }
 
     /// <summary>进程退出时的终局状态转移；返回 null 表示已进入最终判定等待（宿主继续短轮询）。</summary>
-    public RunAttemptResult? OnScriptExited(bool monitorIsNull, bool logConfigured, bool skipFinalJudge)
+    public RunAttemptResult? OnScriptExited(bool monitorIsNull, bool logConfigured, bool skipFinalJudge, bool taskProtocol = false)
     {
+        _taskProtocol |= taskProtocol;
+        if (taskProtocol && !_terminalObservation)
+        {
+            RequestFinalJudge("任务证据观察结束");
+            return TryApplyFinalDecision();
+        }
         if (_terminalObservation)
         {
             // 已进入最终判定等待状态；由循环顶部统一应用结果。

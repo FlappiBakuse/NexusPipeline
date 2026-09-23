@@ -30,8 +30,16 @@ internal static class Program
 
             if (options.Command == "map")
             {
-                var output = Require(options.Output, "--out");
+                var output = options.Output is null
+                    ? Path.Combine(root, ".generated", "architecture", "backend-map.json")
+                    : Path.GetFullPath(options.Output);
                 var map = BackendMapWriter.Build(analysis.Facts, analysis.Models, analysis.Declarations, analysis.Edges, root);
+                var validationErrors = BackendMapWriter.Validate(map, root, mode);
+                if (validationErrors.Count > 0)
+                {
+                    throw new InvalidDataException("Generated backend map is invalid:" + Environment.NewLine
+                        + string.Join(Environment.NewLine, validationErrors.Select(error => $"- {error}")));
+                }
                 if (options.CheckMap)
                 {
                     if (BackendMapWriter.Matches(map, output))

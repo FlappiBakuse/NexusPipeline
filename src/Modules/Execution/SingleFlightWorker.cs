@@ -112,7 +112,10 @@ internal sealed record JudgeSnapshot(
     ResolvedScriptUser? User,
     string ScriptDir,
     string InputJson,
-    IReadOnlyList<JudgeScriptInputFile> Files);
+    IReadOnlyList<JudgeScriptInputFile> Files)
+{
+    public bool IsFinalCall { get; init; }
+}
 
 internal sealed record JudgeWorkerResult(
     string AttemptId,

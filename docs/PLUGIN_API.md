@@ -33,4 +33,4 @@
 <a id="判断脚本"></a>
 <a id="配置还原描述config-restorejson"></a>
 
-旧入口与当前专题的对应关系见 [migration-map.json](migration-map.json)。官方插件作者步骤见相邻仓库的 [NexusPipeline-Plugins 文档门户](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/docs/README.md)。
+以上旧锚点只负责承接历史链接，当前契约以本页导航的专题为准。官方插件作者步骤见相邻仓库的 [NexusPipeline-Plugins 文档门户](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/docs/README.md)。

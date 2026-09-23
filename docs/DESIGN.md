@@ -23,7 +23,7 @@
 
 ## 代码定位
 
-- 后端组合根与启动：`src/Host`、`src/Host/Composition/RuntimeContext.cs`、`src/Host/Lifecycle/Bootstrap.cs`。
+- 后端组合根与启动：`src/Host`、`src/Host/Composition/HostCompositionRoot.cs`、`src/Host/Lifecycle/Bootstrap.cs`。
 - 运行、调度和配置：`src/Modules/Execution`、`src/Modules/Scheduling`、`src/Modules/Configuration`、`src/Platform/Storage`。
 - 控制面与插件：`src/ControlPlane`、`src/Modules/Plugins`、`src/NexusPipeline.Plugin.Abstractions`。
 - 前端与公开元件：`frontend/src/app`、`frontend/src/platform`、`frontend/src/plugin-bridge`、`frontend/src/ui`。
@@ -45,4 +45,4 @@
 <a id="8-已知行为与边界"></a>
 <a id="10-架构与模块定位开发者导航"></a>
 
-历史链接对应关系见 [migration-map.json](migration-map.json)。已发布版本的历史事实见[历史索引](history/README.md)，当前未完成事项见 [STATUS.md](STATUS.md)。
+以上旧锚点只负责承接历史链接，当前正文以对应架构专题为准。已发布版本的历史事实见[历史索引](history/README.md)，当前未完成事项见 [STATUS.md](STATUS.md)。

@@ -148,6 +148,11 @@ internal static class ApiHistoryHandler
             record = record.Clone();
             plugins.LocalizeHistory(record, context.Request.Locale);
             System.Text.Json.Nodes.JsonObject recordView = RunHistoryService.ToView(record);
+            if (context.Request.QueryString["metadata"] == "true")
+            {
+                await HttpHelper.WriteJsonAsync(context, new { record = recordView }).ConfigureAwait(false);
+                return;
+            }
             Audit.Log(Audit.Web, "查询运行详情", $"{record.ScriptName}（{record.StartTime:yyyy-MM-dd HH:mm:ss}）");
             bool includeFull = string.Equals(context.Request.QueryString["full"], "true", StringComparison.OrdinalIgnoreCase)
                 || context.Request.QueryString["full"] == "1";

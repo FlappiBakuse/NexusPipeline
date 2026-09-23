@@ -2,6 +2,8 @@ using System.IO.Compression;
 using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Text;
 using System.Text.Json.Nodes;
 using Xunit;
@@ -9,6 +11,9 @@ using NexusPipeline.ControlPlane.Http;
 using NexusPipeline.Modules.Settings;
 using NexusPipeline.Modules.Updates;
 using NexusPipeline.Shared.Versioning;
+using NexusPipeline.Modules.Configuration.Exchange;
+using NexusPipeline.Modules.Configuration.Scripting;
+using NexusPipeline.Modules.Plugins.Contracts;
 
 namespace NexusPipeline.Tests.Updates;
 
@@ -462,6 +467,94 @@ public sealed class UpdateServiceTests : IAsyncLifetime
         Assert.False(result.Succeeded);
         Assert.Equal("busy", result.Code);
         Assert.False(_exited);
+    }
+
+    [Theory]
+    [InlineData(false, "work/task-selection/journal.json", "{\"version\":1}")]
+    [InlineData(true, "work/task-selection/journal.json", "{\"version\":999}")]
+    [InlineData(false, "work/edit-isolation/original.json", "original")]
+    [InlineData(true, "work/swap-backup/config.json", "original")]
+    [InlineData(false, ".session", "unknown session format")]
+    [InlineData(true, ".session.bak", "interrupted session")]
+    public async Task Apply_PreservesConfigurationRecoveryAndAllowsAfterRecovery(bool defer, string relative, string content)
+    {
+        UpdateService service = NewService();
+        await service.CheckAsync("test");
+        service.StartDownload("test");
+        await WaitStateAsync(service, UpdateState.Ready);
+        string residue = Path.Combine(_installDir!, "data", "fixture-script", "fixture-user", relative);
+        TaskSelectionTransaction? transaction = null;
+        if (content == "{\"version\":1}")
+        {
+            string config = Path.Combine(_root!, "fixture-config.json");
+            File.WriteAllText(config, "{\"enabled\":true,\"count\":7}");
+            var view = new TaskConfigView();
+            view.AddConfig("config:fixture", config, "json");
+            transaction = TaskSelectionTransaction.Freeze(Path.GetDirectoryName(residue)!, view,
+                [new TaskSelectionField("config:fixture", new JsonArray("enabled"), "selection")]);
+            content = File.ReadAllText(residue);
+        }
+        else
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(residue)!);
+            File.WriteAllText(residue, content);
+        }
+        bool spawned = false;
+        UpdateApply.LaunchApplyOverride = _ => spawned = true;
+        try
+        {
+            var rejected = service.RequestApply(defer, "test");
+            Assert.False(rejected.Succeeded);
+            Assert.Equal("configuration-recovery-pending", rejected.Code);
+            Assert.Equal(content, File.ReadAllText(residue));
+            Assert.False(File.Exists(Path.Combine(_installDir!, ".nxp-update", "task.json")));
+            Assert.False(spawned);
+            Assert.False(_exited);
+            Assert.Equal(UpdateState.Ready, service.State);
+            // Use the real transaction restore for the current schema; other fixtures model resolved residue.
+            if (transaction is not null) { transaction.Restore(); transaction.Complete(); }
+            else File.Delete(residue);
+            Assert.True(service.RequestApply(defer, "test").Succeeded);
+            Assert.Equal(!defer, spawned);
+        }
+        finally { UpdateApply.LaunchApplyOverride = null; }
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Apply_InaccessibleRecoveryDirectoryIsNotTreatedAsMissing(bool dataRoot)
+    {
+        UpdateService service = NewService();
+        await service.CheckAsync("test");
+        service.StartDownload("test");
+        await WaitStateAsync(service, UpdateState.Ready);
+        string path = dataRoot ? Path.Combine(_installDir!, "data")
+            : Path.Combine(_installDir!, "data", "fixture-script", "fixture-user", "work");
+        var directory = Directory.CreateDirectory(path);
+        var original = new DirectorySecurity();
+        original.SetSecurityDescriptorBinaryForm(directory.GetAccessControl(AccessControlSections.Access)
+            .GetSecurityDescriptorBinaryForm(), AccessControlSections.Access);
+        var restricted = new DirectorySecurity();
+        restricted.SetSecurityDescriptorBinaryForm(original.GetSecurityDescriptorBinaryForm(), AccessControlSections.Access);
+        restricted.AddAccessRule(new FileSystemAccessRule(WindowsIdentity.GetCurrent().User!,
+            FileSystemRights.ReadAttributes | FileSystemRights.ListDirectory, AccessControlType.Deny));
+        // Only the freshly created test directory is restricted; preserve its ACL for finally/recovery.
+        File.WriteAllBytes(Path.Combine(_root!, "original-directory-acl.bin"), original.GetSecurityDescriptorBinaryForm());
+        try
+        {
+            directory.SetAccessControl(restricted);
+            Assert.Throws<UnauthorizedAccessException>(() => Directory.EnumerateFileSystemEntries(path).ToArray());
+            var rejected = service.RequestApply(defer: true, "test");
+            Assert.False(rejected.Succeeded);
+            Assert.Equal("configuration-recovery-pending", rejected.Code);
+            Assert.False(_exited);
+            Assert.Equal(UpdateState.Ready, service.State);
+            Assert.False(File.Exists(Path.Combine(_installDir!, ".nxp-update", "task.json")));
+        }
+        finally { directory.SetAccessControl(original); }
+        Assert.True(Directory.Exists(path));
+        Assert.True(service.RequestApply(defer: true, "test").Succeeded);
     }
 
     [Fact]

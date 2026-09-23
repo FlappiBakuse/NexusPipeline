@@ -121,6 +121,19 @@ test("documentation map and local test registry are current", () => {
   assert.match(runner, /release <\$\{RELEASE_GROUPS\.join\("\|"\)\}>/u);
 });
 
+test("architecture governance uses generated maps and current composition-root paths", () => {
+  assert.equal(fs.existsSync(path.join(ROOT, "docs/backend-map.json")), false);
+  assert.equal(fs.existsSync(path.join(ROOT, "docs/migration-map.json")), false);
+  assert.match(read(".gitignore"), /^\.generated\/$/mu);
+  assert.match(read("docs/architecture/README.md"), /\.generated\/architecture\/backend-map\.json/u);
+
+  for (const relativePath of ["AGENTS.md", "docs/DESIGN.md", "docs/PLUGIN_API.md", "docs/architecture/overview.md"]) {
+    const text = read(relativePath);
+    assert.doesNotMatch(text, /migration-map\.json/u, `${relativePath} still depends on migration-map.json`);
+    assert.doesNotMatch(text, /src[\\/]Host[\\/]Composition[\\/]RuntimeContext\.cs/u, `${relativePath} still points to RuntimeContext.cs`);
+  }
+});
+
 test("production and Test Host manifest contracts remain distinct", () => {
   assert.match(read("src/app.manifest"), /requestedExecutionLevel level="requireAdministrator"/u);
   assert.match(read("src/app.test.manifest"), /requestedExecutionLevel level="asInvoker"/u);

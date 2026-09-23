@@ -9,6 +9,9 @@ namespace NexusPipeline.Modules.Execution;
 /// <summary>一次脚本 Attempt 的进程生命周期；启动、输出订阅和 owned cleanup 状态集中在此对象。</summary>
 internal sealed class ScriptProcessSession : IDisposable
 {
+    private readonly TaskCompletionSource<bool> _stdoutComplete = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource<bool> _stderrComplete = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
     private ScriptProcessSession(
         Process process,
         ProcessOwnership? ownership,
@@ -66,10 +69,32 @@ internal sealed class ScriptProcessSession : IDisposable
 
     public void AttachOutput(Action<string?, LogLevel> onData)
     {
-        Process.OutputDataReceived += (_, e) => onData(e.Data, LogLevel.Info);
-        Process.ErrorDataReceived += (_, e) => onData(e.Data, LogLevel.Error);
+        Process.OutputDataReceived += (_, e) =>
+        {
+            if (e.Data is null) _stdoutComplete.TrySetResult(true);
+            else onData(e.Data, LogLevel.Info);
+        };
+        Process.ErrorDataReceived += (_, e) =>
+        {
+            if (e.Data is null) _stderrComplete.TrySetResult(true);
+            else onData(e.Data, LogLevel.Error);
+        };
         Process.BeginOutputReadLine();
         Process.BeginErrorReadLine();
+    }
+
+    /// <summary>进程退出不代表异步输出回调已完成；最终判定前必须消费两个流的尾行。</summary>
+    public async Task WaitForOutputDrainAsync(CancellationToken token)
+    {
+        try
+        {
+            await Task.WhenAll(_stdoutComplete.Task, _stderrComplete.Task)
+                .WaitAsync(TimeSpan.FromSeconds(10), token).ConfigureAwait(false);
+        }
+        catch (TimeoutException ex)
+        {
+            throw new IOException("脚本进程已退出，但输出流尾行未能在限时内完成", ex);
+        }
     }
 
     public bool KillAndConfirm(

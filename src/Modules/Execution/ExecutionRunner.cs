@@ -110,13 +110,15 @@ internal sealed class ExecutionRunner
         string queueId,
         string queueName,
         IReadOnlyList<ResolvedScriptUser> users,
-        ResolvedScriptSpec? resolvedSpec = null)
+        ResolvedScriptSpec? resolvedSpec = null,
+        Func<int, string>? queueFollowingWork = null)
     {
         var records = new List<RunRecord>();
         Dictionary<string, int>? successfulRunsByUser = null;
         DateTime successfulRunsDate = DateTime.MinValue;
-        foreach (ResolvedScriptUser runUser in users)
+        for (int userIndex = 0; userIndex < users.Count; userIndex++)
         {
+            ResolvedScriptUser runUser = users[userIndex];
             if (exec.Cts.IsCancellationRequested)
             {
                 exec.Status = "cancelled";
@@ -205,7 +207,15 @@ internal sealed class ExecutionRunner
                         _emulatorSupportProviders,
                         runUser,
                         runUser.Spec ?? resolvedSpec,
-                        _http);
+                        _http,
+                        queueFollowingWork?.Invoke(userIndex) ?? "unknown");
+                    session.TaskReportChanged = exec.UpdateTaskReport;
+                    if (_history is ITaskHistoryCheckpoints checkpoints)
+                        session.TaskCheckpointChanged = checkpoint =>
+                        {
+                            try { checkpoints.SaveTaskCheckpoint(checkpoint); }
+                            catch (Exception ex) { exec.SetPersistenceWarning("Task checkpoint: " + ex.GetType().Name); }
+                        };
 
                     try
                     {
@@ -380,6 +390,11 @@ internal sealed class ExecutionRunner
         HistorySaveResult result;
         try
         {
+            if (_history is ITaskHistoryCheckpoints checkpoints)
+            {
+                try { checkpoints.SaveTaskCheckpoint(record); }
+                catch (Exception ex) { exec.SetPersistenceWarning("Task checkpoint: " + ex.GetType().Name); }
+            }
             result = _history.Save(record, attemptLogs, screenshots);
         }
         catch (Exception ex)
@@ -527,7 +542,14 @@ internal sealed class ExecutionRunner
                     Logger.Warn($"[警告] 调度队列「{queue.Name}」第 {i + 1} 项引用的脚本实例「{script.Name}」未配置启用用户，已跳过。");
                     continue;
                 }
-                records.AddRange(await RunUsersAsync(exec, script, queue.Id, queue.Name, runUsers, planned.ResolvedSpec).ConfigureAwait(false));
+                records.AddRange(await RunUsersAsync(
+                    exec,
+                    script,
+                    queue.Id,
+                    queue.Name,
+                    runUsers,
+                    planned.ResolvedSpec,
+                    userIndex => userIndex < runUsers.Count - 1 || i < tasks.Count - 1 ? "yes" : "no").ConfigureAwait(false));
                 if (exec.Status == "cancelled")
                 {
                     break;

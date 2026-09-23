@@ -208,7 +208,8 @@ internal sealed class DataSpecializedProfileResolver
         {
             return null;
         }
-        profile.JudgeScript = _plugin.ReadJudgeScript();
+        profile.TaskProtocol = _plugin.TaskProtocol;
+        profile.JudgeScript = _plugin.TaskProtocol?.ObserveScript ?? _plugin.ReadJudgeScript();
         return profile;
     }
 }

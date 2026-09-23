@@ -152,9 +152,12 @@ internal class HostCompositionRoot
         collection.AddSingleton<IEmulatorSupportProviderResolver>(provider => provider.GetRequiredService<PluginManager>());
         collection.AddSingleton<IPluginAvailability>(provider => provider.GetRequiredService<PluginManager>());
         collection.AddSingleton<ScriptSpecResolver>();
+        collection.AddSingleton<ConfigDiagnosticFeedback>();
+        collection.AddSingleton<ITaskProtocolConfigAssessmentPort, TaskProtocolConfigAssessmentAdapter>();
         collection.AddSingleton<ScriptSaveValidation>(provider => new ScriptSaveValidation(
             provider.GetRequiredService<ScriptSpecResolver>(),
-            provider.GetRequiredService<IUserSnapshotReader>()));
+            provider.GetRequiredService<IUserSnapshotReader>(),
+            provider.GetRequiredService<ITaskProtocolConfigAssessmentPort>()));
         collection.AddSingleton<ScriptQueries>();
         collection.AddSingleton<QueueQueries>();
         collection.AddSingleton<UserQueries>();
@@ -264,7 +267,8 @@ internal class HostCompositionRoot
             provider.GetRequiredService<IPluginAvailability>(),
             provider.GetRequiredService<IPluginCapabilityResolver>(),
             provider.GetRequiredService<ScriptSpecResolver>(),
-            provider.GetRequiredService<UserCommands>()));
+            provider.GetRequiredService<UserCommands>(),
+            provider.GetRequiredService<ITaskProtocolConfigAssessmentPort>()));
         collection.AddSingleton<UpdateService>(provider => new UpdateService(
             () => Settings,
             AppPaths.AppRoot,
@@ -294,6 +298,7 @@ internal class HostCompositionRoot
             _settingsState,
             provider.GetRequiredService<ISettingsMutationGate>(),
             provider.GetRequiredService<ISettingsChangedEffects>()));
+        collection.AddSingleton<NexusPipeline.Modules.Users.Contracts.ITaskQueryProjection, TaskQueryProjection>();
         collection.AddSingleton<HttpRouteBindings>(provider => new HttpRouteBindings(
             provider.GetRequiredService<SettingsCommands>(),
             provider.GetRequiredService<ScriptCommands>(),
@@ -323,7 +328,8 @@ internal class HostCompositionRoot
             provider.GetRequiredService<UserAssetService>(),
             provider.GetRequiredService<OutboundHttpClientProvider>(),
             provider.GetRequiredService<ScriptIconService>(),
-            provider.GetRequiredService<ScriptFileBrowser>()));
+            provider.GetRequiredService<ScriptFileBrowser>(),
+            provider.GetRequiredService<NexusPipeline.Modules.Users.Contracts.ITaskQueryProjection>()));
         collection.AddSingleton<ExecutionExplainService>();
         collection.AddSingleton<DiagnosticsService>();
         _services = collection.BuildServiceProvider(new ServiceProviderOptions

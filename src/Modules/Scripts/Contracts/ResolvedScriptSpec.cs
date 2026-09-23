@@ -41,5 +41,7 @@ internal sealed record ResolvedScriptSpec(
     /// <summary>插件声明 PC 启动由自身管理；仅在 PC 运行期屏蔽宿主启动，不修改持久脚本。</summary>
     public bool SelfManagedPcLaunch { get; init; }
 
+    public TaskProtocolDescriptor? TaskProtocol { get; init; }
+
     public bool Succeeded => string.IsNullOrWhiteSpace(Error);
 }

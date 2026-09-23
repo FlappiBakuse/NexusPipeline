@@ -41,6 +41,7 @@ internal sealed class ConfigEditCommands
     private readonly IPluginCapabilityResolver _capabilities;
     private readonly ScriptSpecResolver _specResolver;
     private readonly UserCommands _userCommands;
+    private readonly ITaskProtocolConfigAssessmentPort? _taskProtocolAssessment;
 
     internal ConfigEditCommands(
         IConfigEditAdmission admission,
@@ -49,7 +50,8 @@ internal sealed class ConfigEditCommands
         IPluginAvailability pluginAvailability,
         IPluginCapabilityResolver capabilities,
         ScriptSpecResolver specResolver,
-        UserCommands userCommands)
+        UserCommands userCommands,
+        ITaskProtocolConfigAssessmentPort? taskProtocolAssessment = null)
     {
         _admission = admission;
         _scripts = scripts;
@@ -58,6 +60,7 @@ internal sealed class ConfigEditCommands
         _capabilities = capabilities;
         _specResolver = specResolver;
         _userCommands = userCommands;
+        _taskProtocolAssessment = taskProtocolAssessment;
     }
 
     public OperationResult<ConfigEditStarted> Start(
@@ -727,12 +730,53 @@ internal sealed class ConfigEditCommands
         }
     }
 
-    private static ConfigValidationResult RunConfigValidator(
+    internal ConfigValidationResult RunConfigValidator(
         ScriptInstance script,
         ResolvedScriptUser user,
         string userKey,
         ResolvedScriptSpec? spec)
     {
+        if (spec?.TaskProtocol?.Version == "0.1.0" && _taskProtocolAssessment is not null)
+        {
+            try
+            {
+                TaskPlan? plan = _taskProtocolAssessment.RunAsync(
+                        spec,
+                        user,
+                        "config-edit")
+                    .GetAwaiter()
+                    .GetResult();
+                return new ConfigValidationResult(
+                    true,
+                    "",
+                    Array.Empty<string>(),
+                    Array.Empty<ConfigValidationToast>(),
+                    Array.Empty<ConfigValidationNotification>())
+                {
+                    Diagnostics = plan is null
+                        ? Array.Empty<ConfigValidationDiagnostic>()
+                        : _taskProtocolAssessment.ToDiagnostics(plan, user),
+                };
+            }
+            catch (Exception ex)
+            {
+                // Assessment is advisory after a successful configuration commit;
+                // never turn a saved configuration into a failed edit response.
+                Logger.Warn($"[任务协议配置校验:{script.PluginType}] 校验失败（不阻断保存）：{ex.Message}");
+                return new ConfigValidationResult(
+                    true,
+                    "",
+                    Array.Empty<string>(),
+                    Array.Empty<ConfigValidationToast>(),
+                    Array.Empty<ConfigValidationNotification>())
+                {
+                    Diagnostics = spec is null
+                        ? Array.Empty<ConfigValidationDiagnostic>()
+                        : new[] { _taskProtocolAssessment.Error(spec, user, ex.Message) },
+                };
+            }
+        }
+
         if (string.IsNullOrWhiteSpace(script.PluginType) || spec?.ConfigValidator is null)
         {
             return ConfigValidationResult.Skipped;

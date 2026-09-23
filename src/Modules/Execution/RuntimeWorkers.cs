@@ -49,7 +49,8 @@ internal sealed class RuntimeWorkers : IAsyncDisposable
         Action<List<string>> replaceRequested,
         Action<ConfigSyncRequest> configSync,
         Func<int, string, CancellationToken, Task<RunScreenshot?>>? captureScreenshot = null,
-        OutboundHttpClientProvider? http = null)
+        OutboundHttpClientProvider? http = null,
+        Func<bool, CancellationToken, Task<JudgeScriptResult>>? taskObserver = null)
     {
         _attemptId = attemptId;
         _attemptNumber = attemptNumber;
@@ -65,7 +66,9 @@ internal sealed class RuntimeWorkers : IAsyncDisposable
         _judgeWorker = new SingleFlightWorker<JudgeSnapshot, JudgeWorkerResult>(async (snapshot, workerToken) =>
         {
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(workerToken, _operationToken);
-            JudgeScriptResult judgeResult = await JudgeScriptRunner.ExecuteAsync(
+            JudgeScriptResult judgeResult = taskObserver is not null
+                ? await taskObserver(snapshot.IsFinalCall, linked.Token).ConfigureAwait(false)
+                : await JudgeScriptRunner.ExecuteAsync(
                 snapshot.Script,
                 snapshot.InputJson,
                 snapshot.Files.Select(file => new JudgeScriptInputFile
@@ -214,7 +217,7 @@ internal sealed class RuntimeWorkers : IAsyncDisposable
     public bool QueueJudge(bool final)
     {
         int generation = _judgeGeneration + 1;
-        JudgeSnapshot snapshot = _captureSnapshot(generation);
+        JudgeSnapshot snapshot = _captureSnapshot(generation) with { IsFinalCall = final };
         if (!_judgeWorker.TryStart(snapshot))
         {
             if (final)

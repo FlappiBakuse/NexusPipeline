@@ -28,6 +28,8 @@ internal sealed class ExecutionCoordinator : RunSession
 
     private readonly ResolvedScriptSpec? _resolvedSpec;
 
+    private readonly string _queueHasFollowingWork;
+
     private readonly Action<ExecutionPreviewTarget>? _previewTargetChanged;
 
     private readonly RunScreenshotStore _screenshotStore;
@@ -61,6 +63,8 @@ internal sealed class ExecutionCoordinator : RunSession
     private readonly UserHookRunner _userHookRunner;
 
     private volatile bool _budgetExpired;
+    internal Action<System.Text.Json.Nodes.JsonObject>? TaskReportChanged { get; set; }
+    internal Action<RunRecord>? TaskCheckpointChanged { get; set; }
 
     private CancellationToken OperationToken => _operationCts?.Token ?? _token;
 
@@ -70,14 +74,16 @@ internal sealed class ExecutionCoordinator : RunSession
         Action<string, LogLevel>? logLine,
          Action<ExecutionPreviewTarget>? previewTargetChanged,
          IUserRepository users,
-         IEmulatorSupportProviderResolver emulatorSupportProviders,
-         ResolvedScriptUser? resolvedUser = null,
-         ResolvedScriptSpec? resolvedSpec = null,
-         OutboundHttpClientProvider? http = null)
+        IEmulatorSupportProviderResolver emulatorSupportProviders,
+        ResolvedScriptUser? resolvedUser = null,
+        ResolvedScriptSpec? resolvedSpec = null,
+        OutboundHttpClientProvider? http = null,
+        string queueHasFollowingWork = "unknown")
         : base(script, mode, queueId, queueName, userName, token, resolvedUser, attemptChanged, statusChanged, logLine)
     {
         _users = users;
         _resolvedSpec = resolvedSpec;
+        _queueHasFollowingWork = queueHasFollowingWork is "yes" or "no" ? queueHasFollowingWork : "unknown";
         _http = http;
         _emulatorSupportProviders = emulatorSupportProviders ?? throw new ArgumentNullException(nameof(emulatorSupportProviders));
         _previewTargetChanged = previewTargetChanged;
@@ -95,7 +101,8 @@ internal sealed class ExecutionCoordinator : RunSession
             _logLine,
             RemainingRunSeconds,
             () => _budgetExpired || _budget?.IsExpired == true,
-            message => _configRun?.MarkProcessCleanupUnconfirmed(message));
+            message => _configRun?.MarkProcessCleanupUnconfirmed(message),
+            AppendScriptLog);
         SetInitialPreviewTarget();
     }
 
@@ -113,6 +120,51 @@ internal sealed class ExecutionCoordinator : RunSession
     {
         return script.LaunchGame
             && !(spec?.SelfManagedPcLaunch == true && !EmulatorSupport.IsEmulator(script));
+    }
+
+    private TaskExecutionContext CreateTaskExecutionContext(string userId, string trigger) =>
+        CreateTaskExecutionContext(_script, _resolvedSpec, userId, trigger, _queueId, _queueHasFollowingWork);
+
+    /// <summary>
+    /// Builds the immutable execution facts shared by real runs and read-only task previews.
+    /// Keeping this in one place is important because configuration target checks compare
+    /// plugin-owned paths with the bound ScriptInstance.GameExe.
+    /// </summary>
+    internal static TaskExecutionContext CreateTaskExecutionContext(
+        ScriptInstance script,
+        ResolvedScriptSpec? resolvedSpec,
+        string userId,
+        string trigger,
+        string? queueId = null,
+        string queueHasFollowingWork = "unknown")
+    {
+        string mode = EmulatorSupport.IsEmulator(script)
+            ? "emulator"
+            : script.GameMode is "pc" or "cloud" ? script.GameMode : "pc";
+        bool hasGameTarget = !string.IsNullOrWhiteSpace(script.GameExe);
+        string targetKind = !hasGameTarget ? "none" : mode == "emulator" ? "adb_endpoint" : "executable";
+        string launchOwner = !script.LaunchGame
+            ? "already_running"
+            : ShouldHostLaunchGame(script, resolvedSpec) ? "host" : "upstream";
+        string queueKind = string.IsNullOrWhiteSpace(queueId) ? "standalone" : "queue";
+        string following = string.IsNullOrWhiteSpace(queueId)
+            ? "no"
+            : queueHasFollowingWork is "yes" or "no" ? queueHasFollowingWork : "unknown";
+        bool hostWillCloseGame = script.ForceCloseGame && !(resolvedSpec?.SelfManagedPcLaunch == true);
+        return new TaskExecutionContext(
+            userId,
+            script.Id,
+            userId + ":" + script.Id,
+            trigger,
+            mode,
+            launchOwner,
+            new TaskGameTarget(targetKind, hasGameTarget ? script.GameExe : null, null),
+            new TaskQueueContext(queueKind, following),
+            new TaskCleanupContext(true, hostWillCloseGame, "none"),
+            new TaskEffectiveLaunch(script.Id, script.LaunchGame, null, null, null),
+            new TaskLogSourceContext(
+                ShouldPublishConsoleData(script.LogPath) ? "stdout" : "file",
+                true));
     }
 
     /// <summary>按本次实际解析出的有效判定配置决定是否需要最近 PC 帧缓存。</summary>
@@ -188,6 +240,14 @@ internal sealed class ExecutionCoordinator : RunSession
             record.UserName = user.UserName;
         }
         _activeUser = user;
+        if (_resolvedSpec?.TaskProtocol is not null)
+            TaskProtocolRun = new TaskProtocolRun(_resolvedSpec, record.Id, record.UserId,
+                executionContext: CreateTaskExecutionContext(record.UserId, "pre_launch")) { Changed = report =>
+            {
+                var checkpoint = record.Clone(); checkpoint.TaskReport = report;
+                TaskCheckpointChanged?.Invoke(checkpoint);
+                TaskReportChanged?.Invoke(report);
+            } };
 
         _budgetExpiryCts = new CancellationTokenSource();
         _operationCts = CancellationTokenSource.CreateLinkedTokenSource(_token, _budgetExpiryCts.Token);
@@ -216,8 +276,9 @@ internal sealed class ExecutionCoordinator : RunSession
                 _script.Id,
                 resolvedUser?.UserKey,
                 _script.ConfigPath,
-                _script.HasJudgeScript(),
+                _script.HasJudgeScript() && TaskProtocolRun is null,
                 _resolvedSpec);
+            if (TaskProtocolRun is not null) _configRun.RestoreTaskSelections = TaskProtocolRun.Restore;
             _configRun.PrepareScriptArea();
             if (user is not null && !string.IsNullOrWhiteSpace(_script.ConfigPath))
             {
@@ -233,15 +294,49 @@ internal sealed class ExecutionCoordinator : RunSession
                 }
             }
 
+            if (TaskProtocolRun is not null)
+            {
+                try
+                {
+                    await TaskProtocolRun.PreflightAsync(OperationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    record.Status = "cancelled";
+                    record.EndTime = DateTime.Now;
+                    record.ResultDetail = "任务发现已取消";
+                    record.ResultCode = "run.cancelled";
+                    return record;
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warn($"[专项任务] 配置发现失败：{ex.GetType().Name}");
+                    record.Status = "failed";
+                    record.EndTime = DateTime.Now;
+                    record.ResultDetail = "无法建立可信任务计划";
+                    record.ResultCode = "tasks.discovery_failed";
+                    return record;
+                }
+                if (TaskProtocolRun.IsAdmissionBlocked)
+                {
+                    record.Status = "blocked";
+                    record.EndTime = DateTime.Now;
+                    record.ResultDetail = "配置检查未通过，未启动脚本或游戏";
+                    record.ResultCode = "tasks.admission_blocked";
+                    record.TaskReport = TaskProtocolRun.Snapshot();
+                    return record;
+                }
+            }
+
             for (int attemptNo = 1; attemptNo <= maxAttempts; attemptNo++)
             {
                 _attemptChanged?.Invoke(attemptNo, maxAttempts);
-                if (attemptNo > 1 && _configRun.IsPrepared)
+                if (attemptNo > 1 && _configRun.IsPrepared && TaskProtocolRun is null)
                 {
                     string? retryError = _configRun.PrepareForRetry();
                     if (retryError is not null)
                     {
-                        _attemptLogStart = _scriptFullLog.Length;
+                        _attemptLogStart = Results.Length;
                         var retryAttempt = new RunAttempt
                         {
                             Number = attemptNo,
@@ -271,7 +366,7 @@ internal sealed class ExecutionCoordinator : RunSession
                 record.AttemptDetails.Add(attempt);
                 // 段起点设置在「开始」头之前——此前段含「结束」头不含「开始」头（首尾不对称），
                 // 判断脚本输入与按尝试分批落盘的日志段现在从「开始」头起算。
-                _attemptLogStart = _scriptFullLog.Length;
+                _attemptLogStart = Results.Length;
                 AppendScriptLog($"===== 第 {attemptNo}/{maxAttempts} 次尝试 开始（{attempt.StartTime:HH:mm:ss}） =====");
                 _screenshotCapture.BeginAttempt(attemptNo);
 
@@ -302,13 +397,13 @@ internal sealed class ExecutionCoordinator : RunSession
                     result = await RunAttemptCoreAsync(attempt).ConfigureAwait(false);
                 }
 
-                if (mainExecuted && result.Status != "cancelled"
+                if (mainExecuted && result.Status != "cancelled" && TaskProtocolRun?.IsAdmissionBlocked != true
                     && user is not null && !string.IsNullOrWhiteSpace(user.Binding.PostRunScript)
-                    && AttemptLifecycle.ShouldRunPostRun(
+                    && (TaskProtocolRun is not null ? !user.Binding.PostRunOnFinalOnly : AttemptLifecycle.ShouldRunPostRun(
                         user.Binding.PostRunOnFinalOnly,
                         attemptNo,
                         retryPolicy,
-                        result))
+                        result)))
                 {
                     RunAttemptResult? postResult = await RunUserScriptCoreAsync(user!.Binding.PostRunScript, "任务后", attempt, OperationToken).ConfigureAwait(false);
                     if (postResult is not null)
@@ -317,6 +412,79 @@ internal sealed class ExecutionCoordinator : RunSession
                     }
                 }
 
+                bool taskRetry = false;
+                bool retryAdmissionBlocked = TaskProtocolRun?.IsAdmissionBlocked == true
+                    && !TaskProtocolRun.AdmissionBlockedBeforeAttempt
+                    && result.ReasonCode == "tasks.admission_blocked";
+                if (TaskProtocolRun is not null)
+                {
+                    result = TaskProtocolRun.Finish(result, attemptNo);
+                    if (!result.IsFatal && result.Status is not ("success" or "skipped" or "cancelled"))
+                    {
+                        try
+                        {
+                            taskRetry = await TaskProtocolRun.PrepareRetryAsync(maxAttempts, _token.IsCancellationRequested,
+                                _budgetExpired || _budget.IsExpired, OperationToken).ConfigureAwait(false);
+                        }
+                        catch (Exception ex)
+                        {
+                            Logger.Warn($"[专项任务] 安全重试已停止：{ex.GetType().Name}");
+                            taskRetry = false;
+                        }
+                    }
+                    if (!taskRetry && mainExecuted && result.Status != "cancelled" && !TaskProtocolRun.IsAdmissionBlocked
+                        && user?.Binding.PostRunOnFinalOnly == true && !string.IsNullOrWhiteSpace(user.Binding.PostRunScript))
+                    {
+                        var postResult = await RunUserScriptCoreAsync(user.Binding.PostRunScript, "任务后", attempt, OperationToken).ConfigureAwait(false);
+                        if (postResult is not null)
+                        {
+                            result = RunAttemptResult.MergePostRun(result, postResult);
+                            TaskProtocolRun.SetFinalLifecycleFailure(result.Status == "cancelled");
+                        }
+                    }
+                }
+                if (TaskProtocolRun?.IsAdmissionBlocked == true && TaskProtocolRun.AdmissionBlockedBeforeAttempt)
+                {
+                    if (runPreRun)
+                    {
+                        // Keep the hook's real execution and log while making it
+                        // clear that no protocol/main attempt was admitted.
+                        attempt.EndTime = DateTime.Now;
+                        attempt.Status = "blocked";
+                        attempt.Reason = "配置检查未通过，未启动脚本或游戏";
+                        attempt.ReasonCode = "tasks.admission_blocked";
+                        AppendScriptLog($"===== 第 {attemptNo}/{maxAttempts} 次尝试 停止：{attempt.Reason} =====");
+                    }
+                    else record.AttemptDetails.Remove(attempt);
+                    record.Attempts = 0;
+                    record.Status = "blocked";
+                    record.EndTime = DateTime.Now;
+                    record.ResultDetail = "配置检查未通过，未启动脚本或游戏";
+                    record.ResultCode = "tasks.admission_blocked";
+                    Results.CompleteAttempt();
+                    record.TaskReport = TaskProtocolRun.Snapshot();
+                    break;
+                }
+                if (retryAdmissionBlocked)
+                {
+                    // The pre-run hook may have executed and its log belongs to
+                    // this entry, but BeginAsync rejected the retry before a
+                    // second protocol/main attempt started.
+                    attempt.EndTime = DateTime.Now;
+                    attempt.Status = "blocked";
+                    attempt.Reason = "配置检查未通过，未启动脚本或游戏";
+                    attempt.ReasonCode = "tasks.admission_blocked";
+                    record.Attempts = attemptNo - 1;
+                    record.Status = result.Status;
+                    record.EndTime = attempt.EndTime;
+                    record.ResultDetail = result.Reason;
+                    record.ResultCode = result.ReasonCode;
+                    record.ResultArgs = new(result.ReasonArgs, StringComparer.Ordinal);
+                    AppendScriptLog($"===== 第 {attemptNo}/{maxAttempts} 次尝试 停止：{attempt.Reason} =====");
+                    Results.CompleteAttempt();
+                    record.TaskReport = TaskProtocolRun!.Snapshot();
+                    break;
+                }
                 attempt.EndTime = DateTime.Now;
                 attempt.Status = result.Status;
                 attempt.Reason = result.Reason;
@@ -334,6 +502,15 @@ internal sealed class ExecutionCoordinator : RunSession
                 Logger.Info($"第 {attemptNo} 次尝试结束：{result.Status}（{result.Reason}）");
                 Results.CompleteAttempt();
 
+                if (TaskProtocolRun is not null)
+                {
+                    record.Status = result.Status;
+                    record.EndTime = DateTime.Now;
+                    record.ResultDetail = result.Reason;
+                    record.TaskReport = TaskProtocolRun.Snapshot();
+                    if (taskRetry) continue;
+                    break;
+                }
                 if (result.Status is "success" or "partial")
                 {
                     record.Status = result.Status;
@@ -385,10 +562,21 @@ internal sealed class ExecutionCoordinator : RunSession
                 string? restoreError = _configRun.FinalizeRun(_script.AutoUpdateConfig);
                 if (restoreError is not null)
                 {
+                    if (TaskProtocolRun is not null)
+                    {
+                        record.Status = "failed"; record.ResultCode = "tasks.recovery_conflict";
+                        TaskProtocolRun.SetFinalLifecycleFailure(false);
+                    }
                     string msg = $"（警告：配置还原失败，现场已保留，详见日志）";
                     record.ResultDetail += msg;
                     Logger.Error($"[错误] 脚本「{_script.Name}」用户「{user?.UserName ?? _userName ?? ""}」配置还原失败：{restoreError}");
                 }
+            }
+            if (TaskProtocolRun is not null)
+            {
+                if (record.Status is "failed" or "cancelled" && TaskProtocolRun.Snapshot()?["lifecycleOutcome"]?.GetValue<string>() == "running")
+                    TaskProtocolRun.SetFinalLifecycleFailure(record.Status == "cancelled");
+                record.TaskReport = TaskProtocolRun.Snapshot();
             }
         }
     }
@@ -409,6 +597,27 @@ internal sealed class ExecutionCoordinator : RunSession
         if (budgetError is not null)
         {
             return budgetError;
+        }
+        if (TaskProtocolRun is not null)
+        {
+            try { await TaskProtocolRun.BeginAsync(attempt.Number, OperationToken).ConfigureAwait(false); }
+            catch (OperationCanceledException) { return RunAttemptResult.Cancelled("任务发现已取消"); }
+            catch (TaskAdmissionBlockedException)
+            {
+                Logger.Info("[专项任务] 配置检查未通过，未启动脚本或游戏");
+                return new RunAttemptResult
+                {
+                    Status = "blocked",
+                    Reason = "配置检查未通过，未启动脚本或游戏",
+                    ReasonCode = "tasks.admission_blocked",
+                    IsFatal = true,
+                };
+            }
+            catch (Exception ex)
+            {
+                Logger.Warn($"[专项任务] 配置发现失败：{ex.GetType().Name}");
+                return RunAttemptResult.Fatal("无法建立可信任务计划", "tasks.discovery_failed");
+            }
         }
         // Attempt 起点日志环境：一次性记录日志格式下所有候选的 path/FileId/length；后续通配符轮换按这张快照决定读取起点。
         var logEnv = new AttemptLogEnvironment(_script, modeText);
@@ -508,6 +717,11 @@ internal sealed class ExecutionCoordinator : RunSession
             if (ShouldPublishConsoleData(_script.LogPath))
             {
                 _logLine?.Invoke(data, LogLevelUtil.ParseObserved(data, level));
+                if (TaskProtocolRun is not null)
+                {
+                    TaskProtocolRun.Append("stdout", data + "\n");
+                    AppendScriptLog(data);
+                }
             }
         }
 
@@ -547,11 +761,7 @@ internal sealed class ExecutionCoordinator : RunSession
                     Abs = file.Abs,
                 })
                 .ToList();
-            int logLength = Math.Max(0, _scriptFullLog.Length - _attemptLogStart);
-            bool logTruncated = logLength > JudgeScriptRunner.MaxJudgeLogChars;
-            string logText = logTruncated
-                ? _scriptFullLog.ToString(_attemptLogStart + logLength - JudgeScriptRunner.MaxJudgeLogChars, JudgeScriptRunner.MaxJudgeLogChars)
-                : _scriptFullLog.ToString(_attemptLogStart, logLength);
+            var (logText, logTruncated) = Results.SnapshotAttemptTail(JudgeScriptRunner.MaxJudgeLogChars);
             ScriptInstance scriptSnapshot = _script.Clone();
             ResolvedScriptUser? userSnapshot = _activeUser is null
                 ? null
@@ -598,7 +808,8 @@ internal sealed class ExecutionCoordinator : RunSession
                 OperationToken.ThrowIfCancellationRequested();
             },
              (attemptNumber, trigger, captureToken) => _screenshotStore.CaptureAsync(attemptNumber, trigger, captureToken),
-             _http);
+             _http,
+             TaskProtocolRun is null ? null : TaskProtocolRun.ObserveAsync);
         var terminator = new AttemptTerminator(workers, judge, status => _statusChanged?.Invoke(status));
         await using var workersScope = workers;
 
@@ -608,7 +819,7 @@ internal sealed class ExecutionCoordinator : RunSession
             modeText,
             attemptId,
             attemptStart,
-            processSession.Process,
+            processSession,
             launchExe,
             excludeGame,
             logEnv,

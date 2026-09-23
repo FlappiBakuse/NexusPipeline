@@ -65,3 +65,5 @@ GameCheckIn v0.3.1 的独立签到页面由插件导航注册；状态读取位�
 ## 维护规则
 
 新增能力时先实现 Web/CLI 入口与 Application Command，再评估 Agent 场景是否需要 MCP 工具；保持核心子集克制，避免工具面向全量 API 膨胀。本表为信息性记录，不设强制校验测试。
+
+专项任务查询、运行快照与历史深链接见[专项任务控制面](reference/plugin-api/task-protocol.md#控制面)。

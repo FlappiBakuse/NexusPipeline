@@ -26,6 +26,8 @@ node tests\run.mjs release update-acceptance
 
 统一 runner 会在对应 Gate 首次运行前执行 `npm ci --no-audit --no-fund`，并要求每个工作区存在 `package-lock.json`；依赖准备失败会直接终止 Gate，不会降级为跳过。
 
+`release core` 的最后一项是架构门禁：对 production 和 Test Host 真实加载 MSBuild/Roslyn 工程执行 `check`，随后生成 `.generated/architecture/backend-map.json`，校验 schema、非空源码集合、owner 路径和预期模式，重复生成结果必须一致；当前 run 的 artifact 中同时保存带候选 SHA 的地图副本。地图不是宿主运行时或 `release/` 的输入。
+
 `tooling` 递归发现并运行现役 Node 工具测试和 `tools/tests/test_*.py`，同时覆盖前端边界、源码编码、更新策略、资格控制与原生报告解析。
 
 统一 runner 保留实时 stdout/stderr、退出码、超时信息和原生 TAP/TRX/Vitest/Playwright 报告。每次运行的报告位于 `tests/.artifacts/runs/<runId>/reports/`；失败时不删除唯一原始报告。
@@ -91,3 +93,13 @@ H1–H5 的 CI job 无论成功或失败都会保留本次 `tests/.artifacts/run
    脚本当前校验：`frontend.apiVersion` 必须为 1.5、宿主私有结构 class 拒绝、`nxp-*` 元素必须来自公开元素集合、插件不得复制 Nexus UI 组件，并按插件页面形态检查公开契约。slot 插件验证 renderer、所需公开控件和 cleanup；GameCheckIn route 页面验证导航/页面注册、任务 API 行为、离开后资源释放和再次进入。CustomWallpaper 额外覆盖插件级壁纸运行时：激活即应用背景与配色、离开设置页面保留全局外观、页面访问不触发随机轮换、按时间轮换在无设置页面时继续生效、只有插件停用才清理外观与计时器。
 
 构建、测试和发布命令保持实时输出；失败时保留失败项、原因摘要和必要的 runtime 证据。长任务不使用无反馈的超长等待。
+
+生产专项适配器的真实 Jint 联调：`dotnet run --project tools/NexusPipeline.TaskProtocolTests -- --plugin-root <Plugins>`。此命令使用显式插件 checkout 和合成夹具；插件 P1 也运行相同入口。
+
+跨账号配置与恢复：`dotnet run --project tools/NexusPipeline.TaskProtocolTests -p:NexusTestHost=true -- --plugin-root <Plugins> --account-isolation <报告.json>`。八个生产适配器、两个账号、六种生命周期情景，共 96 项；使用新建目录和合成配置，不启动目标软件。失败时输出并保留该情景的隔离目录。
+
+## 外部实例日志只读回放
+
+`dotnet run --project tools/NexusPipeline.TaskProtocolTests -- --plugin-root <Plugins> --replay-manifest <外部清单.json>` 使用真实 Jint/发现/归并器读取显式声明的实例文件，不把旁边的历史 JSON 当成成功证据，不启动游戏或修改配置。清单和报告必须保留在仓库外。
+
+清单字段：`report` 为外部报告路径；`scenarios` 每项包含 `artifact`、`resources`（每项 `id`、`path`、`format`）和 `logs`（每项 `path`、`source`）。资源 ID/日志来源须按插件实际启动契约映射：主配置为 `config:` 加相对文件名；额外资源使用 manifest 中声明的 ID；MXU 的任务回调来自 stdout，其他插件通常来自 file。报告按日志 SHA256 关联，记录发现覆盖、任务结果与运行边界。当前配置与历史配置可能不同，回放结果不能替代当时冻结的计划或真机运行验收。

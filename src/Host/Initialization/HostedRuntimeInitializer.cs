@@ -44,6 +44,7 @@ internal static class HostedRuntimeInitializer
                         mark.PendingConfigInput.Value).Succeeded);
             ConfigWorkDirMaintenance.SweepRuntimeStaging();
             ConfigRecoveryService.RecoverInterrupted(runtime.EntityState.SnapshotUsers());
+            runtime.History.RecoverInterruptedTasks();
             WindowsScheduledTaskRegistration.Sync(runtime.Settings.AutoStart);
             return true;
         }

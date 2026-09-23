@@ -3,6 +3,7 @@ obj/
 release/
 dist/
 build-tmp/
+.generated/
 /plugins/
 *.user
 .vs/
@@ -38,3 +39,6 @@ web.port
 web.port.tmp
 NexusPipeline-*-win-x64.zip
 NexusPipeline-*-win-x64.zip.sha256
+
+**/__pycache__/
+*.pyc

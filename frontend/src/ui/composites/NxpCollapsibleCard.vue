@@ -81,11 +81,11 @@ function toggle() {
 .nxp-collapsible-card-toggle {
   display: flex;
   width: 100%;
-  min-height: 72px;
+  min-height: var(--nx-collapsible-header-height, 72px);
   align-items: center;
   justify-content: space-between;
   gap: var(--space-4, var(--nx-space-4));
-  padding: var(--space-4, var(--nx-space-4)) var(--space-5, var(--nx-space-5));
+  padding: var(--nx-collapsible-header-padding, var(--space-4, var(--nx-space-4))) var(--space-5, var(--nx-space-5));
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -101,7 +101,7 @@ function toggle() {
 .nxp-collapsible-card-actions { display: inline-flex; min-height: 32px; align-items: center; gap: var(--space-2); }
 .nxp-collapsible-card-arrow { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; color: var(--accent, var(--nx-color-accent)); }
 .nxp-collapsible-card-arrow-icon { width: 22px; height: 22px; }
-.nxp-collapsible-card-body { min-width: 0; padding: var(--space-5, var(--nx-space-5)); border-top: 1px solid var(--border, var(--nx-color-border)); }
+.nxp-collapsible-card-body { min-width: 0; padding: var(--nx-collapsible-body-padding, var(--space-5, var(--nx-space-5))); border-top: 1px solid var(--border, var(--nx-color-border)); }
 .nxp-collapsible-card-body[hidden] { display: none; }
 .nxp-collapsible-card-body .settings-list:first-child { margin-top: 0; }
 .nxp-collapsible-card.is-secondary { border-color: var(--content-card-border); background: var(--content-card-soft); }

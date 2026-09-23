@@ -84,6 +84,7 @@ internal class LogMonitor : IDisposable
     }
 
     public string Path => _path;
+    internal int Epoch { get; private set; }
 
     /// <summary>打开时记录的文件创建时间（Ticks），作为 FileId 不可用时的替换检测回退。</summary>
     public long FileStamp { get; private set; }
@@ -129,6 +130,7 @@ internal class LogMonitor : IDisposable
     /// <summary>重新打开并从文件头读取（文件被重建/截断后使用）。</summary>
     public void ReopenFromStart()
     {
+        Epoch++;
         _readFromStart = true;
         Open();
     }
@@ -193,6 +195,7 @@ internal class LogMonitor : IDisposable
                 long? divergence = FindCheckpointDivergence(currentLength);
                 if (divergence is long changedAt)
                 {
+                    Epoch++;
                     // 窗口内发生截断/重写：从第一个可证明变化的字节重新交给判定层。
                     start = changedAt;
                 }

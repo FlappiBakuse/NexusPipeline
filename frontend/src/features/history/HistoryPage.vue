@@ -216,6 +216,28 @@ function closeDetail() {
   detail.value = null;
 }
 
+async function openLinkedRecord() {
+  const query = new URLSearchParams(window.location.hash.split('?')[1] || '');
+  const id = query.get('recordId');
+  if (!id) return;
+  const own = ++requestId;
+  loading.value = true;
+  try {
+    const data = await api('GET', `/api/history/detail?id=${encodeURIComponent(id)}&metadata=true`) as { record?: HistoryRecord };
+    if (own !== requestId) return;
+    if (!data.record) throw new Error(t('tasks.error.record_deleted'));
+    const record = data.record;
+    const day = (record.startTime || '').slice(0, 10);
+    from.value = day; to.value = day; statusFilter.value = '';
+    selectedDate.value = day; selectedUserKey.value = record.userId || record.userName || '';
+    selectedUserName.value = record.userName || '';
+    dates.value = [{ date: day, count: 1 }]; expanded.value = new Set([day]);
+    records.value = [record]; detail.value = record; error.value = '';
+  } catch (reason) {
+    if (own === requestId) { detail.value = null; records.value = []; dates.value = []; error.value = t('tasks.error.record_deleted'); }
+  } finally { if (own === requestId) loading.value = false; }
+}
+
 onMounted(() => {
   setTopbarTitle(t("shell.history"));
   updateMobile();
@@ -229,7 +251,9 @@ onMounted(() => {
     }
   };
   window.addEventListener("resize", resizeHandler);
-  void loadDates();
+  window.addEventListener('hashchange', openLinkedRecord);
+  if (new URLSearchParams(window.location.hash.split('?')[1] || '').has('recordId')) void openLinkedRecord();
+  else void loadDates();
 });
 
 onBeforeUnmount(() => {
@@ -237,6 +261,7 @@ onBeforeUnmount(() => {
   closeDetail();
   void disposeHistorySlots();
   if (resizeHandler) window.removeEventListener("resize", resizeHandler);
+  window.removeEventListener('hashchange', openLinkedRecord);
 });
 </script>
 

@@ -4,6 +4,7 @@ import RunningExecution from "./RunningExecution.vue";
 
 function mountExecution() {
   return mount(RunningExecution, {
+    global: { stubs: { LiveTaskReports: true } },
     props: {
       running: [
         { id: "run-1", targetName: "脚本一", kind: "script", mode: "manual", logTail: ["one"] },

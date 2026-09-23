@@ -143,6 +143,164 @@ public static class BackendMapWriter
         };
     }
 
+    public static IReadOnlyList<string> Validate(object value, string root, string mode)
+    {
+        using var document = JsonDocument.Parse(Serialize(value));
+        var errors = new List<string>();
+        var map = document.RootElement;
+        if (map.ValueKind != JsonValueKind.Object)
+        {
+            return new[] { "map root must be a JSON object" };
+        }
+
+        if (!map.TryGetProperty("schemaVersion", out var schemaVersion)
+            || schemaVersion.ValueKind != JsonValueKind.Number
+            || !schemaVersion.TryGetInt32(out var version)
+            || version != 2)
+        {
+            errors.Add("schemaVersion must be 2");
+        }
+
+        var files = RequireArray(map, "files", errors);
+        if (files.HasValue && files.Value.GetArrayLength() == 0) errors.Add("files must contain at least one source file");
+        var sourcePaths = new HashSet<string>(StringComparer.Ordinal);
+        if (files.HasValue)
+        {
+            var values = files.Value;
+            for (var index = 0; index < values.GetArrayLength(); index++)
+            {
+                var item = values[index];
+                var path = RequiredString(item, "path", $"files[{index}]", errors);
+                ValidateRepositoryFile(path, root, $"files[{index}].path", errors);
+                if (path is not null && !sourcePaths.Add(path.Replace('\\', '/')))
+                {
+                    errors.Add($"files[{index}].path is duplicated: {path}");
+                }
+
+                var owner = RequiredString(item, "owner", $"files[{index}]", errors);
+                if (owner is "Unassigned" or "") errors.Add($"files[{index}].owner must resolve to a concrete owner");
+            }
+        }
+
+        var modes = RequireArray(map, "modes", errors);
+        var expectedModes = mode.Equals("both", StringComparison.OrdinalIgnoreCase)
+            ? new[] { "production", "test-host" }
+            : new[] { mode };
+        var actualModes = new HashSet<string>(StringComparer.Ordinal);
+        if (modes.HasValue)
+        {
+            var values = modes.Value;
+            for (var index = 0; index < values.GetArrayLength(); index++)
+            {
+                var item = values[index];
+                var name = RequiredString(item, "name", $"modes[{index}]", errors);
+                if (name is not null) actualModes.Add(name);
+                var projects = RequireArray(item, "projects", errors, $"modes[{index}]");
+                if (projects.HasValue && projects.Value.GetArrayLength() == 0)
+                {
+                    errors.Add($"modes[{index}].projects must not be empty");
+                }
+                if (!projects.HasValue) continue;
+                var projectValues = projects.Value;
+                for (var projectIndex = 0; projectIndex < projectValues.GetArrayLength(); projectIndex++)
+                {
+                    var project = projectValues[projectIndex];
+                    var projectPath = RequiredString(project, "path", $"modes[{index}].projects[{projectIndex}]", errors);
+                    ValidateRepositoryFile(projectPath, root, $"modes[{index}].projects[{projectIndex}].path", errors);
+                    var sourceFiles = RequireArray(project, "sourceFiles", errors, $"modes[{index}].projects[{projectIndex}]");
+                    if (sourceFiles.HasValue && sourceFiles.Value.GetArrayLength() == 0)
+                    {
+                        errors.Add($"modes[{index}].projects[{projectIndex}].sourceFiles must not be empty");
+                    }
+                    if (!sourceFiles.HasValue) continue;
+                    var sourceValues = sourceFiles.Value;
+                    for (var sourceIndex = 0; sourceIndex < sourceValues.GetArrayLength(); sourceIndex++)
+                    {
+                        var sourcePath = sourceValues[sourceIndex].ValueKind == JsonValueKind.String
+                            ? sourceValues[sourceIndex].GetString()
+                            : null;
+                        ValidateRepositoryFile(sourcePath, root, $"modes[{index}].projects[{projectIndex}].sourceFiles[{sourceIndex}]", errors);
+                    }
+                }
+            }
+        }
+
+        foreach (var expected in expectedModes)
+        {
+            if (!actualModes.Contains(expected)) errors.Add($"modes is missing the expected mode: {expected}");
+        }
+        foreach (var actual in actualModes)
+        {
+            if (!expectedModes.Contains(actual, StringComparer.Ordinal)) errors.Add($"modes contains an unexpected mode: {actual}");
+        }
+
+        var modules = RequireArray(map, "modules", errors);
+        if (modules.HasValue && modules.Value.GetArrayLength() == 0) errors.Add("modules must contain at least one owner");
+        if (modules.HasValue)
+        {
+            var values = modules.Value;
+            for (var index = 0; index < values.GetArrayLength(); index++)
+            {
+                var module = values[index];
+                RequiredString(module, "name", $"modules[{index}]", errors);
+                var moduleFiles = RequireArray(module, "files", errors, $"modules[{index}]");
+                if (moduleFiles.HasValue && moduleFiles.Value.GetArrayLength() == 0)
+                {
+                    errors.Add($"modules[{index}].files must not be empty");
+                }
+                if (!moduleFiles.HasValue) continue;
+                var fileValues = moduleFiles.Value;
+                for (var fileIndex = 0; fileIndex < fileValues.GetArrayLength(); fileIndex++)
+                {
+                    var modulePath = fileValues[fileIndex].ValueKind == JsonValueKind.String
+                        ? fileValues[fileIndex].GetString()
+                        : null;
+                    ValidateRepositoryFile(modulePath, root, $"modules[{index}].files[{fileIndex}]", errors);
+                    if (modulePath is not null && !sourcePaths.Contains(modulePath.Replace('\\', '/')))
+                    {
+                        errors.Add($"modules[{index}].files[{fileIndex}] is not present in files: {modulePath}");
+                    }
+                }
+            }
+        }
+
+        var tests = RequiredObject(map, "tests", errors);
+        if (tests.HasValue)
+        {
+            var registry = RequiredString(tests.Value, "registry", "tests", errors);
+            ValidateRepositoryFile(registry, root, "tests.registry", errors);
+            var testFiles = RequireArray(tests.Value, "files", errors, "tests");
+            if (testFiles.HasValue && testFiles.Value.GetArrayLength() == 0) errors.Add("tests.files must not be empty");
+            if (testFiles.HasValue)
+            {
+                var values = testFiles.Value;
+                for (var index = 0; index < values.GetArrayLength(); index++)
+                {
+                    var testPath = values[index].ValueKind == JsonValueKind.String ? values[index].GetString() : null;
+                    ValidateRepositoryFile(testPath, root, $"tests.files[{index}]", errors);
+                }
+            }
+        }
+
+        var docs = RequireArray(map, "docs", errors);
+        if (docs.HasValue && docs.Value.GetArrayLength() == 0) errors.Add("docs must contain the current documentation index");
+        if (docs.HasValue)
+        {
+            var values = docs.Value;
+            for (var index = 0; index < values.GetArrayLength(); index++)
+            {
+                var path = RequiredString(values[index], "path", $"docs[{index}]", errors);
+                ValidateRepositoryFile(path is null ? null : $"docs/{path}", root, $"docs[{index}].path", errors);
+            }
+        }
+
+        foreach (var requiredArray in new[] { "entryPoints", "httpRoutes", "mcpTools", "cliEntrypoints" })
+        {
+            RequireArray(map, requiredArray, errors);
+        }
+        return errors;
+    }
+
     public static bool Matches(object value, string path)
     {
         if (!File.Exists(path)) return false;
@@ -163,6 +321,66 @@ public static class BackendMapWriter
             WriteIndented = true,
             DefaultIgnoreCondition = JsonIgnoreCondition.Never,
         }).Replace("\r\n", "\n", StringComparison.Ordinal) + "\n";
+
+    private static JsonElement? RequireArray(JsonElement parent, string name, ICollection<string> errors, string? context = null)
+    {
+        if (parent.ValueKind != JsonValueKind.Object
+            || !parent.TryGetProperty(name, out var value)
+            || value.ValueKind != JsonValueKind.Array)
+        {
+            errors.Add($"{context ?? "map"}.{name} must be an array");
+            return null;
+        }
+        return value;
+    }
+
+    private static JsonElement? RequiredObject(JsonElement parent, string name, ICollection<string> errors)
+    {
+        if (parent.ValueKind != JsonValueKind.Object
+            || !parent.TryGetProperty(name, out var value)
+            || value.ValueKind != JsonValueKind.Object)
+        {
+            errors.Add($"map.{name} must be an object");
+            return null;
+        }
+        return value;
+    }
+
+    private static string? RequiredString(JsonElement parent, string name, string context, ICollection<string> errors)
+    {
+        if (parent.ValueKind != JsonValueKind.Object
+            || !parent.TryGetProperty(name, out var value)
+            || value.ValueKind != JsonValueKind.String)
+        {
+            errors.Add($"{context}.{name} must be a string");
+            return null;
+        }
+        var result = value.GetString();
+        if (string.IsNullOrWhiteSpace(result)) errors.Add($"{context}.{name} must not be empty");
+        return result;
+    }
+
+    private static void ValidateRepositoryFile(string? path, string root, string field, ICollection<string> errors)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return;
+        var normalized = path.Replace('\\', '/');
+        if (!IsSafeRelativePath(normalized))
+        {
+            errors.Add($"{field} must be a safe repository-relative path: {path}");
+            return;
+        }
+        var absolute = Path.Combine(root, normalized.Replace('/', Path.DirectorySeparatorChar));
+        if (!File.Exists(absolute)) errors.Add($"{field} does not exist: {path}");
+    }
+
+    private static bool IsSafeRelativePath(string path)
+        => !string.IsNullOrWhiteSpace(path)
+            && !path.StartsWith("/", StringComparison.Ordinal)
+            && !path.StartsWith("//", StringComparison.Ordinal)
+            && !path.StartsWith("../", StringComparison.Ordinal)
+            && !path.Contains("/../", StringComparison.Ordinal)
+            && !path.Equals("..", StringComparison.Ordinal)
+            && !(path.Length >= 3 && char.IsLetter(path[0]) && path[1] == ':' && path[2] == '/');
 
     private static IReadOnlyList<EntryPoint> CollectEntryPoints(IReadOnlyList<SyntaxModelFact> models)
     {

@@ -105,6 +105,7 @@ internal sealed class ScriptSpecResolver
             ConfigValidator: ResolveConfigValidator(script.PluginType),
             ConfigEditor: profile.ConfigEditor)
         {
+            TaskProtocol = profile.TaskProtocol,
             ExtraConfigPaths = profile.ExtraConfigPaths,
             ConfigInputCandidates = profile.ConfigInputCandidates,
             ConfigInputName = profile.ConfigInputName,

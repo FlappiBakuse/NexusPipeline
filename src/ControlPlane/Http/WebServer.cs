@@ -175,6 +175,7 @@ internal sealed class WebServer : IDisposable
                 var type when type == typeof(OutboundHttpClientProvider) => routeBindings.OutboundHttp,
                 var type when type == typeof(ScriptIconService) => routeBindings.ScriptIcons,
                 var type when type == typeof(ScriptFileBrowser) => routeBindings.ScriptFileBrowser,
+                var type when type == typeof(NexusPipeline.Modules.Users.Contracts.ITaskQueryProjection) => routeBindings.TaskQueries,
                 _ => body,
             };
         }
