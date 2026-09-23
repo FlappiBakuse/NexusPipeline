@@ -3,13 +3,26 @@ setlocal
 cd /d "%~dp0"
 rem This produces the production release package. Functional qualification uses a separate Test Host.
 rem Plugin repository is maintained separately; frontend source is built into static files before publishing.
-rem .build-src-hash records the host source and frontend source fingerprint used to skip unchanged publishes.
+rem .build-src-hash records the production inputs used to skip unchanged publishes.
+if "%~1"=="" goto build_frontend
+if /i not "%~1"=="--frontend-ready" goto usage_failed
+if not "%~2"=="" goto usage_failed
+if not exist "%~dp0frontend\dist\index.html" goto frontend_failed
+if not exist "%~dp0frontend\dist\.vite\manifest.json" goto frontend_failed
+if not exist "%~dp0.generated\frontend-build.hash" goto frontend_failed
+for /f "usebackq delims=" %%h in (`node "%~dp0tools\source-hash.mjs" --frontend`) do set FRONTEND_HASH=%%h
+if not defined FRONTEND_HASH goto frontend_failed
+set /p READY_HASH=<"%~dp0.generated\frontend-build.hash"
+if not "%READY_HASH%"=="%FRONTEND_HASH%" goto frontend_failed
+goto frontend_ready
+:build_frontend
 call npm ci --prefix "%~dp0frontend" --no-audit --no-fund
 if errorlevel 1 goto frontend_failed
 call npm run typecheck --prefix "%~dp0frontend"
 if errorlevel 1 goto frontend_failed
 call npm run build --prefix "%~dp0frontend"
 if errorlevel 1 goto frontend_failed
+:frontend_ready
 for /f "usebackq delims=" %%h in (`node "%~dp0tools\source-hash.mjs"`) do set SRC_HASH=%%h
 if "%NEXUS_FORCE_PRODUCTION%"=="1" goto do_publish
 if not exist "%~dp0release\nexus-pipeline.exe" goto do_publish
@@ -40,5 +53,9 @@ exit /b 1
 
 :frontend_failed
 echo.
-echo Frontend build failed. See the command output above.
+echo Frontend build failed or --frontend-ready fingerprint is invalid. See the command output above.
 exit /b 1
+
+:usage_failed
+echo Usage: build.cmd [--frontend-ready]
+exit /b 2
