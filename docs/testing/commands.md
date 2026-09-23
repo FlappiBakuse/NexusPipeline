@@ -39,7 +39,7 @@ node tests\run.mjs release update-acceptance
 
 统一 runner 在需要的阶段执行 `npm ci --no-audit --no-fund`，并要求每个工作区存在 `package-lock.json`；依赖准备失败会直接终止，不会降级为跳过。
 
-`release core` 的最后一项是架构门禁：对 production 和 Test Host 真实加载 MSBuild/Roslyn 工程执行 `check`，随后生成 `.generated/architecture/backend-map.json`，校验 schema、非空源码集合、owner 路径和预期模式，重复生成结果必须一致；当前 run 的 artifact 中同时保存带候选 SHA 的地图副本。地图不是宿主运行时或 `release/` 的输入。
+`fast` 和本地 `release core` 的架构门禁对 production 与 Test Host 真实加载 MSBuild/Roslyn 工程：首次解析检查违规并生成 `.generated/architecture/backend-map.json`，第二次独立解析再次检查违规和地图字节一致性。两次均校验 schema、非空源码集合、owner 路径和预期模式；当前 run 的 artifact 中保存带候选 SHA 的地图副本。地图不是宿主运行时或 `release/` 的输入。
 
 `tooling` 发现并运行现役 Node 工具测试（文档索引测试由 `docs` 独占）和 `tools/tests/test_*.py`，同时覆盖前端边界、源码编码、更新策略、候选来源与原生报告解析。插件源码布局测试只在 `tooling` 执行。
 
