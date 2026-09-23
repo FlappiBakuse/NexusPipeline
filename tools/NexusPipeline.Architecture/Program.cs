@@ -11,7 +11,7 @@ internal static class Program
         {
             var options = Parse(args);
             if (options.Command is null) return Usage("A command is required.");
-            if (options.Command is not ("analyze" or "check" or "map" or "baseline-init" or "baseline-prune"))
+            if (options.Command is not ("analyze" or "check" or "verify" or "map" or "baseline-init" or "baseline-prune"))
             {
                 return Usage($"Unknown command: {options.Command}");
             }
@@ -82,7 +82,7 @@ internal static class Program
                 return 0;
             }
 
-            if (options.Command == "check")
+            if (options.Command is "check" or "verify")
             {
                 DebtComparison? comparison = null;
                 if (options.Baseline is not null)
@@ -98,8 +98,39 @@ internal static class Program
                 }
 
                 var passed = comparison is not null ? comparison.Added.Count == 0 : analysis.Violations.Count == 0;
-                if (options.Output is not null) WriteAtomic(BuildReport(analysis, passed ? "PASS" : "FAIL", comparison), Path.GetFullPath(options.Output));
-                return passed ? 0 : 1;
+                if (options.Command == "check" && options.Output is not null)
+                {
+                    WriteAtomic(BuildReport(analysis, passed ? "PASS" : "FAIL", comparison), Path.GetFullPath(options.Output));
+                }
+                if (!passed) return 1;
+                if (options.Command == "verify")
+                {
+                    var output = options.Output is null
+                        ? Path.Combine(root, ".generated", "architecture", "backend-map.json")
+                        : Path.GetFullPath(options.Output);
+                    var map = BackendMapWriter.Build(analysis.Facts, analysis.Models, analysis.Declarations, analysis.Edges, root);
+                    var validationErrors = BackendMapWriter.Validate(map, root, mode);
+                    if (validationErrors.Count > 0)
+                    {
+                        throw new InvalidDataException("Generated backend map is invalid:" + Environment.NewLine
+                            + string.Join(Environment.NewLine, validationErrors.Select(error => $"- {error}")));
+                    }
+                    if (options.CheckMap)
+                    {
+                        if (!BackendMapWriter.Matches(map, output))
+                        {
+                            Console.Error.WriteLine($"[architecture] map check failed: {output} is not the deterministic current map");
+                            return 1;
+                        }
+                        Console.WriteLine($"[architecture] map check passed: {output}");
+                    }
+                    else
+                    {
+                        BackendMapWriter.Write(map, output);
+                        Console.WriteLine($"[architecture] map written: {output}");
+                    }
+                }
+                return 0;
             }
 
             var status = analysis.Violations.Count == 0 ? "PASS" : "VIOLATIONS";
@@ -314,7 +345,7 @@ internal static class Program
     private static int Usage(string message)
     {
         Console.Error.WriteLine($"[architecture] ARGUMENT_ERROR: {message}");
-        Console.Error.WriteLine("Usage: analyze|check|map|baseline-init|baseline-prune --root <host> --mode production|test-host|both [--file-plan <json>] [--out <json>] [--baseline <json>] [--check]");
+        Console.Error.WriteLine("Usage: analyze|check|verify|map|baseline-init|baseline-prune --root <host> --mode production|test-host|both [--file-plan <json>] [--out <json>] [--baseline <json>] [--check]");
         return 2;
     }
 

@@ -429,38 +429,24 @@ async function runArchitectureCheck() {
     invokedFiles: ["tools/NexusPipeline.Architecture.Tests/ArchitectureRulesTests.cs"],
   });
   if (code !== 0) return code;
-  code = await runProcess("dotnet", ["run", "--project", project, "--no-build", "--", "check", "--root", projectRoot, "--mode", "both"], { cwd: projectRoot });
+  const generatedMap = path.join(projectRoot, ".generated", "architecture", "backend-map.json");
+  code = await runProcess("dotnet", ["run", "--project", project, "--no-build", "--", "verify", "--root", projectRoot, "--mode", "both", "--out", generatedMap], { cwd: projectRoot });
+  if (code !== 0) return code;
+  // Re-analyze independently so map nondeterminism or source changes fail the gate.
+  code = await runProcess("dotnet", ["run", "--project", project, "--no-build", "--", "verify", "--root", projectRoot, "--mode", "both", "--check", "--out", generatedMap], { cwd: projectRoot });
   if (code !== 0) return code;
 
-  const generatedMap = path.join(projectRoot, ".generated", "architecture", "backend-map.json");
-  const repeatedMap = `${generatedMap}.repeat`;
-  fs.rmSync(repeatedMap, { force: true });
-  try {
-    code = await runProcess("dotnet", ["run", "--project", project, "--no-build", "--", "map", "--root", projectRoot, "--mode", "both", "--out", generatedMap], { cwd: projectRoot });
-    if (code !== 0) return code;
-    code = await runProcess("dotnet", ["run", "--project", project, "--no-build", "--", "map", "--root", projectRoot, "--mode", "both", "--out", repeatedMap], { cwd: projectRoot });
-    if (code !== 0) return code;
-    if (!fs.readFileSync(generatedMap).equals(fs.readFileSync(repeatedMap))) {
-      console.error("[architecture] map generation is not deterministic");
-      return 1;
-    }
-    code = await runProcess("dotnet", ["run", "--project", project, "--no-build", "--", "map", "--root", projectRoot, "--mode", "both", "--check", "--out", generatedMap], { cwd: projectRoot });
-    if (code !== 0) return code;
-
-    const artifactDirectory = path.join(reportRoot, "architecture");
-    fs.mkdirSync(artifactDirectory, { recursive: true });
-    const artifactMap = path.join(artifactDirectory, "backend-map.json");
-    fs.copyFileSync(generatedMap, artifactMap);
-    fs.writeFileSync(path.join(artifactDirectory, "backend-map.metadata.json"), `${JSON.stringify({
-      schemaVersion: 1,
-      candidateSha: candidateSha(),
-      mapSha256: sha256File(generatedMap),
-      map: "architecture/backend-map.json",
-    }, null, 2)}\n`, "utf8");
-    return 0;
-  } finally {
-    fs.rmSync(repeatedMap, { force: true });
-  }
+  const artifactDirectory = path.join(reportRoot, "architecture");
+  fs.mkdirSync(artifactDirectory, { recursive: true });
+  const artifactMap = path.join(artifactDirectory, "backend-map.json");
+  fs.copyFileSync(generatedMap, artifactMap);
+  fs.writeFileSync(path.join(artifactDirectory, "backend-map.metadata.json"), `${JSON.stringify({
+    schemaVersion: 1,
+    candidateSha: candidateSha(),
+    mapSha256: sha256File(generatedMap),
+    map: "architecture/backend-map.json",
+  }, null, 2)}\n`, "utf8");
+  return 0;
 }
 
 function buildTestHost() {
