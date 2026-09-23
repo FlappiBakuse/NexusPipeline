@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { installTaskProtocolFixture } from "./task-protocol-fixture.mjs";
+import { installTaskProtocolFixture, installTaskProtocolAdmissionFixture } from "./task-protocol-fixture.mjs";
 import {
   api,
   createUserBinding,
@@ -29,6 +29,7 @@ before(async () => {
   if (!enabled) return;
   await prepareRuntime();
   installTaskProtocolFixture(runtimeDir);
+  installTaskProtocolAdmissionFixture(runtimeDir);
   startRuntime();
   await waitForService();
 });
@@ -123,6 +124,67 @@ test("专项协议真实进程：选择重试、原选择恢复、最终计数�
     assert.equal(detail.record.id, record.id);
   } finally { await deleteScript(script.id); }
 });
+test("1.2 重试准入阻断保留真实运行和前置钩子", { skip }, async () => {
+  const fixture = makeFixture("retry-admission");
+  fixture.exe = path.join(fixture.dir, "task-run.bat");
+  const configPath = path.join(fixture.cfg, "config.json");
+  fs.writeFileSync(configPath, JSON.stringify({ tasks: [{ id: "a", enabled: true }, { id: "b", enabled: true }],
+    counter: 0, armBlock: false, blocked: false, hookCount: 0 }));
+  const worker = path.join(fixture.dir, "task-worker.mjs");
+  fs.writeFileSync(worker, "import fs from 'node:fs';const file=" + JSON.stringify(configPath)
+    + ";const c=JSON.parse(fs.readFileSync(file,'utf8'));c.counter++;for(const t of c.tasks.filter(x=>x.enabled))"
+    + "console.log('TASK '+t.id+' '+(t.id==='b'&&c.counter>=2?'FAIL':'OK'));fs.writeFileSync(file,JSON.stringify(c));");
+  writeBatch(fixture, ['"' + process.execPath + '" "' + worker + '"']);
+  const hookWorker = path.join(fixture.dir, "pre-hook.mjs");
+  fs.writeFileSync(hookWorker, "import fs from 'node:fs';const file=" + JSON.stringify(configPath)
+    + ";const c=JSON.parse(fs.readFileSync(file,'utf8'));if(c.armBlock){c.hookCount++;if(c.hookCount>=2)c.blocked=true;"
+    + "fs.writeFileSync(file,JSON.stringify(c));}console.log('HOOK '+c.hookCount);");
+  const hook = path.join(fixture.dir, "pre-hook.bat");
+  fs.writeFileSync(hook, '@echo off\r\n"' + process.execPath + '" "' + hookWorker + '"\r\n', "utf8");
+  const response = await api("POST", "/api/scripts", { name: "Retry admission " + Date.now(),
+    pluginType: "task-protocol-admission-fixture", rootPath: fixture.dir,
+    gameExe: "C:\\\\Windows\\\\System32\\\\PING.EXE", maxAttempts: 2,
+    totalTimeoutMinutes: 10, logStallTimeoutMinutes: 5, autoUpdateConfig: true });
+  assert.equal(response.status, 200, await response.clone().text());
+  const script = await response.json();
+  try {
+    const user = await createUserBinding(script.id, "Retry admission fixture", { preRunScript: hook });
+    const dispatch = async () => {
+      const started = await api("POST", "/api/dispatch/script", { scriptId: script.id });
+      assert.equal(started.status, 200, await started.clone().text());
+      assert.equal(await waitNoRunning(60000), true);
+    };
+    await dispatch();
+    const old = await waitForHistory(script.id);
+    assert.equal(old.status, "success", JSON.stringify(old));
+    const store = path.join(runtimeDir, "data", script.id, user.id, "store", "config.json");
+    const armed = JSON.parse(fs.readFileSync(store, "utf8"));
+    armed.armBlock = true; armed.blocked = false; armed.hookCount = 0;
+    fs.writeFileSync(store, JSON.stringify(armed));
+    await dispatch();
+    const responseHistory = await (await api("GET", "/api/history?days=7&offset=0&limit=100")).json();
+    const records = Array.isArray(responseHistory) ? responseHistory : responseHistory.records;
+    const current = records.find(item => item.scriptInstanceId === script.id && item.id !== old.id);
+    assert.ok(current, "new run persisted");
+    assert.equal(current.status, "partial", JSON.stringify(current));
+    assert.equal(current.attempts, 1);
+    assert.equal(current.attemptDetails.length, 2);
+    assert.equal(current.attemptDetails[1].status, "blocked");
+    assert.equal(current.taskReport.attemptReports.length, 1);
+    assert.equal(current.taskReport.finalTaskResults.find(item => item.taskId === "b").status, "failed");
+    assert.equal(current.taskReport.summary.tone, "warn");
+    assert.ok(current.taskReport.admissionBlocked);
+    assert.equal(JSON.parse(fs.readFileSync(store, "utf8")).counter, 2);
+    const summary = await (await api("GET", "/api/users/task-summaries")).json();
+    const binding = summary.find(item => item.userId === user.id).bindings.find(item => item.scriptInstanceId === script.id);
+    assert.equal(binding.recordId, current.id);
+    assert.equal(binding.admissionRecordId, current.id);
+    const day = fs.readdirSync(path.join(runtimeDir, "history")).find(name => /^\d{4}-\d{2}-\d{2}$/.test(name));
+    const hookLog = path.join(runtimeDir, "history", day, current.historyDirectory, current.attemptDetails[1].logFile);
+    assert.match(fs.readFileSync(hookLog, "utf8"), /HOOK 2/);
+  } finally { await deleteScript(script.id); }
+});
+
 test("真实 Python Judge 解释器边界", { skip: enabled && pythonAvailable ? false : (!enabled ? skipReason : "未找到 python") }, async () => {
   await runJudge(
     "python",

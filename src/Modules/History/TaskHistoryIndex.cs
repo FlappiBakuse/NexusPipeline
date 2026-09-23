@@ -38,17 +38,22 @@ internal partial class RunHistoryService
         }
         _recordIndex = new(StringComparer.Ordinal);
         if (!Directory.Exists(_historyDir)) return;
+        var records = new List<RunRecord>();
         foreach (string path in Directory.EnumerateDirectories(_historyDir))
             if (DateTime.TryParseExact(Path.GetFileName(path), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date))
-                foreach (var record in ReadDayRecords(date)) IndexTaskRecord(record);
-        // Migrate admission-only records that were incorrectly written to the
-        // actual-latest index by an older host without losing tombstones.
+                records.AddRange(ReadDayRecords(date));
+        foreach (var record in records) _recordIndex[record.Id] = record.Clone();
+        // Classify old entries before comparing timestamps. Otherwise a newer
+        // admission in the old actual index hides the real run during this scan.
+        // Deleted entries remain tombstones: removing one could resurrect an
+        // older run the user already deleted.
         foreach (var (key, latest) in _latestTaskIndex.ToArray())
             if (_recordIndex.TryGetValue(latest.RecordId, out RunRecord? record) && IsAdmissionOnlyRecord(record))
             {
-                _latestTaskIndex.Remove(key);
+                if (!latest.Deleted) _latestTaskIndex.Remove(key);
                 IndexTaskAdmissionRecord(record);
             }
+        foreach (var record in records) IndexTaskRecord(record);
         SaveTaskIndex();
     }
 
@@ -61,9 +66,13 @@ internal partial class RunHistoryService
             IndexTaskAdmissionRecord(record);
             return;
         }
+        // A retry rejection is also an admission event, but it must not
+        // remove the earlier real attempt from the actual-run index.
+        if (record.TaskReport?["admissionBlocked"] is not null) IndexTaskAdmissionRecord(record);
         string key = BindingKey(record.UserId, record.ScriptInstanceId);
         if (_latestTaskIndex.TryGetValue(key, out var prior)
-            && (prior.EndTime > end || prior.EndTime == end && string.CompareOrdinal(prior.RecordId, record.Id) > 0)) return;
+            && (prior.EndTime > end || prior.EndTime == end && string.CompareOrdinal(prior.RecordId, record.Id) > 0
+                || prior.Deleted && prior.RecordId == record.Id)) return;
         _latestTaskIndex[key] = new(record.UserId, record.ScriptInstanceId, record.Id, end, record.Status,
             record.TaskReport?["summary"]?["tone"]?.GetValue<string>(),
             record.TaskReport?["originalPlan"]?["signature"]?.GetValue<string>(), false);
@@ -74,7 +83,8 @@ internal partial class RunHistoryService
         if (record.EndTime is not { } end || record.UserId.Length == 0 || record.ScriptInstanceId.Length == 0) return;
         string key = BindingKey(record.UserId, record.ScriptInstanceId);
         if (_latestTaskAdmissionIndex.TryGetValue(key, out var prior)
-            && (prior.EndTime > end || prior.EndTime == end && string.CompareOrdinal(prior.RecordId, record.Id) > 0)) return;
+            && (prior.EndTime > end || prior.EndTime == end && string.CompareOrdinal(prior.RecordId, record.Id) > 0
+                || prior.Deleted && prior.RecordId == record.Id)) return;
         JsonObject? admission = record.TaskReport?["admissionBlocked"]?.AsObject();
         string state = admission?["readiness"]?["state"]?.GetValue<string>() ?? "blocked";
         string reasonCode = admission?["reasonCode"]?.GetValue<string>() ?? record.ResultCode;
@@ -82,9 +92,11 @@ internal partial class RunHistoryService
     }
 
     private static bool IsAdmissionOnlyRecord(RunRecord record) =>
-        string.Equals(record.ResultCode, "tasks.admission_blocked", StringComparison.Ordinal)
-        || (string.Equals(record.TaskReport?["lifecycleOutcome"]?.GetValue<string>(), "not_started", StringComparison.Ordinal)
-            && record.TaskReport?["admissionBlocked"] is not null);
+        record.TaskReport is { } report
+        && report["admissionBlocked"] is not null
+        && string.Equals(report["lifecycleOutcome"]?.GetValue<string>(), "not_started", StringComparison.Ordinal)
+        && report["attemptReports"] is JsonArray { Count: 0 }
+        && report["finalTaskResults"] is JsonArray { Count: 0 };
 
     private bool RecordExists(RunRecord record)
     {

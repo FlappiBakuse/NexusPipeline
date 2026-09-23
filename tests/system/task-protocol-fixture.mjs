@@ -37,3 +37,33 @@ export function installTaskProtocolFixture(runtimeDir) {
           expected:t.enabled,value:included.includes(t.id),purpose:'selection'}))}]:[]});
   `);
 }
+
+export function installTaskProtocolAdmissionFixture(runtimeDir) {
+  const source = path.join(runtimeDir, "plugins", "TaskProtocolFixture");
+  const root = path.join(runtimeDir, "plugins", "TaskProtocolAdmissionFixture");
+  fs.cpSync(source, root, { recursive: true });
+  const manifestPath = path.join(root, "plugin.json");
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  manifest.name = "task-protocol-admission-fixture";
+  manifest.artifactName = "TaskProtocolAdmissionFixture";
+  manifest.taskProtocol.version = "1.2";
+  manifest.taskProtocol.localization = {
+    defaultLocale: "en-US", messages: { "en-US": "data/i18n/en-US.json" },
+  };
+  manifest.taskProtocol.configRules = [{ id: "fixture.block", required: true, criticality: "critical_when_applicable" }];
+  manifest.taskProtocol.environmentChecks = [];
+  fs.mkdirSync(path.join(root, "data", "i18n"), { recursive: true });
+  fs.writeFileSync(path.join(root, "data", "i18n", "en-US.json"), "{}", "utf8");
+  fs.writeFileSync(manifestPath, JSON.stringify(manifest), "utf8");
+  for (const file of ["discover.js", "judge.js", "retry.js"]) {
+    const target = path.join(root, "data", file);
+    let sourceCode = fs.readFileSync(target, "utf8").replaceAll("protocolVersion:'1.0'", "protocolVersion:'1.2'");
+    if (file === "discover.js") sourceCode = sourceCode.replace("selectionFields:", `
+      configAssessment:{schemaVersion:'1',checks:[{ruleId:'fixture.block',
+        evaluation:config.blocked?'violated':'satisfied',severity:'info',
+        executionEffect:config.blocked?'block':'none',scope:{kind:'binding'},
+        locations:[],actions:[],reasonText:{kind:'literal',value:'Fixture retry admission blocked'}}]},
+      selectionFields:`);
+    fs.writeFileSync(target, sourceCode, "utf8");
+  }
+}

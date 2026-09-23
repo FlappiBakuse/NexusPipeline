@@ -35,6 +35,7 @@ internal sealed class TaskProtocolRun
     private TaskPlan? _expectedRetryPlan;
     private TaskPlan? _admissionPlan;
     private TaskAdmissionBlockedException? _admissionBlocked;
+    private RunAttemptResult? _lastCompletedAttemptResult;
     private string _terminationReason = "none";
     private JsonObject? _cursorState;
     private long _revision;
@@ -232,6 +233,19 @@ internal sealed class TaskProtocolRun
             if (_reducer is null) return processResult;
             if (_attemptNumber != number)
             {
+                // A retry can be rejected by the last pre-launch assessment after
+                // an earlier attempt already produced business facts. Keep that
+                // attempt's outcome; the rejection is reported separately below.
+                if (_admissionBlocked is not null && _attempts.Count > 0 && _lastCompletedAttemptResult is { } previous)
+                {
+                    Publish();
+                    return new RunAttemptResult
+                    {
+                        Status = previous.Status, Reason = previous.Reason, ReasonCode = previous.ReasonCode,
+                        ReasonArgs = new(previous.ReasonArgs, StringComparer.Ordinal), IsFatal = true,
+                        NotifyText = previous.NotifyText, NotifyScreenshotId = previous.NotifyScreenshotId,
+                    };
+                }
                 _lifecycle = processResult.Status == "cancelled" ? "cancelled" : "failed";
                 Publish(); return processResult;
             }
@@ -247,13 +261,16 @@ internal sealed class TaskProtocolRun
                 ["taskResults"] = ResultsJson(_reducer.Results.Where(r => r.LastAttemptId == _attemptId)),
             });
             Publish();
-            if (processResult.Status == "cancelled" || processResult.IsFatal) return processResult;
-            if (_runtimeIdentityChanged) return RunAttemptResult.Failed("Runtime identity changed", "tasks.runtime_identity_changed");
-            if (summary.Tone == "bad") return RunAttemptResult.Failed(summary.Outcome, "tasks." + summary.Outcome);
-            if (summary.Tone == "ok" && summary.Counts["succeeded"] > 0) return RunAttemptResult.Success("tasks.all_satisfied", "tasks.all_satisfied");
-            if (summary.Outcome == "no_tasks" || summary.Tone == "ok")
-                return new RunAttemptResult { Status = "skipped", Reason = "tasks.no_execution_required", ReasonCode = "tasks.no_execution_required" };
-            return RunAttemptResult.Partial(summary.Outcome, summary.Tone == "warn" ? "tasks.partial_failure" : "tasks_unverified");
+            RunAttemptResult outcome = processResult.Status == "cancelled" || processResult.IsFatal ? processResult
+                : _runtimeIdentityChanged ? RunAttemptResult.Failed("Runtime identity changed", "tasks.runtime_identity_changed")
+                : summary.Tone == "bad" ? RunAttemptResult.Failed(summary.Outcome, "tasks." + summary.Outcome)
+                : summary.Tone == "ok" && summary.Counts["succeeded"] > 0
+                    ? RunAttemptResult.Success("tasks.all_satisfied", "tasks.all_satisfied")
+                : summary.Outcome == "no_tasks" || summary.Tone == "ok"
+                    ? new RunAttemptResult { Status = "skipped", Reason = "tasks.no_execution_required", ReasonCode = "tasks.no_execution_required" }
+                : RunAttemptResult.Partial(summary.Outcome, summary.Tone == "warn" ? "tasks.partial_failure" : "tasks_unverified");
+            _lastCompletedAttemptResult = outcome;
+            return outcome;
         }
     }
 

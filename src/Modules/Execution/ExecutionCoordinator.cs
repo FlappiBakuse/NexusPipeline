@@ -101,7 +101,8 @@ internal sealed class ExecutionCoordinator : RunSession
             _logLine,
             RemainingRunSeconds,
             () => _budgetExpired || _budget?.IsExpired == true,
-            message => _configRun?.MarkProcessCleanupUnconfirmed(message));
+            message => _configRun?.MarkProcessCleanupUnconfirmed(message),
+            AppendScriptLog);
         SetInitialPreviewTarget();
     }
 
@@ -412,6 +413,9 @@ internal sealed class ExecutionCoordinator : RunSession
                 }
 
                 bool taskRetry = false;
+                bool retryAdmissionBlocked = TaskProtocolRun?.IsAdmissionBlocked == true
+                    && !TaskProtocolRun.AdmissionBlockedBeforeAttempt
+                    && result.ReasonCode == "tasks.admission_blocked";
                 if (TaskProtocolRun is not null)
                 {
                     result = TaskProtocolRun.Finish(result, attemptNo);
@@ -441,7 +445,17 @@ internal sealed class ExecutionCoordinator : RunSession
                 }
                 if (TaskProtocolRun?.IsAdmissionBlocked == true && TaskProtocolRun.AdmissionBlockedBeforeAttempt)
                 {
-                    record.AttemptDetails.Remove(attempt);
+                    if (runPreRun)
+                    {
+                        // Keep the hook's real execution and log while making it
+                        // clear that no protocol/main attempt was admitted.
+                        attempt.EndTime = DateTime.Now;
+                        attempt.Status = "blocked";
+                        attempt.Reason = "配置检查未通过，未启动脚本或游戏";
+                        attempt.ReasonCode = "tasks.admission_blocked";
+                        AppendScriptLog($"===== 第 {attemptNo}/{maxAttempts} 次尝试 停止：{attempt.Reason} =====");
+                    }
+                    else record.AttemptDetails.Remove(attempt);
                     record.Attempts = 0;
                     record.Status = "blocked";
                     record.EndTime = DateTime.Now;
@@ -449,6 +463,26 @@ internal sealed class ExecutionCoordinator : RunSession
                     record.ResultCode = "tasks.admission_blocked";
                     Results.CompleteAttempt();
                     record.TaskReport = TaskProtocolRun.Snapshot();
+                    break;
+                }
+                if (retryAdmissionBlocked)
+                {
+                    // The pre-run hook may have executed and its log belongs to
+                    // this entry, but BeginAsync rejected the retry before a
+                    // second protocol/main attempt started.
+                    attempt.EndTime = DateTime.Now;
+                    attempt.Status = "blocked";
+                    attempt.Reason = "配置检查未通过，未启动脚本或游戏";
+                    attempt.ReasonCode = "tasks.admission_blocked";
+                    record.Attempts = attemptNo - 1;
+                    record.Status = result.Status;
+                    record.EndTime = attempt.EndTime;
+                    record.ResultDetail = result.Reason;
+                    record.ResultCode = result.ReasonCode;
+                    record.ResultArgs = new(result.ReasonArgs, StringComparer.Ordinal);
+                    AppendScriptLog($"===== 第 {attemptNo}/{maxAttempts} 次尝试 停止：{attempt.Reason} =====");
+                    Results.CompleteAttempt();
+                    record.TaskReport = TaskProtocolRun!.Snapshot();
                     break;
                 }
                 attempt.EndTime = DateTime.Now;
