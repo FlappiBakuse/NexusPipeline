@@ -355,12 +355,13 @@ function syncScriptFieldErrors(invalid: { key: string } | null) {
 function showScriptValidation(value: unknown) {
   const validation = (value as { validation?: {
     toasts?: Array<{ message?: string; kind?: string }>;
-    diagnostics?: Array<{ userName?: string; ruleId?: string; executionEffect?: string; reasonText?: { kind?: string; value?: string; fallback?: string } }>;
+    diagnostics?: Array<{ shouldNotify?: boolean; userName?: string; ruleId?: string; executionEffect?: string; reasonText?: { kind?: string; value?: string; fallback?: string } }>;
   } } | null)?.validation;
   for (const item of validation?.toasts || []) {
     if (item.message) toast(item.message, item.kind === "error" ? "error" : "info");
   }
   for (const item of validation?.diagnostics || []) {
+    if (item.shouldNotify === false) continue;
     const reason = item.reasonText?.kind === "literal"
       ? item.reasonText.value
       : item.reasonText?.fallback;

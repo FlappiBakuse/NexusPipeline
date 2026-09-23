@@ -1,3 +1,4 @@
+using NexusPipeline.Modules.Configuration.Validation;
 using NexusPipeline.Modules.Configuration.Paths;
 using NexusPipeline.Modules.Configuration.Snapshots;
 using NexusPipeline.Modules.Configuration.Scripting;
@@ -100,7 +101,9 @@ internal sealed class TaskQueryProjection(UserQueries users, ScriptQueries scrip
                     hasFollowingWork = queueContext.HasFollowingWork },
                 revision = plan.PlanId, configState = "snapshot", readOnly = true };
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        { return new { error = ex.Message.StartsWith("configuration_conflict", StringComparison.Ordinal) ? "configuration_busy" : "config_unavailable" }; }
+        catch (OperationCanceledException) { return new { error = "cancelled" }; }
+        catch (TimeoutException) { return new { error = "timeout" }; }
+        catch (Exception ex)
+        { return new { error = TaskAssessmentFailure.Code(ex.Message) }; }
     }
 }

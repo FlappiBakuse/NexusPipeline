@@ -1241,5 +1241,9 @@
   "users.validation.remark_length": "Notes may contain at most {bytes} bytes",
   "users.validation.username_duplicate": "That username already exists. Choose another name.",
   "users.validation.username_length": "Usernames may contain at most {bytes} bytes",
-  "users.validation.username_required": "Enter a username"
+  "users.validation.username_required": "Enter a username",
+  "tasks.error.cancelled": "Configuration check cancelled; no readiness result was produced",
+  "tasks.error.timeout": "Configuration check timed out; refresh to check again",
+  "tasks.error.protocol_error": "Plugin configuration check returned an invalid result",
+  "tasks.error.resource_limit": "Plugin configuration check exceeded its resource budget"
 }

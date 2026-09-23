@@ -179,3 +179,18 @@ describe("useConfigEditFlow start semantics", () => {
     expect(flow.configCandidates.value).toMatchObject({ inputName: "configPath", candidates: ["a.json", "b.json"] });
   });
 });
+
+
+it("keeps save success while showing only newly reported binding diagnostics", async () => {
+  const adapters = createAdapters({ finish: vi.fn().mockResolvedValue({ validation: { diagnostics: [
+    { ruleId: "repeated", shouldNotify: false, reasonText: { kind: "literal", value: "Repeated" } },
+    { ruleId: "new", shouldNotify: true, userName: "Alice", executionEffect: "block", reasonText: { kind: "literal", value: "New finding" } },
+  ] } }) });
+  const flow = useConfigEditFlow(adapters);
+  flow.restore({ userId: "u1", scriptId: "s1", userName: "Alice", scriptName: "Script One", mode: "normal" });
+  await flow.finish("done");
+  expect(flow.configEdit.value).toBeNull();
+  expect(adapters.notify).toHaveBeenCalledWith("Alice: New finding", "error");
+  expect(adapters.notify.mock.calls.some(call => call[0] === "Repeated")).toBe(false);
+  expect(adapters.onTransactionChanged).toHaveBeenCalledWith("u1");
+});

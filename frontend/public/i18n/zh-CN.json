@@ -1241,5 +1241,9 @@
   "users.validation.remark_length": "备注最多 {bytes} 字节",
   "users.validation.username_duplicate": "用户名已存在，请使用其他名称",
   "users.validation.username_length": "用户名最多 {bytes} 字节",
-  "users.validation.username_required": "请填写用户名"
+  "users.validation.username_required": "请填写用户名",
+  "tasks.error.cancelled": "配置检查已取消，尚未得到就绪结果",
+  "tasks.error.timeout": "配置检查超时，请重新读取计划",
+  "tasks.error.protocol_error": "插件配置检查返回了无效结果",
+  "tasks.error.resource_limit": "插件配置检查超出资源预算"
 }

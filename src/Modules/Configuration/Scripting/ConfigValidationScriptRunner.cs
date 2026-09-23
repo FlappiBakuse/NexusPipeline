@@ -29,7 +29,10 @@ internal sealed record ConfigValidationDiagnostic(
     string ExecutionEffect,
     System.Text.Json.Nodes.JsonObject? ReasonText,
     System.Text.Json.Nodes.JsonArray Locations,
-    System.Text.Json.Nodes.JsonArray Actions);
+    System.Text.Json.Nodes.JsonArray Actions)
+{
+    public bool ShouldNotify { get; init; } = true;
+}
 
 /// <summary>一次配置校验的结构化结果；校验失败不会改变配置提交结果。</summary>
 internal sealed record ConfigValidationResult(

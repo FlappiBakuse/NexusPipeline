@@ -117,23 +117,27 @@ internal static class TaskProtocolJson
         if (System.Text.Encoding.UTF8.GetByteCount(json) > 1024 * 1024)
             throw new InvalidDataException("resource_limit: protocol result exceeds 1 MiB");
         using var document = JsonDocument.Parse(json, new JsonDocumentOptions { MaxDepth = 32 });
-        Check(document.RootElement, false);
+        Check(document.RootElement, null);
         return JsonSerializer.Deserialize<T>(json, Options) ?? throw new InvalidDataException("protocol_error: null output");
     }
-    private static void Check(JsonElement element, bool legacy)
+    private static void Check(JsonElement element, string? protocolVersion)
     {
         if (element.ValueKind == JsonValueKind.Array)
-            foreach (var child in element.EnumerateArray()) Check(child, legacy);
+            foreach (var child in element.EnumerateArray()) Check(child, protocolVersion);
         if (element.ValueKind != JsonValueKind.Object) return;
         if (element.TryGetProperty("protocolVersion", out var version) && version.ValueKind == JsonValueKind.String
-            && (element.TryGetProperty("type", out _) || element.TryGetProperty("planId", out _))) legacy = version.GetString() == "1.0";
+            && (element.TryGetProperty("type", out _) || element.TryGetProperty("planId", out _))) protocolVersion = version.GetString();
         var names = new HashSet<string>(StringComparer.Ordinal);
         foreach (var property in element.EnumerateObject())
         {
             if (!names.Add(property.Name)) throw new InvalidDataException("protocol_error: duplicate member");
-            if (legacy && property.Name is "nameText" or "reasonText" or "incidents")
+            if (protocolVersion == "1.0" && property.Name is "nameText" or "reasonText" or "incidents")
                 throw new InvalidDataException("protocol_error: text references require 1.1");
-            Check(property.Value, legacy);
+            if (protocolVersion is "1.0" or "1.1" && property.Name is "configAssessment" or "currentReadiness")
+                throw new InvalidDataException("protocol_error: configuration diagnostics require 1.2");
+            if (property.Name is "__proto__" or "prototype" or "constructor")
+                throw new InvalidDataException("protocol_error: reserved member");
+            Check(property.Value, protocolVersion);
         }
     }
     internal static string Write<T>(T value) => JsonSerializer.Serialize(value, Options);

@@ -14,9 +14,23 @@ internal sealed class TaskConfigView
     private readonly Dictionary<string, Entry> _entries = new(StringComparer.Ordinal);
     internal TaskConfigResource[] ConfigResources => _entries.Where(p => p.Value.Writable).Select(p => new TaskConfigResource(p.Key, p.Value.Format)).ToArray();
     internal IReadOnlySet<string> DeclaredResourceIds => _entries.Keys.ToHashSet(StringComparer.Ordinal);
-    internal string RevisionToken => Convert.ToHexString(SHA256.HashData(
-        System.Text.Encoding.UTF8.GetBytes(string.Join("\n", _entries.OrderBy(p => p.Key, StringComparer.Ordinal)
-            .Select(p => p.Key + "=" + p.Value.Revision))))).ToLowerInvariant();
+    private static readonly byte[] RevisionKey = RandomNumberGenerator.GetBytes(32);
+    // Stable only within this Host process. The keyed digest is not an exposed content hash;
+    // per-resource CAS revisions remain random and local to one immutable view.
+    internal string RevisionToken
+    {
+        get
+        {
+            using var hash = IncrementalHash.CreateHMAC(HashAlgorithmName.SHA256, RevisionKey);
+            foreach (var pair in _entries.OrderBy(p => p.Key, StringComparer.Ordinal))
+            {
+                byte[] id = System.Text.Encoding.UTF8.GetBytes(pair.Key);
+                hash.AppendData(BitConverter.GetBytes(id.Length)); hash.AppendData(id);
+                hash.AppendData(BitConverter.GetBytes(pair.Value.Bytes.Length)); hash.AppendData(pair.Value.Bytes);
+            }
+            return Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
+        }
+    }
 
     internal void AddConfig(string id, string path, string format, string? baseDirectory = null) => Add(id, path, format, true, baseDirectory, null);
     internal void AddResource(string id, string path, string format, string? baseDirectory = null, string? sha256 = null) => Add(id, path, format, false, baseDirectory, sha256);

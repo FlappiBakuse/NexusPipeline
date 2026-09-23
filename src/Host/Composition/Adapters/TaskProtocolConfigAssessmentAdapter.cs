@@ -18,7 +18,7 @@ namespace NexusPipeline.Host.Composition.Adapters;
 /// Execution-owned discovery and admission facts without creating a module cycle.
 /// </summary>
 internal sealed class TaskProtocolConfigAssessmentAdapter(
-    QueueQueries queues) : ITaskProtocolConfigAssessmentPort
+    QueueQueries queues, ConfigDiagnosticFeedback feedback) : ITaskProtocolConfigAssessmentPort
 {
     public async Task<TaskPlan?> RunAsync(
         ResolvedScriptSpec spec,
@@ -105,25 +105,24 @@ internal sealed class TaskProtocolConfigAssessmentAdapter(
 
     public IReadOnlyList<ConfigValidationDiagnostic> ToDiagnostics(TaskPlan plan, ResolvedScriptUser user)
     {
-        if (plan.ConfigAssessment is not { } assessment)
+        if (plan.ConfigAssessment is null)
         {
             return Array.Empty<ConfigValidationDiagnostic>();
         }
 
         string bindingKey = user.UserId + ":" + user.Binding.ScriptInstanceId;
-        return assessment.Checks
-            .Where(check => check.Evaluation is not ("satisfied" or "not_applicable"))
-            .Select(check => new ConfigValidationDiagnostic(
+        return feedback.Select(plan, bindingKey)
+            .Select(item => new ConfigValidationDiagnostic(
                 bindingKey,
                 user.UserId,
                 user.UserName,
-                check.RuleId,
-                check.Evaluation,
-                check.Severity,
-                check.ExecutionEffect,
-                check.ReasonText?.DeepClone().AsObject(),
-                check.Locations.DeepClone().AsArray(),
-                check.Actions.DeepClone().AsArray()))
+                item.Check.RuleId,
+                item.Check.Evaluation,
+                item.Check.Severity,
+                item.Check.ExecutionEffect,
+                item.Check.ReasonText?.DeepClone().AsObject(),
+                item.Check.Locations.DeepClone().AsArray(),
+                item.Check.Actions.DeepClone().AsArray()) { ShouldNotify = item.ShouldNotify })
             .ToArray();
     }
 
@@ -140,7 +139,7 @@ internal sealed class TaskProtocolConfigAssessmentAdapter(
             "unknown",
             "warning",
             "warn",
-            new JsonObject { ["kind"] = "literal", ["value"] = message },
+            new JsonObject { ["kind"] = "literal", ["value"] = TaskAssessmentFailure.SafeMessage(message, LocaleContext.Current) },
             [],
             []);
     }

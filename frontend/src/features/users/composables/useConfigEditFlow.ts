@@ -36,6 +36,7 @@ export interface ConfigEditResultToast {
 }
 
 export interface ConfigEditResultDiagnostic {
+  shouldNotify?: boolean;
   userName?: string;
   ruleId?: string;
   executionEffect?: string;
@@ -212,6 +213,7 @@ export function useConfigEditFlow(adapters: ConfigEditFlowAdapters) {
         if (item.message) adapters.notify(item.message, item.kind === "error" ? "error" : "info");
       }
       for (const item of result?.validation?.diagnostics || []) {
+        if (item.shouldNotify === false) continue;
         const reason = item.reasonText?.kind === "literal"
           ? item.reasonText.value
           : item.reasonText?.fallback;

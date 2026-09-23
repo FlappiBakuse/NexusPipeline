@@ -152,6 +152,7 @@ internal class HostCompositionRoot
         collection.AddSingleton<IEmulatorSupportProviderResolver>(provider => provider.GetRequiredService<PluginManager>());
         collection.AddSingleton<IPluginAvailability>(provider => provider.GetRequiredService<PluginManager>());
         collection.AddSingleton<ScriptSpecResolver>();
+        collection.AddSingleton<ConfigDiagnosticFeedback>();
         collection.AddSingleton<ITaskProtocolConfigAssessmentPort, TaskProtocolConfigAssessmentAdapter>();
         collection.AddSingleton<ScriptSaveValidation>(provider => new ScriptSaveValidation(
             provider.GetRequiredService<ScriptSpecResolver>(),

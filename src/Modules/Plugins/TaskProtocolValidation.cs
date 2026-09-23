@@ -82,7 +82,11 @@ internal static class TaskProtocolValidation
         IReadOnlySet<string> declaredConfigIds,
         IReadOnlySet<string> declaredResourceIds)
     {
-        if (protocol.Version != "1.2") return;
+        if (protocol.Version != "1.2")
+        {
+            Require(discovery.ConfigAssessment is null, "configuration diagnostics require 1.2");
+            return;
+        }
         TaskConfigAssessment? assessment = discovery.ConfigAssessment;
         Require(assessment is not null, "config assessment required");
         if (assessment is null) throw new InvalidDataException("protocol_error: config assessment required");
@@ -105,6 +109,7 @@ internal static class TaskProtocolValidation
         var environmentIds = protocol.EnvironmentChecks.Select(check => check.Id).ToHashSet(StringComparer.Ordinal);
         foreach (TaskConfigCheck check in assessment.Checks)
         {
+            Require(check is not null, "null config check");
             Text(check.RuleId);
             Require(declarations.TryGetValue(check.RuleId, out TaskConfigRuleDescriptor? declaration), "undeclared config rule");
             Require(check.Evaluation is "satisfied" or "violated" or "unknown" or "not_applicable", "config evaluation");
@@ -196,6 +201,7 @@ internal static class TaskProtocolValidation
             if (token is System.Text.Json.Nodes.JsonValue value && value.TryGetValue<string>(out string? property))
             {
                 Text(property);
+                Require(property is not ("__proto__" or "prototype" or "constructor"), "reserved config selector");
                 continue;
             }
             System.Text.Json.Nodes.JsonObject? selectorObject = token as System.Text.Json.Nodes.JsonObject;
