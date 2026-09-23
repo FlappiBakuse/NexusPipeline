@@ -50,4 +50,7 @@ export interface TaskReport {
   attemptReports: Array<{ attemptId: string; number: number; selectedTaskIds: string[]; taskResults: TaskResult[];
     retryDecision?: { decision: string; reasonCode: string; reasonText?: TaskTextRef; expandedUnitIds: string[] } }>;
 }
-export interface TaskUserSummary { userId: string; tone: string; recordId?: string; reason: string; activeCount?: number }
+export interface TaskUserSummary {
+  userId: string; tone: string; recordId?: string; reason: string; activeCount?: number;
+  admissionRecordId?: string; admissionState?: 'ready' | 'attention' | 'unknown' | 'blocked'; admissionReason?: string;
+}

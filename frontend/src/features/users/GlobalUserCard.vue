@@ -88,6 +88,16 @@ const emit = defineEmits<{
         <NxpBadge role="button" tabindex="0" class="task-summary-action" @click.stop="taskSummary?.recordId ? openRecord(taskSummary.recordId) : emit('manage', user)" @keydown.enter.stop.prevent="taskSummary?.recordId ? openRecord(taskSummary.recordId) : emit('manage', user)" @keydown.space.stop.prevent="taskSummary?.recordId ? openRecord(taskSummary.recordId) : emit('manage', user)" :tone="taskSummary?.tone === 'ok' || taskSummary?.tone === 'warn' || taskSummary?.tone === 'bad' ? taskSummary.tone : 'muted'">
             {{ translate('tasks.title') }} · {{ t(`tasks.summary.${taskSummary?.reason === 'no_bindings' ? 'no_bindings' : taskSummary?.tone === 'muted' ? taskSummary.reason : taskSummary?.tone || 'not_run'}`) }}
         </NxpBadge>
+        <NxpBadge
+          v-if="taskSummary?.admissionState"
+          :tone="taskSummary.admissionState === 'blocked' ? 'bad' : taskSummary.admissionState === 'attention' ? 'warn' : taskSummary.admissionState === 'ready' ? 'ok' : 'muted'"
+          :title="taskSummary.admissionReason"
+          role="button"
+          tabindex="0"
+          @click.stop="taskSummary.admissionRecordId ? openRecord(taskSummary.admissionRecordId) : undefined"
+          @keydown.enter.stop.prevent="taskSummary.admissionRecordId ? openRecord(taskSummary.admissionRecordId) : undefined"
+          @keydown.space.stop.prevent="taskSummary.admissionRecordId ? openRecord(taskSummary.admissionRecordId) : undefined"
+        >{{ translate(`tasks.readiness.${taskSummary.admissionState}`) }}</NxpBadge>
         <NxpBadge v-if="taskSummary?.activeCount" tone="blue">{{ translate('common.running') }} · {{ taskSummary.activeCount }}</NxpBadge>
         <NxpBadge tone="muted">{{
           translate("users.binding.scripts_count", {

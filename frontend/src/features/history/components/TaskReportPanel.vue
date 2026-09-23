@@ -1,13 +1,20 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { getLocale, t } from "../../../platform/i18n";
 import NxpBadge from "../../../ui/primitives/NxpBadge.vue";
+import NxpButton from "../../../ui/primitives/NxpButton.vue";
 import NxpScrollArea from "../../../ui/primitives/NxpScrollArea.vue";
 import NxpDismissibleNotice from "../../../ui/composites/NxpDismissibleNotice.vue";
 import TaskPlanItem from "./TaskPlanItem.vue";
 import { resolveTaskText } from "../utils/taskText";
 import type { TaskConfigCheck, TaskDefinition, TaskPlan, TaskReport } from "../utils/taskTypes";
-const props = defineProps<{ plan?: TaskPlan; report?: TaskReport; layout?: "cards" | "steps"; stale?: boolean }>();
+const props = defineProps<{
+  plan?: TaskPlan;
+  report?: TaskReport;
+  layout?: "cards" | "steps";
+  stale?: boolean;
+  configAction?: (kind: string, check: TaskConfigCheck) => void;
+}>();
 const plan = computed(() => props.report?.originalPlan || props.plan);
 const tasks = computed(() => (plan.value?.tasks || []).filter(task => task.enabled).slice().sort((a, b) => a.order - b.order));
 const roots = computed(() => tasks.value.filter(task => !task.parentId || !tasks.value.some(parent => parent.id === task.parentId)));
@@ -29,9 +36,26 @@ const businessTotal = computed(() => props.report?.summary?.counts.total ?? busi
 const finished = computed(() => props.report?.summary?.counts.total !== undefined
   ? (props.report?.summary?.counts.succeeded || 0) + (props.report?.summary?.counts.skipped || 0)
   : businessTasks.value.filter(task => ['succeeded', 'skipped'].includes(status(task.id))).length);
-const configChecks = computed(() => (plan.value?.configAssessment?.checks || []).filter(check =>
+const activeAssessment = computed(() => props.report?.admissionBlocked?.configAssessment || plan.value?.configAssessment);
+const activeReadiness = computed(() => props.report?.admissionBlocked?.readiness || plan.value?.currentReadiness);
+const configChecks = computed(() => (activeAssessment.value?.checks || []).filter(check =>
   check.evaluation !== 'satisfied' && check.evaluation !== 'not_applicable'));
-const readiness = computed(() => plan.value?.currentReadiness);
+const readiness = activeReadiness;
+// Metadata sampled by discovery is a point-in-time observation, never a
+// permanent launch guarantee. Expiry only changes presentation, not history.
+const readinessExpired = ref(false);
+let readinessTimer: ReturnType<typeof setTimeout> | undefined;
+watch(activeReadiness, value => {
+  clearTimeout(readinessTimer);
+  readinessTimer = undefined;
+  const checkedAt = Date.parse(value?.checkedAt || "");
+  const remaining = checkedAt + 60_000 - Date.now();
+  readinessExpired.value = Boolean(value) && (!Number.isFinite(remaining) || remaining <= 0);
+  if (value && !value.stale && remaining > 0)
+    readinessTimer = setTimeout(() => { readinessExpired.value = true; }, Math.min(remaining, 60_000));
+}, { immediate: true });
+onBeforeUnmount(() => clearTimeout(readinessTimer));
+const readinessStale = computed(() => props.stale || readiness.value?.stale || readinessExpired.value);
 const unattributed = computed(() => {
   const latest = new Map<string, NonNullable<TaskReport['incidents']>[number]>();
   for (const event of props.report?.incidents || [])
@@ -75,6 +99,19 @@ function configCheckText(check: TaskConfigCheck) {
     : check.ruleId;
 }
 function configCheckLabel(check: TaskConfigCheck) { return t(`tasks.config.evaluation.${check.evaluation}`); }
+function configLocationText(location: Record<string, unknown>) {
+  const source = typeof location.source === "string" ? location.source : "unknown";
+  if (source === "context") return `context:${String(location.field || "")}`;
+  if (source === "environment") return `environment:${String(location.inspectionId || "")}`;
+  const resource = String(location.resourceId || "");
+  const selector = Array.isArray(location.selector)
+    ? location.selector.map(item => typeof item === "string" ? item : JSON.stringify(item)).join(" > ")
+    : "";
+  return `${source}:${resource}${selector ? ` · ${selector}` : ""}`;
+}
+function configActionLabel(kind: string) {
+  return t(`tasks.config.action.${kind}`, {}, kind);
+}
 </script>
 <template>
   <section ref="panel" class="task-report" :aria-label="t('tasks.title')">
@@ -92,12 +129,12 @@ function configCheckLabel(check: TaskConfigCheck) { return t(`tasks.config.evalu
         <strong>{{ t('tasks.admission_blocked') }}</strong>
         <span>{{ t('tasks.admission_blocked_help') }}</span>
       </div>
-      <section v-if="plan.configAssessment" class="task-config-assessment" :aria-label="t('tasks.config.title')">
+      <section v-if="activeAssessment" class="task-config-assessment" :aria-label="t('tasks.config.title')">
         <header class="task-config-header">
           <strong>{{ t('tasks.config.title') }}</strong>
-          <NxpBadge :tone="readinessTone(readiness?.state)">{{ readinessLabel(readiness?.state) }}</NxpBadge>
+          <NxpBadge :tone="readinessStale ? 'muted' : readinessTone(readiness?.state)">{{ readinessLabel(readiness?.state) }}</NxpBadge>
         </header>
-        <p v-if="readiness?.stale" class="task-config-meta">{{ t('tasks.config.stale') }}</p>
+        <p v-if="readinessStale" class="task-config-meta">{{ t('tasks.config.stale') }}</p>
         <ul v-if="configChecks.length" class="task-config-list">
           <li v-for="check in configChecks" :key="check.ruleId + ':' + check.scope.kind + ':' + (check.scope.taskId || '')" :data-config-rule="check.ruleId">
             <div class="task-config-row">
@@ -105,6 +142,10 @@ function configCheckLabel(check: TaskConfigCheck) { return t(`tasks.config.evalu
               <NxpBadge :tone="check.executionEffect === 'block' ? 'bad' : check.executionEffect === 'warn' ? 'warn' : 'muted'">{{ configCheckLabel(check) }}</NxpBadge>
             </div>
             <small>{{ check.ruleId }}</small>
+            <small v-for="(location, index) in check.locations" :key="`${check.ruleId}:location:${index}`" class="task-config-location">{{ configLocationText(location) }}</small>
+            <div v-if="configAction && check.actions.length" class="task-config-actions">
+              <NxpButton v-for="action in check.actions" :key="action.kind" class="ghost" type="button" @click="configAction(action.kind, check)">{{ configActionLabel(action.kind) }}</NxpButton>
+            </div>
           </li>
         </ul>
         <p v-else class="task-config-meta">{{ t('tasks.config.clear') }}</p>
@@ -157,6 +198,8 @@ function configCheckLabel(check: TaskConfigCheck) { return t(`tasks.config.evalu
 .task-config-list span { min-width: 0; overflow-wrap: anywhere; }
 .task-config-list small, .task-config-meta { color: var(--nx-color-muted); font-size: 12px; }
 .task-config-list small { display: block; margin-top: 3px; }
+.task-config-location { overflow-wrap: anywhere; font-family: var(--nx-font-mono, ui-monospace, monospace); }
+.task-config-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .task-config-meta { margin: 8px 0 0; }
 .task-plan-notes { margin: 0 0 12px; padding-inline-start: 20px; font-size: 12px; line-height: 1.6; color: var(--nx-color-muted); overflow-wrap: anywhere; }
 .task-footnote figure { margin: 8px 0; }

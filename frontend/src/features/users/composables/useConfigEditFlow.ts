@@ -35,6 +35,13 @@ export interface ConfigEditResultToast {
   kind?: string;
 }
 
+export interface ConfigEditResultDiagnostic {
+  userName?: string;
+  ruleId?: string;
+  executionEffect?: string;
+  reasonText?: { kind?: string; value?: string; fallback?: string };
+}
+
 export interface ConfigEditFlowAdapters {
   /** 查询绑定是否已有配置快照。 */
   getStatus(userId: string, scriptId: string): Promise<{ hasSnapshot?: boolean } | null>;
@@ -45,7 +52,7 @@ export interface ConfigEditFlowAdapters {
     userId: string,
     scriptId: string,
     action: "done" | "cancel",
-  ): Promise<{ validation?: { toasts?: ConfigEditResultToast[] } } | null>;
+  ): Promise<{ validation?: { toasts?: ConfigEditResultToast[]; diagnostics?: ConfigEditResultDiagnostic[] } } | null>;
   /** 读取宿主当前进行中的编辑会话。 */
   listSessions(): Promise<unknown>;
   createRequesterWindowToken(): string;
@@ -203,6 +210,14 @@ export function useConfigEditFlow(adapters: ConfigEditFlowAdapters) {
       );
       for (const item of result?.validation?.toasts || []) {
         if (item.message) adapters.notify(item.message, item.kind === "error" ? "error" : "info");
+      }
+      for (const item of result?.validation?.diagnostics || []) {
+        const reason = item.reasonText?.kind === "literal"
+          ? item.reasonText.value
+          : item.reasonText?.fallback;
+        if (!reason && !item.ruleId) continue;
+        const message = item.userName ? `${item.userName}: ${reason || item.ruleId}` : (reason || item.ruleId!);
+        adapters.notify(message, item.executionEffect === "block" ? "error" : "info");
       }
       adapters.onTransactionChanged(edit.userId);
     } catch (reason) {

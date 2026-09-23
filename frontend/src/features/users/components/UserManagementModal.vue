@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { isAbortError } from "../../../platform/api";
 import { projectSpecializedCapabilities } from "../../../platform/specialized-capabilities";
 import { state } from "../../../platform/page-state";
@@ -52,6 +52,8 @@ const emit = defineEmits<{
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 
 const draft = ref<User>(clone({ ...props.user, bindings: props.user.bindings || [] }));
+const planRevision = ref(0);
+watch(() => [props.scripts, props.plugins], () => { planRevision.value++; }, { deep: true });
 const expandedBindingId = ref<string | null>(null);
 const bindingEditMode = ref(false);
 const addBindingOpen = ref(false);
@@ -288,6 +290,7 @@ async function paintBindingSlots() {
   }
 }
 async function refresh() {
+  planRevision.value++;
   try {
     draft.value = clone((await getUser(props.user.id)) as User);
     await paintBindingSlots();
@@ -326,6 +329,15 @@ function openConfigEdit(binding: Binding) {
       pluginStatus?.plugin ?? undefined,
     ).allowFreshConfig,
   });
+}
+
+function handleTaskPlanAction(kind: string, binding: Binding) {
+  if (kind === "open_binding_editor") {
+    openConfigEdit(binding);
+  }
+  // open_script_settings is already represented by the expanded binding
+  // section. It remains a declared no-write action, but needs no extra
+  // navigation from this modal.
 }
 
 async function save() {
@@ -511,7 +523,7 @@ onMounted(() => {
                   <NxpButton class="um-edit-config" type="button" :class="{ 'is-unavailable': Boolean(bindingStatus(binding)) }" @click.stop="openConfigEdit(binding)">
                     <span class="um-edit-config-copy"><strong>{{ t("users.edit_configuration") }}</strong><span class="muted">{{ t("users.binding.config_open_help") }}</span></span><span class="um-edit-config-arrow" aria-hidden="true"><NxpIcon name="chevronRight" /></span>
                   </NxpButton>
-                  <TaskPlanPreview v-if="bindingPluginStatus(binding)?.specialized" :user-id="draft.id" :script-id="binding.scriptInstanceId" />
+                  <TaskPlanPreview v-if="bindingPluginStatus(binding)?.specialized" :user-id="draft.id" :script-id="binding.scriptInstanceId" :revision="planRevision" @action="handleTaskPlanAction($event, binding)" />
                   <section class="um-binding-option-section">
                     <div class="section-heading">
                       <div>

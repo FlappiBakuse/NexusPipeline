@@ -16,6 +16,25 @@ const report = (): TaskReport => ({
   evidenceLines: [{ attemptId: "first", sourceId: "stdout", epoch: 2, sequence: 4, text: "Exact evidence" }],
 });
 describe("task history", () => {
+  it('expires sampled readiness without mutating the frozen plan and cancels its timer', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-23T00:00:00Z'));
+    const plan = report().originalPlan;
+    plan.configAssessment = { schemaVersion: '1', checks: [] };
+    plan.currentReadiness = { state: 'ready', stale: false, checkedAt: new Date().toISOString(),
+      assessmentId: 'first', configRevision: 'first', contextFingerprint: 'first' };
+    const wrapper = mount(TaskReportPanel, { props: { plan } });
+    try {
+      expect(wrapper.text()).not.toContain('tasks.config.stale');
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(wrapper.text()).toContain('tasks.config.stale');
+      expect(plan.currentReadiness.stale).toBe(false);
+      await wrapper.setProps({ plan: { ...plan, currentReadiness: { ...plan.currentReadiness, checkedAt: new Date().toISOString(), assessmentId: 'second' } } });
+      expect(wrapper.text()).not.toContain('tasks.config.stale');
+      wrapper.unmount();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { wrapper.unmount(); vi.useRealTimers(); }
+  });
   it('shows frozen plan notes in preview/history, deduplicates runtime notes and excludes disabled owners', () => {
     const data = report();
     data.originalPlan.tasks.push({ ...data.originalPlan.tasks[0], id: 'disabled', name: 'Disabled', enabled: false });
@@ -44,25 +63,53 @@ describe("task history", () => {
   it('shows configuration assessment and keeps an admission block separate from task failures', () => {
     const data = report();
     data.originalPlan.configAssessment = { schemaVersion: '1', checks: [{
-      ruleId: 'example.configuration', evaluation: 'violated', severity: 'error', executionEffect: 'block',
+      ruleId: 'original.configuration', evaluation: 'satisfied', severity: 'info', executionEffect: 'none',
       scope: { kind: 'binding' }, locations: [], actions: [{ kind: 'refresh_plan' }],
-      reasonText: { kind: 'literal', value: 'Configuration needs repair' },
+      reasonText: { kind: 'literal', value: 'Original configuration was ready' },
     }] };
     data.originalPlan.currentReadiness = {
-      state: 'blocked', stale: false, checkedAt: '2026-09-22T00:00:00Z', assessmentId: 'assessment',
+      state: 'ready', stale: false, checkedAt: '2026-09-22T00:00:00Z', assessmentId: 'assessment',
       configRevision: 'revision', contextFingerprint: 'fingerprint',
     };
-    data.admissionBlocked = { reasonCode: 'tasks.admission_blocked', message: 'blocked' };
+    data.admissionBlocked = {
+      reasonCode: 'tasks.admission_blocked', message: 'blocked',
+      readiness: { state: 'blocked', stale: false, checkedAt: '2026-09-22T00:01:00Z', assessmentId: 'retry-assessment', configRevision: 'retry-revision', contextFingerprint: 'retry-fingerprint' },
+      configAssessment: { schemaVersion: '1', checks: [{
+        ruleId: 'retry.configuration', evaluation: 'violated', severity: 'error', executionEffect: 'block',
+        scope: { kind: 'binding' }, locations: [], actions: [{ kind: 'refresh_plan' }],
+        reasonText: { kind: 'literal', value: 'Retry configuration needs repair' },
+      }] },
+    };
     data.summary = undefined;
     data.finalTaskResults = [];
     data.attemptReports = [];
     data.incidents = [];
     const wrapper = mount(TaskReportPanel, { props: { report: data } });
     expect(wrapper.get('[role="alert"]').text()).toContain('tasks.admission_blocked');
-    expect(wrapper.get('[aria-label="tasks.config.title"]').text()).toContain('Configuration needs repair');
+    expect(wrapper.get('[aria-label="tasks.config.title"]').text()).toContain('Retry configuration needs repair');
+    expect(wrapper.get('[aria-label="tasks.config.title"]').text()).not.toContain('Original configuration was ready');
     expect(wrapper.get('[aria-label="tasks.config.title"]').text()).toContain('tasks.readiness.blocked');
     expect(wrapper.text()).toContain('tasks.progress 0/1');
     wrapper.unmount();
+  });
+  it("renders structured diagnostic locations and exposes only declared actions", async () => {
+    const data = report();
+    data.originalPlan.configAssessment = { schemaVersion: '1', checks: [{
+      ruleId: 'fixture.target', evaluation: 'violated', severity: 'warning', executionEffect: 'warn',
+      scope: { kind: 'binding' },
+      locations: [{ source: 'config', resourceId: 'config:settings.json', selector: ['gamePath'] }, { source: 'environment', inspectionId: 'fixture-target' }],
+      actions: [{ kind: 'open_binding_editor' }, { kind: 'refresh_plan' }],
+      reasonText: { kind: 'literal', value: 'Target needs attention' },
+    }] };
+    const action = vi.fn();
+    const wrapper = mount(TaskReportPanel, { props: { plan: data.originalPlan, configAction: action } });
+    expect(wrapper.findAll('.task-config-location').map(item => item.text())).toEqual([
+      'config:config:settings.json · gamePath', 'environment:fixture-target',
+    ]);
+    const buttons = wrapper.findAll('.task-config-actions button');
+    expect(buttons).toHaveLength(2);
+    await buttons[0].trigger('click');
+    expect(action).toHaveBeenCalledWith('open_binding_editor', expect.anything());
   });
   it('retains unassigned incident evidence without attributing it to a task', () => {
     const data = report();

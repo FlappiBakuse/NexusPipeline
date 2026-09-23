@@ -12,6 +12,11 @@ describe("specialized task badge", () => {
     expect(window.location.hash).toBe("#/history?recordId=record");
     await wrapper.setProps({ taskSummary: { userId: "user", tone: "ok", reason: "latest", recordId: "record" } });
     expect(badge.text()).toContain("tasks.summary.ok");
+    await wrapper.setProps({ taskSummary: { userId: "user", tone: "ok", reason: "latest", recordId: "record", admissionState: "blocked", admissionRecordId: "blocked-record" } });
+    const readiness = wrapper.findAll('[role="button"]')[1];
+    expect(readiness.text()).toContain("tasks.readiness.blocked");
+    await readiness.trigger("click");
+    expect(window.location.hash).toBe("#/history?recordId=blocked-record");
     await wrapper.setProps({ taskSummary: undefined });
     expect(badge.text()).toContain("tasks.summary.not_run");
     await badge.trigger("click"); expect(wrapper.emitted("manage")).toEqual([[props.user]]);
