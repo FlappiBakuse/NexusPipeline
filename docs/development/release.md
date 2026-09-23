@@ -33,23 +33,7 @@ gh workflow run release.yml --ref main -f tag=<已有 tag> -f candidate_run_id=<
 
 同一 run 出现多个成功候选 artifact 时，再传 `-f candidate_artifact_id=<服务端 artifact ID>`。独立 writer 核对原 attempt/job、服务端 artifact 摘要、候选清单、Git tree、现有 tag 与包；只复用原 ZIP，不安装或重新编译业务依赖。同 tag 同资产不同字节仍拒绝覆盖，远端读回通过后才公开 Release。仅在本地合成 run ID 打出的候选不能用于发布。
 
-下面的资格关联手动路径仅用于旧 Required 仍生效的迁移窗口，规则切换且新路径验收后退役：
-
-1. 完成版本开发并获得全部适用质量门禁结果；
-2. 通过当前候选的完整 H1–H5，由专用 Qualification App 回报资格，再将源码 PR squash 合入 `main`；保存 PR 号、候选 H、历史基线 B、check ID 和 Qualification run ID；
-3. 在对应 squash 提交创建 `vX.Y.Z[-beta.N|-rc.N]` tag，再按授权推送；已有标签不因发布工具修复而移动；
-4. 将 Release Notes 写入 UTF-8 无 BOM 临时文件，按标签对应源码填写真实变更；
-5. 从受保护的 `main` 启动 Host Release 工作流，并提供原源码 PR 的完整资格关联：
-
-   ```text
-   gh workflow run release.yml --ref main -f tag=<tag> -f pr_number=<PR> -f head_sha=<H> -f base_sha=<B> -f check_id=<check ID> -f qualification_run_id=<run ID>
-   ```
-
-6. 按维护者授权完成 Environment 审核。构建使用固定标签源码及受信 workflow SHA 的打包工具；独立 Windows writer 重新验证资格、生产 PE 的 `requireAdministrator` 和包边界，上传后下载逐字节复核，最后才公开 Release；
-7. 独立下载 ZIP/SHA 复核，备份原 Release 正文后用 `gh release edit <tag> --notes-file <file>` 更新说明；
-8. 在设置页、更新 API 或下方自检工具执行更新可见性检查，确认新版本和两项资产均被识别。
-
-发布工具或工作流的修复同样通过源码 PR 和完整资格，不绕过门禁，也不伪造原版本的资格。发布控制面可以前进，但标签、产品源码和原源码 PR 的证明保持固定。失败后保留证据；恢复时复用唯一匹配的 draft，已存在资产必须字节一致，禁止覆盖同 tag 的不同字节资产。
+新版本需先在受保护 `main` 的对应合并提交完成候选验收；获授权后才能创建并推送指向该提交的 tag。已有 tag 不因发布工具修复而移动。Release Notes 依据该 tag 的真实变更写入 UTF-8 无 BOM 文件；独立下载 ZIP/SHA 复核后，再按授权更新 Release 正文并检查更新可见性。控制工具修复通过正常源码 PR 和 Required 检查；恢复始终使用原候选，已有资产必须字节一致。
 
 ### 资产与 SHA 规则
 

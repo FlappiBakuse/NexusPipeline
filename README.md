@@ -1,7 +1,7 @@
 # NexusPipeline（枢链）
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Qualification](https://github.com/FlappiBakuse/NexusPipeline/actions/workflows/release-qualification.yml/badge.svg)](https://github.com/FlappiBakuse/NexusPipeline/actions)
+[![CI](https://github.com/FlappiBakuse/NexusPipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/FlappiBakuse/NexusPipeline/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/FlappiBakuse/NexusPipeline?include_prereleases)](https://github.com/FlappiBakuse/NexusPipeline/releases)
 
 NexusPipeline 是一个运行在 Windows 上的本地游戏自动化脚本管家。它可以按计划启动脚本、监控日志、处理重试、隔离多账号配置，并在任务结束后发送通知或执行关机、休眠、重启等操作。

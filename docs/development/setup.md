@@ -9,7 +9,7 @@
 | Node.js | 24.x | 前端构建、Web Logic、System Smoke 和 Playwright 测试 |
 
 - 网页管理界面由 `frontend/` 中的 Vue/TypeScript/Vite 源码构建为纯静态 ES modules；运行程序只加载构建结果，源码构建需要 Node.js/npm。
-- 正式程序以管理员身份运行，构建产物带 `requireAdministrator` 清单；本地与 Qualification 的功能测试统一使用 `NexusTestHost=true` 的 asInvoker Test Host，完整性等级只用于诊断，不选择或过滤测试。
+- 正式程序以管理员身份运行，构建产物带 `requireAdministrator` 清单；本地与 CI 的功能测试统一使用 `NexusTestHost=true` 的 asInvoker Test Host，完整性等级只用于诊断，不选择或过滤测试。
 - `tests/e2e/` 已声明 Playwright 依赖；安装和运行方式见[测试命令](../testing/commands.md)。
 
 
@@ -64,7 +64,7 @@ dotnet publish src\NexusPipeline.csproj -c Release -r win-x64 --self-contained f
 
 ## 测试入口
 
-测试分层与归属见[测试索引](../testing/README.md)和[测试政策](../testing/policy.md)，命令、Qualification 顺序、System Smoke 和清理要求见[测试命令](../testing/commands.md)。统一入口为 `node tests/run.mjs dev <suite>` 或 `node tests/run.mjs release <gate>`；每次改动按照修改范围执行对应范围；涉及进程、端口、解释器、模拟器、插件或更新事务时，追加 Test Host System Smoke。
+测试分层与归属见[测试索引](../testing/README.md)和[测试政策](../testing/policy.md)，命令、快速/集成检查、System Smoke 和清理要求见[测试命令](../testing/commands.md)。统一入口为 `node tests/run.mjs fast`、`integration` 或 `all`；每次改动按照修改范围执行对应范围；涉及进程、端口、解释器、模拟器、插件或更新事务时，追加 Test Host System Smoke。
 
 System Smoke 可按 registry 分组运行；省略分组等于全部 suite，每次调用都真实构建并启动隔离运行时：
 
@@ -74,7 +74,7 @@ node tests\run.mjs dev system execution emulator
 node tests\run.mjs dev system --group update --realtime
 ```
 
-PR Feedback 仅由 `tools/ci-scope.mjs` 选择 core、frontend-contract、runtime、update 四个反馈范围；scope 工具、runner、workflow、依赖锁或未知改动按全量反馈处理。最终 Qualification 不读取 diff，固定执行五个 release Gate。
+PR 范围由 `tools/ci-scope.mjs` 选择；scope 工具、runner、workflow、依赖锁或未知改动按全量处理。`Host / Required` 对所选范围聚合判定，合并后的候选任务另行运行完整集成与生产包验收。
 
 
 
