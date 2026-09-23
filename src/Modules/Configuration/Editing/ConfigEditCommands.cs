@@ -730,13 +730,13 @@ internal sealed class ConfigEditCommands
         }
     }
 
-    private ConfigValidationResult RunConfigValidator(
+    internal ConfigValidationResult RunConfigValidator(
         ScriptInstance script,
         ResolvedScriptUser user,
         string userKey,
         ResolvedScriptSpec? spec)
     {
-        if (spec?.TaskProtocol is not null && _taskProtocolAssessment is not null)
+        if (spec?.TaskProtocol?.Version == "1.2" && _taskProtocolAssessment is not null)
         {
             try
             {

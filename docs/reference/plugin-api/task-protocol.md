@@ -79,4 +79,6 @@ Host 联调工具的 `--runtime-installations <matrix.json>` 从显式 `cases`�
 
 保存诊断保留完整 `validation.diagnostics`；每项 `shouldNotify` 为 false 时，前端不重复弹出提示。Host 在当前进程内按绑定、规则范围、快照修订、上下文与词典身份去重；修复后再次出现或修订改变会重新提醒。缓存最多保留 1024 个绑定，重启或容量淘汰后可再次提示，不改历史事实。配置整体修订是进程密钥生成的 HMAC 标识，不是可枚举内容摘要；选择事务的单资源 CAS 令牌仍只属于其冻结视图。
 
+保存脚本实例与完成配置编辑都按协商版本选择单一配置校验入口：1.2 使用 `discover` 的配置诊断，即使检查失败也不回退旧接口；1.0/1.1 若仍声明 `configValidator`，继续运行旧只读校验一次。没有 validator 的旧包不声称完成了 1.2 配置诊断。一个绑定的反馈不会因另一个绑定文字相同而被去重。
+
 预览的 `configuration_busy`、`cancelled`、`timeout`、`resource_limit` 与 `protocol_error` 分别表示占用/变化、取消、超时、资源预算和插件协议错误，不视作配置通过或业务失败。保存完成后的检查异常仅返回安全摘要，不返回原始脚本异常、文件路径或凭据。1.0/1.1 输出携带 `configAssessment` / `currentReadiness` 会明确拒绝，不能借旧版本启用 1.2。

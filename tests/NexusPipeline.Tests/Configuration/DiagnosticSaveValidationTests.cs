@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 using NexusPipeline.Modules.Configuration.Paths;
 using NexusPipeline.Modules.Configuration.Scripting;
 using NexusPipeline.Modules.Configuration.Validation;
+using NexusPipeline.Modules.Configuration.Editing;
 using NexusPipeline.Modules.Plugins.DataSpecialized;
 using NexusPipeline.Modules.Plugins.Managed;
 using NexusPipeline.Modules.Plugins;
@@ -94,6 +95,13 @@ public sealed class DiagnosticSaveValidationTests
                 var again = await validation.RunForScriptAsync(script);
                 Assert.All(again!.Diagnostics, item => Assert.False(item.ShouldNotify));
             }
+            var edit = new ConfigEditCommands(null!, null!, null!, null!, null!, resolver, null!, assessment);
+            var editResult = edit.RunConfigValidator(script,
+                new ResolvedScriptUser(first.Id, first.Name, first.Bindings[0]), first.Id, resolved);
+            Assert.True(editResult.Ran);
+            Assert.Empty(editResult.Toasts);
+            Assert.Empty(editResult.Notifications);
+            Assert.Single(editResult.Diagnostics);
         }
         finally
         {
