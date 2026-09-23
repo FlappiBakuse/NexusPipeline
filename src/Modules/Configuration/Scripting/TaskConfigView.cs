@@ -10,7 +10,7 @@ internal sealed record TaskDeclaredTarget(string Value, string BaseDirectory);
 /// <summary>Owner-local revisions; opaque tokens never expose configuration hashes.</summary>
 internal sealed class TaskConfigView
 {
-    private sealed record Entry(string Path, string BaseDirectory, byte[] Bytes, string Revision, string Format, bool Writable);
+    private sealed record Entry(string Path, string BaseDirectory, byte[] Bytes, string Revision, string Format, bool Writable, string? Integrity);
     private readonly Dictionary<string, Entry> _entries = new(StringComparer.Ordinal);
     internal TaskConfigResource[] ConfigResources => _entries.Where(p => p.Value.Writable).Select(p => new TaskConfigResource(p.Key, p.Value.Format)).ToArray();
     internal IReadOnlySet<string> DeclaredResourceIds => _entries.Keys.ToHashSet(StringComparer.Ordinal);
@@ -18,10 +18,10 @@ internal sealed class TaskConfigView
         System.Text.Encoding.UTF8.GetBytes(string.Join("\n", _entries.OrderBy(p => p.Key, StringComparer.Ordinal)
             .Select(p => p.Key + "=" + p.Value.Revision))))).ToLowerInvariant();
 
-    internal void AddConfig(string id, string path, string format, string? baseDirectory = null) => Add(id, path, format, true, baseDirectory);
-    internal void AddResource(string id, string path, string format, string? baseDirectory = null) => Add(id, path, format, false, baseDirectory);
+    internal void AddConfig(string id, string path, string format, string? baseDirectory = null) => Add(id, path, format, true, baseDirectory, null);
+    internal void AddResource(string id, string path, string format, string? baseDirectory = null, string? sha256 = null) => Add(id, path, format, false, baseDirectory, sha256);
 
-    private void Add(string id, string path, string format, bool writable, string? baseDirectory)
+    private void Add(string id, string path, string format, bool writable, string? baseDirectory, string? sha256)
     {
         if (_entries.Count >= 256 || _entries.ContainsKey(id)) throw new InvalidDataException("resource_limit: duplicate/excess resource");
         ValidatePath(path);
@@ -33,7 +33,9 @@ internal sealed class TaskConfigView
             throw new InvalidDataException("resource_limit: aggregate configuration exceeds 32 MiB");
         string fullPath = Path.GetFullPath(path);
         string fullBaseDirectory = Path.GetFullPath(baseDirectory ?? Path.GetDirectoryName(fullPath) ?? fullPath);
-        _entries.Add(id, new(fullPath, fullBaseDirectory, bytes, Convert.ToHexString(RandomNumberGenerator.GetBytes(24)), format, writable));
+        string? integrity = sha256 is null ? null
+            : Convert.ToHexString(SHA256.HashData(bytes)).Equals(sha256, StringComparison.OrdinalIgnoreCase) ? "verified" : "mismatch";
+        _entries.Add(id, new(fullPath, fullBaseDirectory, bytes, Convert.ToHexString(RandomNumberGenerator.GetBytes(24)), format, writable, integrity));
     }
 
     internal static void ValidatePath(string path)
@@ -60,7 +62,7 @@ internal sealed class TaskConfigView
     /// the source path or document contents to the script. Selectors are evaluated
     /// against the frozen bytes captured for this view, not the live file.
     /// </summary>
-    internal bool TryResolveDeclaredTarget(string id, JsonArray selector, out TaskDeclaredTarget? target, out string status)
+    internal bool TryResolveDeclaredTarget(string id, JsonArray selector, out TaskDeclaredTarget? target, out string status, string? defaultValue = null, bool allowInteger = false)
     {
         target = null;
         status = "not_checked";
@@ -68,8 +70,19 @@ internal sealed class TaskConfigView
         try
         {
             if (entry.Format is not ("json" or "yaml")) return false;
-            JsonNode? selected = new TaskConfigDocument(entry.Bytes, entry.Format).ReadSelection(selector);
-            if (selected is not JsonValue value || !value.TryGetValue<string>(out string? text))
+            var document = new TaskConfigDocument(entry.Bytes, entry.Format);
+            bool useDefault = defaultValue is not null && selector.Count == 1
+                && selector[0] is JsonValue property && property.TryGetValue<string>(out string? name)
+                && document.Document is JsonObject obj && !obj.ContainsKey(name);
+            JsonNode? selected = useDefault ? JsonValue.Create(defaultValue) : document.ReadSelection(selector);
+            string? text = null;
+            if (selected is JsonValue scalar)
+            {
+                if (scalar.TryGetValue<string>(out string? value)) text = value;
+                else if (allowInteger && scalar.TryGetValue<int>(out int integer))
+                    text = integer.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            }
+            if (text is null)
             {
                 status = selected is null ? "missing" : "unsupported";
                 return false;
@@ -103,10 +116,12 @@ internal sealed class TaskConfigView
 
     private static string Read(Entry entry)
     {
-        JsonNode? document = entry.Format == "text"
+        JsonNode? document = entry.Integrity == "mismatch" ? null : entry.Format == "text"
             ? JsonValue.Create(new System.Text.UTF8Encoding(false, true).GetString(entry.Bytes))
             : new TaskConfigDocument(entry.Bytes, entry.Format).Document;
-        return new JsonObject { ["document"] = document, ["revision"] = entry.Revision, ["format"] = entry.Format }.ToJsonString();
+        var result = new JsonObject { ["document"] = document, ["revision"] = entry.Revision, ["format"] = entry.Format };
+        if (entry.Integrity is not null) result["integrity"] = entry.Integrity;
+        return result.ToJsonString();
     }
 
     internal byte[] Stage(string id, string revision, IReadOnlyList<TaskConfigOperation> operations, IReadOnlySet<string> allowed)
@@ -115,6 +130,15 @@ internal sealed class TaskConfigView
             throw new InvalidDataException("configuration_conflict: revision");
         VerifyUnchanged(entry);
         return new TaskConfigDocument(entry.Bytes, entry.Format).Patch(operations, allowed);
+    }
+
+    internal void VerifyPinnedResourcesUnchanged()
+    {
+        foreach (var entry in _entries.Values.Where(e => e.Integrity is not null))
+        {
+            if (entry.Integrity != "verified") throw new InvalidDataException("runtime_identity_changed: unverified resource");
+            VerifyUnchanged(entry);
+        }
     }
 
     internal void VerifyUnchanged()

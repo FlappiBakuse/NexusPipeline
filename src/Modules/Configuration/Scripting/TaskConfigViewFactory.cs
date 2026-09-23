@@ -78,7 +78,7 @@ internal static class TaskConfigViewFactory
             string logicalBase = Path.HasExtension(logicalResourcePath)
                 ? Path.GetDirectoryName(logicalResourcePath) ?? logicalResourcePath
                 : logicalResourcePath;
-            view.AddResource(resource.Id, path, resource.Format, logicalBase);
+            view.AddResource(resource.Id, path, resource.Format, logicalBase, resource.Sha256);
         }
         return view;
     }

@@ -18,7 +18,9 @@ internal sealed record TaskEnvironmentCheckDescriptor(
     bool NetworkAccess,
     bool FollowReparsePoints,
     string Comparison = "exact",
-    JsonArray? SecondarySelector = null);
+    JsonArray? SecondarySelector = null,
+    string? DefaultValue = null,
+    string? SecondaryDefaultValue = null);
 
 internal sealed record TaskExecutionContext(
     string UserId,

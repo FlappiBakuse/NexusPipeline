@@ -10,6 +10,46 @@ namespace NexusPipeline.Tests.Execution;
 
 public sealed class TaskProtocolRunTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RuntimeReplacementRejectsLaterEvidenceAndRetry(bool replaceAfterObservation)
+    {
+        string root = Path.Combine(Path.GetTempPath(), "nxp-runtime-pin-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            string config = Path.Combine(root, "config.json"), code = Path.Combine(root, "main.py");
+            File.WriteAllText(config, "{\"tasks\":[{\"id\":\"daily\",\"enabled\":true}]}");
+            File.WriteAllText(code, "original");
+            string hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(code))).ToLowerInvariant();
+            string discover = Discover.Replace("'1.0'", "'1.2'").Replace("selectionFields:",
+                "configAssessment:{schemaVersion:'1',checks:[{ruleId:'runtime',evaluation:'satisfied',severity:'info',executionEffect:'none',scope:{kind:'binding'},locations:[],actions:[]}]},selectionFields:");
+            var protocol = new TaskProtocolDescriptor("1.2", discover, Observe.Replace("'1.0'", "'1.2'"), Retry.Replace("'1.0'", "'1.2'"),
+                [new("code", "root", "main.py", "text", true, hash)])
+            { ConfigRules = [new("runtime", true, "critical_when_applicable")] };
+            var script = new ScriptInstance { Id = "fixture", PluginType = "fictional", ConfigPath = config, RootPath = root };
+            var spec = new ResolvedScriptSpec(script, "1.0.0", new(true, "javascript", "plugin-file", "", ""), "fixture") { TaskProtocol = protocol };
+            var run = new TaskProtocolRun(spec, "run", "user", Path.Combine(root, "journal"));
+            await run.BeginAsync(1, default);
+            run.Append("stdout", "daily succeeded\n");
+            if (!replaceAfterObservation) File.WriteAllText(code, "repaired by launcher");
+            var observed = await run.ObserveAsync(true, default);
+            if (replaceAfterObservation) Assert.Null(observed.JudgeError);
+            else Assert.Equal("runtime_identity_changed", observed.JudgeError);
+            File.WriteAllText(code, "repaired by launcher");
+            Assert.Equal("failed", run.Finish(RunAttemptResult.Partial("normal exit"), 1).Status);
+            Assert.False(await run.PrepareRetryAsync(2, false, false, default));
+            var report = run.Snapshot()!;
+            Assert.Equal("bad", report["summary"]!["tone"]!.GetValue<string>());
+            Assert.Equal(replaceAfterObservation ? 1 : 0, report["summary"]!["counts"]!["succeeded"]!.GetValue<int>());
+            Assert.Equal(0, report["summary"]!["counts"]!["failed"]!.GetValue<int>());
+            Assert.Contains("runtime_identity_changed", report["diagnostics"]!.ToJsonString());
+            Assert.Null(run.Restore());
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
     [Fact]
     public async Task Version11CarriesFrozenNamesAndDynamicReasonsThroughRealJint()
     {

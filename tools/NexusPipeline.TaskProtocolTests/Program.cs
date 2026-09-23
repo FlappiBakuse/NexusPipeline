@@ -10,6 +10,16 @@ if (args.Length is not (2 or 4) || args[0] != "--plugin-root") throw new Argumen
 string root = Path.GetFullPath(args[1]);
 if (args.Length == 4)
 {
+    if (args[2] == "--validator-comparison")
+    {
+        await LegacyValidatorComparisonProbe.RunAsync(root, Path.GetFullPath(args[3]));
+        return;
+    }
+    if (args[2] == "--runtime-installations")
+    {
+        await RuntimeInstallationProbe.RunAsync(root, Path.GetFullPath(args[3]));
+        return;
+    }
     if (args[2] == "--account-isolation")
     {
         await AccountIsolationProbe.RunAsync(root, Path.GetFullPath(args[3]));
@@ -38,6 +48,7 @@ int passed = 0;
 foreach (string file in files)
 {
     var fixture = JsonNode.Parse(File.ReadAllText(file))!.AsObject();
+    var fixtureResources = TaskFixtureResources.Read(fixture, fixtures);
     string artifact = fixture["artifact"]!.GetValue<string>();
     if (artifact.IndexOfAny(['/', '\\', ':']) >= 0) throw new InvalidDataException("Fixture artifact path");
     bool example = artifact == "TaskProtocolExample" || fixture["example"]?.GetValue<bool>() == true;
@@ -74,13 +85,13 @@ foreach (string file in files)
     {
         var view = new TaskConfigView();
         int index = 0;
-        foreach (var entry in fixture["resources"]!.AsArray())
+        foreach (var entry in fixtureResources)
         {
             string path = Path.Combine(temporary, (++index).ToString());
             File.WriteAllText(path, entry!["text"]!.GetValue<string>());
             string id = entry["id"]!.GetValue<string>(), format = entry["format"]!.GetValue<string>();
             if (id.StartsWith("config:", StringComparison.Ordinal)) view.AddConfig(id, path, format);
-            else view.AddResource(id, path, format);
+            else view.AddResource(id, path, format, sha256: entry["sha256"]?.GetValue<string>());
         }
         var context = TaskExecutionContext.Unknown("fixture-user", "fixture-script", "preview");
         if (fixture["queueFollowingWork"] is { } following)
@@ -110,11 +121,11 @@ foreach (string file in files)
                     File.WriteAllText(path, entry!["text"]!.GetValue<string>());
                     changedView.AddConfig(entry["id"]!.GetValue<string>(), path, entry["format"]!.GetValue<string>());
                 }
-                foreach (var entry in fixture["resources"]!.AsArray().Where(r => !r!["id"]!.GetValue<string>().StartsWith("config:")))
+                foreach (var entry in fixtureResources.Where(r => !r["id"]!.GetValue<string>().StartsWith("config:")))
                 {
                     string path = Path.Combine(temporary, (++index).ToString());
                     File.WriteAllText(path, entry!["text"]!.GetValue<string>());
-                    changedView.AddResource(entry["id"]!.GetValue<string>(), path, entry["format"]!.GetValue<string>());
+                    changedView.AddResource(entry["id"]!.GetValue<string>(), path, entry["format"]!.GetValue<string>(), sha256: entry["sha256"]?.GetValue<string>());
                 }
                 var changedPlan = await TaskDiscoveryService.DiscoverAsync(protocol, changedView, manifest["name"]!.GetValue<string>(),
                     manifest["version"]!.GetValue<string>(), "fixture-user", "fixture-script", "zh-CN", true, default);

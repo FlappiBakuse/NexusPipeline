@@ -1,3 +1,4 @@
+using NexusPipeline.Platform.Storage;
 using System.Text.Json.Nodes;
 using NexusPipeline.Modules.Configuration.Paths;
 using NexusPipeline.Modules.Configuration.Scripting;
@@ -38,18 +39,25 @@ internal sealed class TaskEnvironmentProbe
         if (string.IsNullOrWhiteSpace(id) || !_checks.TryGetValue(id, out var check))
             return new(id ?? "", "not_checked", "unsupported", null, null, "undeclared_inspection");
 
-        if (check.SourceKind is "config" or "resource")
+        if (check.SourceKind is "config" or "resource" or "mainConfig")
         {
-            if (check.ResourceId is null || check.Selector is null)
+            string? resourceId = check.ResourceId;
+            if (check.SourceKind == "mainConfig")
+            {
+                var main = _view.ConfigResources;
+                if (main.Length != 1) return NotChecked(check, "main_config_not_unique");
+                resourceId = main[0].Id;
+            }
+            if (resourceId is null || check.Selector is null)
                 return NotChecked(check, "invalid_declaration");
-            if (!_view.TryResolveDeclaredTarget(check.ResourceId, check.Selector, out TaskDeclaredTarget? target, out string sourceStatus))
+            if (!_view.TryResolveDeclaredTarget(resourceId, check.Selector, out TaskDeclaredTarget? target, out string sourceStatus, check.DefaultValue))
                 return new(check.Id, sourceStatus, check.ExpectedKind, null, null, "config_target_" + sourceStatus);
             if (check.Comparison == "adb_endpoint_with_port")
             {
                 if (check.SecondarySelector is null)
                     return NotChecked(check, "invalid_declaration");
-                if (!_view.TryResolveDeclaredTarget(check.ResourceId, check.SecondarySelector,
-                    out TaskDeclaredTarget? port, out string portStatus))
+                if (!_view.TryResolveDeclaredTarget(resourceId, check.SecondarySelector,
+                    out TaskDeclaredTarget? port, out string portStatus, check.SecondaryDefaultValue, allowInteger: true))
                     return new(check.Id, portStatus, check.ExpectedKind, null, null, "config_target_" + portStatus);
                 return ProbeAdb(check, target!.Value + ":" + port!.Value);
             }
@@ -89,7 +97,7 @@ internal sealed class TaskEnvironmentProbe
             FileAttributes attributes;
             try
             {
-                attributes = File.GetAttributes(full);
+                attributes = LocalPathMetadata.ReadAttributes(full);
             }
             catch (FileNotFoundException)
             {
@@ -149,7 +157,8 @@ internal sealed class TaskEnvironmentProbe
         string value = raw.Trim();
         if (value.Length >= 2 && value[0] == '"' && value[^1] == '"') value = value[1..^1];
         if (IsSpecialPath(value)) return null;
-        if (Path.IsPathRooted(value)) return value;
+        if (Path.IsPathFullyQualified(value)) return value;
+        if (Path.IsPathRooted(value)) return null;
         string? root = relativeBase switch
         {
             "script_root" => _scriptRoot,
@@ -200,6 +209,10 @@ internal sealed class TaskEnvironmentProbe
             || trimmed.StartsWith("\\\\.\\", StringComparison.Ordinal)
             || trimmed.StartsWith("\\Device\\", StringComparison.OrdinalIgnoreCase)
             || trimmed.Contains("\0", StringComparison.Ordinal)
+            || trimmed.StartsWith("\\", StringComparison.Ordinal)
+            || trimmed.StartsWith("/", StringComparison.Ordinal)
+            || System.Text.RegularExpressions.Regex.IsMatch(trimmed, "%[^%]+%")
+            || (trimmed.Length > 2 && trimmed.IndexOf(':', 2) >= 0)
             || (trimmed.Length >= 2 && char.IsLetter(trimmed[0]) && trimmed[1] == ':'
                 && (trimmed.Length == 2 || (trimmed[2] != '\\' && trimmed[2] != '/')))
             || (trimmed.Contains("://", StringComparison.Ordinal) && !IsWindowsDrivePath(trimmed));
@@ -210,16 +223,19 @@ internal sealed class TaskEnvironmentProbe
 
     private static bool HasReparsePoint(string path)
     {
-        string? current = path;
-        while (current is not null)
+        // Inspect ancestors before touching descendants: probing a leaf first
+        // could follow a directory junction (including a remote target).
+        var ancestors = new Stack<string>();
+        for (string? current = path; current is not null; current = Path.GetDirectoryName(current))
+            ancestors.Push(current);
+        while (ancestors.TryPop(out string? current))
         {
             try
             {
-                if ((File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0) return true;
+                if ((LocalPathMetadata.ReadAttributes(current) & FileAttributes.ReparsePoint) != 0) return true;
             }
             catch (FileNotFoundException) { }
             catch (DirectoryNotFoundException) { }
-            current = Path.GetDirectoryName(current);
         }
         return false;
     }

@@ -30,6 +30,7 @@ internal sealed class TaskProtocolRun
     private string _attemptId = "";
     private int _attemptNumber;
     private bool _protocolFailed;
+    private bool _runtimeIdentityChanged;
     private string _lifecycle = "not_started";
     private TaskPlan? _expectedRetryPlan;
     private TaskPlan? _admissionPlan;
@@ -146,6 +147,7 @@ internal sealed class TaskProtocolRun
     {
         try
         {
+            if (!VerifyRuntimeIdentity()) return new JudgeScriptResult { JudgeError = "runtime_identity_changed" };
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
             deadline.CancelAfter(TimeSpan.FromSeconds(30));
             bool more;
@@ -202,8 +204,29 @@ internal sealed class TaskProtocolRun
         }
     }
 
+    private bool VerifyRuntimeIdentity()
+    {
+        try
+        {
+            _view?.VerifyPinnedResourcesUnchanged();
+            return !_runtimeIdentityChanged;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            lock (_gate)
+            {
+                if (!_runtimeIdentityChanged && _diagnostics.Count < 128)
+                    _diagnostics.Add(new("runtime_identity_changed", "Pinned runtime resources changed or became unreadable; later evidence and retries are rejected."));
+                _runtimeIdentityChanged = true;
+                _protocolFailed = true;
+            }
+            return false;
+        }
+    }
+
     internal RunAttemptResult Finish(RunAttemptResult processResult, int number)
     {
+        VerifyRuntimeIdentity();
         lock (_gate)
         {
             if (_reducer is null) return processResult;
@@ -213,7 +236,7 @@ internal sealed class TaskProtocolRun
                 Publish(); return processResult;
             }
             _lifecycle = processResult.Status == "cancelled" ? "cancelled"
-                : processResult.Status == "failed" || _reducer!.RunBoundary == "aborted" || _terminationReason == "stall" ? "failed" : "completed";
+                : _runtimeIdentityChanged || processResult.Status == "failed" || _reducer!.RunBoundary == "aborted" || _terminationReason == "stall" ? "failed" : "completed";
             _reducer!.FinishAttempt(_lifecycle);
             var summary = _reducer.Summarize(_lifecycle);
             _attempts.Add(new JsonObject
@@ -225,6 +248,7 @@ internal sealed class TaskProtocolRun
             });
             Publish();
             if (processResult.Status == "cancelled" || processResult.IsFatal) return processResult;
+            if (_runtimeIdentityChanged) return RunAttemptResult.Failed("Runtime identity changed", "tasks.runtime_identity_changed");
             if (summary.Tone == "bad") return RunAttemptResult.Failed(summary.Outcome, "tasks." + summary.Outcome);
             if (summary.Tone == "ok" && summary.Counts["succeeded"] > 0) return RunAttemptResult.Success("tasks.all_satisfied", "tasks.all_satisfied");
             if (summary.Outcome == "no_tasks" || summary.Tone == "ok")

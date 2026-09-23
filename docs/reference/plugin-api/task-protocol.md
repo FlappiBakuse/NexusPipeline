@@ -6,7 +6,7 @@
 
 ## 文本引用协议 1.1
 
-宿主源码同时识别 1.0 与 1.1。当前开发树中的八个专项插件声明 1.1，最低 Host 为本轮 0.16.8 开发构建；这不代表已有发行包具备这些改动。旧 Host 因未知协议版本拒绝 1.1，不会回退旧 judge。
+宿主源码识别 1.0、1.1 与 1.2。当前八个专项插件声明 1.2，最低 Host 为未发布的 0.16.8 开发构建。旧开发二进制不代表当前候选；未知协议版本必须拒绝，不回退旧 judge。
 
 1.1 在 `taskProtocol` 中要求 `localization: {defaultLocale, messages}`；messages 将 locale 映射到包内 `data/*.json` 平面字符串词典。最多 16 个语言、每个语言 4096 项，全部词典共 256 KiB；路径、重解析点、重复 key 和词条长度均校验。所有阶段的输出版本必须与 manifest 一致。
 
@@ -65,3 +65,13 @@ node tests/run.mjs release all
 每类最多显示 12 项、360 个名称字符，每项最多 120 字符；长列表明确显示省略数量，附运行历史 ID。任务名、原因与证据均使用运行时冻结词典，卸载或替换插件后不重新读取插件资源。既有通知上下文、账号收件人覆盖和截图传递保持有效。
 
 作者可用 `dotnet run --project tools/NexusPipeline.TaskProtocolTests -- --plugin-root <插件源码目录> --history-plugin <示例目录名>` 验证 JSON-list 示例的安装、真实 Jint 失败、历史持久化、词典替换、事务卸载及双语通知。该探针使用独立临时目录，不发送外部通知。
+
+## 固定运行资源的完整性
+
+仅协议 1.2 的 `readResources` 可添加可选 `sha256`，值为 64 位小写十六进制，且资源必须为 `source: root`、`format: text`。宿主按捕获的原始字节比较，包含 BOM 和换行；`readResource` 增加 `integrity: verified|mismatch`。不匹配时 document 为 null，缺失/不可读仍按资源不可用处理。未声明哈希的资源和旧协议返回形状不变；配置 revision 仍为不透明令牌，不返回内容摘要。既有路径白名单、单文件及总量预算不变。
+
+此声明用于已审查的发行文件。发现时由插件 critical 规则决定阻断；运行阶段 Host 在接受观察前及结束时复核已固定资源，变化或不可读会停止接受后续证据及自动重试，记录运行链异常，保留此前任务事实。它不是对全部 Python 依赖、解释器、加载代码或瞬时替换的完整证明，也不会阻止上游启动器修复/更新；新发行字节必须重新审查。
+
+环境目标可声明 `source: {kind: "mainConfig", selector: [...]}`，仅在绑定捕获恰好一份主配置时解析，文件改名不改变归属；目录多配置或无配置时返回未检查，不从附加配置或其他账号回退。可选 `defaultValue`、`secondaryDefaultValue` 必须为有界字符串且对应单层属性 selector，只用于该属性不存在，显式 null、空值和错误类型不能被默认值掩盖。ADB 端口 selector 接受整数或字符串，地址组合仍只作格式/相等比较，不联网探测。默认值必须有锁定上游依据。
+
+Host 联调工具的 `--runtime-installations <matrix.json>` 从显式 `cases`（id/artifact/root/expectedEvaluation）只读捕获官方安装资源，账号配置仍为合成夹具；`output` 指向不存在的报告路径。`--validator-comparison <inputs.json>` 使用显式 legacyCommit/scripts（artifact/path/sha256）与当前四个生产适配器进行只读 Jint 对照，覆盖路径、ADB 默认值和日志开关。两者均先传 `--plugin-root <插件检出>`；不能用合成资源集合代替安装来源证据。运行前用 `dotnet build <Host>/tools/NexusPipeline.TaskProtocolTests -m:1 -p:NexusTestHost=true` 构建，随后运行对应 Test Host 输出 DLL。

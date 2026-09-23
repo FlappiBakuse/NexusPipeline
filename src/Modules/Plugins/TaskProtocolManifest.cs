@@ -47,7 +47,14 @@ internal static class TaskProtocolManifest
             foreach (JsonNode? node in resources)
             {
                 if (node is not JsonObject resource) throw new InvalidDataException("invalid read resource");
-                Fields(resource, "id", "source", "path", "format", "required");
+                Fields(resource, version == "1.2" && resource.ContainsKey("sha256")
+                    ? ["id", "source", "path", "format", "required", "sha256"]
+                    : ["id", "source", "path", "format", "required"]);
+                if (resource.ContainsKey("sha256") &&
+                    (resource["sha256"] is not JsonValue digest || !digest.TryGetValue<string>(out var hash)
+                     || !System.Text.RegularExpressions.Regex.IsMatch(hash, "\\A[0-9a-f]{64}\\z")
+                     || resource["source"]?.GetValue<string>() != "root" || resource["format"]?.GetValue<string>() != "text"))
+                    throw new InvalidDataException("resource.sha256 requires a lowercase SHA-256 and root text resource");
                 string id = resource["id"]?.GetValue<string>() ?? "";
                 if (id.Length is 0 or > 512 || id.StartsWith("config:", StringComparison.Ordinal) || !ids.Add(id))
                     throw new InvalidDataException("invalid or duplicate read resource id");
@@ -111,7 +118,7 @@ internal static class TaskProtocolManifest
             Read(manifest["judgeScript"]!.GetValue<string>()), Read(protocol["retryScript"]!.GetValue<string>()),
             ((JsonArray)protocol["readResources"]!).Select(r => new TaskReadResource(
                 r!["id"]!.GetValue<string>(), r["source"]!.GetValue<string>(), r["path"]!.GetValue<string>(),
-                r["format"]!.GetValue<string>(), r["required"]!.GetValue<bool>())).ToArray())
+                r["format"]!.GetValue<string>(), r["required"]!.GetValue<bool>(), r["sha256"]?.GetValue<string>())).ToArray())
         {
             Localization = frozen,
             ConfigRules = ReadConfigRules(protocol),
@@ -187,6 +194,12 @@ internal static class TaskProtocolManifest
                     throw new InvalidDataException("invalid environment resource source");
                 ValidateSelectorShape(selector);
             }
+            else if (kind == "mainConfig")
+            {
+                Fields(source, "kind", "selector");
+                if (source["selector"] is not JsonArray selector) throw new InvalidDataException("main config selector required");
+                ValidateSelectorShape(selector);
+            }
             else if (kind == "host")
             {
                 Fields(source, "kind", "field");
@@ -201,19 +214,29 @@ internal static class TaskProtocolManifest
                 throw new InvalidDataException("path comparison requires file_or_directory");
             if (comparison == "adb_endpoint_with_port")
             {
-                if (kind != "resource" || expectedKind != "adb_endpoint" || check["secondarySelector"] is not JsonArray secondary)
+                if (kind is not ("resource" or "config" or "mainConfig") || expectedKind != "adb_endpoint" || check["secondarySelector"] is not JsonArray secondary)
                     throw new InvalidDataException("adb endpoint comparison requires a resource secondary selector");
                 ValidateSelectorShape(secondary);
             }
             else if (hasSecondary)
                 throw new InvalidDataException("secondary selector is only valid for adb endpoint comparison");
+            foreach (string field in new[] { "defaultValue", "secondaryDefaultValue" })
+                if (check.ContainsKey(field))
+                {
+                    JsonNode? selector = field == "defaultValue" ? source["selector"] : check["secondarySelector"];
+                    if (kind == "host" || selector is not JsonArray { Count: 1 } parts
+                        || parts[0] is not JsonValue property || !property.TryGetValue<string>(out _)
+                        || check[field] is not JsonValue fallback || !fallback.TryGetValue<string>(out var text)
+                        || text.Length is 0 or > 512)
+                        throw new InvalidDataException("target defaults require a single property selector and bounded string");
+                }
         }
     }
 
     private static void EnvironmentFields(JsonObject check)
     {
         string[] required = ["id", "source", "expectedKind", "relativeBase", "networkAccess", "followReparsePoints"];
-        string[] optional = ["comparison", "secondarySelector"];
+        string[] optional = ["comparison", "secondarySelector", "defaultValue", "secondaryDefaultValue"];
         string[] unknown = check.Select(property => property.Key)
             .Where(key => !required.Concat(optional).Contains(key, StringComparer.Ordinal))
             .OrderBy(key => key, StringComparer.Ordinal).ToArray();
@@ -263,12 +286,13 @@ internal static class TaskProtocolManifest
             return new TaskEnvironmentCheckDescriptor(
                 check["id"]!.GetValue<string>(), kind,
                 kind is "config" or "resource" ? source["resourceId"]!.GetValue<string>() : null,
-                kind is "config" or "resource" ? source["selector"]!.DeepClone().AsArray() : null,
+                kind is "config" or "resource" or "mainConfig" ? source["selector"]!.DeepClone().AsArray() : null,
                 kind == "host" ? source["field"]!.GetValue<string>() : null,
                 check["expectedKind"]!.GetValue<string>(), check["relativeBase"]!.GetValue<string>(),
                 check["networkAccess"]!.GetValue<bool>(), check["followReparsePoints"]!.GetValue<bool>(),
                 check["comparison"]?.GetValue<string>() ?? "exact",
-                check["secondarySelector"]?.DeepClone().AsArray());
+                check["secondarySelector"]?.DeepClone().AsArray(),
+                check["defaultValue"]?.GetValue<string>(), check["secondaryDefaultValue"]?.GetValue<string>());
         }).ToArray();
     }
 

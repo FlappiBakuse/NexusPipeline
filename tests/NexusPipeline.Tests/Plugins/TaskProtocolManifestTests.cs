@@ -68,6 +68,57 @@ public sealed class TaskProtocolManifestTests
         Assert.False(TaskProtocolManifest.TryValidate(manifest, out _));
     }
 
+    [Theory]
+    [InlineData("1.0", "root", "text", true, false)]
+    [InlineData("1.1", "root", "text", true, false)]
+    [InlineData("1.2", "root", "text", true, true)]
+    [InlineData("1.2", "extraConfig", "text", true, false)]
+    [InlineData("1.2", "root", "json", true, false)]
+    [InlineData("1.2", "root", "text", false, false)]
+    public void ResourceIntegrityRequiresVersion12AndFixedRootText(string version, string source, string format, bool validHash, bool valid)
+    {
+        var manifest = Manifest();
+        var protocol = manifest["taskProtocol"]!.AsObject();
+        protocol["version"] = version;
+        if (version != "1.0") protocol["localization"] = JsonNode.Parse("""{"defaultLocale":"en-US","messages":{"en-US":"data/i18n/en.json"}}""");
+        if (version == "1.2")
+        {
+            protocol["configRules"] = JsonNode.Parse("""[{"id":"runtime","required":true,"criticality":"critical_when_applicable"}]""");
+            protocol["environmentChecks"] = new JsonArray();
+        }
+        protocol["readResources"] = new JsonArray(new JsonObject {
+            ["id"] = "code", ["source"] = source, ["path"] = "main.py", ["format"] = format,
+            ["required"] = false, ["sha256"] = validHash ? new string('a', 64) : "invalid"
+        });
+        bool actual = TaskProtocolManifest.TryValidate(manifest, out var error);
+        Assert.True(valid == actual, error ?? "Unexpected acceptance");
+    }
+
+    [Theory]
+    [InlineData("valid", true)]
+    [InlineData("nullDefault", false)]
+    [InlineData("emptyDefault", false)]
+    [InlineData("nestedDefault", false)]
+    [InlineData("foreignResource", false)]
+    [InlineData("network", false)]
+    public void MainConfigTargetDefaultsRemainBounded(string variation, bool expected)
+    {
+        var manifest = Manifest();
+        var protocol = manifest["taskProtocol"]!.AsObject();
+        protocol["version"] = "1.2";
+        protocol["localization"] = JsonNode.Parse("""{"defaultLocale":"en-US","messages":{"en-US":"data/i18n/en.json"}}""");
+        protocol["configRules"] = JsonNode.Parse("""[{"id":"runtime","required":true,"criticality":"critical_when_applicable"}]""");
+        var check = JsonNode.Parse("""{"id":"adb","source":{"kind":"mainConfig","selector":["ip"]},"expectedKind":"adb_endpoint","relativeBase":"none","networkAccess":false,"followReparsePoints":false,"comparison":"adb_endpoint_with_port","secondarySelector":["port"],"defaultValue":"127.0.0.1","secondaryDefaultValue":"5555"}""")!.AsObject();
+        if (variation == "nullDefault") check["defaultValue"] = null;
+        if (variation == "emptyDefault") check["defaultValue"] = "";
+        if (variation == "nestedDefault") check["source"]!["selector"] = new JsonArray("parent", "ip");
+        if (variation == "foreignResource") check["source"]!["resourceId"] = "other";
+        if (variation == "network") check["networkAccess"] = true;
+        protocol["environmentChecks"] = new JsonArray(check);
+        bool actual = TaskProtocolManifest.TryValidate(manifest, out var error);
+        Assert.True(expected == actual, error ?? "Unexpected acceptance");
+    }
+
     private static JsonObject Manifest() => (JsonObject)JsonNode.Parse("""
         {"kind":"data-specialized","judgeScript":"data/judge.js","minHostVersion":"0.16.8",
          "taskProtocol":{"version":"1.0","discoverScript":"data/discover.js","retryScript":"data/retry.js","readResources":[]}}

@@ -37,9 +37,9 @@ internal static class AccountIsolationProbe
                 bool passed = false;
                 try
                 {
-                    var entries = fixture["resources"]!.AsArray().Select((r, i) =>
+                    var entries = TaskFixtureResources.Read(fixture, Path.Combine(plugins, "tools", "task-protocol", "fixtures")).Select((r, i) =>
                         (Id: r!["id"]!.GetValue<string>(), Format: r["format"]!.GetValue<string>(),
-                         Text: r["text"]!.GetValue<string>(), File: i + ".config")).ToArray();
+                         Text: r["text"]!.GetValue<string>(), Sha256: r["sha256"]?.GetValue<string>(), File: i + ".config")).ToArray();
                     foreach (var r in entries) File.WriteAllText(Path.Combine(r.Id.StartsWith("config:") ? site : resources, r.File), r.Text);
                     File.WriteAllText(Path.Combine(site, "business-counter.json"), "{\"count\":0}");
                     var original = Snapshot(site);
@@ -48,7 +48,7 @@ internal static class AccountIsolationProbe
                         var view = new TaskConfigView();
                         foreach (var r in entries)
                             if (r.Id.StartsWith("config:")) view.AddConfig(r.Id, Path.Combine(directory, r.File), r.Format);
-                            else view.AddResource(r.Id, Path.Combine(resources, r.File), r.Format);
+                            else view.AddResource(r.Id, Path.Combine(resources, r.File), r.Format, sha256: r.Sha256);
                         return view;
                     }
                     Task<TaskPlan> Discover(string user) => TaskDiscoveryService.DiscoverAsync(protocol, View(site),

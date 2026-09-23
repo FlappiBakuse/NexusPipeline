@@ -18,4 +18,4 @@ internal sealed record TaskProtocolDescriptor(
     public TaskEnvironmentCheckDescriptor[] EnvironmentChecks { get; init; } = [];
 }
 
-internal sealed record TaskReadResource(string Id, string Source, string Path, string Format, bool Required);
+internal sealed record TaskReadResource(string Id, string Source, string Path, string Format, bool Required, string? Sha256 = null);

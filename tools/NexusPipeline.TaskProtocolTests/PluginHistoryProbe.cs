@@ -54,7 +54,11 @@ internal static class PluginHistoryProbe
             Require(History().Save(record, [], []).PersistenceWarning is null, "history save");
             string frozen = record.TaskReport.ToJsonString();
             // Change installed dictionaries before uninstalling through the real transaction engine.
-            foreach (string file in Directory.GetFiles(Path.Combine(installed, "data"), "task-text.*.json")) File.WriteAllText(file, "{}");
+            var dictionaries = manifest["taskProtocol"]!["localization"]!["messages"]!.AsObject();
+            Require(dictionaries.Count > 0, "nonempty frozen dictionaries");
+            foreach (var dictionary in dictionaries) File.WriteAllText(Path.Combine(installed, dictionary.Value!.GetValue<string>()), "{}");
+            if (protocol.Version == "1.2")
+                Require(record.TaskReport["originalPlan"]!["configAssessment"] is JsonObject, "version 1.2 diagnostic history");
             Apply("uninstall");
             Require(!Directory.Exists(installed) && PluginInstallRecovery.ReadOwnership(ownership).Count == 0, "uninstall ownership");
             var reloaded = History().FindById(record.Id)!;
