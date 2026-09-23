@@ -30,14 +30,18 @@ if not exist "%~dp0.build-src-hash" goto do_publish
 set /p OLD_HASH=<"%~dp0.build-src-hash"
 if "%OLD_HASH%"=="%SRC_HASH%" goto sync_web
 :do_publish
-if exist "%~dp0release" rmdir /s /q "%~dp0release"
+rem Publish into the existing installation directory without deleting runtime-owned data.
+if not exist "%~dp0release" mkdir "%~dp0release"
 dotnet publish "%~dp0src\NexusPipeline.csproj" -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -p:DebugType=none -p:DebugSymbols=false -o "%~dp0release"
 if errorlevel 1 goto build_failed
 > "%~dp0.build-src-hash" echo %SRC_HASH%
 :sync_web
-if exist "%~dp0release\plugins" rmdir /s /q "%~dp0release\plugins"
+rem wwwroot is an owned frontend build output; plugins/config/data/history/logs are runtime-owned.
+if exist "%~dp0release\wwwroot" rmdir /s /q "%~dp0release\wwwroot"
+if errorlevel 1 goto build_failed
 xcopy /e /i /y "%~dp0frontend\dist" "%~dp0release\wwwroot" >nul
-mkdir "%~dp0release\plugins" >nul 2>nul
+if errorlevel 1 goto build_failed
+if not exist "%~dp0release\plugins" mkdir "%~dp0release\plugins" >nul 2>nul
 echo.
 echo Build OK: %~dp0release\nexus-pipeline.exe
 echo Production executable uses the requireAdministrator manifest.
