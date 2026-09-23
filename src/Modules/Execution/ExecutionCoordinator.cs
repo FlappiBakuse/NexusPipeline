@@ -28,6 +28,8 @@ internal sealed class ExecutionCoordinator : RunSession
 
     private readonly ResolvedScriptSpec? _resolvedSpec;
 
+    private readonly string _queueHasFollowingWork;
+
     private readonly Action<ExecutionPreviewTarget>? _previewTargetChanged;
 
     private readonly RunScreenshotStore _screenshotStore;
@@ -72,14 +74,16 @@ internal sealed class ExecutionCoordinator : RunSession
         Action<string, LogLevel>? logLine,
          Action<ExecutionPreviewTarget>? previewTargetChanged,
          IUserRepository users,
-         IEmulatorSupportProviderResolver emulatorSupportProviders,
-         ResolvedScriptUser? resolvedUser = null,
-         ResolvedScriptSpec? resolvedSpec = null,
-         OutboundHttpClientProvider? http = null)
+        IEmulatorSupportProviderResolver emulatorSupportProviders,
+        ResolvedScriptUser? resolvedUser = null,
+        ResolvedScriptSpec? resolvedSpec = null,
+        OutboundHttpClientProvider? http = null,
+        string queueHasFollowingWork = "unknown")
         : base(script, mode, queueId, queueName, userName, token, resolvedUser, attemptChanged, statusChanged, logLine)
     {
         _users = users;
         _resolvedSpec = resolvedSpec;
+        _queueHasFollowingWork = queueHasFollowingWork is "yes" or "no" ? queueHasFollowingWork : "unknown";
         _http = http;
         _emulatorSupportProviders = emulatorSupportProviders ?? throw new ArgumentNullException(nameof(emulatorSupportProviders));
         _previewTargetChanged = previewTargetChanged;
@@ -118,7 +122,7 @@ internal sealed class ExecutionCoordinator : RunSession
     }
 
     private TaskExecutionContext CreateTaskExecutionContext(string userId, string trigger) =>
-        CreateTaskExecutionContext(_script, _resolvedSpec, userId, trigger, _queueId);
+        CreateTaskExecutionContext(_script, _resolvedSpec, userId, trigger, _queueId, _queueHasFollowingWork);
 
     /// <summary>
     /// Builds the immutable execution facts shared by real runs and read-only task previews.
@@ -130,7 +134,8 @@ internal sealed class ExecutionCoordinator : RunSession
         ResolvedScriptSpec? resolvedSpec,
         string userId,
         string trigger,
-        string? queueId = null)
+        string? queueId = null,
+        string queueHasFollowingWork = "unknown")
     {
         string mode = EmulatorSupport.IsEmulator(script)
             ? "emulator"
@@ -141,7 +146,9 @@ internal sealed class ExecutionCoordinator : RunSession
             ? "already_running"
             : ShouldHostLaunchGame(script, resolvedSpec) ? "host" : "upstream";
         string queueKind = string.IsNullOrWhiteSpace(queueId) ? "standalone" : "queue";
-        string following = string.IsNullOrWhiteSpace(queueId) ? "no" : "unknown";
+        string following = string.IsNullOrWhiteSpace(queueId)
+            ? "no"
+            : queueHasFollowingWork is "yes" or "no" ? queueHasFollowingWork : "unknown";
         bool hostWillCloseGame = script.ForceCloseGame && !(resolvedSpec?.SelfManagedPcLaunch == true);
         return new TaskExecutionContext(
             userId,
@@ -153,7 +160,10 @@ internal sealed class ExecutionCoordinator : RunSession
             new TaskGameTarget(targetKind, hasGameTarget ? script.GameExe : null, null),
             new TaskQueueContext(queueKind, following),
             new TaskCleanupContext(true, hostWillCloseGame, "none"),
-            new TaskEffectiveLaunch(script.Id, script.LaunchGame, null, null, null));
+            new TaskEffectiveLaunch(script.Id, script.LaunchGame, null, null, null),
+            new TaskLogSourceContext(
+                ShouldPublishConsoleData(script.LogPath) ? "stdout" : "file",
+                true));
     }
 
     /// <summary>按本次实际解析出的有效判定配置决定是否需要最近 PC 帧缓存。</summary>

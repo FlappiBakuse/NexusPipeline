@@ -5,6 +5,7 @@ using NexusPipeline.Modules.Execution.Judgement;
 using NexusPipeline.Modules.Execution;
 using NexusPipeline.Modules.History;
 using NexusPipeline.Modules.Plugins.Contracts;
+using NexusPipeline.Modules.Queues.Queries;
 using NexusPipeline.Modules.Scripts.Contracts;
 using NexusPipeline.Modules.Scripts.Queries;
 using NexusPipeline.Modules.Scripts.Resolution;
@@ -15,11 +16,13 @@ using NexusPipeline.Shared.Localization;
 namespace NexusPipeline.Host.Composition.Adapters;
 
 internal sealed class TaskQueryProjection(UserQueries users, ScriptQueries scripts, ScriptSpecResolver resolver,
-    IScriptConfigGate gate, RunHistoryService history, ExecutionDispatcher execution) : ITaskQueryProjection
+    IScriptConfigGate gate, RunHistoryService history, ExecutionDispatcher execution,
+    QueueQueries queues) : ITaskQueryProjection
 {
     public object Summaries()
     {
         var latest = history.LatestTasks().ToDictionary(r => (r.UserId, r.ScriptInstanceId));
+        var admissions = history.LatestAdmissions().ToDictionary(r => (r.UserId, r.ScriptInstanceId));
         var active = execution.Active.SelectMany(e => e.SnapshotTaskReports()).Where(r => r["lifecycleOutcome"]?.GetValue<string>() == "running")
             .GroupBy(r => r["userId"]?.GetValue<string>() ?? "").ToDictionary(g => g.Key, g => g.Count());
         var specialized = scripts.ListEffective().Where(s => !string.IsNullOrWhiteSpace(s.PluginType)).Select(s => s.Id).ToHashSet(StringComparer.Ordinal);
@@ -28,10 +31,18 @@ internal sealed class TaskQueryProjection(UserQueries users, ScriptQueries scrip
             var bindings = user.Bindings.Where(b => b.Effective.Enabled && specialized.Contains(b.ScriptInstanceId)).Select(binding =>
             {
                 var result = latest.GetValueOrDefault((user.Id, binding.ScriptInstanceId));
+                var admission = admissions.GetValueOrDefault((user.Id, binding.ScriptInstanceId));
+                bool admissionCurrent = admission?.Deleted == false
+                    && (result is null || result.Deleted || admission.EndTime >= result.EndTime);
                 string tone = result is null || result.Deleted ? "muted" : result.Tone
                     ?? (result.Status == "failed" ? "bad" : result.Status == "partial" ? "warn" : "muted");
                 return new { binding.ScriptInstanceId, tone, recordId = result?.Deleted == false ? result.RecordId : null,
-                    endTime = result?.EndTime, reason = result is null ? "not_run" : result.Deleted ? "record_deleted" : result.Tone is null ? "legacy_unknown" : "latest" };
+                    endTime = result?.EndTime,
+                    reason = result is null ? "not_run" : result.Deleted ? "record_deleted" : result.Tone is null ? "legacy_unknown" : "latest",
+                    admissionRecordId = admissionCurrent ? admission!.RecordId : null,
+                    admissionEndTime = admissionCurrent ? (DateTime?)admission!.EndTime : null,
+                    admissionState = admissionCurrent ? admission!.State : null,
+                    admissionReason = admissionCurrent ? admission!.ReasonCode : null };
             }).ToArray();
             var worst = bindings.OrderBy(b => b.tone switch { "bad" => 0, "warn" => 1, "muted" => 2, _ => 3 })
                 .ThenByDescending(b => b.endTime).ThenBy(b => b.recordId, StringComparer.Ordinal).FirstOrDefault();
@@ -66,8 +77,17 @@ internal sealed class TaskQueryProjection(UserQueries users, ScriptQueries scrip
                 string file = Path.Combine(saved, Path.GetFileName(path));
                 return File.Exists(file) ? file : saved;
             }).ToArray();
-            var view = TaskConfigViewFactory.Capture(config, spec.Script.RootPath, extras, spec.TaskProtocol.ReadResources);
-            TaskExecutionContext context = ExecutionCoordinator.CreateTaskExecutionContext(script, spec, userId, "preview");
+            var view = TaskConfigViewFactory.Capture(config, spec.Script.RootPath, extras, spec.TaskProtocol.ReadResources, spec.Script.ConfigPath, spec.ExtraConfigPaths);
+            TaskQueueContextFact queueContext = TaskQueueContextResolver.Resolve(
+                queues.List().Select(item => item.Queue).ToList(),
+                scriptId);
+            TaskExecutionContext context = ExecutionCoordinator.CreateTaskExecutionContext(
+                script,
+                spec,
+                userId,
+                "preview",
+                queueContext.QueueId,
+                queueContext.HasFollowingWork);
             var plan = await TaskDiscoveryService.DiscoverAsync(spec.TaskProtocol, view, script.PluginType, spec.PluginVersion,
                 userId, scriptId, LocaleContext.Current, true, token,
                 executionContext: context,
@@ -75,6 +95,9 @@ internal sealed class TaskQueryProjection(UserQueries users, ScriptQueries scrip
                 scriptExecutable: spec.Script.MainExe).ConfigureAwait(false);
             var last = history.LatestTasks().SingleOrDefault(r => r.UserId == userId && r.ScriptInstanceId == scriptId);
             return new { plan, stale = last?.Signature is { } signature && signature != plan.Signature,
+                queueContext = new { kind = queueContext.QueueId is null ? "standalone" : "queue",
+                    queueId = queueContext.QueueId,
+                    hasFollowingWork = queueContext.HasFollowingWork },
                 revision = plan.PlanId, configState = "snapshot", readOnly = true };
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

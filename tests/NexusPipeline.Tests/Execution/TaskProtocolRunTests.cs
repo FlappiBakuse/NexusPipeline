@@ -44,6 +44,40 @@ public sealed class TaskProtocolRunTests
         }
         finally { Directory.Delete(root, true); }
     }
+
+    [Fact]
+    public async Task FinishedReportMarksReadinessAsHistoricalAndStale()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "nxp-task-readiness-history-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            string config = Path.Combine(root, "config.json");
+            File.WriteAllText(config, "{\"tasks\":[{\"id\":\"daily\",\"enabled\":true}]}");
+            string discover = Discover.Replace("'1.0'", "'1.2'").Replace(
+                "selectionFields:",
+                "configAssessment:{schemaVersion:'1',checks:[{ruleId:'fixture.assessment',evaluation:'satisfied',severity:'info',executionEffect:'none',scope:{kind:'binding'},locations:[],actions:[]}]},selectionFields:");
+            var protocol = new TaskProtocolDescriptor(
+                "1.2", discover, Observe.Replace("'1.0'", "'1.2'"), Retry.Replace("'1.0'", "'1.2'"), [])
+            {
+                ConfigRules = [new TaskConfigRuleDescriptor("fixture.assessment", true, "critical_when_applicable")],
+            };
+            var script = new ScriptInstance { Id = "fixture", PluginType = "fictional", ConfigPath = config, RootPath = root };
+            var spec = new ResolvedScriptSpec(script, "1.0.0", new(true, "javascript", "plugin-file", "", ""), "fixture")
+            { TaskProtocol = protocol };
+            var run = new TaskProtocolRun(spec, "run", "user", Path.Combine(root, "journal"));
+
+            await run.BeginAsync(1, default);
+            run.Append("stdout", "daily succeeded\n");
+            Assert.Null((await run.ObserveAsync(true, default)).JudgeError);
+            run.Finish(RunAttemptResult.Success("done"), 1);
+
+            JsonObject report = run.Snapshot()!;
+            Assert.True(report["originalPlan"]!["currentReadiness"]!["stale"]!.GetValue<bool>());
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
     private const string Discover = """
         const resource = input.configResources[0].id;
         const config = nexus.readConfig(resource).document;

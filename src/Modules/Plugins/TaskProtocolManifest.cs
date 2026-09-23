@@ -166,11 +166,13 @@ internal static class TaskProtocolManifest
         foreach (JsonNode? node in checks)
         {
             if (node is not JsonObject check) throw new InvalidDataException("invalid environment check");
-            Fields(check, "id", "source", "expectedKind", "relativeBase", "networkAccess", "followReparsePoints");
+            EnvironmentFields(check);
             string id = check["id"]?.GetValue<string>() ?? "";
             if (!System.Text.RegularExpressions.Regex.IsMatch(id, "^[A-Za-z0-9_.:-]{1,160}$") || !ids.Add(id))
                 throw new InvalidDataException("invalid or duplicate environment check id");
-            if (check["expectedKind"]?.GetValue<string>() is not ("file" or "directory" or "adb_endpoint")
+            string expectedKind = check["expectedKind"]?.GetValue<string>() ?? "";
+            string comparison = check["comparison"]?.GetValue<string>() ?? "exact";
+            if (expectedKind is not ("file" or "directory" or "file_or_directory" or "adb_endpoint")
                 || check["relativeBase"]?.GetValue<string>() is not ("script_root" or "config_directory" or "none")
                 || check["networkAccess"]?.GetValue<bool>() != false
                 || check["followReparsePoints"]?.GetValue<bool>() != false)
@@ -192,7 +194,32 @@ internal static class TaskProtocolManifest
                     throw new InvalidDataException("invalid environment host source");
             }
             else throw new InvalidDataException("invalid environment source kind");
+            if (comparison is not ("exact" or "path_or_executable_parent" or "adb_endpoint_with_port"))
+                throw new InvalidDataException("invalid environment comparison");
+            bool hasSecondary = check["secondarySelector"] is not null;
+            if (comparison == "path_or_executable_parent" && expectedKind != "file_or_directory")
+                throw new InvalidDataException("path comparison requires file_or_directory");
+            if (comparison == "adb_endpoint_with_port")
+            {
+                if (kind != "resource" || expectedKind != "adb_endpoint" || check["secondarySelector"] is not JsonArray secondary)
+                    throw new InvalidDataException("adb endpoint comparison requires a resource secondary selector");
+                ValidateSelectorShape(secondary);
+            }
+            else if (hasSecondary)
+                throw new InvalidDataException("secondary selector is only valid for adb endpoint comparison");
         }
+    }
+
+    private static void EnvironmentFields(JsonObject check)
+    {
+        string[] required = ["id", "source", "expectedKind", "relativeBase", "networkAccess", "followReparsePoints"];
+        string[] optional = ["comparison", "secondarySelector"];
+        string[] unknown = check.Select(property => property.Key)
+            .Where(key => !required.Concat(optional).Contains(key, StringComparer.Ordinal))
+            .OrderBy(key => key, StringComparer.Ordinal).ToArray();
+        string[] missing = required.Where(field => !check.ContainsKey(field)).ToArray();
+        if (unknown.Length > 0 || missing.Length > 0)
+            throw new InvalidDataException("unknown or missing environment check fields");
     }
 
     private static void ValidateSelectorShape(JsonArray selector)
@@ -239,7 +266,9 @@ internal static class TaskProtocolManifest
                 kind is "config" or "resource" ? source["selector"]!.DeepClone().AsArray() : null,
                 kind == "host" ? source["field"]!.GetValue<string>() : null,
                 check["expectedKind"]!.GetValue<string>(), check["relativeBase"]!.GetValue<string>(),
-                check["networkAccess"]!.GetValue<bool>(), check["followReparsePoints"]!.GetValue<bool>());
+                check["networkAccess"]!.GetValue<bool>(), check["followReparsePoints"]!.GetValue<bool>(),
+                check["comparison"]?.GetValue<string>() ?? "exact",
+                check["secondarySelector"]?.DeepClone().AsArray());
         }).ToArray();
     }
 

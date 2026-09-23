@@ -23,7 +23,7 @@ namespace NexusPipeline.Tests.Configuration;
 public sealed class ScriptSaveValidationTests
 {
     [Fact]
-    public async Task SavedScriptWithTwoBindingsRunsReadOnlyValidationAndDeduplicatesFeedback()
+    public async Task SavedScriptWithTwoBindingsRunsReadOnlyValidationAndKeepsFeedbackPerBinding()
     {
         string pluginRoot = Path.Combine(Path.GetTempPath(), "np-script-save-validator-" + Guid.NewGuid().ToString("N"));
         string scriptRoot = Path.Combine(Path.GetTempPath(), "np-script-save-root-" + Guid.NewGuid().ToString("N"));
@@ -71,8 +71,8 @@ public sealed class ScriptSaveValidationTests
             Assert.NotNull(result);
             Assert.True(result!.Ran);
             Assert.Empty(result.Error);
-            Assert.Single(result.Toasts);
-            Assert.Single(result.Notifications);
+            Assert.Equal(2, result.Toasts.Count);
+            Assert.Equal(2, result.Notifications.Count);
             Assert.Equal("同一条提示", result.Toasts[0].Message);
             Assert.Equal("同一通知", result.Notifications[0].Title);
             Assert.Equal("只读内容", File.ReadAllText(Path.Combine(ConfigPaths.StoreDir(scriptId, firstUserId), "config.json")));

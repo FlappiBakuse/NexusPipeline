@@ -152,9 +152,11 @@ internal class HostCompositionRoot
         collection.AddSingleton<IEmulatorSupportProviderResolver>(provider => provider.GetRequiredService<PluginManager>());
         collection.AddSingleton<IPluginAvailability>(provider => provider.GetRequiredService<PluginManager>());
         collection.AddSingleton<ScriptSpecResolver>();
+        collection.AddSingleton<ITaskProtocolConfigAssessmentPort, TaskProtocolConfigAssessmentAdapter>();
         collection.AddSingleton<ScriptSaveValidation>(provider => new ScriptSaveValidation(
             provider.GetRequiredService<ScriptSpecResolver>(),
-            provider.GetRequiredService<IUserSnapshotReader>()));
+            provider.GetRequiredService<IUserSnapshotReader>(),
+            provider.GetRequiredService<ITaskProtocolConfigAssessmentPort>()));
         collection.AddSingleton<ScriptQueries>();
         collection.AddSingleton<QueueQueries>();
         collection.AddSingleton<UserQueries>();
@@ -264,7 +266,8 @@ internal class HostCompositionRoot
             provider.GetRequiredService<IPluginAvailability>(),
             provider.GetRequiredService<IPluginCapabilityResolver>(),
             provider.GetRequiredService<ScriptSpecResolver>(),
-            provider.GetRequiredService<UserCommands>()));
+            provider.GetRequiredService<UserCommands>(),
+            provider.GetRequiredService<ITaskProtocolConfigAssessmentPort>()));
         collection.AddSingleton<UpdateService>(provider => new UpdateService(
             () => Settings,
             AppPaths.AppRoot,

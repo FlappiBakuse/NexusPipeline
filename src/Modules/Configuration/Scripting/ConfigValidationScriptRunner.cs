@@ -18,6 +18,19 @@ internal sealed record ConfigValidationToast(string Message, string Kind);
 /// <summary>配置校验脚本向前端请求的页面角落通知。</summary>
 internal sealed record ConfigValidationNotification(string Title, string Body, string Kind);
 
+/// <summary>宿主统一任务协议配置诊断；按绑定用户保留，不跨用户去重。</summary>
+internal sealed record ConfigValidationDiagnostic(
+    string BindingKey,
+    string UserId,
+    string UserName,
+    string RuleId,
+    string Evaluation,
+    string Severity,
+    string ExecutionEffect,
+    System.Text.Json.Nodes.JsonObject? ReasonText,
+    System.Text.Json.Nodes.JsonArray Locations,
+    System.Text.Json.Nodes.JsonArray Actions);
+
 /// <summary>一次配置校验的结构化结果；校验失败不会改变配置提交结果。</summary>
 internal sealed record ConfigValidationResult(
     bool Ran,
@@ -26,6 +39,8 @@ internal sealed record ConfigValidationResult(
     IReadOnlyList<ConfigValidationToast> Toasts,
     IReadOnlyList<ConfigValidationNotification> Notifications)
 {
+    public IReadOnlyList<ConfigValidationDiagnostic> Diagnostics { get; init; } = Array.Empty<ConfigValidationDiagnostic>();
+
     public static ConfigValidationResult Skipped => new(
         false,
         "",

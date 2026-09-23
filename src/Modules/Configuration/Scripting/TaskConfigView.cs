@@ -10,7 +10,7 @@ internal sealed record TaskDeclaredTarget(string Value, string BaseDirectory);
 /// <summary>Owner-local revisions; opaque tokens never expose configuration hashes.</summary>
 internal sealed class TaskConfigView
 {
-    private sealed record Entry(string Path, byte[] Bytes, string Revision, string Format, bool Writable);
+    private sealed record Entry(string Path, string BaseDirectory, byte[] Bytes, string Revision, string Format, bool Writable);
     private readonly Dictionary<string, Entry> _entries = new(StringComparer.Ordinal);
     internal TaskConfigResource[] ConfigResources => _entries.Where(p => p.Value.Writable).Select(p => new TaskConfigResource(p.Key, p.Value.Format)).ToArray();
     internal IReadOnlySet<string> DeclaredResourceIds => _entries.Keys.ToHashSet(StringComparer.Ordinal);
@@ -18,10 +18,10 @@ internal sealed class TaskConfigView
         System.Text.Encoding.UTF8.GetBytes(string.Join("\n", _entries.OrderBy(p => p.Key, StringComparer.Ordinal)
             .Select(p => p.Key + "=" + p.Value.Revision))))).ToLowerInvariant();
 
-    internal void AddConfig(string id, string path, string format) => Add(id, path, format, true);
-    internal void AddResource(string id, string path, string format) => Add(id, path, format, false);
+    internal void AddConfig(string id, string path, string format, string? baseDirectory = null) => Add(id, path, format, true, baseDirectory);
+    internal void AddResource(string id, string path, string format, string? baseDirectory = null) => Add(id, path, format, false, baseDirectory);
 
-    private void Add(string id, string path, string format, bool writable)
+    private void Add(string id, string path, string format, bool writable, string? baseDirectory)
     {
         if (_entries.Count >= 256 || _entries.ContainsKey(id)) throw new InvalidDataException("resource_limit: duplicate/excess resource");
         ValidatePath(path);
@@ -31,7 +31,9 @@ internal sealed class TaskConfigView
         if (bytes.Length > 2 * 1024 * 1024) throw new InvalidDataException("resource_limit: resource changed while reading");
         if (_entries.Values.Sum(e => (long)e.Bytes.Length) + bytes.Length > 32 * 1024 * 1024)
             throw new InvalidDataException("resource_limit: aggregate configuration exceeds 32 MiB");
-        _entries.Add(id, new(Path.GetFullPath(path), bytes, Convert.ToHexString(RandomNumberGenerator.GetBytes(24)), format, writable));
+        string fullPath = Path.GetFullPath(path);
+        string fullBaseDirectory = Path.GetFullPath(baseDirectory ?? Path.GetDirectoryName(fullPath) ?? fullPath);
+        _entries.Add(id, new(fullPath, fullBaseDirectory, bytes, Convert.ToHexString(RandomNumberGenerator.GetBytes(24)), format, writable));
     }
 
     internal static void ValidatePath(string path)
@@ -78,7 +80,7 @@ internal sealed class TaskConfigView
                 status = "missing";
                 return false;
             }
-            target = new(normalized, Path.GetDirectoryName(entry.Path) ?? Path.GetPathRoot(entry.Path) ?? "");
+            target = new(normalized, entry.BaseDirectory);
             status = "present";
             return true;
         }

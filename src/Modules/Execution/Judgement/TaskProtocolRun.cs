@@ -60,7 +60,7 @@ internal sealed class TaskProtocolRun
     }
 
     private TaskConfigView Capture() => TaskConfigViewFactory.Capture(_spec.Script.ConfigPath,
-        _spec.Script.RootPath, _spec.ExtraConfigPaths, _protocol.ReadResources);
+        _spec.Script.RootPath, _spec.ExtraConfigPaths, _protocol.ReadResources, _spec.Script.ConfigPath, _spec.ExtraConfigPaths);
 
     internal bool IsAdmissionBlocked
     {
@@ -308,6 +308,19 @@ internal sealed class TaskProtocolRun
     private static JsonArray ResultsJson(IEnumerable<TaskEffectiveResult> results) => (JsonArray)JsonNode.Parse(TaskProtocolJson.Write(
         results.Select(r => new { r.TaskId, r.Status, r.ReasonCode, r.ReasonText, r.LastAttemptId, r.Evidence })))!;
 
+    /// <summary>
+    /// A task report is an immutable historical snapshot once the run is no
+    /// longer active. Its readiness assessment remains useful for explaining
+    /// the decision that was made, but it must not be presented as proof of
+    /// the current configuration or environment. Mark only the serialized
+    /// report snapshot stale; fresh discovery plans keep their current status.
+    /// </summary>
+    private static TaskPlan HistoricalPlan(TaskPlan plan) => plan.CurrentReadiness is { } readiness
+        ? plan with { CurrentReadiness = readiness with { Stale = true } }
+        : plan;
+
+    private static TaskReadiness HistoricalReadiness(TaskReadiness readiness) => readiness with { Stale = true };
+
     internal JsonObject? Snapshot()
     {
         lock (_gate)
@@ -322,7 +335,7 @@ internal sealed class TaskProtocolRun
                     ["revision"] = _revision,
                     ["userId"] = _userId,
                     ["scriptInstanceId"] = _spec.Script.Id,
-                    ["originalPlan"] = JsonNode.Parse(TaskProtocolJson.Write(blockedPlan)),
+                    ["originalPlan"] = JsonNode.Parse(TaskProtocolJson.Write(HistoricalPlan(blockedPlan))),
                     ["lifecycleOutcome"] = "not_started",
                     ["attemptReports"] = new JsonArray(),
                     ["finalTaskResults"] = new JsonArray(),
@@ -332,7 +345,7 @@ internal sealed class TaskProtocolRun
                     {
                         ["reasonCode"] = "tasks.admission_blocked",
                         ["message"] = blocked.Message,
-                        ["readiness"] = JsonNode.Parse(TaskProtocolJson.Write(blocked.Readiness)),
+                        ["readiness"] = JsonNode.Parse(TaskProtocolJson.Write(HistoricalReadiness(blocked.Readiness))),
                         ["configAssessment"] = JsonNode.Parse(TaskProtocolJson.Write(blocked.Assessment)),
                     },
                 };
@@ -351,7 +364,8 @@ internal sealed class TaskProtocolRun
             {
                 ["schemaVersion"] = 1, ["runId"] = _runId, ["pluginId"] = _spec.Script.PluginType,
                 ["revision"] = _revision, ["userId"] = _userId, ["scriptInstanceId"] = _spec.Script.Id,
-                ["originalPlan"] = JsonNode.Parse(TaskProtocolJson.Write(_reducer.OriginalPlan)),
+                ["originalPlan"] = JsonNode.Parse(TaskProtocolJson.Write(
+                    _lifecycle == "running" ? _reducer.OriginalPlan : HistoricalPlan(_reducer.OriginalPlan))),
                 ["lifecycleOutcome"] = _lifecycle,
                 ["attemptReports"] = attempts,
                 ["finalTaskResults"] = ResultsJson(_reducer.Results),
@@ -361,6 +375,19 @@ internal sealed class TaskProtocolRun
                 ["evidenceLines"] = JsonNode.Parse(TaskProtocolJson.Write(_evidenceLines.Select(p => new
                 { attemptId = p.Key.Attempt, sourceId = p.Key.Source, epoch = p.Key.Epoch, sequence = p.Key.Sequence, text = p.Value }))),
             };
+            // Include retry-admission diagnostics before freezing the localized
+            // display snapshot so newly introduced reasonText references are
+            // resolvable in the final report as well.
+            if (_admissionBlocked is { } retryBlocked && _admissionPlan is not null)
+            {
+                report["admissionBlocked"] = new JsonObject
+                {
+                    ["reasonCode"] = "tasks.admission_blocked",
+                    ["message"] = retryBlocked.Message,
+                    ["readiness"] = JsonNode.Parse(TaskProtocolJson.Write(HistoricalReadiness(retryBlocked.Readiness))),
+                    ["configAssessment"] = JsonNode.Parse(TaskProtocolJson.Write(retryBlocked.Assessment)),
+                };
+            }
             if (_protocol.Localization is { } localization)
             {
                 IEnumerable<JsonObject?> References(JsonNode? node)
@@ -373,16 +400,6 @@ internal sealed class TaskProtocolRun
                 }
                 var display = (localization with { PluginId = _spec.Script.PluginType, PluginVersion = _spec.PluginVersion }).Select(References(report));
                 report["displaySnapshot"] = JsonNode.Parse(TaskProtocolJson.Write(display));
-            }
-            if (_admissionBlocked is { } retryBlocked && _admissionPlan is not null)
-            {
-                report["admissionBlocked"] = new JsonObject
-                {
-                    ["reasonCode"] = "tasks.admission_blocked",
-                    ["message"] = retryBlocked.Message,
-                    ["readiness"] = JsonNode.Parse(TaskProtocolJson.Write(retryBlocked.Readiness)),
-                    ["configAssessment"] = JsonNode.Parse(TaskProtocolJson.Write(retryBlocked.Assessment)),
-                };
             }
             return report;
         }

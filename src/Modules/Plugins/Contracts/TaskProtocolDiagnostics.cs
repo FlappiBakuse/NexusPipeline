@@ -16,7 +16,9 @@ internal sealed record TaskEnvironmentCheckDescriptor(
     string ExpectedKind,
     string RelativeBase,
     bool NetworkAccess,
-    bool FollowReparsePoints);
+    bool FollowReparsePoints,
+    string Comparison = "exact",
+    JsonArray? SecondarySelector = null);
 
 internal sealed record TaskExecutionContext(
     string UserId,
@@ -28,7 +30,8 @@ internal sealed record TaskExecutionContext(
     TaskGameTarget GameTarget,
     TaskQueueContext Queue,
     TaskCleanupContext Cleanup,
-    TaskEffectiveLaunch EffectiveLaunch)
+    TaskEffectiveLaunch EffectiveLaunch,
+    TaskLogSourceContext LogSource)
 {
     internal static TaskExecutionContext Unknown(string userId, string scriptInstanceId, string trigger) => new(
         userId,
@@ -40,7 +43,8 @@ internal sealed record TaskExecutionContext(
         new("none", null, null),
         new("unknown", "unknown"),
         new(false, false, "none"),
-        new("unknown", null, null, false, null));
+        new("unknown", null, null, false, null),
+        new("unknown", false));
 }
 
 internal sealed record TaskGameTarget(
@@ -58,6 +62,12 @@ internal sealed record TaskEffectiveLaunch(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? TaskIndex,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? ExitRequested,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? SelectedProfile);
+
+/// <summary>
+/// Host-owned, read-only fact about the log channel available to the task
+/// protocol. Launch ownership is not evidence that a usable log source exists.
+/// </summary>
+internal sealed record TaskLogSourceContext(string Kind, bool Available);
 
 /// <summary>Safe result returned by nexus.inspectDeclaredTarget(id). It never contains file contents.</summary>
 internal sealed record TaskEnvironmentInspection(

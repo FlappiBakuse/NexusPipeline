@@ -79,7 +79,8 @@ internal static class TaskProtocolValidation
     internal static void ConfigAssessment(
         TaskDiscovery discovery,
         TaskProtocolDescriptor protocol,
-        NexusPipeline.Modules.Configuration.Scripting.TaskConfigView view)
+        IReadOnlySet<string> declaredConfigIds,
+        IReadOnlySet<string> declaredResourceIds)
     {
         if (protocol.Version != "1.2") return;
         TaskConfigAssessment? assessment = discovery.ConfigAssessment;
@@ -94,12 +95,12 @@ internal static class TaskProtocolValidation
         // Optional manifest resources may be absent from the frozen view. Their
         // locations are still valid declarations; the script must report
         // unknown rather than making the assessment envelope invalid.
-        var configIds = view.DeclaredResourceIds
+        var configIds = declaredConfigIds
             .Where(id => id.StartsWith("config:", StringComparison.Ordinal))
             .ToHashSet(StringComparer.Ordinal);
         var resourceIds = protocol.ReadResources
             .Select(resource => resource.Id)
-            .Concat(view.DeclaredResourceIds.Where(id => !id.StartsWith("config:", StringComparison.Ordinal)))
+            .Concat(declaredResourceIds.Where(id => !id.StartsWith("config:", StringComparison.Ordinal)))
             .ToHashSet(StringComparer.Ordinal);
         var environmentIds = protocol.EnvironmentChecks.Select(check => check.Id).ToHashSet(StringComparer.Ordinal);
         foreach (TaskConfigCheck check in assessment.Checks)
@@ -169,7 +170,7 @@ internal static class TaskProtocolValidation
             System.Text.Json.Nodes.JsonArray? selector = objectValue["selector"] as System.Text.Json.Nodes.JsonArray;
             Require(objectValue.Count == 3 && resourceId is { Length: > 0 }
                 && (source == "config"
-                    ? (resourceId.StartsWith("config:", StringComparison.Ordinal) || configIds.Contains(resourceId))
+                    ? configIds.Contains(resourceId)
                     : resourceIds.Contains(resourceId))
                 && selector is not null,
                 "config resource location");

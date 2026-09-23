@@ -47,6 +47,37 @@ public sealed class TaskHistoryTests : IDisposable
         var latest = Assert.Single(Service().LatestTasks());
         Assert.Equal(last.Id, latest.RecordId); Assert.True(latest.Deleted);
     }
+
+    [Fact]
+    public void AdmissionBlockedRecordDoesNotReplaceLatestActualRun()
+    {
+        var service = Service();
+        var actual = Record();
+        actual.Status = "success";
+        actual.EndTime = DateTime.Now.AddMinutes(-1);
+        Assert.Null(service.Save(actual, [], []).PersistenceWarning);
+
+        var blocked = Record();
+        blocked.Status = "blocked";
+        blocked.ResultCode = "tasks.admission_blocked";
+        blocked.EndTime = DateTime.Now;
+        blocked.TaskReport = JsonNode.Parse("""
+            {"lifecycleOutcome":"not_started","admissionBlocked":{"reasonCode":"tasks.admission_blocked",
+             "readiness":{"state":"blocked"},"configAssessment":{"schemaVersion":"1","checks":[]}}}
+            """)!.AsObject();
+        Assert.Null(service.Save(blocked, [], []).PersistenceWarning);
+
+        var latestActual = Assert.Single(service.LatestTasks());
+        Assert.Equal(actual.Id, latestActual.RecordId);
+        var latestAdmission = Assert.Single(service.LatestAdmissions());
+        Assert.Equal(blocked.Id, latestAdmission.RecordId);
+        Assert.Equal("blocked", latestAdmission.State);
+
+        var restarted = Service();
+        Assert.Equal(actual.Id, Assert.Single(restarted.LatestTasks()).RecordId);
+        Assert.Equal(blocked.Id, Assert.Single(restarted.LatestAdmissions()).RecordId);
+    }
+
     [Fact]
     public void CorruptIndexNeverBecomesAnEmptySuccessfulCache()
     {

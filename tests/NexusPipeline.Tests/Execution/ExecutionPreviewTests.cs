@@ -3,9 +3,11 @@ using System.Drawing.Imaging;
 using NexusPipeline.Plugin.Abstractions;
 using Xunit;
 using NexusPipeline.ControlPlane.Http;
+using NexusPipeline.Host.Composition.Adapters;
 using NexusPipeline.Modules.Execution.Monitoring;
 using NexusPipeline.Modules.Execution;
 using NexusPipeline.Modules.Plugins.Contracts;
+using NexusPipeline.Modules.Queues;
 using NexusPipeline.Modules.Scripts.Contracts;
 using NexusPipeline.Modules.Scripts;
 using NexusPipeline.Shared.Logging;
@@ -54,6 +56,61 @@ public sealed class ExecutionPreviewTests
         Assert.Equal("executable", context.GameTarget.Kind);
         Assert.Equal(script.GameExe, context.GameTarget.Value);
         Assert.Equal("preview", context.Trigger);
+    }
+
+    [Fact]
+    public void TaskExecutionContextCarriesFrozenQueueAndLogFacts()
+    {
+        var script = new ScriptInstance
+        {
+            Id = "script-queue",
+            GameExe = "C:\\Games\\game.exe",
+            LogPath = "C:\\Logs\\game.log",
+        };
+
+        TaskExecutionContext first = ExecutionCoordinator.CreateTaskExecutionContext(
+            script, null, "user-1", "pre_launch", "queue-1", "yes");
+        TaskExecutionContext last = ExecutionCoordinator.CreateTaskExecutionContext(
+            script, null, "user-1", "pre_launch", "queue-1", "no");
+        TaskExecutionContext standalone = ExecutionCoordinator.CreateTaskExecutionContext(
+            new ScriptInstance { Id = "script-stdout" }, null, "user-1", "preview", null, "yes");
+
+        Assert.Equal("queue", first.Queue.Kind);
+        Assert.Equal("yes", first.Queue.HasFollowingWork);
+        Assert.Equal("no", last.Queue.HasFollowingWork);
+        Assert.Equal("file", first.LogSource.Kind);
+        Assert.True(first.LogSource.Available);
+        Assert.Equal("no", standalone.Queue.HasFollowingWork);
+        Assert.Equal("stdout", standalone.LogSource.Kind);
+        Assert.True(standalone.LogSource.Available);
+    }
+
+    [Fact]
+    public void TaskQueueContextResolverUsesHostQueueOrderForPreviewFacts()
+    {
+        var queues = new[]
+        {
+            new DispatchQueue
+            {
+                Id = "queue-1",
+                Tasks = new List<QueueTask>
+                {
+                    new() { Index = 0, ScriptInstanceId = "before" },
+                    new() { Index = 1, ScriptInstanceId = "target" },
+                    new() { Index = 2, ScriptInstanceId = "after" },
+                },
+            },
+        };
+
+        TaskQueueContextFact target = TaskQueueContextResolver.Resolve(queues, "target");
+        TaskQueueContextFact last = TaskQueueContextResolver.Resolve(queues, "after");
+        TaskQueueContextFact standalone = TaskQueueContextResolver.Resolve(queues, "not-queued");
+
+        Assert.Equal("queue-1", target.QueueId);
+        Assert.Equal("yes", target.HasFollowingWork);
+        Assert.Equal("no", last.HasFollowingWork);
+        Assert.Null(standalone.QueueId);
+        Assert.Equal("no", standalone.HasFollowingWork);
     }
 
     [Fact]

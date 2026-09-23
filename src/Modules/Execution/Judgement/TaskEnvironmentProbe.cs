@@ -44,6 +44,15 @@ internal sealed class TaskEnvironmentProbe
                 return NotChecked(check, "invalid_declaration");
             if (!_view.TryResolveDeclaredTarget(check.ResourceId, check.Selector, out TaskDeclaredTarget? target, out string sourceStatus))
                 return new(check.Id, sourceStatus, check.ExpectedKind, null, null, "config_target_" + sourceStatus);
+            if (check.Comparison == "adb_endpoint_with_port")
+            {
+                if (check.SecondarySelector is null)
+                    return NotChecked(check, "invalid_declaration");
+                if (!_view.TryResolveDeclaredTarget(check.ResourceId, check.SecondarySelector,
+                    out TaskDeclaredTarget? port, out string portStatus))
+                    return new(check.Id, portStatus, check.ExpectedKind, null, null, "config_target_" + portStatus);
+                return ProbeAdb(check, target!.Value + ":" + port!.Value);
+            }
             return ProbePath(check, target!.Value, target.BaseDirectory);
         }
 
@@ -84,11 +93,11 @@ internal sealed class TaskEnvironmentProbe
             }
             catch (FileNotFoundException)
             {
-                return new(check.Id, "missing", check.ExpectedKind, null, MatchesContext(full), "target_missing");
+                return new(check.Id, "missing", check.ExpectedKind, null, MatchesContext(check, full, null), "target_missing");
             }
             catch (DirectoryNotFoundException)
             {
-                return new(check.Id, "missing", check.ExpectedKind, null, MatchesContext(full), "target_missing");
+                return new(check.Id, "missing", check.ExpectedKind, null, MatchesContext(check, full, null), "target_missing");
             }
             catch (UnauthorizedAccessException)
             {
@@ -104,8 +113,9 @@ internal sealed class TaskEnvironmentProbe
             }
 
             string actualKind = (attributes & FileAttributes.Directory) != 0 ? "directory" : "file";
-            bool? matchesContext = MatchesContext(full);
-            if (!string.Equals(actualKind, check.ExpectedKind, StringComparison.Ordinal))
+            bool? matchesContext = MatchesContext(check, full, actualKind);
+            if (check.ExpectedKind != "file_or_directory"
+                && !string.Equals(actualKind, check.ExpectedKind, StringComparison.Ordinal))
                 return new(check.Id, "wrong_kind", check.ExpectedKind, actualKind, matchesContext, "target_wrong_kind");
             return new(check.Id, "present", check.ExpectedKind, actualKind, matchesContext, "target_present");
         }
@@ -127,8 +137,8 @@ internal sealed class TaskEnvironmentProbe
     {
         bool valid = EmulatorSupport.IsValidAdbAddress(raw);
         return valid
-            ? new(check.Id, "present", "adb_endpoint", "adb_endpoint", MatchesContext(raw), "endpoint_format_valid")
-            : new(check.Id, "wrong_kind", "adb_endpoint", "unsupported", MatchesContext(raw), "endpoint_format_invalid");
+            ? new(check.Id, "present", "adb_endpoint", "adb_endpoint", MatchesContext(check, raw, "adb_endpoint"), "endpoint_format_valid")
+            : new(check.Id, "wrong_kind", "adb_endpoint", "unsupported", MatchesContext(check, raw, "adb_endpoint"), "endpoint_format_invalid");
     }
 
     private TaskEnvironmentInspection NotChecked(TaskEnvironmentCheckDescriptor check, string reason) =>
@@ -150,17 +160,27 @@ internal sealed class TaskEnvironmentProbe
         return root is null ? null : ConfigPathSafety.ResolveWithin(root, value);
     }
 
-    private bool? MatchesContext(string value)
+    private bool? MatchesContext(TaskEnvironmentCheckDescriptor check, string value, string? actualKind)
     {
         string? context = _context.GameTarget.Value;
         if (string.IsNullOrWhiteSpace(context) || _context.GameTarget.Kind == "none") return null;
-        if (_context.GameTarget.Kind == "adb_endpoint")
+        if (check.Comparison == "adb_endpoint_with_port" || _context.GameTarget.Kind == "adb_endpoint")
             return string.Equals(NormalizeEndpoint(value), NormalizeEndpoint(context), StringComparison.OrdinalIgnoreCase);
         try
         {
             if (IsSpecialPath(value) || IsSpecialPath(context)) return false;
-            return string.Equals(Path.GetFullPath(value).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
-                Path.GetFullPath(context).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar), StringComparison.OrdinalIgnoreCase);
+            string candidate = Path.GetFullPath(value);
+            string expected = Path.GetFullPath(context);
+            if (check.Comparison == "path_or_executable_parent")
+            {
+                string kind = actualKind ?? (Path.GetExtension(candidate).Equals(".exe", StringComparison.OrdinalIgnoreCase) ? "file" : "directory");
+                if (kind == "directory" && _context.GameTarget.Kind == "executable")
+                    expected = Path.GetDirectoryName(expected) ?? expected;
+            }
+            return string.Equals(
+                candidate.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                expected.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                StringComparison.OrdinalIgnoreCase);
         }
         catch
         {

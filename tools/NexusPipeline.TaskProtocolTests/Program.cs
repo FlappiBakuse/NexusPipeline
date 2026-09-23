@@ -82,9 +82,21 @@ foreach (string file in files)
             if (id.StartsWith("config:", StringComparison.Ordinal)) view.AddConfig(id, path, format);
             else view.AddResource(id, path, format);
         }
+        var context = TaskExecutionContext.Unknown("fixture-user", "fixture-script", "preview");
+        if (fixture["queueFollowingWork"] is { } following)
+            context = context with { Queue = new("queue", following.GetValue<string>()) };
         var plan = await TaskDiscoveryService.DiscoverAsync(protocol, view, manifest["name"]?.GetValue<string>() ?? artifact,
-            manifest["version"]!.GetValue<string>(), "fixture-user", "fixture-script", "zh-CN", true, default);
+            manifest["version"]!.GetValue<string>(), "fixture-user", "fixture-script", "zh-CN", true, default, context);
         Check(plan.Coverage == fixture["coverage"]!.GetValue<string>(), "discovery coverage");
+        if (fixture["configChecks"] is JsonArray expectedChecks)
+            foreach (var expected in expectedChecks)
+            {
+                var check = plan.ConfigAssessment!.Checks.Single(c => c.RuleId == expected!["ruleId"]!.GetValue<string>());
+                Check(check.Evaluation == expected!["evaluation"]!.GetValue<string>(), "config evaluation " + check.RuleId);
+                Check(check.ExecutionEffect == expected["executionEffect"]!.GetValue<string>(), "config effect " + check.RuleId);
+                if (expected["locationCount"] is { } count)
+                    Check(check.Locations.Count == count.GetValue<int>(), "config locations " + check.RuleId);
+            }
         if (fixture["forbiddenPlanText"] is JsonArray forbidden)
             foreach (var value in forbidden)
                 Check(!TaskProtocolJson.Write(plan).Contains(value!.GetValue<string>(), StringComparison.Ordinal), "private config excluded from plan");
@@ -113,6 +125,7 @@ foreach (string file in files)
             var task = plan.Tasks.Single(t => t.SourceKey == item.Key);
             Check(task.Enabled == item.Value!["enabled"]!.GetValue<bool>(), "selection " + item.Key);
             if (item.Value["detection"] is {} detection) Check(task.Detection == detection.GetValue<string>(), "detection " + item.Key);
+            if (item.Value["role"] is {} role) Check(task.Role == role.GetValue<string>(), "role " + item.Key);
             if (item.Value["order"] is {} expectedOrder) Check(task.Order == expectedOrder.GetValue<int>(), "task order " + item.Key);
         }
         Check(plan.Tasks.Length == fixture["tasks"]!.AsObject().Count, "task count");

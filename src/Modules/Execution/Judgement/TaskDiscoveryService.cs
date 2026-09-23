@@ -24,7 +24,11 @@ internal static class TaskDiscoveryService
             view.ReadConfig, view.ReadResource, preview, token, probe is null ? null : probe.Inspect).ConfigureAwait(false);
         TaskProtocolValidation.Discovery(result);
         TaskProtocolValidation.Require(result.ProtocolVersion == protocol.Version, "negotiated discovery version");
-        TaskProtocolValidation.ConfigAssessment(result, protocol, view);
+        TaskProtocolValidation.ConfigAssessment(
+            result,
+            protocol,
+            view.DeclaredResourceIds.Where(id => id.StartsWith("config:", StringComparison.Ordinal)).ToHashSet(StringComparer.Ordinal),
+            view.DeclaredResourceIds.Where(id => !id.StartsWith("config:", StringComparison.Ordinal)).ToHashSet(StringComparer.Ordinal));
         var behavior = result.BehaviorFields.Select(field =>
         {
             var resource = view.Snapshot(field.ResourceId);
