@@ -1047,9 +1047,13 @@
   "tasks.detection.unsupported": "暂不支持",
   "tasks.empty": "没有启用的业务任务",
   "tasks.enabled_count": "已启用 {count} 项业务任务",
+  "tasks.error.cancelled": "配置检查已取消，尚未得到就绪结果",
   "tasks.error.config_unavailable": "配置不可用，请先保存用户配置快照",
   "tasks.error.configuration_busy": "配置正在运行或编辑中，请稍后重试",
+  "tasks.error.protocol_error": "插件配置检查返回了无效结果",
   "tasks.error.record_deleted": "记录不存在或已删除",
+  "tasks.error.resource_limit": "插件配置检查超出资源预算",
+  "tasks.error.timeout": "配置检查超时，请重新读取计划",
   "tasks.error.unsupported_schema": "此插件尚未提供任务计划",
   "tasks.evidence": "查看日志证据",
   "tasks.evidence_unavailable": "该日志证据片段未保存，请查看对应尝试的完整日志。",
@@ -1241,9 +1245,5 @@
   "users.validation.remark_length": "备注最多 {bytes} 字节",
   "users.validation.username_duplicate": "用户名已存在，请使用其他名称",
   "users.validation.username_length": "用户名最多 {bytes} 字节",
-  "users.validation.username_required": "请填写用户名",
-  "tasks.error.cancelled": "配置检查已取消，尚未得到就绪结果",
-  "tasks.error.timeout": "配置检查超时，请重新读取计划",
-  "tasks.error.protocol_error": "插件配置检查返回了无效结果",
-  "tasks.error.resource_limit": "插件配置检查超出资源预算"
+  "users.validation.username_required": "请填写用户名"
 }
