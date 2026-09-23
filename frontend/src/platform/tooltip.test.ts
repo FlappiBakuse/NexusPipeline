@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { hideTooltip, initTooltips } from "./tooltip";
 
 /**
@@ -23,10 +23,10 @@ describe("delayed help tooltip contract", () => {
 
     input.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
     input.focus();
-    await new Promise(resolve => setTimeout(resolve, 720));
-
-    const tooltip = document.body.querySelector(":scope > [role='tooltip']");
-    expect(tooltip?.textContent).toBe("字段说明");
+    await vi.waitFor(() => {
+      const tooltip = document.body.querySelector(":scope > [role='tooltip']");
+      expect(tooltip?.textContent).toBe("字段说明");
+    }, { timeout: 2500 });
 
     input.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
     expect(document.body.querySelector(":scope > [role='tooltip']")).toBeNull();
@@ -57,7 +57,8 @@ describe("delayed help tooltip contract", () => {
     // 排除只针对操作按钮：同一容器内的文本输入仍然提供字段说明。
     input.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
     input.focus();
-    await new Promise(resolve => setTimeout(resolve, 720));
-    expect(document.body.querySelector(":scope > [role='tooltip']")?.textContent).toBe("字段说明");
+    await vi.waitFor(() => {
+      expect(document.body.querySelector(":scope > [role='tooltip']")?.textContent).toBe("字段说明");
+    }, { timeout: 2500 });
   });
 });
