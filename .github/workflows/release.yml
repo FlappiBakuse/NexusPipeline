@@ -93,10 +93,11 @@ jobs:
         shell: pwsh
         env:
           PLUGIN_SHA: ${{ steps.plugins.outputs.sha }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
         run: >-
           python tools/host_release.py candidate
           --root . --source-sha $env:GITHUB_SHA
-          --workflow-sha $env:GITHUB_WORKFLOW_SHA
+          --workflow-sha $env:WORKFLOW_SHA
           --partner-sha $env:PLUGIN_SHA
           --run-id $env:GITHUB_RUN_ID --run-attempt $env:GITHUB_RUN_ATTEMPT
           --frontend-ready
