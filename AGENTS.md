@@ -24,8 +24,7 @@ NexusPipeline（枢链）是 Windows 本地自动化脚本管家：.NET 8/C# Win
 ## 2. 操作授权、版本和数据
 
 - 代码实施授权与 commit、push、tag、PR、合并、规则修改、实际发布授权分别判断。用户未授权的远端或版本操作不得执行。可以完成不依赖远端写入的实现和本地验证。
-- 日常开发目标为 `develop`；`main` 源码必须经 PR、当前候选的完整 `Release Qualification` 和 squash 合并。Host 没有生成物直推 `main` 例外。禁止普通直推/force push `main`。
-- 首次安装仓库资格控制面时，单独的控制面初始化 PR 按当时实际生效的门禁与维护者明确审核合入；不携带产品功能或生成物、不伪造新资格、不自动发布。此初始化操作需要独立授权，不能成为已启用门禁后的绕过入口。
+- 日常开发目标为 `develop`；`main` 源码必须经 PR、`Host / Required` 成功和 squash 合并。Host 没有生成物直推 `main` 例外。禁止普通直推/force push `main`。
 - 正式版本号仅按用户指示修改；未指定版本不阻止普通修复、架构或工具工作。指定版本后同步相关元数据。`major=0` 或含 `-beta.N`/`-rc.N` 的发行标记为 Pre-release。预览插件通道与 Host 产品 Pre-release 是不同概念。
 - 修改前保存当前 HEAD、diff 和将修改文件的外部备份。备份必须包含未提交字节；只记录 tag 不足以保全工作树。未经针对性授权不使用 `reset --hard`、`clean -fd`、自动 stash 或覆盖恢复。已授权的版本化本地备份 tag 不推送远端。
 - `config/`、`data/`、`history/`、`logs/`、`.nxp/`、插件用户数据、更新/配置恢复现场属于用户或运行态。测试使用新建隔离目录；不得对用户现有实例、进程、端口或文件做“测试清理”。读日志先脱敏。
@@ -55,18 +54,13 @@ HTTP 只处理路由、认证、参数、用例调用和响应映射；图标、
 主要入口如下，完整参数和工具链版本以 `docs/testing/commands.md` 为准：
 
 ```text
-node tests/run.mjs dev
-node tests/run.mjs dev ui
-node tests/run.mjs dev system --group plugins
-node tests/run.mjs release core
-node tests/run.mjs release frontend-contract
-node tests/run.mjs release ui-runtime
-node tests/run.mjs release execution-emulator
-node tests/run.mjs release update-acceptance
-node tests/run.mjs release all
+node tests/run.mjs prepare
+node tests/run.mjs fast
+node tests/run.mjs integration
+node tests/run.mjs all
 ```
 
-H1–H5 的测试内容在本地和 CI 一致。H3/H4 使用 scale10；H5 包含 update scale10、update scale1 故障注入及 execution scale1。未知组、空选择、零用例、意外 skip、缺报告、子进程失败和超时不得报告通过。环境限制与断言失败分开记录；未运行就是 NOT_RUN。
+`fast` 不构建生产包，`integration` 复用同一次 Test Host 运行 UI、系统与真实计时检查；候选任务在合并后另行验收生产包。未知组、空选择、零用例、意外 skip、缺报告、子进程失败和超时不得报告通过。环境限制与断言失败分开记录；未运行就是 NOT_RUN。
 
 生产/Test Host 构建的输出和中间目录分离；两者共享同一业务源实现，禁止将测试 EXE 发布给用户。测试使用独立端口和受控进程/模拟器 fixture，操作系统授权边界通过平台适配器契约验证，不冒称普通权限已执行了系统级操作。
 

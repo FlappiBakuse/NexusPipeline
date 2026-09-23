@@ -4,7 +4,7 @@
 
 以下命令均在 `NexusPipeline/` 根目录执行：
 
-方案 B 的本地阶段入口已可使用；线上 Required 仍按现行 ruleset 运行旧 Qualification，切换前不要删除旧工作流：
+当前本地与 CI 使用同一快速、集成分层入口：
 
 ```text
 node tests\run.mjs prepare
@@ -37,11 +37,11 @@ node tests\run.mjs release execution-emulator
 node tests\run.mjs release update-acceptance
 ```
 
-统一 runner 会在对应 Gate 首次运行前执行 `npm ci --no-audit --no-fund`，并要求每个工作区存在 `package-lock.json`；依赖准备失败会直接终止 Gate，不会降级为跳过。
+统一 runner 在需要的阶段执行 `npm ci --no-audit --no-fund`，并要求每个工作区存在 `package-lock.json`；依赖准备失败会直接终止，不会降级为跳过。
 
 `release core` 的最后一项是架构门禁：对 production 和 Test Host 真实加载 MSBuild/Roslyn 工程执行 `check`，随后生成 `.generated/architecture/backend-map.json`，校验 schema、非空源码集合、owner 路径和预期模式，重复生成结果必须一致；当前 run 的 artifact 中同时保存带候选 SHA 的地图副本。地图不是宿主运行时或 `release/` 的输入。
 
-`tooling` 发现并运行现役 Node 工具测试（文档索引测试由 `docs` 独占）和 `tools/tests/test_*.py`，同时覆盖前端边界、源码编码、更新策略、资格控制与原生报告解析。插件源码布局测试只在 `tooling` 执行。
+`tooling` 发现并运行现役 Node 工具测试（文档索引测试由 `docs` 独占）和 `tools/tests/test_*.py`，同时覆盖前端边界、源码编码、更新策略、候选来源与原生报告解析。插件源码布局测试只在 `tooling` 执行。
 
 统一 runner 保留实时 stdout/stderr、退出码、超时信息和原生 TAP/TRX/Vitest/Playwright 报告。每次运行的报告位于 `tests/.artifacts/runs/<runId>/reports/`；失败时不删除唯一原始报告。
 
@@ -70,7 +70,7 @@ node tests\run.mjs dev system [runtime|control|config|execution|judge|emulator|p
 
 Test Host 使用 `NexusTestHost=true` 的 `asInvoker` 清单和每次运行独立的 `tests/.artifacts/runs/<runId>/`；完整性等级只作为诊断信息，不决定是否跳过测试。
 
-每次 Release Qualification 的 H5 固定执行两次独立的 Test Host Update 和一次 Execution 真实计时段：
+完整集成与发行诊断固定执行两次独立的 Test Host Update 和一次 Execution 真实计时段：
 
 ```text
 node tests\run.mjs release update-acceptance
@@ -86,28 +86,26 @@ System Smoke 的 `emulator` suite 覆盖宿主内置 Generic ADB、MuMuManager�
 
 1. 修改宿主代码、测试或前端纯函数后运行 `node tests\run.mjs dev default` 的适用组合。
 2. 涉及配置交换、Windows 进程、端口、解释器、插件、模拟器或更新事务时，追加 `node tests\run.mjs dev system`；宿主模拟器系统边界通过 TestPlugin 验证 provider 注册到执行及清理，厂商驱动行为由官方扩展插件测试覆盖。
-3. 发布前由 Qualification workflow 独立执行 `release core`、`frontend-contract`、`ui-runtime`、`execution-emulator`、`update-acceptance` 五个 Gate；本地 `release all` 使用相同顺序。
-4. 两仓库的宿主—插件契约发生变化时，在插件仓库执行下方固定 P1/P2/P3，并核对两仓库文档、manifest 和测试。
-5. 修改 `frontend/src/plugin-bridge/**`、`frontend/src/platform/appearance.ts`、公开 `nxp-*` 元素或 Frontend API 契约时，必须执行 `NexusPipeline-Plugins/tools/Test-FrontendPlugins.mjs` 和宿主 `node tests/run.mjs contract`。前者使用 mock host 验证插件业务与生命周期，从实际宿主检出的 `NEXUS_PUBLIC_ELEMENTS` 读取公开清单；后者加载真实公共元素完成装配交互验证。两仓库 Qualification 各自固定一次对端官方完整 SHA；Plugins 的 `host.lock.json` 只保存 API/locale 兼容元数据，不再承载浮动或旧式 commit 锁。managed-code 构建与打包共享该次 SDK 来源。
+3. PR 的 `Host / Required` 执行适用的 `fast` 范围；合并后的候选任务执行 `integration`、生产构建及包验收。发行前核对该源码提交的候选确实成功。
+4. 两仓库的宿主—插件契约发生变化时，在插件仓库执行下方 `verify --scope all`，并核对两仓库文档、manifest 和测试。
+5. 修改 `frontend/src/plugin-bridge/**`、`frontend/src/platform/appearance.ts`、公开 `nxp-*` 元素或 Frontend API 契约时，必须执行 `NexusPipeline-Plugins/tools/Test-FrontendPlugins.mjs` 和宿主 `node tests/run.mjs contract`。前者使用 mock host 验证插件业务与生命周期，从实际宿主检出的 `NEXUS_PUBLIC_ELEMENTS` 读取公开清单；后者加载真实公共元素完成装配交互验证。两仓库任务各自固定一次对端官方完整 SHA；Plugins 的 `host.lock.json` 只保存 API/locale 兼容元数据。managed-code 构建与打包共享该次 SDK 来源。
 
-在 Plugins 仓库根执行以下 PowerShell 命令。`HOST_ROOT` 指向实际干净 Host checkout；SDK SHA 从该目录取得，目标基线 B 从本次已同步的 main 取得。目录不要求相邻。
+在 Plugins 仓库根执行以下 PowerShell 命令。`HOST_ROOT` 指向实际干净 Host checkout；SDK SHA 从该目录取得，PR 基线从本次已同步的 main 取得。目录不要求相邻。
 
 ```powershell
 $env:HOST_ROOT = (Resolve-Path '<实际 Host checkout 路径>').Path
 $env:SDK_SHA = (git -C $env:HOST_ROOT rev-parse HEAD).Trim()
-$targetBase = (git rev-parse main).Trim()
-python tools/repository.py qualification --group source --base $targetBase --host-root "$env:HOST_ROOT" --sdk-sha $env:SDK_SHA
-python tools/repository.py qualification --group frontend-managed --base $targetBase --host-root "$env:HOST_ROOT" --sdk-sha $env:SDK_SHA
-python tools/repository.py qualification --group candidate --base $targetBase --host-root "$env:HOST_ROOT" --sdk-sha $env:SDK_SHA --output .generated/qualification-candidate
+$targetBase = (git rev-parse origin/main).Trim()
+python tools/repository.py verify --scope all --base $targetBase --host-root "$env:HOST_ROOT" --sdk-sha $env:SDK_SHA
 ```
 
-H1–H5 的 CI job 无论成功或失败都会保留本次 `tests/.artifacts/runs/*/reports/` 原生报告；不会上传整个 runtime、用户配置或日志目录。依赖安装阶段尚未产生报告时，job 日志保留命令及非零退出状态。
+CI 与候选任务在成功或失败时保留本次 `tests/.artifacts/runs/*/reports/` 原生报告；不会上传整个 runtime、用户配置或日志目录。依赖安装阶段尚未产生报告时，job 日志保留命令及非零退出状态。
 
    脚本当前校验：`frontend.apiVersion` 必须为 1.5、宿主私有结构 class 拒绝、`nxp-*` 元素必须来自公开元素集合、插件不得复制 Nexus UI 组件，并按插件页面形态检查公开契约。slot 插件验证 renderer、所需公开控件和 cleanup；GameCheckIn route 页面验证导航/页面注册、任务 API 行为、离开后资源释放和再次进入。CustomWallpaper 额外覆盖插件级壁纸运行时：激活即应用背景与配色、离开设置页面保留全局外观、页面访问不触发随机轮换、按时间轮换在无设置页面时继续生效、只有插件停用才清理外观与计时器。
 
 构建、测试和发布命令保持实时输出；失败时保留失败项、原因摘要和必要的 runtime 证据。长任务不使用无反馈的超长等待。
 
-生产专项适配器的真实 Jint 联调：`dotnet run --project tools/NexusPipeline.TaskProtocolTests -- --plugin-root <Plugins>`。此命令使用显式插件 checkout 和合成夹具；插件 P1 也运行相同入口。
+生产专项适配器的真实 Jint 联调：`dotnet run --project tools/NexusPipeline.TaskProtocolTests -- --plugin-root <Plugins>`。此命令使用显式插件 checkout 和合成夹具；插件 `verify --scope all` 也运行相同入口。
 
 跨账号配置与恢复：`dotnet run --project tools/NexusPipeline.TaskProtocolTests -p:NexusTestHost=true -- --plugin-root <Plugins> --account-isolation <报告.json>`。八个生产适配器、两个账号、六种生命周期情景，共 96 项；使用新建目录和合成配置，不启动目标软件。失败时输出并保留该情景的隔离目录。
 

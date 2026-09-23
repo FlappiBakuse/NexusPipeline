@@ -46,7 +46,7 @@ dotnet run --project tools/NexusPipeline.TaskProtocolTests -- --plugin-root <Plu
 node tests/run.mjs release all
 ```
 
-联调工具不启动游戏或读取用户配置；使用真实 Jint、协议校验、结果归并和配置事务。正式 EXE 的管理员清单保持不变，系统功能验收使用 asInvoker Test Host。最终资格 H1–H5 仍全部执行。
+联调工具不启动游戏或读取用户配置；使用真实 Jint、协议校验、结果归并和配置事务。正式 EXE 的管理员清单保持不变，系统功能验收使用 asInvoker Test Host。PR 快速检查与合并后候选的集成验收均须通过。
 
 账号配置矩阵入口：`dotnet run --project tools/NexusPipeline.TaskProtocolTests -p:NexusTestHost=true -- --plugin-root <Plugins> --account-isolation <报告.json>`。八个生产适配器分别使用同名、不同开关的 A/B 合成配置，经过真实配置交换、Jint 发现/重试、快照写回及持久化恢复；覆盖自动同步、禁止同步、选择性重试或安全停止、取消、进程清理未确认和重试中断。校验原现场和另一账号（含快照元数据）的字节不变、本账号完整配置语义与业务计数。失败现场保留供诊断；该探针不启动游戏，不替代进程租约、编辑器、真实账号登录或发行版资格验证。
 

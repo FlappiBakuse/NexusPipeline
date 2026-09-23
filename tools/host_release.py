@@ -12,7 +12,7 @@ import subprocess
 import tempfile
 import zipfile
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 from xml.etree import ElementTree
 
 try:
@@ -75,7 +75,7 @@ def git_output(root: Path, *arguments: str) -> str:
     return result.stdout.strip()
 
 
-def verify_tag(root: Path, tag: str, *, qualification_verifier: Callable[[str], None] | None = None) -> str:
+def verify_tag(root: Path, tag: str) -> str:
     tag = normalized_tag(tag)
     commit = git_output(root, "rev-parse", f"refs/tags/{tag}^{{commit}}")
     _require(re.fullmatch(r"[0-9a-f]{40}", commit) is not None, "tag 未解析为 commit")
@@ -87,8 +87,6 @@ def verify_tag(root: Path, tag: str, *, qualification_verifier: Callable[[str], 
     git_output(root, "merge-base", "--is-ancestor", commit, main_ref)
     declared = project_version(root, commit)
     _require(declared == tag[1:], f"tag 版本与 csproj 不一致：{tag} / {declared}")
-    if qualification_verifier is not None:
-        qualification_verifier(commit)
     return commit
 
 

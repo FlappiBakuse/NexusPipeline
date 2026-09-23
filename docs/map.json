@@ -662,7 +662,7 @@
     {
       "id": "testing.commands",
       "path": "testing/commands.md",
-      "summary": "Unit、Frontend、Docs、System 与五个 Qualification Gate 命令",
+      "summary": "Unit、Frontend、Docs、System 与快速/集成检查命令",
       "topics": [
         "命令",
         "门禁",
@@ -675,7 +675,7 @@
       ],
       "codePaths": [
         "tests/run.mjs",
-        ".github/workflows/release-qualification.yml"
+        ".github/workflows/ci.yml"
       ],
       "testDomains": [
         "governanceDomains.tooling"
@@ -688,7 +688,7 @@
     {
       "id": "testing.domains",
       "path": "testing/domains.md",
-      "summary": "测试 registry、PR Feedback 范围与 Qualification 清理边界",
+      "summary": "测试 registry、PR 范围与候选清理边界",
       "topics": [
         "影响域",
         "CI",
@@ -702,7 +702,7 @@
       "codePaths": [
         "tests/registry.mjs",
         "tools/ci-scope.mjs",
-        ".github/workflows/release-qualification.yml"
+        ".github/workflows/ci.yml"
       ],
       "testDomains": [
         "governanceDomains.tooling"
@@ -864,7 +864,7 @@
       ],
       "codePaths": [
         "build.cmd",
-        ".github/workflows/release-qualification.yml"
+        ".github/workflows/release.yml"
       ],
       "testDomains": [
         "hostAreas.update",
