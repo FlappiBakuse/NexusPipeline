@@ -1,6 +1,8 @@
 name: Host Release
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       tag:
@@ -9,23 +11,31 @@ on:
         type: string
       pr_number:
         description: Same-repository merged PR carrying the qualified source
-        required: true
+        required: false
         type: string
       head_sha:
         description: Qualified PR head H
-        required: true
+        required: false
         type: string
       base_sha:
         description: Historical qualification base B
-        required: true
+        required: false
         type: string
       check_id:
         description: Host Release Qualification check id
-        required: true
+        required: false
         type: string
       qualification_run_id:
         description: Completed Host Release Qualification run id
-        required: true
+        required: false
+        type: string
+      candidate_run_id:
+        description: Original successful Host candidate run ID for publish-only recovery
+        required: false
+        type: string
+      candidate_artifact_id:
+        description: Artifact ID if the original run has more than one successful candidate
+        required: false
         type: string
 
 permissions:
@@ -36,8 +46,79 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  candidate:
+    name: Build and validate Host candidate
+    if: github.event_name == 'push'
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          path: NexusPipeline
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: "24"
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+        with:
+          dotnet-version: "8.0.424"
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.13"
+      - name: Resolve official Plugins input
+        id: plugins
+        shell: pwsh
+        run: |
+          $line = @(git ls-remote https://github.com/FlappiBakuse/NexusPipeline-Plugins.git refs/heads/main)
+          if ($LASTEXITCODE -ne 0 -or $line.Count -ne 1) { throw 'Cannot resolve official Plugins main' }
+          $sha = ($line[0] -split '\s+')[0]
+          if ($sha -notmatch '^[0-9a-f]{40}$') { throw 'Invalid official Plugins SHA' }
+          "sha=$sha" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: FlappiBakuse/NexusPipeline-Plugins
+          ref: ${{ steps.plugins.outputs.sha }}
+          path: NexusPipeline-Plugins
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Run merged-source integration
+        working-directory: NexusPipeline
+        env:
+          NEXUS_OFFICIAL_PLUGINS_ROOT: ${{ github.workspace }}\NexusPipeline-Plugins
+        run: node tests/run.mjs integration
+      - name: Build and verify original candidate
+        working-directory: NexusPipeline
+        shell: pwsh
+        env:
+          PLUGIN_SHA: ${{ steps.plugins.outputs.sha }}
+        run: >-
+          python tools/host_release.py candidate
+          --root . --source-sha $env:GITHUB_SHA
+          --workflow-sha $env:GITHUB_WORKFLOW_SHA
+          --partner-sha $env:PLUGIN_SHA
+          --run-id $env:GITHUB_RUN_ID --run-attempt $env:GITHUB_RUN_ATTEMPT
+          --frontend-ready
+          --output .generated/candidate/$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT
+      - name: Upload diagnostic reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: host-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: NexusPipeline/tests/.artifacts/runs/*/reports/**
+          if-no-files-found: warn
+      - name: Upload validated candidate
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: host-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: NexusPipeline/.generated/candidate/${{ github.run_id }}-${{ github.run_attempt }}/
+          include-hidden-files: true
+          if-no-files-found: error
+
   preflight:
     name: Verify approved tag and qualification
+    if: github.event_name == 'workflow_dispatch' && inputs.candidate_run_id == ''
     runs-on: ubuntu-latest
     environment: qualification-control
     outputs:
@@ -101,6 +182,7 @@ jobs:
 
   build:
     name: Build approved production package
+    if: github.event_name == 'workflow_dispatch' && inputs.candidate_run_id == ''
     needs: preflight
     runs-on: windows-latest
     permissions:
@@ -146,6 +228,7 @@ jobs:
 
   publish:
     name: Publish approved release
+    if: github.event_name == 'workflow_dispatch' && inputs.candidate_run_id == ''
     needs: [preflight, build]
     runs-on: windows-latest
     environment: host-release
@@ -217,76 +300,81 @@ jobs:
           SOURCE_SHA: ${{ needs.preflight.outputs.source_sha }}
           PUBLISH_ROOT: NexusPipeline/.artifacts/publish/${{ github.run_id }}
         shell: bash
+        run: bash NexusPipeline/tools/host_release_publish.sh
+
+  publish-only:
+    name: Publish original Host candidate
+    if: github.event_name == 'workflow_dispatch' && inputs.candidate_run_id != ''
+    runs-on: windows-latest
+    environment: host-release
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: NexusPipeline
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.13"
+      - name: Resolve original successful producer and artifact
+        id: source
+        working-directory: NexusPipeline
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+          CANDIDATE_ARTIFACT_ID: ${{ inputs.candidate_artifact_id }}
         run: |
-          set -euo pipefail
-          cd "$PUBLISH_ROOT"
-          metadata="build-metadata.json"
-          test "$(jq -r .sourceSha "$metadata")" = "$SOURCE_SHA"
-          test "$(jq -r .tag "$metadata")" = "$TAG"
-          test "$(jq -r .mode "$metadata")" = production
-          zip_asset="NexusPipeline-$(jq -r .tag "$metadata")-win-x64.zip"
-          sha_asset="$zip_asset.sha256"
-          test -f "$zip_asset" -a -f "$sha_asset"
-          expected="$(tr -d '\r\n' < "$sha_asset")"
-          actual="$(sha256sum "$zip_asset" | cut -d' ' -f1)"
-          test "$expected" = "$actual"
-          python "$GITHUB_WORKSPACE/NexusPipeline/tools/host_release.py" verify-package \
-            --package "$zip_asset" \
-            --metadata "$metadata" \
-            --expected-source-sha "$SOURCE_SHA" \
-            --expected-tag "$TAG"
-          api="https://api.github.com/repos/$GH_REPO/releases/tags/$TAG"
-          response_file="$(mktemp)"
-          status="$(curl -sS -o "$response_file" -w '%{http_code}' -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "$api")"
-          if [ "$status" = 404 ]; then
-            # Tag lookup omits drafts; recover an existing draft by its immutable ID.
-            matches="$(gh api --paginate "repos/$GH_REPO/releases?per_page=100" | jq -s --arg tag "$TAG" '[.[][] | select(.tag_name == $tag)]')"
-            count="$(jq length <<<"$matches")"
-            test "$count" -le 1 || { echo "同 tag 存在多个 Release，拒绝猜测恢复目标" >&2; exit 1; }
-            if [ "$count" = 1 ]; then
-              release_json="$(jq '.[0]' <<<"$matches")"
-            else
-              prerelease=false
-              if [[ "$TAG" =~ ^v0\. || "$TAG" =~ -(beta|rc)\.[0-9]+$ ]]; then prerelease=true; fi
-              release_json="$(gh api --method POST "repos/$GH_REPO/releases" -f tag_name="$TAG" -f target_commitish="$SOURCE_SHA" -f name="$TAG" -f body="sourceSha=$SOURCE_SHA" -F draft=true -F prerelease="$prerelease")"
-            fi
-          elif [ "$status" = 200 ]; then
-            release_json="$(cat "$response_file")"
-          else
-            cat "$response_file" >&2
-            echo "读取同 tag Release 失败：HTTP $status" >&2
-            exit 1
-          fi
-          release_id="$(jq -r .id <<<"$release_json")"
-          test "$release_id" != null -a "$release_id" != ""
-          for asset in "$zip_asset" "$sha_asset"; do
-            existing_url="$(jq -r --arg name "$asset" '.assets[]? | select(.name == $name) | .url' <<<"$release_json" | head -n 1)"
-            if [ -n "$existing_url" ]; then
-              existing="$(mktemp)"
-              curl -sS -L -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/octet-stream' "$existing_url" -o "$existing"
-              cmp -s "$existing" "$asset" || { echo "拒绝覆盖同 tag 的不同字节资产：$asset" >&2; exit 1; }
-              rm -f "$existing"
-            else
-              gh release upload "$TAG" "$asset" --repo "$GH_REPO"
-            fi
-          done
-          release_json="$(gh api "repos/$GH_REPO/releases/$release_id")"
-          for asset in "$zip_asset" "$sha_asset"; do
-            asset_url="$(jq -r --arg name "$asset" '.assets[]? | select(.name == $name) | .url' <<<"$release_json" | head -n 1)"
-            test -n "$asset_url"
-            received="$(mktemp)"
-            curl -sS -f -L -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/octet-stream' "$asset_url" -o "$received"
-            cmp -s "$received" "$asset" || { echo "远端资产下载后字节不一致：$asset" >&2; exit 1; }
-            if [ "$asset" = "$zip_asset" ]; then
-              python "$GITHUB_WORKSPACE/NexusPipeline/tools/host_release.py" verify-package \
-                --package "$received" \
-                --metadata "$metadata" \
-                --expected-source-sha "$SOURCE_SHA" \
-                --expected-tag "$TAG"
-            else
-              test "$(sha256sum "$received" | cut -d' ' -f1)" = "$(sha256sum "$asset" | cut -d' ' -f1)"
-            fi
-            rm -f "$received"
-          done
-          gh api --method PATCH "repos/$GH_REPO/releases/$release_id" -F draft=false
-          test "$(gh api "repos/$GH_REPO/releases/$release_id" --jq '.draft')" = false
+          if ($env:GITHUB_REF -ne 'refs/heads/main') { throw 'Publisher control must run from main' }
+          $arguments = @('--candidate-run-id', $env:CANDIDATE_RUN_ID, '--current-run-id', $env:GITHUB_RUN_ID, '--github-output', $env:GITHUB_OUTPUT)
+          if ($env:CANDIDATE_ARTIFACT_ID) { $arguments += @('--artifact-id', $env:CANDIDATE_ARTIFACT_ID) }
+          python tools/host_candidate_source.py @arguments
+          if ($LASTEXITCODE -ne 0) { throw 'Original candidate source was not verifiable' }
+      - name: Download original artifact and verify bytes
+        working-directory: NexusPipeline
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: ${{ steps.source.outputs.artifact_id }}
+          ARTIFACT_DIGEST: ${{ steps.source.outputs.artifact_digest }}
+        run: |
+          New-Item -ItemType Directory -Path '.generated' -Force | Out-Null
+          $uri = "https://api.github.com/repos/FlappiBakuse/NexusPipeline/actions/artifacts/$env:ARTIFACT_ID/zip"
+          curl.exe -fsSL -H "Authorization: Bearer $env:GITHUB_TOKEN" -H 'Accept: application/octet-stream' --output '.generated/host-candidate-artifact.zip' $uri
+          if ($LASTEXITCODE -ne 0) { throw 'Candidate artifact download failed' }
+          python tools/host_release.py extract-candidate --artifact-zip '.generated/host-candidate-artifact.zip' --expected-digest $env:ARTIFACT_DIGEST --output '.generated/host-candidate'
+          if ($LASTEXITCODE -ne 0) { throw 'Candidate artifact failed server digest or path validation' }
+      - name: Verify tag, source tree, producer and production package
+        working-directory: NexusPipeline
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          SOURCE_SHA: ${{ steps.source.outputs.source_sha }}
+          WORKFLOW_SHA: ${{ steps.source.outputs.workflow_sha }}
+          ORIGINAL_RUN_ID: ${{ steps.source.outputs.run_id }}
+          ORIGINAL_ATTEMPT: ${{ steps.source.outputs.run_attempt }}
+        run: |
+          python tools/host_release.py validate-candidate --root . --output '.generated/host-candidate' --tag $env:RELEASE_TAG --expected-source-sha $env:SOURCE_SHA --workflow-sha $env:WORKFLOW_SHA --run-id $env:ORIGINAL_RUN_ID --run-attempt $env:ORIGINAL_ATTEMPT
+          if ($LASTEXITCODE -ne 0) { throw 'Original candidate failed independent validation' }
+      - name: Create release publisher App token
+        id: publisher-token
+        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547
+        with:
+          app-id: ${{ vars.HOST_RELEASE_PUBLISHER_APP_ID }}
+          private-key: ${{ secrets.HOST_RELEASE_PUBLISHER_PRIVATE_KEY }}
+          owner: FlappiBakuse
+          repositories: NexusPipeline
+          permission-contents: write
+      - name: Publish immutable package without rebuilding
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.publisher-token.outputs.token }}
+          GH_REPO: FlappiBakuse/NexusPipeline
+          TAG: ${{ inputs.tag }}
+          SOURCE_SHA: ${{ steps.source.outputs.source_sha }}
+          PUBLISH_ROOT: NexusPipeline/.generated/host-candidate
+        run: bash NexusPipeline/tools/host_release_publish.sh

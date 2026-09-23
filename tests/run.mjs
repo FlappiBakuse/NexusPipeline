@@ -602,6 +602,7 @@ async function runDefault() {
   for (const step of [
     () => runUnit(),
     () => runFrontend(),
+    () => runContracts(),
     () => runDocs(),
     () => runTooling(),
     () => runSyntax(),

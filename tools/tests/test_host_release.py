@@ -8,11 +8,34 @@ import hashlib
 from unittest.mock import Mock, patch
 from pathlib import Path
 
-from tools.host_release import HostReleaseError, archive_production, normalized_tag, parse_version, validate_candidate_data, verify_received_package, write_candidate_manifest
+from tools.host_release import HostReleaseError, archive_production, extract_candidate_artifact, normalized_tag, parse_version, validate_candidate_data, verify_received_package, write_candidate_manifest
 from tools import host_release
 
 
 class HostReleaseTests(unittest.TestCase):
+    def test_artifact_digest_and_paths_are_checked_before_extraction(self) -> None:
+        with tempfile.TemporaryDirectory(prefix='nxp-host-artifact-test-') as temporary:
+            root = Path(temporary)
+            archive = root / 'artifact.zip'
+            names = ['candidate.json', 'build-metadata.json', 'NexusPipeline-v1.2.3-win-x64.zip',
+                     'NexusPipeline-v1.2.3-win-x64.zip.sha256']
+            with zipfile.ZipFile(archive, 'w') as stream:
+                for name in names:
+                    stream.writestr(name, b'data')
+            digest = 'sha256:' + hashlib.sha256(archive.read_bytes()).hexdigest()
+            with self.assertRaisesRegex(HostReleaseError, 'SHA256'):
+                extract_candidate_artifact(archive, root / 'wrong', expected_digest='sha256:' + '0' * 64)
+            self.assertFalse((root / 'wrong').exists())
+            extract_candidate_artifact(archive, root / 'valid', expected_digest=digest)
+            self.assertEqual({item.name for item in (root / 'valid').iterdir()}, set(names))
+            with zipfile.ZipFile(archive, 'w') as stream:
+                for name in [*names[:2], '../escape.zip', names[-1]]:
+                    stream.writestr(name, b'data')
+            hostile_digest = 'sha256:' + hashlib.sha256(archive.read_bytes()).hexdigest()
+            with self.assertRaisesRegex(HostReleaseError, '路径无效'):
+                extract_candidate_artifact(archive, root / 'hostile', expected_digest=hostile_digest)
+            self.assertFalse((root / 'hostile').exists())
+
     def test_candidate_inventory_binds_original_producer_and_rejects_extra_files(self) -> None:
         with tempfile.TemporaryDirectory(prefix='nxp-host-candidate-test-') as temporary:
             root = Path(temporary)
