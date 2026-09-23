@@ -36,7 +36,7 @@ const MODE_SUITES = new Set(["default", "ui", "system", "all"]);
 let reportSequence = 0;
 
 const buildPromises = new Map();
-const preparedNpmWorkspaces = new Set();
+const preparedNpmWorkspaces = new Map();
 const preparedGateDependencies = new Set();
 let officialPluginsRoot = null;
 
@@ -124,11 +124,32 @@ function runProcess(command, args, options = {}) {
 
 async function ensureNpmWorkspace(directory) {
   const workspace = path.resolve(directory);
-  if (preparedNpmWorkspaces.has(workspace)) return 0;
+  const manifest = path.join(workspace, "package.json");
   const lockfile = path.join(workspace, "package-lock.json");
-  if (!fs.existsSync(lockfile)) {
-    console.error(`[依赖] 缺少 package-lock.json：${workspace}`);
+  if (!fs.existsSync(manifest) || !fs.existsSync(lockfile)) {
+    console.error(`[依赖] 缺少 package.json 或 package-lock.json：${workspace}`);
     return 1;
+  }
+  const fingerprint = createHash("sha256")
+    .update(`npm-ci-v1\0${process.platform}\0${process.arch}\0${process.version}\0`)
+    .update(fs.readFileSync(manifest))
+    .update("\0")
+    .update(fs.readFileSync(lockfile))
+    .digest("hex");
+  const modules = path.join(workspace, "node_modules");
+  const stamp = path.join(modules, ".nxp-install.hash");
+  if (fs.existsSync(modules) && fs.lstatSync(modules).isSymbolicLink()) {
+    console.error(`[依赖] node_modules 不得是符号链接：${modules}`);
+    return 1;
+  }
+  const ready = fs.existsSync(path.join(modules, ".package-lock.json"))
+    && fs.existsSync(stamp)
+    && fs.readFileSync(stamp, "utf8").trim() === fingerprint;
+  if (preparedNpmWorkspaces.get(workspace) === fingerprint && ready) return 0;
+  if (ready) {
+    console.error(`[依赖] 复用已安装工作区：${workspace}`);
+    preparedNpmWorkspaces.set(workspace, fingerprint);
+    return 0;
   }
   const code = await runProcess(npmCommand, ["ci", "--no-audit", "--no-fund"], {
     cwd: workspace,
@@ -138,7 +159,14 @@ async function ensureNpmWorkspace(directory) {
     console.error(`[依赖] npm ci 失败：${workspace}`);
     return code;
   }
-  preparedNpmWorkspaces.add(workspace);
+  if (!fs.existsSync(path.join(modules, ".package-lock.json"))) {
+    console.error(`[依赖] npm ci 未生成完整安装记录：${workspace}`);
+    return 1;
+  }
+  const temporaryStamp = `${stamp}.${process.pid}.tmp`;
+  fs.writeFileSync(temporaryStamp, `${fingerprint}\n`, "utf8");
+  fs.renameSync(temporaryStamp, stamp);
+  preparedNpmWorkspaces.set(workspace, fingerprint);
   return 0;
 }
 
