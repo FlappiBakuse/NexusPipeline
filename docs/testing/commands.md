@@ -13,7 +13,7 @@ node tests\run.mjs integration
 node tests\run.mjs all
 ```
 
-`prepare` 安装前端和工具工作区的锁定依赖；`fast` 执行后端单测、前端类型检查与单测、文档、工具、语法和架构检查，不构建生产包。`integration` 在 Windows 上构建一次隔离 Test Host，执行 UI 与系统贯通、更新和执行真实计时；不构建生产包。`all` 在同一进程中依次执行 fast 和 integration，复用已准备依赖及 Test Host。生产构建由 `build` 单独执行。
+`prepare` 安装前端和工具工作区的锁定依赖；`fast` 执行后端单测、前端类型检查与单测、官方插件契约、文档、工具、语法和架构检查，不构建生产包。非纯文档的 `fast` 必须通过 `NEXUS_OFFICIAL_PLUGINS_ROOT` 指定固定的官方插件 checkout。`integration` 在 Windows 上构建一次隔离 Test Host，执行 UI 与系统贯通、更新和执行真实计时；不构建生产包。`all` 在同一进程中依次执行 fast 和 integration，复用已准备依赖及 Test Host。生产构建由 `build` 单独执行。
 
 ```text
 dotnet test tests\NexusPipeline.Tests\NexusPipeline.Tests.csproj --nologo -m:1
