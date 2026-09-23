@@ -9,7 +9,7 @@ import { getIntegrityLevel } from "./support/windows-process.mjs";
 import { getProcessRunnerState, resetProcessRunnerState, runProcess as runOwnedProcess } from "./support/process-runner.mjs";
 import { findAvailablePort } from "./support/test-runtime.mjs";
 import { gateSequence, runtimePolicy } from "./support/runtime-policy.mjs";
-import { FRONTEND_TEST_GROUPS, GOVERNANCE_DOMAINS, HOST_TEST_AREAS, SYSTEM_TEST_GROUPS, validateRegistry } from "./registry.mjs";
+import { FRONTEND_TEST_GROUPS, GOVERNANCE_DOMAINS, HOST_TEST_AREAS, SYSTEM_TEST_GROUPS, systemRuntimeName, validateRegistry } from "./registry.mjs";
 
 validateRegistry();
 
@@ -556,15 +556,16 @@ async function runSystem(args = [], { phase = "accelerated" } = {}) {
       const suitePhase = parsed.realtime
         ? suite.group === "execution" ? "execution-realtime" : suite.group === "update" ? "update-realtime" : phase
         : phase;
+      const runtimeName = systemRuntimeName(suite.runtimeName, suitePhase);
       const env = testHostEnvironment({
         phase: suitePhase,
         system: true,
-        runtimeName: suite.runtimeName,
-        exitFile: path.join(runRoot, suite.runtimeName, ".nxp", "test-host.exit"),
+        runtimeName,
+        exitFile: path.join(runRoot, runtimeName, ".nxp", "test-host.exit"),
       });
       env.NEXUS_SYSTEM_WEB_PORT = String(port);
       if (suite.group === "emulator") env.NEXUS_SYSTEM_EMULATOR_PLUGIN_DIR = emulatorFixturePluginDir;
-      console.error(`[System Smoke] 开始 ${suite.group}/${suite.runtimeName}，port=${port}，timeScale=${env.NEXUS_TIME_SCALE}`);
+      console.error(`[System Smoke] 开始 ${suite.group}/${runtimeName}，port=${port}，timeScale=${env.NEXUS_TIME_SCALE}`);
       code = await runReported(nodeCommand, ["--test", "--test-concurrency=1", suite.file], { env, timeoutMs: 5 * 60 * 1000 }, "tap", {
         expectedFiles: [normalizePath(suite.file)],
         invokedFiles: [normalizePath(suite.file)],

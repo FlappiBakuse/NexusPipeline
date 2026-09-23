@@ -9,6 +9,7 @@ import {
   HOST_TEST_AREAS,
   SYSTEM_TEST_GROUPS,
   TEST_DOMAIN_REGISTRY,
+  systemRuntimeName,
   validateRegistry,
 } from "../../tests/registry.mjs";
 
@@ -41,6 +42,19 @@ test("registry is unique and contains only runnable, existing suites", () => {
     for (const suitePath of group.suitePaths) {
       assert.equal(fs.existsSync(path.join(ROOT, suitePath)), true, `${group.key}: ${suitePath}`);
     }
+  }
+});
+
+test("H5 real-time phases use distinct runtime directories", () => {
+  for (const name of ["runtime-startup-update", "runtime-update", "runtime-execution-resilience"]) {
+    const accelerated = systemRuntimeName(name, "accelerated");
+    const updateRealtime = systemRuntimeName(name, "update-realtime");
+    const executionRealtime = systemRuntimeName(name, "execution-realtime");
+    assert.equal(accelerated, name);
+    assert.notEqual(accelerated, updateRealtime);
+    assert.notEqual(accelerated, executionRealtime);
+    assert.match(updateRealtime, /^[A-Za-z0-9_-]+$/u);
+    assert.match(executionRealtime, /^[A-Za-z0-9_-]+$/u);
   }
 });
 test("registry does not treat shared fixtures or directories as a test file", () => {
