@@ -4,14 +4,15 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const mode = process.argv[2] || "--production";
-if (!["--production", "--frontend"].includes(mode) || process.argv.length > 3) {
-  throw new Error("用法：node tools/source-hash.mjs [--production|--frontend]");
+const MODES = new Set(["--production", "--frontend", "--test-host"]);
+
+function inputPaths(mode) {
+  return mode === "--frontend"
+    ? ["frontend", "tools/source-hash.mjs"]
+    : mode === "--test-host"
+      ? ["src", "frontend", "Directory.Build.props", "build.cmd", "tests/run.mjs", "tools/source-hash.mjs"]
+      : ["src", "frontend", "Directory.Build.props", "build.cmd", "tools/source-hash.mjs"];
 }
-const inputs = mode === "--frontend"
-  ? ["frontend", "tools/source-hash.mjs"]
-  : ["src", "frontend", "Directory.Build.props", "build.cmd", "tools/source-hash.mjs"];
 
 function collectFiles(root) {
   const files = [];
@@ -29,26 +30,36 @@ function collectFiles(root) {
   return files;
 }
 
-const files = inputs
-  .flatMap(relative => {
-    const absolute = path.join(projectRoot, relative);
-    return fs.statSync(absolute).isDirectory() ? collectFiles(absolute) : [absolute];
-  })
-  .sort((left, right) => {
-    const a = path.relative(projectRoot, left).split(path.sep).join("/");
-    const b = path.relative(projectRoot, right).split(path.sep).join("/");
-    return Buffer.from(a, "utf8").compare(Buffer.from(b, "utf8"));
-  });
-
-const toolchain = [mode, process.platform, process.arch, process.version];
-if (mode === "--production") {
-  toolchain.push(execFileSync("dotnet", ["--version"], { cwd: projectRoot, encoding: "utf8" }).trim());
+export function computeSourceHash(projectRoot, mode, options = {}) {
+  if (!MODES.has(mode)) throw new Error(`不支持的 hash 模式：${mode}`);
+  const files = inputPaths(mode)
+    .flatMap(relative => {
+      const absolute = path.join(projectRoot, relative);
+      return fs.statSync(absolute).isDirectory() ? collectFiles(absolute) : [absolute];
+    })
+    .sort((left, right) => {
+      const a = path.relative(projectRoot, left).split(path.sep).join("/");
+      const b = path.relative(projectRoot, right).split(path.sep).join("/");
+      return Buffer.from(a, "utf8").compare(Buffer.from(b, "utf8"));
+    });
+  const toolchain = [mode, options.platform || process.platform, options.arch || process.arch, options.nodeVersion || process.version];
+  if (mode !== "--frontend") {
+    toolchain.push(options.dotnetVersion || execFileSync("dotnet", ["--version"], { cwd: projectRoot, encoding: "utf8" }).trim());
+  }
+  const manifest = [toolchain.join("\0"), ...files.map(file => {
+    const relative = path.relative(projectRoot, file).split(path.sep).join("/");
+    const digest = crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+    return `${relative}\0${digest}`;
+  })].join("\n");
+  return crypto.createHash("sha256").update(manifest, "utf8").digest("hex").toUpperCase();
 }
-const manifest = [toolchain.join("\0"), ...files.map(file => {
-  const relative = path.relative(projectRoot, file).split(path.sep).join("/");
-  const digest = crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
-  return `${relative}\0${digest}`;
-})].join("\n");
 
-const result = crypto.createHash("sha256").update(manifest, "utf8").digest("hex").toUpperCase();
-process.stdout.write(`${result}\n`);
+const invokedPath = process.argv[1] ? path.resolve(process.argv[1]) : "";
+if (invokedPath === fileURLToPath(import.meta.url)) {
+  const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  const mode = process.argv[2] || "--production";
+  if (!MODES.has(mode) || process.argv.length > 3) {
+    throw new Error("用法：node tools/source-hash.mjs [--production|--frontend|--test-host]");
+  }
+  process.stdout.write(`${computeSourceHash(projectRoot, mode)}\n`);
+}

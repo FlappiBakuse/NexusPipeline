@@ -34,7 +34,61 @@ function isDocumentationPath(file) {
 }
 
 function classifyFast(changedFiles) {
-  return { docs_only: Array.isArray(changedFiles) && changedFiles.length > 0 && changedFiles.every(isDocumentationPath) };
+  const plan = {
+    docs_only: false,
+    full: false,
+    unit_groups: [],
+    frontend_groups: [],
+    contracts: false,
+    docs: false,
+    tooling: false,
+    syntax: false,
+    architecture: false,
+    needs_plugins: false,
+  };
+  if (!Array.isArray(changedFiles) || changedFiles.length === 0) return { ...plan, full: true };
+  plan.docs_only = changedFiles.every(isDocumentationPath);
+  const unit = new Set();
+  const frontend = new Set();
+  const allUnit = ["core", "persistence", "config", "execution", "scheduling", "judgement", "plugins", "update", "control", "observability"];
+  const allFrontend = ["ui", "bridge", "platform", "features"];
+  for (const value of changedFiles) {
+    const file = value.replaceAll("\\", "/").replace(/^\.\//u, "");
+    if (isDocumentationPath(file) || file === "AGENTS.md") { plan.docs = true; continue; }
+    if (file.startsWith("frontend/src/ui/")) { frontend.add("ui"); continue; }
+    if (file.startsWith("frontend/src/plugin-bridge/") || file.startsWith("src/NexusPipeline.Plugin.Abstractions/")) {
+      frontend.add("bridge"); unit.add("plugins"); plan.contracts = true; plan.needs_plugins = true; plan.architecture = true; continue;
+    }
+    if (file.startsWith("frontend/src/platform/") || file.startsWith("frontend/src/stores/") || file === "frontend/src/router.ts") { frontend.add("platform"); continue; }
+    if (file.startsWith("frontend/src/features/") || file.startsWith("frontend/src/app/")) { frontend.add("features"); continue; }
+    if (file.startsWith("frontend/")) { allFrontend.forEach(item => frontend.add(item)); continue; }
+    if (file.startsWith("src/Modules/Configuration/") || file.startsWith("src/Modules/Settings/") || file.startsWith("src/Modules/Users/") || file.startsWith("src/Modules/Scripts/") || file.startsWith("src/Modules/Queues/")) unit.add("config");
+    else if (file.startsWith("src/Modules/Execution/Judgement/") || file.startsWith("src/Modules/Execution/Monitoring/")) unit.add("judgement");
+    else if (file.startsWith("src/Modules/Execution/")) unit.add("execution");
+    else if (file.startsWith("src/Modules/Scheduling/")) unit.add("scheduling");
+    else if (file.startsWith("src/Modules/Plugins/")) { unit.add("plugins"); plan.contracts = true; plan.needs_plugins = true; }
+    else if (file.startsWith("src/Modules/Updates/") || file === "update-policy.json") unit.add("update");
+    else if (file.startsWith("src/ControlPlane/")) unit.add("control");
+    else if (file.startsWith("src/Modules/Diagnostics/") || file.startsWith("src/Modules/History/") || file.startsWith("src/Modules/Notifications/")) unit.add("observability");
+    else if (file.includes("/Persistence/") || file.startsWith("src/Modules/Configuration/Snapshots/")) unit.add("persistence");
+    else if (file.startsWith("src/Host/") || file.startsWith("src/Shared/") || file.startsWith("src/Platform/")) unit.add("core");
+    else if (file.startsWith("src/")) allUnit.forEach(item => unit.add(item));
+    else if (file.startsWith("tools/") || file.startsWith("tests/") || file.startsWith(".github/")
+      || ["build.cmd", "global.json", "package.json", "package-lock.json", "Directory.Build.props"].includes(file)
+      || file.endsWith(".csproj") || file.endsWith(".sln")) plan.full = true;
+    else plan.full = true;
+    if (file.startsWith("src/")) plan.architecture = true;
+  }
+  plan.unit_groups = [...unit].sort();
+  plan.frontend_groups = [...frontend].sort();
+  if (plan.full) {
+    plan.unit_groups = allUnit;
+    plan.frontend_groups = allFrontend;
+    Object.assign(plan, { contracts: true, docs: true, tooling: true, syntax: true, architecture: true, needs_plugins: true });
+  }
+  if (![plan.docs, plan.full, plan.contracts, plan.architecture, plan.tooling, plan.syntax,
+    plan.unit_groups.length > 0, plan.frontend_groups.length > 0].some(Boolean)) plan.full = true;
+  return plan;
 }
 
 function markForPath(file) {
@@ -128,8 +182,15 @@ function main(argv) {
   } else {
     for (const file of changedFiles) merge(result, markForPath(file));
   }
+  const fast = classifyFast(changedFiles);
   const lines = options.mode === "fast"
-    ? [`docs_only=${classifyFast(changedFiles).docs_only ? "true" : "false"}`]
+    ? [
+      `docs_only=${fast.docs_only ? "true" : "false"}`,
+      `needs_plugins=${fast.needs_plugins ? "true" : "false"}`,
+      `needs_dotnet=${fast.full || fast.architecture || fast.unit_groups.length > 0 ? "true" : "false"}`,
+      `needs_python=${fast.full || fast.tooling ? "true" : "false"}`,
+      `plan_json=${JSON.stringify(fast)}`,
+    ]
     : KEYS.map(key => `${key}=${result[key] ? "true" : "false"}`);
   process.stdout.write(`${lines.join("\n")}\n`);
   if (options.output) fs.appendFileSync(options.output, `${lines.join("\n")}\n`, "utf8");

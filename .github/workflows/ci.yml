@@ -41,7 +41,7 @@ jobs:
         shell: pwsh
         run: node tools/ci-scope.mjs --mode fast --base '${{ github.event.pull_request.base.sha }}' --head '${{ github.sha }}' --github-output $env:GITHUB_OUTPUT
       - name: Resolve official Plugins source
-        if: steps.scope.outputs.docs_only != 'true'
+        if: steps.scope.outputs.needs_plugins == 'true'
         id: plugins
         shell: pwsh
         run: |
@@ -52,7 +52,7 @@ jobs:
           "sha=$sha" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           Write-Output "plugins=$sha"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        if: steps.scope.outputs.docs_only != 'true'
+        if: steps.scope.outputs.needs_plugins == 'true'
         with:
           repository: FlappiBakuse/NexusPipeline-Plugins
           ref: ${{ steps.plugins.outputs.sha }}
@@ -60,21 +60,18 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
-        if: steps.scope.outputs.docs_only != 'true'
+        if: steps.scope.outputs.needs_dotnet == 'true'
         with:
           dotnet-version: "8.0.x"
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
-        if: steps.scope.outputs.docs_only != 'true'
+        if: steps.scope.outputs.needs_python == 'true'
         with:
           python-version: "3.13"
-      - name: Run documentation checks
-        if: steps.scope.outputs.docs_only == 'true'
-        run: node tests/run.mjs docs
       - name: Run fast checks
-        if: steps.scope.outputs.docs_only != 'true'
         env:
           NEXUS_OFFICIAL_PLUGINS_ROOT: ${{ github.workspace }}\NexusPipeline-Plugins
-        run: node tests/run.mjs fast
+          NEXUS_FAST_PLAN: ${{ steps.scope.outputs.plan_json }}
+        run: node tests/run.mjs fast --plan-env
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:

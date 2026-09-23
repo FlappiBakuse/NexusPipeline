@@ -5,9 +5,22 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
-      tag:
-        description: Existing approved release tag to publish
+      operation:
+        description: Read-only candidate build or publish an existing candidate
         required: true
+        default: candidate
+        type: choice
+        options:
+          - candidate
+          - publish-only
+      source_ref:
+        description: Main-reachable source commit/ref for candidate mode
+        required: false
+        default: main
+        type: string
+      tag:
+        description: Existing approved release tag (publish-only only)
+        required: false
         type: string
       candidate_run_id:
         description: Original successful Host candidate run ID for publish-only recovery
@@ -28,16 +41,44 @@ concurrency:
 jobs:
   candidate:
     name: Build and validate Host candidate
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.operation == 'candidate')
     runs-on: windows-latest
     timeout-minutes: 90
     steps:
+      - name: Validate candidate operation before checkout
+        shell: pwsh
+        env:
+          OPERATION: ${{ inputs.operation || 'candidate' }}
+          SOURCE_REF: ${{ inputs.source_ref || github.sha }}
+          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+          CANDIDATE_ARTIFACT_ID: ${{ inputs.candidate_artifact_id }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          if ($env:GITHUB_REF -ne 'refs/heads/main') { throw 'Candidate controller must run from main' }
+          if ($env:OPERATION -ne 'candidate' -or -not $env:SOURCE_REF) { throw 'Invalid candidate operation or source_ref' }
+          if ($env:CANDIDATE_RUN_ID -or $env:CANDIDATE_ARTIFACT_ID -or $env:RELEASE_TAG) { throw 'candidate mode does not accept publish-only inputs' }
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ github.workflow_sha }}
+          path: NexusPipeline-Control
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event_name == 'push' && github.sha || inputs.source_ref }}
           path: NexusPipeline
           fetch-depth: 0
           persist-credentials: false
+      - name: Require source reachable from protected main
+        id: source
+        working-directory: NexusPipeline
+        shell: pwsh
+        run: |
+          git fetch origin main --no-tags
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot resolve protected main' }
+          git merge-base --is-ancestor HEAD origin/main
+          if ($LASTEXITCODE -ne 0) { throw 'Candidate source is not reachable from main' }
+          "sha=$((git rev-parse HEAD).Trim())" >> $env:GITHUB_OUTPUT
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: "24"
@@ -74,9 +115,10 @@ jobs:
         env:
           PLUGIN_SHA: ${{ steps.plugins.outputs.sha }}
           WORKFLOW_SHA: ${{ github.workflow_sha }}
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
         run: >-
-          python tools/host_release.py candidate
-          --root . --source-sha $env:GITHUB_SHA
+          python ../NexusPipeline-Control/tools/host_release.py candidate
+          --root . --source-sha $env:SOURCE_SHA
           --workflow-sha $env:WORKFLOW_SHA
           --partner-sha $env:PLUGIN_SHA
           --run-id $env:GITHUB_RUN_ID --run-attempt $env:GITHUB_RUN_ATTEMPT
@@ -99,7 +141,7 @@ jobs:
 
   publish-only:
     name: Publish original Host candidate
-    if: github.event_name == 'workflow_dispatch' && inputs.candidate_run_id != ''
+    if: github.event_name == 'workflow_dispatch' && inputs.operation == 'publish-only'
     runs-on: windows-latest
     environment: host-release
     permissions:
@@ -125,6 +167,8 @@ jobs:
           CANDIDATE_ARTIFACT_ID: ${{ inputs.candidate_artifact_id }}
         run: |
           if ($env:GITHUB_REF -ne 'refs/heads/main') { throw 'Publisher control must run from main' }
+          if (-not $env:CANDIDATE_RUN_ID) { throw 'publish-only requires candidate_run_id' }
+          if (-not '${{ inputs.tag }}') { throw 'publish-only requires an existing tag' }
           $arguments = @('--candidate-run-id', $env:CANDIDATE_RUN_ID, '--current-run-id', $env:GITHUB_RUN_ID, '--github-output', $env:GITHUB_OUTPUT)
           if ($env:CANDIDATE_ARTIFACT_ID) { $arguments += @('--artifact-id', $env:CANDIDATE_ARTIFACT_ID) }
           python tools/host_candidate_source.py @arguments
@@ -139,21 +183,38 @@ jobs:
         run: |
           New-Item -ItemType Directory -Path '.generated' -Force | Out-Null
           $uri = "https://api.github.com/repos/FlappiBakuse/NexusPipeline/actions/artifacts/$env:ARTIFACT_ID/zip"
-          curl.exe -fsSL -H "Authorization: Bearer $env:GITHUB_TOKEN" -H 'Accept: application/octet-stream' --output '.generated/host-candidate-artifact.zip' $uri
+          curl.exe -fsSL --connect-timeout 10 --max-time 60 --retry 2 -H "Authorization: Bearer $env:GITHUB_TOKEN" -H 'Accept: application/octet-stream' --output '.generated/host-candidate-artifact.zip' $uri
           if ($LASTEXITCODE -ne 0) { throw 'Candidate artifact download failed' }
           python tools/host_release.py extract-candidate --artifact-zip '.generated/host-candidate-artifact.zip' --expected-digest $env:ARTIFACT_DIGEST --output '.generated/host-candidate'
           if ($LASTEXITCODE -ne 0) { throw 'Candidate artifact failed server digest or path validation' }
+      - name: Inspect original candidate identity before source checkout
+        id: candidate
+        working-directory: NexusPipeline
+        shell: pwsh
+        run: >-
+          python tools/host_release.py inspect-candidate
+          --output '.generated/host-candidate'
+          --workflow-sha '${{ steps.source.outputs.workflow_sha }}'
+          --run-id '${{ steps.source.outputs.run_id }}'
+          --run-attempt '${{ steps.source.outputs.run_attempt }}'
+          --github-output $env:GITHUB_OUTPUT
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ steps.candidate.outputs.source_sha }}
+          path: NexusPipeline-Source
+          fetch-depth: 0
+          persist-credentials: false
       - name: Verify tag, source tree, producer and production package
         working-directory: NexusPipeline
         shell: pwsh
         env:
           RELEASE_TAG: ${{ inputs.tag }}
-          SOURCE_SHA: ${{ steps.source.outputs.source_sha }}
+          SOURCE_SHA: ${{ steps.candidate.outputs.source_sha }}
           WORKFLOW_SHA: ${{ steps.source.outputs.workflow_sha }}
           ORIGINAL_RUN_ID: ${{ steps.source.outputs.run_id }}
           ORIGINAL_ATTEMPT: ${{ steps.source.outputs.run_attempt }}
         run: |
-          python tools/host_release.py validate-candidate --root . --output '.generated/host-candidate' --tag $env:RELEASE_TAG --expected-source-sha $env:SOURCE_SHA --workflow-sha $env:WORKFLOW_SHA --run-id $env:ORIGINAL_RUN_ID --run-attempt $env:ORIGINAL_ATTEMPT
+          python tools/host_release.py validate-candidate --root ../NexusPipeline-Source --output '.generated/host-candidate' --tag $env:RELEASE_TAG --expected-source-sha $env:SOURCE_SHA --workflow-sha $env:WORKFLOW_SHA --run-id $env:ORIGINAL_RUN_ID --run-attempt $env:ORIGINAL_ATTEMPT
           if ($LASTEXITCODE -ne 0) { throw 'Original candidate failed independent validation' }
       - name: Create release publisher App token
         id: publisher-token
@@ -170,6 +231,6 @@ jobs:
           GH_TOKEN: ${{ steps.publisher-token.outputs.token }}
           GH_REPO: FlappiBakuse/NexusPipeline
           TAG: ${{ inputs.tag }}
-          SOURCE_SHA: ${{ steps.source.outputs.source_sha }}
+          SOURCE_SHA: ${{ steps.candidate.outputs.source_sha }}
           PUBLISH_ROOT: NexusPipeline/.generated/host-candidate
         run: bash NexusPipeline/tools/host_release_publish.sh

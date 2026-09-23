@@ -11,6 +11,7 @@ import argparse
 import json
 import os
 import re
+import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable
@@ -67,9 +68,9 @@ def resolve_candidate(
     workflow_path = str(original.get("path", "")).split("@", 1)[0]
     require(workflow_path == WORKFLOW_PATH or workflow_path == f"{REPOSITORY}/{WORKFLOW_PATH}",
             "candidate workflow 路径不可信")
-    require(original.get("event") == "push" and original.get("head_branch") == "main",
-            "candidate 必须由 main push 产生")
-    source_sha = full_sha(original.get("head_sha"), "candidate source")
+    require(original.get("event") in {"push", "workflow_dispatch"} and original.get("head_branch") == "main",
+            "candidate 必须由 main push 或 main 控制的手动工作流产生")
+    controller_sha = full_sha(original.get("head_sha"), "candidate controller")
     artifacts: list[dict[str, Any]] = []
     for page in range(1, 101):
         response = fetch(f"{prefix}/runs/{candidate_run_id}/artifacts?per_page=100&page={page}")
@@ -105,8 +106,8 @@ def resolve_candidate(
             and candidate_jobs[0].get("status") == "completed",
             "原 attempt candidate job 未真实成功")
     return {
-        "sourceSha": source_sha,
-        "workflowSha": source_sha,
+        "sourceSha": controller_sha,
+        "workflowSha": controller_sha,
         "runId": candidate_run_id,
         "runAttempt": attempt,
         "artifactId": artifact["id"],
@@ -120,11 +121,25 @@ def github_fetch(token: str, path: str) -> dict[str, Any]:
         headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json",
                  "X-GitHub-Api-Version": "2022-11-28"},
     )
-    try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            return json.load(response)
-    except (OSError, urllib.error.HTTPError, ValueError) as exc:
-        raise CandidateSourceError(f"读取 Actions 服务端事实失败：{type(exc).__name__}") from exc
+    for attempt in range(3):
+        try:
+            with urllib.request.urlopen(request, timeout=20) as response:
+                return json.load(response)
+        except urllib.error.HTTPError as exc:
+            if (exc.code == 429 or exc.code >= 500) and attempt < 2:
+                retry_after = exc.headers.get("Retry-After", "1")
+                delay = min(5, max(1, int(retry_after))) if retry_after.isdecimal() else 1
+                time.sleep(delay)
+                continue
+            raise CandidateSourceError(f"读取 Actions 服务端事实失败：HTTP {exc.code}") from exc
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            if attempt < 2:
+                time.sleep(2 ** attempt)
+                continue
+            raise CandidateSourceError(f"读取 Actions 服务端事实失败：{type(exc).__name__}") from exc
+        except ValueError as exc:
+            raise CandidateSourceError("读取 Actions 服务端事实失败：响应 JSON 无效") from exc
+    raise CandidateSourceError("读取 Actions 服务端事实失败：超过有界重试")
 
 
 def main() -> None:

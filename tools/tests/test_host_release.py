@@ -8,11 +8,28 @@ import hashlib
 from unittest.mock import Mock, patch
 from pathlib import Path
 
-from tools.host_release import HostReleaseError, archive_production, extract_candidate_artifact, normalized_tag, parse_version, validate_candidate_data, verify_received_package, write_candidate_manifest
+from tools.host_release import HostReleaseError, archive_production, extract_candidate_artifact, inspect_candidate_identity, normalized_tag, parse_version, validate_candidate_data, verify_received_package, write_candidate_manifest
 from tools import host_release
 
 
 class HostReleaseTests(unittest.TestCase):
+    def test_candidate_identity_separates_source_from_manual_controller(self) -> None:
+        with tempfile.TemporaryDirectory(prefix='nxp-host-candidate-identity-') as temporary:
+            output = Path(temporary)
+            candidate = {
+                'sourceSha': 'a' * 40,
+                'partnerSha': 'b' * 40,
+                'producer': {'workflowPath': '.github/workflows/release.yml',
+                             'workflowSha': 'c' * 40, 'runId': 12,
+                             'runAttempt': 2, 'jobName': 'candidate'},
+            }
+            (output / 'candidate.json').write_text(json.dumps(candidate), encoding='utf-8')
+            self.assertEqual(inspect_candidate_identity(output, workflow_sha='c' * 40,
+                                                        run_id=12, run_attempt=2),
+                             {'sourceSha': 'a' * 40, 'partnerSha': 'b' * 40})
+            with self.assertRaisesRegex(HostReleaseError, 'producer'):
+                inspect_candidate_identity(output, workflow_sha='d' * 40,
+                                           run_id=12, run_attempt=2)
     def test_artifact_digest_and_paths_are_checked_before_extraction(self) -> None:
         with tempfile.TemporaryDirectory(prefix='nxp-host-artifact-test-') as temporary:
             root = Path(temporary)

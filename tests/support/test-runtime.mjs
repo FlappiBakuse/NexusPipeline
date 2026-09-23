@@ -120,6 +120,7 @@ export function copyReleaseArtifacts(releaseDir, runtimeDir, { pluginDirectories
       copySafe(source, path.join(runtimeDir, entry.name), releaseDir);
       continue;
     }
+    if (entry.isFile() && entry.name === ".complete.json") continue;
     if (entry.name === "plugins") continue;
     throw new Error(`产物清单含未允许的旁车文件：${entry.name}`);
   }
