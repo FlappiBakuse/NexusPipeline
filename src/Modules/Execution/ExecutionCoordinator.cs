@@ -819,7 +819,7 @@ internal sealed class ExecutionCoordinator : RunSession
             modeText,
             attemptId,
             attemptStart,
-            processSession.Process,
+            processSession,
             launchExe,
             excludeGame,
             logEnv,

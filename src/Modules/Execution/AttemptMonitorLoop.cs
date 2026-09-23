@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using NexusPipeline.ControlPlane.Http;
 using NexusPipeline.Modules.Execution.Judgement;
 using NexusPipeline.Modules.Execution.Monitoring;
@@ -37,7 +36,7 @@ internal sealed class AttemptMonitorLoop
         string modeText,
         string attemptId,
         DateTime attemptStart,
-        Process process,
+        ScriptProcessSession processSession,
         string launchExe,
         string? excludeGame,
         AttemptLogEnvironment logEnv,
@@ -124,11 +123,15 @@ internal sealed class AttemptMonitorLoop
                 // create its first/final log after a previous discovery pass and then exit.
                 // Never combine a new exit observation with an older missing-log snapshot.
                 bool scriptExited = attemptMonitor.IsScriptExited(
-                    process,
+                    processSession.Process,
                     launchExe,
                     session.ProcessOwnership,
                     excludeGame,
                     processSnapshot);
+                if (scriptExited)
+                {
+                    await processSession.WaitForOutputDrainAsync(token).ConfigureAwait(false);
+                }
                 state.Monitor = logEnv.RefreshMonitor(state.Monitor);
 
                 string newContent = attemptMonitor.ReadLog(state.Monitor);
