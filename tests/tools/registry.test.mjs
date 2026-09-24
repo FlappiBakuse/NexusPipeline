@@ -11,6 +11,7 @@ import {
   TIMING_TESTS,
   TEST_DOMAIN_REGISTRY,
   systemRuntimeName,
+  selectHostTestFiles,
   validateRegistry,
 } from "../../tests/registry.mjs";
 
@@ -55,7 +56,14 @@ test("real-clock acceptance selects explicit timing cases instead of whole syste
   for (const timing of TIMING_TESTS) {
     assert.match(timing.runtimeName, /-timing$/u);
     assert.ok(SYSTEM_TEST_GROUPS.some(group => group.suitePaths.includes(timing.suitePath)));
+    assert.equal(timing.caseIds.length, 2);
   }
+});
+
+test("host test selection returns concrete files once across overlapping areas", () => {
+  const realtime = "tests/NexusPipeline.Tests/Execution/RealtimeEventBusTests.cs";
+  assert.equal(fs.existsSync(path.join(ROOT, realtime)), true);
+  assert.deepEqual(selectHostTestFiles(["execution", "control"], [realtime, realtime]), [realtime]);
 });
 
 test("H5 real-time phases use distinct runtime directories", () => {

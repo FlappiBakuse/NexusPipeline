@@ -85,6 +85,28 @@ export function parseTapResults(text, options) {
   return withObservation(result, options, parsed.cases, parsed.fileHints);
 }
 
+/** Require every registered real-clock case to appear exactly once and pass. */
+export function validateTimingSelection(result, caseIds) {
+  if (!Array.isArray(caseIds) || caseIds.length === 0 || new Set(caseIds).size !== caseIds.length) {
+    throw new Error("Timing 预期用例身份无效");
+  }
+  if (result.failed !== 0 || result.skipped !== 0) {
+    throw new Error(`Timing 所选用例失败或跳过/TODO：failed=${result.failed} skipped=${result.skipped}`);
+  }
+  const observed = result.observedCases;
+  if (!Array.isArray(observed)) throw new Error("Timing 缺少原生用例结果");
+  for (const id of caseIds) {
+    const matches = observed.filter(item => item.title === id
+      || item.title.startsWith(`${id} `) || item.title.startsWith(`${id}：`));
+    if (matches.length !== 1) throw new Error(`Timing 用例缺失或重复：${id}`);
+    if (matches[0].status !== "passed") throw new Error(`Timing 用例状态无效：${id}=${matches[0].status}`);
+  }
+  if (observed.length !== caseIds.length || result.testCount !== caseIds.length || result.passed !== caseIds.length) {
+    throw new Error(`Timing 所选用例结果不完整：expected=${caseIds.length} observed=${observed.length} passed=${result.passed}`);
+  }
+  return true;
+}
+
 function parseTrxCases(text, expectedFiles) {
   const testNames = new Map();
   const source = String(text);

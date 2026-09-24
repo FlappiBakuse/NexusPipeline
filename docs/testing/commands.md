@@ -76,7 +76,7 @@ Test Host 使用 `NexusTestHost=true` 的 `asInvoker` 清单。只读二进制�
 node tests\run.mjs release update-acceptance
 ```
 
-真实计时注册表只选择依赖墙上时间的 apply/defer 与 cleanup/stall 场景，不重复整份 Update/Execution 文件。计划性排除在 TAP 中保留为筛选记录，但每个计时分组必须至少有用例真实通过；报告目录按 runId 和阶段分开保存。
+真实计时注册表只选择依赖墙上时间的 apply/defer 与 cleanup/stall 场景，不重复整份 Update/Execution 文件。每个已登记的所选用例都必须在原生 TAP 中出现且通过；所选用例的 skip、TODO、缺失和取消均使门禁失败。名称过滤之外的用例不计入结果；报告目录按 runId 和阶段分开保存。
 
 System Smoke 的 `emulator` suite 覆盖宿主内置 Generic ADB、MuMuManager、无扩展时 Generic ADB 回退，以及通过真实 managed-code TestPlugin 注册的 API v1.7 provider 执行、截图和实例清理。雷电、夜神和 BlueStacks 的厂商命令与探测在 `NexusPipeline-Plugins/plugins/general/EmulatorSupport` 的插件测试中验证；真实设备矩阵由插件仓库维护。`update` suite 的 8 个用例覆盖启动前宿主更新检查、安装与恢复及既有运行期更新；启动失败冷却由 `StartupUpdateAttemptStore` 和 `StartupUpdateCoordinator` 单元测试覆盖。
 
