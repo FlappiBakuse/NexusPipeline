@@ -398,6 +398,10 @@ export async function stopSpawnedService({ child, exitFile, pidFilePath, markerP
       throw new Error(`受控停止未确认进程已退出：PID=${pid}`);
     }
   }
+  // 进程被强制终止时可能来不及自行删除 service.pid。只有本次已确认退出的
+  // PID 仍写在文件中，才清理这个过期指针；新进程改写的 PID 必须保留。
+  const finalMarked = readPidFile(pidFilePath);
+  if (finalMarked && owned.includes(finalMarked)) fs.rmSync(pidFilePath, { force: true });
   // 保留 marker 作为下一次 prepareRuntime 的 ownership 证据；下一次会先核验所有
   // 记录的 PID 已退出，再清理整个隔离目录。无 marker 的目录永远不因本流程被删除。
 }

@@ -119,6 +119,38 @@ test("cleanup never refreshes reused or missing identities and verifies before s
   }
 });
 
+test("confirmed stop removes only its stale service PID file", async () => {
+  for (const state of ["exited", "rewritten", "exit-unconfirmed"]) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "nxp-stop-pid-"));
+    try {
+      const markerPath = path.join(root, "marker.json");
+      const pidFilePath = path.join(root, "service.pid");
+      fs.writeFileSync(markerPath, JSON.stringify({
+        schemaVersion: 1, nonce: "nonce", pid: 101,
+        executablePath: process.execPath, processStartTimeUtc: "original",
+      }));
+      fs.writeFileSync(pidFilePath, "101");
+      let kills = 0;
+      const operation = stopSpawnedService({
+        markerPath, pidFilePath, exitFile: path.join(root, "exit"),
+        aliveReader: () => true,
+        identityReader: () => ({ executablePath: process.execPath, startTime: "original" }),
+        terminator: () => { kills++; return true; },
+        exitWaiter: async () => {
+          if (state === "rewritten") fs.writeFileSync(pidFilePath, "202");
+          return state !== "exit-unconfirmed";
+        },
+      });
+      if (state === "exit-unconfirmed") await assert.rejects(operation, /进程已退出/);
+      else await operation;
+      assert.equal(kills, 1);
+      assert.equal(fs.existsSync(pidFilePath), state !== "exited");
+      if (state === "rewritten") assert.equal(fs.readFileSync(pidFilePath, "utf8"), "202");
+      assert.equal(fs.existsSync(markerPath), true);
+    } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  }
+});
+
 test("handoff requires the run receipt, never just a reused parent PID", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "nxp-handoff-"));
   try {
