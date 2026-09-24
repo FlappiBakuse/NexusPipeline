@@ -2,6 +2,8 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { FRONTEND_TEST_GROUPS, HOST_TEST_AREAS } from "../tests/registry.mjs";
+import { globToRegExp } from "./path-glob.mjs";
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const KEYS = ["core", "frontend_contract", "runtime", "update"];
@@ -33,6 +35,26 @@ function isDocumentationPath(file) {
   return file === "README.md" || file === "CHANGELOG.md" || file.startsWith("docs/");
 }
 
+function fullFastPlan() {
+  return {
+    docs_only: false,
+    full: true,
+    unit_groups: HOST_TEST_AREAS.map(area => area.key),
+    frontend_groups: FRONTEND_TEST_GROUPS.map(group => group.key),
+    contracts: true,
+    docs: true,
+    tooling: true,
+    syntax: true,
+    architecture: true,
+    needs_plugins: true,
+  };
+}
+
+function matchingGroups(file, groups) {
+  return groups.filter(group => group.paths.some(pattern => globToRegExp(pattern).test(file)))
+    .map(group => group.key);
+}
+
 function classifyFast(changedFiles) {
   const plan = {
     docs_only: false,
@@ -46,48 +68,38 @@ function classifyFast(changedFiles) {
     architecture: false,
     needs_plugins: false,
   };
-  if (!Array.isArray(changedFiles) || changedFiles.length === 0) return { ...plan, full: true };
+  if (!Array.isArray(changedFiles) || changedFiles.length === 0) return fullFastPlan();
   plan.docs_only = changedFiles.every(isDocumentationPath);
   const unit = new Set();
   const frontend = new Set();
-  const allUnit = ["core", "persistence", "config", "execution", "scheduling", "judgement", "plugins", "update", "control", "observability"];
-  const allFrontend = ["ui", "bridge", "platform", "features"];
   for (const value of changedFiles) {
     const file = value.replaceAll("\\", "/").replace(/^\.\//u, "");
     if (isDocumentationPath(file) || file === "AGENTS.md") { plan.docs = true; continue; }
-    if (file.startsWith("frontend/src/ui/")) { frontend.add("ui"); continue; }
-    if (file.startsWith("frontend/src/plugin-bridge/") || file.startsWith("src/NexusPipeline.Plugin.Abstractions/")) {
-      frontend.add("bridge"); unit.add("plugins"); plan.contracts = true; plan.needs_plugins = true; plan.architecture = true; continue;
+    if (file.startsWith("frontend/")) {
+      const owners = matchingGroups(file, FRONTEND_TEST_GROUPS);
+      (owners.length ? owners : FRONTEND_TEST_GROUPS.map(group => group.key)).forEach(key => frontend.add(key));
+      if (file.startsWith("frontend/src/plugin-bridge/")) {
+        unit.add("plugins");
+        plan.contracts = true;
+        plan.architecture = true;
+      }
+      continue;
     }
-    if (file.startsWith("frontend/src/platform/") || file.startsWith("frontend/src/stores/") || file === "frontend/src/router.ts") { frontend.add("platform"); continue; }
-    if (file.startsWith("frontend/src/features/") || file.startsWith("frontend/src/app/")) { frontend.add("features"); continue; }
-    if (file.startsWith("frontend/")) { allFrontend.forEach(item => frontend.add(item)); continue; }
-    if (file.startsWith("src/Modules/Configuration/") || file.startsWith("src/Modules/Settings/") || file.startsWith("src/Modules/Users/") || file.startsWith("src/Modules/Scripts/") || file.startsWith("src/Modules/Queues/")) unit.add("config");
-    else if (file.startsWith("src/Modules/Execution/Judgement/") || file.startsWith("src/Modules/Execution/Monitoring/")) unit.add("judgement");
-    else if (file.startsWith("src/Modules/Execution/")) unit.add("execution");
-    else if (file.startsWith("src/Modules/Scheduling/")) unit.add("scheduling");
-    else if (file.startsWith("src/Modules/Plugins/")) { unit.add("plugins"); plan.contracts = true; plan.needs_plugins = true; }
-    else if (file.startsWith("src/Modules/Updates/") || file === "update-policy.json") unit.add("update");
-    else if (file.startsWith("src/ControlPlane/")) unit.add("control");
-    else if (file.startsWith("src/Modules/Diagnostics/") || file.startsWith("src/Modules/History/") || file.startsWith("src/Modules/Notifications/")) unit.add("observability");
-    else if (file.includes("/Persistence/") || file.startsWith("src/Modules/Configuration/Snapshots/")) unit.add("persistence");
-    else if (file.startsWith("src/Host/") || file.startsWith("src/Shared/") || file.startsWith("src/Platform/")) unit.add("core");
-    else if (file.startsWith("src/")) allUnit.forEach(item => unit.add(item));
-    else if (file.startsWith("tools/") || file.startsWith("tests/") || file.startsWith(".github/")
-      || ["build.cmd", "global.json", "package.json", "package-lock.json", "Directory.Build.props"].includes(file)
-      || file.endsWith(".csproj") || file.endsWith(".sln")) plan.full = true;
-    else plan.full = true;
-    if (file.startsWith("src/")) plan.architecture = true;
+    const owners = matchingGroups(file, HOST_TEST_AREAS);
+    if (owners.length) {
+      owners.forEach(key => unit.add(key));
+      if (file.startsWith("src/Modules/Plugins/") || file.startsWith("src/NexusPipeline.Plugin.Abstractions/")) plan.contracts = true;
+      if (file.startsWith("src/NexusPipeline.Plugin.Abstractions/")) frontend.add("bridge");
+      if (file.startsWith("src/")) plan.architecture = true;
+      continue;
+    }
+    return fullFastPlan();
   }
   plan.unit_groups = [...unit].sort();
   plan.frontend_groups = [...frontend].sort();
-  if (plan.full) {
-    plan.unit_groups = allUnit;
-    plan.frontend_groups = allFrontend;
-    Object.assign(plan, { contracts: true, docs: true, tooling: true, syntax: true, architecture: true, needs_plugins: true });
-  }
-  if (![plan.docs, plan.full, plan.contracts, plan.architecture, plan.tooling, plan.syntax,
-    plan.unit_groups.length > 0, plan.frontend_groups.length > 0].some(Boolean)) plan.full = true;
+  plan.needs_plugins = plan.contracts;
+  if (![plan.docs, plan.contracts, plan.architecture, plan.tooling, plan.syntax,
+    plan.unit_groups.length > 0, plan.frontend_groups.length > 0].some(Boolean)) return fullFastPlan();
   return plan;
 }
 

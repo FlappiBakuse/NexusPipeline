@@ -4,12 +4,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { globToRegExp } from "../tools/path-glob.mjs";
-import { parseTapResults, parseTrxResults, parseVitestResults, parsePlaywrightResults } from "../tools/test-results.mjs";
+import { parseTapResults, parseTrxResults, parseVitestResults, parsePlaywrightResults, validateTimingSelection } from "../tools/test-results.mjs";
 import { getIntegrityLevel } from "./support/windows-process.mjs";
 import { getProcessRunnerState, resetProcessRunnerState, runProcess as runOwnedProcess } from "./support/process-runner.mjs";
 import { findAvailablePort } from "./support/test-runtime.mjs";
 import { gateSequence, runtimePolicy } from "./support/runtime-policy.mjs";
-import { FRONTEND_TEST_GROUPS, GOVERNANCE_DOMAINS, HOST_TEST_AREAS, SYSTEM_TEST_GROUPS, TIMING_TESTS, systemRuntimeName, validateRegistry } from "./registry.mjs";
+import { FRONTEND_TEST_GROUPS, GOVERNANCE_DOMAINS, HOST_TEST_AREAS, SYSTEM_TEST_GROUPS, TIMING_TESTS, selectHostTestFiles, systemRuntimeName, validateRegistry } from "./registry.mjs";
 
 validateRegistry();
 
@@ -108,10 +108,8 @@ function unitTestFiles(groups = []) {
   const unitDir = path.join(testsDir, "NexusPipeline.Tests");
   const candidates = recursiveFiles(unitDir).filter(file => file.endsWith("Tests.cs")).sort();
   if (groups.length === 0) return candidates;
-  const patterns = HOST_TEST_AREAS.filter(area => groups.includes(area.key))
-    .flatMap(area => area.testPaths)
-    .map(pattern => globToRegExp(`tests/NexusPipeline.Tests/${pattern}`));
-  return candidates.filter(file => patterns.some(pattern => pattern.test(normalizePath(file))));
+  const selected = new Set(selectHostTestFiles(groups, candidates.map(normalizePath)));
+  return candidates.filter(file => selected.has(normalizePath(file)));
 }
 
 function syntaxFiles() {
@@ -254,10 +252,8 @@ async function runReported(command, args, options = {}, format = "tap", context 
           : parsePlaywrightResults(JSON.parse(fs.readFileSync(reportFile, "utf8")), parseOptions);
     fs.writeFileSync(path.join(reportDir, "stdout.log"), output, "utf8");
     console.error(`[测试结果] ${format}: passed=${result.passed} failed=${result.failed} skipped=${result.skipped}`);
-    const invalidSelection = context.plannedSelection
-      ? result.passed <= 0
-      : result.skipped !== 0;
-    if (code !== 0 || result.testCount <= 0 || result.failed !== 0 || invalidSelection) return code || 1;
+    if (context.expectedCaseIds) validateTimingSelection(result, context.expectedCaseIds);
+    if (code !== 0 || result.testCount <= 0 || result.failed !== 0 || result.skipped !== 0) return code || 1;
     return 0;
   } catch (error) {
     fs.writeFileSync(path.join(reportDir, "stdout.log"), output, "utf8");
@@ -686,7 +682,7 @@ async function runTiming(keys = TIMING_TESTS.map(test => test.key)) {
       {
         expectedFiles: [normalizePath(timing.suitePath)],
         invokedFiles: [normalizePath(timing.suitePath)],
-        plannedSelection: true,
+        expectedCaseIds: timing.caseIds,
       },
     );
     if (code !== 0) return code;

@@ -4,6 +4,8 @@
  * This file describes what the runner actually executes. It intentionally has
  * no CI job ids, change plans, permissions or result-proof fields.
  */
+import { globToRegExp } from "../tools/path-glob.mjs";
+
 export const HOST_TEST_AREAS = Object.freeze([
   { key: "core", paths: ["src/Host/**", "src/Shared/**", "src/Platform/**"], testPaths: ["Host/RuntimeContextQueryTests.cs", "Host/RuntimeEntityStateTests.cs", "Host/RuntimeInitializationBoundaryTests.cs", "Host/HostInstanceTests.cs", "Host/HostLifecycleLocalizationTests.cs", "Platform/NativePathPickerServiceTests.cs", "Platform/RuntimeGuardsTests.cs", "Platform/ProcessCleanupResultTests.cs", "Shared/EntityNameRulesTests.cs", "Shared/LocalizationTests.cs", "Shared/NexusVersionTests.cs"] },
   { key: "persistence", paths: ["src/Modules/**/Persistence/**", "src/Modules/Configuration/Snapshots/**"], testPaths: ["Platform/JsonStoreTests.cs", "Platform/RuntimeStateLayoutTests.cs", "Scripts/ScriptPersistenceTests.cs"] },
@@ -46,14 +48,24 @@ export const TIMING_TESTS = Object.freeze([
     suitePath: "tests/system/update-smoke.mjs",
     runtimeName: "runtime-update-timing",
     namePattern: "apply-update|defer 标记",
+    caseIds: ["apply-update", "defer 标记"],
   },
   {
     key: "execution",
     suitePath: "tests/system/execution-resilience.mjs",
     runtimeName: "runtime-execution-timing",
     namePattern: "ER07|ER10",
+    caseIds: ["ER07", "ER10"],
   },
 ]);
+
+/** Apply the same file patterns used by runUnit to a concrete candidate list. */
+export function selectHostTestFiles(groups, candidates) {
+  const patterns = HOST_TEST_AREAS.filter(area => groups.includes(area.key))
+    .flatMap(area => area.testPaths)
+    .map(pattern => globToRegExp(`tests/NexusPipeline.Tests/${pattern}`));
+  return [...new Set(candidates.filter(file => patterns.some(pattern => pattern.test(file))))].sort();
+}
 
 /** 同一次 H5 的加速与真实计时段必须使用不同运行目录，避免旧 PID 标记误指新进程。 */
 export function systemRuntimeName(baseName, phase) {
@@ -97,8 +109,10 @@ export function validateRegistry() {
     }
   }
   for (const timing of TIMING_TESTS) {
-    if (!timing.suitePath || !timing.runtimeName || !timing.namePattern) {
-      throw new Error(`Timing 分组缺少 suite/runtimeName/namePattern：${timing.key}`);
+    if (!timing.suitePath || !timing.runtimeName || !timing.namePattern
+      || !Array.isArray(timing.caseIds) || timing.caseIds.length === 0
+      || new Set(timing.caseIds).size !== timing.caseIds.length) {
+      throw new Error(`Timing 分组缺少 suite/runtimeName/namePattern/caseIds：${timing.key}`);
     }
   }
   return true;
