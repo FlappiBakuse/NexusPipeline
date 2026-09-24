@@ -13,7 +13,7 @@ node tests\run.mjs integration
 node tests\run.mjs all
 ```
 
-`prepare` 安装前端和工具工作区的锁定依赖；已安装工作区在 Node 版本、平台、`package.json` 与锁文件均匹配时跨进程复用，输入变化重新执行 `npm ci`。`fast` 执行后端单测、前端类型检查与单测、官方插件契约、文档、工具、语法和架构检查，不构建生产包。非纯文档的 `fast` 必须通过 `NEXUS_OFFICIAL_PLUGINS_ROOT` 指定固定的官方插件 checkout。`integration` 在 Windows 上构建一次隔离 Test Host，执行 UI 与系统贯通、更新和执行真实计时；不构建生产包。`all` 在同一进程中依次执行 fast 和 integration，复用已准备依赖及 Test Host。生产构建由 `build` 单独执行。
+`prepare` 安装前端和工具工作区的锁定依赖；已安装工作区在 Node 版本、平台、`package.json` 与锁文件均匹配时跨进程复用，输入变化重新执行 `npm ci`。本地直接执行 `fast` 仍运行完整快速门禁；PR 的 `Host / Required` 根据完整 diff 生成后端、前端、契约、文档、工具、语法和架构计划，只准备计划所需工具链，未知共享输入保守扩大为完整门禁。非纯文档且包含插件契约的计划必须通过 `NEXUS_OFFICIAL_PLUGINS_ROOT` 指定固定的官方插件 checkout。`integration` 在 Windows 上使用隔离 Test Host，执行 UI、全部加速系统贯通以及独立的更新与执行真实计时用例；不构建生产包。`all` 在同一进程中依次执行 fast 和 integration。生产构建由 `build` 单独执行。
 
 本地 `build.cmd` 只清理程序自有的 `release/wwwroot` 前端输出；重新发布到 `release/` 时保留 `plugins/`、`config/`、`data/`、`history/` 与 `logs/` 等运行数据。正式候选仍在独立的 `.generated/candidate/` 中构建和验包，不读取本地 `release/` 的运行数据。
 
@@ -68,15 +68,15 @@ node tests\run.mjs dev system [runtime|control|config|execution|judge|emulator|p
 
 可以列出多个分组，也可以用 `--group <名称>` 重复指定；省略分组等于全部 suite。未知分组会打印可用分组并以 exit code 2 退出。每个 suite 都会实际启动独立 Test Host，不提供 dry-run 替代测试。
 
-Test Host 使用 `NexusTestHost=true` 的 `asInvoker` 清单和每次运行独立的 `tests/.artifacts/runs/<runId>/`；完整性等级只作为诊断信息，不决定是否跳过测试。
+Test Host 使用 `NexusTestHost=true` 的 `asInvoker` 清单。只读二进制输出按源码、前端锁、构建配方、Node/.NET SDK、模式与平台的内容指纹保存在 `.generated/test-host-cache/<hash>/`，完整性元数据缺失或不匹配时重建；不同命令可复用同一完整缓存。运行数据、端口、PID 与退出标记始终位于每次运行独立的 `tests/.artifacts/runs/<runId>/`，不会随二进制缓存复用。完整性等级只作为诊断信息，不决定是否跳过测试。
 
-完整集成与发行诊断固定执行两次独立的 Test Host Update 和一次 Execution 真实计时段：
+完整集成与发行诊断在加速系统套件后执行独立的 Update 与 Execution 真实计时用例：
 
 ```text
 node tests\run.mjs release update-acceptance
 ```
 
-该入口按 accelerated → update-realtime → execution-realtime 顺序执行；后两段不接受过滤，报告目录按 runId 和阶段分开保存。
+真实计时注册表只选择依赖墙上时间的 apply/defer 与 cleanup/stall 场景，不重复整份 Update/Execution 文件。计划性排除在 TAP 中保留为筛选记录，但每个计时分组必须至少有用例真实通过；报告目录按 runId 和阶段分开保存。
 
 System Smoke 的 `emulator` suite 覆盖宿主内置 Generic ADB、MuMuManager、无扩展时 Generic ADB 回退，以及通过真实 managed-code TestPlugin 注册的 API v1.7 provider 执行、截图和实例清理。雷电、夜神和 BlueStacks 的厂商命令与探测在 `NexusPipeline-Plugins/plugins/general/EmulatorSupport` 的插件测试中验证；真实设备矩阵由插件仓库维护。`update` suite 的 8 个用例覆盖启动前宿主更新检查、安装与恢复及既有运行期更新；启动失败冷却由 `StartupUpdateAttemptStore` 和 `StartupUpdateCoordinator` 单元测试覆盖。
 

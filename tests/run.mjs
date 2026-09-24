@@ -9,7 +9,7 @@ import { getIntegrityLevel } from "./support/windows-process.mjs";
 import { getProcessRunnerState, resetProcessRunnerState, runProcess as runOwnedProcess } from "./support/process-runner.mjs";
 import { findAvailablePort } from "./support/test-runtime.mjs";
 import { gateSequence, runtimePolicy } from "./support/runtime-policy.mjs";
-import { FRONTEND_TEST_GROUPS, GOVERNANCE_DOMAINS, HOST_TEST_AREAS, SYSTEM_TEST_GROUPS, systemRuntimeName, validateRegistry } from "./registry.mjs";
+import { FRONTEND_TEST_GROUPS, GOVERNANCE_DOMAINS, HOST_TEST_AREAS, SYSTEM_TEST_GROUPS, TIMING_TESTS, systemRuntimeName, validateRegistry } from "./registry.mjs";
 
 validateRegistry();
 
@@ -26,7 +26,7 @@ const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
 const runId = process.env.NEXUS_TEST_RUN_ID?.trim()
   || `run-${Date.now()}-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
 const runRoot = path.join(projectRoot, "tests", ".artifacts", "runs", runId);
-const testHostDir = path.join(runRoot, "test-host");
+let testHostDir = path.join(runRoot, "test-host-uninitialized");
 const emulatorFixturePluginDir = path.join(runRoot, "emulator-fixture");
 const reportRoot = path.join(runRoot, "reports");
 const frontendBuildStamp = path.join(projectRoot, ".generated", "frontend-build.hash");
@@ -63,6 +63,20 @@ function candidateSha() {
 
 function sha256File(file) {
   return createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+}
+
+function directoryInventory(root, relative = "") {
+  const result = {};
+  const current = path.join(root, relative);
+  for (const entry of fs.readdirSync(current, { withFileTypes: true })
+    .sort((left, right) => Buffer.from(left.name, "utf8").compare(Buffer.from(right.name, "utf8")))) {
+    const child = relative ? path.join(relative, entry.name) : entry.name;
+    if (child === ".complete.json") continue;
+    if (entry.isDirectory()) Object.assign(result, directoryInventory(root, child));
+    else if (entry.isFile()) result[normalizePath(child)] = sha256File(path.join(root, child));
+    else throw new Error(`Test Host cache contains unsupported entry: ${child}`);
+  }
+  return result;
 }
 
 function recursiveFiles(directory) {
@@ -240,7 +254,10 @@ async function runReported(command, args, options = {}, format = "tap", context 
           : parsePlaywrightResults(JSON.parse(fs.readFileSync(reportFile, "utf8")), parseOptions);
     fs.writeFileSync(path.join(reportDir, "stdout.log"), output, "utf8");
     console.error(`[测试结果] ${format}: passed=${result.passed} failed=${result.failed} skipped=${result.skipped}`);
-    if (code !== 0 || result.testCount <= 0 || result.failed !== 0 || result.skipped !== 0) return code || 1;
+    const invalidSelection = context.plannedSelection
+      ? result.passed <= 0
+      : result.skipped !== 0;
+    if (code !== 0 || result.testCount <= 0 || result.failed !== 0 || invalidSelection) return code || 1;
     return 0;
   } catch (error) {
     fs.writeFileSync(path.join(reportDir, "stdout.log"), output, "utf8");
@@ -450,7 +467,12 @@ async function runArchitectureCheck() {
 }
 
 function buildTestHost() {
-  const key = `test-host:${runId}`;
+  const inputHash = execFileSync(nodeCommand, [path.join(toolsDir, "source-hash.mjs"), "--test-host"], {
+    cwd: projectRoot,
+    encoding: "utf8",
+  }).trim();
+  const key = `test-host:${inputHash}`;
+  testHostDir = path.join(projectRoot, ".generated", "test-host-cache", inputHash);
   if (!buildPromises.has(key)) buildPromises.set(key, buildTestHostCore());
   return buildPromises.get(key);
 }
@@ -460,25 +482,51 @@ async function buildTestHostCore() {
   if (dependencyCode !== 0) return dependencyCode;
   const code = await runFrontendBuild();
   if (code !== 0) return code;
+  const complete = path.join(testHostDir, ".complete.json");
+  const executable = path.join(testHostDir, "nexus-pipeline.exe");
+  const index = path.join(testHostDir, "wwwroot", "index.html");
+  if (fs.existsSync(complete) && fs.existsSync(executable) && fs.existsSync(index)) {
+    try {
+      const metadata = JSON.parse(fs.readFileSync(complete, "utf8"));
+      const observed = directoryInventory(testHostDir);
+      if (metadata.schemaVersion === 2
+        && metadata.files && typeof metadata.files === "object" && !Array.isArray(metadata.files)
+        && JSON.stringify(metadata.files) === JSON.stringify(observed)) {
+        console.error(`[Test Host] 复用只读构建缓存：${testHostDir}`);
+        return 0;
+      }
+    } catch { /* remove the exact corrupt cache entry below */ }
+  }
   fs.rmSync(testHostDir, { recursive: true, force: true, maxRetries: 120, retryDelay: 250 });
-  fs.mkdirSync(testHostDir, { recursive: true });
+  const temporary = `${testHostDir}.tmp-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
+  fs.rmSync(temporary, { recursive: true, force: true, maxRetries: 120, retryDelay: 250 });
+  fs.mkdirSync(temporary, { recursive: true });
   const publishCode = await runProcess("dotnet", [
     "publish", "src\\NexusPipeline.csproj", "-c", "Release", "-r", "win-x64", "--self-contained", "false",
     "-p:PublishSingleFile=true", "-p:DebugType=none", "-p:DebugSymbols=false", "-p:NexusTestHost=true",
-    "-o", testHostDir, "--nologo", "-m:1", "-nr:false",
+    "-o", temporary, "--nologo", "-m:1", "-nr:false",
   ], { timeoutMs: 15 * 60 * 1000 });
-  if (publishCode !== 0) return publishCode;
-  const manifestCode = await verifyEmbeddedManifest(path.join(testHostDir, "nexus-pipeline.exe"), "asInvoker");
-  if (manifestCode !== 0) return manifestCode;
-  fs.cpSync(path.join(frontendDir, "dist"), path.join(testHostDir, "wwwroot"), { recursive: true });
-  fs.mkdirSync(path.join(testHostDir, "plugins"), { recursive: true });
+  if (publishCode !== 0) { fs.rmSync(temporary, { recursive: true, force: true }); return publishCode; }
+  const manifestCode = await verifyEmbeddedManifest(path.join(temporary, "nexus-pipeline.exe"), "asInvoker");
+  if (manifestCode !== 0) { fs.rmSync(temporary, { recursive: true, force: true }); return manifestCode; }
+  fs.cpSync(path.join(frontendDir, "dist"), path.join(temporary, "wwwroot"), { recursive: true });
+  fs.mkdirSync(path.join(temporary, "plugins"), { recursive: true });
+  fs.writeFileSync(path.join(temporary, ".complete.json"), `${JSON.stringify({
+    schemaVersion: 2,
+    files: directoryInventory(temporary),
+  }, null, 2)}\n`, "utf8");
+  try { fs.renameSync(temporary, testHostDir); }
+  catch (error) {
+    if (!fs.existsSync(path.join(testHostDir, ".complete.json"))) throw error;
+    fs.rmSync(temporary, { recursive: true, force: true });
+  }
   console.error(`[Test Host] 构建完成：${path.join(testHostDir, "nexus-pipeline.exe")}`);
   return 0;
 }
 
 function cleanTestHost() {
-  fs.rmSync(testHostDir, { recursive: true, force: true, maxRetries: 120, retryDelay: 250 });
-  buildPromises.delete(`test-host:${runId}`);
+  // Test Host binaries are content-addressed, read-only build outputs. Runtime
+  // data, ports and exit markers remain under the per-command runRoot.
 }
 
 function cleanEmulatorFixturePlugin() {
@@ -612,6 +660,40 @@ async function runSystem(args = [], { phase = "accelerated" } = {}) {
   }
 }
 
+async function runTiming(keys = TIMING_TESTS.map(test => test.key)) {
+  const selected = TIMING_TESTS.filter(test => keys.includes(test.key));
+  if (selected.length !== keys.length || selected.length === 0) {
+    console.error(`[Timing] 未知或空分组：${keys.join(", ")}`);
+    return 2;
+  }
+  let code = await buildTestHost();
+  if (code !== 0) return code;
+  for (const timing of selected) {
+    const port = await findAvailablePort();
+    const env = testHostEnvironment({
+      phase: `${timing.key}-realtime`,
+      system: true,
+      runtimeName: timing.runtimeName,
+      exitFile: path.join(runRoot, timing.runtimeName, ".nxp", "test-host.exit"),
+    });
+    env.NEXUS_SYSTEM_WEB_PORT = String(port);
+    console.error(`[Timing] 开始 ${timing.key}/${timing.runtimeName}，pattern=${timing.namePattern}，timeScale=${env.NEXUS_TIME_SCALE}`);
+    code = await runReported(
+      nodeCommand,
+      ["--test", "--test-concurrency=1", "--test-name-pattern", timing.namePattern, timing.suitePath],
+      { env, timeoutMs: 5 * 60 * 1000 },
+      "tap",
+      {
+        expectedFiles: [normalizePath(timing.suitePath)],
+        invokedFiles: [normalizePath(timing.suitePath)],
+        plannedSelection: true,
+      },
+    );
+    if (code !== 0) return code;
+  }
+  return 0;
+}
+
 async function runDefault() {
   for (const step of [
     () => runUnit(),
@@ -622,6 +704,38 @@ async function runDefault() {
     () => runSyntax(),
     () => runArchitectureCheck(),
   ]) {
+    const code = await step();
+    if (code !== 0) return code;
+  }
+  return 0;
+}
+
+async function runFastPlan(serialized) {
+  let plan;
+  try { plan = JSON.parse(serialized); } catch (error) {
+    console.error(`[Fast] 计划 JSON 无效：${error.message}`);
+    return 2;
+  }
+  if (!plan || typeof plan !== "object" || Array.isArray(plan)) return 2;
+  if (plan.full === true) return runDefault();
+  const unitGroups = Array.isArray(plan.unit_groups) ? plan.unit_groups : [];
+  const frontendGroups = Array.isArray(plan.frontend_groups) ? plan.frontend_groups : [];
+  if (unitGroups.some(key => !HOST_TEST_AREAS.some(area => area.key === key))
+    || frontendGroups.some(key => !FRONTEND_TEST_GROUPS.some(group => group.key === key))) return 2;
+  const steps = [];
+  if (unitGroups.length) steps.push(() => runUnit(unitGroups));
+  if (frontendGroups.length) steps.push(() => runFrontend(frontendGroups));
+  if (plan.contracts === true) steps.push(runContracts);
+  if (plan.docs === true) steps.push(runDocs);
+  if (plan.tooling === true) steps.push(runTooling);
+  if (plan.syntax === true) steps.push(runSyntax);
+  if (plan.architecture === true) steps.push(runArchitectureCheck);
+  if (steps.length === 0) {
+    console.error("[Fast] 计划为空；不能把零选择当作验证通过");
+    return 1;
+  }
+  console.error(`[Fast] plan=${JSON.stringify(plan)}`);
+  for (const step of steps) {
     const code = await step();
     if (code !== 0) return code;
   }
@@ -643,9 +757,7 @@ async function runIntegration() {
   if (code !== 0) return code;
   code = await runProcess(nodeCommand, ["tools\\validate-update-policy-history.mjs"]);
   if (code !== 0) return code;
-  code = await runSystem(["update"], { phase: "update-realtime" });
-  if (code !== 0) return code;
-  return runSystem(["execution"], { phase: "execution-realtime" });
+  return runTiming();
 }
 
 async function runDev(suite, args) {
@@ -681,8 +793,7 @@ async function runRelease(group) {
     "update-acceptance": [
       () => runProcess(nodeCommand, ["tools\\validate-update-policy-history.mjs"]),
       () => runSystem(["update"], { phase: "accelerated" }),
-      () => runSystem(["update"], { phase: "update-realtime" }),
-      () => runSystem(["execution"], { phase: "execution-realtime" }),
+      () => runTiming(),
     ],
   }[group];
   for (const step of steps) {
@@ -708,6 +819,7 @@ function listTestPlan() {
     hostAreas: HOST_TEST_AREAS,
     frontendGroups: FRONTEND_TEST_GROUPS,
     systemGroups: SYSTEM_TEST_GROUPS,
+    timingTests: TIMING_TESTS,
     governanceDomains: GOVERNANCE_DOMAINS,
   };
 }
@@ -727,7 +839,13 @@ resetProcessRunnerState();
 try {
   switch (command.toLowerCase()) {
     case "prepare": exitCode = args.length ? 2 : await prepareFast(); break;
-    case "fast": exitCode = args.length ? 2 : await runDefault(); break;
+    case "fast": {
+      if (args.length === 0) exitCode = await runDefault();
+      else if (args.length === 1 && args[0] === "--plan-env" && process.env.NEXUS_FAST_PLAN) {
+        exitCode = await runFastPlan(process.env.NEXUS_FAST_PLAN);
+      } else exitCode = 2;
+      break;
+    }
     case "integration": exitCode = args.length ? 2 : await runIntegration(); break;
     case "all": {
       if (args.length) { exitCode = 2; break; }

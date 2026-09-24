@@ -9,6 +9,26 @@ test("fast scope treats only an explicit nonempty documentation diff as docs-onl
   }
 });
 
+test("fast scope selects documented frontend backend and conservative tool plans", () => {
+  const docs = classifyFast(["docs/testing/commands.md"]);
+  assert.equal(docs.docs, true);
+  assert.equal(docs.unit_groups.length, 0);
+  assert.equal(docs.frontend_groups.length, 0);
+
+  const frontend = classifyFast(["frontend/src/ui/button.ts", "frontend/src/ui/button.test.ts"]);
+  assert.deepEqual(frontend.frontend_groups, ["ui"]);
+  assert.equal(frontend.architecture, false);
+
+  const backend = classifyFast(["src/Modules/Settings/SettingsService.cs"]);
+  assert.deepEqual(backend.unit_groups, ["config"]);
+  assert.equal(backend.architecture, true);
+
+  const sharedTool = classifyFast(["tools/source-hash.mjs"]);
+  assert.equal(sharedTool.full, true);
+  assert.equal(sharedTool.tooling, true);
+  assert.equal(sharedTool.needs_plugins, true);
+});
+
 test("renames classify both old and new paths", () => {
   const docsRename = parseNameStatusZ("R100\0docs/old.md\0docs/new.md\0");
   assert.equal(classifyFast(docsRename).docs_only, true);

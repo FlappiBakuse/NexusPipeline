@@ -8,6 +8,7 @@ import {
   GOVERNANCE_DOMAINS,
   HOST_TEST_AREAS,
   SYSTEM_TEST_GROUPS,
+  TIMING_TESTS,
   TEST_DOMAIN_REGISTRY,
   systemRuntimeName,
   validateRegistry,
@@ -42,6 +43,18 @@ test("registry is unique and contains only runnable, existing suites", () => {
     for (const suitePath of group.suitePaths) {
       assert.equal(fs.existsSync(path.join(ROOT, suitePath)), true, `${group.key}: ${suitePath}`);
     }
+  }
+  for (const timing of TIMING_TESTS) {
+    assert.equal(fs.existsSync(path.join(ROOT, timing.suitePath)), true, `${timing.key}: ${timing.suitePath}`);
+    assert.ok(timing.namePattern);
+  }
+});
+
+test("real-clock acceptance selects explicit timing cases instead of whole system groups", () => {
+  assert.deepEqual(TIMING_TESTS.map(item => item.key), ["update", "execution"]);
+  for (const timing of TIMING_TESTS) {
+    assert.match(timing.runtimeName, /-timing$/u);
+    assert.ok(SYSTEM_TEST_GROUPS.some(group => group.suitePaths.includes(timing.suitePath)));
   }
 });
 

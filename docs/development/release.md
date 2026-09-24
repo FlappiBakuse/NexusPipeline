@@ -23,12 +23,12 @@
 
 以下步骤需要维护者明确授权：
 
-当前阶段的新候选路径在受保护 `main` 每次 push 后运行 Host Release 的 `candidate` job：用该合并提交构建一次隔离 Test Host，完成 UI、系统与真实计时检查，再复用同一次前端构建打出生产 ZIP，验证后才上传 `host-candidate-<runId>-<attempt>`。失败报告使用独立 diagnostics artifact；候选不会创建或移动 tag，也不会自行发布。
+当前阶段的新候选路径在受保护 `main` 每次 push 后运行 Host Release 的 `candidate` job；也可从 `main` 显式选择 `operation=candidate` 和受保护 main 历史中的 `source_ref` 手动重建已过期候选。candidate 不需要 tag：它用固定源码构建隔离 Test Host，完成 UI、系统与独立真实计时检查，再打出生产 ZIP，验证后才上传 `host-candidate-<runId>-<attempt>`。失败报告使用独立 diagnostics artifact；候选不会创建或移动 tag，也不会自行发布。
 
 已有 tag 指向候选源码且候选 job 真正成功时，发布者可从 `main` 手动执行同包恢复：
 
 ```text
-gh workflow run release.yml --ref main -f tag=<已有 tag> -f candidate_run_id=<原候选 run ID>
+gh workflow run release.yml --ref main -f operation=publish-only -f tag=<已有 tag> -f candidate_run_id=<原候选 run ID>
 ```
 
 同一 run 出现多个成功候选 artifact 时，再传 `-f candidate_artifact_id=<服务端 artifact ID>`。独立 writer 核对原 attempt/job、服务端 artifact 摘要、候选清单、Git tree、现有 tag 与包；只复用原 ZIP，不安装或重新编译业务依赖。同 tag 同资产不同字节仍拒绝覆盖，远端读回通过后才公开 Release。仅在本地合成 run ID 打出的候选不能用于发布。

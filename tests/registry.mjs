@@ -35,6 +35,26 @@ export const SYSTEM_TEST_GROUPS = Object.freeze([
   { key: "update", suitePaths: ["tests/system/startup-update-smoke.mjs", "tests/system/update-smoke.mjs"], runtimeNames: ["runtime-startup-update", "runtime-update"] },
 ]);
 
+/**
+ * Real-clock acceptance deliberately selects only scenarios whose assertions
+ * depend on elapsed wall time. The accelerated system pass already covers the
+ * remaining scenarios, so repeating whole files here would duplicate work.
+ */
+export const TIMING_TESTS = Object.freeze([
+  {
+    key: "update",
+    suitePath: "tests/system/update-smoke.mjs",
+    runtimeName: "runtime-update-timing",
+    namePattern: "apply-update|defer 标记",
+  },
+  {
+    key: "execution",
+    suitePath: "tests/system/execution-resilience.mjs",
+    runtimeName: "runtime-execution-timing",
+    namePattern: "ER07|ER10",
+  },
+]);
+
 /** 同一次 H5 的加速与真实计时段必须使用不同运行目录，避免旧 PID 标记误指新进程。 */
 export function systemRuntimeName(baseName, phase) {
   return phase === "update-realtime" || phase === "execution-realtime"
@@ -55,6 +75,7 @@ export const TEST_DOMAIN_REGISTRY = Object.freeze({
   hostAreas: HOST_TEST_AREAS,
   frontendGroups: FRONTEND_TEST_GROUPS,
   systemGroups: SYSTEM_TEST_GROUPS,
+  timingTests: TIMING_TESTS,
   governanceDomains: GOVERNANCE_DOMAINS,
 });
 
@@ -68,10 +89,16 @@ export function validateRegistry() {
   assertUnique(HOST_TEST_AREAS, "Host");
   assertUnique(FRONTEND_TEST_GROUPS, "Frontend");
   assertUnique(SYSTEM_TEST_GROUPS, "System");
+  assertUnique(TIMING_TESTS, "Timing");
   assertUnique(GOVERNANCE_DOMAINS, "Governance");
   for (const group of SYSTEM_TEST_GROUPS) {
     if (group.suitePaths.length === 0 || group.suitePaths.length !== group.runtimeNames.length) {
       throw new Error(`System 分组缺少 suite/runtimeName：${group.key}`);
+    }
+  }
+  for (const timing of TIMING_TESTS) {
+    if (!timing.suitePath || !timing.runtimeName || !timing.namePattern) {
+      throw new Error(`Timing 分组缺少 suite/runtimeName/namePattern：${timing.key}`);
     }
   }
   return true;

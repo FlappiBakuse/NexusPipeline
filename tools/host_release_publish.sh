@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export GH_HTTP_TIMEOUT=30
+curl_read=(--connect-timeout 10 --max-time 60 --retry 2 --retry-delay 1 --retry-connrefused)
 cd "$PUBLISH_ROOT"
 metadata="build-metadata.json"
 test "$(jq -r .sourceSha "$metadata")" = "$SOURCE_SHA"
@@ -18,7 +20,7 @@ python "$GITHUB_WORKSPACE/NexusPipeline/tools/host_release.py" verify-package \
   --expected-tag "$TAG"
 api="https://api.github.com/repos/$GH_REPO/releases/tags/$TAG"
 response_file="$(mktemp)"
-status="$(curl -sS -o "$response_file" -w '%{http_code}' -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "$api")"
+status="$(curl "${curl_read[@]}" -sS -o "$response_file" -w '%{http_code}' -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "$api")"
 if [ "$status" = 404 ]; then
   # Tag lookup omits drafts; recover an existing draft by its immutable ID.
   matches="$(gh api --paginate "repos/$GH_REPO/releases?per_page=100" | jq -s --arg tag "$TAG" '[.[][] | select(.tag_name == $tag)]')"
@@ -46,7 +48,7 @@ for asset in "$zip_asset" "$sha_asset"; do
   existing_url="$(jq -r --arg name "$asset" '.assets[]? | select(.name == $name) | .url' <<<"$release_json" | head -n 1)"
   if [ -n "$existing_url" ]; then
     existing="$(mktemp)"
-    curl -sS -L -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/octet-stream' "$existing_url" -o "$existing"
+    curl "${curl_read[@]}" -sS -L -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/octet-stream' "$existing_url" -o "$existing"
     cmp -s "$existing" "$asset" || { echo "拒绝覆盖同 tag 的不同字节资产：$asset" >&2; exit 1; }
     rm -f "$existing"
   else
@@ -58,7 +60,7 @@ for asset in "$zip_asset" "$sha_asset"; do
   asset_url="$(jq -r --arg name "$asset" '.assets[]? | select(.name == $name) | .url' <<<"$release_json" | head -n 1)"
   test -n "$asset_url"
   received="$(mktemp)"
-  curl -sS -f -L -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/octet-stream' "$asset_url" -o "$received"
+  curl "${curl_read[@]}" -sS -f -L -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/octet-stream' "$asset_url" -o "$received"
   cmp -s "$received" "$asset" || { echo "远端资产下载后字节不一致：$asset" >&2; exit 1; }
   if [ "$asset" = "$zip_asset" ]; then
     python "$GITHUB_WORKSPACE/NexusPipeline/tools/host_release.py" verify-package \

@@ -381,6 +381,26 @@ def extract_candidate_artifact(archive_path: Path, output_dir: Path, *, expected
         raise HostReleaseError("candidate artifact ZIP 损坏") from exc
 
 
+def inspect_candidate_identity(output: Path, *, workflow_sha: str,
+                               run_id: int, run_attempt: int) -> dict[str, str]:
+    try:
+        candidate = json.loads((output / "candidate.json").read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise HostReleaseError("candidate.json 缺失或无效") from exc
+    _require(isinstance(candidate, dict), "candidate.json 根节点无效")
+    source_sha = candidate.get("sourceSha")
+    partner_sha = candidate.get("partnerSha")
+    _require(isinstance(source_sha, str) and re.fullmatch(r"[0-9a-f]{40}", source_sha) is not None,
+             "candidate source SHA 无效")
+    _require(isinstance(partner_sha, str) and re.fullmatch(r"[0-9a-f]{40}", partner_sha) is not None,
+             "candidate partner SHA 无效")
+    _require(candidate.get("producer") == {"workflowPath": ".github/workflows/release.yml",
+                                           "workflowSha": workflow_sha, "runId": run_id,
+                                           "runAttempt": run_attempt, "jobName": "candidate"},
+             "candidate 原 producer 身份不符")
+    return {"sourceSha": source_sha, "partnerSha": partner_sha}
+
+
 def _safe_package_entry(name: str) -> str:
     normalized = name.replace("\\", "/").removesuffix("/")
     _require(
@@ -471,7 +491,7 @@ def verify_received_package(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="NexusPipeline Host production release boundary")
-    parser.add_argument("command", nargs="?", choices=("release", "verify-package", "candidate", "extract-candidate", "validate-candidate"), default="release")
+    parser.add_argument("command", nargs="?", choices=("release", "verify-package", "candidate", "extract-candidate", "inspect-candidate", "validate-candidate"), default="release")
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--tag")
     parser.add_argument("--source-sha")
@@ -488,6 +508,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--frontend-ready", action="store_true")
     parser.add_argument("--artifact-zip", type=Path)
     parser.add_argument("--expected-digest")
+    parser.add_argument("--github-output", type=Path)
     args = parser.parse_args(argv)
     root = args.root.resolve()
     if args.command == "extract-candidate":
@@ -495,6 +516,17 @@ def main(argv: list[str] | None = None) -> int:
                              (args.expected_digest, "--expected-digest")):
             _require(value is not None, f"{label} is required")
         extract_candidate_artifact(args.artifact_zip, args.output, expected_digest=args.expected_digest)
+        return 0
+    if args.command == "inspect-candidate":
+        for value, label in ((args.output, "--output"), (args.workflow_sha, "--workflow-sha"),
+                             (args.run_id, "--run-id"), (args.run_attempt, "--run-attempt")):
+            _require(value is not None, f"{label} is required")
+        identity = inspect_candidate_identity(args.output, workflow_sha=args.workflow_sha,
+                                              run_id=args.run_id, run_attempt=args.run_attempt)
+        if args.github_output:
+            with args.github_output.open("a", encoding="utf-8") as stream:
+                stream.write(f"source_sha={identity['sourceSha']}\npartner_sha={identity['partnerSha']}\n")
+        print(json.dumps(identity, sort_keys=True))
         return 0
     if args.command == "validate-candidate":
         for value, label in ((args.output, "--output"), (args.tag, "--tag"),
