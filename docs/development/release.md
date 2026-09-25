@@ -23,7 +23,7 @@
 
 以下步骤需要维护者明确授权：
 
-当前阶段的新候选路径在受保护 `main` 每次 push 后运行 Host Release 的 `candidate` job；也可从 `main` 显式选择 `operation=candidate` 和受保护 main 历史中的 `source_ref` 手动重建已过期候选。candidate 不需要 tag：它用固定源码构建隔离 Test Host，完成 UI、系统与独立真实计时检查，再打出生产 ZIP，验证后才上传 `host-candidate-<runId>-<attempt>`。失败报告使用独立 diagnostics artifact；候选不会创建或移动 tag，也不会自行发布。
+当前阶段的新候选路径在受保护 `main` 每次 push 后运行 Host Release 的 `candidate` job；也可从 `main` 显式选择 `operation=candidate` 和受保护 main 历史中的 `source_ref` 手动重建已过期候选。candidate 不需要 tag：它用固定源码构建隔离 Test Host，完成 UI、系统与独立真实计时检查，再用同一 production staging 生成 ZIP 和 Setup。Inno Setup 6.7.3 的下载包与编译器分别验固定 SHA256；两种分发物及各自纯 SHA 侧文件进入同一 `host-candidate-<runId>-<attempt>`，候选清单还记录 ZIP/Setup 构建元数据。失败报告使用独立 diagnostics artifact；候选不会创建或移动 tag，也不会自行发布。
 
 已有 tag 指向候选源码且候选 job 真正成功时，发布者可从 `main` 手动执行同包恢复：
 
@@ -31,7 +31,7 @@
 gh workflow run release.yml --ref main -f operation=publish-only -f tag=<已有 tag> -f candidate_run_id=<原候选 run ID>
 ```
 
-同一 run 出现多个成功候选 artifact 时，再传 `-f candidate_artifact_id=<服务端 artifact ID>`。独立 writer 核对原 attempt/job、服务端 artifact 摘要、候选清单、Git tree、现有 tag 与包；只复用原 ZIP，不安装或重新编译业务依赖。同 tag 同资产不同字节仍拒绝覆盖，远端读回通过后才公开 Release。仅在本地合成 run ID 打出的候选不能用于发布。
+同一 run 出现多个成功候选 artifact 时，再传 `-f candidate_artifact_id=<服务端 artifact ID>`。独立 writer 核对原 attempt/job、服务端 artifact 摘要、候选清单、Git tree、现有 tag、ZIP 与 Setup 来源及摘要；只复用原候选，不重新编译。四个分发资产（ZIP、Setup 与各自 SHA 侧文件）采用固定白名单；同 tag 同资产不同字节拒绝覆盖，远端逐项读回通过后才公开 Release。仅在本地合成 run ID 打出的候选不能用于发布。
 
 新版本需先在受保护 `main` 的对应合并提交完成候选验收；获授权后才能创建并推送指向该提交的 tag。已有 tag 不因发布工具修复而移动。Release Notes 依据该 tag 的真实变更写入 UTF-8 无 BOM 文件；独立下载 ZIP/SHA 复核后，再按授权更新 Release 正文并检查更新可见性。控制工具修复通过正常源码 PR 和 Required 检查；恢复始终使用原候选，已有资产必须字节一致。
 

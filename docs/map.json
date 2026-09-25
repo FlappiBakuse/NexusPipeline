@@ -2,6 +2,39 @@
   "schemaVersion": 1,
   "topics": [
     {
+      "id": "user.guide",
+      "path": "user/README.md",
+      "summary": "安装、依赖、取消、日志、结果、配置修复、升级与卸载",
+      "topics": ["用户指南", "安装", "取消", "日志", "升级", "卸载"],
+      "aliases": ["FAQ", "常见问题", "使用指南"],
+      "codePaths": ["README.md", "frontend/public/help/runtime-prerequisites.html"],
+      "testDomains": ["governanceDomains.docs-links-contracts"],
+      "authorityFor": ["user-operations"],
+      "status": "current"
+    },
+    {
+      "id": "user.guide.en",
+      "path": "user/README.en.md",
+      "summary": "English entry for installation, unverified outcomes, repair and data retention",
+      "topics": ["English guide", "installation", "unverified", "upgrade"],
+      "aliases": ["user guide English"],
+      "codePaths": ["README.md"],
+      "testDomains": ["governanceDomains.docs-links-contracts"],
+      "authorityFor": ["user-operations-english"],
+      "status": "current"
+    },
+    {
+      "id": "development.debt-ledger",
+      "path": "development/debt-ledger.md",
+      "summary": "v0.16.9 已证删除、兼容保留、生成资产与性能测量缺口",
+      "topics": ["死代码", "性能", "债务", "兼容"],
+      "aliases": ["debt ledger", "性能基准"],
+      "codePaths": ["src/Modules/Configuration/Scripting/TaskConfigView.cs", "src/Modules/Execution/Judgement/TaskProtocolRun.cs"],
+      "testDomains": ["hostAreas.execution", "hostAreas.config"],
+      "authorityFor": ["v0169-debt-audit"],
+      "status": "current"
+    },
+    {
       "id": "architecture.index",
       "path": "architecture/README.md",
       "summary": "架构专题入口与模块责任边界",

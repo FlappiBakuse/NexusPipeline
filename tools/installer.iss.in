@@ -1,0 +1,416 @@
+; Generated from this template and one frozen production payload by host_installer.py.
+[Setup]
+AppId=NexusPipeline.PerUser
+AppName=NexusPipeline
+AppVersion=@@VERSION@@
+AppPublisher=FlappiBakuse
+DefaultDirName={localappdata}\Programs\NexusPipeline
+DefaultGroupName=NexusPipeline
+UninstallFilesDir={localappdata}\NexusPipeline\installer
+PrivilegesRequired=lowest
+ArchitecturesAllowed=x64
+ArchitecturesInstallIn64BitMode=x64
+AllowUNCPath=no
+AllowNetworkDrive=no
+AppMutex=NexusPipeline.SingleInstance
+CloseApplications=no
+RestartApplications=no
+UsePreviousAppDir=no
+DisableProgramGroupPage=yes
+OutputDir=@@OUTPUT_DIR@@
+OutputBaseFilename=NexusPipeline-v@@VERSION@@-win-x64-setup
+Compression=lzma2
+SolidCompression=yes
+WizardStyle=modern
+
+[Tasks]
+Name: desktopicon; Description: "创建桌面快捷方式"; Flags: unchecked
+
+[Icons]
+Name: "{autoprograms}\NexusPipeline"; Filename: "{app}\nexus-pipeline.exe"
+Name: "{autodesktop}\NexusPipeline"; Filename: "{app}\nexus-pipeline.exe"; Tasks: desktopicon
+
+[Files]
+@@FILES@@
+
+[Code]
+const
+  RegistryKey = 'Software\NexusPipeline\Installer';
+  IdentityFile = 'installer-instance.txt';
+
+var
+  DeleteDataCheck: TNewCheckBox;
+  UpgradeMode: Boolean;
+
+function GetDriveTypeW(RootPath: String): Integer;
+  external 'GetDriveTypeW@kernel32.dll stdcall';
+
+function IsReparse(const Path: String): Boolean;
+var
+  Entry: TFindRec;
+begin
+  Result := False;
+  if FindFirst(Path, Entry) then begin
+    Result := (Entry.Attributes and FILE_ATTRIBUTE_REPARSE_POINT) <> 0;
+    FindClose(Entry);
+  end;
+end;
+
+function HasLinkInPath(const Path: String): Boolean;
+var
+  Current, Parent: String;
+begin
+  Result := False;
+  Current := RemoveBackslashUnlessRoot(Path);
+  while Current <> '' do begin
+    if FileOrDirExists(Current) and IsReparse(Current) then begin
+      Result := True;
+      Exit;
+    end;
+    Parent := ExtractFileDir(Current);
+    if (Parent = Current) or (Parent = '') then Exit;
+    Current := Parent;
+  end;
+end;
+
+function IsEmptyDirectory(const Path: String): Boolean;
+var
+  Entry: TFindRec;
+begin
+  Result := True;
+  if not DirExists(Path) then Exit;
+  if FindFirst(AddBackslash(Path) + '*', Entry) then begin
+    try
+      repeat
+        if (Entry.Name <> '.') and (Entry.Name <> '..') then begin
+          Result := False;
+          Exit;
+        end;
+      until not FindNext(Entry);
+    finally
+      FindClose(Entry);
+    end;
+  end;
+end;
+
+function InstanceOwned(const Path: String): Boolean;
+var
+  Registered: String;
+  Identity: AnsiString;
+begin
+  Result := False;
+  if HasLinkInPath(Path) then Exit;
+  if not RegQueryStringValue(HKCU, RegistryKey, 'AppDir', Registered) then Exit;
+  if CompareText(RemoveBackslashUnlessRoot(Registered), RemoveBackslashUnlessRoot(Path)) <> 0 then Exit;
+  if not LoadStringFromFile(ExpandConstant('{localappdata}\NexusPipeline\installer\') + IdentityFile, Identity) then Exit;
+  Result := Identity = 'NexusPipeline.PerUser|' + Path;
+end;
+
+function ValidDestination(const Path: String): Boolean;
+var
+  Drive: String;
+begin
+  Result := False;
+  if (Copy(Path, 1, 2) = '\\') or HasLinkInPath(Path) then Exit;
+  Drive := ExtractFileDrive(Path);
+  if (Length(Drive) <> 2) or (GetDriveTypeW(Drive + '\') <> 3) then Exit;
+  if not IsEmptyDirectory(Path) and not InstanceOwned(Path) then Exit;
+  Result := True;
+end;
+
+function NextButtonClick(CurPageID: Integer): Boolean;
+begin
+  Result := True;
+  if CurPageID = wpSelectDir then begin
+    Result := ValidDestination(WizardDirValue);
+    if not Result then
+      MsgBox('请选择可写的本地空目录，或此用户已登记且身份匹配的安装目录；不会接管不明旧目录、网络盘或链接目录。', mbError, MB_OK);
+  end;
+end;
+
+function HasFramework(const Framework: String): Boolean;
+var
+  Dotnet, Line, Prefix, VersionText, ExpectedPath: String;
+  I, Code, Marker: Integer;
+  Version, Minimum, Maximum: Int64;
+  Output: TExecOutput;
+begin
+  Result := False;
+  if not IsWin64 then Exit;
+  if not StrToVersion('8.0.0', Minimum) or not StrToVersion('9.0.0', Maximum) then Exit;
+  Dotnet := ExpandConstant('{commonpf64}\dotnet\dotnet.exe');
+  ExpectedPath := ExpandConstant('{commonpf64}\dotnet\shared\') + Framework;
+  if not FileExists(Dotnet) or HasLinkInPath(Dotnet) then Exit;
+  try
+    if not ExecAndCaptureOutput(Dotnet, '--list-runtimes', '', SW_HIDE,
+      ewWaitUntilTerminated, Code, Output) then Exit;
+  except
+    Exit;
+  end;
+  if (Code <> 0) or Output.Error then Exit;
+  Prefix := Framework + ' ';
+  for I := 0 to GetArrayLength(Output.StdOut) - 1 do begin
+    Line := Output.StdOut[I];
+    Marker := Pos(' [', Line);
+    if (Copy(Line, 1, Length(Prefix)) = Prefix) and (Marker > Length(Prefix)) then begin
+      VersionText := Copy(Line, Length(Prefix) + 1, Marker - Length(Prefix) - 1);
+      if StrToVersion(VersionText, Version) and (Version >= Minimum) and (Version < Maximum)
+        and (CompareText(Copy(Line, Marker + 2, Length(ExpectedPath)), ExpectedPath) = 0)
+        and (Copy(Line, Marker + 2 + Length(ExpectedPath), 1) = ']') then begin
+        Result := True;
+        Exit;
+      end;
+    end;
+  end;
+end;
+
+function VerifyMicrosoftSignature(const Package: String): Boolean;
+var
+  Script, Params: String;
+  Code: Integer;
+begin
+  Result := False;
+  Script := ExpandConstant('{tmp}\nxp-verify-microsoft.ps1');
+  if not SaveStringToFile(Script,
+    'param([string]$Package)' + #13#10 +
+    '$s = Get-AuthenticodeSignature -LiteralPath $Package' + #13#10 +
+    'if ($s.Status -ne ''Valid'' -or $s.SignerCertificate.Subject -notmatch ''O=Microsoft Corporation'') { exit 1 }' + #13#10,
+    False) then Exit;
+  Params := '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + Script + '" -Package "' + Package + '"';
+  Result := Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), Params,
+    '', SW_HIDE, ewWaitUntilTerminated, Code) and (Code = 0);
+end;
+
+function InstallFramework(const Framework, Description, URL, FileName, Digest: String;
+  var NeedsRestart: Boolean): String;
+var
+  Package: String;
+  Code: Integer;
+begin
+  Result := '';
+  if HasFramework(Framework) then Exit;
+  if WizardSilent then begin
+    Result := '缺少 ' + Description + '；请交互运行安装器并确认依赖安装。';
+    Exit;
+  end;
+  if MsgBox('缺少 ' + Description + '。将从微软官方地址下载已锁定的 x64 安装包并运行，是否继续？',
+    mbConfirmation, MB_YESNO) <> IDYES then begin
+    Result := '用户取消了 ' + Description + ' 依赖安装。';
+    Exit;
+  end;
+  try
+    DownloadTemporaryFile(URL, FileName, Digest, nil);
+  except
+    Result := Description + ' 下载或摘要校验失败：' + GetExceptionMessage;
+    Exit;
+  end;
+  Package := ExpandConstant('{tmp}\') + FileName;
+  if not VerifyMicrosoftSignature(Package) then begin
+    Result := Description + ' 的微软数字签名无法确认。';
+    Exit;
+  end;
+  if not ShellExec('runas', Package, '/install /quiet /norestart', '', SW_SHOWNORMAL,
+    ewWaitUntilTerminated, Code) then begin
+    Result := Description + ' 安装器无法启动：' + SysErrorMessage(Code);
+    Exit;
+  end;
+  if Code = 3010 then begin
+    NeedsRestart := True;
+    Result := Description + ' 安装需要重启；请自行重启后重新运行本安装器。';
+    Exit;
+  end;
+  if Code <> 0 then begin
+    Result := Description + ' 安装失败，退出码 ' + IntToStr(Code) + '。';
+    Exit;
+  end;
+  if not HasFramework(Framework) then
+    Result := Description + ' 安装后仍未检测到适用的 x64 框架。';
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  Path: String;
+begin
+  Result := '';
+  UpgradeMode := False;
+  if not ValidDestination(WizardDirValue) then begin
+    Result := '目标目录不是可信的本地空目录或已登记实例。';
+    Exit;
+  end;
+  Path := WizardDirValue;
+  UpgradeMode := not IsEmptyDirectory(Path);
+  if UpgradeMode and
+     (DirExists(AddBackslash(Path) + '.nxp-update') or
+      DirExists(AddBackslash(Path) + '.nxp-backup') or
+      FileExists(AddBackslash(Path) + '.nxp-version')) then begin
+    Result := '已有更新或恢复现场；请先在原实例完成恢复，不覆盖现场。';
+    Exit;
+  end;
+  Result := InstallFramework('Microsoft.WindowsDesktop.App', '.NET Desktop Runtime 8 x64',
+    '@@DESKTOP_URL@@', 'windowsdesktop-runtime-8.0.31-win-x64.exe', '@@DESKTOP_SHA256@@', NeedsRestart);
+  if Result <> '' then Exit;
+  Result := InstallFramework('Microsoft.AspNetCore.App', 'ASP.NET Core Runtime 8 x64',
+    '@@ASPNET_URL@@', 'aspnetcore-runtime-8.0.31-win-x64.exe', '@@ASPNET_SHA256@@', NeedsRestart);
+end;
+
+function IsFreshInstall: Boolean;
+begin
+  Result := not UpgradeMode;
+end;
+
+function IsTrustedUpgrade: Boolean;
+begin
+  Result := UpgradeMode;
+end;
+
+procedure VerifyStagedFile(const Relative, Digest: String);
+var
+  Path: String;
+begin
+  Path := AddBackslash(ExpandConstant('{app}')) + '.nxp-update\staging\@@VERSION@@\' + Relative;
+  if not FileExists(Path) or HasLinkInPath(Path) or
+     (CompareText(GetSHA256OfFile(Path), Digest) <> 0) then
+    RaiseException('暂存载荷校验失败：' + Relative);
+end;
+
+procedure VerifyStagedPayload;
+begin
+@@VERIFY_STAGED@@
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  Path, ManagerDir, Staged: String;
+  Code: Integer;
+begin
+  if CurStep <> ssPostInstall then Exit;
+  Path := ExpandConstant('{app}');
+  if UpgradeMode then begin
+    Staged := AddBackslash(Path) + '.nxp-update\staging\@@VERSION@@';
+    VerifyStagedPayload;
+    if not ShellExec('runas', AddBackslash(Path) + 'nexus-pipeline.exe',
+      'apply-update --staged "' + Staged + '"', Path, SW_HIDE, ewWaitUntilTerminated, Code) then
+      RaiseException('旧版更新 worker 无法启动；保留 staged 文件供诊断。');
+    if Code <> 0 then
+      RaiseException('旧版更新 worker 失败，退出码 ' + IntToStr(Code) + '；请检查 journal/backup。');
+    Exit;
+  end;
+  ManagerDir := ExpandConstant('{localappdata}\NexusPipeline\installer');
+  if not ForceDirectories(ManagerDir) then
+    RaiseException('无法创建此实例的安装归属记录。');
+  if not SaveStringToFile(AddBackslash(ManagerDir) + IdentityFile,
+    'NexusPipeline.PerUser|' + Path, False) then
+    RaiseException('无法写入此实例的安装归属记录。');
+  if not RegWriteStringValue(HKCU, RegistryKey, 'AppDir', Path) then
+    RaiseException('无法登记此实例的安装路径。');
+end;
+
+function LinkFreeTree(const Path: String): Boolean;
+var
+  Entry: TFindRec;
+  Child: String;
+begin
+  Result := not HasLinkInPath(Path);
+  if not Result or not DirExists(Path) then Exit;
+  if FindFirst(AddBackslash(Path) + '*', Entry) then begin
+    try
+      repeat
+        if (Entry.Name <> '.') and (Entry.Name <> '..') then begin
+          Child := AddBackslash(Path) + Entry.Name;
+          if (Entry.Attributes and FILE_ATTRIBUTE_REPARSE_POINT) <> 0 then begin
+            Result := False;
+            Exit;
+          end;
+          if ((Entry.Attributes and FILE_ATTRIBUTE_DIRECTORY) <> 0) and not LinkFreeTree(Child) then begin
+            Result := False;
+            Exit;
+          end;
+        end;
+      until not FindNext(Entry);
+    finally
+      FindClose(Entry);
+    end;
+  end;
+end;
+
+function DeleteLinkFreeTree(const Path: String): Boolean;
+var
+  Entry: TFindRec;
+  Child: String;
+begin
+  Result := not HasLinkInPath(Path);
+  if not Result then Exit;
+  if not DirExists(Path) then Exit;
+  if FindFirst(AddBackslash(Path) + '*', Entry) then begin
+    try
+      repeat
+        if (Entry.Name <> '.') and (Entry.Name <> '..') then begin
+          Child := AddBackslash(Path) + Entry.Name;
+          if (Entry.Attributes and FILE_ATTRIBUTE_REPARSE_POINT) <> 0 then begin
+            Result := False;
+            Exit;
+          end;
+          if (Entry.Attributes and FILE_ATTRIBUTE_DIRECTORY) <> 0 then begin
+            if not DeleteLinkFreeTree(Child) then Result := False;
+          end else if not DeleteFile(Child) then Result := False;
+        end;
+      until not FindNext(Entry);
+    finally
+      FindClose(Entry);
+    end;
+  end;
+  if not RemoveDir(Path) then Result := False;
+end;
+
+procedure DeleteOwnedFile(const Relative, Digest: String);
+var
+  Path: String;
+begin
+  Path := AddBackslash(ExpandConstant('{app}')) + Relative;
+  if not FileExists(Path) or HasLinkInPath(Path) then Exit;
+  try
+    if CompareText(GetSHA256OfFile(Path), Digest) = 0 then
+      if not DeleteFile(Path) then Log('保留无法删除的应用文件：' + Relative);
+  except
+    Log('保留无法核验的应用文件：' + Relative);
+  end;
+end;
+
+procedure DeleteKnownPayload;
+begin
+@@DELETE_OWNED@@
+end;
+
+procedure InitializeUninstallProgressForm;
+begin
+  DeleteDataCheck := TNewCheckBox.Create(UninstallProgressForm);
+  DeleteDataCheck.Parent := UninstallProgressForm;
+  DeleteDataCheck.Caption := '删除此实例用户数据（config、data、history、logs、.nxp、plugins 等）';
+  DeleteDataCheck.Checked := False;
+  DeleteDataCheck.Left := UninstallProgressForm.StatusLabel.Left;
+  DeleteDataCheck.Top := UninstallProgressForm.StatusLabel.Top + ScaleY(42);
+  DeleteDataCheck.Width := UninstallProgressForm.ClientWidth - DeleteDataCheck.Left - ScaleX(12);
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  Path: String;
+begin
+  if CurUninstallStep <> usUninstall then Exit;
+  Path := ExpandConstant('{app}');
+  if not InstanceOwned(Path) then begin
+    Log('无法确认实例归属；应用文件和数据均保留。');
+    Exit;
+  end;
+  DeleteKnownPayload;
+  if Assigned(DeleteDataCheck) and DeleteDataCheck.Checked then begin
+    if LinkFreeTree(AddBackslash(Path) + 'config') then DeleteLinkFreeTree(AddBackslash(Path) + 'config') else Log('保留含链接的 config');
+    if LinkFreeTree(AddBackslash(Path) + 'data') then DeleteLinkFreeTree(AddBackslash(Path) + 'data') else Log('保留含链接的 data');
+    if LinkFreeTree(AddBackslash(Path) + 'history') then DeleteLinkFreeTree(AddBackslash(Path) + 'history') else Log('保留含链接的 history');
+    if LinkFreeTree(AddBackslash(Path) + 'logs') then DeleteLinkFreeTree(AddBackslash(Path) + 'logs') else Log('保留含链接的 logs');
+    if LinkFreeTree(AddBackslash(Path) + 'plugins') then DeleteLinkFreeTree(AddBackslash(Path) + 'plugins') else Log('保留含链接的 plugins');
+    if LinkFreeTree(AddBackslash(Path) + '.nxp') then DeleteLinkFreeTree(AddBackslash(Path) + '.nxp') else Log('保留含链接的 .nxp');
+  end;
+  RegDeleteValue(HKCU, RegistryKey, 'AppDir');
+  DeleteFile(ExpandConstant('{localappdata}\NexusPipeline\installer\') + IdentityFile);
+end;

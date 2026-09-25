@@ -1,6 +1,6 @@
 # 项目状态（Status）
 
-**更新日期**：2026-09-23｜**发布模式**：`major=0` 或带 `-beta.N` / `-rc.N` 后缀的版本为 Pre-release；`major>=1` 且无后缀的版本为正式 Release。源码进入 `main` 必须经过 PR、`Host / Required` 检查与 squash merge；日常开发目标为 `develop`。
+**更新日期**：2026-09-25｜**发布模式**：`major=0` 或带 `-beta.N` / `-rc.N` 后缀的版本为 Pre-release；`major>=1` 且无后缀的版本为正式 Release。当前本地实施分支为 `codex/v0.16.9-local`（未提交）；源码进入 `main` 必须经过 PR、`Host / Required` 检查与 squash merge。
 
 > 本文件记录尚未完成的开发计划、活跃技术验证和当前未解决问题。已完成版本以 [CHANGELOG.md](../CHANGELOG.md)、代码和测试结果为准。版本号只在用户明确指定时修改；开发检查点保存在仓库外，不以 Git 标签代替文件备份。
 
@@ -15,7 +15,7 @@
 ## 后续功能：插件生态扩展
 
 - [ ] 继续扩展八个专项适配器中缺乏明确原生日志的内部业务分支。MXU 无任务 ID 的异步 focus 无法可靠归属；三月七官方包的旁置文件桥接试验不支持该接入方式，源码桥原型默认关闭；官方 ok 启动器仍可能自行更新，超出固定版本/工作文件身份的组合保持受限。各插件的已验证规则与限制见官方插件仓库的 `docs/TASK_ADAPTERS.md`。
-- [ ] 完成独立授权的真实账号/游戏运行验证；隔离启动器、原始分支、Jint、配置事务与 Test Host 测试不替代真实业务运行。
+- [ ] 扩展已获授权的真实账号/游戏验证。六款 PC 专项脚本各完成单配置真实运行；仅 ZZZ 该配置五项得到完整成功证据，其他未核验项保留原状。OkNTE China 新发行完成真实准入，但正常收尾尚未通过，最终实测依用户要求取消。OkWutheringWaves、模拟器、机器人与其他配置/分支未运行；隔离源码和 Jint 测试不替代这些结果。
 - [ ] 为更多官方 managed-code 插件补充 mock HTTP 与事件回归测试。
 - [ ] 继续完善插件设置贡献的字段校验、错误呈现和目录元数据检查。
 - [ ] 持续验证用户级插件数据清理、密钥保护和升级后的当前数据访问。
@@ -26,6 +26,17 @@
 - [ ] 完成更新事务的进一步故障注入矩阵，覆盖长时间运行、文件锁和异常退出组合。
 - [ ] 持续维护运行时版本动态展示、真实计时回归和 Release 资产校验。
 - [ ] 在 NexusPipeline-Plugins 的 `EmulatorSupport` 插件完成雷电、夜神和 BlueStacks 真机验证；实例识别、ADB 路由、启动/前台查询/截图/应用停止与安全关闭矩阵由[插件发行指南](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/docs/RELEASING.md)维护。宿主 System Smoke 覆盖 Generic ADB、MuMuManager 和 managed-code provider 跨边界调用。
+
+## v0.16.9 本地处置
+
+| 活跃项 | 处置 | 本轮证据或再触发条件 |
+|---|---|---|
+| 八适配器内部业务分支 | bounded-support | 仅已审查且有本轮证据的任务给终态；新官方发行与匿名 focus 保持受限，见 Plugins 支持表 |
+| 真实账号/游戏、机器人、模拟器真机 | bounded-support | 六款 PC 单配置真实运行已记录，OkNTE 受限准入已核对但正常收尾未验证；机器人与模拟器真机仍未运行 |
+| managed 设置、密钥、事件和清理 | bounded-support | GameCheckIn 现有 mock 覆盖保存/遮盖/回退，EmulatorSupport 新增 provider 停止注销；其余插件按实际使用接口再扩展 |
+| 插件设置贡献与用户级清理 | defer | 触发条件为新的具体字段、目录元数据或删除场景；不将本轮安装器脚本编译当实际卸载通过 |
+| 更新文件锁/磁盘满/异常恢复 | defer | 待独立 Windows 分发实例运行故障注入；源码和 unit 不代表老 EXE 升级通过 |
+| 运行时版本显示、资产回读与性能扩展 | defer | 候选冻结与远端发行尚未授权；同平台扩展基准需原始样本 |
 
 ## 维护规则
 

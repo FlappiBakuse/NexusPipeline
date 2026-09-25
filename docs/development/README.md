@@ -9,5 +9,6 @@
 | 环境与本地运行 | 安装 SDK、构建前端/宿主、调试运行时和隔离数据 | [setup.md](setup.md) |
 | 协作与提交 | 版本边界、提交授权、文档维护和 UI 测试治理 | [workflow.md](workflow.md) |
 | 发行与更新 | 发布前门禁、Pre-release 规则、包校验和发布后清理 | [release.md](release.md) |
+| 债务与性能 | v0.16.9 已证删除、保留理由和测量缺口 | [debt-ledger.md](debt-ledger.md) |
 
 开始一次修改时，同时核对[架构索引](../architecture/README.md)、[插件 API 索引](../reference/plugin-api/README.md)和适用的测试域；版本历史与当前状态分别见[历史索引](../history/README.md)和 [STATUS.md](../STATUS.md)。

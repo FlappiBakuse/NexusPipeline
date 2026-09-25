@@ -12,7 +12,11 @@
 
 更新检查发现候选版本后，`UpdateService` 通过固定更新源读取根目录 `update-policy.json`。策略必须通过 schema、仓库标识、版本顺序、屏障 code 和迁移 URL 校验；网络失败、响应超限或策略无效时保持发现结果并禁止内置下载。对当前版本到目标版本区间内的最早屏障，状态 API 和 MCP 返回 `manualUpdateRequired`、`updateBlockCode=breaking-update`、`barrierVersion` 与可选 `migrationUrl`，下载、启动前自动应用、下次启动应用和闲时自动应用均被拒绝。策略验证成功且未命中屏障时才允许下载；策略缓存只用于带 HTTP validator 的后续验证，网络失败不会授权旧缓存。
 
-主程序更新事务只交换 `nexus-pipeline.exe` 与 `wwwroot/`，用户 `plugins/`、`config/`、`data/`、`history/` 和 `logs/` 保持不变；官方插件仓库不参与宿主自动更新流程。`update-policy.json` 的屏障记录在破坏性布局发布前按版本递增追加，启动时按当前版本与目标版本区间执行策略检查。
+主程序更新事务交换 `nexus-pipeline.exe`、`wwwroot/`，若新包含 `README.md` 也交换该应用资产；用户 `plugins/`、`config/`、`data/`、`history/` 和 `logs/` 保持不变；官方插件仓库不参与宿主自动更新流程。`update-policy.json` 的屏障记录在破坏性布局发布前按版本递增追加，启动时按当前版本与目标版本区间执行策略检查。
+
+已发布 v0.16.8 的 worker 只交换 EXE 和 `wwwroot/`。v0.16.9 首次启动收尾会在已提交的同版本 journal 和 staging 存在时，仅对缺失的 `README.md` 创建文件；若用户目录已有 README，则保留，绝不覆盖未知修改。安装器同路径升级只接收本 Windows 用户已登记且身份匹配的安装目录，应用文件先按冻结 SHA256 写入 `.nxp-update/staging/`，再调用现有 `apply-update` worker；不明便携目录必须走内置更新或手动替换指导。
+
+候选构建对同一 production staging 生成 ZIP 和 Setup；`candidate.json` 固定列出两份资产、纯 SHA 侧文件和两份构建元数据。publisher 从原成功 run 下载服务端指定 artifact，核对来源、tree、依赖与编译器锁、四项分发资产的字节，再发布并远端逐项回读；不从发行页按 latest 重新取包。当前未授权创建 tag 或发布，源码中的链路不表示已有 v0.16.9 候选。
 
 启动恢复发现未完成的 apply journal 且 immutable backup 包含宿主 exe 时，当前启动实例不会直接覆盖自己的映像；它会拉起独立 recovery worker，等待当前实例释放单实例互斥体后还原 backup、写入 `RollbackConfirmed` 并重拉宿主，旧版本启动收尾再删除 backup 与 journal。回滚失败时现场继续保留并由下一次启动重试。
 
