@@ -10,7 +10,7 @@ using NexusPipeline.Modules.Users;
 
 namespace NexusPipeline.Tests.Configuration;
 
-public sealed class ConfigValidationScriptRunnerTests
+public sealed class ConfigEditScriptRunnerTests
 {
     private static string MakeTempDir()
     {
@@ -44,9 +44,9 @@ public sealed class ConfigValidationScriptRunnerTests
         };
     }
 
-    private static ConfigValidatorDescriptor Descriptor(string code, string root)
+    private static ConfigEditorDescriptor Descriptor(string code, string root)
     {
-        return new ConfigValidatorDescriptor(
+        return new ConfigEditorDescriptor(
             "fixture-validator",
             root,
             Path.Combine(root, "config-validator.js"),
@@ -61,7 +61,7 @@ public sealed class ConfigValidationScriptRunnerTests
             "user-1",
             "用户甲",
             new UserScriptBinding { ScriptInstanceId = script.Id });
-        string json = ConfigValidationScriptRunner.BuildInput(
+        string json = ConfigEditScriptRunner.BuildInput(
             script,
             user,
             [new ConfigValidationFile("config.json", 12), new ConfigValidationFile("profiles/user.json", 34)]);
@@ -93,7 +93,7 @@ public sealed class ConfigValidationScriptRunnerTests
                 nexus.notify('配置检查', '发现未使用字段，保留当前配置。', 'warning');
                 """;
 
-            ConfigValidationResult result = await ConfigValidationScriptRunner.ExecuteAsync(
+            ConfigValidationResult result = await ConfigEditScriptRunner.ExecuteAsync(
                 Descriptor(code, root),
                 MakeScript(),
                 null,
@@ -130,7 +130,7 @@ public sealed class ConfigValidationScriptRunnerTests
                 if (nexus.readFile('missing.json') !== null) throw new Error('missing-read');
                 """;
 
-            ConfigValidationResult result = await ConfigValidationScriptRunner.ExecuteAsync(
+            ConfigValidationResult result = await ConfigEditScriptRunner.ExecuteAsync(
                 Descriptor(code, root),
                 MakeScript(),
                 null,
@@ -155,7 +155,7 @@ public sealed class ConfigValidationScriptRunnerTests
         try
         {
             string code = "nexus.writeFile('first.json', '保留'); throw new Error('after-write');";
-            ConfigValidationResult result = await ConfigValidationScriptRunner.ExecuteAsync(
+            ConfigValidationResult result = await ConfigEditScriptRunner.ExecuteAsync(
                 Descriptor(code, root),
                 MakeScript(),
                 null,
@@ -177,14 +177,14 @@ public sealed class ConfigValidationScriptRunnerTests
         string root = MakeTempDir();
         try
         {
-            ConfigValidationResult syntax = await ConfigValidationScriptRunner.ExecuteAsync(
+            ConfigValidationResult syntax = await ConfigEditScriptRunner.ExecuteAsync(
                 Descriptor("const = ;", root),
                 MakeScript(),
                 null,
                 root);
             Assert.Contains("执行失败", syntax.Error);
 
-            ConfigValidationResult timeout = await ConfigValidationScriptRunner.ExecuteAsync(
+            ConfigValidationResult timeout = await ConfigEditScriptRunner.ExecuteAsync(
                 Descriptor("while (true) {}", root),
                 MakeScript(),
                 null,
@@ -202,7 +202,7 @@ public sealed class ConfigValidationScriptRunnerTests
     {
         ScriptInstance script = MakeScript();
         var extras = new List<ConfigValidationExtraSnapshot>();
-        string json = ConfigValidationScriptRunner.BuildInput(
+        string json = ConfigEditScriptRunner.BuildInput(
             script,
             null,
             [new ConfigValidationFile("config.json", 12)],
@@ -237,7 +237,7 @@ public sealed class ConfigValidationScriptRunnerTests
                 new("D:/games/DATA/CONFIGS/software_config.json", extraStore),
             };
 
-            ConfigValidationResult result = await ConfigValidationScriptRunner.ExecuteAsync(
+            ConfigValidationResult result = await ConfigEditScriptRunner.ExecuteAsync(
                 Descriptor(code, root),
                 MakeScript(),
                 null,

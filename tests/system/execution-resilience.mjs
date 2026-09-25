@@ -101,13 +101,15 @@ async function historyRecords(scriptId) {
     (item.scriptInstanceId || item.ScriptInstanceId) === scriptId);
 }
 
-async function runScript(scriptId, userName, timeoutMs = 60000) {
+async function runScript(scriptId, userName, timeoutMs = 60000, onStarted) {
   const body = { scriptId, mode: "manual" };
   if (userName) body.userName = userName;
   const dispatch = await api("POST", "/api/dispatch/script", body);
   if (!dispatch.ok) {
     assert.fail(`启动脚本失败：HTTP ${dispatch.status} ${await dispatch.text()}`);
   }
+  const { runId } = await dispatch.json();
+  if (onStarted) onStarted(runId);
   assert.equal(await waitNoRunning(timeoutMs), true, `脚本 ${scriptId} 未在 ${timeoutMs}ms 内结束`);
   let record = null;
   await waitFor(async () => {
@@ -290,9 +292,21 @@ if (text.includes("FAIL")) {
     judgeScript: judge,
   });
   try {
-    const record = await runScript(script.id, undefined, 60000);
+    let runId;
+    const record = await runScript(script.id, undefined, 60000, id => { runId = id; });
     assert.equal(recordAttempts(record), 2);
     assert.equal(recordStatus(record), "success");
+    const detail = await api("GET", `/api/dispatch/${runId}`);
+    assert.equal(detail.status, 200);
+    const current = await detail.json();
+    assert.match(current.logSegmentId, /:attempt:2$/);
+    assert.equal(current.logSegment?.id, current.logSegmentId);
+    assert.equal(current.logSegment?.attemptNumber, 2);
+    assert.equal(current.logSegment?.generation, current.logSegmentSequence);
+    assert.equal(current.logSegment?.runRecordId, record.id || record.Id);
+    assert.ok(current.logSegmentSequence >= 3, "准备段和两次 attempt 应各有独立代际");
+    assert.doesNotMatch((current.logTail || []).join("\n"), /ER04-FAIL/);
+    assert.match((current.logTail || []).join("\n"), /ER04-SUCCESS/);
     assert.equal(fs.readFileSync(pathJoin(fixture.cfg, "tasks.txt"), "utf8").trim(), "FAIL");
     assert.match(recordDetails(record).map(item => item.reason || "").join(" | "), /ER04-retry/);
   } finally {
@@ -590,3 +604,102 @@ test("ER10 stall/final Judge：日志停滞后终局判断仍能完成", { skip 
     await deleteScript(script.id);
   }
 });
+
+test("EX01 人工取消：30 次独立运行均停止当前脚本且不派发第二个用户", { skip }, async () => {
+  const fixture = makeFixture("ex01-cancel-users");
+  const marker = path.join(fixture.dir, "started.txt");
+  const after = path.join(fixture.dir, "after.txt");
+  writeBatchCode(fixture, [
+    `echo started>>"${marker}"`,
+    "ping -n 30 127.0.0.1 >nul",
+    `echo completed>>"${after}"`,
+  ]);
+  const script = await createScript(fixture, {
+    name: "EX01 Cancel Users",
+    users: ["EX01-A", "EX01-B"],
+    maxAttempts: 2,
+  });
+  let runId;
+  const samples = [];
+  try {
+    for (let sample = 0; sample < 33; sample++) {
+      fs.rmSync(marker, { force: true });
+      fs.rmSync(after, { force: true });
+      const started = await api("POST", "/api/dispatch/script", { scriptId: script.id, mode: "manual" });
+      assert.equal(started.status, 200);
+      ({ runId } = await started.json());
+      assert.equal(await waitFor(() => fs.existsSync(marker), 15000, 25), true, `第 ${sample + 1} 次首项未开始`);
+      const acceptedAt = performance.now();
+      const cancel = await api("POST", "/api/cancel", { runId });
+      assert.equal(cancel.status, 200);
+      assert.equal((await cancel.json()).cancellation, "accepted");
+      const responseMs = performance.now() - acceptedAt;
+      const repeated = await api("POST", "/api/cancel", { runId });
+      assert.equal(repeated.status, 200);
+      assert.match((await repeated.json()).cancellation, /already_requested|already_finished/);
+      assert.equal(await waitNoRunning(15000), true, `第 ${sample + 1} 次取消后未结束`);
+      const terminalMs = performance.now() - acceptedAt;
+      const detail = await api("GET", `/api/dispatch/${runId}`);
+      assert.equal(detail.status, 200);
+      const snapshot = await detail.json();
+      assert.equal(snapshot.status || snapshot.Status, "cancelled");
+      assert.equal(snapshot.cancelRequested, true);
+      const timing = snapshot.cancellationTimingMs;
+      assert.ok(timing, "缺少单调时钟取消阶段计时");
+      const stopIssuedMs = timing.stopIssued ?? timing.StopIssued;
+      const ownedExitedMs = timing.ownedProcessesExited ?? timing.OwnedProcessesExited;
+      const workersQuiescedMs = timing.workersQuiesced ?? timing.WorkersQuiesced;
+      const resultCommittedMs = timing.resultCommitted ?? timing.ResultCommitted;
+      assert.ok(Number.isFinite(stopIssuedMs), "缺少停止请求时刻");
+      assert.ok(Number.isFinite(ownedExitedMs), "缺少已确权退出时刻");
+      assert.ok(Number.isFinite(workersQuiescedMs), "缺少 worker 收拢时刻");
+      assert.ok(Number.isFinite(resultCommittedMs), "缺少结果提交时刻");
+      assert.ok(stopIssuedMs <= ownedExitedMs && ownedExitedMs <= workersQuiescedMs && workersQuiescedMs <= resultCommittedMs);
+      assert.equal((snapshot.records || []).length, 1, "取消后仍派发了下一用户");
+      assert.equal(fs.readFileSync(marker, "utf8").trim(), "started");
+      assert.equal(fs.existsSync(after), false, "当前脚本取消后仍运行至末尾");
+      if (sample >= 3) samples.push({ responseMs: Math.round(responseMs * 10) / 10,
+        terminalMs: Math.round(terminalMs * 10) / 10,
+        stopIssuedMs, ownedExitedMs, workersQuiescedMs, resultCommittedMs });
+    }
+    const metric = key => {
+      const ordered = samples.map(item => item[key]).sort((a, b) => a - b);
+      return { p50: ordered[14], p95: ordered[28], max: ordered[29] };
+    };
+    console.log(`EX01 cancellation samples=${JSON.stringify(samples)} response=${JSON.stringify(metric("responseMs"))} terminal=${JSON.stringify(metric("terminalMs"))} stopIssued=${JSON.stringify(metric("stopIssuedMs"))} ownedExited=${JSON.stringify(metric("ownedExitedMs"))} workersQuiesced=${JSON.stringify(metric("workersQuiescedMs"))}`);
+    assert.ok(metric("stopIssuedMs").p95 <= 500, "EX01 停止请求 P95 超过 500ms");
+    assert.ok(metric("ownedExitedMs").p95 <= 2000, "EX01 已确权退出 P95 超过 2s");
+  } finally {
+    if (runId) {
+      await api("POST", "/api/cancel", { runId });
+      await waitNoRunning(40000);
+    }
+    await deleteScript(script.id);
+  }
+});
+
+for (const channel of ["stdout", "stderr"]) {
+  test(`ER14 ${channel} only：首次输出后的沉默仍触发无日志超时`, { skip }, async () => {
+    const fixture = makeFixture(`er14-${channel}-stall`);
+    writeBatchCode(fixture, [
+      channel === "stderr" ? "echo ER14-START 1>&2" : "echo ER14-START",
+      "ping -n 30 127.0.0.1 >nul",
+    ]);
+    const script = await createScript(fixture, {
+      name: `ER14 ${channel} stall`,
+      // The script contract requires a plausible log path and game executable.
+      // Leave the log file absent so stdout/stderr is the sole input source.
+      logPath: fixture.log,
+      gameExe: pingExe,
+      logStallTimeoutMinutes: 1,
+      totalTimeoutMinutes: 5,
+    });
+    try {
+      const record = await runScript(script.id, undefined, 60000);
+      assert.equal(recordStatus(record), "failed");
+      assert.match(recordDetails(record).map(item => item.reason || "").join(" | "), /日志超过 .*无新增输入/);
+    } finally {
+      await deleteScript(script.id);
+    }
+  });
+}

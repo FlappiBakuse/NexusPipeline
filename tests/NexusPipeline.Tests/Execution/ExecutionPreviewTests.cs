@@ -56,6 +56,11 @@ public sealed class ExecutionPreviewTests
         Assert.Equal("executable", context.GameTarget.Kind);
         Assert.Equal(script.GameExe, context.GameTarget.Value);
         Assert.Equal("preview", context.Trigger);
+        Assert.Null(context.GameTarget.Ready);
+        TaskExecutionContext runtime = ExecutionCoordinator.CreateTaskExecutionContext(
+            script, resolvedSpec: null, "user-1", "pre_launch", gameTargetReady: false);
+        Assert.Equal("already_running", runtime.LaunchOwner);
+        Assert.False(runtime.GameTarget.Ready);
     }
 
     [Fact]
@@ -242,6 +247,87 @@ public sealed class ExecutionPreviewTests
         Assert.Equal(RunningExecution.MaxLogEntries - RunningExecution.StatusLogEntries + 2, snapshot.LogEntries[0].Sequence);
         Assert.Equal(RunningExecution.MaxLogEntries + 1, snapshot.LogEntries[^1].Sequence);
         Assert.Equal(RunningExecution.MaxLogEntries, execution.LogEntries(RunningExecution.MaxLogEntries).Count);
+    }
+
+    [Fact]
+    public void RunningExecution_NewRecordClearsTailAndRejectsLateOutput()
+    {
+        var execution = new RunningExecution();
+        execution.BeginLogSegment("record-a");
+        for (int index = 0; index <= RunningExecution.MaxLogEntries; index++)
+            execution.AppendLog(LogLevel.Info, $"old-{index}", "record-a");
+        Assert.True(execution.LogTruncated);
+
+        execution.BeginLogSegment("record-b");
+        execution.AppendLog(LogLevel.Info, "late old output", "record-a");
+        RunningExecutionSnapshot empty = execution.Snapshot();
+        Assert.Equal("record-b", empty.LogSegmentId);
+        Assert.Empty(empty.LogEntries);
+        Assert.Empty(empty.LogTail);
+        Assert.False(empty.LogTruncated);
+
+        execution.AppendLog(LogLevel.Warn, "current output", "record-b");
+        Assert.Equal("current output", Assert.Single(execution.Snapshot().LogEntries).Message);
+
+        Assert.True(execution.BeginLogSegment("record-b:attempt:2", 2, 3, "record-b"));
+        execution.AppendLog(LogLevel.Warn, "late attempt one", "record-b");
+        RunningExecutionSnapshot attemptTwo = execution.Snapshot();
+        Assert.Equal(2, attemptTwo.CurrentAttempt);
+        Assert.Equal(3, attemptTwo.CurrentMaxAttempts);
+        Assert.Equal("record-b:attempt:2", attemptTwo.LogSegmentId);
+        Assert.Equal("record-b", attemptTwo.LogSegment?.RunRecordId);
+        Assert.Equal(2, attemptTwo.LogSegment?.AttemptNumber);
+        Assert.Equal(attemptTwo.LogSegmentSequence, attemptTwo.LogSegment?.Generation);
+        Assert.Empty(attemptTwo.LogEntries);
+    }
+
+    [Fact]
+    public void RunningExecution_CancellationIsIdempotentAndWinsBeforeNormalTerminalCommit()
+    {
+        var execution = new RunningExecution();
+        Assert.True(execution.BeginLogSegment("record-a"));
+        Assert.Equal(CancellationRequestResult.Accepted, execution.RequestCancellation());
+        Assert.True(execution.Cts.IsCancellationRequested);
+        Assert.NotNull(execution.Snapshot().CancellationTimingMs?.SignalSent);
+        Assert.Equal(CancellationRequestResult.AlreadyRequested, execution.RequestCancellation());
+        Assert.False(execution.BeginLogSegment("record-b"));
+        Assert.Equal("正在停止任务", execution.Snapshot().CurrentStatus);
+        Assert.True(execution.Snapshot().CancelRequested);
+
+        execution.Status = "done";
+        Assert.Equal("cancelled", execution.Status);
+        Assert.Equal("terminal", execution.Snapshot().CancellationPhase);
+        Assert.Equal(CancellationRequestResult.AlreadyFinished, execution.RequestCancellation());
+    }
+
+    [Fact]
+    public void AttemptMonitor_RecognizesOnlyReportedStartupWindowFailure()
+    {
+        var monitor = new AttemptMonitor();
+        monitor.ObserveConsoleLine("窗口尚未出现，继续等待");
+        Assert.Null(monitor.StartupFailure);
+        monitor.ObserveConsoleLine("任务启动失败：未搜索到任何窗口");
+        Assert.Equal(new UpstreamStartupFailure("上游任务启动失败：未搜索到任何窗口", "run.startup_window_missing"), monitor.StartupFailure);
+        var asciiColon = new AttemptMonitor();
+        asciiColon.ObserveConsoleLine("任务启动失败: 未搜索到任何窗口");
+        Assert.Equal(new UpstreamStartupFailure("上游任务启动失败：未搜索到任何窗口", "run.startup_window_missing"), asciiColon.StartupFailure);
+    }
+
+    [Fact]
+    public void AttemptMonitor_RecognizesScopedMxuLaunchFailuresWithoutAcceptingOtherLogs()
+    {
+        const string failed = "2026-09-25 ERROR [MXU_LAUNCH] Failed to spawn program: path missing";
+        var other = new AttemptMonitor();
+        other.ObserveConsoleLine(failed);
+        Assert.Null(other.StartupFailure);
+
+        var mxu = new AttemptMonitor(isMxu: true);
+        mxu.ObserveLogLine("[MXU_LAUNCH] Launching: program=game.exe, args=, wait_for_exit=false");
+        Assert.Null(mxu.StartupFailure);
+        mxu.ObserveLogLine(failed);
+        Assert.Equal(new UpstreamStartupFailure(
+            "上游 MXU 启动动作失败，请检查当前实例的启动配置和日志",
+            "run.upstream_launch_failed"), mxu.StartupFailure);
     }
 
     [Fact]

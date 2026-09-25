@@ -574,6 +574,7 @@
   "startup.admin_title": "NexusPipeline requires administrator privileges",
   "startup.limits_fatal": "A fatal limits configuration error prevented startup. Fix config/limits.json and try again.",
   "system.local_only": "This operation is available only to local requests",
+  "tasks.outcome.unverified": "Run ended · {count} item(s) unverified",
   "tray.cli_menu": "Command-line management",
   "tray.exit": "Exit NexusPipeline",
   "tray.lightweight_open_failed": "Lightweight mode did not start the Web service, so the management page cannot be opened.",

@@ -22,7 +22,6 @@ namespace NexusPipeline.Modules.Execution;
 internal sealed class ExecutionCoordinator : RunSession
 {
     /// <summary>成功判定后等待脚本自行退出的宽限秒数（NEXUS_TIME_SCALE 加速时按比例缩放）。</summary>
-    private const int ExitGraceSecondsAfterMarker = 60;
 
     private readonly IUserRepository _users;
 
@@ -68,6 +67,11 @@ internal sealed class ExecutionCoordinator : RunSession
 
     private CancellationToken OperationToken => _operationCts?.Token ?? _token;
 
+    private readonly string? _recordId;
+
+    private readonly Action<string, LogLevel, int>? _attemptLogLine;
+    private readonly Action<int, int>? _attemptStarted;
+
     public ExecutionCoordinator(ScriptInstance script, string mode, string queueId, string queueName, string? userName, CancellationToken token,
         Action<int, int>? attemptChanged,
         Action<string>? statusChanged,
@@ -78,12 +82,18 @@ internal sealed class ExecutionCoordinator : RunSession
         ResolvedScriptUser? resolvedUser = null,
         ResolvedScriptSpec? resolvedSpec = null,
         OutboundHttpClientProvider? http = null,
-        string queueHasFollowingWork = "unknown")
+        string queueHasFollowingWork = "unknown",
+        string? recordId = null,
+        Action<string, LogLevel, int>? attemptLogLine = null,
+        Action<int, int>? attemptStarted = null)
         : base(script, mode, queueId, queueName, userName, token, resolvedUser, attemptChanged, statusChanged, logLine)
     {
         _users = users;
         _resolvedSpec = resolvedSpec;
         _queueHasFollowingWork = queueHasFollowingWork is "yes" or "no" ? queueHasFollowingWork : "unknown";
+        _recordId = recordId;
+        _attemptLogLine = attemptLogLine;
+        _attemptStarted = attemptStarted;
         _http = http;
         _emulatorSupportProviders = emulatorSupportProviders ?? throw new ArgumentNullException(nameof(emulatorSupportProviders));
         _previewTargetChanged = previewTargetChanged;
@@ -102,7 +112,8 @@ internal sealed class ExecutionCoordinator : RunSession
             RemainingRunSeconds,
             () => _budgetExpired || _budget?.IsExpired == true,
             message => _configRun?.MarkProcessCleanupUnconfirmed(message),
-            AppendScriptLog);
+            AppendScriptLog,
+            attemptLogLine);
         SetInitialPreviewTarget();
     }
 
@@ -122,8 +133,16 @@ internal sealed class ExecutionCoordinator : RunSession
             && !(spec?.SelfManagedPcLaunch == true && !EmulatorSupport.IsEmulator(script));
     }
 
-    private TaskExecutionContext CreateTaskExecutionContext(string userId, string trigger) =>
-        CreateTaskExecutionContext(_script, _resolvedSpec, userId, trigger, _queueId, _queueHasFollowingWork);
+    private TaskExecutionContext CreateTaskExecutionContext(string userId, string trigger)
+    {
+        // Only the MXU PC preflight uses this live fact. A configured executable
+        // or a process with no visible window is not an already usable target.
+        bool? ready = _script.GameMode == "pc" && !_script.LaunchGame
+            && _script.PluginType is "maaend" or "maas"
+            ? FindGameProcessId(null) is > 0 : null;
+        return CreateTaskExecutionContext(_script, _resolvedSpec, userId, trigger,
+            _queueId, _queueHasFollowingWork, ready);
+    }
 
     /// <summary>
     /// Builds the immutable execution facts shared by real runs and read-only task previews.
@@ -136,7 +155,8 @@ internal sealed class ExecutionCoordinator : RunSession
         string userId,
         string trigger,
         string? queueId = null,
-        string queueHasFollowingWork = "unknown")
+        string queueHasFollowingWork = "unknown",
+        bool? gameTargetReady = null)
     {
         string mode = EmulatorSupport.IsEmulator(script)
             ? "emulator"
@@ -158,7 +178,7 @@ internal sealed class ExecutionCoordinator : RunSession
             trigger,
             mode,
             launchOwner,
-            new TaskGameTarget(targetKind, hasGameTarget ? script.GameExe : null, null),
+            new TaskGameTarget(targetKind, hasGameTarget ? script.GameExe : null, null, gameTargetReady),
             new TaskQueueContext(queueKind, following),
             new TaskCleanupContext(true, hostWillCloseGame, "none"),
             new TaskEffectiveLaunch(script.Id, script.LaunchGame, null, null, null),
@@ -183,6 +203,7 @@ internal sealed class ExecutionCoordinator : RunSession
         _budget = new RunBudget(_script.TotalTimeoutMinutes, DateTime.Now);
         var record = new RunRecord
         {
+            Id = _recordId ?? Guid.NewGuid().ToString("N"),
             ScriptInstanceId = _script.Id,
             ScriptName = _script.Name,
             QueueId = _queueId,
@@ -330,6 +351,7 @@ internal sealed class ExecutionCoordinator : RunSession
 
             for (int attemptNo = 1; attemptNo <= maxAttempts; attemptNo++)
             {
+                _attemptStarted?.Invoke(attemptNo, maxAttempts);
                 _attemptChanged?.Invoke(attemptNo, maxAttempts);
                 if (attemptNo > 1 && _configRun.IsPrepared && TaskProtocolRun is null)
                 {
@@ -396,6 +418,9 @@ internal sealed class ExecutionCoordinator : RunSession
                 {
                     result = await RunAttemptCoreAsync(attempt).ConfigureAwait(false);
                 }
+
+                if (_token.IsCancellationRequested && result.Status != "cancelled")
+                    result = RunAttemptResult.Cancelled("运行已取消");
 
                 if (mainExecuted && result.Status != "cancelled" && TaskProtocolRun?.IsAdmissionBlocked != true
                     && user is not null && !string.IsNullOrWhiteSpace(user.Binding.PostRunScript)
@@ -559,6 +584,7 @@ internal sealed class ExecutionCoordinator : RunSession
             // 判断脚本目录清理 → 配置交换还原。
             if (_configRun is not null)
             {
+                if (_token.IsCancellationRequested) _statusChanged?.Invoke("正在恢复配置");
                 string? restoreError = _configRun.FinalizeRun(_script.AutoUpdateConfig);
                 if (restoreError is not null)
                 {
@@ -571,6 +597,8 @@ internal sealed class ExecutionCoordinator : RunSession
                     record.ResultDetail += msg;
                     Logger.Error($"[错误] 脚本「{_script.Name}」用户「{user?.UserName ?? _userName ?? ""}」配置还原失败：{restoreError}");
                 }
+                if (_token.IsCancellationRequested)
+                    _statusChanged?.Invoke(restoreError is null ? "配置恢复完成" : "配置恢复失败，现场已保留");
             }
             if (TaskProtocolRun is not null)
             {
@@ -665,17 +693,15 @@ internal sealed class ExecutionCoordinator : RunSession
 
         ScriptProcessSession processSession;
         bool cleanupConfirmed = true;
+        bool killAttempted = false;
         string? excludeGame = EmulatorSupport.IsEmulator(_script)
             ? null
             : (string.IsNullOrWhiteSpace(_script.GameExe) ? null : Path.GetFileNameWithoutExtension(_script.GameExe));
         if (SystemActions.IsExeRunning(launchExe))
         {
-            Logger.Warn($"[{modeText}运行] 脚本「{_script.Name}」检测到旧进程，先结束后重新启动。");
-            _statusChanged?.Invoke("检测到旧脚本进程，正在结束后重新启动...");
-            if (!SystemActions.KillExistingProcessesByIdentity(launchExe, "旧脚本", excludeProcessBaseName: excludeGame))
-            {
-                return await FinishEarlyAsync(RunAttemptResult.Fatal("检测到旧脚本进程但无法确认其退出，已拒绝重复启动")).ConfigureAwait(false);
-            }
+            return await FinishEarlyAsync(RunAttemptResult.Fatal(
+                "检测到同路径脚本进程但无法确认属于本次运行，已拒绝重复启动；请自行确认并关闭旧实例",
+                "run.unowned_process_running")).ConfigureAwait(false);
         }
         try
         {
@@ -708,15 +734,20 @@ internal sealed class ExecutionCoordinator : RunSession
             BringGameToFrontIfRunning();
         }
 
+        var attemptMonitor = new AttemptMonitor(_script.PluginType is "maaend" or "maas");
         void OnConsoleData(string? data, LogLevel level)
         {
+            if (_token.IsCancellationRequested) return;
+            if (data is not null) attemptMonitor.ObserveConsoleLine(data);
             if (string.IsNullOrWhiteSpace(data))
             {
                 return;
             }
             if (ShouldPublishConsoleData(_script.LogPath))
             {
-                _logLine?.Invoke(data, LogLevelUtil.ParseObserved(data, level));
+                LogLevel observedLevel = LogLevelUtil.ParseObserved(data, level);
+                if (_attemptLogLine is not null) _attemptLogLine(data, observedLevel, attempt.Number);
+                else _logLine?.Invoke(data, observedLevel);
                 if (TaskProtocolRun is not null)
                 {
                     TaskProtocolRun.Append("stdout", data + "\n");
@@ -729,6 +760,8 @@ internal sealed class ExecutionCoordinator : RunSession
 
         bool KillScriptAndConfirm()
         {
+            if (killAttempted) return cleanupConfirmed;
+            killAttempted = true;
             bool confirmed = processSession.KillAndConfirm(finalizer, excludeGame);
             if (!confirmed)
             {
@@ -740,9 +773,7 @@ internal sealed class ExecutionCoordinator : RunSession
 
         // 启动前已存在的残留日志即使被启动后追加写刷新 LastWriteTime，也只从 Attempt 起点长度续读。
         string? resolvedBeforeStart = string.IsNullOrWhiteSpace(_script.LogPath) ? null : LogPattern.ResolveFile(_script.LogPath);
-        DateTime attemptStart = DateTime.Now;
         LogMonitor? monitor = logEnv.CreateMonitor(resolvedBeforeStart);
-        var attemptMonitor = new AttemptMonitor();
         var judge = new SessionJudge(_script);
         bool scriptMode = judge.ScriptMode;
         RunAttemptResult? result = null;
@@ -818,7 +849,6 @@ internal sealed class ExecutionCoordinator : RunSession
             attempt,
             modeText,
             attemptId,
-            attemptStart,
             processSession,
             launchExe,
             excludeGame,
@@ -839,14 +869,16 @@ internal sealed class ExecutionCoordinator : RunSession
         result = monitorLoop.Result;
         monitor = monitorLoop.Monitor;
 
-        // 先收拢后台 worker，再进入进程清理与 ConfigRunSession.FinalizeRun，
-        // 防止旧 Attempt 的 Judge/配置同步在收尾阶段继续写入状态或文件。
+        // Issue the owned-process stop before waiting for a potentially busy Judge or
+        // config worker. Recovery still waits until the workers have truly exited.
+        if (_token.IsCancellationRequested) _statusChanged?.Invoke("正在停止脚本");
+        bool stopped = KillScriptAndConfirm();
+        if (_token.IsCancellationRequested && stopped) _statusChanged?.Invoke("脚本已停止，正在收拢后台任务");
         await workers.StopAsync().ConfigureAwait(false);
+        if (_token.IsCancellationRequested) _statusChanged?.Invoke("后台任务已收拢");
 
         monitor?.Dispose();
         monitor = null;
-
-        KillScriptAndConfirm();
 
         if (!cleanupConfirmed)
         {

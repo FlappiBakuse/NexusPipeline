@@ -65,6 +65,14 @@ const logLevelOptions = computed<NxpOption[]>(() => [
         :aria-label="t('settings.open_browser')"
         @change="props.save"
       />
+      <NxpSwitchSetting
+        id="st-config-repair"
+        v-model="props.settings.allowConfigRepair"
+        :label="t('settings.config_repair')"
+        :description="t('settings.config_repair_help')"
+        :aria-label="t('settings.config_repair')"
+        @change="props.save"
+      />
     </div>
     <div class="settings-service-fields" :data-help="t('settings.service.restart_requirements')">
       <div class="form-grid settings-service-grid settings-service-grid-primary">

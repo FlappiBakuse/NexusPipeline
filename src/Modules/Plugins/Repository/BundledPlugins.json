@@ -1,0 +1,115 @@
+{
+  "schemaVersion": 1,
+  "repository": "FlappiBakuse/NexusPipeline-Plugins",
+  "plugins": [
+    {
+      "name": "emulator-support",
+      "artifactName": "EmulatorSupport",
+      "version": "0.1.0",
+      "kind": "managed-code",
+      "apiVersion": "1.7",
+      "minHostVersion": "0.16.5",
+      "packageSha256": "95948588cee447e5f02cfc57178e0437a2530a920d9a6e4155c5659b400417a6",
+      "packageSizeBytes": 163017,
+      "files": [
+        {
+          "path": "NexusPipeline.Plugin.Abstractions.deps.json",
+          "sizeBytes": 469,
+          "sha256": "59e512e585bbc8a50c4ad340344d22b88390e338c781f156283412e7036c6397"
+        },
+        {
+          "path": "NexusPipeline.Plugin.Abstractions.dll",
+          "sizeBytes": 77312,
+          "sha256": "1c0c676110b83e909736adb8ed89852337a1cfd68c2b0b69db8233df6cbe915d"
+        },
+        {
+          "path": "NexusPipeline.Plugin.EmulatorSupport.deps.json",
+          "sizeBytes": 933,
+          "sha256": "45dfcd7e0ed01bba7573f0c3eef8086690d61f35c6693f2be584001790cc7990"
+        },
+        {
+          "path": "NexusPipeline.Plugin.EmulatorSupport.dll",
+          "sizeBytes": 82432,
+          "sha256": "d85acc3c17f225c84fed3d1e04a31249e730e2255092299bce213dedec26cc4f"
+        },
+        {
+          "path": "plugin.json",
+          "sizeBytes": 475,
+          "sha256": "170e23fd4fe398930b8368cbcbb3b2ae22672e2374314329d0974ea45f7ebce7"
+        },
+        {
+          "path": "store.json",
+          "sizeBytes": 544,
+          "sha256": "e38bf8b73d0fb66b33dea406461a0072f6c6cb375de70347e5b88af56eed443c"
+        }
+      ]
+    },
+    {
+      "name": "live-screenshot",
+      "artifactName": "LiveScreenshot",
+      "version": "0.2.0",
+      "kind": "managed-code",
+      "apiVersion": "1.5",
+      "minHostVersion": "0.15.9",
+      "packageSha256": "015e4270d0cb75ce0be0961ceefed02d118913c9c9900954d5bd4be16a73aafc",
+      "packageSizeBytes": 170192,
+      "files": [
+        {
+          "path": "i18n/en-US.json",
+          "sizeBytes": 437,
+          "sha256": "847b453f59fb70f1a428cb4828c7e90921503b0016b0511d2dceabcd47a60fbc"
+        },
+        {
+          "path": "i18n/zh-CN.json",
+          "sizeBytes": 421,
+          "sha256": "67fad34d3026c95312159c163394cc7d471f807457facf4a9336197bdf4d8da9"
+        },
+        {
+          "path": "NexusPipeline.Plugin.Abstractions.deps.json",
+          "sizeBytes": 469,
+          "sha256": "cdfc05b9d084a9e654c1aac39d142d368faa05016937ec91783188bbdbd0923b"
+        },
+        {
+          "path": "NexusPipeline.Plugin.Abstractions.dll",
+          "sizeBytes": 71168,
+          "sha256": "a83cea5bb2c0590efc078b204d66c17441c387d3a701f0f5ca188eed4b33ea1b"
+        },
+        {
+          "path": "NexusPipeline.Plugin.LiveScreenshot.deps.json",
+          "sizeBytes": 930,
+          "sha256": "fb2106a05bcda9af04c141a7b4b8af2a4738e8e260d60444c7f39b936c8f3716"
+        },
+        {
+          "path": "NexusPipeline.Plugin.LiveScreenshot.dll",
+          "sizeBytes": 4608,
+          "sha256": "942a372e535443bec170e571c4ff4980c1d827514afa2223bc552693ae066915"
+        },
+        {
+          "path": "plugin.json",
+          "sizeBytes": 820,
+          "sha256": "7f0d5c8ad5a6aff9d0098d7106197af4f3ed68eac0309fdb3b670d21d3b4c036"
+        },
+        {
+          "path": "README.md",
+          "sizeBytes": 721,
+          "sha256": "ce807321196942cb53c18cd73bab25867b94b6a507822faf0a2ceeed232e9d41"
+        },
+        {
+          "path": "store.json",
+          "sizeBytes": 1843,
+          "sha256": "0b16e4befcf78f58724e44555d50d0392c595a4d9fe84a33060a00013f72ad1a"
+        },
+        {
+          "path": "web/main.js",
+          "sizeBytes": 86389,
+          "sha256": "970b38b5e0f0185dba326d7b35ee3f8cc9cc434a4c380bade00c7851a5df6f56"
+        },
+        {
+          "path": "web/style.css",
+          "sizeBytes": 1032,
+          "sha256": "5c92427daedcf50ad884fd1fe5b9cf1975f219158268be904629d871a03264c3"
+        }
+      ]
+    }
+  ]
+}

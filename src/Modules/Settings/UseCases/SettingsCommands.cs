@@ -149,6 +149,11 @@ internal sealed class SettingsCommands
     {
         switch (field)
         {
+            case "allowConfigRepair":
+                if (value is not JsonValue repairValue || !repairValue.TryGetValue<bool>(out bool allowRepair))
+                    return "允许配置修复必须是布尔值";
+                settings.AllowConfigRepair = allowRepair;
+                return null;
             case "historyRetentionDays":
                 int days = value.Int(settings.HistoryRetentionDays);
                 string? retentionError = Limits.CheckRetentionDays(days);

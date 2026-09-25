@@ -16,6 +16,7 @@ internal sealed class TaskConfigDocument
     private readonly Node _root;
     internal string Format { get; }
     internal JsonNode? Document => _root.Value?.DeepClone();
+    internal bool ContainsTopLevelProperty(string name) => _root.Properties?.ContainsKey(name) == true;
 
     private sealed record Node(JsonNode? Value, int Start, int End,
         Dictionary<string, Node>? Properties = null, List<Node>? Items = null);
@@ -140,7 +141,7 @@ internal sealed class TaskConfigDocument
         var edits = new List<(int Start, int End, string Value)>();
         foreach (var operation in operations)
         {
-            if (operation.Purpose is not ("selection" or "cursor") || !allowedSelectors.Contains(operation.Selector.ToJsonString()))
+            if (operation.Purpose is not ("selection" or "cursor" or "repair") || !allowedSelectors.Contains(operation.Selector.ToJsonString()))
                 throw new InvalidDataException("patch field was not authorized by original discovery");
             Node selected = Select(operation.Selector);
             if (!JsonNode.DeepEquals(selected.Value, operation.Expected)) throw new InvalidDataException("configuration_conflict: expected value");

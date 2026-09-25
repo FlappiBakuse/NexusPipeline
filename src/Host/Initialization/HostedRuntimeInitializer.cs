@@ -2,6 +2,7 @@ using NexusPipeline.Host.Composition;
 using NexusPipeline.Modules.Configuration.Exchange;
 using NexusPipeline.Modules.Configuration.Paths;
 using NexusPipeline.Modules.Plugins;
+using NexusPipeline.Modules.Plugins.Repository;
 using NexusPipeline.Modules.Settings.Persistence;
 using NexusPipeline.Modules.Users.UseCases;
 using NexusPipeline.Platform.Windows;
@@ -19,6 +20,7 @@ internal static class HostedRuntimeInitializer
     {
         try
         {
+            PluginInstallRecovery.SeedBundledForNewInstall(RuntimeInitializer.BundledPluginSeedEligible);
             runtime.ReloadSettings(ConfigLoadMode.Repair);
             runtime.ReloadData();
             PluginNameMigration.Apply(

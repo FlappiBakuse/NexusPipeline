@@ -10,8 +10,48 @@ internal sealed record TaskDeclaredTarget(string Value, string BaseDirectory);
 /// <summary>Owner-local revisions; opaque tokens never expose configuration hashes.</summary>
 internal sealed class TaskConfigView
 {
-    private sealed record Entry(string Path, string BaseDirectory, byte[] Bytes, string Revision, string Format, bool Writable, string? Integrity);
+    private sealed class Entry
+    {
+        internal string Path { get; }
+        internal string BaseDirectory { get; }
+        internal byte[] Bytes { get; }
+        internal string Revision { get; }
+        internal string Format { get; }
+        internal bool Writable { get; }
+        internal string? Integrity { get; }
+        internal Lazy<TaskConfigDocument?> Parsed { get; }
+        internal Lazy<string> Serialized { get; }
+
+        internal Entry(string path, string baseDirectory, byte[] bytes, string revision,
+            string format, bool writable, string? integrity, Action parsed)
+        {
+            Path = path;
+            BaseDirectory = baseDirectory;
+            Bytes = bytes;
+            Revision = revision;
+            Format = format;
+            Writable = writable;
+            Integrity = integrity;
+            Parsed = new Lazy<TaskConfigDocument?>(() =>
+            {
+                if (format is not ("json" or "yaml")) return null;
+                parsed();
+                return new TaskConfigDocument(bytes, format);
+            });
+            Serialized = new Lazy<string>(() =>
+            {
+                JsonNode? document = integrity == "mismatch" ? null : format == "text"
+                    ? JsonValue.Create(new System.Text.UTF8Encoding(false, true).GetString(bytes))
+                    : Parsed.Value!.Document;
+                var result = new JsonObject { ["document"] = document, ["revision"] = revision, ["format"] = format };
+                if (integrity is not null) result["integrity"] = integrity;
+                return result.ToJsonString();
+            });
+        }
+    }
     private readonly Dictionary<string, Entry> _entries = new(StringComparer.Ordinal);
+    private int _parseCount;
+    internal int ParseCount => Volatile.Read(ref _parseCount);
     internal TaskConfigResource[] ConfigResources => _entries.Where(p => p.Value.Writable).Select(p => new TaskConfigResource(p.Key, p.Value.Format)).ToArray();
     internal IReadOnlySet<string> DeclaredResourceIds => _entries.Keys.ToHashSet(StringComparer.Ordinal);
     private static readonly byte[] RevisionKey = RandomNumberGenerator.GetBytes(32);
@@ -49,7 +89,8 @@ internal sealed class TaskConfigView
         string fullBaseDirectory = Path.GetFullPath(baseDirectory ?? Path.GetDirectoryName(fullPath) ?? fullPath);
         string? integrity = sha256 is null ? null
             : Convert.ToHexString(SHA256.HashData(bytes)).Equals(sha256, StringComparison.OrdinalIgnoreCase) ? "verified" : "mismatch";
-        _entries.Add(id, new(fullPath, fullBaseDirectory, bytes, Convert.ToHexString(RandomNumberGenerator.GetBytes(24)), format, writable, integrity));
+        _entries.Add(id, new(fullPath, fullBaseDirectory, bytes, Convert.ToHexString(RandomNumberGenerator.GetBytes(24)),
+            format, writable, integrity, () => Interlocked.Increment(ref _parseCount)));
     }
 
     internal static void ValidatePath(string path)
@@ -84,10 +125,10 @@ internal sealed class TaskConfigView
         try
         {
             if (entry.Format is not ("json" or "yaml")) return false;
-            var document = new TaskConfigDocument(entry.Bytes, entry.Format);
+            var document = entry.Parsed.Value!;
             bool useDefault = defaultValue is not null && selector.Count == 1
                 && selector[0] is JsonValue property && property.TryGetValue<string>(out string? name)
-                && document.Document is JsonObject obj && !obj.ContainsKey(name);
+                && !document.ContainsTopLevelProperty(name);
             JsonNode? selected = useDefault ? JsonValue.Create(defaultValue) : document.ReadSelection(selector);
             string? text = null;
             if (selected is JsonValue scalar)
@@ -128,15 +169,7 @@ internal sealed class TaskConfigView
         }
     }
 
-    private static string Read(Entry entry)
-    {
-        JsonNode? document = entry.Integrity == "mismatch" ? null : entry.Format == "text"
-            ? JsonValue.Create(new System.Text.UTF8Encoding(false, true).GetString(entry.Bytes))
-            : new TaskConfigDocument(entry.Bytes, entry.Format).Document;
-        var result = new JsonObject { ["document"] = document, ["revision"] = entry.Revision, ["format"] = entry.Format };
-        if (entry.Integrity is not null) result["integrity"] = entry.Integrity;
-        return result.ToJsonString();
-    }
+    private static string Read(Entry entry) => entry.Serialized.Value;
 
     internal byte[] Stage(string id, string revision, IReadOnlyList<TaskConfigOperation> operations, IReadOnlySet<string> allowed)
     {
@@ -158,6 +191,68 @@ internal sealed class TaskConfigView
     internal void VerifyUnchanged()
     {
         foreach (var entry in _entries.Values) VerifyUnchanged(entry);
+    }
+
+    // OK launchers update these two operational fields during their own run.
+    // Writable configuration is restored by the existing transaction; upstream
+    // may update it during execution. Freeze every runtime resource instead,
+    // and compare app metadata so version/update-state drift still aborts.
+    internal void VerifyRestrictedOkRuntimeUnchanged()
+    {
+        foreach (var (id, entry) in _entries)
+        {
+            if (entry.Writable) continue;
+            if (id != "runtime-app" || entry.Format != "json")
+            {
+                VerifyUnchanged(entry);
+                continue;
+            }
+            ValidatePath(entry.Path);
+            var info = new FileInfo(entry.Path);
+            if (!info.Exists || info.Length > 2 * 1024 * 1024)
+                throw new InvalidDataException("runtime_identity_changed: app metadata unavailable");
+            byte[] current = File.ReadAllBytes(entry.Path);
+            if (!StableRuntimeAppFields(entry.Bytes).SequenceEqual(StableRuntimeAppFields(current)))
+                throw new InvalidDataException("runtime_identity_changed: app metadata changed");
+        }
+    }
+
+    private static IEnumerable<KeyValuePair<string, string>> StableRuntimeAppFields(byte[] bytes)
+    {
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(bytes);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+                throw new InvalidDataException("runtime_identity_changed: invalid app metadata");
+            var fields = new SortedDictionary<string, string>(StringComparer.Ordinal);
+            bool hasRunning = false;
+            bool hasLastStart = false;
+            foreach (JsonProperty property in document.RootElement.EnumerateObject())
+            {
+                if (property.NameEquals("running"))
+                {
+                    if (hasRunning || property.Value.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+                        throw new InvalidDataException("runtime_identity_changed: invalid running state");
+                    hasRunning = true;
+                    continue;
+                }
+                if (property.NameEquals("last_start"))
+                {
+                    if (hasLastStart)
+                        throw new InvalidDataException("runtime_identity_changed: duplicate app metadata");
+                    hasLastStart = true;
+                    continue;
+                }
+                if (!fields.TryAdd(property.Name, property.Value.GetRawText()))
+                    throw new InvalidDataException("runtime_identity_changed: duplicate app metadata");
+            }
+            if (!hasRunning) throw new InvalidDataException("runtime_identity_changed: missing running state");
+            return fields;
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidDataException("runtime_identity_changed: malformed app metadata", ex);
+        }
     }
 
     internal (string Path, byte[] Bytes, string Format) Snapshot(string id)

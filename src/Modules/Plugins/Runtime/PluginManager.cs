@@ -223,21 +223,6 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
         return candidates;
     }
 
-    /// <summary>返回已发现、已启用且有效的数据化插件配置校验脚本；普通脚本和 managed-code 插件不参与。</summary>
-    internal bool TryGetConfigValidator(string pluginName, out ConfigValidatorDescriptor? descriptor)
-    {
-        descriptor = null;
-        pluginName = ResolveLoadedPluginName(pluginName);
-        DataSpecializedPlugin? plugin = _dataPlugins.FirstOrDefault(item =>
-            string.Equals(item.Name, pluginName, StringComparison.OrdinalIgnoreCase));
-        if (plugin is null || !IsRuntimeEnabled(plugin.Name) || !plugin.HasConfigValidator)
-        {
-            return false;
-        }
-        descriptor = plugin.ReadConfigValidator();
-        return descriptor is not null;
-    }
-
     /// <summary>返回已发现、已启用且有效的数据化插件配置编辑脚本。</summary>
     internal bool TryGetConfigEditor(string pluginName, out ConfigEditorDescriptor? descriptor)
     {

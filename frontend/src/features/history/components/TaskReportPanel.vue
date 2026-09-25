@@ -36,6 +36,7 @@ const businessTotal = computed(() => props.report?.summary?.counts.total ?? busi
 const finished = computed(() => props.report?.summary?.counts.total !== undefined
   ? (props.report?.summary?.counts.succeeded || 0) + (props.report?.summary?.counts.skipped || 0)
   : businessTasks.value.filter(task => ['succeeded', 'skipped'].includes(status(task.id))).length);
+const unverified = computed(() => props.report?.summary?.counts.unknown || 0);
 const activeAssessment = computed(() => props.report?.admissionBlocked?.configAssessment || plan.value?.configAssessment);
 const activeReadiness = computed(() => props.report?.admissionBlocked?.readiness || plan.value?.currentReadiness);
 const configChecks = computed(() => (activeAssessment.value?.checks || []).filter(check =>
@@ -157,13 +158,14 @@ function configActionLabel(kind: string) {
         </li>
       </ul>
       <p v-if="report?.summary?.recovered && layout !== 'steps'" class="task-notice">{{ t('tasks.recovered') }}</p>
+      <p v-if="report && unverified && report.lifecycleOutcome === 'completed'" class="task-footnote">{{ t('tasks.outcome.unverified_count', { count: unverified }) }}</p>
       <p v-if="!tasks.length" class="muted">{{ t('tasks.empty') }}</p>
       <div v-if="layout !== 'steps'" class="task-list">
         <TaskPlanItem v-for="task in roots" :key="task.id" :task="task" :tasks="plan.tasks" :report="report" :display-snapshot="report?.displaySnapshot || plan.displaySnapshot" :focus-task-id="focusTaskId" />
       </div>
       <NxpScrollArea v-else-if="layout === 'steps'" direction="horizontal" :aria-label="t('tasks.title')">
         <ol class="task-steps">
-          <li v-for="(task, index) in tasks" :key="task.id" :data-task-id="task.id" class="task-step">
+          <li v-for="(task, index) in businessTasks" :key="task.id" :data-task-id="task.id" class="task-step">
             <span class="task-marker" :data-status="status(task.id)" aria-hidden="true">{{ index + 1 }}</span>
             <span class="task-step-name" :title="taskName(task)">{{ taskName(task) }}</span>
             <NxpBadge class="task-step-status" :tone="tone(status(task.id))">{{ t(`tasks.status.${status(task.id)}`) }}</NxpBadge>

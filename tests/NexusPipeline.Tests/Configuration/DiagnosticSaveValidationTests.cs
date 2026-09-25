@@ -64,10 +64,8 @@ public sealed class DiagnosticSaveValidationTests
 
             var users = new SnapshotReader(first, second);
             var resolver = new ScriptSpecResolver(manager, manager, plugins: manager);
-            Assert.False(manager.TryGetConfigValidator(plugin.Name, out _));
             ResolvedScriptSpec resolved = resolver.Resolve(script);
             Assert.True(resolved.Succeeded, resolved.Error);
-            Assert.Null(resolved.ConfigValidator);
             Assert.NotNull(resolved.TaskProtocol);
             foreach (string id in new[] { firstUserId, secondUserId })
                 NexusPipeline.Modules.Configuration.Snapshots.ConfigStoreMetadata.Save(scriptId, id, new() { ConfigKind = "file", ConfigLocatorHash = NexusPipeline.Modules.Configuration.Snapshots.ConfigStoreMetadata.HashLocator(resolved.Script.ConfigPath) });
@@ -96,8 +94,8 @@ public sealed class DiagnosticSaveValidationTests
                 Assert.All(again!.Diagnostics, item => Assert.False(item.ShouldNotify));
             }
             var edit = new ConfigEditCommands(null!, null!, null!, null!, null!, resolver, null!, assessment);
-            var editResult = edit.RunConfigValidator(script,
-                new ResolvedScriptUser(first.Id, first.Name, first.Bindings[0]), first.Id, resolved);
+            var editResult = edit.RunConfigAssessment(script,
+                new ResolvedScriptUser(first.Id, first.Name, first.Bindings[0]), resolved);
             Assert.True(editResult.Ran);
             Assert.Empty(editResult.Toasts);
             Assert.Empty(editResult.Notifications);

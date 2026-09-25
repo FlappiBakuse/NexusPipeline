@@ -1,4 +1,3 @@
-using NexusPipeline.Modules.Configuration.Paths;
 using NexusPipeline.Modules.Configuration.Scripting;
 using NexusPipeline.Modules.Configuration.Snapshots;
 using NexusPipeline.Modules.Plugins.Contracts;
@@ -11,8 +10,7 @@ using NexusPipeline.Shared.Logging;
 namespace NexusPipeline.Modules.Configuration.Validation;
 
 /// <summary>
-/// 保存脚本实例后的专项配置校验（script-save 语境）：对每个绑定用户以其 store 为根运行插件的
-/// 统一运行 taskProtocol 配置诊断与兼容旧 configValidator（只读比较 + 通知），
+/// 保存脚本实例后的专项配置诊断（script-save 语境）：对每个绑定用户运行 taskProtocol 诊断，
 /// 聚合结果供 Web 响应返回。保存结果不受校验影响；无可用快照或无绑定用户时返回 null。
 /// </summary>
 internal sealed class ScriptSaveValidation
@@ -56,13 +54,8 @@ internal sealed class ScriptSaveValidation
                 return null;
             }
 
-            var toasts = new List<ConfigValidationToast>();
-            var notifications = new List<ConfigValidationNotification>();
             var diagnostics = new List<ConfigValidationDiagnostic>();
             using var assessmentBudget = new CancellationTokenSource(TaskProtocolAssessmentBudget);
-            HashSet<string> toastKeys = new(StringComparer.Ordinal);
-            HashSet<string> notificationKeys = new(StringComparer.Ordinal);
-            string? error = null;
             bool ran = false;
             foreach (ResolvedScriptUser user in targets)
             {
@@ -114,47 +107,12 @@ internal sealed class ScriptSaveValidation
                     continue;
                 }
 
-                if (spec.ConfigValidator is null)
-                {
-                    continue;
-                }
-                ConfigValidationResult result = await ConfigValidationScriptRunner.ExecuteAsync(
-                    spec.ConfigValidator,
-                    spec.Script,
-                    user,
-                    ConfigPaths.StoreDir(script.Id, user.UserId),
-                    "script-save",
-                    BuildExtraSnapshots(script.Id, user.UserId, spec.ExtraConfigPaths)).ConfigureAwait(false);
-                if (!result.Ran)
-                {
-                    continue;
-                }
-                ran = true;
-                error ??= result.Error;
-                // Feedback belongs to a user binding. Keep de-duplication within
-                // that binding only; identical wording from another user is a
-                // separate configuration fact and must remain visible.
-                string bindingKey = user.UserId + ":" + script.Id;
-                foreach (ConfigValidationToast toast in result.Toasts)
-                {
-                    if (toastKeys.Add(bindingKey + "|" + toast.Kind + "|" + toast.Message))
-                    {
-                        toasts.Add(toast);
-                    }
-                }
-                foreach (ConfigValidationNotification notification in result.Notifications)
-                {
-                    if (notificationKeys.Add(bindingKey + "|" + notification.Kind + "|" + notification.Title + "|" + notification.Body))
-                    {
-                        notifications.Add(notification);
-                    }
-                }
             }
-            if (!ran && error is null)
+            if (!ran)
             {
                 return null;
             }
-            return new ConfigValidationResult(true, error ?? "", Array.Empty<string>(), toasts, notifications)
+            return new ConfigValidationResult(true, "", Array.Empty<string>(), Array.Empty<ConfigValidationToast>(), Array.Empty<ConfigValidationNotification>())
             {
                 Diagnostics = diagnostics,
             };
@@ -166,18 +124,4 @@ internal sealed class ScriptSaveValidation
         }
     }
 
-    /// <summary>附加配置路径 → 该用户 store-extra 快照的只读视图（编辑会话与保存校验共用）。</summary>
-    public static IReadOnlyList<ConfigValidationExtraSnapshot> BuildExtraSnapshots(
-        string scriptId,
-        string userKey,
-        IReadOnlyList<string> extraPaths)
-    {
-        if (extraPaths.Count == 0)
-        {
-            return Array.Empty<ConfigValidationExtraSnapshot>();
-        }
-        return extraPaths
-            .Select(path => new ConfigValidationExtraSnapshot(path, ConfigPaths.StoreExtraDir(scriptId, userKey, path)))
-            .ToList();
-    }
 }

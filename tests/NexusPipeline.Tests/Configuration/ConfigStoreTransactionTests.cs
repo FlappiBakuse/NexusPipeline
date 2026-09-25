@@ -11,6 +11,56 @@ namespace NexusPipeline.Tests.Configuration;
 public sealed class ConfigStoreTransactionTests
 {
     [Fact]
+    public void RepairSourcePreservesSnapshotIdentityAndRejectsStaleBytes()
+    {
+        string scriptId = "txn-repair-" + Guid.NewGuid().ToString("N");
+        string userKey = "user-" + Guid.NewGuid().ToString("N");
+        string root = Path.Combine(Path.GetTempPath(), "np-repair-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            string originalPath = Path.Combine(root, "original", "config.yaml");
+            string sourceDir = Path.Combine(root, "private-source");
+            Directory.CreateDirectory(sourceDir);
+            string source = Path.Combine(sourceDir, "config.yaml");
+            string store = ConfigPaths.StoreDir(scriptId, userKey);
+            Directory.CreateDirectory(store);
+            string storeFile = Path.Combine(store, "config.yaml");
+            byte[] before = System.Text.Encoding.UTF8.GetBytes("after_finish: Shutdown\nother: kept\n");
+            File.WriteAllBytes(storeFile, before);
+            File.WriteAllText(source, "after_finish: \"None\"\nother: kept\n");
+            var meta = ConfigStoreMetadata.For(storeFile, new ConfigSessionRuntimeMetadata(
+                "", "", "", "profile", "march7th", "0.3.0", "file"));
+            meta.ConfigLocatorHash = ConfigStoreMetadata.HashLocator(originalPath);
+            meta.Generation = 7;
+            ConfigStoreMetadata.Save(scriptId, userKey, meta);
+            var mark = new ConfigSessionMark { ScriptId = scriptId, UserId = userKey,
+                ConfigPath = originalPath, ConfigKind = "file" };
+
+            Assert.Throws<IOException>(() => ConfigStoreTransaction.Apply(scriptId, userKey, source,
+                new HashSet<string>(), null, null, mark, preserveExistingMetadata: true,
+                expectedStoreFile: storeFile, expectedStoreBytes: System.Text.Encoding.UTF8.GetBytes("stale")));
+            Assert.Equal(before, File.ReadAllBytes(storeFile));
+            Assert.Equal(7, ConfigStoreMetadata.Load(scriptId, userKey)!.Generation);
+
+            ConfigStoreTransaction.Apply(scriptId, userKey, source, new HashSet<string>(),
+                null, null, mark, preserveExistingMetadata: true,
+                expectedStoreFile: storeFile, expectedStoreBytes: before);
+            Assert.Equal(File.ReadAllBytes(source), File.ReadAllBytes(storeFile));
+            ConfigStoreMetadata actual = ConfigStoreMetadata.Load(scriptId, userKey)!;
+            Assert.Equal(8, actual.Generation);
+            Assert.Equal(meta.ConfigLocatorHash, actual.ConfigLocatorHash);
+            Assert.Equal(meta.ProfileHash, actual.ProfileHash);
+            Assert.False(Directory.Exists(ConfigPaths.StoreTransactionDir(scriptId, userKey)));
+        }
+        finally
+        {
+            DeleteScriptData(scriptId);
+            DeleteDirectory(root);
+        }
+    }
+
+    [Fact]
     public void Recovery_PartialRollbackRetainsBackupsAndCanResumeAfterFileUnlock()
     {
         string scriptId = "txn-locked-" + Guid.NewGuid().ToString("N");

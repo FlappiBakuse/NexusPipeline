@@ -35,7 +35,6 @@ internal sealed class AttemptMonitorLoop
         RunAttempt attempt,
         string modeText,
         string attemptId,
-        DateTime attemptStart,
         ScriptProcessSession processSession,
         string launchExe,
         string? excludeGame,
@@ -61,6 +60,13 @@ internal sealed class AttemptMonitorLoop
             {
                 CancellationToken token = operationToken();
                 token.ThrowIfCancellationRequested();
+                if (attemptMonitor.StartupFailure is { } startupFailure)
+                {
+                    state.Result = killScriptAndConfirm()
+                        ? RunAttemptResult.Failed(startupFailure.Detail, startupFailure.Code)
+                        : RunAttemptResult.Fatal("脚本进程清理未确认，已阻断配置替换与重试");
+                    break;
+                }
 
                 // 先预热最近有效帧，再消费判断结果和新增日志；截图请求可能就在本轮随后到达。
                 // 模拟器模式跳过（模拟器截图走实时 ADB，不使用 PC 窗口缓存）。
@@ -131,6 +137,11 @@ internal sealed class AttemptMonitorLoop
                 if (scriptExited)
                 {
                     await processSession.WaitForOutputDrainAsync(token).ConfigureAwait(false);
+                    if (attemptMonitor.StartupFailure is { } exitedStartupFailure)
+                    {
+                        state.Result = RunAttemptResult.Failed(exitedStartupFailure.Detail, exitedStartupFailure.Code);
+                        break;
+                    }
                 }
                 state.Monitor = logEnv.RefreshMonitor(state.Monitor);
 
@@ -144,6 +155,7 @@ internal sealed class AttemptMonitorLoop
                 }
                 if (newContent.Length > 0)
                 {
+                    attemptMonitor.MarkInput();
                     state.FirstEntryAt ??= DateTime.Now;
                     if (state.StallStatusShown)
                     {
@@ -157,6 +169,7 @@ internal sealed class AttemptMonitorLoop
                         {
                             continue;
                         }
+                        attemptMonitor.ObserveLogLine(line);
                         session.ReportLogLine(line, LogLevelUtil.ParseObserved(line));
                         session.AppendScriptLogLine(line);
                         SessionJudge.LineHit lineHit = judge.HandleLine(line);
@@ -186,6 +199,14 @@ internal sealed class AttemptMonitorLoop
                                 break;
                         }
                     }
+                }
+
+                if (attemptMonitor.StartupFailure is { } logStartupFailure)
+                {
+                    state.Result = killScriptAndConfirm()
+                        ? RunAttemptResult.Failed(logStartupFailure.Detail, logStartupFailure.Code)
+                        : RunAttemptResult.Fatal("脚本进程清理未确认，已阻断配置替换与重试");
+                    break;
                 }
 
                 // （台账外，修正）：周期触发与退出/stall 最终触发同轮先后命中时跳过最终触发——
@@ -238,8 +259,6 @@ internal sealed class AttemptMonitorLoop
                     StallObservation stall = attemptMonitor.CheckStall(
                         state.Monitor,
                         !string.IsNullOrWhiteSpace(session.Script.LogPath),
-                        attemptStart,
-                        state.FirstEntryAt,
                         session.Script.LogStallTimeoutMinutes);
                     if (stall.Hit)
                     {

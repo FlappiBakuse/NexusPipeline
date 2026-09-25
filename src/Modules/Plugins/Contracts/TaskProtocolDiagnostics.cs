@@ -52,7 +52,8 @@ internal sealed record TaskExecutionContext(
 internal sealed record TaskGameTarget(
     string Kind,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Value,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? InspectionId);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? InspectionId,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? Ready = null);
 
 internal sealed record TaskQueueContext(string Kind, string HasFollowingWork);
 

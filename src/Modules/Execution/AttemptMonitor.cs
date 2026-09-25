@@ -7,6 +7,7 @@ using NexusPipeline.Platform.Windows;
 namespace NexusPipeline.Modules.Execution;
 
 internal readonly record struct StallObservation(bool Hit, string Reason);
+internal sealed record UpstreamStartupFailure(string Detail, string Code);
 
 /// <summary>
 /// 一次 Attempt 的轻量监控边界：日志增量、进程退出和 stall 观察都在这里完成，
@@ -14,6 +15,40 @@ internal readonly record struct StallObservation(bool Hit, string Reason);
 /// </summary>
 internal sealed class AttemptMonitor
 {
+    private readonly long _startedStamp = Stopwatch.GetTimestamp();
+    private long _lastInputStamp;
+
+    private readonly bool _isMxu;
+    private UpstreamStartupFailure? _startupFailure;
+
+    public AttemptMonitor(bool isMxu = false) => _isMxu = isMxu;
+
+    public void MarkInput() => Interlocked.Exchange(ref _lastInputStamp, Stopwatch.GetTimestamp());
+
+    public void ObserveConsoleLine(string line)
+    {
+        MarkInput();
+        ObserveLogLine(line);
+    }
+
+    public void ObserveLogLine(string line)
+    {
+        // This is a reported upstream startup failure, not an inferred lack of
+        // progress. Both console callbacks and file monitors are attempt-scoped.
+        if (line.Contains("任务启动失败：未搜索到任何窗口", StringComparison.Ordinal)
+            || line.Contains("任务启动失败: 未搜索到任何窗口", StringComparison.Ordinal))
+            Interlocked.CompareExchange(ref _startupFailure,
+                new("上游任务启动失败：未搜索到任何窗口", "run.startup_window_missing"), null);
+        if (_isMxu && (line.Contains("[MXU_LAUNCH] Failed to spawn program:", StringComparison.Ordinal)
+            || line.Contains("[MXU_LAUNCH] Failed to run program:", StringComparison.Ordinal)
+            || line.Contains("[MXU_LAUNCH] Failed to parse param JSON:", StringComparison.Ordinal)
+            || line.Contains("[MXU_LAUNCH] Missing or empty 'program' parameter", StringComparison.Ordinal)))
+            Interlocked.CompareExchange(ref _startupFailure,
+                new("上游 MXU 启动动作失败，请检查当前实例的启动配置和日志", "run.upstream_launch_failed"), null);
+    }
+
+    public UpstreamStartupFailure? StartupFailure => Volatile.Read(ref _startupFailure);
+
     public string ReadLog(LogMonitor? monitor)
     {
         return monitor?.ReadNew() ?? "";
@@ -46,8 +81,6 @@ internal sealed class AttemptMonitor
     public StallObservation CheckStall(
         LogMonitor? monitor,
         bool logConfigured,
-        DateTime attemptStart,
-        DateTime? firstEntryAt,
         int stallTimeoutMinutes)
     {
         if (stallTimeoutMinutes <= 0)
@@ -55,27 +88,14 @@ internal sealed class AttemptMonitor
             return new StallObservation(false, "");
         }
         double stallSeconds = TestHooks.ScaledSeconds(stallTimeoutMinutes * 60);
-        if (monitor is null && logConfigured)
-        {
-            double waitSeconds = (DateTime.Now - attemptStart).TotalSeconds;
-            return waitSeconds >= stallSeconds
-                ? new StallObservation(true, $"启动后 {stallTimeoutMinutes} 分钟未产生日志条目（未找到日志文件）")
-                : new StallObservation(false, "");
-        }
-        if (monitor is not null && firstEntryAt is null)
-        {
-            double waitSeconds = (DateTime.Now - attemptStart).TotalSeconds;
-            return waitSeconds >= stallSeconds
-                ? new StallObservation(true, $"启动后 {stallTimeoutMinutes} 分钟未产生日志条目")
-                : new StallObservation(false, "");
-        }
-        if (monitor is not null)
-        {
-            double stallSecondsSinceWrite = (DateTime.Now - monitor.LastWrite).TotalSeconds;
-            return stallSecondsSinceWrite >= stallSeconds
-                ? new StallObservation(true, $"日志超过 {stallTimeoutMinutes} 分钟无更新")
-                : new StallObservation(false, "");
-        }
-        return new StallObservation(false, "");
+        long lastInput = Interlocked.Read(ref _lastInputStamp);
+        double idleSeconds = Stopwatch.GetElapsedTime(lastInput == 0 ? _startedStamp : lastInput).TotalSeconds;
+        if (idleSeconds < stallSeconds) return new StallObservation(false, "");
+        string reason = lastInput == 0
+            ? monitor is null && logConfigured
+                ? $"启动后 {stallTimeoutMinutes} 分钟未产生日志条目（未找到日志文件，stdout/stderr 也无输出）"
+                : $"启动后 {stallTimeoutMinutes} 分钟未产生日志条目"
+            : $"日志超过 {stallTimeoutMinutes} 分钟无新增输入";
+        return new StallObservation(true, reason);
     }
 }

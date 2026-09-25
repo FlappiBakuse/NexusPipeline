@@ -268,7 +268,8 @@ internal class HostCompositionRoot
             provider.GetRequiredService<IPluginCapabilityResolver>(),
             provider.GetRequiredService<ScriptSpecResolver>(),
             provider.GetRequiredService<UserCommands>(),
-            provider.GetRequiredService<ITaskProtocolConfigAssessmentPort>()));
+            provider.GetRequiredService<ITaskProtocolConfigAssessmentPort>(),
+            provider.GetRequiredService<ISettingsProvider>()));
         collection.AddSingleton<UpdateService>(provider => new UpdateService(
             () => Settings,
             AppPaths.AppRoot,

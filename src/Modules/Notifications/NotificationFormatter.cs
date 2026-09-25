@@ -20,6 +20,7 @@ internal static class NotificationFormatter
         string detail = RunResultLocalization.Detail(record);
         string status = record.Status switch
         {
+            "partial" when record.ResultCode == "tasks_unverified" => detail,
             "success" => HostLocalization.TranslateNamed("notification.script.success", $"运行成功（{detail}）", new Dictionary<string, object?> { ["detail"] = detail }),
             "partial" => HostLocalization.TranslateNamed("notification.script.partial", $"运行部分完成（{detail}）", new Dictionary<string, object?> { ["detail"] = detail }),
             "cancelled" => HostLocalization.TranslateNamed("notification.script.cancelled", "运行已取消"),
@@ -59,6 +60,7 @@ internal static class NotificationFormatter
             string detail = RunResultLocalization.Detail(record);
             string status = record.Status switch
             {
+                "partial" when record.ResultCode == "tasks_unverified" => detail,
                 "success" => HostLocalization.TranslateNamed("notification.queue.success", $"成功（{detail}）", new Dictionary<string, object?> { ["detail"] = detail }),
                 "partial" => HostLocalization.TranslateNamed("notification.queue.partial", $"部分完成（{detail}）", new Dictionary<string, object?> { ["detail"] = detail }),
                 "cancelled" => HostLocalization.TranslateNamed("notification.queue.cancelled", "已取消"),

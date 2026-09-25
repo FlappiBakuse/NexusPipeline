@@ -22,7 +22,7 @@
 - 运行页显示任务树、当前尝试和已确认事实；实时事件只提示更新，完整快照支持断线恢复。
 - 历史报告保存当时名称、任务范围、尝试与证据；不依赖插件继续安装。最新记录被删除或保留策略清理后保留 tombstone，不能回退旧成功记录。
 - 用户徽章按当前启用专项绑定的最近结果汇总。最终实例异常/全部业务失败为红，部分明确失败为黄，未知为灰，全部满足为绿；技术准备不参与业务分母。运行中数量单独展示。
-- 自动重试只能覆盖有明确失败/未执行证据且风险验证安全的任务和必要前置；不把原本关闭的业务任务打开。恢复冲突保留现场，不同步临时选择。
+- 自动重试按每个有明确失败/未执行证据的候选独立评估重试单元和必要前置；不相关的 unknown 或危险失败不否决安全候选，整个共享单元仍须全部安全。不把原本关闭的业务任务打开。恢复冲突保留现场，不同步临时选择。
 
 ## 控制面
 
@@ -70,15 +70,21 @@ node tests/run.mjs release all
 
 `0.1.0` 的 `readResources` 可添加可选 `sha256`，值为 64 位小写十六进制，且资源必须为 `source: root`、`format: text`。宿主按捕获的原始字节比较，包含 BOM 和换行；`readResource` 增加 `integrity: verified|mismatch`。不匹配时 document 为 null，缺失/不可读仍按资源不可用处理。未声明哈希的资源返回形状不变；配置 revision 仍为不透明令牌，不返回内容摘要。既有路径白名单、单文件及总量预算不变。
 
-此声明用于已审查的发行文件。发现时由插件 critical 规则决定阻断；运行阶段 Host 在接受观察前及结束时复核已固定资源，变化或不可读会停止接受后续证据及自动重试，记录运行链异常，保留此前任务事实。它不是对全部 Python 依赖、解释器、加载代码或瞬时替换的完整证明，也不会阻止上游启动器修复/更新；新发行字节必须重新审查。
+此声明用于已审查发行的高级判定。发现时由插件 critical 规则决定阻断；运行阶段 Host 在接受观察前及结束时复核已固定资源，变化或不可读会停止接受后续证据及自动重试，记录运行链异常，保留此前任务事实。OK 两款较新的同主版本只有在对应渠道的官方来源、安装元数据、空闲更新器、完整 HEAD 和基础配置形态可确认时才建立受限计划。受限运行只保留基础生命周期，业务任务始终未核验；Host 不调用旧版观察器或选择重试。运行阶段逐字节复核运行资源；`runtime-app` 仅允许上游写入布尔 `running` 和 `last_start`，版本、渠道、更新状态等字段仍需一致。可写用户配置由现有事务恢复，不作为发行身份字节。资源变化或不可读仍会拒绝后续证据。受限路径不证明全部 Python 依赖、解释器或瞬时替换安全，也不会阻止上游启动器修复/更新；新发行的高级判定仍须重新审查。
 
 环境目标可声明 `source: {kind: "mainConfig", selector: [...]}`，仅在绑定捕获恰好一份主配置时解析，文件改名不改变归属；目录多配置或无配置时返回未检查，不从附加配置或其他账号回退。可选 `defaultValue`、`secondaryDefaultValue` 必须为有界字符串且对应单层属性 selector，只用于该属性不存在，显式 null、空值和错误类型不能被默认值掩盖。ADB 端口 selector 接受整数或字符串，地址组合仍只作格式/相等比较，不联网探测。默认值必须有锁定上游依据。
 
-Host 联调工具的 `--runtime-installations <matrix.json>` 从显式 `cases`（id/artifact/root/expectedEvaluation）只读捕获官方安装资源，账号配置仍为合成夹具；`output` 指向不存在的报告路径。`--validator-comparison <inputs.json>` 使用显式 legacyCommit/scripts（artifact/path/sha256）与当前四个生产适配器进行只读 Jint 对照，覆盖路径、ADB 默认值和日志开关。两者均先传 `--plugin-root <插件检出>`；不能用合成资源集合代替安装来源证据。运行前用 `dotnet build <Host>/tools/NexusPipeline.TaskProtocolTests -m:1 -p:NexusTestHost=true` 构建，随后运行对应 Test Host 输出 DLL。
+Host 联调工具的 `--runtime-installations <matrix.json>` 从显式 `cases`（id/artifact/root/expectedEvaluation）只读捕获官方安装资源，账号配置仍为合成夹具；`output` 指向不存在的报告路径。先传 `--plugin-root <插件检出>`；不能用合成资源集合代替安装来源证据。运行前用 `dotnet build <Host>/tools/NexusPipeline.TaskProtocolTests -m:1 -p:NexusTestHost=true` 构建，随后运行对应 Test Host 输出 DLL。旧 validator 对比实验结果保留在历史报告，不再提供执行入口。
 
 
 保存诊断保留完整 `validation.diagnostics`；每项 `shouldNotify` 为 false 时，前端不重复弹出提示。Host 在当前进程内按绑定、规则范围、快照修订、上下文与词典身份去重；修复后再次出现或修订改变会重新提醒。缓存最多保留 1024 个绑定，重启或容量淘汰后可再次提示，不改历史事实。配置整体修订是进程密钥生成的 HMAC 标识，不是可枚举内容摘要；选择事务的单资源 CAS 令牌仍只属于其冻结视图。
 
-保存脚本实例与完成配置编辑都选择单一配置校验入口：声明 `0.1.0` 协议的插件使用 `discover` 配置诊断，即使检查失败也不回退旧接口；没有声明 `taskProtocol` 的旧插件若有 `configValidator`，继续运行旧只读校验一次。一个绑定的反馈不会因另一个绑定文字相同而被去重。
+保存脚本实例与完成配置编辑都使用 `0.1.0` 协议的 `discover` 配置诊断；诊断失败不回退旧接口。声明 `configValidator` 的旧包被拒绝并提示升级或卸载，现有用户快照保持不变。一个绑定的反馈不会因另一个绑定文字相同而被去重。
+
+v0.16.9 的本地 Web 可在设置页逐次开启“允许逐次配置修复”。当前自动修复仅覆盖 March7thAssistant 插件 0.3.0 的用户级单文件快照中已知危险 `after_finish` 系统动作，将其建议为 `None`。预览只返回插件、用户绑定、字段、白名单原值、建议值、原因、影响及进程内预览令牌；点击应用才重新核对开关、插件/profile、快照元数据和字节修订，借现役配置快照事务提交。共享 extra config、多文件快照、未知值、旧/受限版本均须手动编辑；本功能不修改未接管的现场配置、不对其他诊断自动推断修复。事务出错保留恢复现场。内部受控选择补丁和常规配置编辑不受该开关影响。
 
 预览的 `configuration_busy`、`cancelled`、`timeout`、`resource_limit` 与 `protocol_error` 分别表示占用/变化、取消、超时、资源预算和插件协议错误，不视作配置通过或业务失败。保存完成后的检查异常仅返回安全摘要，不返回原始脚本异常、文件路径或凭据。旧开发版协议声明会明确拒绝；`0.1.0` 的 `configAssessment` 必须完整且通过声明约束。
+
+## MXU PC 启动事实
+
+`executionContext.gameTarget.ready` 是可选的宿主只读布尔值：仅 MaaEnd 与 MaaStellaSora 的 PC 运行前准入在 `LaunchGame=false` 时填入。`true` 表示按本次配置的游戏进程名找到了可见窗口；`false` 表示该时点未找到。预览、其他模式及旧宿主没有此字段，插件须按未知处理，不能把缺失当作 `false`。它不证明 MXU 控制器已成功连接，也不能替代启动后 stdout/超时监控。

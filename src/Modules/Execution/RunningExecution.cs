@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using NexusPipeline.ControlPlane.Http;
 using NexusPipeline.Modules.History;
 using NexusPipeline.Modules.Scripts;
@@ -19,7 +20,29 @@ internal sealed class RunningExecution
 
     private long _nextLogSequence;
 
+    // The current record owns the visible log tail. A queue placeholder uses its
+    // frozen item position until a concrete RunRecord is created.
+    private string _logSegmentId = "";
+
+    private long _logSegmentSequence;
+
+    private string _logRecordId = "";
+
+    private int _logAttemptNumber;
+
     private string _status = "running";
+
+    private bool _cancelRequested;
+
+    private string _cancellationPhase = "";
+
+    private long _cancelAcceptedAt;
+    private long _cancelSignalAt;
+    private long _cancelStopAt;
+    private long _cancelExitedAt;
+    private long _cancelWorkersAt;
+    private long _cancelRestoredAt;
+    private long _cancelCommittedAt;
 
     private DateTime? _finishedAt;
 
@@ -94,14 +117,43 @@ internal sealed class RunningExecution
             bool changed;
             lock (_stateSync)
             {
+                // An accepted cancellation wins over a not-yet-committed normal end.
+                if (_cancelRequested && value == "done") value = "cancelled";
                 changed = !string.Equals(_status, value, StringComparison.Ordinal);
                 _status = value;
+                if (_cancelRequested && value != "running")
+                {
+                    _cancellationPhase = "terminal";
+                    _cancelCommittedAt = Stopwatch.GetTimestamp();
+                }
             }
             if (changed)
             {
                 NotifyStatusChanged();
             }
         }
+    }
+
+    public CancellationRequestResult RequestCancellation()
+    {
+        lock (_stateSync)
+        {
+            if (_status != "running" || _finishedAt is not null) return CancellationRequestResult.AlreadyFinished;
+            if (_cancelRequested) return CancellationRequestResult.AlreadyRequested;
+            _cancelRequested = true;
+            _cancelAcceptedAt = Stopwatch.GetTimestamp();
+            _cancellationPhase = "stopping";
+            _currentStatus = "正在停止任务";
+        }
+        // Signal before synchronous realtime observers or audit persistence can run.
+        try { Cts.Cancel(throwOnFirstException: false); }
+        catch (Exception ex) { Logger.Warn($"取消信号发送失败（{TargetName}），任务可能仍在运行：{ex.Message}"); }
+        if (Cts.IsCancellationRequested)
+        {
+            lock (_stateSync) _cancelSignalAt = Stopwatch.GetTimestamp();
+        }
+        NotifyStatusChanged();
+        return CancellationRequestResult.Accepted;
     }
 
     public DateTime StartedAt { get; set; } = DateTime.Now;
@@ -205,8 +257,15 @@ internal sealed class RunningExecution
             bool changed;
             lock (_stateSync)
             {
+                if (_cancelRequested && _status == "running" && value is not ("正在停止脚本" or "脚本已停止，正在收拢后台任务" or "后台任务已收拢" or "正在恢复配置" or "配置恢复完成" or "配置恢复失败，现场已保留")) return;
                 changed = !string.Equals(_currentStatus, value, StringComparison.Ordinal);
                 _currentStatus = value;
+                if (_cancelRequested && value == "正在停止脚本") _cancellationPhase = "stopping";
+                if (_cancelRequested && value == "正在停止脚本") _cancelStopAt = Stopwatch.GetTimestamp();
+                if (_cancelRequested && value == "脚本已停止，正在收拢后台任务") { _cancellationPhase = "quiescing"; _cancelExitedAt = Stopwatch.GetTimestamp(); }
+                if (_cancelRequested && value == "后台任务已收拢") _cancelWorkersAt = Stopwatch.GetTimestamp();
+                if (_cancelRequested && value == "正在恢复配置") _cancellationPhase = "restoring";
+                if (_cancelRequested && value is "配置恢复完成" or "配置恢复失败，现场已保留") _cancelRestoredAt = Stopwatch.GetTimestamp();
             }
             if (changed)
             {
@@ -291,6 +350,41 @@ internal sealed class RunningExecution
         }
     }
 
+    public string LogSegmentId
+    {
+        get
+        {
+            lock (_stateSync) return _logSegmentId;
+        }
+    }
+
+    public bool BeginLogSegment(string segmentId)
+        => BeginLogSegment(segmentId, null, null, null);
+
+    public bool BeginLogSegment(string segmentId, int? attempt, int? maxAttempts, string? recordId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(segmentId);
+        lock (_stateSync)
+        {
+            if (_cancelRequested || _status != "running") return false;
+            if (string.Equals(_logSegmentId, segmentId, StringComparison.Ordinal)) return true;
+            _logSegmentId = segmentId;
+            _logSegmentSequence++;
+            _logRecordId = recordId ?? "";
+            _logAttemptNumber = attempt ?? 0;
+            _logEntries.Clear();
+            _logTruncated = false;
+            if (attempt is { } number)
+            {
+                _currentAttempt = number;
+                _currentMaxAttempts = maxAttempts ?? _currentMaxAttempts;
+                _currentStatus = "正在准备当前尝试";
+            }
+        }
+        NotifyStatusChanged();
+        return true;
+    }
+
     public void SetPersistenceWarning(string warning)
     {
         if (string.IsNullOrWhiteSpace(warning))
@@ -352,7 +446,7 @@ internal sealed class RunningExecution
         AppendLog(LogLevel.Info, line);
     }
 
-    public void AppendLog(LogLevel level, string line)
+    public void AppendLog(LogLevel level, string line, string? segmentId = null)
     {
         if (string.IsNullOrWhiteSpace(line))
         {
@@ -361,13 +455,15 @@ internal sealed class RunningExecution
         ExecutionLogEntry entry;
         lock (_stateSync)
         {
+            // Output callbacks from a completed record cannot enter a later user's view.
+            if (segmentId is not null && !string.Equals(segmentId, _logSegmentId, StringComparison.Ordinal)) return;
             DateTimeOffset timestamp = DateTimeOffset.Now;
             entry = new ExecutionLogEntry(
                 ++_nextLogSequence,
                 timestamp,
                 level,
                 line,
-                Logger.FormatLine(level, line, timestamp));
+                Logger.FormatLine(level, line, timestamp)) { LogSegmentId = _logSegmentId };
             _logEntries.Add(entry);
             if (_logEntries.Count > MaxLogEntries)
             {
@@ -475,6 +571,12 @@ internal sealed class RunningExecution
             CurrentMaxAttempts = _currentMaxAttempts,
             PersistenceWarning = _persistenceWarning,
             LogTruncated = _logTruncated,
+            LogSegmentId = _logSegmentId,
+            LogSegmentSequence = _logSegmentSequence,
+            LogSegment = CreateLogSegmentLocked(),
+            CancelRequested = _cancelRequested,
+            CancellationPhase = _cancellationPhase,
+            CancellationTimingMs = CreateCancellationTimingLocked(),
         };
     }
 
@@ -586,20 +688,59 @@ internal sealed class RunningExecution
                 CurrentMaxAttempts = currentMaxAttempts,
                 PersistenceWarning = persistenceWarning,
                 LogTruncated = _logTruncated,
+                LogSegmentId = _logSegmentId,
+                LogSegmentSequence = _logSegmentSequence,
+                LogSegment = CreateLogSegmentLocked(),
+                CancelRequested = _cancelRequested,
+                CancellationPhase = _cancellationPhase,
+                CancellationTimingMs = CreateCancellationTimingLocked(),
                 Records = Records.Select(record => record.Clone()).ToList(),
                 LogTail = _logEntries.TakeLast(60).Select(entry => entry.FormattedText).ToList(),
                 LogEntries = _logEntries.TakeLast(StatusLogEntries).ToList(),
             };
         }
     }
+
+    private CancellationTimingSnapshot? CreateCancellationTimingLocked()
+    {
+        if (_cancelAcceptedAt == 0) return null;
+        double? Elapsed(long timestamp) => timestamp == 0 ? null : Math.Round(Stopwatch.GetElapsedTime(_cancelAcceptedAt, timestamp).TotalMilliseconds, 3);
+        return new CancellationTimingSnapshot(
+            Elapsed(_cancelSignalAt), Elapsed(_cancelStopAt), Elapsed(_cancelExitedAt),
+            Elapsed(_cancelWorkersAt), Elapsed(_cancelRestoredAt), Elapsed(_cancelCommittedAt));
+    }
+
+    private LogSegmentProjection? CreateLogSegmentLocked() => _logSegmentId.Length == 0 ? null
+        : new LogSegmentProjection(_logSegmentId, _logSegmentSequence,
+            _logRecordId.Length == 0 ? null : _logRecordId, _logAttemptNumber);
 }
+
+internal sealed record LogSegmentProjection(string Id, long Generation, string? RunRecordId, int AttemptNumber);
+
+internal sealed record CancellationTimingSnapshot(
+    double? SignalSent,
+    double? StopIssued,
+    double? OwnedProcessesExited,
+    double? WorkersQuiesced,
+    double? RestoreFinished,
+    double? ResultCommitted);
 
 internal sealed record ExecutionLogEntry(
     long Sequence,
     DateTimeOffset Timestamp,
     LogLevel Level,
     string Message,
-    string FormattedText);
+    string FormattedText)
+{
+    public string LogSegmentId { get; init; } = "";
+}
+
+internal enum CancellationRequestResult
+{
+    Accepted,
+    AlreadyRequested,
+    AlreadyFinished,
+}
 
 internal sealed record RunningExecutionStatusSnapshot
 {
@@ -636,6 +777,18 @@ internal sealed record RunningExecutionStatusSnapshot
     public string PersistenceWarning { get; init; } = "";
 
     public bool LogTruncated { get; init; }
+
+    public string LogSegmentId { get; init; } = "";
+
+    public long LogSegmentSequence { get; init; }
+
+    public LogSegmentProjection? LogSegment { get; init; }
+
+    public bool CancelRequested { get; init; }
+
+    public string CancellationPhase { get; init; } = "";
+
+    public CancellationTimingSnapshot? CancellationTimingMs { get; init; }
 }
 
 internal sealed record RunningExecutionSnapshot
@@ -673,6 +826,18 @@ internal sealed record RunningExecutionSnapshot
     public string PersistenceWarning { get; init; } = "";
 
     public bool LogTruncated { get; init; }
+
+    public string LogSegmentId { get; init; } = "";
+
+    public long LogSegmentSequence { get; init; }
+
+    public LogSegmentProjection? LogSegment { get; init; }
+
+    public bool CancelRequested { get; init; }
+
+    public string CancellationPhase { get; init; } = "";
+
+    public CancellationTimingSnapshot? CancellationTimingMs { get; init; }
 
     public IReadOnlyList<RunRecord> Records { get; init; } = Array.Empty<RunRecord>();
 

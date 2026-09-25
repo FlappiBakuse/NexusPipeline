@@ -102,7 +102,6 @@ internal sealed class ScriptSpecResolver
             profile.PluginVersion ?? "",
             judge,
             ComputeProfileHash(script, profile.PluginName ?? "", profile.PluginVersion ?? "", judge),
-            ConfigValidator: ResolveConfigValidator(script.PluginType),
             ConfigEditor: profile.ConfigEditor)
         {
             TaskProtocol = profile.TaskProtocol,
@@ -176,14 +175,6 @@ internal sealed class ScriptSpecResolver
             "",
             Hash(script.JudgeScript));
         return new ResolvedScriptSpec(script, version, judge, ComputeProfileHash(script, script.PluginType, version, judge), error);
-    }
-
-    private ConfigValidatorDescriptor? ResolveConfigValidator(string pluginType)
-    {
-        return _plugins is not null
-            && _plugins.TryGetConfigValidator(pluginType, out ConfigValidatorDescriptor? descriptor)
-            ? descriptor
-            : null;
     }
 
     private static string ComputeProfileHash(

@@ -251,6 +251,14 @@ internal static class ProcessCleanup
         {
             Logger.Warn($"[警告] {display}进程树初次清理未确认：{cleanup.Reason}。");
         }
+        // A populated Job that is now empty proves the launched process and its
+        // owned descendants exited. No second fixed stability window is needed.
+        if (cleanup.ConfirmedExited && ownership is { IsUsable: true, HasAssignedProcess: true }
+            && CaptureOwnedAndExpectedIdentities(ownership, exePath, excludeProcessBaseName, rootPid).Count == 0
+            && !IsExeRunning(exePath))
+        {
+            return true;
+        }
         return ConfirmStableExit(
             exePath,
             display,
@@ -470,7 +478,16 @@ internal static class ProcessCleanup
         ProcessCleanupResult owned = ownership is not null && ownership.IsUsable
             ? KillOwnedFromJob(ownership, rootPid, excludeProcessBaseName)
             : KillTree(rootPid, excludeProcessBaseName);
-        ProcessCleanupResult expected = KillExpectedIdentityProcesses(exePath, excludeProcessBaseName, rootPid);
+        // A matching image path is not proof of this run's ownership. Observe
+        // unidentified instances, but never terminate another user's process.
+        IReadOnlyList<ProcessIdentity> unidentified = CaptureExecutableIdentities(exePath, excludeProcessBaseName, rootPid)
+            .Where(identity => identity.Pid != rootPid
+                && (ownership is null || !ownership.Snapshot().Any(ownedIdentity => ownedIdentity.Matches(identity))))
+            .ToArray();
+        ProcessCleanupResult expected = unidentified.Count == 0
+            ? ProcessCleanupResult.Confirmed("无未确权的同映像进程")
+            : ProcessCleanupResult.Unconfirmed(unidentified.Select(identity => identity.Pid),
+                $"发现 {unidentified.Count} 个同映像进程，无法确认属于本次运行");
         return CombineCleanup(owned, expected);
     }
 
@@ -609,7 +626,9 @@ internal static class ProcessCleanup
         IReadOnlyList<ProcessIdentity> owned = ownership.Snapshot();
         if (owned.Count == 0)
         {
-            return KillTree(rootPid, excludeProcessBaseName);
+            return ownership.HasAssignedProcess
+                ? ProcessCleanupResult.Confirmed("已分配的 Job Object 内无待清理进程")
+                : KillTree(rootPid, excludeProcessBaseName);
         }
         int killed = 0;
         var remaining = new List<ProcessIdentity>();

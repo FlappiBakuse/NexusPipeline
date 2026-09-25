@@ -92,7 +92,7 @@ function toggle() {
   color: inherit;
   text-align: left;
 }
-.nxp-collapsible-card-toggle:hover { background: var(--content-card-hover, var(--nx-color-surface)); }
+.nxp-collapsible-card-toggle:hover { background: transparent; }
 .nxp-collapsible-card-toggle:focus-visible { outline: none; box-shadow: var(--focus, 0 0 0 3px var(--accent-soft)); }
 .nxp-collapsible-card-copy { display: grid; min-width: 0; gap: 4px; }
 .nxp-collapsible-card-title { font-size: 15px; line-height: 1.45; }

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 using NexusPipeline.Modules.Scripts;
 using NexusPipeline.Platform.Processes;
 using NexusPipeline.Platform.Windows;
@@ -49,6 +50,14 @@ internal sealed class ScriptProcessSession : IDisposable
                 launchArgs,
                 noWindow: true,
                 redirect: true);
+            // The captured MaaEnd startup diagnostic was UTF-8 decoded through
+            // the local Windows code page. Decode this verified channel at the
+            // byte boundary; other scripts retain their existing encoding.
+            if (script.PluginType == "maaend")
+            {
+                psi.StandardOutputEncoding = Encoding.UTF8;
+                psi.StandardErrorEncoding = Encoding.UTF8;
+            }
             process = SystemActions.StartOwnedProcess(psi, ownership);
             if (process is null)
             {

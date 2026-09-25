@@ -124,6 +124,17 @@ internal sealed class ExecutionRunner
                 exec.Status = "cancelled";
                 break;
             }
+            string recordId = Guid.NewGuid().ToString("N");
+            if (!exec.BeginLogSegment(recordId, null, null, recordId))
+            {
+                exec.Status = "cancelled";
+                break;
+            }
+            // The record's preparation segment is visible immediately. Each later
+            // attempt gets a new generation; process and hook callbacks carry the
+            // attempt number captured at their source so late output stays old.
+            object logSegmentSync = new();
+            string activeLogSegmentId = recordId;
             string displayName = $"{script.Name}（{runUser.UserName}）";
             exec.CurrentScriptName = displayName;
             exec.SetPreviewWaiting(script);
@@ -168,6 +179,7 @@ internal sealed class ExecutionRunner
                             runUser,
                             successfulRuns,
                             maxSuccessfulRuns);
+                        skippedRecord.Id = recordId;
                     }
                 }
 
@@ -201,14 +213,27 @@ internal sealed class ExecutionRunner
                             exec.CurrentMaxAttempts = max;
                         },
                         status => exec.CurrentStatus = status,
-                        (line, level) => exec.AppendLog(level, line),
+                        (line, level) =>
+                        {
+                            lock (logSegmentSync) exec.AppendLog(level, line, activeLogSegmentId);
+                        },
                         target => exec.SetPreviewTarget(target),
                         _users,
                         _emulatorSupportProviders,
                         runUser,
                         runUser.Spec ?? resolvedSpec,
                         _http,
-                        queueFollowingWork?.Invoke(userIndex) ?? "unknown");
+                        queueFollowingWork?.Invoke(userIndex) ?? "unknown",
+                        recordId,
+                        (line, level, attempt) => exec.AppendLog(level, line, $"{recordId}:attempt:{attempt}"),
+                        (attempt, max) =>
+                        {
+                            lock (logSegmentSync)
+                            {
+                                string nextSegment = $"{recordId}:attempt:{attempt}";
+                                if (exec.BeginLogSegment(nextSegment, attempt, max, recordId)) activeLogSegmentId = nextSegment;
+                            }
+                        });
                     session.TaskReportChanged = exec.UpdateTaskReport;
                     if (_history is ITaskHistoryCheckpoints checkpoints)
                         session.TaskCheckpointChanged = checkpoint =>
@@ -225,6 +250,7 @@ internal sealed class ExecutionRunner
                     {
                         // Coordinator 异常也必须形成可查询的失败历史，并继续队列后续任务。
                         record = CreateHostErrorRecord(script, exec.Mode, queueId, queueName, runUser.UserName, ex);
+                        record.Id = recordId;
                         record.UserId = runUser.UserId;
                         Logger.Error($"[错误] 脚本「{displayName}」协调器异常，已生成失败历史并继续：{ex}");
                     }
@@ -470,6 +496,13 @@ internal sealed class ExecutionRunner
                     break;
                 }
 
+                // Publish an authoritative empty tail before exposing the next queue item.
+                if (!exec.BeginLogSegment($"queue:{i + 1}"))
+                {
+                    exec.Status = "cancelled";
+                    break;
+                }
+
                 PlannedQueueTask planned = tasks[i];
                 QueueTask task = planned.Task;
                 ScriptInstance? script = planned.Script;
@@ -616,6 +649,11 @@ internal sealed class ExecutionRunner
         IReadOnlyList<ResolvedScriptUser> users,
         string unavailableReason)
     {
+        if (!exec.BeginLogSegment(Guid.NewGuid().ToString("N")))
+        {
+            exec.Status = "cancelled";
+            return new List<RunRecord>();
+        }
         string detail = "绑定的" + unavailableReason;
         string logLine = string.IsNullOrWhiteSpace(queueName)
             ? $"[错误] 脚本实例「{script.Name}」{detail}，已跳过本次运行。"

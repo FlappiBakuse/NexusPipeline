@@ -77,6 +77,13 @@ internal sealed class GameLaunchController
             return RunAttemptResult.Failed("游戏路径错误或不是可执行文件");
         }
 
+        if (!SystemActions.IsCommandFile(_script.GameExe) && IsPcTargetReady())
+        {
+            _setPcProcessId(_findGameProcessId());
+            _statusChanged?.Invoke("已确认游戏目标就绪");
+            return null;
+        }
+
         _statusChanged?.Invoke("正在启动游戏...");
         try
         {
@@ -111,7 +118,7 @@ internal sealed class GameLaunchController
         bool gameConfirmed;
         try
         {
-            gameConfirmed = await WaitForGameProcessAsync(
+            gameConfirmed = await WaitForGameReadyAsync(
                 TimeSpan.FromSeconds(Math.Min(requestedGameWait, remainingSeconds))).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
@@ -124,7 +131,7 @@ internal sealed class GameLaunchController
         }
         if (!gameConfirmed)
         {
-            return RunAttemptResult.Failed($"等待 {_script.GameWaitSeconds} 秒后仍未检测到游戏进程，游戏可能启动失败");
+            return RunAttemptResult.Failed($"等待 {_script.GameWaitSeconds} 秒后仍未确认游戏目标就绪，请检查游戏窗口与启动配置", "run.game_not_ready");
         }
         _setPcProcessId(_findGameProcessId());
         _statusChanged?.Invoke("已确认游戏进程启动");
@@ -132,21 +139,25 @@ internal sealed class GameLaunchController
         return null;
     }
 
-    private async Task<bool> WaitForGameProcessAsync(TimeSpan timeout)
+    private bool IsPcTargetReady() => _script.GameMode == "cloud"
+        ? SystemActions.IsExeRunning(_script.GameExe)
+        : _findGameProcessId() is > 0;
+
+    private async Task<bool> WaitForGameReadyAsync(TimeSpan timeout)
     {
         if (SystemActions.IsCommandFile(_script.GameExe))
         {
             await Task.Delay(timeout, OperationToken).ConfigureAwait(false);
             return true;
         }
-        DateTime deadline = DateTime.Now + timeout;
+        long started = Stopwatch.GetTimestamp();
         while (true)
         {
-            if (SystemActions.IsExeRunning(_script.GameExe))
+            if (IsPcTargetReady())
             {
                 return true;
             }
-            if (DateTime.Now >= deadline)
+            if (Stopwatch.GetElapsedTime(started) >= timeout)
             {
                 return false;
             }

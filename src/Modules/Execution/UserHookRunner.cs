@@ -15,6 +15,7 @@ internal sealed class UserHookRunner
     private readonly Action<string>? _statusChanged;
     private readonly Action<string, LogLevel>? _logLine;
     private readonly Action<string>? _historyLogLine;
+    private readonly Action<string, LogLevel, int>? _attemptLogLine;
     private readonly Func<double> _remainingRunSeconds;
     private readonly Func<bool> _budgetExpired;
     private readonly Action<string>? _markCleanupUnconfirmed;
@@ -27,7 +28,8 @@ internal sealed class UserHookRunner
         Func<double> remainingRunSeconds,
         Func<bool> budgetExpired,
         Action<string>? markCleanupUnconfirmed,
-        Action<string>? historyLogLine = null)
+        Action<string>? historyLogLine = null,
+        Action<string, LogLevel, int>? attemptLogLine = null)
     {
         _script = script;
         _mode = mode;
@@ -37,6 +39,7 @@ internal sealed class UserHookRunner
         _budgetExpired = budgetExpired;
         _markCleanupUnconfirmed = markCleanupUnconfirmed;
         _historyLogLine = historyLogLine;
+        _attemptLogLine = attemptLogLine;
     }
 
     /// <summary>运行用户自写的前置/后置脚本：启动并等待退出，退出码非 0 视为失败；支持超时与取消。</summary>
@@ -75,7 +78,9 @@ internal sealed class UserHookRunner
             {
                 return;
             }
-            _logLine?.Invoke(data, LogLevelUtil.ParseObserved(data, level));
+            LogLevel observedLevel = LogLevelUtil.ParseObserved(data, level);
+            if (_attemptLogLine is not null) _attemptLogLine(data, observedLevel, attempt.Number);
+            else _logLine?.Invoke(data, observedLevel);
             _historyLogLine?.Invoke($"[{role}脚本] {data}");
         }
 

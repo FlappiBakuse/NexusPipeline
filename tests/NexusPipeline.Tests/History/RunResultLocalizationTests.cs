@@ -1,6 +1,7 @@
 using System.Collections.Specialized;
 using System.Reflection;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Xunit;
 using NexusPipeline.Modules.History.Localization;
@@ -30,6 +31,20 @@ public sealed class RunResultLocalizationTests
         Assert.Equal(
             "The daily success limit was reached (2/3); this run was skipped",
             RunResultLocalization.Detail(record, "en-US"));
+    }
+
+    [Fact]
+    public void UnverifiedTaskOutcomeIncludesFrozenUnknownCountWithoutClaimingSuccess()
+    {
+        var record = new RunRecord
+        {
+            Status = "partial",
+            ResultCode = "tasks_unverified",
+            ResultDetail = "incomplete",
+            TaskReport = JsonNode.Parse("""{"summary":{"counts":{"unknown":2}}}""")!.AsObject(),
+        };
+        Assert.Equal("流程已结束 · 有 2 项未核验", RunResultLocalization.Detail(record, "zh-CN"));
+        Assert.Equal("Run ended · 2 item(s) unverified", RunResultLocalization.Detail(record, "en-US"));
     }
 
     private static Dictionary<string, string> ReadEmbeddedResource(string locale)

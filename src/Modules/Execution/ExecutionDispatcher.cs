@@ -152,21 +152,20 @@ internal sealed class ExecutionDispatcher : IExecutionService, IFrozenQueueExecu
     }
 
     public void Cancel(string runId, string source = Audit.System)
+        => RequestCancellation(runId, source);
+
+    public CancellationRequestResult RequestCancellation(string runId, string source = Audit.System)
     {
-        RunningExecution? exec = Find(runId);
+        RunningExecution? exec = FindAny(runId);
         if (exec is null)
         {
             throw new InvalidOperationException($"未找到运行中的任务：{runId}");
         }
+        CancellationRequestResult result = exec.RequestCancellation();
+        if (result != CancellationRequestResult.Accepted) return result;
+        // Audit persistence must not delay the cancellation signal.
         Audit.Log(source, $"取消运行{ExecKindText(exec)}", exec.TargetName);
-        try
-        {
-            exec.Cts.Cancel();
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn($"取消信号发送失败（{exec.TargetName}），任务可能仍在运行：{ex.Message}");
-        }
+        return result;
     }
 
     /// <summary>提供执行校验使用的静态进程检测入口。</summary>

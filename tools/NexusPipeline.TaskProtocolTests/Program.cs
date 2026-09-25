@@ -10,11 +10,6 @@ if (args.Length is not (2 or 4) || args[0] != "--plugin-root") throw new Argumen
 string root = Path.GetFullPath(args[1]);
 if (args.Length == 4)
 {
-    if (args[2] == "--validator-comparison")
-    {
-        await LegacyValidatorComparisonProbe.RunAsync(root, Path.GetFullPath(args[3]));
-        return;
-    }
     if (args[2] == "--runtime-installations")
     {
         await RuntimeInstallationProbe.RunAsync(root, Path.GetFullPath(args[3]));
@@ -96,6 +91,14 @@ foreach (string file in files)
         var context = TaskExecutionContext.Unknown("fixture-user", "fixture-script", "preview");
         if (fixture["queueFollowingWork"] is { } following)
             context = context with { Queue = new("queue", following.GetValue<string>()) };
+        if (fixture["executionContext"] is JsonObject launch)
+            context = context with
+            {
+                Mode = launch["mode"]?.GetValue<string>() ?? context.Mode,
+                LaunchOwner = launch["launchOwner"]?.GetValue<string>() ?? context.LaunchOwner,
+                GameTarget = new("executable", launch["gameTarget"]?.GetValue<string>(), null,
+                    launch["ready"]?.GetValue<bool>()),
+            };
         var plan = await TaskDiscoveryService.DiscoverAsync(protocol, view, manifest["name"]?.GetValue<string>() ?? artifact,
             manifest["version"]!.GetValue<string>(), "fixture-user", "fixture-script", "zh-CN", true, default, context);
         Check(plan.Coverage == fixture["coverage"]!.GetValue<string>(), "discovery coverage");

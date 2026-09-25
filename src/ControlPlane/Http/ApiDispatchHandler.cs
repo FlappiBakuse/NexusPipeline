@@ -138,9 +138,16 @@ internal static class ApiDispatchHandler
             snapshot.CurrentMaxAttempts,
             persistenceWarning = snapshot.PersistenceWarning,
             logTail = snapshot.LogTail,
+            logSegmentId = snapshot.LogSegmentId,
+            logSegmentSequence = snapshot.LogSegmentSequence,
+            logSegment = snapshot.LogSegment,
+            cancelRequested = snapshot.CancelRequested,
+            cancellationPhase = snapshot.CancellationPhase,
+            cancellationTimingMs = snapshot.CancellationTimingMs,
             logEntries = snapshot.LogEntries.Select(entry => new
             {
                 sequence = entry.Sequence,
+                logSegmentId = entry.LogSegmentId,
                 timestamp = entry.Timestamp,
                 level = entry.Level.ToString().ToLowerInvariant(),
                 text = entry.FormattedText,
@@ -165,8 +172,14 @@ internal static class ApiDispatchHandler
         string runId = node.Get("runId").Str();
         try
         {
-            dispatchCenter.Cancel(runId, Audit.Web);
-            await HttpHelper.WriteJsonAsync(context, new { ok = true }).ConfigureAwait(false);
+            CancellationRequestResult result = dispatchCenter.RequestCancellation(runId, Audit.Web);
+            string state = result switch
+            {
+                CancellationRequestResult.Accepted => "accepted",
+                CancellationRequestResult.AlreadyRequested => "already_requested",
+                _ => "already_finished",
+            };
+            await HttpHelper.WriteJsonAsync(context, new { ok = true, cancellation = state }).ConfigureAwait(false);
         }
         catch (Exception ex)
         {

@@ -187,27 +187,40 @@ internal sealed class TaskRunReducer
         static TaskRetrySelection Stop(string code) => new("stop", code, [], [], []);
         if (cancelled) return Stop("retry.cancelled");
         if (budgetExhausted || _attemptNumber >= maximumAttempts) return Stop("retry.budget_exhausted");
-        var selected = _effective.Values.Where(r => r.Status is "failed" or "blocked").Select(r => r.TaskId).ToHashSet(StringComparer.Ordinal);
-        if (selected.Count == 0) return Stop("retry.no_verified_candidate");
+        var candidates = _effective.Values.Where(r => r.Status is "failed" or "blocked").Select(r => r.TaskId).ToArray();
+        if (candidates.Length == 0) return Stop("retry.no_verified_candidate");
+        var selected = new HashSet<string>(StringComparer.Ordinal);
         var prerequisites = new HashSet<string>(StringComparer.Ordinal);
         var expanded = new HashSet<string>(StringComparer.Ordinal);
-        bool changed;
-        do
+        foreach (string candidate in candidates)
         {
-            int before = selected.Count;
-            foreach (string key in selected.ToArray())
+            var unitSelection = new HashSet<string>(StringComparer.Ordinal) { candidate };
+            var unitPrerequisites = new HashSet<string>(StringComparer.Ordinal);
+            var unitExpanded = new HashSet<string>(StringComparer.Ordinal);
+            bool changed;
+            do
             {
-                string unit = _tasks[key].RetryUnitId;
-                var related = _tasks.Values.Where(t => t.Enabled && t.RetryUnitId == unit).Select(t => t.Id).Append(unit).ToArray();
-                if (related.Any(id => !selected.Contains(id))) expanded.Add(unit);
-                selected.UnionWith(related);
-                foreach (string dependency in _tasks[key].Dependencies) { prerequisites.Add(dependency); selected.Add(dependency); }
-            }
-            changed = before != selected.Count;
-        } while (changed);
-        if (selected.Any(key => !_tasks[key].Enabled && _tasks[key].Role == "business")) return Stop("retry.disabled_business_dependency");
-        // Conditional risks need an explicit host-verifiable condition; no generic implicit approval.
-        if (selected.Any(key => _tasks[key].RetryRisk != "safe")) return Stop("retry.risk_not_verified");
+                int before = unitSelection.Count;
+                foreach (string key in unitSelection.ToArray())
+                {
+                    string unit = _tasks[key].RetryUnitId;
+                    var related = _tasks.Values.Where(t => t.Enabled && t.RetryUnitId == unit).Select(t => t.Id).Append(unit).ToArray();
+                    if (related.Any(id => !unitSelection.Contains(id))) unitExpanded.Add(unit);
+                    unitSelection.UnionWith(related);
+                    foreach (string dependency in _tasks[key].Dependencies)
+                    { unitPrerequisites.Add(dependency); unitSelection.Add(dependency); }
+                }
+                changed = before != unitSelection.Count;
+            } while (changed);
+            // Evaluate each failed identity independently. A separate unsafe failure must
+            // not veto a safe retry, but its shared unit/dependencies still must pass.
+            if (unitSelection.Any(key => !_tasks.TryGetValue(key, out var task) || task.RetryRisk != "safe"
+                || (!task.Enabled && task.Role == "business"))) continue;
+            selected.UnionWith(unitSelection);
+            prerequisites.UnionWith(unitPrerequisites);
+            expanded.UnionWith(unitExpanded);
+        }
+        if (selected.Count == 0) return Stop("retry.risk_not_verified");
         var ordered = new List<string>();
         while (selected.Count > 0)
         {

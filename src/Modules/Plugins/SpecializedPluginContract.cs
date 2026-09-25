@@ -169,7 +169,7 @@ internal static class SpecializedPluginContract
         error = null;
         var closure = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var queue = new Queue<string>();
-        foreach (string field in new[] { "judgeScript", "configValidator", "configEditor" })
+        foreach (string field in new[] { "judgeScript", "configEditor" })
         {
             if (root[field] is null) continue;
             string value = root[field]!.ToString().Trim().Replace('\\', '/');

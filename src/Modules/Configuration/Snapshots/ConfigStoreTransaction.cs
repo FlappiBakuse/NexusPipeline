@@ -66,7 +66,10 @@ internal static class ConfigStoreTransaction
         ConfigSwapSession.ConfigRestoreDescriptor? descriptor,
         string? expectedSample,
         ConfigSessionMark mark,
-        Action<string, string>? writeAtomic = null)
+        Action<string, string>? writeAtomic = null,
+        bool preserveExistingMetadata = false,
+        string? expectedStoreFile = null,
+        byte[]? expectedStoreBytes = null)
     {
         Action<string, string> writer = writeAtomic
             ?? ((target, content) => JsonUtil.WriteAtomic(target, content));
@@ -74,15 +77,28 @@ internal static class ConfigStoreTransaction
         string transactionDir = ConfigPaths.StoreTransactionDir(scriptId, userKey);
         ConfigStoreTransactionRecovery.Recover(scriptId, userKey);
         EnsureWritable(scriptId, userKey, transactionDir);
+        if (expectedStoreFile is not null && (expectedStoreBytes is null
+            || !File.Exists(expectedStoreFile)
+            || !File.ReadAllBytes(expectedStoreFile).AsSpan().SequenceEqual(expectedStoreBytes)))
+        {
+            throw new IOException("配置修复预览已过期，保留旧快照");
+        }
 
         ConfigStoreDiffPlan plan = ConfigStoreDiff.Build(configPath, store, swapFiles, descriptor);
         ConfigStoreMetadata? previousMetadata = LoadPreviousMetadata(scriptId, userKey);
+        if (preserveExistingMetadata && previousMetadata is null)
+        {
+            throw new IOException("配置修复要求现有用户快照元数据");
+        }
         if (!plan.HasChanges)
         {
+            ConfigStoreMetadata unchanged = preserveExistingMetadata
+                ? ConfigStoreMetadata.Clone(previousMetadata!)
+                : ConfigStoreMetadata.FromMark(mark, previousMetadata);
             ConfigStoreMetadata.Save(
                 scriptId,
                 userKey,
-                ConfigStoreMetadata.FromMark(mark, previousMetadata),
+                unchanged,
                 writer);
             return new ConfigStoreTransactionResult(0, 0, 0, plan.Preserved.Count);
         }
@@ -90,7 +106,7 @@ internal static class ConfigStoreTransaction
         string transactionId = Guid.NewGuid().ToString("N");
         string stageDir = ConfigPaths.StoreTransactionStageDir(scriptId, userKey);
         string rollbackDir = ConfigPaths.StoreTransactionRollbackDir(scriptId, userKey);
-        ConfigStoreMetadata nextMetadata = CreateNextMetadata(mark, previousMetadata, transactionId);
+        ConfigStoreMetadata nextMetadata = CreateNextMetadata(mark, previousMetadata, transactionId, preserveExistingMetadata);
         var manifest = new ConfigStoreTransactionManifest
         {
             TransactionId = transactionId,
@@ -154,6 +170,12 @@ internal static class ConfigStoreTransaction
                 && !string.Equals(expectedSample, ConfigSwapSession.SampleConfig(configPath), StringComparison.Ordinal))
             {
                 throw new IOException("配置在事务暂存期间发生变化，保留旧快照");
+            }
+            if (expectedStoreFile is not null && (expectedStoreBytes is null
+                || !File.Exists(expectedStoreFile)
+                || !File.ReadAllBytes(expectedStoreFile).AsSpan().SequenceEqual(expectedStoreBytes)))
+            {
+                throw new IOException("配置修复预览已过期，保留旧快照");
             }
 
             writer(
@@ -232,9 +254,12 @@ internal static class ConfigStoreTransaction
     private static ConfigStoreMetadata CreateNextMetadata(
         ConfigSessionMark mark,
         ConfigStoreMetadata? previous,
-        string transactionId)
+        string transactionId,
+        bool preserveExistingMetadata)
     {
-        var next = ConfigStoreMetadata.FromMark(mark, previous);
+        var next = preserveExistingMetadata
+            ? ConfigStoreMetadata.Clone(previous!)
+            : ConfigStoreMetadata.FromMark(mark, previous);
         next.Generation = (previous?.Generation ?? 0) + 1;
         next.LastCommittedTransactionId = transactionId;
         return next;

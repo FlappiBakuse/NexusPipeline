@@ -98,7 +98,7 @@ internal sealed class RuntimeWorkers : IAsyncDisposable
         });
     }
 
-    public bool TryStartConfigSync(ConfigSyncRequest request) => _configSyncWorker.TryStart(request);
+    public bool TryStartConfigSync(ConfigSyncRequest request) => !_operationToken.IsCancellationRequested && _configSyncWorker.TryStart(request);
 
     public bool ConsumeConfigSyncResult()
     {
@@ -138,6 +138,7 @@ internal sealed class RuntimeWorkers : IAsyncDisposable
         bool current = completed.AttemptId == _attemptId
             && completed.AttemptNumber == _attemptNumber
             && completed.Generation == _judgeGeneration;
+        if (_operationToken.IsCancellationRequested) return true;
         if (!current)
         {
             Logger.Info($"[{_modeText}运行] 丢弃脚本「{_scriptName}」过期判断结果（AttemptId/Generation 不匹配）。");
@@ -216,6 +217,7 @@ internal sealed class RuntimeWorkers : IAsyncDisposable
     /// <summary>触发判断脚本执行（批次/周期/最终共用）；单飞 worker 忙时返回 false（调用方按 final 语义保留排队）。</summary>
     public bool QueueJudge(bool final)
     {
+        if (_operationToken.IsCancellationRequested) return false;
         int generation = _judgeGeneration + 1;
         JudgeSnapshot snapshot = _captureSnapshot(generation) with { IsFinalCall = final };
         if (!_judgeWorker.TryStart(snapshot))
@@ -259,7 +261,8 @@ internal sealed class RuntimeWorkers : IAsyncDisposable
     /// <summary>先收拢后台 worker（消费残留结果并停止），再允许宿主进入进程清理与配置收尾，防止旧 Attempt 继续写入状态或文件。</summary>
     public async Task StopAsync()
     {
-        await ConsumeJudgeResultAsync().ConfigureAwait(false);
+        if (!_operationToken.IsCancellationRequested)
+            await ConsumeJudgeResultAsync().ConfigureAwait(false);
         ConsumeConfigSyncResult();
         await _judgeWorker.StopAsync().ConfigureAwait(false);
         await _configSyncWorker.StopAsync().ConfigureAwait(false);

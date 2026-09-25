@@ -171,6 +171,14 @@ internal static class UpdateApply
             journal.Write();
             SwapInto(Path.Combine(stagedDir, "nexus-pipeline.exe"), oldExe);
             SwapInto(Path.Combine(stagedDir, "wwwroot"), oldWww);
+            // README is an application asset in new packages, but remains
+            // optional when receiving an older compatible package.
+            if (File.Exists(Path.Combine(stagedDir, "README.md")))
+            {
+                string readmeTarget = Path.Combine(installDir, "README.md");
+                EnsureOptionalAssetTargetIsSafe(readmeTarget);
+                SwapInto(Path.Combine(stagedDir, "README.md"), readmeTarget);
+            }
             journal = journal with { Phase = UpdatePhase.SwapReady };
             journal.Write();
             PauseForFaultInjection(UpdatePhase.SwapReady);
@@ -268,6 +276,13 @@ internal static class UpdateApply
             Logger.Info($"[更新] 检测到已完成更新（v{appliedVersion}），清理暂存与备份。");
             try
             {
+                // v0.16.8's worker commits EXE/wwwroot but ignores the new README.
+                // Materialize it only when the old installation has no README.
+                if (task is { Mode: "completed", Phase: UpdatePhase.Committed }
+                    && string.Equals(task.Version, appliedVersion, StringComparison.Ordinal))
+                {
+                    CompleteMissingReadme(task.StagedDir, AppPaths.AppRoot);
+                }
                 CleanupAfterCompletion();
                 Audit.Log(Audit.System, "更新完成", task is null ? $"v{appliedVersion}" : $"v{task.Version} → v{appliedVersion}");
             }
@@ -523,7 +538,39 @@ internal static class UpdateApply
     {
         CopySnapshotItem(Path.Combine(installDir, "nexus-pipeline.exe"), Path.Combine(backup, "nexus-pipeline.exe"));
         CopySnapshotItem(Path.Combine(installDir, "wwwroot"), Path.Combine(backup, "wwwroot"));
+        EnsureOptionalAssetTargetIsSafe(Path.Combine(installDir, "README.md"));
+        CopySnapshotItem(Path.Combine(installDir, "README.md"), Path.Combine(backup, "README.md"));
         WriteRequiredText(Path.Combine(backup, BackupReadyMarker), DateTimeOffset.UtcNow.ToString("O"));
+    }
+
+    private static void EnsureOptionalAssetTargetIsSafe(string path)
+    {
+        if (Directory.Exists(path)) throw new IOException($"应用说明文件目标是目录，拒绝覆盖：{path}");
+        if (File.Exists(path) && (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
+            throw new IOException($"应用说明文件目标是重解析点，拒绝覆盖：{path}");
+    }
+
+    internal static void CompleteMissingReadme(string stagedDir, string installDir)
+    {
+        ValidateStagedPath(stagedDir);
+        string source = Path.Combine(stagedDir, "README.md");
+        if (!File.Exists(source)) return;
+        string destination = Path.Combine(installDir, "README.md");
+        EnsureOptionalAssetTargetIsSafe(destination);
+        if (File.Exists(destination)) return;
+        string current = Path.GetFullPath(stagedDir);
+        string updateRoot = Path.GetFullPath(AppPaths.UpdateDir).TrimEnd(Path.DirectorySeparatorChar);
+        while (current.Length > updateRoot.Length)
+        {
+            if ((File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
+                throw new IOException($"README 暂存路径含重解析点：{current}");
+            current = Path.GetDirectoryName(current)
+                ?? throw new IOException("README 暂存路径无父目录");
+        }
+        if ((File.GetAttributes(updateRoot) & FileAttributes.ReparsePoint) != 0
+            || (File.GetAttributes(source) & FileAttributes.ReparsePoint) != 0)
+            throw new IOException("README 暂存来源含重解析点");
+        File.Copy(source, destination, overwrite: false);
     }
 
     private static void CopySnapshotItem(string source, string target)
@@ -571,6 +618,10 @@ internal static class UpdateApply
         string installDir = AppPaths.AppRoot;
         RestoreFromBackup(Path.Combine(backup, "nexus-pipeline.exe"), Path.Combine(installDir, "nexus-pipeline.exe"));
         RestoreFromBackup(Path.Combine(backup, "wwwroot"), Path.Combine(installDir, "wwwroot"));
+        string readmeBackup = Path.Combine(backup, "README.md");
+        string readmeTarget = Path.Combine(installDir, "README.md");
+        if (File.Exists(readmeBackup)) RestoreFromBackup(readmeBackup, readmeTarget);
+        else DeletePathRequired(readmeTarget);
         UpdateTask confirmed = journal with { Mode = "apply", Phase = UpdatePhase.RollbackConfirmed };
         confirmed.Write();
         Audit.Log(Audit.System, "更新回滚完成", "旧版本文件已从 immutable backup 还原");

@@ -137,6 +137,28 @@ public sealed class TaskRunReducerTests
     }
 
     [Fact]
+    public void IndependentUnsafeFailureDoesNotVetoSafeFailure()
+    {
+        var run = Run(Task("safe"), Task("unsafe", "unknown"), Task("unverified"));
+        run.BeginAttempt("one", 1, ["safe", "unsafe", "unverified"]);
+        Observe(run, "one", ("safe", "failed"), ("unsafe", "failed"));
+        run.FinishAttempt("completed");
+        var retry = run.SelectRetry(2, false, false);
+        Assert.Equal("selective", retry.Decision);
+        Assert.Equal(["safe"], retry.IncludedTaskIds);
+        Assert.Equal("unknown", run.Results.Single(r => r.TaskId == "unverified").Status);
+    }
+
+    [Fact]
+    public void UnsafeMemberOfSharedRetryUnitStillBlocksCandidate()
+    {
+        var run = Run(Task("a") with { RetryUnitId = "a" }, Task("b", "unknown") with { RetryUnitId = "a" });
+        run.BeginAttempt("one", 1, ["a", "b"]);
+        Observe(run, "one", ("a", "failed"));
+        Assert.Equal("retry.risk_not_verified", run.SelectRetry(2, false, false).ReasonCode);
+    }
+
+    [Fact]
     public void TechnicalSuccessDoesNotHideAllBusinessFailure()
     {
         var run = Run(Task("login", role: "technical"), Task("business")); run.BeginAttempt("one", 1, ["login", "business"]);

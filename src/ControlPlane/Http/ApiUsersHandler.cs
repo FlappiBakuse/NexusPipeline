@@ -258,6 +258,33 @@ internal static class ApiUsersHandler
                 return;
             }
         }
+        if (seg.Length == 5 && seg[4].Equals("config-repair", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!HttpHelper.IsLoopback(context))
+            {
+                await HttpHelper.ErrorAsync(context, "local_only", 403).ConfigureAwait(false);
+                return;
+            }
+            string scriptId = Uri.UnescapeDataString(seg[3]);
+            if (method == "GET")
+            {
+                OperationResult<ConfigRepairProposal> preview = configEditCommands.PreviewRepair(scriptId, userId);
+                if (!preview.Succeeded)
+                    await ApplicationErrorResponse.WriteAsync(context, preview.Error!).ConfigureAwait(false);
+                else await HttpHelper.WriteJsonAsync(context, preview.Value!).ConfigureAwait(false);
+                return;
+            }
+            if (method == "POST")
+            {
+                JsonNode? request = HttpHelper.ParseBody(body);
+                string token = request?["token"]?.GetValue<string>() ?? "";
+                OperationResult<ConfigRepairProposal> applied = configEditCommands.ApplyRepair(scriptId, userId, token);
+                if (!applied.Succeeded)
+                    await ApplicationErrorResponse.WriteAsync(context, applied.Error!).ConfigureAwait(false);
+                else await HttpHelper.WriteJsonAsync(context, applied.Value!).ConfigureAwait(false);
+                return;
+            }
+        }
         await HttpHelper.MethodNotAllowedAsync(context).ConfigureAwait(false);
     }
 

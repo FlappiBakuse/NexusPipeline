@@ -57,7 +57,7 @@ function update(value: boolean) {
   background: var(--nx-switch-setting-background, var(--content-card-soft, var(--nx-color-surface)));
   color: var(--nx-color-text, inherit);
 }
-.nxp-switch-setting-root:hover { background: var(--nx-switch-setting-hover-background, var(--content-card-hover, var(--nx-color-surface))); }
+.nxp-switch-setting-root:hover { background: var(--nx-switch-setting-hover-background, var(--nx-switch-setting-background, var(--content-card-soft, var(--nx-color-surface)))); }
 .nxp-switch-setting-copy { flex: 1 1 auto; min-width: 0; padding-right: var(--nx-switch-setting-copy-padding, 0); }
 .nxp-switch-setting-copy > strong { display: block; font-size: 13px; line-height: 1.45; }
 .nxp-switch-setting-copy > .muted { display: block; margin-top: 4px; color: var(--muted, var(--nx-color-muted)); font-size: 12px; line-height: 1.55; }

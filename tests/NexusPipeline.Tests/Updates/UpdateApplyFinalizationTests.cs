@@ -54,6 +54,32 @@ public sealed class UpdateApplyFinalizationTests
     }
 
     [Fact]
+    public void OldWorkerReadmeHandoffCreatesMissingAssetAndPreservesExistingOne()
+    {
+        string staging = Path.Combine(AppPaths.UpdateDir, "staging", "readme-" + Guid.NewGuid().ToString("N"));
+        string install = Path.Combine(_root, "installed");
+        try
+        {
+            Directory.CreateDirectory(staging);
+            Directory.CreateDirectory(install);
+            File.WriteAllText(Path.Combine(staging, "README.md"), "candidate");
+
+            UpdateApply.CompleteMissingReadme(staging, install);
+            string destination = Path.Combine(install, "README.md");
+            Assert.Equal("candidate", File.ReadAllText(destination));
+
+            File.WriteAllText(destination, "user-edited");
+            UpdateApply.CompleteMissingReadme(staging, install);
+            Assert.Equal("user-edited", File.ReadAllText(destination));
+        }
+        finally
+        {
+            DeleteExact(staging);
+            DeleteExact(install);
+        }
+    }
+
+    [Fact]
     public void Finalization_CompletedCleansMarkers()
     {
         try
