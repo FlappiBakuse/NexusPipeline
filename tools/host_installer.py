@@ -54,7 +54,9 @@ def verified_payload(root: Path, metadata: dict) -> list[dict]:
         item = by_name[name]
         _require(path.stat().st_size == item["sizeBytes"] and sha256(path) == item["sha256"],
                  f"安装器与 ZIP 的 staging 字节不同：{name}")
-    return [by_name[name] for name in sorted(by_name)]
+    # Keep the ZIP's frozen inventory order so the receipt describes exactly
+    # the same payload contract, including its canonical serialization.
+    return [by_name[item["path"]] for item in listed]
 
 
 def dependency_pair(path: Path) -> dict[str, dict]:
@@ -80,7 +82,6 @@ def render_script(template: str, *, production_root: Path, output_dir: Path,
     for path in (production_root, output_dir):
         _require('"' not in str(path) and ';' not in str(path) and "\n" not in str(path), "安装器路径无法安全写入脚本")
     file_lines: list[str] = []
-    delete_lines: list[str] = []
     stage_checks: list[str] = []
     for item in files:
         relative = item["path"]
@@ -92,7 +93,6 @@ def render_script(template: str, *, production_root: Path, output_dir: Path,
             flags += " onlyifdoesntexist"
         file_lines.append(f'Source: "{source}"; DestDir: "{dest}"; Flags: {flags}; Check: IsFreshInstall')
         if not relative.startswith("plugins/"):
-            delete_lines.append(f"  DeleteOwnedFile('{relative.replace('/', chr(92))}', '{item['sha256']}');")
             stage_parent = "{app}\\.nxp-update\\staging\\" + version
             if dest_parent:
                 stage_parent += "\\" + dest_parent.replace("/", "\\")
@@ -102,8 +102,11 @@ def render_script(template: str, *, production_root: Path, output_dir: Path,
         "@@VERSION@@": version,
         "@@OUTPUT_DIR@@": str(output_dir),
         "@@FILES@@": "\n".join(file_lines),
-        "@@DELETE_OWNED@@": "\n".join(delete_lines),
         "@@VERIFY_STAGED@@": "\n".join(stage_checks),
+        "@@PAYLOAD_MANIFEST@@": json.dumps(
+            [{"Path": item["path"], "Sha256": item["sha256"]} for item in files
+             if not item["path"].startswith("plugins/")], ensure_ascii=True, separators=(",", ":")).replace("'", "''"),
+        "@@EXE_SHA256@@": next(item["sha256"] for item in files if item["path"] == "nexus-pipeline.exe"),
         "@@DESKTOP_URL@@": dependencies["Microsoft.WindowsDesktop.App"]["url"],
         "@@DESKTOP_SHA256@@": dependencies["Microsoft.WindowsDesktop.App"]["sha256"],
         "@@ASPNET_URL@@": dependencies["Microsoft.AspNetCore.App"]["url"],

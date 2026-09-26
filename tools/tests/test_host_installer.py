@@ -30,14 +30,18 @@ class HostInstallerTests(unittest.TestCase):
                 {"path": name, "sizeBytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
                 for name, data in source.items()]}
             files = verified_payload(payload, metadata)
-            template = "@@VERSION@@\n@@FILES@@\n@@DELETE_OWNED@@\n@@VERIFY_STAGED@@\n@@DESKTOP_URL@@\n@@DESKTOP_SHA256@@\n@@ASPNET_URL@@\n@@ASPNET_SHA256@@\n@@OUTPUT_DIR@@"
+            self.assertEqual(files, metadata["payloadFiles"])
+            template = "@@VERSION@@\n@@FILES@@\n@@PAYLOAD_MANIFEST@@\n@@EXE_SHA256@@\n@@VERIFY_STAGED@@\n@@DESKTOP_URL@@\n@@DESKTOP_SHA256@@\n@@ASPNET_URL@@\n@@ASPNET_SHA256@@\n@@OUTPUT_DIR@@"
             dependencies = {name: {"url": "https://builds.dotnet.microsoft.com/dotnet/one.exe", "sha256": "a" * 64}
                             for name in ("Microsoft.WindowsDesktop.App", "Microsoft.AspNetCore.App")}
             script = render_script(template, production_root=payload, output_dir=root / "out",
                                    metadata=metadata, files=files, dependencies=dependencies)
             self.assertIn("onlyifdoesntexist", script)
-            self.assertIn("DeleteOwnedFile('README.md'", script)
-            self.assertNotIn("DeleteOwnedFile('plugins", script)
+            manifest_line = next(line for line in script.splitlines() if line.startswith('[{"Path":'))
+            inventory = json.loads(manifest_line)
+            self.assertEqual({item["Path"] for item in inventory}, {"nexus-pipeline.exe", "README.md", "wwwroot/index.html"})
+            self.assertEqual(next(item["Sha256"] for item in inventory if item["Path"] == "README.md"),
+                             hashlib.sha256(source["README.md"]).hexdigest())
             self.assertIn("VerifyStagedFile('README.md'", script)
             self.assertIn("DestDir: \"{app}\\.nxp-update\\staging\\0.16.9\"", script)
             self.assertNotIn("staging\\0.16.9\\plugins", script)

@@ -12,7 +12,6 @@ ArchitecturesAllowed=x64
 ArchitecturesInstallIn64BitMode=x64
 AllowUNCPath=no
 AllowNetworkDrive=no
-AppMutex=NexusPipeline.SingleInstance
 CloseApplications=no
 RestartApplications=no
 UsePreviousAppDir=no
@@ -22,6 +21,7 @@ OutputBaseFilename=NexusPipeline-v@@VERSION@@-win-x64-setup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
+DefaultDialogFontName=Microsoft YaHei UI
 
 [Tasks]
 Name: desktopicon; Description: "创建桌面快捷方式"; Flags: unchecked
@@ -34,13 +34,48 @@ Name: "{autodesktop}\NexusPipeline"; Filename: "{app}\nexus-pipeline.exe"; Tasks
 @@FILES@@
 
 [Code]
-const
-  RegistryKey = 'Software\NexusPipeline\Installer';
-  IdentityFile = 'installer-instance.txt';
-
 var
-  DeleteDataCheck: TNewCheckBox;
   UpgradeMode: Boolean;
+  RetainedMode: Boolean;
+  SetupMutex: Integer;
+  TransactionId: String;
+  DependencyDownloadPage: TDownloadWizardPage;
+  InstallationQualified: Boolean;
+  DeleteInstanceData: Boolean;
+
+procedure InitializeWizard;
+begin
+  DependencyDownloadPage := CreateDownloadPage('下载必需的运行时',
+    '从微软官方地址下载并验证依赖。可以取消下载后重新尝试。', nil);
+  DependencyDownloadPage.ShowBaseNameInsteadOfUrl := True;
+end;
+
+function CreateMutexW(Attributes: Integer; InitialOwner: Boolean; Name: String): Integer;
+  external 'CreateMutexW@kernel32.dll stdcall';
+
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  if (CurPageID = wpFinished) and not InstallationQualified then begin
+    WizardForm.FinishedHeadingLabel.Caption := 'NexusPipeline 安装未完成';
+    WizardForm.FinishedLabel.Caption := '安装归属登记或升级事务未通过。请保留日志和恢复现场，修复后再安装。';
+  end;
+end;
+
+function GetCustomSetupExitCode: Integer;
+begin
+  Result := 0;
+  if not InstallationQualified then Result := 12;
+end;
+
+function CloseHandle(Handle: Integer): Boolean;
+  external 'CloseHandle@kernel32.dll stdcall';
+function NativeLastError: Integer;
+  external 'GetLastError@kernel32.dll stdcall';
+
+procedure DeinitializeSetup;
+begin
+  if SetupMutex <> 0 then CloseHandle(SetupMutex);
+end;
 
 function GetDriveTypeW(RootPath: String): Integer;
   external 'GetDriveTypeW@kernel32.dll stdcall';
@@ -93,17 +128,52 @@ begin
   end;
 end;
 
-function InstanceOwned(const Path: String): Boolean;
+function ProtectedInstanceState(const Path: String; CheckHelper: Boolean): String;
 var
-  Registered: String;
-  Identity: AnsiString;
+  Script, Params, ResultFile: String;
+  Code: Integer;
+  State: AnsiString;
 begin
-  Result := False;
-  if HasLinkInPath(Path) then Exit;
-  if not RegQueryStringValue(HKCU, RegistryKey, 'AppDir', Registered) then Exit;
-  if CompareText(RemoveBackslashUnlessRoot(Registered), RemoveBackslashUnlessRoot(Path)) <> 0 then Exit;
-  if not LoadStringFromFile(ExpandConstant('{localappdata}\NexusPipeline\installer\') + IdentityFile, Identity) then Exit;
-  Result := Identity = 'NexusPipeline.PerUser|' + Path;
+  Result := '';
+  if HasLinkInPath(Path) or HasLinkInPath(ExpandConstant('{localappdata}\NexusPipeline\installer')) then Exit;
+  Script := ExpandConstant('{tmp}\nxp-instance-check.ps1');
+  ResultFile := ExpandConstant('{tmp}\nxp-instance-check.result');
+  if FileExists(ResultFile) and not DeleteFile(ResultFile) then Exit;
+  if not SaveStringToFile(Script,
+    'param([string]$Root,[string]$CheckHelper,[string]$ResultFile)' + #13#10 +
+    '$ErrorActionPreference = ''Stop''' + #13#10 +
+    'try {' + #13#10 +
+    'Add-Type -AssemblyName System.Security' + #13#10 +
+    '$k = Get-ItemProperty -LiteralPath ''HKCU:\Software\NexusPipeline\Installer''' + #13#10 +
+    '$m = Join-Path $env:LOCALAPPDATA ''NexusPipeline\installer''' + #13#10 +
+    '$s = [IO.File]::ReadAllText((Join-Path $m ''identity.protected''))' + #13#10 +
+    '$h = [BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($s))).Replace(''-'','''').ToLowerInvariant()' + #13#10 +
+    'if ($h -ne $k.IdentityDigest) { exit 1 }' + #13#10 +
+    '$b = [Security.Cryptography.ProtectedData]::Unprotect([Convert]::FromBase64String($s),$null,[Security.Cryptography.DataProtectionScope]::CurrentUser)' + #13#10 +
+    '$i = [Text.Encoding]::UTF8.GetString($b) | ConvertFrom-Json' + #13#10 +
+    'if ($i.SchemaVersion -ne 1 -or $i.InstanceId -ne $k.InstanceId -or $i.WindowsUserId -ne [Security.Principal.WindowsIdentity]::GetCurrent().User.Value -or [IO.Path]::GetFullPath($i.AppRoot).TrimEnd(''\'') -ne [IO.Path]::GetFullPath($Root).TrimEnd(''\'') -or $i.State -notin @(''active'',''retained-data'')) { exit 1 }' + #13#10 +
+    'if ($CheckHelper -eq ''true'') {' + #13#10 +
+    '$exe = Join-Path $m ''nexus-installer-helper.exe''' + #13#10 +
+    'if ((Get-Item -LiteralPath $exe).Attributes -band [IO.FileAttributes]::ReparsePoint) { exit 1 }' + #13#10 +
+    '$expected = @($i.PayloadFiles | Where-Object Path -eq ''nexus-pipeline.exe'')' + #13#10 +
+    'if ($expected.Count -ne 1 -or (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash -ne $expected[0].Sha256) { exit 1 }' + #13#10 +
+    '}' + #13#10 + '[IO.File]::WriteAllText($ResultFile,$i.State,[Text.Encoding]::ASCII)' + #13#10 + '} catch { exit 1 }' + #13#10, False) then Exit;
+  Params := '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + Script + '" -Root "' + Path + '" -CheckHelper ';
+  if CheckHelper then Params := Params + 'true' else Params := Params + 'false';
+  Params := Params + ' -ResultFile "' + ResultFile + '"';
+  try
+    if Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+      Params, '', SW_HIDE, ewWaitUntilTerminated, Code) and (Code = 0) and
+      LoadStringFromFile(ResultFile, State) and
+      ((State = 'active') or (State = 'retained-data')) then Result := State;
+  except
+    Result := '';
+  end;
+end;
+
+function InstanceOwned(const Path: String): Boolean;
+begin
+  Result := ProtectedInstanceState(Path, False) <> '';
 end;
 
 function ValidDestination(const Path: String): Boolean;
@@ -123,8 +193,11 @@ begin
   Result := True;
   if CurPageID = wpSelectDir then begin
     Result := ValidDestination(WizardDirValue);
-    if not Result then
-      MsgBox('请选择可写的本地空目录，或此用户已登记且身份匹配的安装目录；不会接管不明旧目录、网络盘或链接目录。', mbError, MB_OK);
+    if not Result then begin
+      Log('目标目录不是可信的本地空目录或已登记实例。');
+      if not WizardSilent then
+        MsgBox('请选择可写的本地空目录，或此用户已登记且身份匹配的安装目录；不会接管不明旧目录、网络盘或链接目录。', mbError, MB_OK);
+    end;
   end;
 end;
 
@@ -198,12 +271,23 @@ begin
     Result := '用户取消了 ' + Description + ' 依赖安装。';
     Exit;
   end;
+  DependencyDownloadPage.Clear;
+  DependencyDownloadPage.Add(URL, FileName, Digest);
+  DependencyDownloadPage.Show;
   try
-    DownloadTemporaryFile(URL, FileName, Digest, nil);
-  except
-    Result := Description + ' 下载或摘要校验失败：' + GetExceptionMessage;
-    Exit;
+    try
+      DependencyDownloadPage.Download;
+    except
+      if DependencyDownloadPage.AbortedByUser then
+        Result := '用户取消了 ' + Description + ' 依赖下载。'
+      else
+        Result := Description + ' 下载或摘要校验失败：' + GetExceptionMessage;
+      Log(Result);
+    end;
+  finally
+    DependencyDownloadPage.Hide;
   end;
+  if Result <> '' then Exit;
   Package := ExpandConstant('{tmp}\') + FileName;
   if not VerifyMicrosoftSignature(Package) then begin
     Result := Description + ' 的微软数字签名无法确认。';
@@ -238,7 +322,22 @@ begin
     Exit;
   end;
   Path := WizardDirValue;
-  UpgradeMode := not IsEmptyDirectory(Path);
+  RetainedMode := ProtectedInstanceState(Path, False) = 'retained-data';
+  if RetainedMode then begin
+    if WizardSilent then begin Result := '保留数据重装需要交互确认。'; Exit; end;
+    if MsgBox('使用本实例保留的数据重新安装？已有插件和用户配置将保留。', mbConfirmation, MB_YESNO) <> IDYES then begin
+      Result := '已取消保留数据重装。'; Exit;
+    end;
+  end;
+  UpgradeMode := not IsEmptyDirectory(Path) and not RetainedMode;
+  if SetupMutex = 0 then begin
+    SetupMutex := CreateMutexW(0, True, 'NexusPipeline.Setup.' + GetSHA256OfString(Lowercase(RemoveBackslashUnlessRoot(Path))));
+    if (SetupMutex = 0) or (NativeLastError = 183) then begin
+      if SetupMutex <> 0 then CloseHandle(SetupMutex);
+      SetupMutex := 0;
+      Result := '另一个安装器正在处理此实例，请等待其完成。'; Exit;
+    end;
+  end;
   if UpgradeMode and
      (DirExists(AddBackslash(Path) + '.nxp-update') or
       DirExists(AddBackslash(Path) + '.nxp-backup') or
@@ -280,7 +379,7 @@ end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 var
-  Path, ManagerDir, Staged: String;
+  Path, ManagerDir, Staged, Helper, Manifest: String;
   Code: Integer;
 begin
   if CurStep <> ssPostInstall then Exit;
@@ -288,129 +387,71 @@ begin
   if UpgradeMode then begin
     Staged := AddBackslash(Path) + '.nxp-update\staging\@@VERSION@@';
     VerifyStagedPayload;
-    if not ShellExec('runas', AddBackslash(Path) + 'nexus-pipeline.exe',
-      'apply-update --staged "' + Staged + '"', Path, SW_HIDE, ewWaitUntilTerminated, Code) then
-      RaiseException('旧版更新 worker 无法启动；保留 staged 文件供诊断。');
+    TransactionId := Copy(GetSHA256OfString(Path + GetDateTimeString('yyyymmddhhnnss', #0, #0) + IntToStr(Random(2147483647)) + IntToStr(Random(2147483647))), 1, 32);
+    Helper := AddBackslash(Path) + '.nxp-update-worker-setup-' + TransactionId + '.exe';
+    if not FileCopy(AddBackslash(Staged) + 'nexus-pipeline.exe', Helper, True) then
+      RaiseException('无法建立同根独立安装器交接副本；保留 staging。');
+    if CompareText(GetSHA256OfFile(Helper), '@@EXE_SHA256@@') <> 0 then
+      RaiseException('安装器交接副本摘要不匹配。');
+    if not ShellExec('runas', Helper,
+      'installer-update --staged "' + Staged + '" --version @@VERSION@@ --image-hash @@EXE_SHA256@@ --transaction ' + TransactionId,
+      Path, SW_HIDE, ewWaitUntilTerminated, Code) then
+      RaiseException('独立安装器交接无法启动或授权被取消；保留 staging。');
     if Code <> 0 then
-      RaiseException('旧版更新 worker 失败，退出码 ' + IntToStr(Code) + '；请检查 journal/backup。');
+      RaiseException('升级事务未通过，退出码 ' + IntToStr(Code) + '；保留 journal/backup/result 供诊断。');
+    InstallationQualified := True;
+    DeleteFile(Helper);
     Exit;
   end;
   ManagerDir := ExpandConstant('{localappdata}\NexusPipeline\installer');
   if not ForceDirectories(ManagerDir) then
     RaiseException('无法创建此实例的安装归属记录。');
-  if not SaveStringToFile(AddBackslash(ManagerDir) + IdentityFile,
-    'NexusPipeline.PerUser|' + Path, False) then
-    RaiseException('无法写入此实例的安装归属记录。');
-  if not RegWriteStringValue(HKCU, RegistryKey, 'AppDir', Path) then
-    RaiseException('无法登记此实例的安装路径。');
+  Manifest := ExpandConstant('{tmp}\nxp-payload-manifest.json');
+  if not SaveStringToFile(Manifest, '@@PAYLOAD_MANIFEST@@', False) then RaiseException('无法写入冻结载荷清单。');
+  if not ShellExec('runas', AddBackslash(Path) + 'nexus-pipeline.exe',
+    'installer-state register --root "' + Path + '" --version @@VERSION@@ --manifest "' + Manifest + '"',
+    Path, SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then
+    RaiseException('实例归属登记未通过；保留程序与数据供诊断。');
+  InstallationQualified := True;
 end;
 
-function LinkFreeTree(const Path: String): Boolean;
-var
-  Entry: TFindRec;
-  Child: String;
-begin
-  Result := not HasLinkInPath(Path);
-  if not Result or not DirExists(Path) then Exit;
-  if FindFirst(AddBackslash(Path) + '*', Entry) then begin
-    try
-      repeat
-        if (Entry.Name <> '.') and (Entry.Name <> '..') then begin
-          Child := AddBackslash(Path) + Entry.Name;
-          if (Entry.Attributes and FILE_ATTRIBUTE_REPARSE_POINT) <> 0 then begin
-            Result := False;
-            Exit;
-          end;
-          if ((Entry.Attributes and FILE_ATTRIBUTE_DIRECTORY) <> 0) and not LinkFreeTree(Child) then begin
-            Result := False;
-            Exit;
-          end;
-        end;
-      until not FindNext(Entry);
-    finally
-      FindClose(Entry);
-    end;
-  end;
-end;
-
-function DeleteLinkFreeTree(const Path: String): Boolean;
-var
-  Entry: TFindRec;
-  Child: String;
-begin
-  Result := not HasLinkInPath(Path);
-  if not Result then Exit;
-  if not DirExists(Path) then Exit;
-  if FindFirst(AddBackslash(Path) + '*', Entry) then begin
-    try
-      repeat
-        if (Entry.Name <> '.') and (Entry.Name <> '..') then begin
-          Child := AddBackslash(Path) + Entry.Name;
-          if (Entry.Attributes and FILE_ATTRIBUTE_REPARSE_POINT) <> 0 then begin
-            Result := False;
-            Exit;
-          end;
-          if (Entry.Attributes and FILE_ATTRIBUTE_DIRECTORY) <> 0 then begin
-            if not DeleteLinkFreeTree(Child) then Result := False;
-          end else if not DeleteFile(Child) then Result := False;
-        end;
-      until not FindNext(Entry);
-    finally
-      FindClose(Entry);
-    end;
-  end;
-  if not RemoveDir(Path) then Result := False;
-end;
-
-procedure DeleteOwnedFile(const Relative, Digest: String);
+function InitializeUninstall: Boolean;
 var
   Path: String;
+  Choice: Integer;
 begin
-  Path := AddBackslash(ExpandConstant('{app}')) + Relative;
-  if not FileExists(Path) or HasLinkInPath(Path) then Exit;
-  try
-    if CompareText(GetSHA256OfFile(Path), Digest) = 0 then
-      if not DeleteFile(Path) then Log('保留无法删除的应用文件：' + Relative);
-  except
-    Log('保留无法核验的应用文件：' + Relative);
+  Result := False;
+  Path := ExpandConstant('{app}');
+  if ProtectedInstanceState(Path, True) <> 'active' then begin
+    MsgBox('无法确认本实例归属或当前卸载程序载荷；程序与数据均保留。', mbError, MB_OK);
+    Exit;
   end;
-end;
-
-procedure DeleteKnownPayload;
-begin
-@@DELETE_OWNED@@
-end;
-
-procedure InitializeUninstallProgressForm;
-begin
-  DeleteDataCheck := TNewCheckBox.Create(UninstallProgressForm);
-  DeleteDataCheck.Parent := UninstallProgressForm;
-  DeleteDataCheck.Caption := '删除此实例用户数据（config、data、history、logs、.nxp、plugins 等）';
-  DeleteDataCheck.Checked := False;
-  DeleteDataCheck.Left := UninstallProgressForm.StatusLabel.Left;
-  DeleteDataCheck.Top := UninstallProgressForm.StatusLabel.Top + ScaleY(42);
-  DeleteDataCheck.Width := UninstallProgressForm.ClientWidth - DeleteDataCheck.Left - ScaleX(12);
+  if CheckForMutexes('NexusPipeline.SingleInstance') then begin
+    MsgBox('宿主仍在运行。请先正常退出，等待任务和配置恢复完成，再卸载。', mbError, MB_OK); Exit;
+  end;
+  Choice := IDNO;
+  if not UninstallSilent then
+    Choice := MsgBox('是否同时删除本实例的 config、data、history、logs、.nxp、plugins、outputs 和 user-assets？' + #13#10 +
+      '选择“否”仅移除已核验的应用文件并保留数据；选择“取消”退出卸载。不会跟随外部路径或链接。',
+      mbConfirmation, MB_YESNOCANCEL or MB_DEFBUTTON2);
+  if Choice = IDCANCEL then Exit;
+  DeleteInstanceData := Choice = IDYES;
+  Result := True;
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
-  Path: String;
+  Path, Helper, Params: String;
+  Code: Integer;
 begin
   if CurUninstallStep <> usUninstall then Exit;
   Path := ExpandConstant('{app}');
-  if not InstanceOwned(Path) then begin
-    Log('无法确认实例归属；应用文件和数据均保留。');
-    Exit;
-  end;
-  DeleteKnownPayload;
-  if Assigned(DeleteDataCheck) and DeleteDataCheck.Checked then begin
-    if LinkFreeTree(AddBackslash(Path) + 'config') then DeleteLinkFreeTree(AddBackslash(Path) + 'config') else Log('保留含链接的 config');
-    if LinkFreeTree(AddBackslash(Path) + 'data') then DeleteLinkFreeTree(AddBackslash(Path) + 'data') else Log('保留含链接的 data');
-    if LinkFreeTree(AddBackslash(Path) + 'history') then DeleteLinkFreeTree(AddBackslash(Path) + 'history') else Log('保留含链接的 history');
-    if LinkFreeTree(AddBackslash(Path) + 'logs') then DeleteLinkFreeTree(AddBackslash(Path) + 'logs') else Log('保留含链接的 logs');
-    if LinkFreeTree(AddBackslash(Path) + 'plugins') then DeleteLinkFreeTree(AddBackslash(Path) + 'plugins') else Log('保留含链接的 plugins');
-    if LinkFreeTree(AddBackslash(Path) + '.nxp') then DeleteLinkFreeTree(AddBackslash(Path) + '.nxp') else Log('保留含链接的 .nxp');
-  end;
-  RegDeleteValue(HKCU, RegistryKey, 'AppDir');
-  DeleteFile(ExpandConstant('{localappdata}\NexusPipeline\installer\') + IdentityFile);
+  if (ProtectedInstanceState(Path, True) <> 'active') or
+     CheckForMutexes('NexusPipeline.SingleInstance') then
+    RaiseException('实例归属或运行状态已变化；程序与数据均保留。');
+  Helper := ExpandConstant('{localappdata}\NexusPipeline\installer\nexus-installer-helper.exe');
+  Params := 'installer-state uninstall --root "' + Path + '" --delete-data ';
+  if DeleteInstanceData then Params := Params + 'true' else Params := Params + 'false';
+  if not ShellExec('runas', Helper, Params, Path, SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then
+    RaiseException('卸载归属、恢复状态或文件处理未通过。保留未知文件与恢复证据，请先核对或恢复。');
 end;
