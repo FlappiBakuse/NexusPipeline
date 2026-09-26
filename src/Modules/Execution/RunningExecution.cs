@@ -34,7 +34,7 @@ internal sealed class RunningExecution
 
     private bool _cancelRequested;
 
-    private string _cancellationPhase = "";
+    private CancellationMilestone _cancellationMilestone;
 
     private long _cancelAcceptedAt;
     private long _cancelSignalAt;
@@ -123,7 +123,7 @@ internal sealed class RunningExecution
                 _status = value;
                 if (_cancelRequested && value != "running")
                 {
-                    _cancellationPhase = "terminal";
+                    _cancellationMilestone = CancellationMilestone.Terminal;
                     _cancelCommittedAt = Stopwatch.GetTimestamp();
                 }
             }
@@ -142,18 +142,42 @@ internal sealed class RunningExecution
             if (_cancelRequested) return CancellationRequestResult.AlreadyRequested;
             _cancelRequested = true;
             _cancelAcceptedAt = Stopwatch.GetTimestamp();
-            _cancellationPhase = "stopping";
+            _cancellationMilestone = CancellationMilestone.Accepted;
             _currentStatus = "正在停止任务";
         }
-        // Signal before synchronous realtime observers or audit persistence can run.
-        try { Cts.Cancel(throwOnFirstException: false); }
+        // Mark cancellation immediately; callbacks run separately from this request.
+        try { _ = Cts.CancelAsync().ContinueWith(task =>
+            {
+                if (task.Exception is not null)
+                    Logger.Warn($"取消回调失败（{TargetName}）：{task.Exception.GetBaseException().Message}");
+            }, TaskContinuationOptions.OnlyOnFaulted); }
         catch (Exception ex) { Logger.Warn($"取消信号发送失败（{TargetName}），任务可能仍在运行：{ex.Message}"); }
         if (Cts.IsCancellationRequested)
         {
             lock (_stateSync) _cancelSignalAt = Stopwatch.GetTimestamp();
         }
-        NotifyStatusChanged();
+        _ = Task.Run(NotifyStatusChanged);
         return CancellationRequestResult.Accepted;
+    }
+
+    internal void MarkCancellationMilestone(CancellationMilestone milestone, string? displayStatus = null)
+    {
+        lock (_stateSync)
+        {
+            if (!_cancelRequested || _status != "running" || milestone <= _cancellationMilestone) return;
+            _cancellationMilestone = milestone;
+            long stamp = Stopwatch.GetTimestamp();
+            switch (milestone)
+            {
+                case CancellationMilestone.StopIssued: _cancelStopAt = stamp; _currentStatus = "正在停止脚本"; break;
+                case CancellationMilestone.OwnedProcessesExited: _cancelExitedAt = stamp; _currentStatus = "脚本已停止，正在收拢后台任务"; break;
+                case CancellationMilestone.WorkersQuiesced: _cancelWorkersAt = stamp; _currentStatus = "后台任务已收拢"; break;
+                case CancellationMilestone.Restoring: _currentStatus = "正在恢复配置"; break;
+                case CancellationMilestone.RestoreFinished: _cancelRestoredAt = stamp; break;
+            }
+            if (displayStatus is not null) _currentStatus = displayStatus;
+        }
+        NotifyStatusChanged();
     }
 
     public DateTime StartedAt { get; set; } = DateTime.Now;
@@ -257,15 +281,9 @@ internal sealed class RunningExecution
             bool changed;
             lock (_stateSync)
             {
-                if (_cancelRequested && _status == "running" && value is not ("正在停止脚本" or "脚本已停止，正在收拢后台任务" or "后台任务已收拢" or "正在恢复配置" or "配置恢复完成" or "配置恢复失败，现场已保留")) return;
+                if (_cancelRequested && _status == "running") return;
                 changed = !string.Equals(_currentStatus, value, StringComparison.Ordinal);
                 _currentStatus = value;
-                if (_cancelRequested && value == "正在停止脚本") _cancellationPhase = "stopping";
-                if (_cancelRequested && value == "正在停止脚本") _cancelStopAt = Stopwatch.GetTimestamp();
-                if (_cancelRequested && value == "脚本已停止，正在收拢后台任务") { _cancellationPhase = "quiescing"; _cancelExitedAt = Stopwatch.GetTimestamp(); }
-                if (_cancelRequested && value == "后台任务已收拢") _cancelWorkersAt = Stopwatch.GetTimestamp();
-                if (_cancelRequested && value == "正在恢复配置") _cancellationPhase = "restoring";
-                if (_cancelRequested && value is "配置恢复完成" or "配置恢复失败，现场已保留") _cancelRestoredAt = Stopwatch.GetTimestamp();
             }
             if (changed)
             {
@@ -575,7 +593,7 @@ internal sealed class RunningExecution
             LogSegmentSequence = _logSegmentSequence,
             LogSegment = CreateLogSegmentLocked(),
             CancelRequested = _cancelRequested,
-            CancellationPhase = _cancellationPhase,
+            CancellationPhase = CancellationMilestoneText(_cancellationMilestone),
             CancellationTimingMs = CreateCancellationTimingLocked(),
         };
     }
@@ -692,7 +710,7 @@ internal sealed class RunningExecution
                 LogSegmentSequence = _logSegmentSequence,
                 LogSegment = CreateLogSegmentLocked(),
                 CancelRequested = _cancelRequested,
-                CancellationPhase = _cancellationPhase,
+                CancellationPhase = CancellationMilestoneText(_cancellationMilestone),
                 CancellationTimingMs = CreateCancellationTimingLocked(),
                 Records = Records.Select(record => record.Clone()).ToList(),
                 LogTail = _logEntries.TakeLast(60).Select(entry => entry.FormattedText).ToList(),
@@ -710,9 +728,31 @@ internal sealed class RunningExecution
             Elapsed(_cancelWorkersAt), Elapsed(_cancelRestoredAt), Elapsed(_cancelCommittedAt));
     }
 
+    private static string CancellationMilestoneText(CancellationMilestone milestone) => milestone switch
+    {
+        CancellationMilestone.None => "",
+        CancellationMilestone.Accepted or CancellationMilestone.StopIssued => "stopping",
+        CancellationMilestone.OwnedProcessesExited or CancellationMilestone.WorkersQuiesced => "quiescing",
+        CancellationMilestone.Restoring or CancellationMilestone.RestoreFinished => "restoring",
+        CancellationMilestone.Terminal => "terminal",
+        _ => "",
+    };
+
     private LogSegmentProjection? CreateLogSegmentLocked() => _logSegmentId.Length == 0 ? null
         : new LogSegmentProjection(_logSegmentId, _logSegmentSequence,
             _logRecordId.Length == 0 ? null : _logRecordId, _logAttemptNumber);
+}
+
+internal enum CancellationMilestone
+{
+    None,
+    Accepted,
+    StopIssued,
+    OwnedProcessesExited,
+    WorkersQuiesced,
+    Restoring,
+    RestoreFinished,
+    Terminal,
 }
 
 internal sealed record LogSegmentProjection(string Id, long Generation, string? RunRecordId, int AttemptNumber);

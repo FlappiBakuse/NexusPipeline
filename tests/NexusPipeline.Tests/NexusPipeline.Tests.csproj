@@ -18,6 +18,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\NexusPipeline.csproj" />
     <ProjectReference Include="..\fixtures\NexusPipeline.TestPlugin\NexusPipeline.TestPlugin.csproj" />
+    <ProjectReference Include="..\fixtures\NexusPipeline.TestProviderWorker\NexusPipeline.TestProviderWorker.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
 </Project>

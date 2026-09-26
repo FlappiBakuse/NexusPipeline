@@ -1,12 +1,36 @@
 using System.Text.Json.Nodes;
 using NexusPipeline.Modules.Plugins;
 using NexusPipeline.Modules.Plugins.Contracts;
+using NexusPipeline.Modules.Configuration.Editing;
+using System.Text;
 using Xunit;
 
 namespace NexusPipeline.Tests.Plugins;
 
 public sealed class TaskProtocolManifestTests
 {
+    [Fact]
+    public void CurrentMarch7thPackageDeclaresUsableBoundedRepair()
+    {
+        // The cross-repository verification runner supplies its isolated Plugins checkout.
+        string? root = Environment.GetEnvironmentVariable("NEXUS_MARCH7TH_PLUGIN_DIR");
+        if (string.IsNullOrWhiteSpace(root)) return;
+        string manifestPath = Path.Combine(root, "plugin.json");
+        var manifest = JsonNode.Parse(File.ReadAllText(manifestPath))!.AsObject();
+        Assert.Equal("0.3.1", manifest["version"]!.GetValue<string>());
+        Assert.Equal("0.1.1", manifest["taskProtocol"]!["version"]!.GetValue<string>());
+        var descriptor = TaskProtocolManifest.Freeze(manifest, root)!;
+        Assert.Equal("0.1.0", descriptor.Version); // Phase wire format is unchanged.
+        TaskConfigRepairDescriptor rule = Assert.Single(descriptor.RepairRules);
+        byte[] before = Encoding.UTF8.GetBytes("# original\r\nafter_finish: Shutdown # remain\r\nsecret: 'keep'\r\n");
+        ConfigRepairProposal? proposal = ConfigRepairPolicy.TryPropose(rule,
+            "march7th", manifest["version"]!.GetValue<string>(), "user", "script",
+            "profile", "locator", 1, before, out byte[]? after);
+        Assert.NotNull(proposal);
+        Assert.Equal("# original\r\nafter_finish: \"None\" # remain\r\nsecret: 'keep'\r\n",
+            Encoding.UTF8.GetString(after!));
+    }
+
     [Theory]
     [InlineData("{\"kind\":\"literal\",\"value\":\"user name\",\"owner\":\"other\"}")]
     [InlineData("{\"kind\":\"plugin\",\"key\":\"a\",\"args\":{\"a\":[]},\"fallback\":\"text\"}")]
@@ -118,6 +142,21 @@ public sealed class TaskProtocolManifestTests
           "localization":{"defaultLocale":"en-US","messages":{"en-US":"data/i18n/en.json"}},
           "configRules":[{"id":"fixture.default","required":true,"criticality":"critical_when_applicable"}],"environmentChecks":[]}}
         """)!;
+
+    [Fact]
+    public void RepairExtensionRequiresNegotiatedVersionAndNarrowDeclaration()
+    {
+        var manifest = Manifest();
+        var protocol = manifest["taskProtocol"]!.AsObject();
+        protocol["repairRules"] = JsonNode.Parse("""[{"id":"queue_finish_action","ruleId":"fixture.default","resourceId":"config:config.yaml","selector":["after_finish"],"source":"user_snapshot","format":"yaml","kind":"replace_enum","fromValues":["Shutdown"],"toValue":"None","preconditions":{"snapshotKind":"file","exclusiveResource":true,"noExtraConfig":true},"explanation":"Disable the system action."}]""");
+        Assert.False(TaskProtocolManifest.TryValidate(manifest, out _)); // An older Host rejects unknown fields.
+        protocol["version"] = "0.1.1";
+        Assert.False(TaskProtocolManifest.TryValidate(manifest, out _)); // Old minHostVersion is insufficient.
+        manifest["minHostVersion"] = "0.16.9";
+        Assert.True(TaskProtocolManifest.TryValidate(manifest, out var accepted), accepted);
+        protocol["repairRules"]![0]!["selector"] = new JsonArray("other_field");
+        Assert.False(TaskProtocolManifest.TryValidate(manifest, out _));
+    }
 
     [Theory]
     [InlineData("version", "2.0")]

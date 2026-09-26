@@ -163,8 +163,10 @@ internal sealed class ExecutionDispatcher : IExecutionService, IFrozenQueueExecu
         }
         CancellationRequestResult result = exec.RequestCancellation();
         if (result != CancellationRequestResult.Accepted) return result;
-        // Audit persistence must not delay the cancellation signal.
-        Audit.Log(source, $"取消运行{ExecKindText(exec)}", exec.TargetName);
+        // Audit persistence can block on disk; it must not delay acceptance.
+        string kind = ExecKindText(exec);
+        string targetName = exec.TargetName;
+        _ = Task.Run(() => Audit.Log(source, $"取消运行{kind}", targetName));
         return result;
     }
 

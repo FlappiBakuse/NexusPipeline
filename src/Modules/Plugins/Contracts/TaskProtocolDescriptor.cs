@@ -16,6 +16,12 @@ internal sealed record TaskProtocolDescriptor(
 
     [System.Text.Json.Serialization.JsonInclude]
     public TaskEnvironmentCheckDescriptor[] EnvironmentChecks { get; init; } = [];
+
+    [System.Text.Json.Serialization.JsonInclude]
+    public TaskConfigRepairDescriptor[] RepairRules { get; init; } = [];
 }
 
-internal sealed record TaskReadResource(string Id, string Source, string Path, string Format, bool Required, string? Sha256 = null);
+internal sealed record TaskReadResource(string Id, string Source, string Path, string Format, bool Required, string? Sha256 = null)
+{
+    public IReadOnlyDictionary<string, string> OperationalFields { get; init; } = new Dictionary<string, string>(StringComparer.Ordinal);
+}

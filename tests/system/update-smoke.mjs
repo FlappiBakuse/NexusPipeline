@@ -6,7 +6,7 @@ import {
   api,
   prepareRuntime,
   projectRoot,
-  releaseDir,
+  updateReleaseDirectory,
   runtimeDir,
   runtimeExe,
   sleep,
@@ -48,8 +48,9 @@ function writeTask(mode, stagedDir = stagingRoot) {
 function prepareStaging() {
   fs.rmSync(stagingRoot, { recursive: true, force: true });
   fs.mkdirSync(stagingRoot, { recursive: true });
-  fs.copyFileSync(runtimeExe, path.join(stagingRoot, "nexus-pipeline.exe"));
-  fs.cpSync(path.join(releaseDir, "wwwroot"), path.join(stagingRoot, "wwwroot"), { recursive: true });
+  const candidate = updateReleaseDirectory();
+  fs.copyFileSync(path.join(candidate, "nexus-pipeline.exe"), path.join(stagingRoot, "nexus-pipeline.exe"));
+  fs.cpSync(path.join(candidate, "wwwroot"), path.join(stagingRoot, "wwwroot"), { recursive: true });
   fs.writeFileSync(path.join(stagingRoot, "wwwroot", "candidate-install-marker.txt"), "candidate-install-marker", "utf8");
   if (fs.existsSync(path.join(runtimeDir, "plugins"))) {
     fs.cpSync(path.join(runtimeDir, "plugins"), path.join(stagingRoot, "plugins"), { recursive: true });
@@ -173,7 +174,7 @@ test("apply-update：备份→交换→保留插件与数据→重拉宿主→�
     error: result.error?.message,
     errno: result.error?.code,
   });
-  assert.equal(result.status, 0, `apply-update 退出码非 0：${resultSummary}`);
+  assert.equal(result.status, 0, `apply-update 退出码非 0：${resultSummary}\n${logTail()}`);
   // 交换完成：新 wwwroot 标记到位、旧标记消失、用户自加插件保留、数据目录原样。
   // （versionFile/backup 是交换后到收尾前的中间态，重拉宿主启动即清理，不做时序性断言）
   assert.equal(fs.readFileSync(path.join(runtimeDir, "wwwroot", "candidate-install-marker.txt"), "utf8"), "candidate-install-marker");
@@ -188,10 +189,10 @@ test("apply-update：备份→交换→保留插件与数据→重拉宿主→�
   // 新实例启动：收尾清理 + 服务可达。
   // The owned apply worker already relaunched the host with this run's receipt.
   await waitForService(null, 60000);
-  await waitFor(() => !fs.existsSync(versionFile), 30000);
+  assert.equal(await waitFor(() => !fs.existsSync(taskFile) && !fs.existsSync(backupDir), 30000), true, logTail());
   assertMarkersCleaned();
   const status = await (await api("GET", "/api/status")).json();
-  assert.match(status.version, /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-(?:beta|rc)\.(?:0|[1-9]\d*))?$/);
+  assert.equal(status.version, updateVersion);
   const audit = logTail();
   assert.match(audit, /更新完成/, "日志应包含「更新完成」审计");
   await stopRuntimeHard();
@@ -247,7 +248,8 @@ test("defer 标记：下次启动自动应用并重拉服务", { skip }, async (
   await waitForService(null, 90000);
 
   assert.equal(fs.readFileSync(path.join(runtimeDir, "wwwroot", "candidate-install-marker.txt"), "utf8"), "candidate-install-marker");
-  await waitFor(() => !fs.existsSync(versionFile), 30000);
+  assert.equal(await waitFor(() => !fs.existsSync(taskFile) && !fs.existsSync(backupDir)
+    && /更新完成/.test(logTail()), 30000), true, logTail());
   assertMarkersCleaned();
   const audit = logTail();
   assert.match(audit, /更新完成/, "日志应包含「更新完成」审计");

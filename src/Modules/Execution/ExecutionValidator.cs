@@ -8,6 +8,8 @@ using NexusPipeline.Modules.Settings.Validation;
 using NexusPipeline.Modules.Users.Contracts;
 using NexusPipeline.Platform.Windows;
 using NexusPipeline.Modules.Queues.Validation;
+using NexusPipeline.Platform.Processes;
+using NexusPipeline.Modules.Execution.Targets;
 
 namespace NexusPipeline.Modules.Execution;
 
@@ -100,7 +102,7 @@ internal sealed class ExecutionValidator
             throw new InvalidOperationException(timeoutError);
         }
 
-        if (PluginAvailability.GetUnavailableReason(script.PluginType, _pluginAvailability) is not null)
+        if (PluginAvailability.GetUnavailableReason(script, _pluginAvailability) is not null)
         {
             return;
         }
@@ -124,6 +126,8 @@ internal sealed class ExecutionValidator
     /// <summary>使用同一份脚本快照校验队列，供 ExecutionPlanBuilder 避免校验与计划读取之间漂移。</summary>
     public void ValidateQueueStartSnapshot(DispatchQueue queue, IReadOnlyList<ScriptInstance> scripts)
     {
+        string? dependencyError = QueueCompositionPolicy.CheckDependencies(queue);
+        if (dependencyError is not null) throw new InvalidOperationException(dependencyError);
         foreach (QueueTask task in queue.Tasks)
         {
             ScriptInstance? script = scripts.FirstOrDefault(s => s.Id == task.ScriptInstanceId);
@@ -204,6 +208,8 @@ internal sealed class ExecutionValidator
         {
             return false;
         }
+        if (script.PluginType is "oknte" or "okww")
+            return OkRuntimeActivityProbe.Observe(script.PluginType, script.RootPath) != "inactive";
         string workingDir = string.IsNullOrWhiteSpace(script.RootPath)
             ? Path.GetDirectoryName(script.MainExe) ?? ""
             : script.RootPath;

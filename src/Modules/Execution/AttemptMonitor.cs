@@ -20,6 +20,7 @@ internal sealed class AttemptMonitor
 
     private readonly bool _isMxu;
     private UpstreamStartupFailure? _startupFailure;
+    private bool _observedOwnedAutomation;
 
     public AttemptMonitor(bool isMxu = false) => _isMxu = isMxu;
 
@@ -33,18 +34,37 @@ internal sealed class AttemptMonitor
 
     public void ObserveLogLine(string line)
     {
-        // This is a reported upstream startup failure, not an inferred lack of
-        // progress. Both console callbacks and file monitors are attempt-scoped.
-        if (line.Contains("任务启动失败：未搜索到任何窗口", StringComparison.Ordinal)
-            || line.Contains("任务启动失败: 未搜索到任何窗口", StringComparison.Ordinal))
+        // This diagnostic belongs to the MXU startup phase. A generic log may
+        // quote these words while reporting a recovered error or past attempt.
+        // Require the entire upstream message, not a substring in arbitrary logs.
+        if (_isMxu && (line.Trim() is "任务启动失败：未搜索到任何窗口"
+            or "任务启动失败: 未搜索到任何窗口"))
             Interlocked.CompareExchange(ref _startupFailure,
                 new("上游任务启动失败：未搜索到任何窗口", "run.startup_window_missing"), null);
-        if (_isMxu && (line.Contains("[MXU_LAUNCH] Failed to spawn program:", StringComparison.Ordinal)
-            || line.Contains("[MXU_LAUNCH] Failed to run program:", StringComparison.Ordinal)
-            || line.Contains("[MXU_LAUNCH] Failed to parse param JSON:", StringComparison.Ordinal)
-            || line.Contains("[MXU_LAUNCH] Missing or empty 'program' parameter", StringComparison.Ordinal)))
+        if (_isMxu && IsMxuLaunchFailure(line))
             Interlocked.CompareExchange(ref _startupFailure,
                 new("上游 MXU 启动动作失败，请检查当前实例的启动配置和日志", "run.upstream_launch_failed"), null);
+    }
+
+    private static bool IsMxuLaunchFailure(string line)
+    {
+        string message = line.Trim();
+        const string tag = "[MXU_LAUNCH] ";
+        int tagAt = message.IndexOf(tag, StringComparison.Ordinal);
+        if (tagAt < 0) return false;
+        // Upstream file logs may prefix an error with a timestamp and level.
+        // Do not accept an arbitrary sentence or a quoted historical entry.
+        string prefix = message[..tagAt];
+        if (prefix.Length > 0
+            && (!prefix.Contains(" ERROR ", StringComparison.Ordinal)
+                || prefix.Length < 12
+                || !char.IsDigit(prefix[0])))
+            return false;
+        string suffix = message[(tagAt + tag.Length)..];
+        return suffix.StartsWith("Failed to spawn program:", StringComparison.Ordinal)
+            || suffix.StartsWith("Failed to run program:", StringComparison.Ordinal)
+            || suffix.StartsWith("Failed to parse param JSON:", StringComparison.Ordinal)
+            || suffix.StartsWith("Missing or empty 'program' parameter", StringComparison.Ordinal);
     }
 
     public UpstreamStartupFailure? StartupFailure => Volatile.Read(ref _startupFailure);
@@ -59,12 +79,24 @@ internal sealed class AttemptMonitor
         string launchExe,
         ProcessOwnership? ownership,
         string? excludeGame,
-        AttemptProcessSnapshot? processSnapshot)
+        AttemptProcessSnapshot? processSnapshot,
+        ProcessIdentity? preservedLauncher = null,
+        bool automationBoundaryConfirmed = false,
+        bool knownRequiredWorkersStopped = true)
     {
-        bool ownedAlive = ownership?.Snapshot().Any(identity =>
-            excludeGame is null
-            || rootProcess is not null && identity.Pid == rootProcess.Id
-            || !string.Equals(Path.GetFileNameWithoutExtension(identity.ImageName), excludeGame, StringComparison.OrdinalIgnoreCase)) == true;
+        ProcessObservation? observation = ownership?.Observe();
+        // Missing Job evidence is not evidence that a detached writer or worker exited.
+        bool ownedAlive = observation is { IsComplete: false }
+            || (preservedLauncher is not null && (ownership?.HasAssignedProcess != true || observation is null))
+            || observation?.Identities.Any(identity =>
+                (preservedLauncher is null || !preservedLauncher.Value.Matches(identity))
+                && (preservedLauncher is null || !ProcessRoleClassifier.IsConsoleSidecar(identity))
+                && (
+                excludeGame is null
+                || rootProcess is not null && identity.Pid == rootProcess.Id
+                || !ProcessTree.IsSameProcessName(identity.ImageName, excludeGame))) == true;
+        if (preservedLauncher is not null && observation is { IsComplete: true } && ownedAlive)
+            _observedOwnedAutomation = true;
         bool rootExited;
         try
         {
@@ -72,10 +104,15 @@ internal sealed class AttemptMonitor
         }
         catch (InvalidOperationException)
         {
-            rootExited = true;
+            rootExited = false;
         }
-        bool launchRunning = processSnapshot?.IsExecutableRunning(launchExe) ?? SystemActions.IsExeRunning(launchExe);
-        return rootExited && !launchRunning && !ownedAlive;
+        bool launchRunning = preservedLauncher is null
+            && (processSnapshot?.IsExecutableRunning(launchExe) ?? SystemActions.IsExeRunning(launchExe));
+        // A launcher may create the worker after the first empty Job sample.
+        // Its pure role alone is not an automation completion boundary.
+        bool retainedBoundary = preservedLauncher is not null
+            && (automationBoundaryConfirmed || _observedOwnedAutomation);
+        return knownRequiredWorkersStopped && (rootExited || retainedBoundary) && !launchRunning && !ownedAlive;
     }
 
     public StallObservation CheckStall(

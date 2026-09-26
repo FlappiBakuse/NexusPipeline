@@ -2,12 +2,12 @@ using System.Text.Json.Nodes;
 
 namespace NexusPipeline.Plugin.Abstractions;
 
-/// <summary>稳定的 NexusPipeline managed-code 插件生命周期契约（Plugin API v1.8）。</summary>
+/// <summary>稳定的 NexusPipeline managed-code 插件生命周期契约（Plugin API v1.9）。</summary>
 public static class PluginApiVersion
 {
     public const int Major = 1;
 
-    public const int Minor = 8;
+    public const int Minor = 9;
 }
 
 /// <summary>独立于 C# Plugin API 维护的前端扩展 ABI 版本；要求精确版本匹配。</summary>
@@ -153,6 +153,12 @@ public interface IPluginHostContextV1_7 : IPluginHostContextV1_6
 /// <summary>Plugin API v1.8 的通知收件人覆盖能力。</summary>
 public interface IPluginHostContextV1_8 : IPluginHostContextV1_7
 {
+}
+
+/// <summary>Plugin API v1.9 的可选执行 provider 注册端口。</summary>
+public interface IPluginHostContextV1_9 : IPluginHostContextV1_8
+{
+    IPluginExecutionProviderRegistry ExecutionProviders { get; }
 }
 
 /// <summary>由 managed-code 插件提供的模拟器识别器。宿主按优先级和插件身份稳定调用。</summary>

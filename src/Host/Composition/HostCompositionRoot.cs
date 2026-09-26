@@ -187,7 +187,8 @@ internal class HostCompositionRoot
             provider.GetRequiredService<IEmulatorSupportProviderResolver>(),
             provider.GetRequiredService<IUserRunStartingPublisher>(),
             provider.GetRequiredService<PluginManager>(),
-            provider.GetRequiredService<OutboundHttpClientProvider>()));
+            provider.GetRequiredService<OutboundHttpClientProvider>(),
+            provider.GetRequiredService<ExecutionStateStore>()));
         collection.AddSingleton<ExecutionDispatcher>();
         collection.AddSingleton<IConfigEditAdmission>(provider => provider.GetRequiredService<ExecutionDispatcher>());
         collection.AddSingleton<IExecutionService>(provider => provider.GetRequiredService<ExecutionDispatcher>());

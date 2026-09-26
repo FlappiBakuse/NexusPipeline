@@ -1,10 +1,13 @@
 using NexusPipeline.Modules.Plugins.DataSpecialized;
+using NexusPipeline.Platform.Processes;
 namespace NexusPipeline.Modules.Plugins.Contracts;
 
 
 /// <summary>专项插件按当前插件文件推导出的运行时配置快照。</summary>
 internal sealed class ScriptProfile
 {
+    public ProcessRole RootProcessRole { get; set; } = ProcessRole.AutomationWorker;
+    public string OutputEncoding { get; set; } = "";
     public TaskProtocolDescriptor? TaskProtocol { get; set; }
 
     public string MainExe { get; set; } = "";

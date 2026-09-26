@@ -64,6 +64,8 @@ GameCheckIn v0.3.1 的独立签到页面由插件导航注册；状态读取位�
 
 ## 维护规则
 
+`POST /api/cancel` 返回兼容的 `accepted`、`already_requested` 或 `already_finished`。标准 `Server-Timing` 响应头记录 `request`（transport 接收至 handler）、`cancel`（解析并接受取消）和 `received`（服务接收墙钟，诊断描述）。运行快照中的取消阶段计时采用单调时钟；响应头和展示墙钟不能替代进程停止证明。
+
 新增能力时先实现 Web/CLI 入口与 Application Command，再评估 Agent 场景是否需要 MCP 工具；保持核心子集克制，避免工具面向全量 API 膨胀。本表为信息性记录，不设强制校验测试。
 
 专项任务查询、运行快照与历史深链接见[专项任务控制面](reference/plugin-api/task-protocol.md#控制面)。

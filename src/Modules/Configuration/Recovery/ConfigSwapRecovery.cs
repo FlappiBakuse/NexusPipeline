@@ -40,6 +40,11 @@ internal sealed class ConfigSwapRecovery
     {
         ConfigStoreTransactionRecovery.Recover(scriptId, userName);
         ConfigSessionMark? mark = ConfigSessionMark.TryRead(scriptId, userName);
+        if (mark?.SessionPhase == "provider_run")
+        {
+            if (mark.ProviderWorkersStopped == true) { ConfigSessionMark.Clear(scriptId, userName); return; }
+            throw new IOException("provider writers require independent stop confirmation; shared project files are preserved");
+        }
         if (TaskSelectionResidue(scriptId, userName))
         {
             if (mark is null || ScriptProcessRunning(scriptId, userName))
@@ -177,6 +182,12 @@ internal sealed class ConfigSwapRecovery
     /// <summary>尝试恢复一个脚本/用户的全部残留（配置替换 + 配置交换）；返回是否已完全恢复，失败记入待办。</summary>
     private bool TryRecoverItem(string scriptId, string? userName)
     {
+        if (!string.IsNullOrWhiteSpace(userName) && ConfigSessionMark.TryRead(scriptId, userName) is { SessionPhase: "provider_run" } provider)
+        {
+            if (provider.ProviderWorkersStopped != true) { EnqueuePendingRecover(scriptId, userName); return false; }
+            ConfigSessionMark.Clear(scriptId, userName);
+            return !HasSessionMarkFiles(scriptId, userName);
+        }
         // 脚本进程仍在运行（如「强制关闭服务 + 先启动脚本再启动服务」场景）时跳过全部恢复动作，
         // 避免误删/误覆盖正在使用的配置；记入待办，进程退出后由后台重试循环自动完成恢复。
         bool hasExtraResidue = !string.IsNullOrWhiteSpace(userName)

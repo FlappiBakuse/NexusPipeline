@@ -219,8 +219,7 @@ internal sealed class RuntimeWorkers : IAsyncDisposable
     {
         if (_operationToken.IsCancellationRequested) return false;
         int generation = _judgeGeneration + 1;
-        JudgeSnapshot snapshot = _captureSnapshot(generation) with { IsFinalCall = final };
-        if (!_judgeWorker.TryStart(snapshot))
+        if (!_judgeWorker.TryStart(() => _captureSnapshot(generation) with { IsFinalCall = final }))
         {
             if (final)
             {

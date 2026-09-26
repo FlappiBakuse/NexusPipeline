@@ -301,16 +301,60 @@ public sealed class ExecutionPreviewTests
     }
 
     [Fact]
+    public void RunningExecution_CancellationAcceptanceDoesNotWaitForTokenCallback()
+    {
+        var execution = new RunningExecution();
+        using var release = new ManualResetEventSlim(false);
+        using var entered = new ManualResetEventSlim(false);
+        using var registration = execution.Cts.Token.Register(() =>
+        {
+            entered.Set();
+            release.Wait(TimeSpan.FromSeconds(5));
+        });
+        try
+        {
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            Assert.Equal(CancellationRequestResult.Accepted, execution.RequestCancellation());
+            clock.Stop();
+            Assert.True(clock.ElapsedMilliseconds < 500, $"Cancellation request blocked for {clock.ElapsedMilliseconds} ms");
+            Assert.True(execution.Cts.IsCancellationRequested);
+            Assert.True(entered.Wait(TimeSpan.FromSeconds(2)));
+        }
+        finally
+        {
+            release.Set();
+        }
+    }
+
+    [Fact]
+    public void RunningExecution_CancellationTimingUsesMilestonesInsteadOfDisplayText()
+    {
+        var execution = new RunningExecution();
+        execution.RequestCancellation();
+        execution.CurrentStatus = "localized status from plugin";
+        Assert.Equal("stopping", execution.Snapshot().CancellationPhase);
+        execution.MarkCancellationMilestone(CancellationMilestone.StopIssued);
+        execution.MarkCancellationMilestone(CancellationMilestone.OwnedProcessesExited);
+        Assert.NotNull(execution.Snapshot().CancellationTimingMs?.OwnedProcessesExited);
+        Assert.Equal("quiescing", execution.Snapshot().CancellationPhase);
+    }
+
+    [Fact]
     public void AttemptMonitor_RecognizesOnlyReportedStartupWindowFailure()
     {
-        var monitor = new AttemptMonitor();
+        var monitor = new AttemptMonitor(isMxu: true);
         monitor.ObserveConsoleLine("窗口尚未出现，继续等待");
+        Assert.Null(monitor.StartupFailure);
+        monitor.ObserveConsoleLine("本次日志引用：任务启动失败：未搜索到任何窗口");
         Assert.Null(monitor.StartupFailure);
         monitor.ObserveConsoleLine("任务启动失败：未搜索到任何窗口");
         Assert.Equal(new UpstreamStartupFailure("上游任务启动失败：未搜索到任何窗口", "run.startup_window_missing"), monitor.StartupFailure);
-        var asciiColon = new AttemptMonitor();
+        var asciiColon = new AttemptMonitor(isMxu: true);
         asciiColon.ObserveConsoleLine("任务启动失败: 未搜索到任何窗口");
         Assert.Equal(new UpstreamStartupFailure("上游任务启动失败：未搜索到任何窗口", "run.startup_window_missing"), asciiColon.StartupFailure);
+        var unrelated = new AttemptMonitor();
+        unrelated.ObserveConsoleLine("任务启动失败：未搜索到任何窗口");
+        Assert.Null(unrelated.StartupFailure);
     }
 
     [Fact]
@@ -323,6 +367,8 @@ public sealed class ExecutionPreviewTests
 
         var mxu = new AttemptMonitor(isMxu: true);
         mxu.ObserveLogLine("[MXU_LAUNCH] Launching: program=game.exe, args=, wait_for_exit=false");
+        Assert.Null(mxu.StartupFailure);
+        mxu.ObserveLogLine("History says 2026-09-25 ERROR [MXU_LAUNCH] Failed to spawn program: path missing");
         Assert.Null(mxu.StartupFailure);
         mxu.ObserveLogLine(failed);
         Assert.Equal(new UpstreamStartupFailure(

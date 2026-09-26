@@ -455,7 +455,7 @@
     {
       "id": "plugin-api.managed",
       "path": "reference/plugin-api/managed.md",
-      "summary": "managed-code C# 生命周期、宿主服务与 Plugin API v1.8",
+      "summary": "managed-code C# 生命周期、宿主服务与 Plugin API v1.9",
       "topics": [
         "managed-code",
         "C#",
@@ -476,6 +476,17 @@
       "authorityFor": [
         "managed-plugin-contract"
       ],
+      "status": "current"
+    },
+    {
+      "id": "plugin-api.execution-provider",
+      "path": "reference/plugin-api/execution-provider.md",
+      "summary": "独立执行 provider、冻结计划、worker IPC、启动目标与结构化结果",
+      "topics": ["provider", "worker", "IPC", "执行扩展"],
+      "aliases": ["Maa worker", "Plugin API 1.9"],
+      "codePaths": ["src/NexusPipeline.Plugin.Abstractions/ExecutionProviderApi.cs", "src/Modules/Execution/ProviderWorkerPort.cs", "src/Modules/Plugins/Runtime/PluginExecutionProviderRegistry.cs"],
+      "testDomains": ["hostAreas.execution", "hostAreas.plugins", "systemGroups.maa"],
+      "authorityFor": ["execution-provider-contract"],
       "status": "current"
     },
     {

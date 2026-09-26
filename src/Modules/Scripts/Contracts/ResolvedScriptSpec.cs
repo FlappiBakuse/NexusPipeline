@@ -4,6 +4,7 @@ using System.Text.Json;
 using NexusPipeline.Modules.Plugins.Contracts;
 using NexusPipeline.Modules.Plugins.DataSpecialized;
 using NexusPipeline.Modules.Scripts;
+using NexusPipeline.Platform.Processes;
 namespace NexusPipeline.Modules.Scripts.Contracts;
 
 
@@ -19,6 +20,9 @@ internal sealed record ResolvedScriptSpec(
     string? Error = null,
     ConfigEditorDescriptor? ConfigEditor = null)
 {
+    public NexusPipeline.Plugin.Abstractions.PluginProviderPlan? ProviderPlan { get; init; }
+    public ProcessRole RootProcessRole { get; init; } = ProcessRole.AutomationWorker;
+    public string OutputEncoding { get; init; } = "";
     /// <summary>专项插件的附加配置路径（extraConfigPaths）；通用脚本为空。仅参与按用户快照交换与校验器只读。</summary>
     public IReadOnlyList<string> ExtraConfigPaths { get; init; } = Array.Empty<string>();
 

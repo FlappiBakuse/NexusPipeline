@@ -54,6 +54,14 @@ internal sealed class HostAdmissionBridge :
             out failureCode);
     }
 
+    public IDisposable? TryAcquireProviderConfiguration(string scriptId, string userId, string packageRoot)
+    {
+        ExecutionDispatcher? dispatcher = Volatile.Read(ref _dispatcher);
+        string editKey = "provider:" + userId;
+        if (dispatcher is null || !dispatcher.TryBeginEditSession(scriptId, editKey, packageRoot, out _)) return null;
+        return new NexusPipeline.Modules.Plugins.CallbackDisposable(() => dispatcher.EndEditSession(scriptId, editKey));
+    }
+
     public ScriptMutationAdmissionResult TryExecute(
         string scriptId,
         string? userName,

@@ -235,12 +235,16 @@ internal static class TaskProtocolValidation
     }
 
     internal static void Observation(TaskObservationBatch batch, string runId, string attemptId,
-        IReadOnlySet<string> selected, IReadOnlySet<(string, int, long)> evidence)
+        IReadOnlySet<string> selected, IReadOnlySet<(string, int, long)> evidence,
+        IReadOnlySet<string>? structuredEvidence = null)
     {
         Require(batch.ProtocolVersion == "0.1.0" && batch.Type == "observation" && batch.RunId == runId && batch.AttemptId == attemptId, "observation identity");
         Require(batch.Observations is { Length: <= 2048 }, "observation count");
         Require(batch.RunBoundary is "open" or "ended" or "aborted" or "unknown", "boundary");
-        Evidence(batch.BoundaryEvidence, evidence, batch.RunBoundary is "ended" or "aborted");
+        Require(structuredEvidence is null ? batch.StructuredEvidenceVersion is null : batch.StructuredEvidenceVersion == 1,
+            "structured evidence must be authenticated by Host");
+        bool structuredBoundary = StructuredEvidence(batch.BoundaryStructuredEvidenceRefs, structuredEvidence);
+        Evidence(batch.BoundaryEvidence, evidence, batch.RunBoundary is "ended" or "aborted" && !structuredBoundary);
         Diagnostics(batch.Diagnostics, batch.ProtocolVersion);
         Require(batch.CursorState is null || System.Text.Encoding.UTF8.GetByteCount(batch.CursorState.ToJsonString()) <= 64 * 1024, "adapter cursor limit");
         var ids = new HashSet<string>(StringComparer.Ordinal);
@@ -253,7 +257,8 @@ internal static class TaskProtocolValidation
             Require(observation.ExecutionOrdinal > 0, "execution ordinal");
             Require(observation.Status is "running" or "succeeded" or "failed" or "skipped" or "blocked" or "unknown", "observation status");
             Require(observation.Status != "skipped" || observation.SkipKind is "satisfied" or "inapplicable", "skip kind");
-            Evidence(observation.Evidence, evidence, observation.Status is not "unknown");
+            bool structured = StructuredEvidence(observation.StructuredEvidenceRefs, structuredEvidence);
+            Evidence(observation.Evidence, evidence, observation.Status is not "unknown" && !structured);
         }
         if (batch.Incidents is { } incidents)
         {
@@ -272,6 +277,16 @@ internal static class TaskProtocolValidation
                 Evidence(incident.Evidence, evidence, true);
             }
         }
+    }
+
+    private static bool StructuredEvidence(string[]? references, IReadOnlySet<string>? known)
+    {
+        if (references is null) return false;
+        Require(known is not null && references.Length is > 0 and <= 8
+            && references.Distinct(StringComparer.Ordinal).Count() == references.Length,
+            "structured evidence references");
+        foreach (string id in references) { Text(id); Require(known!.Contains(id), "structured evidence outside current attempt"); }
+        return true;
     }
 
     private static void Evidence(TaskEvidence[] items, IReadOnlySet<(string, int, long)> known, bool required)

@@ -345,6 +345,9 @@ tbody tr:hover td { background: var(--content-card-hover); }
 .task-row > .task-script-select { width: 100%; min-width: 0; }
 .task-row > button { width: 84px; min-width: 84px; min-height: 40px; margin-left: 0; padding: 0 8px; }
 .task-row > .task-drag-handle { width: var(--nx-drag-handle-size, 32px); min-width: var(--nx-drag-handle-size, 32px); margin-right: 0; }
+.task-row > .task-prerequisites { grid-column: 2 / 4; min-width: 0; margin-top: 8px; }
+.task-prerequisites > summary { cursor: pointer; color: var(--muted); }
+.task-prerequisite-row { margin-top: 8px; }
 .timeset-list { display: flex; flex-direction: column; }
 .timeset-card { display: block; padding: var(--space-4) 0; border-bottom: 1px solid var(--border); }
 .timeset-card:hover { background: transparent; }

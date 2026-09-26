@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
 using NexusPipeline.Modules.Configuration.Scripting;
+using NexusPipeline.Modules.Plugins.Contracts;
 
 namespace NexusPipeline.Modules.Configuration.Editing;
 
@@ -21,7 +22,6 @@ internal sealed record ConfigRepairProposal(
 internal static class ConfigRepairPolicy
 {
     private static readonly byte[] TokenKey = RandomNumberGenerator.GetBytes(32);
-    private static readonly JsonArray Selector = new("after_finish");
     private static readonly HashSet<string> UnsafeActions = new(StringComparer.Ordinal)
     {
         "Loop", "循环", "Shutdown", "关机", "Sleep", "睡眠", "Hibernate", "休眠",
@@ -29,27 +29,30 @@ internal static class ConfigRepairPolicy
     };
 
     internal static ConfigRepairProposal? TryPropose(
-        string plugin, string pluginVersion, string userId, string scriptId,
+        TaskConfigRepairDescriptor rule, string plugin, string pluginVersion, string userId, string scriptId,
         string profileHash, string locatorHash, long generation, byte[] bytes,
         out byte[]? patched)
     {
         patched = null;
-        if (plugin != "march7th" || pluginVersion != "0.3.0") return null;
-        var document = new TaskConfigDocument(bytes, "yaml");
-        JsonNode? selected = document.ReadSelection(Selector);
+        if (plugin != "march7th" || rule.Id != "queue_finish_action"
+            || rule.RuleId != "march7th.finish_action" || rule.ResourceId != "config:config.yaml"
+            || rule.Source != "user_snapshot" || rule.Format != "yaml"
+            || rule.Selector.ToJsonString() != "[\"after_finish\"]" || rule.ToValue != "None") return null;
+        var document = new TaskConfigDocument(bytes, rule.Format);
+        JsonNode? selected = document.ReadSelection(rule.Selector);
         if (selected is not JsonValue scalar || !scalar.TryGetValue<string>(out string? oldValue)
-            || !UnsafeActions.Contains(oldValue)) return null;
+            || !UnsafeActions.Contains(oldValue) || !rule.FromValues.Contains(oldValue, StringComparer.Ordinal)) return null;
         patched = document.Patch(
-            [new TaskConfigOperation((JsonArray)Selector.DeepClone(), JsonValue.Create(oldValue), JsonValue.Create("None"), "repair")],
-            new HashSet<string>(StringComparer.Ordinal) { Selector.ToJsonString() });
+            [new TaskConfigOperation((JsonArray)rule.Selector.DeepClone(), JsonValue.Create(oldValue), JsonValue.Create(rule.ToValue), "repair")],
+            new HashSet<string>(StringComparer.Ordinal) { rule.Selector.ToJsonString() });
         return new ConfigRepairProposal(true, "queue_finish_action", plugin, userId, scriptId,
-            "after_finish", oldValue, "None",
-            "脚本结束后不再执行此系统动作；其他配置字段保持原值。",
-            Token(plugin, pluginVersion, userId, scriptId, profileHash, locatorHash, generation, bytes));
+            "after_finish", oldValue, rule.ToValue, rule.Explanation,
+            Token(plugin, pluginVersion, userId, scriptId, profileHash, locatorHash, generation, bytes, rule));
     }
 
     internal static string Token(string plugin, string pluginVersion, string userId, string scriptId,
-        string profileHash, string locatorHash, long generation, byte[] bytes)
+        string profileHash, string locatorHash, long generation, byte[] bytes,
+        TaskConfigRepairDescriptor? rule = null)
     {
         using var hash = IncrementalHash.CreateHMAC(HashAlgorithmName.SHA256, TokenKey);
         foreach (string item in new[] { plugin, pluginVersion, userId, scriptId, profileHash, locatorHash,
@@ -61,6 +64,12 @@ internal static class ConfigRepairPolicy
         }
         hash.AppendData(BitConverter.GetBytes(bytes.Length));
         hash.AppendData(bytes);
+        if (rule is not null)
+        {
+            byte[] declaration = Encoding.UTF8.GetBytes(System.Text.Json.JsonSerializer.Serialize(rule));
+            hash.AppendData(BitConverter.GetBytes(declaration.Length));
+            hash.AppendData(declaration);
+        }
         return Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
     }
 }

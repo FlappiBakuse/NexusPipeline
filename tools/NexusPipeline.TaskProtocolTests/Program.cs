@@ -90,7 +90,9 @@ foreach (string file in files)
         }
         var context = TaskExecutionContext.Unknown("fixture-user", "fixture-script", "preview");
         if (fixture["queueFollowingWork"] is { } following)
-            context = context with { Queue = new("queue", following.GetValue<string>()) };
+            context = context with { Queue = new("queue", following.GetValue<string>(),
+                fixture["queueNextTargetRelation"]?.GetValue<string>() ?? "unknown",
+                fixture["queueNextLaunchOwner"]?.GetValue<string>() ?? "unknown") };
         if (fixture["executionContext"] is JsonObject launch)
             context = context with
             {
@@ -98,6 +100,7 @@ foreach (string file in files)
                 LaunchOwner = launch["launchOwner"]?.GetValue<string>() ?? context.LaunchOwner,
                 GameTarget = new("executable", launch["gameTarget"]?.GetValue<string>(), null,
                     launch["ready"]?.GetValue<bool>()),
+                RuntimeActivity = launch["runtimeActivity"]?.GetValue<string>(),
             };
         var plan = await TaskDiscoveryService.DiscoverAsync(protocol, view, manifest["name"]?.GetValue<string>() ?? artifact,
             manifest["version"]!.GetValue<string>(), "fixture-user", "fixture-script", "zh-CN", true, default, context);

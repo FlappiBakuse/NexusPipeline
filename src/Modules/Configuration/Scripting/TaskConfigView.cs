@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using NexusPipeline.Modules.Plugins.Contracts;
 
 namespace NexusPipeline.Modules.Configuration.Scripting;
 
@@ -40,6 +41,7 @@ internal sealed class TaskConfigView
             });
             Serialized = new Lazy<string>(() =>
             {
+                TaskConfigMetrics.Count(6);
                 JsonNode? document = integrity == "mismatch" ? null : format == "text"
                     ? JsonValue.Create(new System.Text.UTF8Encoding(false, true).GetString(bytes))
                     : Parsed.Value!.Document;
@@ -81,6 +83,7 @@ internal sealed class TaskConfigView
         ValidatePath(path);
         var info = new FileInfo(path);
         if (!info.Exists || info.Length > 2 * 1024 * 1024) throw new InvalidDataException("config_unavailable: missing/oversize resource");
+        TaskConfigMetrics.Count(4);
         byte[] bytes = File.ReadAllBytes(path);
         if (bytes.Length > 2 * 1024 * 1024) throw new InvalidDataException("resource_limit: resource changed while reading");
         if (_entries.Values.Sum(e => (long)e.Bytes.Length) + bytes.Length > 32 * 1024 * 1024)
@@ -179,6 +182,14 @@ internal sealed class TaskConfigView
         return new TaskConfigDocument(entry.Bytes, entry.Format).Patch(operations, allowed);
     }
 
+    /// <summary>Read a behavior field from the immutable capture, sharing its parsed tree with other fields.</summary>
+    internal JsonNode? ReadFrozenSelection(string id, JsonArray selector)
+    {
+        if (!_entries.TryGetValue(id, out var entry) || !entry.Writable || entry.Format is not ("json" or "yaml"))
+            throw new InvalidDataException("config_unavailable: undeclared behavior resource");
+        return entry.Parsed.Value!.ReadSelection(selector);
+    }
+
     internal void VerifyPinnedResourcesUnchanged()
     {
         foreach (var entry in _entries.Values.Where(e => e.Integrity is not null))
@@ -193,16 +204,17 @@ internal sealed class TaskConfigView
         foreach (var entry in _entries.Values) VerifyUnchanged(entry);
     }
 
-    // OK launchers update these two operational fields during their own run.
-    // Writable configuration is restored by the existing transaction; upstream
-    // may update it during execution. Freeze every runtime resource instead,
-    // and compare app metadata so version/update-state drift still aborts.
-    internal void VerifyRestrictedOkRuntimeUnchanged()
+    // Writable configuration is restored by the existing transaction. Each
+    // read-only runtime resource stays byte-stable except manifest-declared,
+    // type-constrained operational fields.
+    internal void VerifyRestrictedRuntimeUnchanged(IReadOnlyList<TaskReadResource> resources)
     {
+        var declarations = resources.ToDictionary(resource => resource.Id, StringComparer.Ordinal);
         foreach (var (id, entry) in _entries)
         {
             if (entry.Writable) continue;
-            if (id != "runtime-app" || entry.Format != "json")
+            if (!declarations.TryGetValue(id, out TaskReadResource? resource)
+                || resource.OperationalFields.Count == 0)
             {
                 VerifyUnchanged(entry);
                 continue;
@@ -211,13 +223,16 @@ internal sealed class TaskConfigView
             var info = new FileInfo(entry.Path);
             if (!info.Exists || info.Length > 2 * 1024 * 1024)
                 throw new InvalidDataException("runtime_identity_changed: app metadata unavailable");
+            TaskConfigMetrics.Count(5);
             byte[] current = File.ReadAllBytes(entry.Path);
-            if (!StableRuntimeAppFields(entry.Bytes).SequenceEqual(StableRuntimeAppFields(current)))
+            if (!StableRuntimeFields(entry.Bytes, resource.OperationalFields)
+                .SequenceEqual(StableRuntimeFields(current, resource.OperationalFields)))
                 throw new InvalidDataException("runtime_identity_changed: app metadata changed");
         }
     }
 
-    private static IEnumerable<KeyValuePair<string, string>> StableRuntimeAppFields(byte[] bytes)
+    private static IEnumerable<KeyValuePair<string, string>> StableRuntimeFields(
+        byte[] bytes, IReadOnlyDictionary<string, string> operationalFields)
     {
         try
         {
@@ -225,28 +240,31 @@ internal sealed class TaskConfigView
             if (document.RootElement.ValueKind != JsonValueKind.Object)
                 throw new InvalidDataException("runtime_identity_changed: invalid app metadata");
             var fields = new SortedDictionary<string, string>(StringComparer.Ordinal);
-            bool hasRunning = false;
-            bool hasLastStart = false;
+            var seen = new HashSet<string>(StringComparer.Ordinal);
             foreach (JsonProperty property in document.RootElement.EnumerateObject())
             {
-                if (property.NameEquals("running"))
+                if (!seen.Add(property.Name))
+                    throw new InvalidDataException("runtime_identity_changed: duplicate app metadata");
+                if (operationalFields.TryGetValue(property.Name, out string? kind))
                 {
-                    if (hasRunning || property.Value.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
-                        throw new InvalidDataException("runtime_identity_changed: invalid running state");
-                    hasRunning = true;
-                    continue;
-                }
-                if (property.NameEquals("last_start"))
-                {
-                    if (hasLastStart)
-                        throw new InvalidDataException("runtime_identity_changed: duplicate app metadata");
-                    hasLastStart = true;
+                    bool valid = kind switch
+                    {
+                        "boolean" => property.Value.ValueKind is JsonValueKind.True or JsonValueKind.False,
+                        "timestamp" => property.Value.ValueKind == JsonValueKind.String
+                            && property.Value.GetString() is { Length: <= 64 } stamp
+                            && DateTimeOffset.TryParse(stamp, System.Globalization.CultureInfo.InvariantCulture,
+                                System.Globalization.DateTimeStyles.None, out _),
+                        _ => false,
+                    };
+                    if (!valid) throw new InvalidDataException("runtime_identity_changed: invalid operational field");
                     continue;
                 }
                 if (!fields.TryAdd(property.Name, property.Value.GetRawText()))
                     throw new InvalidDataException("runtime_identity_changed: duplicate app metadata");
             }
-            if (!hasRunning) throw new InvalidDataException("runtime_identity_changed: missing running state");
+            foreach (var (name, kind) in operationalFields)
+                if (kind == "boolean" && !seen.Contains(name))
+                    throw new InvalidDataException("runtime_identity_changed: missing required operational field");
             return fields;
         }
         catch (JsonException ex)
@@ -259,13 +277,17 @@ internal sealed class TaskConfigView
     {
         if (!_entries.TryGetValue(id, out var entry) || !entry.Writable) throw new InvalidDataException("undeclared writable resource");
         VerifyUnchanged(entry);
+        TaskConfigMetrics.Count(7);
         return (entry.Path, entry.Bytes.ToArray(), entry.Format);
     }
 
     private static void VerifyUnchanged(Entry entry)
     {
         ValidatePath(entry.Path);
-        if (new FileInfo(entry.Path).Length != entry.Bytes.Length || !File.ReadAllBytes(entry.Path).AsSpan().SequenceEqual(entry.Bytes))
+        if (new FileInfo(entry.Path).Length != entry.Bytes.Length)
+            throw new InvalidDataException("configuration_conflict: resource changed after snapshot");
+        TaskConfigMetrics.Count(5);
+        if (!File.ReadAllBytes(entry.Path).AsSpan().SequenceEqual(entry.Bytes))
             throw new InvalidDataException("configuration_conflict: resource changed after snapshot");
     }
 }

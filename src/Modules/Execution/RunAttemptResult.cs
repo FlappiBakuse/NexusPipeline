@@ -9,6 +9,7 @@ internal sealed class RunAttemptResult
     public string ReasonCode { get; set; } = "";
     public Dictionary<string, string> ReasonArgs { get; set; } = new(StringComparer.Ordinal);
     public bool IsFatal { get; set; }
+    public bool OutputIncomplete { get; set; }
     public string NotifyText { get; set; } = "";
     public string NotifyScreenshotId { get; set; } = "";
 
@@ -54,6 +55,7 @@ internal sealed class RunAttemptResult
             ReasonCode = main.ReasonCode,
             ReasonArgs = new Dictionary<string, string>(main.ReasonArgs, StringComparer.Ordinal),
             IsFatal = main.IsFatal,
+            OutputIncomplete = main.OutputIncomplete || post.OutputIncomplete,
             NotifyText = string.IsNullOrWhiteSpace(main.NotifyText) ? post.NotifyText : main.NotifyText,
             NotifyScreenshotId = string.IsNullOrWhiteSpace(main.NotifyScreenshotId)
                 ? post.NotifyScreenshotId

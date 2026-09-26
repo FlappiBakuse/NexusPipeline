@@ -43,6 +43,12 @@ internal sealed record ExecutionResourceSet(
     /// <summary>用户前置/后置脚本的进程名资源。</summary>
     public IReadOnlySet<string> AuxiliaryProcessNames { get; init; } = Array.Empty<string>().ToFrozenSet(Comparer);
 
+    /// <summary>Foreground input/capture is exclusive within the current Windows session.</summary>
+    public IReadOnlySet<string> DesktopDomains { get; init; } = Array.Empty<string>().ToFrozenSet(Comparer);
+
+    /// <summary>Project working trees that may be written by the launched automation.</summary>
+    public IReadOnlyList<string> WritableRoots { get; init; } = Array.Empty<string>();
+
     public static ExecutionResourceSet Empty { get; } = new(
         Array.Empty<string>().ToFrozenSet(Comparer),
         Array.Empty<string>().ToFrozenSet(Comparer),
@@ -64,6 +70,16 @@ internal sealed record ExecutionResourceSet(
         {
             return conflict;
         }
+
+        conflict = FindSetConflict(DesktopDomains, other.DesktopDomains, "desktop-input");
+        if (conflict is not null) return conflict;
+
+        foreach (string candidate in WritableRoots)
+            foreach (string existing in other.WritableRoots.Concat(other.ConfigPaths))
+                if (PathsConflict(candidate, existing)) return $"writable:{candidate}";
+        foreach (string existing in other.WritableRoots)
+            foreach (string candidate in ConfigPaths)
+                if (PathsConflict(candidate, existing)) return $"writable:{existing}";
 
         conflict = FindSetConflict(ExecutablePaths, other.ExecutablePaths, "executable");
         if (conflict is not null)
@@ -250,7 +266,8 @@ internal sealed record ExecutionAdmissionProfile(
         ScriptInstance script,
         string? userName = null,
         IPluginCapabilityResolver? capabilities = null,
-        IReadOnlyList<ResolvedScriptUser>? resolvedUsers = null)
+        IReadOnlyList<ResolvedScriptUser>? resolvedUsers = null,
+        NexusPipeline.Modules.Scripts.Contracts.ResolvedScriptSpec? resolvedSpec = null)
     {
         IReadOnlyList<string>? users = string.IsNullOrWhiteSpace(userName)
             ? null
@@ -259,7 +276,7 @@ internal sealed record ExecutionAdmissionProfile(
             "script",
             null,
             ExecutionResourceSetBuilder.Build(
-                new[] { new ExecutionResourceInput(script.Id, script, users, resolvedUsers) },
+                new[] { new ExecutionResourceInput(script.Id, script, users, resolvedUsers, resolvedSpec) },
                 capabilities),
             "none");
     }
@@ -273,7 +290,7 @@ internal sealed record ExecutionAdmissionProfile(
             && tasks.All(task => task.Script is not null && IsVerifiedEmulator(task.Script, capabilities));
 
         IEnumerable<ExecutionResourceInput> resources = tasks.Select(task =>
-            new ExecutionResourceInput(task.Task.ScriptInstanceId, task.Script, task.EnabledUsers, task.ResolvedUsers));
+            new ExecutionResourceInput(task.Task.ScriptInstanceId, task.Script, task.EnabledUsers, task.ResolvedUsers, task.ResolvedSpec));
         return new ExecutionAdmissionProfile(
             "queue",
             emulatorOnly ? ExecutionConcurrencyClass.EmulatorOnly : ExecutionConcurrencyClass.Standard,
@@ -319,7 +336,8 @@ internal sealed record ExecutionResourceInput(
     string ScriptId,
     ScriptInstance? Script,
     IReadOnlyCollection<string>? UserNames,
-    IReadOnlyCollection<ResolvedScriptUser>? ResolvedUsers = null);
+    IReadOnlyCollection<ResolvedScriptUser>? ResolvedUsers = null,
+    NexusPipeline.Modules.Scripts.Contracts.ResolvedScriptSpec? ResolvedSpec = null);
 
 internal static class ExecutionResourceSetBuilder
 {
@@ -347,6 +365,8 @@ internal static class ExecutionResourceSetBuilder
         var logResources = new List<LogResourceDescriptor>();
         var auxiliaryExecutablePaths = new HashSet<string>(Comparer);
         var auxiliaryProcessNames = new HashSet<string>(Comparer);
+        var desktopDomains = new HashSet<string>(Comparer);
+        var writableRoots = new HashSet<string>(Comparer);
 
         foreach (ExecutionResourceInput item in items)
         {
@@ -392,11 +412,29 @@ internal static class ExecutionResourceSetBuilder
                 continue;
             }
 
+            var providerPlans = (item.ResolvedUsers ?? []).Select(user => user.Spec?.ProviderPlan)
+                .Append(item.ResolvedSpec?.ProviderPlan).Where(plan => plan is not null);
+            foreach (var plan in providerPlans)
+            {
+                foreach (var resource in plan!.Resources)
+                {
+                    if (resource.Kind == "writable_root") writableRoots.Add(NormalizePath(resource.Identity));
+                    else if (resource.Kind == "desktop_input") desktopDomains.Add("session:" + System.Diagnostics.Process.GetCurrentProcess().SessionId);
+                    else if (resource.Kind == "adb_endpoint") emulatorEndpoints.Add(NormalizeEmulatorEndpoint(resource.Identity) ?? resource.Identity.Trim().ToLowerInvariant());
+                }
+            }
+
             string workingDir = string.IsNullOrWhiteSpace(script.RootPath)
                 ? Path.GetDirectoryName(script.MainExe) ?? string.Empty
                 : script.RootPath;
             (string launchExe, _) = SystemActions.ResolveLaunchTarget(script.MainExe, workingDir, script.Args);
-            AddExecutable(executablePaths, processNames, launchExe);
+            bool sharedRuntime = IsSharedRuntime(launchExe)
+                && (!string.IsNullOrWhiteSpace(script.RootPath) || !string.IsNullOrWhiteSpace(script.ConfigPath));
+            if (!sharedRuntime) AddExecutable(executablePaths, processNames, launchExe);
+            if (!string.IsNullOrWhiteSpace(script.RootPath)) writableRoots.Add(NormalizePath(script.RootPath));
+            if ((!EmulatorSupport.IsEmulator(script) || NormalizeEmulatorEndpoint(script.GameExe) is null)
+                && (script.LaunchGame || !string.IsNullOrWhiteSpace(script.PluginType) || !string.IsNullOrWhiteSpace(script.ExecutionProviderId)))
+                desktopDomains.Add("session:" + System.Diagnostics.Process.GetCurrentProcess().SessionId.ToString(System.Globalization.CultureInfo.InvariantCulture));
 
             if (!string.IsNullOrWhiteSpace(script.ConfigPath))
             {
@@ -451,7 +489,19 @@ internal static class ExecutionResourceSetBuilder
             LogResources = logResources,
             AuxiliaryExecutablePaths = auxiliaryExecutablePaths.ToFrozenSet(Comparer),
             AuxiliaryProcessNames = auxiliaryProcessNames.ToFrozenSet(Comparer),
+            DesktopDomains = desktopDomains.ToFrozenSet(Comparer),
+            WritableRoots = writableRoots.ToArray(),
         };
+    }
+
+    private static bool IsSharedRuntime(string executable)
+    {
+        string name = Path.GetFileNameWithoutExtension(executable);
+        return name.Equals("python", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("pythonw", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("py", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("node", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("dotnet", StringComparison.OrdinalIgnoreCase);
     }
 
     public static string NormalizePath(string path)

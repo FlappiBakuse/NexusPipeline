@@ -121,6 +121,9 @@ internal static class ProcessTree
     {
         try
         {
+            if (Path.IsPathFullyQualified(baseName))
+                return Path.IsPathFullyQualified(exeFile)
+                    && string.Equals(Path.GetFullPath(exeFile), Path.GetFullPath(baseName), StringComparison.OrdinalIgnoreCase);
             return string.Equals(Path.GetFileNameWithoutExtension(exeFile), baseName, StringComparison.OrdinalIgnoreCase);
         }
         catch (Exception ex)

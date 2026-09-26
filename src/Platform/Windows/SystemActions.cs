@@ -186,9 +186,6 @@ internal static class SystemActions
     public static void MinimizeWindowFireAndForget(int pid, string what) =>
         ProcessWindows.MinimizeWindowFireAndForget(pid, what);
 
-    public static bool MinimizeWindow(int pid, int timeoutSeconds = 30) =>
-        ProcessWindows.MinimizeWindow(pid, timeoutSeconds);
-
     internal static IntPtr FindVisibleWindow(int pid) =>
         ProcessWindows.FindVisibleWindow(pid);
 }

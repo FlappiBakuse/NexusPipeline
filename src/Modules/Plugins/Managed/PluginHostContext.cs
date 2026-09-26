@@ -16,7 +16,7 @@ using NexusPipeline.Shared.Serialization;
 
 namespace NexusPipeline.Modules.Plugins.Managed;
 
-internal sealed class PluginHostContext : IPluginHostContextV1_8
+internal sealed class PluginHostContext : IPluginHostContextV1_9
 {
     public PluginHostContext(
         string pluginName,
@@ -31,6 +31,7 @@ internal sealed class PluginHostContext : IPluginHostContextV1_8
         PluginWebApiRegistry webApi,
         PluginHistoryContributionRegistry history,
         PluginEmulatorSupportRegistry emulatorSupport,
+        PluginExecutionProviderRegistry executionProviders,
         PluginLocalizationManifest localization)
     {
         PluginName = pluginName;
@@ -50,6 +51,7 @@ internal sealed class PluginHostContext : IPluginHostContextV1_8
         _webApi = new PluginWebApiAdapter(webApi, pluginName);
         _history = new PluginHistoryContributionAdapter(history, pluginName, pluginDisplayName);
         _emulatorSupport = new PluginEmulatorSupportAdapter(emulatorSupport, pluginName);
+        _executionProviders = new PluginExecutionProviderAdapter(executionProviders, pluginName);
         I18n = new PluginLocalizationService(localization);
     }
 
@@ -88,6 +90,7 @@ internal sealed class PluginHostContext : IPluginHostContextV1_8
     public IPluginAssetStore Assets { get; }
 
     public IPluginEmulatorSupportRegistry EmulatorSupport => _emulatorSupport;
+    public IPluginExecutionProviderRegistry ExecutionProviders => _executionProviders;
 
     private readonly PluginUserGlobalManagementAdapter _globalManagement;
 
@@ -101,6 +104,7 @@ internal sealed class PluginHostContext : IPluginHostContextV1_8
     private readonly PluginHistoryContributionAdapter _history;
 
     private readonly PluginEmulatorSupportAdapter _emulatorSupport;
+    private readonly PluginExecutionProviderAdapter _executionProviders;
 
     public void Dispose()
     {
@@ -111,9 +115,63 @@ internal sealed class PluginHostContext : IPluginHostContextV1_8
         _webApi.Dispose();
         _history.Dispose();
         _emulatorSupport.Dispose();
+        _executionProviders.Dispose();
         ((PluginJobScheduler)Scheduler).Dispose();
     }
 
+}
+
+internal sealed class PluginExecutionProviderAdapter : IPluginExecutionProviderRegistry, IDisposable
+{
+    private readonly PluginExecutionProviderRegistry _registry;
+    private readonly string _pluginName;
+    private readonly List<IDisposable> _registrations = new();
+    private readonly object _sync = new();
+    private bool _disposed;
+
+    public PluginExecutionProviderAdapter(PluginExecutionProviderRegistry registry, string pluginName)
+    {
+        _registry = registry;
+        _pluginName = pluginName;
+    }
+
+    public IDisposable Register(IPluginExecutionProvider provider)
+    {
+        IDisposable registration = _registry.Register(_pluginName, provider);
+        lock (_sync)
+        {
+            if (_disposed)
+            {
+                registration.Dispose();
+                throw new ObjectDisposedException(nameof(PluginExecutionProviderAdapter));
+            }
+            _registrations.Add(registration);
+        }
+        return new CallbackDisposable(() =>
+        {
+            registration.Dispose();
+            lock (_sync) _registrations.Remove(registration);
+        });
+    }
+
+    public IDisposable? TryAcquireConfiguration(string scriptInstanceId, string userId, string packageRoot)
+    {
+        lock (_sync) if (_disposed) return null;
+        return _registry.TryAcquireConfiguration(_pluginName, scriptInstanceId, userId, packageRoot);
+    }
+
+    public void Dispose()
+    {
+        IDisposable[] registrations;
+        lock (_sync)
+        {
+            if (_disposed) return;
+            _disposed = true;
+            registrations = _registrations.ToArray();
+            _registrations.Clear();
+        }
+        foreach (IDisposable registration in registrations) registration.Dispose();
+    }
 }
 
 internal sealed class PluginEmulatorSupportAdapter : IPluginEmulatorSupportRegistry, IDisposable

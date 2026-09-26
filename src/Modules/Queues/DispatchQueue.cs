@@ -18,6 +18,9 @@ public class QueueTask
     public int Index { get; set; }
 
     public string ScriptInstanceId { get; set; } = "";
+
+    /// <summary>Only named earlier queue items are prerequisites; empty preserves legacy independent ordering.</summary>
+    public List<string> DependsOnTaskIds { get; set; } = new();
 }
 
 public class DispatchQueue

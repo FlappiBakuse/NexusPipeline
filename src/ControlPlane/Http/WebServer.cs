@@ -4,6 +4,7 @@ using System.Net.Sockets;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
+using System.Diagnostics;
 using NexusPipeline.ControlPlane.Http.Services;
 using NexusPipeline.Modules.Settings.UseCases;
 using NexusPipeline.Modules.Scripts.UseCases;
@@ -353,7 +354,8 @@ internal sealed class WebServer : IDisposable
                 }
                 return;
             }
-            _ = Task.Run(() => HandleAsync(WebContext.FromHttpListener(context), token));
+            var requestContext = WebContext.FromHttpListener(context);
+            _ = Task.Run(() => HandleAsync(requestContext, token));
         }
 #endif
     }
@@ -387,11 +389,12 @@ internal sealed class WebServer : IDisposable
                 Logger.Error($"[错误] 托管 HTTP 监听循环异常退出：{ex.Message}");
                 return;
             }
-            _ = Task.Run(() => HandleManagedClientAsync(client, token));
+            long acceptedTimestamp = Stopwatch.GetTimestamp();
+            _ = Task.Run(() => HandleManagedClientAsync(client, token, acceptedTimestamp));
         }
     }
 
-    private async Task HandleManagedClientAsync(TcpClient client, CancellationToken token)
+    private async Task HandleManagedClientAsync(TcpClient client, CancellationToken token, long acceptedTimestamp)
     {
         using (client)
         {
@@ -405,7 +408,7 @@ internal sealed class WebServer : IDisposable
                     client.Client.RemoteEndPoint as IPEndPoint,
                     token).ConfigureAwait(false);
                 if (request is null) return;
-                var context = new WebContext(request, WebResponse.ForManagedStream(stream));
+                var context = new WebContext(request, WebResponse.ForManagedStream(stream), acceptedTimestamp);
                 await HandleAsync(context, token).ConfigureAwait(false);
                 context.Response.Close();
             }
@@ -427,7 +430,7 @@ internal sealed class WebServer : IDisposable
         {
             string path = context.Request.Url?.AbsolutePath ?? "/";
             string method = context.Request.HttpMethod;
-            if (!(method == "GET" && path == "/api/status"))
+            if (!(method == "GET" && path == "/api/status") && !(method == "POST" && path == "/api/cancel"))
             {
                 Logger.Debug($"[Web] {method} {path}");
             }

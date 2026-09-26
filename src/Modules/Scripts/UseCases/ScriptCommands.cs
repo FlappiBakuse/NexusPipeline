@@ -374,6 +374,8 @@ internal sealed class ScriptCommands
 
     private static void NormalizePaths(ScriptInstance script)
     {
+        script.ExecutionProviderId = script.ExecutionProviderId?.Trim() ?? "";
+        script.ExecutionProviderConfigId = script.ExecutionProviderConfigId?.Trim() ?? "";
         script.RootPath = StripPathQuotes(script.RootPath);
         script.MainExe = StripPathQuotes(script.MainExe);
         script.ConfigPath = StripPathQuotes(script.ConfigPath);

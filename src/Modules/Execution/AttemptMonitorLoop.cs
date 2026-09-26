@@ -133,7 +133,11 @@ internal sealed class AttemptMonitorLoop
                     launchExe,
                     session.ProcessOwnership,
                     excludeGame,
-                    processSnapshot);
+                    processSnapshot,
+                    processSession.PreservedLauncher,
+                    session.TaskProtocolRun?.HasTerminalBoundary == true,
+                    processSession.PreservedLauncher is null || session.Script.PluginType is not ("oknte" or "okww")
+                        || OkRuntimeActivityProbe.Observe(session.Script.PluginType, session.Script.RootPath) == "inactive");
                 if (scriptExited)
                 {
                     await processSession.WaitForOutputDrainAsync(token).ConfigureAwait(false);

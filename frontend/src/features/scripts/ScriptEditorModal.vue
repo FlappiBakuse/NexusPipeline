@@ -51,12 +51,13 @@ const scriptLabel = computed(() => props.script || null);
 const modalTitle = computed(() =>
   scriptLabel.value
     ? t("scripts.edit_script_instance")
+    : draft.executionProviderId ? t('scripts.framework_driver', {}, '框架直驱') + ' / ' + draft.executionProviderId
     : draft.pluginType
       ? t("scripts.action.new_specialized", { plugin: pluginName(draft) })
       : t("scripts.new_general_script_instance"),
 );
-const canExport = computed(() => Boolean(props.script && draft.id && !draft.pluginType));
-const canImport = computed(() => !props.script && !draft.id && !draft.pluginType);
+const canExport = computed(() => Boolean(props.script && draft.id && !draft.pluginType && !draft.executionProviderId));
+const canImport = computed(() => !props.script && !draft.id && !draft.pluginType && !draft.executionProviderId);
 
 const gameModeOptions = computed<NxpOption[]>(() => [
   { value: "pc", label: t("scripts.pc_client") },
@@ -323,11 +324,11 @@ function syncScriptFieldErrors(invalid: { key: string } | null) {
   const requiredFields = [
     { id: "sm-name", value: draft.name },
     { id: "sm-root", value: draft.rootPath },
-    { id: "sm-game-exe", value: draft.gameExe },
+    ...(!draft.executionProviderId ? [{ id: "sm-game-exe", value: draft.gameExe }] : []),
     { id: "sm-attempts", value: draft.maxAttempts },
     { id: "sm-stall", value: draft.logStallTimeoutMinutes },
     { id: "sm-total", value: draft.totalTimeoutMinutes },
-    ...(!draft.pluginType
+    ...(!draft.pluginType && !draft.executionProviderId
       ? [
           { id: "sm-exe", value: draft.mainExe },
           { id: "sm-config", value: draft.configPath },
@@ -396,9 +397,29 @@ async function paintEditorSlot() {
     await renderPluginSlot(editorSlotRoot.value, "scripts.editor.sections", {
       mode: draft.id ? "edit" : "create",
       primaryId: draft.id,
+      executionProviderId: draft.executionProviderId || '',
+      executionProviderConfigId: draft.executionProviderConfigId || '',
+      packageRoot: draft.rootPath,
     });
   }
 }
+function providerConfigured(event: Event) {
+  const detail = (event as CustomEvent).detail;
+  if (detail?.providerId !== draft.executionProviderId || detail?.packageRoot !== draft.rootPath
+    || !/^[a-zA-Z0-9_-]{1,128}$/.test(detail?.profileId || '')) return;
+  draft.executionProviderConfigId = detail.profileId;
+  const launch = detail.hostLaunchConfiguration;
+  if (launch?.launchGame === true && launch.gameMode === "pc"
+    && typeof launch.gameExe === "string" && typeof launch.gameArgs === "string"
+    && Number.isInteger(launch.gameWaitSeconds) && launch.gameWaitSeconds >= 1 && launch.gameWaitSeconds <= 300) {
+    draft.launchGame = true;
+    draft.gameMode = "pc";
+    draft.gameExe = launch.gameExe;
+    draft.gameArgs = launch.gameArgs;
+    draft.gameWaitSeconds = launch.gameWaitSeconds;
+  }
+}
+watch(() => [draft.executionProviderId, draft.rootPath], () => { void paintEditorSlot(); });
 function close() {
   rootProbe.invalidate();
   if (editorSlotRoot.value) void disposePluginSlot(editorSlotRoot.value);
@@ -480,7 +501,7 @@ watch(
             />
           </div>
         </div>
-        <template v-if="!draft.pluginType">
+        <template v-if="!draft.pluginType && !draft.executionProviderId">
           <div class="form-grid">
             <div class="field">
               <label class="field-label" for="sm-exe"
@@ -543,7 +564,7 @@ watch(
             </div>
           </div>
         </template>
-        <div class="subsection">
+        <div v-if="!draft.executionProviderId" class="subsection">
           <div class="section-heading">
             <h3>{{ t("scripts.game_integration") }}</h3>
             <span v-if="draft.pluginType" class="muted">{{
@@ -701,7 +722,7 @@ watch(
             </div>
           </div>
         </div>
-        <div v-if="!draft.pluginType" class="subsection judge-box">
+        <div v-if="!draft.pluginType && !draft.executionProviderId" class="subsection judge-box">
           <div class="section-heading">
             <h3>{{ t("scripts.custom_completion_markers") }}</h3>
           </div>
@@ -792,6 +813,7 @@ watch(
           class="plugin-slot script-editor-plugin-slot"
           data-plugin-slot="scripts.editor.sections"
           data-plugin-anchor="scripts.editor.sections"
+          @nxp-provider-configured="providerConfigured"
           hidden
         ></div>
     <template #footer>

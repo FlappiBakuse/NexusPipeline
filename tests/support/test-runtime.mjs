@@ -32,6 +32,22 @@ export function resolveTestHostDir(projectRoot) {
     : path.join(projectRoot, "tests", ".artifacts", "runs", runId, "test-host");
 }
 
+export function resolveTestRunRoot(projectRoot, runId) {
+  if (!/^[A-Za-z0-9_-]+$/.test(runId)) throw new Error("Invalid test run identity");
+  const configured = process.env.NEXUS_TEST_ARTIFACT_ROOT?.trim();
+  if (!configured) return path.join(projectRoot, "tests", ".artifacts", "runs", runId);
+  if (!path.isAbsolute(configured)) throw new Error("NEXUS_TEST_ARTIFACT_ROOT must be absolute");
+  const base = path.resolve(configured);
+  for (let current = base; ; current = path.dirname(current)) {
+    if (fs.lstatSync(current).isSymbolicLink()) throw new Error("Linked test artifact root");
+    if (path.dirname(current) === current) break;
+  }
+  const marker = JSON.parse(fs.readFileSync(path.join(base, ".nxp-test-artifact-root.json"), "utf8"));
+  if (marker.schemaVersion !== 1 || marker.owner !== "NexusPipeline.Tests"
+    || path.resolve(marker.directory || "") !== base) throw new Error("Unowned test artifact root");
+  return path.join(base, "runs", runId);
+}
+
 export function resolveTestHostExitFile(projectRoot, fallbackPath) {
   const configured = process.env.NEXUS_TEST_HOST_EXIT_FILE?.trim();
   return configured

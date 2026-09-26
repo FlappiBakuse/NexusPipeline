@@ -2,6 +2,7 @@ using Xunit;
 using NexusPipeline.ControlPlane.Http;
 using NexusPipeline.Host.Composition;
 using NexusPipeline.Modules.Execution;
+using NexusPipeline.Modules.Configuration.Recovery;
 using NexusPipeline.Modules.History.Contracts;
 using NexusPipeline.Modules.History;
 using NexusPipeline.Modules.Notifications.Contracts;
@@ -11,6 +12,7 @@ using NexusPipeline.Modules.Queues;
 using NexusPipeline.Modules.Scripts.Contracts;
 using NexusPipeline.Modules.Scripts;
 using NexusPipeline.Modules.Users;
+using NexusPipeline.Modules.Users.Contracts;
 using NexusPipeline.Platform.Storage;
 using NexusPipeline.Tests.Scheduling;
 using NexusPipeline.Tests.Support;
@@ -130,6 +132,136 @@ public sealed class UnavailablePluginExecutionTests : IClassFixture<HostTestScop
         Assert.Contains("未配置启用用户", history.Records[1].ResultDetail);
     }
 
+    [Fact]
+    public async Task QueueRunner_RecordsQuarantinedItemWithoutAttemptAndContinuesIndependentItems()
+    {
+        string suffix = Guid.NewGuid().ToString("N");
+        ScriptInstance first = SpecializedScript("isolation-first-" + suffix, "A");
+        string sharedConfig = Path.Combine(Path.GetTempPath(), "isolation-" + suffix, "shared.json");
+        ScriptInstance blocked = new() { Id = "isolation-blocked-" + suffix, Name = "B", ConfigPath = sharedConfig };
+        ScriptInstance independentC = new() { Id = "isolation-c-" + suffix, Name = "C" };
+        ScriptInstance independentD = new() { Id = "isolation-d-" + suffix, Name = "D" };
+        var queue = new DispatchQueue
+        {
+            Id = "isolation-queue-" + suffix,
+            Name = "隔离后继续",
+            CompletionAction = "shutdown",
+            Tasks = new ScriptInstance[] { first, blocked, independentC, independentD }
+                .Select((script, index) => new QueueTask { ScriptInstanceId = script.Id, Index = index }).ToList(),
+        };
+        queue.Tasks[2].DependsOnTaskIds.Add(queue.Tasks[1].Id);
+        ResolvedScriptUser User(ScriptInstance script) => new("user-" + script.Id, "测试用户",
+            new UserScriptBinding { ScriptInstanceId = script.Id, NotifyEnabled = false });
+        ScriptInstance[] scripts = [first, blocked, independentC, independentD];
+        PlannedQueueTask[] tasks = scripts.Select((script, index) => new PlannedQueueTask(
+            queue.Tasks[index], script, ["测试用户"], [User(script)])).ToArray();
+        var history = new CapturingHistoryStore();
+        var mark = new ConfigSessionMark
+        {
+            ScriptId = first.Id,
+            UserId = "recovery-owner",
+            ConfigPath = sharedConfig,
+            ConfigKind = "file",
+            SessionPhase = "run",
+            RecoveryIsolation = new ConfigSessionRecoveryIsolation
+            {
+                CauseCode = "config_restore_failed",
+                ScopeQuality = "complete",
+                MayContinueIndependent = true,
+            },
+        };
+        history.AfterSave = record =>
+        {
+            if (record.ScriptInstanceId == first.Id) mark.Write();
+        };
+        var state = new ExecutionStateStore();
+        var runner = CreateRunner(history, new FakePluginAvailability(), state);
+        var execution = new RunningExecution
+        {
+            Kind = "queue", TargetId = queue.Id, TargetName = queue.Name,
+            Mode = "manual", TotalTasks = tasks.Length,
+        };
+        var plan = new QueueExecutionPlan(queue, tasks,
+            ExecutionAdmissionProfile.ForQueue(queue, tasks), tasks.Length);
+        Assert.True(state.TryRegister(execution, plan.Admission, out _));
+        try
+        {
+            await runner.RunQueueAsync(execution, plan);
+            Assert.Equal(new[] { first.Id, blocked.Id, independentC.Id, independentD.Id },
+                history.Records.Select(record => record.ScriptInstanceId));
+            RunRecord skipped = history.Records[1];
+            Assert.Equal("run.not_started_quarantined", skipped.ResultCode);
+            Assert.Equal(0, skipped.Attempts);
+            Assert.Empty(skipped.AttemptDetails);
+            Assert.Equal("not_started", skipped.Outcomes?.ExecutionOutcome);
+            Assert.Equal("run.not_started_dependency", history.Records[2].ResultCode);
+            Assert.Equal(0, history.Records[2].Attempts);
+            Assert.Equal("quarantined", history.Records[2].Outcomes?.RecoveryOutcome);
+            Assert.NotEqual("run.not_started_quarantined", history.Records[3].ResultCode);
+            Assert.NotEqual("run.not_started_dependency", history.Records[3].ResultCode);
+            Assert.Null(state.CurrentSystemAction);
+        }
+        finally
+        {
+            string directory = Path.Combine(AppPaths.DataDir, first.Id);
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task QueueRunner_StopsBeforeIndependentSuccessorWhenQuarantineHistoryIsNotDurable()
+    {
+        string suffix = Guid.NewGuid().ToString("N");
+        ScriptInstance first = SpecializedScript("isolation-first-" + suffix, "A");
+        string sharedConfig = Path.Combine(Path.GetTempPath(), "isolation-" + suffix, "shared.json");
+        ScriptInstance blocked = new() { Id = "isolation-blocked-" + suffix, Name = "B", ConfigPath = sharedConfig };
+        ScriptInstance independent = new() { Id = "isolation-independent-" + suffix, Name = "C" };
+        ScriptInstance[] scripts = [first, blocked, independent];
+        var queue = new DispatchQueue
+        {
+            Id = "isolation-queue-" + suffix, Name = "持久化失败停止",
+            CompletionAction = "shutdown",
+            Tasks = scripts.Select((script, index) => new QueueTask { ScriptInstanceId = script.Id, Index = index }).ToList(),
+        };
+        PlannedQueueTask[] tasks = scripts.Select((script, index) => new PlannedQueueTask(
+            queue.Tasks[index], script, ["测试用户"],
+            [new ResolvedScriptUser("user-" + script.Id, "测试用户",
+                new UserScriptBinding { ScriptInstanceId = script.Id })])).ToArray();
+        var mark = new ConfigSessionMark
+        {
+            ScriptId = first.Id, UserId = "recovery-owner", ConfigPath = sharedConfig,
+            ConfigKind = "file", SessionPhase = "run",
+            RecoveryIsolation = new ConfigSessionRecoveryIsolation
+            {
+                CauseCode = "config_restore_failed", ScopeQuality = "complete", MayContinueIndependent = true,
+            },
+        };
+        var history = new CapturingHistoryStore { PersistenceWarningScriptId = blocked.Id };
+        history.AfterSave = record => { if (record.ScriptInstanceId == first.Id) mark.Write(); };
+        var state = new ExecutionStateStore();
+        var runner = CreateRunner(history, new FakePluginAvailability(), state);
+        var execution = new RunningExecution
+        {
+            Kind = "queue", TargetId = queue.Id, TargetName = queue.Name,
+            Mode = "manual", TotalTasks = tasks.Length,
+        };
+        var plan = new QueueExecutionPlan(queue, tasks,
+            ExecutionAdmissionProfile.ForQueue(queue, tasks), tasks.Length);
+        Assert.True(state.TryRegister(execution, plan.Admission, out _));
+        try
+        {
+            await runner.RunQueueAsync(execution, plan);
+            Assert.Equal("error", execution.Status);
+            Assert.Equal(new[] { first.Id, blocked.Id }, history.Records.Select(record => record.ScriptInstanceId));
+            Assert.Null(state.CurrentSystemAction);
+        }
+        finally
+        {
+            string directory = Path.Combine(AppPaths.DataDir, first.Id);
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
     private static ScriptInstance SpecializedScript(string id, string name) => new()
     {
         Id = id,
@@ -188,15 +320,18 @@ public sealed class UnavailablePluginExecutionTests : IClassFixture<HostTestScop
 
     private static ExecutionRunner CreateRunner(
         IHistoryStore history,
-        IPluginAvailability plugins)
+        IPluginAvailability plugins,
+        ExecutionStateStore? state = null)
     {
+        state ??= new ExecutionStateStore();
         return new ExecutionRunner(
             new EmptyUserRepository(),
             history,
             new NoopNotificationService(),
-            new SystemActionExecutor(new ExecutionStateStore()),
+            new SystemActionExecutor(state),
             plugins,
-            new EmptyEmulatorSupportProviderResolver());
+            new EmptyEmulatorSupportProviderResolver(),
+            state: state);
     }
 
     private sealed class EmptyEmulatorSupportProviderResolver : IEmulatorSupportProviderResolver
@@ -208,11 +343,15 @@ public sealed class UnavailablePluginExecutionTests : IClassFixture<HostTestScop
     private sealed class CapturingHistoryStore : IHistoryStore
     {
         public List<RunRecord> Records { get; } = new();
+        public Action<RunRecord>? AfterSave { get; set; }
+        public string? PersistenceWarningScriptId { get; set; }
 
         public HistorySaveResult Save(RunRecord record, List<string> attemptLogs, IReadOnlyList<RunScreenshot> screenshots)
         {
             Records.Add(record.Clone());
-            return new HistorySaveResult(record.Clone(), null);
+            AfterSave?.Invoke(record);
+            return new HistorySaveResult(record.Clone(), record.ScriptInstanceId == PersistenceWarningScriptId
+                ? "synthetic storage failure" : null);
         }
 
         public IReadOnlyDictionary<string, int> GetSuccessfulRunsByUser(DateTime date, string scriptInstanceId) =>

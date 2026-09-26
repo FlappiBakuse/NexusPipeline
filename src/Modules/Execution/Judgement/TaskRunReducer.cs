@@ -8,6 +8,8 @@ internal sealed record TaskEffectiveResult(string TaskId, string Status, string 
 {
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public System.Text.Json.Nodes.JsonObject? ReasonText { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string[]? StructuredEvidenceRefs { get; init; }
 }
 internal sealed record TaskSummary(string Tone, string Outcome, Dictionary<string, int> Counts, bool Recovered);
 internal sealed record TaskRetrySelection(string Decision, string ReasonCode, string[] IncludedTaskIds,
@@ -64,10 +66,16 @@ internal sealed class TaskRunReducer
     }
 
     internal void Accept(TaskObservationBatch batch, TaskLogBatch logs)
+        => AcceptCore(batch, logs, null);
+
+    internal void AcceptStructured(TaskObservationBatch batch, IReadOnlySet<string> authenticatedEvidence)
+        => AcceptCore(batch, new([], false), authenticatedEvidence);
+
+    private void AcceptCore(TaskObservationBatch batch, TaskLogBatch logs, IReadOnlySet<string>? structuredEvidence)
     {
         var available = new HashSet<(string, int, long)>(_evidence);
         foreach (var line in logs.Records) available.Add((line.SourceId, line.Epoch, line.Sequence));
-        TaskProtocolValidation.Observation(batch, RunId, _attemptId, _selected, available);
+        TaskProtocolValidation.Observation(batch, RunId, _attemptId, _selected, available, structuredEvidence);
         TaskProtocolValidation.Require(batch.ProtocolVersion == _plan.ProtocolVersion, "negotiated observation version");
         TaskProtocolValidation.Require(available.Count <= 262144 && _accepted.Count + batch.Observations.Count(o => !_accepted.ContainsKey(o.Id)) <= 65536,
             "resource_limit: attempt evidence ledger");
@@ -121,7 +129,8 @@ internal sealed class TaskRunReducer
             string status = observation.Status;
             if (_tasks[observation.TaskId].Detection == "unsupported" && status is "succeeded" or "skipped") status = "unknown";
             _effective[observation.TaskId] = new(observation.TaskId, status, observation.ReasonCode,
-                _attemptId, observation.ExecutionOrdinal, observation.Evidence.ToArray()) { ReasonText = observation.ReasonText?.DeepClone().AsObject() };
+                _attemptId, observation.ExecutionOrdinal, observation.Evidence.ToArray())
+            { ReasonText = observation.ReasonText?.DeepClone().AsObject(), StructuredEvidenceRefs = observation.StructuredEvidenceRefs?.ToArray() };
             _hadFailure |= status == "failed";
         }
         _evidence = available;

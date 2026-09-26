@@ -6,9 +6,15 @@
 
 ## 首发协议文本引用
 
-宿主仅识别首发专项协议 `0.1.0`；当前八个专项插件均声明该协议，最低 Host 为尚未发布的 0.16.8 开发构建。旧开发版 `1.0`、`1.1`、`1.2` 声明会被拒绝，不回退旧 judge。
+宿主支持 `0.1.0` 声明和 v0.16.9 新增的 `0.1.1` 声明。后者扩展受控修复及运行状态字段声明，最低 Host 为 `0.16.9`；三阶段输出线格式均为 `0.1.0`。旧开发版 `1.0`、`1.1`、`1.2` 声明会被拒绝，不回退旧 judge。
 
-`0.1.0` 在 `taskProtocol` 中要求 `localization: {defaultLocale, messages}`；messages 将 locale 映射到包内 `data/i18n/*.json` 平面字符串词典。最多 16 个语言、每个语言 4096 项，全部词典共 256 KiB；路径、重解析点、重复 key 和词条长度均校验。所有阶段的输出版本必须与 manifest 一致。
+`taskProtocol` 要求 `localization: {defaultLocale, messages}`；messages 将 locale 映射到包内 `data/i18n/*.json` 平面字符串词典。最多 16 个语言、每个语言 4096 项，全部词典共 256 KiB；路径、重解析点、重复 key 和词条长度均校验。所有阶段的输出版本必须为 `0.1.0`。
+
+### 启动进程与输出声明
+
+`resolve.json` 可声明 `outputEncoding` 为 `utf-8`、`windows-936` 或 `system-default`，在逐行切分前按该编码解码 stdout 和 stderr；缺省保持既有系统默认，未知值拒绝推导。
+
+带 `taskProtocol` 的包可声明 `process: {rootRole: "game_launcher", writesManagedConfig: false}`。只有完整启动身份匹配且明确不写接管配置的纯 launcher 可以保留；`writesManagedConfig: true` 按必要配置 writer 处理，不能因 launcher 名称逃过停止和恢复屏障。缺声明仍为普通必要自动化进程；未知角色或缺少写入声明拒绝推导。
 
 任务可附 `nameText`，观察、诊断、重试可附 `reasonText`。引用为 `{kind:"literal",value}` 或 `{kind:"plugin",key,args,fallback}`，不允许 owner；插件身份由 Host 从已解析实例赋予。key 最多 160 个 ASCII 字母、数字、点、横线或下划线；args 最多 16 个字符串/有限数值/布尔值，字符串最多 256 字符；literal/fallback 最多 2048 字符。占位符为 `{argument}`，缺失参数使用回退，不递归解释参数文本。不应把账号、日志或凭据传入参数。
 
@@ -70,7 +76,7 @@ node tests/run.mjs release all
 
 `0.1.0` 的 `readResources` 可添加可选 `sha256`，值为 64 位小写十六进制，且资源必须为 `source: root`、`format: text`。宿主按捕获的原始字节比较，包含 BOM 和换行；`readResource` 增加 `integrity: verified|mismatch`。不匹配时 document 为 null，缺失/不可读仍按资源不可用处理。未声明哈希的资源返回形状不变；配置 revision 仍为不透明令牌，不返回内容摘要。既有路径白名单、单文件及总量预算不变。
 
-此声明用于已审查发行的高级判定。发现时由插件 critical 规则决定阻断；运行阶段 Host 在接受观察前及结束时复核已固定资源，变化或不可读会停止接受后续证据及自动重试，记录运行链异常，保留此前任务事实。OK 两款较新的同主版本只有在对应渠道的官方来源、安装元数据、空闲更新器、完整 HEAD 和基础配置形态可确认时才建立受限计划。受限运行只保留基础生命周期，业务任务始终未核验；Host 不调用旧版观察器或选择重试。运行阶段逐字节复核运行资源；`runtime-app` 仅允许上游写入布尔 `running` 和 `last_start`，版本、渠道、更新状态等字段仍需一致。可写用户配置由现有事务恢复，不作为发行身份字节。资源变化或不可读仍会拒绝后续证据。受限路径不证明全部 Python 依赖、解释器或瞬时替换安全，也不会阻止上游启动器修复/更新；新发行的高级判定仍须重新审查。
+此声明用于已审查发行的高级判定。发现时由插件 critical 规则决定阻断；运行阶段 Host 在接受观察前及结束时复核已固定资源，变化或不可读会停止接受后续证据及自动重试，记录运行链异常，保留此前任务事实。OK 两款较新的同主版本只有在对应渠道的官方来源、安装元数据、空闲更新器、完整 HEAD 和基础配置形态可确认时才建立受限计划。受限运行只保留基础生命周期，业务任务始终未核验；Host 不调用旧版观察器或选择重试。`0.1.1` 的只读 JSON 资源可声明最多两个 `operationalFields`，类型限布尔与时间戳；运行期只允许这些字段按类型改变，其余字段仍须一致，发行身份及更新字段不能列入该声明。未声明的只读资源逐字节保持稳定。OK 启动前另对安装目录中的嵌入式 Python worker 做进程映像观测；持久 `running=true` 且确认无 worker 时只进入受限流程，实际 worker 活动或观测不可读则阻断，驻留启动器本身不构成冲突。可写用户配置由现有事务恢复，不作为发行身份字节。资源变化或不可读仍会拒绝后续证据。受限路径不证明全部 Python 依赖、解释器或瞬时替换安全，也不会阻止上游启动器修复/更新；新发行的高级判定仍须重新审查。
 
 环境目标可声明 `source: {kind: "mainConfig", selector: [...]}`，仅在绑定捕获恰好一份主配置时解析，文件改名不改变归属；目录多配置或无配置时返回未检查，不从附加配置或其他账号回退。可选 `defaultValue`、`secondaryDefaultValue` 必须为有界字符串且对应单层属性 selector，只用于该属性不存在，显式 null、空值和错误类型不能被默认值掩盖。ADB 端口 selector 接受整数或字符串，地址组合仍只作格式/相等比较，不联网探测。默认值必须有锁定上游依据。
 
@@ -81,10 +87,12 @@ Host 联调工具的 `--runtime-installations <matrix.json>` 从显式 `cases`�
 
 保存脚本实例与完成配置编辑都使用 `0.1.0` 协议的 `discover` 配置诊断；诊断失败不回退旧接口。声明 `configValidator` 的旧包被拒绝并提示升级或卸载，现有用户快照保持不变。一个绑定的反馈不会因另一个绑定文字相同而被去重。
 
-v0.16.9 的本地 Web 可在设置页逐次开启“允许逐次配置修复”。当前自动修复仅覆盖 March7thAssistant 插件 0.3.0 的用户级单文件快照中已知危险 `after_finish` 系统动作，将其建议为 `None`。预览只返回插件、用户绑定、字段、白名单原值、建议值、原因、影响及进程内预览令牌；点击应用才重新核对开关、插件/profile、快照元数据和字节修订，借现役配置快照事务提交。共享 extra config、多文件快照、未知值、旧/受限版本均须手动编辑；本功能不修改未接管的现场配置、不对其他诊断自动推断修复。事务出错保留恢复现场。内部受控选择补丁和常规配置编辑不受该开关影响。
+v0.16.9 的本地 Web 可在设置页逐次开启“允许逐次配置修复”。`taskProtocol` 包声明 `0.1.1` 增加必需的 `repairRules` 数组，要求 `minHostVersion >= 0.16.9`；三阶段线格式仍是 `0.1.0`。旧 Host 对未知声明版本拒绝加载。当前 March7thAssistant 插件 0.3.1 声明一项有限能力：用户级 `config.yaml` 单文件快照的已识别危险 `after_finish` 动作可建议为 `None`。Host 还限制资源、字段、取值和脚本根目录归属；其他规则仅指导手动编辑。预览只返回插件、用户绑定、字段、原值、建议值、原因、影响及进程内令牌；点击应用才重新核对开关、冻结修复声明、插件/profile、快照元数据和文件字节，借现役配置快照事务提交。共享 extra config、多文件快照、未知值和未声明能力均须手动编辑；本功能不修改未接管的现场配置。事务出错保留恢复现场。内部受控选择补丁和常规配置编辑不受该开关影响。
 
 预览的 `configuration_busy`、`cancelled`、`timeout`、`resource_limit` 与 `protocol_error` 分别表示占用/变化、取消、超时、资源预算和插件协议错误，不视作配置通过或业务失败。保存完成后的检查异常仅返回安全摘要，不返回原始脚本异常、文件路径或凭据。旧开发版协议声明会明确拒绝；`0.1.0` 的 `configAssessment` 必须完整且通过声明约束。
 
 ## MXU PC 启动事实
 
 `executionContext.gameTarget.ready` 是可选的宿主只读布尔值：仅 MaaEnd 与 MaaStellaSora 的 PC 运行前准入在 `LaunchGame=false` 时填入。`true` 表示按本次配置的游戏进程名找到了可见窗口；`false` 表示该时点未找到。预览、其他模式及旧宿主没有此字段，插件须按未知处理，不能把缺失当作 `false`。它不证明 MXU 控制器已成功连接，也不能替代启动后 stdout/超时监控。
+
+`executionContext.queue` 在队列运行时还可提供 `nextTargetRelation`（`same` / `different` / `unknown`）和 `nextLaunchOwner`（`host` / `upstream` / `already_running` / `unknown`）。只有同一目标且下一项依赖已有窗口，才将“关闭游戏和软件”判为确定冲突；不明责任保持告警。跨队列静态预览不能把其中一个后继上下文写成永久配置错误。数据化插件可在 `resolve.json` 声明 `outputEncoding` 为 `utf-8`、`windows-936` 或 `system-default`，通用进程读取器按声明解码 stdout/stderr；缺省保持旧行为。

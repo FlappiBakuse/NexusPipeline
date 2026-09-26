@@ -1,5 +1,9 @@
 using System.Diagnostics;
 using System.Text.Json;
+using System.Security.Cryptography;
+using System.Text.Json.Serialization;
+using NexusPipeline.Platform.Processes;
+using NexusPipeline.Platform.Windows;
 using NexusPipeline.Platform.Storage;
 using NexusPipeline.Shared.Logging;
 using NexusPipeline.Shared.Serialization;
@@ -16,6 +20,7 @@ internal static class UpdatePhase
     public const string BackupReady = "BackupReady";
     public const string SwapInProgress = "SwapInProgress";
     public const string SwapReady = "SwapReady";
+    public const string AwaitingStartup = "AwaitingStartup";
     public const string Committed = "Committed";
     public const string RollbackPending = "RollbackPending";
     public const string RollbackConfirmed = "RollbackConfirmed";
@@ -31,6 +36,12 @@ internal sealed record UpdateTask(
     string Phase = "",
     DateTimeOffset? CreatedAt = null)
 {
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TransactionId { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TargetImageHash { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ProcessIdentity? WorkerIdentity { get; init; }
     public static UpdateTask? Read(string? path = null)
     {
         string file = path ?? AppPaths.UpdateTaskFile;
@@ -56,6 +67,10 @@ internal sealed record UpdateTask(
             {
                 throw new InvalidDataException("更新 journal 的 Phase 为空");
             }
+            if (task.TransactionId is not null && (!Guid.TryParseExact(task.TransactionId, "N", out _)
+                || task.TargetImageHash is not { Length: 64 }
+                || task.TargetImageHash.Any(ch => !Uri.IsHexDigit(ch))))
+                throw new InvalidDataException("更新事务身份无效");
             return task;
         }
         catch (Exception ex)
@@ -110,6 +125,8 @@ internal static class UpdateApply
     private const int RequiredFileRetryCount = 10;
     private static readonly TimeSpan RequiredFileRetryDelay = TimeSpan.FromMilliseconds(200);
     private static int _startupRecoveryUnsafe;
+    private static string TransactionMutexName => "NexusPipeline.Update." + Convert.ToHexString(SHA256.HashData(
+        System.Text.Encoding.UTF8.GetBytes(Path.GetFullPath(AppPaths.AppRoot).TrimEnd('\\').ToUpperInvariant())));
 
     internal static bool StartupRecoveryUnsafe => Volatile.Read(ref _startupRecoveryUnsafe) != 0;
 
@@ -118,6 +135,20 @@ internal static class UpdateApply
         string stagedDir,
         bool webOnly = false,
         string? mutexName = null)
+    {
+        // Running the replaceable image as its own worker can never release it.
+        if (string.Equals(Environment.ProcessPath, Path.Combine(AppPaths.AppRoot, "nexus-pipeline.exe"), StringComparison.OrdinalIgnoreCase))
+        { Logger.Error("[更新] 请通过复制 worker 交接；原宿主映像不可执行交换。"); return 1; }
+        using var transactionMutex = new Mutex(false, TransactionMutexName);
+        bool acquired;
+        try { acquired = transactionMutex.WaitOne(0); }
+        catch (AbandonedMutexException) { acquired = true; }
+        if (!acquired) { Logger.Error("[更新] 已有更新 worker 持有本实例事务。"); return 1; }
+        try { return RunApplyTransaction(stagedDir, webOnly, mutexName); }
+        finally { transactionMutex.ReleaseMutex(); }
+    }
+
+    private static int RunApplyTransaction(string stagedDir, bool webOnly, string? mutexName)
     {
         Logger.Info("[更新] apply-update 进程启动，等待主实例退出...");
         Audit.Log(Audit.System, "更新切换", "apply-update 进程启动");
@@ -128,9 +159,13 @@ internal static class UpdateApply
             return 1;
         }
         string targetVersion = task?.Version ?? Path.GetFileName(stagedDir.TrimEnd(Path.DirectorySeparatorChar));
-        UpdateTask journal = task ?? new UpdateTask("apply", targetVersion, stagedDir, UpdatePhase.ApplyRequested, DateTimeOffset.UtcNow);
+        UpdateTask journal = task ?? new UpdateTask("apply", targetVersion, stagedDir, UpdatePhase.ApplyRequested);
+        // Freeze the timestamp for compatible older journals which omitted it.
+        journal = journal with { CreatedAt = journal.CreatedAt ?? DateTimeOffset.UtcNow };
         bool staleBackupDetected = false;
         bool backupComplete = false;
+        Process? candidateProcess = null;
+        ProcessIdentity? candidateIdentity = null;
         try
         {
             ValidateStagedPath(stagedDir);
@@ -138,6 +173,7 @@ internal static class UpdateApply
             {
                 Logger.Error("[更新] 等待主实例退出超时（120 秒），更新取消。");
                 Audit.Log(Audit.System, "更新切换失败", "等待主实例退出超时");
+                WriteTransactionResult(journal, false, "host_release_timeout");
                 AbortBeforeBackup(journal);
                 return 1;
             }
@@ -146,6 +182,7 @@ internal static class UpdateApply
             if (ConfigUpdateAdmission.HasPendingRecovery(AppPaths.DataDir))
             {
                 Logger.Error("[更新] 配置恢复现场尚未清理，保留更新暂存和 journal，拒绝切换版本。");
+                WriteTransactionResult(journal, false, "configuration_recovery_pending");
                 return 1;
             }
             string stageExe = Path.Combine(stagedDir, "nexus-pipeline.exe");
@@ -155,6 +192,8 @@ internal static class UpdateApply
             }
 
             string backup = AppPaths.UpdateBackupDir;
+            journal = journal with { TransactionId = journal.TransactionId ?? Guid.NewGuid().ToString("N"),
+                TargetImageHash = ImageHash(stageExe), WorkerIdentity = ProcessIdentity.Capture(Process.GetCurrentProcess()) };
             staleBackupDetected = Directory.Exists(backup) || File.Exists(backup);
             EnsureNoStaleBackup(backup);
             journal = journal with { Mode = "apply", Phase = UpdatePhase.BackupPreparing };
@@ -183,12 +222,21 @@ internal static class UpdateApply
             journal.Write();
             PauseForFaultInjection(UpdatePhase.SwapReady);
 
+            journal = journal with { Phase = UpdatePhase.AwaitingStartup };
+            journal.Write();
+            candidateProcess = LaunchService(installDir, webOnly);
+            candidateIdentity = CaptureCandidateIdentity(candidateProcess, oldExe);
+            if (candidateIdentity is null) throw new IOException("新宿主启动身份无法确认");
+            WaitForStartupReceipt(journal, candidateProcess, candidateIdentity.Value);
+            InstallationOwnership.RefreshAfterUpdate(installDir, targetVersion);
             WriteVersionFile(targetVersion);
             journal = journal with { Mode = "completed", Phase = UpdatePhase.Committed };
             journal.Write();
             Audit.Log(Audit.System, "更新应用完成", $"v{targetVersion}（staging：{stagedDir}）");
             Logger.Info($"[更新] 文件交换完成（v{targetVersion}），正在重新拉起宿主。");
-            LaunchService(installDir, webOnly);
+            CleanupAfterCompletion();
+            Audit.Log(Audit.System, "更新完成", $"v{targetVersion}（候选启动、映像、事务收尾已确认）");
+            WriteTransactionResult(journal, true, "committed");
             return 0;
         }
         catch (Exception ex)
@@ -198,10 +246,18 @@ internal static class UpdateApply
             UpdateTask? current = UpdateTask.Read();
             if (ReadVersionFile() is not null || string.Equals(current?.Phase, UpdatePhase.Committed, StringComparison.Ordinal))
             {
-                // 新版本已经 commit：保留 marker/journal/backup，交给新实例启动收尾。
-                Logger.Error("[更新] 新版本已提交但启动收尾未完成，保留 journal 与 backup 供下次启动处理。");
+                WriteTransactionResult(journal, false, "committed_cleanup_pending");
+                Logger.Error("[更新] 启动已核对，但提交收尾失败；保留 journal 与 backup。");
                 return 1;
             }
+            if (candidateProcess is not null && candidateIdentity is not null
+                && !SystemActions.KillEditProcess(null, candidateIdentity, candidateProcess.Id,
+                    Path.Combine(AppPaths.AppRoot, "nexus-pipeline.exe"), "unqualified update candidate", rounds: 2, intervalMs: 100, stableSeconds: 1))
+            {
+                Logger.Error("[更新] 新宿主未通过启动核对且退出未确认；保留唯一备份，禁止覆盖。");
+                WriteTransactionResult(journal, false, "candidate_stop_unconfirmed"); return 1;
+            }
+            WriteTransactionResult(journal, false, "apply_failed");
             if (staleBackupDetected)
             {
                 // 旧 backup 的归属无法在 worker 内安全分类：严禁拿它作为本次回滚源，也严禁自动删除。
@@ -234,7 +290,7 @@ internal static class UpdateApply
                     try
                     {
                         Logger.Warn("[更新] 正在重新拉起回滚后的宿主版本。");
-                        LaunchService(AppPaths.AppRoot, webOnly);
+                        LaunchService(AppPaths.AppRoot, webOnly).Dispose();
                     }
                     catch (Exception launchEx)
                     {
@@ -250,7 +306,7 @@ internal static class UpdateApply
                     try
                     {
                         Logger.Warn("[更新] 文件交换前更新失败，正在重新拉起现有宿主版本。");
-                        LaunchService(AppPaths.AppRoot, webOnly);
+                        LaunchService(AppPaths.AppRoot, webOnly).Dispose();
                     }
                     catch (Exception launchEx)
                     {
@@ -260,6 +316,7 @@ internal static class UpdateApply
             }
             return 1;
         }
+        finally { candidateProcess?.Dispose(); }
     }
 
     /// <summary>
@@ -304,6 +361,13 @@ internal static class UpdateApply
             Logger.Error("[更新] journal 存在但无法读取，保留现场并停止自动更新。");
             Volatile.Write(ref _startupRecoveryUnsafe, 1);
             return false;
+        }
+        if (pending.Phase == UpdatePhase.AwaitingStartup)
+        {
+            bool? alive = ObserveWorker(pending.WorkerIdentity);
+            if (alive == true) return false; // backup remains immutable until actual services are ready
+            if (alive is null) { Volatile.Write(ref _startupRecoveryUnsafe, 1); return false; }
+            // A crashed worker has not committed. Existing rollback recovery owns this case.
         }
 
         if (pending.Phase == UpdatePhase.BackupPreparing)
@@ -433,7 +497,7 @@ internal static class UpdateApply
         try
         {
             Rollback(pending with { Mode = "apply", Phase = UpdatePhase.RollbackPending });
-            LaunchService(AppPaths.AppRoot, webOnly);
+            LaunchService(AppPaths.AppRoot, webOnly).Dispose();
             return 0;
         }
         catch (Exception ex)
@@ -540,6 +604,7 @@ internal static class UpdateApply
         CopySnapshotItem(Path.Combine(installDir, "wwwroot"), Path.Combine(backup, "wwwroot"));
         EnsureOptionalAssetTargetIsSafe(Path.Combine(installDir, "README.md"));
         CopySnapshotItem(Path.Combine(installDir, "README.md"), Path.Combine(backup, "README.md"));
+        InstallationOwnership.SnapshotForUpdate(installDir, backup);
         WriteRequiredText(Path.Combine(backup, BackupReadyMarker), DateTimeOffset.UtcNow.ToString("O"));
     }
 
@@ -622,6 +687,7 @@ internal static class UpdateApply
         string readmeTarget = Path.Combine(installDir, "README.md");
         if (File.Exists(readmeBackup)) RestoreFromBackup(readmeBackup, readmeTarget);
         else DeletePathRequired(readmeTarget);
+        InstallationOwnership.RestoreAfterRollback(installDir, backup);
         UpdateTask confirmed = journal with { Mode = "apply", Phase = UpdatePhase.RollbackConfirmed };
         confirmed.Write();
         Audit.Log(Audit.System, "更新回滚完成", "旧版本文件已从 immutable backup 还原");
@@ -1065,7 +1131,7 @@ internal static class UpdateApply
     /// <summary>测试注入点：L2 单测替换 recovery worker 拉起。</summary>
     internal static Func<bool>? LaunchRecoveryOverride;
 
-    private static void LaunchService(string installDir, bool webOnly)
+    private static Process LaunchService(string installDir, bool webOnly)
     {
         string exePath = Path.Combine(installDir, "nexus-pipeline.exe");
         var startInfo = new ProcessStartInfo(exePath)
@@ -1083,9 +1149,126 @@ internal static class UpdateApply
         {
             throw new InvalidOperationException("重新拉起宿主失败：Process.Start 未返回进程");
         }
-        process.Dispose();
         Logger.Info(webOnly
             ? "[更新] 已重新拉起宿主（web 模式）。"
             : "[更新] 已重新拉起宿主（服务模式）。");
+        return process;
+    }
+
+    internal static string ImageHash(string path)
+    {
+        using var stream = File.OpenRead(path);
+        return Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
+    }
+
+    internal static string TransactionResultPath(string transactionId)
+    {
+        if (!Guid.TryParseExact(transactionId, "N", out _)) throw new InvalidDataException("update.transaction_id");
+        return Path.Combine(AppPaths.StateDir, "updates", transactionId + ".result.json");
+    }
+
+    private static string StartupReceiptPath(string transactionId) => TransactionResultPath(transactionId).Replace(".result.json", ".startup.json", StringComparison.Ordinal);
+    private sealed record StartupReceipt(string TransactionId, string Version, string ImageHash, ProcessIdentity Identity, DateTimeOffset ReadyAtUtc);
+
+    internal static bool RequiresStartupQualification => UpdateTask.Read()?.Phase == UpdatePhase.AwaitingStartup;
+
+    /// <summary>Called only after runtime, plugins and the owning Control API have started, under the existing maintenance lease.</summary>
+    internal static bool ConfirmStartupReadiness()
+    {
+        UpdateTask? task = UpdateTask.Read();
+        if (task?.Phase != UpdatePhase.AwaitingStartup) return true;
+        try
+        {
+            if (task.TransactionId is null || ObserveWorker(task.WorkerIdentity) != true || task.Version != UpdateService.CurrentVersion)
+                throw new IOException("update.startup_identity");
+            using var current = Process.GetCurrentProcess();
+            var identity = ProcessIdentity.Capture(current) ?? throw new IOException("update.startup_process");
+            string image = Environment.ProcessPath ?? throw new IOException("update.startup_image");
+            if (!string.Equals(image, Path.Combine(AppPaths.AppRoot, "nexus-pipeline.exe"), StringComparison.OrdinalIgnoreCase)
+                || ImageHash(image) != task.TargetImageHash) throw new IOException("update.startup_hash");
+            Directory.CreateDirectory(Path.GetDirectoryName(StartupReceiptPath(task.TransactionId))!);
+            JsonUtil.WriteAtomic(StartupReceiptPath(task.TransactionId), JsonSerializer.Serialize(
+                new StartupReceipt(task.TransactionId, task.Version, task.TargetImageHash!, identity, DateTimeOffset.UtcNow)));
+            DateTime deadline = DateTime.UtcNow.AddSeconds(30);
+            while (DateTime.UtcNow < deadline)
+            {
+                string result = TransactionResultPath(task.TransactionId);
+                if (File.Exists(result))
+                {
+                    using var doc = JsonDocument.Parse(File.ReadAllText(result));
+                    return doc.RootElement.GetProperty("Succeeded").GetBoolean()
+                        && doc.RootElement.GetProperty("TransactionId").GetString() == task.TransactionId;
+                }
+                if (ObserveWorker(task.WorkerIdentity) != true) return false;
+                Thread.Sleep(100);
+            }
+        }
+        catch (Exception ex) { Logger.Error($"[更新] 启动核对失败，保留事务备份：{ex.Message}"); }
+        return false;
+    }
+
+    private static void WaitForStartupReceipt(UpdateTask task, Process candidate, ProcessIdentity identity)
+    {
+        DateTime deadline = DateTime.UtcNow.AddSeconds(60);
+        while (DateTime.UtcNow < deadline)
+        {
+            if (candidate.HasExited) throw new IOException("update.candidate_exited:" + candidate.ExitCode);
+            string path = StartupReceiptPath(task.TransactionId!);
+            if (File.Exists(path))
+            {
+                var receipt = JsonSerializer.Deserialize<StartupReceipt>(File.ReadAllText(path));
+                if (receipt is null) throw new InvalidDataException("update.startup_receipt_null");
+                if (receipt.TransactionId != task.TransactionId) throw new InvalidDataException("update.startup_receipt_transaction");
+                if (receipt.Version != task.Version) throw new InvalidDataException("update.startup_receipt_version");
+                if (receipt.ImageHash != task.TargetImageHash) throw new InvalidDataException("update.startup_receipt_declared_hash");
+                if (!receipt.Identity.Matches(identity))
+                    throw new InvalidDataException($"update.startup_receipt_process:pid={receipt.Identity.Pid == identity.Pid},time={receipt.Identity.StartTime == identity.StartTime},image={string.Equals(receipt.Identity.ImageName, identity.ImageName, StringComparison.OrdinalIgnoreCase)}");
+                if (task.CreatedAt is null || receipt.ReadyAtUtc < task.CreatedAt)
+                    throw new InvalidDataException("update.startup_receipt_time");
+                if (ImageHash(identity.ImageName) != task.TargetImageHash)
+                    throw new InvalidDataException("update.startup_receipt_actual_hash");
+                return;
+            }
+            Thread.Sleep(100);
+        }
+        throw new TimeoutException("update.startup_readiness_timeout");
+    }
+
+    private static ProcessIdentity? CaptureCandidateIdentity(Process candidate, string executable)
+    {
+        // Process.Start can return before MainModule is readable. Capture's
+        // basename fallback is useful for diagnostics, but cannot qualify an update.
+        DateTime deadline = DateTime.UtcNow.AddSeconds(2);
+        do
+        {
+            var identity = ProcessIdentity.Capture(candidate);
+            if (identity is not null && string.Equals(identity.Value.ImageName, executable, StringComparison.OrdinalIgnoreCase))
+                return identity;
+            if (candidate.HasExited) return null;
+            Thread.Sleep(25);
+        } while (DateTime.UtcNow < deadline);
+        return null;
+    }
+
+    internal static bool? ObserveWorker(ProcessIdentity? expected)
+    {
+        if (expected is null) return null;
+        try
+        {
+            using var process = Process.GetProcessById(expected.Value.Pid);
+            if (process.HasExited) return false;
+            var current = ProcessIdentity.Capture(process);
+            return current is null ? null : expected.Value.Matches(current.Value);
+        }
+        catch (ArgumentException) { return false; }
+        catch (Exception) { return null; }
+    }
+
+    private static void WriteTransactionResult(UpdateTask task, bool succeeded, string code)
+    {
+        if (task.TransactionId is null) return;
+        Directory.CreateDirectory(Path.GetDirectoryName(TransactionResultPath(task.TransactionId))!);
+        JsonUtil.WriteAtomic(TransactionResultPath(task.TransactionId), JsonSerializer.Serialize(new
+        { task.TransactionId, task.Version, Succeeded = succeeded, Code = code, AtUtc = DateTimeOffset.UtcNow }));
     }
 }

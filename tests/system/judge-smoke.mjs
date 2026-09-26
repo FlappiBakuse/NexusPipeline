@@ -210,7 +210,9 @@ test("专项协议运行边界：脚本保持打开时完成监控，未确认�
     assert.equal(started.status,200,await started.clone().text());
     assert.equal(await waitNoRunning(60000),true,"Explicit boundary completes a live process without waiting for stall");
     const record=await waitForHistory(script.id);
-    assert.equal(record.status,"partial",JSON.stringify(record));
+    assert.equal(record.status,"unverified",JSON.stringify(record));
+    assert.equal(record.resultCode,"tasks.unverified");
+    assert.equal(record.outcomes.businessVerification,"unverified");
     const results=record.taskReport.finalTaskResults;
     assert.equal(results.find(t=>t.taskId==='a').status,'succeeded');
     assert.equal(results.find(t=>t.taskId==='b').status,'unknown');

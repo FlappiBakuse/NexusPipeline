@@ -168,11 +168,16 @@ internal static class ApiDispatchHandler
             await HttpHelper.MethodNotAllowedAsync(context).ConfigureAwait(false);
             return;
         }
+        long handlerTimestamp = System.Diagnostics.Stopwatch.GetTimestamp();
+        DateTime requestReceivedUtc = DateTime.UtcNow;
         JsonNode? node = HttpHelper.ParseBody(body);
         string runId = node.Get("runId").Str();
         try
         {
             CancellationRequestResult result = dispatchCenter.RequestCancellation(runId, Audit.Web);
+            double requestMs = System.Diagnostics.Stopwatch.GetElapsedTime(context.AcceptedTimestamp, handlerTimestamp).TotalMilliseconds;
+            double cancelMs = System.Diagnostics.Stopwatch.GetElapsedTime(handlerTimestamp).TotalMilliseconds;
+            context.Response.Headers["Server-Timing"] = FormattableString.Invariant($"request;dur={requestMs:F3}, cancel;dur={cancelMs:F3}, received;desc=\"{requestReceivedUtc:O}\"");
             string state = result switch
             {
                 CancellationRequestResult.Accepted => "accepted",

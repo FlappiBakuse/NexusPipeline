@@ -5,7 +5,8 @@
 | 契约 | 负责内容 | 入口 |
 |---|---|---|
 | Manifest 与包格式 | `plugin.json`、`store.json`、资源路径、能力声明和发行布局 | [manifest.md](manifest.md) |
-| Managed Plugin API | `INexusPlugin` 生命周期、Plugin API v1.8、用户/数据/通知/模拟器等服务端口 | [managed.md](managed.md) |
+| Managed Plugin API | `INexusPlugin` 生命周期、Plugin API v1.9、用户/数据/通知/模拟器等服务端口 | [managed.md](managed.md) |
+| 执行 provider | 冻结计划、Host worker、结构化事件和既有队列／恢复接入 | [execution-provider.md](execution-provider.md) |
 | Frontend API | Frontend API 1.5、`activate(host)`、路由/导航/slot、公共元素和 dispose | [frontend.md](frontend.md) 与 [UI 参考](../ui/README.md) |
 | Data-specialized | `resolve.json`、judge、只读探针、截图和 `config-restore.json` | [data-specialized.md](data-specialized.md) |
 

@@ -26,6 +26,7 @@ internal sealed class GameLaunchController
     private readonly Action<IEmulatorDriver> _setEmulatorDriver;
     private readonly Action<IEmulatorDriver?, bool> _setEmulatorPreviewTarget;
     private readonly Action<string>? _statusChanged;
+    private readonly Action<ProcessIdentity>? _gameStarted;
 
     public GameLaunchController(
         ScriptInstance script,
@@ -39,7 +40,8 @@ internal sealed class GameLaunchController
         IEmulatorSupportProviderResolver emulatorSupportProviders,
         Action<IEmulatorDriver> setEmulatorDriver,
         Action<IEmulatorDriver?, bool> setEmulatorPreviewTarget,
-        Action<string>? statusChanged)
+        Action<string>? statusChanged,
+        Action<ProcessIdentity>? gameStarted = null)
     {
         _script = script;
         _resolvedSpec = resolvedSpec;
@@ -53,6 +55,7 @@ internal sealed class GameLaunchController
         _setEmulatorDriver = setEmulatorDriver;
         _setEmulatorPreviewTarget = setEmulatorPreviewTarget;
         _statusChanged = statusChanged;
+        _gameStarted = gameStarted;
     }
 
     private CancellationToken OperationToken => _operationToken();
@@ -101,7 +104,9 @@ internal sealed class GameLaunchController
             }
             // 启动返回的 PID 可能属于启动器；后续统一按用户提供的 GameExe 进程名解析，
             // 再由监控循环负责窗口前置和截图目标更新。
-            SystemActions.StartWithOutputDrain(gamePsi, disposeWhenExited: true);
+            Process? startedGame = SystemActions.StartWithOutputDrain(gamePsi, disposeWhenExited: true);
+            if (startedGame is not null && ProcessIdentity.Capture(startedGame) is { } identity)
+                _gameStarted?.Invoke(identity);
             Logger.Info($"游戏已启动：{_script.GameExe}（等待 {_script.GameWaitSeconds} 秒确认）。");
         }
         catch (Exception ex)

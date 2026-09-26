@@ -2,6 +2,7 @@ import test, { after, before } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import diagnostics from "node:diagnostics_channel";
 import {
   api,
   createUserBinding,
@@ -10,6 +11,7 @@ import {
   projectRoot,
   prepareRuntime,
   runtimeDir,
+  serviceUrl,
   sleep,
   startRuntime,
   stopRuntime,
@@ -110,7 +112,12 @@ async function runScript(scriptId, userName, timeoutMs = 60000, onStarted) {
   }
   const { runId } = await dispatch.json();
   if (onStarted) onStarted(runId);
-  assert.equal(await waitNoRunning(timeoutMs), true, `脚本 ${scriptId} 未在 ${timeoutMs}ms 内结束`);
+  const finished = await waitNoRunning(timeoutMs);
+  if (!finished) {
+    await api("POST", "/api/cancel", { runId });
+    assert.equal(await waitNoRunning(40000), true, `本用例 ${runId} 取消后仍未停止`);
+  }
+  assert.equal(finished, true, `脚本 ${scriptId} 未在 ${timeoutMs}ms 内结束`);
   let record = null;
   await waitFor(async () => {
     const records = await historyRecords(scriptId);
@@ -134,7 +141,7 @@ function recordDetails(record) {
   return record.attemptDetails || record.AttemptDetails || [];
 }
 
-function counterJudge(secondResult, { delayMs = 0 } = {}) {
+function counterJudge(secondResult, { delayMs = 0, successAt = 2, secondDelayMs = 0 } = {}) {
   const delay = delayMs > 0
     ? `const deadline = Date.now() + ${delayMs}; while (Date.now() < deadline) {}`
     : "";
@@ -143,8 +150,9 @@ const input = JSON.parse(__NEXUS_INPUT__);
 const counter = (input.files || []).find(f => f.Root === "script" && f.Path === "count");
 const n = Number(counter ? (nexus.readFile(counter.Abs) || "0") : "0") + 1;
 nexus.writeFile("count", String(n));
-if (n === 1) {
+if (n < ${successAt}) {
   ${delay}
+  if (n === 2) { const until = Date.now() + ${secondDelayMs}; while (Date.now() < until) {} }
   console.log("pending");
 } else {
   console.log(JSON.stringify({ status: "success", reason: ${JSON.stringify(secondResult)} + "-" + n }));
@@ -587,19 +595,31 @@ test("ER10 stall/final Judge：日志停滞后终局判断仍能完成", { skip 
   writeBatchCode(fixture, [
     "cd /d \"%~dp0\"",
     `echo ER10-START>>\"${fixture.log}\"`,
-    "ping -n 30 127.0.0.1 >nul",
+    "ping -n 120 127.0.0.1 >nul",
   ]);
   const script = await createScript(fixture, {
     name: "ER10 Stall Final",
     logStallTimeoutMinutes: 1,
     judgeScriptEnabled: true,
-    judgeScript: counterJudge("ER10-stall-final"),
+    // Batch call is pending; the 30-second periodic call is also pending.
+    // Its brief delay separates the next periodic deadline from the 60-second
+    // input deadline, so the third call is the final stall decision.
+    judgeScript: counterJudge("ER10-stall-final", { successAt: 3, secondDelayMs: 2000 / Number(timeScale) }),
   });
   try {
-    const record = await runScript(script.id, undefined, 60000);
+    const startedAt = performance.now();
+    const record = await runScript(script.id, undefined, 90000);
+    const elapsedMs = performance.now() - startedAt;
+    const finalReason = recordDetails(record).map(item => item.reason || "").join(" | ");
+    fs.writeFileSync(path.join(runtimeDir, "stall-final-evidence.json"), JSON.stringify({
+      caseId: "ER10", timeScale: Number(timeScale), elapsedMs, record,
+      judgeCalls: Number(finalReason.match(/ER10-stall-final-(\d+)/)?.[1] ?? 0),
+    }, null, 2));
     assert.equal(recordAttempts(record), 1);
     assert.equal(recordStatus(record), "success");
-    assert.match(recordDetails(record).map(item => item.reason || "").join(" | "), /ER10-stall-final-2/);
+    assert.match(finalReason, /ER10-stall-final-[34]/);
+    assert.ok(elapsedMs >= 60000 / Number(timeScale) && elapsedMs < 90000,
+      `ER10 did not terminate at the input stall boundary: ${elapsedMs}ms`);
   } finally {
     await deleteScript(script.id);
   }
@@ -621,18 +641,42 @@ test("EX01 人工取消：30 次独立运行均停止当前脚本且不派发第
   });
   let runId;
   const samples = [];
+  let passed = false;
   try {
     for (let sample = 0; sample < 33; sample++) {
+      const measured = { sample, warmup: sample < 3, completed: false };
+      samples.push(measured);
       fs.rmSync(marker, { force: true });
       fs.rmSync(after, { force: true });
       const started = await api("POST", "/api/dispatch/script", { scriptId: script.id, mode: "manual" });
       assert.equal(started.status, 200);
       ({ runId } = await started.json());
       assert.equal(await waitFor(() => fs.existsSync(marker), 15000, 25), true, `第 ${sample + 1} 次首项未开始`);
+      // Resolve the fixture's port file outside the HTTP response interval,
+      // just as the application already knows the service URL. Retain the
+      // lookup cost separately rather than charging test filesystem I/O to HTTP.
+      const lookupAt = performance.now();
+      const cancelUrl = serviceUrl();
+      measured.fixtureUrlLookupMs = performance.now() - lookupAt;
       const acceptedAt = performance.now();
-      const cancel = await api("POST", "/api/cancel", { runId });
-      assert.equal(cancel.status, 200);
-      assert.equal((await cancel.json()).cancellation, "accepted");
+      measured.requestedAtUtc = new Date().toISOString();
+      const observers = ["create", "bodySent", "headers", "trailers"].map(stage => {
+        const channel = diagnostics.channel("undici:request:" + stage);
+        const observe = ({ request }) => {
+          if (request?.path === "/api/cancel") measured["transport" + stage + "Ms"] = performance.now() - acceptedAt;
+        };
+        channel.subscribe(observe); return { channel, observe };
+      });
+      let cancel;
+      try {
+        cancel = await api("POST", "/api/cancel", { runId }, cancelUrl);
+        measured.responseHeadersMs = performance.now() - acceptedAt;
+        measured.serverTiming = cancel.headers.get("server-timing");
+        assert.equal(cancel.status, 200);
+        assert.equal((await cancel.json()).cancellation, "accepted");
+      } finally {
+        observers.forEach(({ channel, observe }) => channel.unsubscribe(observe));
+      }
       const responseMs = performance.now() - acceptedAt;
       const repeated = await api("POST", "/api/cancel", { runId });
       assert.equal(repeated.status, 200);
@@ -658,18 +702,24 @@ test("EX01 人工取消：30 次独立运行均停止当前脚本且不派发第
       assert.equal((snapshot.records || []).length, 1, "取消后仍派发了下一用户");
       assert.equal(fs.readFileSync(marker, "utf8").trim(), "started");
       assert.equal(fs.existsSync(after), false, "当前脚本取消后仍运行至末尾");
-      if (sample >= 3) samples.push({ responseMs: Math.round(responseMs * 10) / 10,
+      Object.assign(measured, { completed: true, responseMs: Math.round(responseMs * 10) / 10,
         terminalMs: Math.round(terminalMs * 10) / 10,
         stopIssuedMs, ownedExitedMs, workersQuiescedMs, resultCommittedMs });
     }
     const metric = key => {
-      const ordered = samples.map(item => item[key]).sort((a, b) => a - b);
+      const ordered = samples.filter(item => !item.warmup).map(item => item[key]).sort((a, b) => a - b);
       return { p50: ordered[14], p95: ordered[28], max: ordered[29] };
     };
-    console.log(`EX01 cancellation samples=${JSON.stringify(samples)} response=${JSON.stringify(metric("responseMs"))} terminal=${JSON.stringify(metric("terminalMs"))} stopIssued=${JSON.stringify(metric("stopIssuedMs"))} ownedExited=${JSON.stringify(metric("ownedExitedMs"))} workersQuiesced=${JSON.stringify(metric("workersQuiescedMs"))}`);
+    console.log(`EX01 cancellation samples=${samples.length} raw=${path.join(runtimeDir, "cancellation-performance.json")} response=${JSON.stringify(metric("responseMs"))} terminal=${JSON.stringify(metric("terminalMs"))} stopIssued=${JSON.stringify(metric("stopIssuedMs"))} ownedExited=${JSON.stringify(metric("ownedExitedMs"))} workersQuiesced=${JSON.stringify(metric("workersQuiescedMs"))}`);
+    assert.ok(metric("responseMs").p95 <= 500, "EX01 取消 HTTP 响应 P95 超过 500ms");
     assert.ok(metric("stopIssuedMs").p95 <= 500, "EX01 停止请求 P95 超过 500ms");
     assert.ok(metric("ownedExitedMs").p95 <= 2000, "EX01 已确权退出 P95 超过 2s");
+    passed = true;
   } finally {
+    fs.writeFileSync(path.join(runtimeDir, "cancellation-performance.json"), JSON.stringify({
+      caseId: "EX01", passed, timeScale: Number(timeScale), warmupCount: 3, sampleCount: 30,
+      samples, failures: passed ? 0 : 1,
+    }, null, 2));
     if (runId) {
       await api("POST", "/api/cancel", { runId });
       await waitNoRunning(40000);
@@ -683,7 +733,7 @@ for (const channel of ["stdout", "stderr"]) {
     const fixture = makeFixture(`er14-${channel}-stall`);
     writeBatchCode(fixture, [
       channel === "stderr" ? "echo ER14-START 1>&2" : "echo ER14-START",
-      "ping -n 30 127.0.0.1 >nul",
+      "ping -n 120 127.0.0.1 >nul",
     ]);
     const script = await createScript(fixture, {
       name: `ER14 ${channel} stall`,
@@ -695,7 +745,7 @@ for (const channel of ["stdout", "stderr"]) {
       totalTimeoutMinutes: 5,
     });
     try {
-      const record = await runScript(script.id, undefined, 60000);
+      const record = await runScript(script.id, undefined, 90000);
       assert.equal(recordStatus(record), "failed");
       assert.match(recordDetails(record).map(item => item.reason || "").join(" | "), /日志超过 .*无新增输入/);
     } finally {

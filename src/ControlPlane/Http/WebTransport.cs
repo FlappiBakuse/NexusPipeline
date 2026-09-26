@@ -2,6 +2,7 @@ using System.Collections.Specialized;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using System.Diagnostics;
 using NexusPipeline.Shared.Localization;
 
 namespace NexusPipeline.ControlPlane.Http;
@@ -12,15 +13,17 @@ namespace NexusPipeline.ControlPlane.Http;
 /// </summary>
 internal sealed class WebContext
 {
-    public WebContext(WebRequest request, WebResponse response)
+    public WebContext(WebRequest request, WebResponse response, long acceptedTimestamp = 0)
     {
         Request = request;
         Response = response;
+        AcceptedTimestamp = acceptedTimestamp == 0 ? Stopwatch.GetTimestamp() : acceptedTimestamp;
     }
 
     public WebRequest Request { get; }
 
     public WebResponse Response { get; }
+    internal long AcceptedTimestamp { get; }
 
     public static WebContext FromHttpListener(System.Net.HttpListenerContext context)
     {

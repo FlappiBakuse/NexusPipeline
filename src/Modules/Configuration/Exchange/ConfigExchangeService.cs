@@ -102,6 +102,8 @@ internal static class ConfigExchangeService
                     ProfileHash = metadata?.ProfileHash ?? "",
                     PluginName = metadata?.PluginName ?? "",
                     PluginVersion = metadata?.PluginVersion ?? "",
+                    OriginExecutionId = metadata?.OriginExecutionId ?? "",
+                    WritableRoot = metadata?.WritableRoot ?? "",
                     ExtraConfigPaths = frozenExtraPaths,
                 };
                 // 标记先行：任何时刻崩溃（含 extra/main 配置移动前后）都可恢复。

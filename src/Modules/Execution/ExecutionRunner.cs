@@ -33,6 +33,7 @@ internal sealed class ExecutionRunner
     private readonly IUserRunStartingPublisher? _userRunEvents;
     private readonly PluginManager? _plugins;
     private readonly OutboundHttpClientProvider? _http;
+    private readonly ExecutionStateStore? _state;
 
     public ExecutionRunner(
         IUserRepository users,
@@ -43,7 +44,8 @@ internal sealed class ExecutionRunner
         IEmulatorSupportProviderResolver emulatorSupportProviders,
         IUserRunStartingPublisher? userRunEvents = null,
         PluginManager? plugins = null,
-        OutboundHttpClientProvider? http = null)
+        OutboundHttpClientProvider? http = null,
+        ExecutionStateStore? state = null)
     {
         _users = users;
         _history = history;
@@ -54,6 +56,7 @@ internal sealed class ExecutionRunner
         _userRunEvents = userRunEvents;
         _plugins = plugins;
         _http = http;
+        _state = state;
     }
 
     public async Task RunScriptAsync(RunningExecution exec, ScriptExecutionPlan plan)
@@ -63,7 +66,7 @@ internal sealed class ExecutionRunner
         {
             exec.SetPreviewWaiting(script);
             string? unavailableReason = PluginAvailability.GetUnavailableReason(
-                script.PluginType,
+                script,
                 _pluginAvailability);
             if (unavailableReason is not null)
             {
@@ -111,7 +114,8 @@ internal sealed class ExecutionRunner
         string queueName,
         IReadOnlyList<ResolvedScriptUser> users,
         ResolvedScriptSpec? resolvedSpec = null,
-        Func<int, string>? queueFollowingWork = null)
+        Func<int, string>? queueFollowingWork = null,
+        Func<int, (string Relation, string LaunchOwner)>? queueNextWork = null)
     {
         var records = new List<RunRecord>();
         Dictionary<string, int>? successfulRunsByUser = null;
@@ -157,8 +161,19 @@ internal sealed class ExecutionRunner
             NotificationImage? notificationImage = null;
             try
             {
+                ExecutionResourceSet itemResources = ExecutionResourceSetBuilder.Build(
+                    new[] { new ExecutionResourceInput(script.Id,
+                        runUser.Spec is { Succeeded: true } frozen ? frozen.Script : script,
+                        new[] { runUser.UserName }, new[] { runUser }) });
+                string? quarantine = _state?.FindRecoveryIsolationConflict(itemResources);
+                if (quarantine is not null)
+                {
+                    skippedRecord = CreateQuarantineSkippedRecord(script, exec.Mode,
+                        queueId, queueName, runUser, quarantine);
+                    skippedRecord.Id = recordId;
+                }
                 int maxSuccessfulRuns = runUser.Binding.MaxSuccessfulRunsPerDay;
-                if (maxSuccessfulRuns > 0)
+                if (skippedRecord is null && maxSuccessfulRuns > 0)
                 {
                     DateTime today = DateTime.Today;
                     if (successfulRunsByUser is null || successfulRunsDate != today)
@@ -204,6 +219,8 @@ internal sealed class ExecutionRunner
                     // 按用户绑定输入实例化的专项快照成功时，以其 Script（实例化后的配置路径与启动参数）运行；
                     // 失败快照由 coordinator 的用户级检查生成失败记录。
                     ScriptInstance userScript = runUser.Spec is { Succeeded: true } userSpec ? userSpec.Script : script;
+                    (string nextRelation, string nextOwner) = queueNextWork?.Invoke(userIndex)
+                        ?? ("unknown", "unknown");
                     session = new ExecutionCoordinator(
                         userScript, exec.Mode, queueId, queueName, runUser.UserName,
                         exec.Cts.Token,
@@ -233,8 +250,13 @@ internal sealed class ExecutionRunner
                                 string nextSegment = $"{recordId}:attempt:{attempt}";
                                 if (exec.BeginLogSegment(nextSegment, attempt, max, recordId)) activeLogSegmentId = nextSegment;
                             }
-                        });
+                        },
+                        nextRelation,
+                        nextOwner,
+                        _pluginAvailability as IPluginExecutionProviderResolver ?? _plugins);
                     session.TaskReportChanged = exec.UpdateTaskReport;
+                    session.OriginExecutionId = exec.Id;
+                    session.CancellationMilestoneChanged = exec.MarkCancellationMilestone;
                     if (_history is ITaskHistoryCheckpoints checkpoints)
                         session.TaskCheckpointChanged = checkpoint =>
                         {
@@ -262,7 +284,8 @@ internal sealed class ExecutionRunner
                         skippedRecord,
                         new List<string>(),
                         Array.Empty<RunScreenshot>(),
-                        displayName);
+                        displayName,
+                        requireDurable: skippedRecord.ResultCode == "run.not_started_quarantined");
                 }
                 else
                 {
@@ -405,12 +428,39 @@ internal sealed class ExecutionRunner
         };
     }
 
+    internal static RunRecord CreateQuarantineSkippedRecord(
+        ScriptInstance script, string mode, string queueId, string queueName,
+        ResolvedScriptUser user, string resource)
+    {
+        DateTime now = DateTime.Now;
+        return new RunRecord
+        {
+            ScriptInstanceId = script.Id,
+            ScriptName = script.Name,
+            QueueId = queueId,
+            QueueName = queueName,
+            Mode = mode,
+            UserName = user.UserName,
+            UserId = user.UserId,
+            StartTime = now,
+            EndTime = now,
+            Attempts = 0,
+            MaxAttempts = Math.Max(1, script.MaxAttempts),
+            Status = "skipped",
+            ResultDetail = "未执行：等待恢复隔离解除",
+            ResultCode = "run.not_started_quarantined",
+            ResultArgs = new Dictionary<string, string>(StringComparer.Ordinal) { ["resource"] = resource },
+            Outcomes = new RunOutcomeDimensions("not_started", "unverified", "not_started", "quarantined"),
+        };
+    }
+
     private RunRecord PersistRecord(
         RunningExecution exec,
         RunRecord record,
         List<string> attemptLogs,
         IReadOnlyList<RunScreenshot> screenshots,
-        string displayName)
+        string displayName,
+        bool requireDurable = false)
     {
         _plugins?.EnrichHistory(record);
         HistorySaveResult result;
@@ -432,6 +482,8 @@ internal sealed class ExecutionRunner
         if (!string.IsNullOrWhiteSpace(result.PersistenceWarning))
         {
             exec.SetPersistenceWarning(result.PersistenceWarning);
+            if (requireDurable)
+                throw new IOException("受阻项历史未确认持久化，已停止后继扫描：" + result.PersistenceWarning);
         }
         // RunHistoryService 返回的是提交后的快照；通知文本属于运行时字段，需要随最终快照保留。
         result.Record.CustomNotifyText = record.CustomNotifyText;
@@ -486,6 +538,7 @@ internal sealed class ExecutionRunner
         try
         {
             var records = new List<RunRecord>();
+            var taskOutcomes = new Dictionary<string, string>(StringComparer.Ordinal);
             List<PlannedQueueTask> tasks = plan.Tasks.ToList();
             for (int i = 0; i < tasks.Count; i++)
             {
@@ -506,6 +559,23 @@ internal sealed class ExecutionRunner
                 PlannedQueueTask planned = tasks[i];
                 QueueTask task = planned.Task;
                 ScriptInstance? script = planned.Script;
+                string[] blockedDependencies = (task.DependsOnTaskIds ?? [])
+                    .Where(id => !taskOutcomes.TryGetValue(id, out string? status) || status != "success")
+                    .ToArray();
+                if (blockedDependencies.Length > 0)
+                {
+                    bool quarantined = blockedDependencies.Any(id =>
+                        taskOutcomes.GetValueOrDefault(id) == "quarantined");
+                    RunRecord dependent = CreateDependencySkippedRecord(script, task, exec.Mode,
+                        queue.Id, queue.Name, blockedDependencies, quarantined);
+                    RunRecord published = PersistRecord(exec, dependent, new List<string>(),
+                        Array.Empty<RunScreenshot>(), script?.Name ?? queue.Name, requireDurable: true);
+                    records.Add(published);
+                    exec.AddRecordAndIncrement(published);
+                    taskOutcomes[task.Id] = quarantined ? "quarantined" : "blocked";
+                    exec.CurrentStatus = "未执行（前置任务未确认成功）";
+                    continue;
+                }
                 if (script is null)
                 {
                     exec.ClearPreviewTarget();
@@ -524,6 +594,7 @@ internal sealed class ExecutionRunner
                     };
                     RunRecord publishedMissing = PersistRecord(exec, missing, new List<string>(), Array.Empty<RunScreenshot>(), queue.Name);
                     records.Add(publishedMissing);
+                    taskOutcomes[task.Id] = "blocked";
                     exec.AddRecordAndIncrement(publishedMissing);
                     Logger.Warn($"[警告] 调度队列「{queue.Name}」第 {i + 1} 项引用的脚本实例不存在，已跳过。");
                     continue;
@@ -534,7 +605,7 @@ internal sealed class ExecutionRunner
                 exec.CurrentAttempt = 0;
                 exec.CurrentStatus = "等待开始";
                 string? unavailableReason = PluginAvailability.GetUnavailableReason(
-                    script.PluginType,
+                    script,
                     _pluginAvailability);
                 if (unavailableReason is not null)
                 {
@@ -547,6 +618,7 @@ internal sealed class ExecutionRunner
                         unavailableUsers,
                         unavailableReason);
                     records.AddRange(skippedRecords);
+                    taskOutcomes[task.Id] = "blocked";
                     if (!queue.NotifyEnabled)
                     {
                         await NotifyUnavailableScriptAsync(script, unavailableUsers, skippedRecords).ConfigureAwait(false);
@@ -571,18 +643,42 @@ internal sealed class ExecutionRunner
                     };
                     RunRecord publishedSkipped = PersistRecord(exec, skipped, new List<string>(), Array.Empty<RunScreenshot>(), queue.Name);
                     records.Add(publishedSkipped);
+                    taskOutcomes[task.Id] = "blocked";
                     exec.AddRecordAndIncrement(publishedSkipped);
                     Logger.Warn($"[警告] 调度队列「{queue.Name}」第 {i + 1} 项引用的脚本实例「{script.Name}」未配置启用用户，已跳过。");
                     continue;
                 }
-                records.AddRange(await RunUsersAsync(
+                List<RunRecord> itemRecords = await RunUsersAsync(
                     exec,
                     script,
                     queue.Id,
                     queue.Name,
                     runUsers,
                     planned.ResolvedSpec,
-                    userIndex => userIndex < runUsers.Count - 1 || i < tasks.Count - 1 ? "yes" : "no").ConfigureAwait(false));
+                    userIndex => userIndex < runUsers.Count - 1 || i < tasks.Count - 1 ? "yes" : "no",
+                    userIndex =>
+                    {
+                        ScriptInstance? next = userIndex < runUsers.Count - 1
+                            ? script
+                            : i < tasks.Count - 1 ? tasks[i + 1].Script : null;
+                        if (next is null) return ("unknown", "unknown");
+                        string relation = string.IsNullOrWhiteSpace(script.GameExe)
+                            || string.IsNullOrWhiteSpace(next.GameExe)
+                            ? "unknown"
+                            : string.Equals(script.GameExe.Replace('/', '\\'), next.GameExe.Replace('/', '\\'),
+                                StringComparison.OrdinalIgnoreCase) ? "same" : "different";
+                        ResolvedScriptSpec? nextSpec = userIndex < runUsers.Count - 1
+                            ? planned.ResolvedSpec
+                            : i < tasks.Count - 1 ? tasks[i + 1].ResolvedSpec : null;
+                        string owner = !next.LaunchGame ? "already_running"
+                            : ExecutionCoordinator.ShouldHostLaunchGame(next, nextSpec) ? "host" : "upstream";
+                        return (relation, owner);
+                    }).ConfigureAwait(false);
+                records.AddRange(itemRecords);
+                taskOutcomes[task.Id] = itemRecords.Any(record => record.ResultCode == "run.not_started_quarantined")
+                    ? "quarantined"
+                    : itemRecords.Count > 0 && itemRecords.All(record => record.Status == "success")
+                        ? "success" : "blocked";
                 if (exec.Status == "cancelled")
                 {
                     break;
@@ -597,14 +693,14 @@ internal sealed class ExecutionRunner
                 await _notifications.NotifyQueueAsync(queue, records).ConfigureAwait(false);
             }
 
-            if (!anyCancelled)
+            if (!anyCancelled && !records.Any(record => record.ResultCode is "run.not_started_quarantined" or "run.not_started_dependency"))
             {
                 Logger.Info($"调度队列「{queue.Name}」全部任务执行完毕，执行完成操作：{QueueRule.CompletionActionDesc(queue.CompletionAction)}。");
                 completionIntent = new CompletionIntent(exec.Id, queue.Name, queue.CompletionAction);
             }
             else
             {
-                Logger.Warn($"调度队列「{queue.Name}」未全部完成（有任务被取消），跳过完成操作。");
+                Logger.Warn($"调度队列「{queue.Name}」存在取消或恢复隔离未执行项，跳过完成操作。");
             }
         }
         catch (Exception ex)
@@ -618,6 +714,31 @@ internal sealed class ExecutionRunner
             exec.FinishedAt = DateTime.Now;
             _systemActions.CompleteExecution(exec, completionIntent);
         }
+    }
+
+    private static RunRecord CreateDependencySkippedRecord(
+        ScriptInstance? script, QueueTask task, string mode, string queueId, string queueName,
+        IReadOnlyList<string> blockedDependencies, bool quarantined)
+    {
+        DateTime now = DateTime.Now;
+        return new RunRecord
+        {
+            ScriptInstanceId = task.ScriptInstanceId,
+            ScriptName = script?.Name ?? "(脚本实例不存在)",
+            QueueId = queueId,
+            QueueName = queueName,
+            Mode = mode,
+            StartTime = now,
+            EndTime = now,
+            Attempts = 0,
+            Status = "skipped",
+            ResultDetail = "未执行：前置队列任务未确认成功",
+            ResultCode = "run.not_started_dependency",
+            ResultArgs = new Dictionary<string, string>(StringComparer.Ordinal)
+                { ["dependencyTaskIds"] = string.Join(",", blockedDependencies) },
+            Outcomes = new RunOutcomeDimensions("not_started", "unverified", "not_started",
+                quarantined ? "quarantined" : "not_required"),
+        };
     }
 
     private async Task NotifyUnavailableScriptAsync(

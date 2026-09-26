@@ -2,6 +2,8 @@
 
 ## 默认命令
 
+嵌套检出过深时，Windows 批处理 fixture 的工作目录可能超出系统启动限制。可设置 `NEXUS_TEST_ARTIFACT_ROOT` 指向本次新建的短路径普通目录；其中 `.nxp-test-artifact-root.json` 必须声明 `schemaVersion: 1`、`owner: "NexusPipeline.Tests"`、`directory` 为该目录的完整路径。runner 与 UI／系统 helper 将报告和独立运行目录放在其 `runs/<runId>/` 下。缺归属、相对路径、链接或非法 run ID 拒绝执行；默认仍使用仓内 `tests/.artifacts/runs/`。不要把已有用户目录登记为测试目录。
+
 以下命令均在 `NexusPipeline/` 根目录执行：
 
 当前本地与 CI 使用同一快速、集成分层入口：
@@ -63,10 +65,29 @@ node tests\run.mjs dev all
 System Smoke 支持按影响域分组运行，便于 CI 与本地只跑受影响的 suite：
 
 ```text
-node tests\run.mjs dev system [runtime|control|config|execution|judge|emulator|plugins|update] [--realtime]
+node tests\run.mjs dev system [runtime|control|config|execution|judge|emulator|plugins|maa|update] [--realtime]
 ```
 
 可以列出多个分组，也可以用 `--group <名称>` 重复指定；省略分组等于全部 suite。未知分组会打印可用分组并以 exit code 2 退出。每个 suite 都会实际启动独立 Test Host，不提供 dry-run 替代测试。
+
+`maa` 通过显式 `NEXUS_OFFICIAL_PLUGINS_ROOT` 的官方工具准备实际可选插件包、原生库及自有无游戏 Win32／ADB／Agent／pretask 夹具，使用同一 Test Host 验证安装、绑定、队列与持久历史。`NEXUS_MAA_NATIVE_ARCHIVE` 可指定锁定的官方 v5.14.0 ZIP，`NEXUS_MAA_PROJECT_ARCHIVES` 可指定包含两款锁定官方项目 ZIP 的目录；均重新验摘要后在新归属目录解压。真实账号与设备测试不替代该必需 native 组。
+
+真实发现热路的测量使用现役 stress 项目：
+
+```text
+dotnet build tests/stress/RuntimeEfficiencyDiagnostic/RuntimeEfficiencyDiagnostic.csproj -c Release -p:NexusTestHost=true --nologo -m:1 -nr:false
+dotnet bin/test-host/RuntimeEfficiencyDiagnostic/Release/net8.0-windows/NexusPipeline.StressDiagnostics.dll --task-discovery <不存在的自有报告目录> <源码指纹标签>
+```
+
+它对 1／10／50 个冻结资源各采集 30 份真实 Jint 发现样本，分开输出冷读／热读、CPU、工作集、GC、分配字节、全部配置构造／JSON 验证／YAML 解析／复制／磁盘读取计数。该命令不测队列端到端或取消延迟；基线必须来自实际源码并记录测量插桩差异。CPU 的系统计时分辨率和进程工作集采样不能作为每操作精确消耗。
+
+同一 stress 项目还提供真实 Jint 无变化观察和单飞忙时快照测量；每个调用输出 30 份样本并保留 final 发布断言：
+
+```text
+dotnet bin/test-host/RuntimeEfficiencyDiagnostic/Release/net8.0-windows/NexusPipeline.StressDiagnostics.dll --runtime-observe <不存在的自有报告目录> <源码指纹标签>
+```
+
+`--runtime <新运行目录> --output <报告.json> --ticks 600 --append-bytes 4096` 测量 100 MiB 合成日志的检查点/追加读取和空闲 tick。30 样本需使用 30 个独立目录；无等待 tick 复放不等于 10 分钟墙钟运行，截图消费者门控不等于 GDI 采集。
 
 Test Host 使用 `NexusTestHost=true` 的 `asInvoker` 清单。只读二进制输出按源码、前端锁、构建配方、Node/.NET SDK、模式与平台的内容指纹保存在 `.generated/test-host-cache/<hash>/`，完整性元数据缺失或不匹配时重建；不同命令可复用同一完整缓存。运行数据、端口、PID 与退出标记始终位于每次运行独立的 `tests/.artifacts/runs/<runId>/`，不会随二进制缓存复用。完整性等级只作为诊断信息，不决定是否跳过测试。
 

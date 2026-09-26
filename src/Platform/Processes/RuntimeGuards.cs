@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Text;
 using Microsoft.Win32.SafeHandles;
 using NexusPipeline.Shared.Logging;
 
@@ -27,7 +28,7 @@ internal readonly record struct ProcessIdentity(int Pid, DateTime StartTime, str
             string imageName;
             try
             {
-                imageName = process.MainModule?.FileName ?? process.ProcessName + ".exe";
+                imageName = ReadImagePath(process.Id) ?? process.MainModule?.FileName ?? process.ProcessName + ".exe";
             }
             catch
             {
@@ -40,6 +41,25 @@ internal readonly record struct ProcessIdentity(int Pid, DateTime StartTime, str
             return null;
         }
     }
+
+    private static string? ReadImagePath(int pid)
+    {
+        using SafeProcessHandle handle = OpenProcess(0x1000 /* QUERY_LIMITED_INFORMATION */, false, pid);
+        if (handle.IsInvalid) return null;
+        var path = new StringBuilder(1024);
+        uint size = (uint)path.Capacity;
+        if (QueryFullProcessImageName(handle, 0, path, ref size)) return path.ToString();
+        if (Marshal.GetLastWin32Error() != 122) return null;
+        path = new StringBuilder(32768); size = (uint)path.Capacity;
+        return QueryFullProcessImageName(handle, 0, path, ref size) ? path.ToString() : null;
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern SafeProcessHandle OpenProcess(uint access, [MarshalAs(UnmanagedType.Bool)] bool inherit, int processId);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool QueryFullProcessImageName(SafeProcessHandle process, uint flags, StringBuilder image, ref uint size);
 }
 
 /// <summary>
@@ -96,6 +116,8 @@ internal sealed class ProcessOwnership : IDisposable
     private const int JobObjectBasicProcessIdList = 3;
 
     private readonly SafeFileHandle _job;
+    private readonly object _observationSync = new();
+    private readonly Dictionary<int, ProcessIdentity> _lastKnown = new();
     private bool _disposed;
 
     private ProcessOwnership(SafeFileHandle job)
@@ -153,78 +175,81 @@ internal sealed class ProcessOwnership : IDisposable
         }
     }
 
-    public IReadOnlyList<ProcessIdentity> Snapshot()
+    public ProcessObservation Observe()
     {
+        DateTimeOffset observedAt = DateTimeOffset.UtcNow;
+        JobPidQueryResult query = QueryProcessIds();
         var identities = new List<ProcessIdentity>();
-        foreach (int pid in QueryProcessIds())
+        var unresolved = new List<int>();
+        var exited = new List<int>();
+        if (!query.Complete)
+        {
+            lock (_observationSync) identities.AddRange(_lastKnown.Values);
+            return new(ProcessObservationQuality.Unavailable, Array.Empty<int>(), identities,
+                Array.Empty<int>(), Array.Empty<int>(), observedAt, query.ErrorCode);
+        }
+        foreach (int pid in query.Pids)
         {
             try
             {
                 using Process process = Process.GetProcessById(pid);
                 ProcessIdentity? identity = ProcessIdentity.Capture(process);
-                if (identity is not null)
+                if (identity is not null && Path.IsPathFullyQualified(identity.Value.ImageName))
                 {
                     identities.Add(identity.Value);
                 }
+                else if (process.HasExited)
+                {
+                    exited.Add(pid);
+                }
+                else
+                {
+                    unresolved.Add(pid);
+                }
+            }
+            catch (ArgumentException)
+            {
+                exited.Add(pid);
+            }
+            catch (InvalidOperationException)
+            {
+                // An invalid process handle can also mean that identity capture failed.
+                // Only GetProcessById's missing-PID result confirms an exit.
+                unresolved.Add(pid);
             }
             catch
             {
-                // 进程可能刚好退出；下一轮再观察，不把 PID 复用误认成 owned process。
+                unresolved.Add(pid);
             }
         }
-        return identities;
+        lock (_observationSync)
+        {
+            foreach (ProcessIdentity identity in identities) _lastKnown[identity.Pid] = identity;
+            foreach (int pid in exited) _lastKnown.Remove(pid);
+            foreach (int pid in _lastKnown.Keys.Except(query.Pids).ToArray()) _lastKnown.Remove(pid);
+            foreach (int pid in unresolved)
+                if (_lastKnown.TryGetValue(pid, out ProcessIdentity old)
+                    && identities.All(item => item.Pid != pid)) identities.Add(old);
+        }
+        return new(unresolved.Count == 0 ? ProcessObservationQuality.Complete : ProcessObservationQuality.Partial,
+            query.Pids, identities, unresolved, exited, observedAt, null);
     }
 
-    private IReadOnlyList<int> QueryProcessIds()
+    /// <summary>兼容只读身份投影；所有用于恢复或终态的调用方必须检查 Observe 的质量。</summary>
+    public IReadOnlyList<ProcessIdentity> Snapshot() => Observe().Identities;
+
+    private JobPidQueryResult QueryProcessIds()
     {
         if (!IsUsable)
         {
-            return Array.Empty<int>();
+            return new(false, Array.Empty<int>(), null);
         }
-        int capacity = 64;
-        while (capacity <= 4096)
+        return JobProcessIdReader.Read((buffer, bufferSize) =>
         {
-            int bufferSize = checked(8 + IntPtr.Size * capacity);
-            IntPtr buffer = Marshal.AllocHGlobal(bufferSize);
-            try
-            {
-                if (!QueryInformationJobObject(
-                        _job.DangerousGetHandle(),
-                        JobObjectBasicProcessIdList,
-                        buffer,
-                        bufferSize,
-                        out _))
-                {
-                    return Array.Empty<int>();
-                }
-                uint count = unchecked((uint)Marshal.ReadInt32(buffer, 4));
-                if (count > capacity)
-                {
-                    capacity = checked((int)Math.Min(count * 2u, 4096u));
-                    continue;
-                }
-                var pids = new List<int>((int)count);
-                for (int i = 0; i < count; i++)
-                {
-                    IntPtr pid = Marshal.ReadIntPtr(buffer, 8 + i * IntPtr.Size);
-                    long value = pid.ToInt64();
-                    if (value > 0 && value <= int.MaxValue)
-                    {
-                        pids.Add((int)value);
-                    }
-                }
-                return pids;
-            }
-            catch
-            {
-                return Array.Empty<int>();
-            }
-            finally
-            {
-                Marshal.FreeHGlobal(buffer);
-            }
-        }
-        return Array.Empty<int>();
+            bool success = QueryInformationJobObject(_job.DangerousGetHandle(),
+                JobObjectBasicProcessIdList, buffer, bufferSize, out int returnLength);
+            return new(success, success ? 0 : Marshal.GetLastWin32Error(), returnLength);
+        });
     }
 
     public void Dispose()

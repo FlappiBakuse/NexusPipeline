@@ -71,6 +71,8 @@ internal sealed record TaskObservation
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public System.Text.Json.Nodes.JsonObject? ReasonText { get; init; }
     public required TaskEvidence[] Evidence { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string[]? StructuredEvidenceRefs { get; init; }
     public string? SkipKind { get; init; }
 }
 
@@ -83,6 +85,10 @@ internal sealed record TaskObservationBatch
     public required TaskObservation[] Observations { get; init; }
     public required string RunBoundary { get; init; }
     public required TaskEvidence[] BoundaryEvidence { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? StructuredEvidenceVersion { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string[]? BoundaryStructuredEvidenceRefs { get; init; }
     public required TaskDiagnostic[] Diagnostics { get; init; }
     public System.Text.Json.Nodes.JsonObject? CursorState { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

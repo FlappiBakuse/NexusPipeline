@@ -32,9 +32,16 @@ export interface TaskPlan {
 export interface TaskResult {
   taskId: string; status: string; reasonCode: string; lastAttemptId: string;
   reasonText?: TaskTextRef;
+  engineStatus?: string;
+  structuredEvidenceRefs?: string[];
   evidence: Array<{ sourceId: string; epoch: number; sequence: number; ruleId: string }>;
 }
 export interface TaskReport {
+  engineStatus?: string;
+  businessVerification?: string;
+  structuredEvidenceVersion?: number;
+  structuredEvidence?: Array<{ id: string; providerId: string; sessionId?: string; attemptId: string;
+    sourceSequence: number; kind: string; taskId?: string; status?: string; nativeTaskId?: number | string }>;
   diagnostics?: TaskDiagnostic[];
   runId: string; revision: number; userId: string; scriptInstanceId: string; lifecycleOutcome: string;
   evidenceLines?: Array<{ attemptId: string; sourceId: string; epoch: number; sequence: number; text: string }>;

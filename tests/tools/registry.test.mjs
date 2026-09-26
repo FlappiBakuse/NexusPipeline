@@ -56,7 +56,10 @@ test("real-clock acceptance selects explicit timing cases instead of whole syste
   for (const timing of TIMING_TESTS) {
     assert.match(timing.runtimeName, /-timing$/u);
     assert.ok(SYSTEM_TEST_GROUPS.some(group => group.suitePaths.includes(timing.suitePath)));
-    assert.equal(timing.caseIds.length, 2);
+    assert.equal(timing.caseIds.length, timing.key === "execution" ? 5 : 2);
+    assert.equal(new Set(timing.caseIds).size, timing.caseIds.length);
+    if (timing.key === "execution") assert.deepEqual(timing.caseIds,
+      ["ER07", "ER10", "ER14 stdout only", "ER14 stderr only", "EX01"]);
   }
 });
 

@@ -9,6 +9,7 @@ using NexusPipeline.Modules.History;
 using NexusPipeline.Modules.Plugins.Contracts;
 using NexusPipeline.Modules.Scripts.Contracts;
 using NexusPipeline.Modules.Scripts;
+using NexusPipeline.Modules.Scripts.Validation;
 using NexusPipeline.Modules.Users.Contracts;
 using NexusPipeline.Platform.Networking;
 using NexusPipeline.Platform.Processes;
@@ -28,6 +29,8 @@ internal sealed class ExecutionCoordinator : RunSession
     private readonly ResolvedScriptSpec? _resolvedSpec;
 
     private readonly string _queueHasFollowingWork;
+    private readonly string _queueNextTargetRelation;
+    private readonly string _queueNextLaunchOwner;
 
     private readonly Action<ExecutionPreviewTarget>? _previewTargetChanged;
 
@@ -38,6 +41,9 @@ internal sealed class ExecutionCoordinator : RunSession
     private readonly OutboundHttpClientProvider? _http;
 
     private readonly IEmulatorSupportProviderResolver _emulatorSupportProviders;
+    private readonly IPluginExecutionProviderResolver? _executionProviders;
+    private ProviderTaskProjection? _providerProjection;
+    private string _providerRecordId = "";
 
     private int? _gameProcessId;
 
@@ -64,6 +70,8 @@ internal sealed class ExecutionCoordinator : RunSession
     private volatile bool _budgetExpired;
     internal Action<System.Text.Json.Nodes.JsonObject>? TaskReportChanged { get; set; }
     internal Action<RunRecord>? TaskCheckpointChanged { get; set; }
+    internal Action<CancellationMilestone, string?>? CancellationMilestoneChanged { get; set; }
+    internal string OriginExecutionId { get; set; } = "";
 
     private CancellationToken OperationToken => _operationCts?.Token ?? _token;
 
@@ -85,12 +93,19 @@ internal sealed class ExecutionCoordinator : RunSession
         string queueHasFollowingWork = "unknown",
         string? recordId = null,
         Action<string, LogLevel, int>? attemptLogLine = null,
-        Action<int, int>? attemptStarted = null)
+        Action<int, int>? attemptStarted = null,
+        string queueNextTargetRelation = "unknown",
+        string queueNextLaunchOwner = "unknown",
+        IPluginExecutionProviderResolver? executionProviders = null)
         : base(script, mode, queueId, queueName, userName, token, resolvedUser, attemptChanged, statusChanged, logLine)
     {
         _users = users;
+        _executionProviders = executionProviders;
         _resolvedSpec = resolvedSpec;
         _queueHasFollowingWork = queueHasFollowingWork is "yes" or "no" ? queueHasFollowingWork : "unknown";
+        _queueNextTargetRelation = queueNextTargetRelation is "same" or "different" ? queueNextTargetRelation : "unknown";
+        _queueNextLaunchOwner = queueNextLaunchOwner is "host" or "upstream" or "already_running"
+            ? queueNextLaunchOwner : "unknown";
         _recordId = recordId;
         _attemptLogLine = attemptLogLine;
         _attemptStarted = attemptStarted;
@@ -141,7 +156,7 @@ internal sealed class ExecutionCoordinator : RunSession
             && _script.PluginType is "maaend" or "maas"
             ? FindGameProcessId(null) is > 0 : null;
         return CreateTaskExecutionContext(_script, _resolvedSpec, userId, trigger,
-            _queueId, _queueHasFollowingWork, ready);
+            _queueId, _queueHasFollowingWork, ready, _queueNextTargetRelation, _queueNextLaunchOwner);
     }
 
     /// <summary>
@@ -156,7 +171,9 @@ internal sealed class ExecutionCoordinator : RunSession
         string trigger,
         string? queueId = null,
         string queueHasFollowingWork = "unknown",
-        bool? gameTargetReady = null)
+        bool? gameTargetReady = null,
+        string queueNextTargetRelation = "unknown",
+        string queueNextLaunchOwner = "unknown")
     {
         string mode = EmulatorSupport.IsEmulator(script)
             ? "emulator"
@@ -179,7 +196,7 @@ internal sealed class ExecutionCoordinator : RunSession
             mode,
             launchOwner,
             new TaskGameTarget(targetKind, hasGameTarget ? script.GameExe : null, null, gameTargetReady),
-            new TaskQueueContext(queueKind, following),
+            new TaskQueueContext(queueKind, following, queueNextTargetRelation, queueNextLaunchOwner),
             new TaskCleanupContext(true, hostWillCloseGame, "none"),
             new TaskEffectiveLaunch(script.Id, script.LaunchGame, null, null, null),
             new TaskLogSourceContext(
@@ -218,6 +235,7 @@ internal sealed class ExecutionCoordinator : RunSession
             StartTime = DateTime.Now,
             ResultCode = "run.running",
         };
+        _providerRecordId = record.Id;
 
         ResolvedScriptUser? resolvedUser = _resolvedUser
             ?? (string.IsNullOrWhiteSpace(_userName)
@@ -298,10 +316,12 @@ internal sealed class ExecutionCoordinator : RunSession
                 resolvedUser?.UserKey,
                 _script.ConfigPath,
                 _script.HasJudgeScript() && TaskProtocolRun is null,
-                _resolvedSpec);
+                _resolvedSpec,
+                OriginExecutionId,
+                record.Id);
             if (TaskProtocolRun is not null) _configRun.RestoreTaskSelections = TaskProtocolRun.Restore;
             _configRun.PrepareScriptArea();
-            if (user is not null && !string.IsNullOrWhiteSpace(_script.ConfigPath))
+            if (user is not null && (!string.IsNullOrWhiteSpace(_script.ConfigPath) || _resolvedSpec?.ProviderPlan is not null))
             {
                 _statusChanged?.Invoke("正在加载用户配置...");
                 if (!_configRun.Prepare(out string? prepError))
@@ -513,6 +533,7 @@ internal sealed class ExecutionCoordinator : RunSession
                 attempt.EndTime = DateTime.Now;
                 attempt.Status = result.Status;
                 attempt.Reason = result.Reason;
+                attempt.OutputIncomplete = result.OutputIncomplete;
                 attempt.ReasonCode = result.ReasonCode;
                 attempt.ReasonArgs = new Dictionary<string, string>(result.ReasonArgs, StringComparer.Ordinal);
                 record.Attempts = attemptNo;
@@ -571,6 +592,8 @@ internal sealed class ExecutionCoordinator : RunSession
         }
         finally
         {
+            bool configPrepared = _configRun?.RequiresRestoration == true;
+            bool recoveryFailed = false;
             if (_budgetWatchdog is not null)
             {
                 await _budgetWatchdog.DisposeAsync().ConfigureAwait(false);
@@ -584,10 +607,13 @@ internal sealed class ExecutionCoordinator : RunSession
             // 判断脚本目录清理 → 配置交换还原。
             if (_configRun is not null)
             {
-                if (_token.IsCancellationRequested) _statusChanged?.Invoke("正在恢复配置");
+                if (_token.IsCancellationRequested)
+                    CancellationMilestoneChanged?.Invoke(CancellationMilestone.Restoring, null);
+                _configRun.OriginAttempt = record.Attempts;
                 string? restoreError = _configRun.FinalizeRun(_script.AutoUpdateConfig);
                 if (restoreError is not null)
                 {
+                    recoveryFailed = true;
                     if (TaskProtocolRun is not null)
                     {
                         record.Status = "failed"; record.ResultCode = "tasks.recovery_conflict";
@@ -598,7 +624,8 @@ internal sealed class ExecutionCoordinator : RunSession
                     Logger.Error($"[错误] 脚本「{_script.Name}」用户「{user?.UserName ?? _userName ?? ""}」配置还原失败：{restoreError}");
                 }
                 if (_token.IsCancellationRequested)
-                    _statusChanged?.Invoke(restoreError is null ? "配置恢复完成" : "配置恢复失败，现场已保留");
+                    CancellationMilestoneChanged?.Invoke(CancellationMilestone.RestoreFinished,
+                        restoreError is null ? "配置恢复完成" : "配置恢复失败，现场已保留");
             }
             if (TaskProtocolRun is not null)
             {
@@ -606,6 +633,8 @@ internal sealed class ExecutionCoordinator : RunSession
                     TaskProtocolRun.SetFinalLifecycleFailure(record.Status == "cancelled");
                 record.TaskReport = TaskProtocolRun.Snapshot();
             }
+            if (_providerProjection is not null) record.TaskReport = _providerProjection.Snapshot();
+            record.Outcomes = RunOutcomeProjector.Project(record, configPrepared, recoveryFailed);
         }
     }
 
@@ -619,12 +648,20 @@ internal sealed class ExecutionCoordinator : RunSession
 
     internal async Task<RunAttemptResult> RunAttemptCoreAsync(RunAttempt attempt)
     {
+        bool providerRun = !string.IsNullOrWhiteSpace(_script.ExecutionProviderId);
         string modeText = _mode == "auto" ? "自动" : "手动";
         var finalizer = new RunAttemptFinalizer(_script, modeText, () => _emulatorDriver);
         RunAttemptResult? budgetError = CheckTotalTimeout();
         if (budgetError is not null)
         {
             return budgetError;
+        }
+        if (providerRun)
+        {
+            var descriptor = _executionProviders?.ResolveExecutionProvider(_script.ExecutionProviderId);
+            if (descriptor is null || _resolvedSpec?.ProviderPlan is not { } providerPlan || descriptor.PluginVersion != _resolvedSpec.PluginVersion)
+                return RunAttemptResult.Fatal("执行 provider 或冻结计划不可用", "provider.unavailable");
+            ProviderPlanPolicy.Validate(_script.RootPath, providerPlan);
         }
         if (TaskProtocolRun is not null)
         {
@@ -673,11 +710,19 @@ internal sealed class ExecutionCoordinator : RunSession
             _emulatorSupportProviders,
             driver => _emulatorDriver = driver,
             SetEmulatorPreviewTarget,
-            _statusChanged);
+            _statusChanged,
+            finalizer.TrackGameIdentity);
         RunAttemptResult? gameLaunchError = await gameLauncher.LaunchAsync().ConfigureAwait(false);
         if (gameLaunchError is not null)
         {
             return await FinishEarlyAsync(gameLaunchError).ConfigureAwait(false);
+        }
+
+        if (providerRun)
+        {
+            RunAttemptResult providerResult = await RunProviderAttemptAsync(attempt).ConfigureAwait(false);
+            await finalizer.CleanupGameAsync(providerResult, attempt.Number, Math.Max(1, _script.MaxAttempts)).ConfigureAwait(false);
+            return providerResult;
         }
 
         if (!ExecutablePathRules.IsExecutable(_script.MainExe))
@@ -696,8 +741,12 @@ internal sealed class ExecutionCoordinator : RunSession
         bool killAttempted = false;
         string? excludeGame = EmulatorSupport.IsEmulator(_script)
             ? null
-            : (string.IsNullOrWhiteSpace(_script.GameExe) ? null : Path.GetFileNameWithoutExtension(_script.GameExe));
-        if (SystemActions.IsExeRunning(launchExe))
+            : (string.IsNullOrWhiteSpace(_script.GameExe) ? null : _script.GameExe);
+        bool unownedAutomationRunning = _resolvedSpec?.RootProcessRole == ProcessRole.GameLauncher
+            && (_script.PluginType is "oknte" or "okww")
+            ? OkRuntimeActivityProbe.Observe(_script.PluginType, _script.RootPath) != "inactive"
+            : SystemActions.IsExeRunning(launchExe);
+        if (unownedAutomationRunning)
         {
             return await FinishEarlyAsync(RunAttemptResult.Fatal(
                 "检测到同路径脚本进程但无法确认属于本次运行，已拒绝重复启动；请自行确认并关闭旧实例",
@@ -712,7 +761,9 @@ internal sealed class ExecutionCoordinator : RunSession
                 workingDir,
                 launchArgs,
                 _statusChanged,
-                message => Logger.Info(message));
+                message => Logger.Info(message),
+                _resolvedSpec?.RootProcessRole ?? ProcessRole.AutomationWorker,
+                _resolvedSpec?.OutputEncoding ?? "");
             _processOwnership = processSession.Ownership;
         }
         catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 740)
@@ -763,6 +814,11 @@ internal sealed class ExecutionCoordinator : RunSession
             if (killAttempted) return cleanupConfirmed;
             killAttempted = true;
             bool confirmed = processSession.KillAndConfirm(finalizer, excludeGame);
+            // Single-instance launchers may route the request to an older GUI;
+            // its embedded worker is outside the new Job. Never restore managed
+            // configuration while that exact installed runtime is active/unknown.
+            if (confirmed && processSession.PreservedLauncher is not null && (_script.PluginType is "oknte" or "okww"))
+                confirmed = OkRuntimeActivityProbe.Observe(_script.PluginType, _script.RootPath) == "inactive";
             if (!confirmed)
             {
                 cleanupConfirmed = false;
@@ -871,11 +927,14 @@ internal sealed class ExecutionCoordinator : RunSession
 
         // Issue the owned-process stop before waiting for a potentially busy Judge or
         // config worker. Recovery still waits until the workers have truly exited.
-        if (_token.IsCancellationRequested) _statusChanged?.Invoke("正在停止脚本");
+        if (_token.IsCancellationRequested)
+            CancellationMilestoneChanged?.Invoke(CancellationMilestone.StopIssued, null);
         bool stopped = KillScriptAndConfirm();
-        if (_token.IsCancellationRequested && stopped) _statusChanged?.Invoke("脚本已停止，正在收拢后台任务");
+        if (_token.IsCancellationRequested && stopped)
+            CancellationMilestoneChanged?.Invoke(CancellationMilestone.OwnedProcessesExited, null);
         await workers.StopAsync().ConfigureAwait(false);
-        if (_token.IsCancellationRequested) _statusChanged?.Invoke("后台任务已收拢");
+        if (_token.IsCancellationRequested)
+            CancellationMilestoneChanged?.Invoke(CancellationMilestone.WorkersQuiesced, null);
 
         monitor?.Dispose();
         monitor = null;
@@ -896,6 +955,7 @@ internal sealed class ExecutionCoordinator : RunSession
         _pendingReplaceConfigs = null;
 
         RunAttemptResult finalResult = result ?? RunAttemptResult.Failed("未知原因：未能取得运行结果");
+        finalResult.OutputIncomplete |= processSession.OutputIncomplete;
         // 运行收尾后释放进程句柄与 owned Job Object。
         processSession.Dispose();
         try
@@ -907,6 +967,83 @@ internal sealed class ExecutionCoordinator : RunSession
             _processOwnership = null;
         }
         return finalResult;
+    }
+
+    private async Task<RunAttemptResult> RunProviderAttemptAsync(RunAttempt attempt)
+    {
+        var descriptor = _executionProviders?.ResolveExecutionProvider(_script.ExecutionProviderId);
+        var plan = _resolvedSpec?.ProviderPlan;
+        if (descriptor is null || plan is null || descriptor.PluginVersion != _resolvedSpec?.PluginVersion)
+            return RunAttemptResult.Fatal("执行 provider 或冻结计划不可用", "provider.unavailable");
+        NexusPipeline.Modules.Scripts.Validation.ProviderPlanPolicy.Validate(_script.RootPath, plan);
+        _providerProjection = new(plan, descriptor.PluginId, descriptor.PluginVersion, _providerRecordId,
+            _activeUser?.UserId ?? "", _script.Id, attempt.Number);
+        var port = new ProviderWorkerPort(descriptor.PluginDirectory, _script.RootPath, OriginExecutionId,
+            _providerRecordId, attempt.Number, _logLine);
+        // Only authenticated frames received through the Host port become evidence.
+        // A managed plugin's PublishEvent callback cannot manufacture native success.
+        async ValueTask Publish(NexusPipeline.Plugin.Abstractions.PluginProviderEvent item)
+        {
+            _providerProjection.Accept(item);
+            TaskReportChanged?.Invoke(_providerProjection.Snapshot());
+            await ValueTask.CompletedTask;
+        }
+        var mediated = new ProviderEvidenceWorkerPort(port, Publish);
+        try
+        {
+            var context = new NexusPipeline.Plugin.Abstractions.PluginProviderRunContext(OriginExecutionId,
+                _providerRecordId, attempt.Number, _activeUser?.UserId ?? "", _script.Id, plan,
+                mediated, _ => ValueTask.CompletedTask, CaptureProviderLaunchTarget());
+            var result = await descriptor.Provider.RunAsync(context, OperationToken).ConfigureAwait(false);
+            bool cancelled = OperationToken.IsCancellationRequested;
+            string engine = port.TerminalReceived && port.TerminalStatus == "succeeded"
+                && result.EngineStatus == "succeeded" ? "succeeded" : "failed";
+            _providerProjection.Finish(engine, cancelled);
+            return _providerProjection.Result(result.Detail);
+        }
+        catch (OperationCanceledException)
+        {
+            _providerProjection.Finish("cancelled", true);
+            return RunAttemptResult.Cancelled("直驱执行已取消");
+        }
+        catch (Exception ex)
+        {
+            _providerProjection.Finish("failed", false);
+            return RunAttemptResult.Fatal("直驱执行失败：" + ex.GetType().Name + ": " + ex.Message, "provider.failed");
+        }
+        finally
+        {
+            if (!port.CleanupConfirmed) _configRun?.MarkProcessCleanupUnconfirmed("provider worker 清理未确认");
+            TaskReportChanged?.Invoke(_providerProjection.Snapshot());
+        }
+    }
+
+    private NexusPipeline.Plugin.Abstractions.PluginProviderLaunchTarget? CaptureProviderLaunchTarget()
+    {
+        if (!_script.LaunchGame || string.IsNullOrWhiteSpace(_script.GameExe)) return null;
+        if (EmulatorSupport.IsEmulator(_script)) return new("adb", _script.GameExe);
+        if (_gameProcessId is not > 0) throw new InvalidDataException("provider.host_target_unavailable");
+        using Process target = Process.GetProcessById(_gameProcessId.Value);
+        var identity = ProcessIdentity.Capture(target);
+        IntPtr window = SystemActions.FindVisibleWindow(target.Id);
+        if (identity is null || !Path.IsPathFullyQualified(identity.Value.ImageName)
+            || !string.Equals(Path.GetFullPath(identity.Value.ImageName), Path.GetFullPath(_script.GameExe), StringComparison.OrdinalIgnoreCase)
+            || window == IntPtr.Zero) throw new InvalidDataException("provider.host_target_identity");
+        return new("win32", identity.Value.ImageName, target.Id, window.ToInt64(), identity.Value.StartTime);
+    }
+
+    private sealed class ProviderEvidenceWorkerPort(ProviderWorkerPort worker,
+        Func<NexusPipeline.Plugin.Abstractions.PluginProviderEvent, ValueTask> publish)
+        : NexusPipeline.Plugin.Abstractions.IPluginProviderWorkerPort
+    {
+        public Task<NexusPipeline.Plugin.Abstractions.PluginProviderWorkerResult> RunAsync(
+            NexusPipeline.Plugin.Abstractions.PluginProviderWorkerRequest request,
+            Func<NexusPipeline.Plugin.Abstractions.PluginProviderEvent, ValueTask> onEvent,
+            CancellationToken cancellationToken) => worker.RunAsync(request, async item =>
+            {
+                await publish(item).ConfigureAwait(false);
+                await onEvent(item).ConfigureAwait(false);
+            }, cancellationToken);
     }
 
     private double RemainingRunSeconds()
@@ -1012,6 +1149,7 @@ internal sealed class ExecutionCoordinator : RunSession
         {
             return processSnapshot.FindProcessIds(processName)
                 .Where(processId => processId > 0)
+                .Where(MatchesConfiguredGameImage)
                 .Distinct()
                 .ToArray();
         }
@@ -1031,6 +1169,7 @@ internal sealed class ExecutionCoordinator : RunSession
             return processes
                 .Select(process => process.Id)
                 .Where(processId => processId > 0)
+                .Where(MatchesConfiguredGameImage)
                 .Distinct()
                 .ToArray();
         }
@@ -1043,6 +1182,17 @@ internal sealed class ExecutionCoordinator : RunSession
         }
     }
 
+    private bool MatchesConfiguredGameImage(int processId)
+    {
+        try
+        {
+            using Process process = Process.GetProcessById(processId);
+            return ProcessIdentity.Capture(process) is { } identity && Path.IsPathFullyQualified(identity.ImageName)
+                && ProcessTree.IsSameProcessName(identity.ImageName, _script.GameExe);
+        }
+        catch { return false; }
+    }
+
     private int? FindGameProcessId(int? preferredProcessId, AttemptProcessSnapshot? processSnapshot = null)
     {
         string processName = Path.GetFileNameWithoutExtension(_script.GameExe ?? "");
@@ -1052,6 +1202,7 @@ internal sealed class ExecutionCoordinator : RunSession
         }
 
         IReadOnlyList<int> configuredProcessIds = FindConfiguredGameProcessIds(processName, processSnapshot);
+        if (preferredProcessId is { } preferred && !MatchesConfiguredGameImage(preferred)) preferredProcessId = null;
         return SelectGameProcessId(
             configuredProcessIds,
             preferredProcessId,

@@ -115,9 +115,10 @@ function resetDraft(queue: Queue | null = null) {
     .slice()
     .sort((a, b) => a.index - b.index)
     .map((task, index) => ({
-      id: task.id,
+      id: task.id || crypto.randomUUID().replaceAll("-", ""),
       index,
       scriptInstanceId: task.scriptInstanceId,
+      dependsOnTaskIds: [...(task.dependsOnTaskIds || [])],
     }));
 }
 function openEditor(queue: Queue | null = null) {
@@ -147,12 +148,13 @@ function addTask() {
     toast(t("queues.validation.user_limit", { current, maximum }), "error");
     return;
   }
-  draft.tasks.push({ id: "", index: draft.tasks.length, scriptInstanceId: "" });
+  draft.tasks.push({ id: crypto.randomUUID().replaceAll("-", ""), index: draft.tasks.length, scriptInstanceId: "", dependsOnTaskIds: [] });
 }
 function removeTask(index: number) {
-  draft.tasks.splice(index, 1);
+  const removed = draft.tasks.splice(index, 1)[0]?.id;
   draft.tasks.forEach((task, taskIndex) => {
     task.index = taskIndex;
+    if (removed) task.dependsOnTaskIds = (task.dependsOnTaskIds || []).filter(id => id !== removed);
   });
 }
 function addTimeSet() {
@@ -181,7 +183,12 @@ function reorderTasks(ids: string[]) {
   const current = draft.tasks.slice();
   const next = ids.map(id => current[Number(id)]).filter((item): item is QueueTask => Boolean(item));
   if (next.length !== current.length || next.every((item, index) => item === current[index])) return;
-  draft.tasks = next.map((task, index) => ({ ...task, index }));
+  const earlier = new Set<string>();
+  draft.tasks = next.map((task, index) => {
+    const ordered = { ...task, index, dependsOnTaskIds: (task.dependsOnTaskIds || []).filter(id => earlier.has(id)) };
+    if (task.id) earlier.add(task.id);
+    return ordered;
+  });
 }
 async function reorderQueues(ids: string[]) {
   const currentPage = visibleQueues.value;

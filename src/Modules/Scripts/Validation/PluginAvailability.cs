@@ -10,6 +10,11 @@ internal static class PluginAvailability
         ScriptInstance script,
         IPluginAvailability plugins)
     {
+        string providerId = script.ExecutionProviderId?.Trim() ?? "";
+        if (providerId.Length > 0)
+            return plugins is IPluginExecutionProviderResolver resolver
+                && resolver.ResolveExecutionProvider(providerId) is not null
+                ? null : $"脚本实例「{script.Name}」的执行 provider「{providerId}」未安装、未启用或未注册";
         string pluginType = script.PluginType?.Trim() ?? "";
         if (pluginType.Length == 0)
         {

@@ -15,7 +15,7 @@ internal sealed class TaskConfigDocument
     private readonly bool _bom;
     private readonly Node _root;
     internal string Format { get; }
-    internal JsonNode? Document => _root.Value?.DeepClone();
+    internal JsonNode? Document => Clone(_root.Value);
     internal bool ContainsTopLevelProperty(string name) => _root.Properties?.ContainsKey(name) == true;
 
     private sealed record Node(JsonNode? Value, int Start, int End,
@@ -23,6 +23,7 @@ internal sealed class TaskConfigDocument
 
     internal TaskConfigDocument(byte[] bytes, string format)
     {
+        TaskConfigMetrics.Count(0);
         if (bytes.Length > 2 * 1024 * 1024) throw new InvalidDataException("resource_limit: config exceeds 2 MiB");
         if (format is not ("json" or "yaml")) throw new InvalidDataException("unsupported_schema: document format");
         Format = format;
@@ -30,8 +31,10 @@ internal sealed class TaskConfigDocument
         _text = new UTF8Encoding(false, true).GetString(bytes.AsSpan(_bom ? 3 : 0));
         if (format == "json")
         {
+            TaskConfigMetrics.Count(1);
             using var json = JsonDocument.Parse(_text, new JsonDocumentOptions { MaxDepth = 32 });
         }
+        TaskConfigMetrics.Count(2);
         var parser = new Parser(new StringReader(_text));
         parser.Consume<StreamStart>();
         parser.Consume<DocumentStart>();
@@ -78,7 +81,7 @@ internal sealed class TaskConfigDocument
                 parser.MoveNext();
                 Node child = Read(parser, depth + 1);
                 if (!children.TryAdd(key.Value, child)) throw new InvalidDataException("unsupported_schema: duplicate key");
-                obj.Add(key.Value, child.Value?.DeepClone());
+                obj.Add(key.Value, Clone(child.Value));
             }
             var end = parser.Consume<MappingEnd>();
             return new(obj, checked((int)mapping.Start.Index), checked((int)end.End.Index + (mapping.Style == MappingStyle.Flow ? 1 : 0)), children);
@@ -91,7 +94,7 @@ internal sealed class TaskConfigDocument
             while (parser.Current is not SequenceEnd)
             {
                 Node child = Read(parser, depth + 1);
-                children.Add(child); array.Add(child.Value?.DeepClone());
+                children.Add(child); array.Add(Clone(child.Value));
             }
             var end = parser.Consume<SequenceEnd>();
             return new(array, checked((int)sequence.Start.Index), checked((int)end.End.Index + (sequence.Style == SequenceStyle.Flow ? 1 : 0)), Items: children);
@@ -133,7 +136,9 @@ internal sealed class TaskConfigDocument
         return node;
     }
 
-    internal JsonNode? ReadSelection(JsonArray selector) => Select(selector).Value?.DeepClone();
+    private static JsonNode? Clone(JsonNode? value)
+    { TaskConfigMetrics.Count(3); return value?.DeepClone(); }
+    internal JsonNode? ReadSelection(JsonArray selector) => Clone(Select(selector).Value);
 
     internal byte[] Patch(IReadOnlyList<TaskConfigOperation> operations, IReadOnlySet<string> allowedSelectors)
     {

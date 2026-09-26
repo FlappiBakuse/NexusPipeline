@@ -22,27 +22,32 @@ internal sealed class ScriptSpecResolver
     private readonly IPluginCapabilityResolver _capabilities;
     private readonly IPluginAvailability _availability;
     private readonly JudgeScriptStore _judgeScripts;
-    private readonly PluginManager? _plugins;
+    private readonly IPluginExecutionProviderResolver? _executionProviders;
 
     public ScriptSpecResolver(
         IPluginCapabilityResolver capabilities,
         IPluginAvailability availability,
         JudgeScriptStore? judgeScripts = null,
-        PluginManager? plugins = null)
+        PluginManager? plugins = null,
+        IPluginExecutionProviderResolver? executionProviders = null)
     {
         _capabilities = capabilities;
         _availability = availability;
         _judgeScripts = judgeScripts ?? new JudgeScriptStore(AppPaths.JudgeScriptsDir);
-        _plugins = plugins;
+        _executionProviders = executionProviders ?? plugins;
     }
 
     /// <summary>
     /// 解析脚本声明。inputOverrides 为用户级输入值（UserScriptBinding.ConfigInputs），
     /// 优先于脚本实例持久化的 PluginInputs；通用脚本忽略该参数。
     /// </summary>
-    public ResolvedScriptSpec Resolve(ScriptInstance declaration, IReadOnlyDictionary<string, string>? inputOverrides = null)
+    public ResolvedScriptSpec Resolve(ScriptInstance declaration, IReadOnlyDictionary<string, string>? inputOverrides = null, string userId = "")
     {
         ScriptInstance script = declaration.Clone();
+        if (!string.IsNullOrWhiteSpace(script.ExecutionProviderId))
+            return ResolveProvider(script, userId);
+        if (!string.IsNullOrWhiteSpace(script.ExecutionProviderConfigId))
+            return Failed(script, "未声明执行 provider，不能使用 provider 配置身份", "");
         if (string.IsNullOrWhiteSpace(script.PluginType))
         {
             return ResolveGeneric(script);
@@ -101,9 +106,12 @@ internal sealed class ScriptSpecResolver
             script,
             profile.PluginVersion ?? "",
             judge,
-            ComputeProfileHash(script, profile.PluginName ?? "", profile.PluginVersion ?? "", judge),
+            ComputeProfileHash(script, profile.PluginName ?? "", profile.PluginVersion ?? "", judge,
+                profile.RootProcessRole.ToString(), profile.OutputEncoding),
             ConfigEditor: profile.ConfigEditor)
         {
+            RootProcessRole = profile.RootProcessRole,
+            OutputEncoding = profile.OutputEncoding,
             TaskProtocol = profile.TaskProtocol,
             ExtraConfigPaths = profile.ExtraConfigPaths,
             ConfigInputCandidates = profile.ConfigInputCandidates,
@@ -124,6 +132,10 @@ internal sealed class ScriptSpecResolver
     public ResolvedScriptSpec ResolveCandidate(ScriptInstance candidate)
     {
         ScriptInstance script = candidate.Clone();
+        if (!string.IsNullOrWhiteSpace(script.ExecutionProviderId))
+            return ResolveProvider(script);
+        if (!string.IsNullOrWhiteSpace(script.ExecutionProviderConfigId))
+            return Failed(script, "未声明执行 provider，不能使用 provider 配置身份", "");
         return string.IsNullOrWhiteSpace(script.PluginType)
             ? ResolveGeneric(script, preferInlineSource: true)
             : Resolve(script);
@@ -132,6 +144,44 @@ internal sealed class ScriptSpecResolver
     public ScriptInstance ResolveScript(ScriptInstance declaration)
     {
         return Resolve(declaration).Script;
+    }
+
+    private ResolvedScriptSpec ResolveProvider(ScriptInstance script, string userId = "")
+    {
+        string id = script.ExecutionProviderId?.Trim() ?? "";
+        string configId = script.ExecutionProviderConfigId?.Trim() ?? "";
+        if (!string.IsNullOrWhiteSpace(script.PluginType) || !ScriptPathPolicy.IsProviderConfigId(configId))
+            return Failed(script, "直驱实例必须单独声明 provider 及其配置身份", "");
+        script.ExecutionProviderId = id;
+        script.ExecutionProviderConfigId = configId;
+        ExecutionProviderDescriptor? provider = _executionProviders?.ResolveExecutionProvider(id);
+        if (provider is null)
+            return Failed(script, $"执行 provider「{id}」未安装、未启用或尚未完成注册", "");
+        if (!string.IsNullOrWhiteSpace(script.MainExe) || !string.IsNullOrWhiteSpace(script.ConfigPath)
+            || !string.IsNullOrWhiteSpace(script.LogPath))
+            return Failed(script, "直驱实例不能伪造外部脚本主程序或配置路径", "");
+        var judge = new ResolvedJudgeScript(false, "javascript", "provider", "", Hash(""));
+        try
+        {
+            // This resolver is a synchronous legacy port. Run the provider's read-only
+            // preparation off the caller's UI context; never start a worker here.
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            var request = new NexusPipeline.Plugin.Abstractions.PluginProviderPrepareRequest(
+                configId, userId, script.Id, script.RootPath, "interface.json", "", new());
+            var plan = Task.Run(async () => await provider.Provider.PrepareAsync(request, timeout.Token)
+                .ConfigureAwait(false), timeout.Token).WaitAsync(timeout.Token).GetAwaiter().GetResult();
+            ProviderPlanPolicy.Validate(script.RootPath, plan);
+            var frozen = JsonSerializer.Deserialize<NexusPipeline.Plugin.Abstractions.PluginProviderPlan>(
+                JsonSerializer.Serialize(plan))!;
+            return new ResolvedScriptSpec(script, provider.PluginVersion, judge,
+                Hash("provider=" + id + "\nversion=" + provider.PluginVersion + "\nconfig=" + configId
+                    + "\nroot=" + script.RootPath + "\nplan=" + JsonSerializer.Serialize(frozen))) { ProviderPlan = frozen };
+        }
+        catch (Exception ex)
+        {
+            return Failed(script, "执行 provider 无法准备安全计划：" + ex.GetType().Name + ": " + ex.Message,
+                provider.PluginVersion);
+        }
     }
 
     private ResolvedScriptSpec ResolveGeneric(ScriptInstance script, bool preferInlineSource = false)
@@ -181,7 +231,9 @@ internal sealed class ScriptSpecResolver
         ScriptInstance script,
         string pluginName,
         string pluginVersion,
-        ResolvedJudgeScript judge)
+        ResolvedJudgeScript judge,
+        string rootProcessRole = "AutomationWorker",
+        string outputEncoding = "")
     {
         var projection = new
         {
@@ -201,7 +253,10 @@ internal sealed class ScriptSpecResolver
             PluginVersion = pluginVersion,
             script.AutoUpdateConfig,
         };
-        return Hash(JsonSerializer.Serialize(projection));
+        string source = JsonSerializer.Serialize(projection);
+        if (rootProcessRole != "AutomationWorker") source += "\nrootProcessRole=" + rootProcessRole;
+        if (!string.IsNullOrEmpty(outputEncoding)) source += "\noutputEncoding=" + outputEncoding;
+        return Hash(source);
     }
 
     private static string Hash(string? value)

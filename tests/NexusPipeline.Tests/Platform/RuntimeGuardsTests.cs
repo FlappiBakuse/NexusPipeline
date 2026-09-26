@@ -1,4 +1,5 @@
 using Xunit;
+using System.Diagnostics;
 using NexusPipeline.ControlPlane.Http;
 using NexusPipeline.Platform.Processes;
 using NexusPipeline.Platform.Windows;
@@ -52,6 +53,32 @@ public sealed class RuntimeGuardsTests
         Assert.False(identity.Matches(new ProcessIdentity(100, start.AddTicks(1), "script.exe")));
         Assert.False(identity.Matches(new ProcessIdentity(101, start, "script.exe")));
         Assert.False(identity.Matches(new ProcessIdentity(100, start, "other.exe")));
+    }
+
+    [Fact]
+    public void ExecutableObservationDoesNotConfuseAnotherInstallWithSameName()
+    {
+        Assert.True(OperatingSystem.IsWindows());
+        string real = Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe");
+        using Process process = Process.Start(new ProcessStartInfo(real,
+            "-NoProfile -NonInteractive -Command Start-Sleep -Seconds 10")
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+        })!;
+        try
+        {
+            Assert.True(ProcessCleanup.IsExeRunning(real));
+            Assert.False(ProcessCleanup.IsExeRunning(Path.Combine(Path.GetTempPath(), "powershell.exe")));
+        }
+        finally
+        {
+            if (!process.HasExited)
+            {
+                process.Kill();
+                process.WaitForExit(5000);
+            }
+        }
     }
 
     [Theory]

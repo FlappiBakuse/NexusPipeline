@@ -232,17 +232,20 @@ internal static class ProcessWindows
         {
             return;
         }
-        _ = Task.Run(() =>
+        _ = MinimizeAsync();
+        async Task MinimizeAsync()
         {
             try
             {
-                MinimizeWindow(pid);
+                ProcessIdentity? identity = ProcessTree.CaptureProcessIdentity(pid);
+                if (identity is not null)
+                    await MinimizeWindowAsync(identity.Value, 30, CancellationToken.None).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
                 Logger.Warn($"[警告] 最小化{what}窗口失败：{ex.Message}");
             }
-        });
+        }
     }
 
     /// <summary>
@@ -325,25 +328,21 @@ internal static class ProcessWindows
     /// 将指定进程的可见主窗口最小化：轮询窗口出现后 ShowWindow(SW_MINIMIZE)（GUI 脚本让位，
     /// 控制台脚本经 cmd 包装已无窗口，静默跳过）。用于运行脚本实例/调度队列时脚本主窗口最小化。
     /// </summary>
-    public static bool MinimizeWindow(int pid, int timeoutSeconds = 30)
+    internal static async Task<bool> MinimizeWindowAsync(ProcessIdentity identity, int timeoutSeconds, CancellationToken token)
     {
-        if (pid <= 0)
+        long started = Stopwatch.GetTimestamp();
+        while (Stopwatch.GetElapsedTime(started).TotalSeconds < timeoutSeconds)
         {
-            return false;
-        }
-        DateTime deadline = DateTime.Now.AddSeconds(timeoutSeconds);
-        while (DateTime.Now < deadline)
-        {
-            IntPtr hWnd = FindVisibleWindow(pid);
-            if (hWnd != IntPtr.Zero)
+            token.ThrowIfCancellationRequested();
+            if (!ProcessCleanup.IsIdentityRunning(identity)) return false;
+            IntPtr window = FindVisibleWindow(identity.Pid);
+            if (window != IntPtr.Zero && ProcessCleanup.IsIdentityRunning(identity))
             {
-                ShowWindow(hWnd, SW_MINIMIZE);
-                Logger.Debug($"[最小化] 已最小化进程窗口（PID {pid}，句柄 {hWnd}）。");
+                ShowWindow(window, SW_MINIMIZE);
                 return true;
             }
-            Thread.Sleep(300);
+            await Task.Delay(300, token).ConfigureAwait(false);
         }
-        Logger.Debug($"[最小化] 未找到进程可见窗口（PID {pid}），跳过。");
         return false;
     }
 

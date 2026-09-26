@@ -16,8 +16,6 @@ using NexusPipeline.Modules.Settings.Contracts;
 using NexusPipeline.Modules.Settings;
 using NexusPipeline.Modules.Users.Contracts;
 using NexusPipeline.Modules.Users;
-using NexusPipeline.Tests.Scheduling;
-using NexusPipeline.Tests.Support;
 
 namespace NexusPipeline.StressDiagnostics;
 
@@ -30,6 +28,10 @@ internal static class Program
     {
         try
         {
+            if (args.FirstOrDefault() == "--task-discovery")
+                return TaskDiscoveryPerformance.Measure(args.Skip(1).ToArray());
+            if (args.FirstOrDefault() == "--runtime-observe")
+                return RuntimeObservePerformance.Measure(args.Skip(1).ToArray()).GetAwaiter().GetResult();
             Options options = Options.Parse(args);
             Directory.CreateDirectory(options.RuntimeDirectory);
             Dictionary<string, object?> result = Run(options);

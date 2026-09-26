@@ -2,6 +2,28 @@
 
 ## 核心运行流程
 
+### 独立执行 provider
+
+`ExecutionPlanBuilder` 经当前启用插件的 `PluginExecutionProviderRegistry` 读取并冻结 provider 计划，`ProviderPlanPolicy` 校验身份、顺序、授权指纹、资源与字节预算。它复用相同的 `ExecutionAdmissionProfile`、队列／用户集合、资源租约、`ExecutionRunner`、历史和 `ConfigRunSession`。具体扩展与 worker wire 契约见 [执行 provider](../reference/plugin-api/execution-provider.md)。不再为 provider 启动专项主程序或执行旧 judge；两条入口由脚本的显式 provider ID 区分。
+
+Host 负责游戏启动时，在现有启动就绪流程之后传递完整映像、PID、创建时间和可见窗口。插件在同一进程身份内复核自己的控制器选择；它不能凭进程名选择另一安装目录的目标。worker 通过专用 IPC 报送引擎事件，`ProviderTaskProjection` 写入同一个任务报告。原生任务成功没有独立业务证据时为 `unverified`，不计入每日业务成功上限。
+
+### 进程观测与保留启动器
+
+`ProcessObservation` 保存 complete／partial／unavailable、原始 PID、可确权身份、不可读身份与原生错误。Job 查询扩容有上限，查询失败不是空集合；旧身份不因单次读取失败消失。安全结束与清理快路要求实际归属成功和完整必要进程观测。
+
+专项冻结启动声明只在明确的纯 launcher 契约、无接管配置 writer 职责且根进程完整身份匹配时保留该根。声明 `writesManagedConfig: true` 的 launcher 按必要 writer 处理。纯 launcher 仍在原 Job 内，不启用 kill-on-close 或为清空 Job 全杀。必要 automation 子进程仍阻塞结束和恢复；纯 launcher 驻留不改变已有业务结果。初始空 Job 不能提前判启动完成，需可信协议边界或已观察到必要子进程结束。OK 单实例启动还复核精确安装目录中的解释器活动；转交给预存 GUI 的外部 worker 活跃或不可确认时保持相关隔离。
+
+游戏收尾只使用 Host 本轮启动时捕获的身份，或本次脚本 Job 中匹配完整游戏映像的身份。PID、创建时间及映像在停止时再次核对；预存进程、不同安装目录的同名程序和无法确权的外部实例保留。必要脚本清理按完整映像排除需保留游戏；缺少 Job 时的名称快照不足以确认该排除，返回未确认并保留隔离。窗口最小化轮询使用异步延迟，精确目标退出即结束，不在线程池中堆积 30 秒同步等待。
+
+可信自动化边界后有界等待 stdout／stderr EOF，未 EOF 标记 `OutputIncomplete` 并保留已有事实。它不会凭尾流缺失补成功，也不因纯伴随进程保留而覆写已核验业务结果。
+
+### 四维结果与队列继续
+
+`RunOutcomeProjector` 分开持久化 engineStatus、businessVerification、executionOutcome 和 recoveryOutcome。恢复故障保留已观察业务事实，并附隔离警告；旧历史缺少这些字段时保守投影。整队人工取消先冻结派发／重试，停止本轮必要进程、收拢 Host 写入 worker，再恢复或保留隔离；计时使用单调时钟与显式阶段，不解析展示文案。
+
+局部恢复故障由原 journal 投影到受影响资源；后继逐项按既有准入检查。共享资源项记为未执行，有显式失败依赖的项同样未执行，然后继续检查后面的独立项；不自动回头补跑。活动独立运行不被一项故障取消。未解决恢复时抑制会中断恢复的自动系统动作和宿主自更新；人工整队取消停止全部后继。
+
 专项任务的每次主执行尝试在前置脚本之后再次检查当前配置。若首次检查阻断，任务报告没有执行尝试；若第一次已实际执行、准备重试也已通过，但下一次检查才阻断，历史保留第一次的任务事实和最终业务状态，并附上本次准入停止信息。被阻断的轮次没有第二次主程序执行；该轮若运行了用户前置脚本，其日志与停止记录仍保留。
 
 
@@ -78,7 +100,7 @@ sequenceDiagram
    - 成功关键字命中 → 等待脚本自行退出（最多 60 秒，超时杀进程仍判成功）；
    - 判断脚本模式 → 批次触发/周期触发/最终触发（见[完成判定](judgement-logs.md#完成判定)），可得到 success 或 partial；
    - 无任何判定且进程退出 → 按「进程自行退出」判定成功（未配置判定时）；配置了判定但无命中 → 失败。
-7. **超时与启动失败**：`LogStallTimeoutMinutes=-1` 时跳过无日志超时；其余值使用单调时钟观察文件新增内容及 stdout/stderr 输入，报告心跳不重置时钟。首次输出后无新增输入也会超时。MaaEnd 标准输出和错误输出在字节边界按已观察到的 UTF-8 解码；其他脚本沿用原编码。当前尝试的 stdout/stderr 或新增文件日志明确输出“任务启动失败: 未搜索到任何窗口”（也接受中文冒号）时记录启动失败。MaaEnd/MaaStellaSora 的 MXU 日志报告 `[MXU_LAUNCH] Failed to spawn/run program`、参数 JSON 无效或启动程序缺失时也立即失败；清理确认后才进入原有专项安全重试判断。`RunBudget` 的总时间跨全部重试和前后置脚本计算；判断脚本仍有独立 30 秒上限。
+7. **超时与启动失败**：`LogStallTimeoutMinutes=-1` 时跳过无日志超时；其余值使用单调时钟观察文件新增内容及 stdout/stderr 输入，报告心跳不重置时钟。首次输出后无新增输入也会超时。输出在字节边界按冻结 resolve 的 `outputEncoding` 声明解码；MaaEnd／MaaStellaSora 的 MXU 声明 UTF-8，未声明保持原系统默认值。当前尝试的 stdout/stderr 或新增文件日志明确输出“任务启动失败: 未搜索到任何窗口”（也接受中文冒号）时记录启动失败。MXU 报告 `[MXU_LAUNCH] Failed to spawn/run program`、参数 JSON 无效或启动程序缺失时也立即失败；清理确认后才进入原有专项安全重试判断。`RunBudget` 的总时间跨全部重试和前后置脚本计算；判断脚本仍有独立 30 秒上限。
 8. **尝试结束清理**：`RunAttemptFinalizer` 统一承载进程树清理和游戏/模拟器策略（Toolhelp 快照 + BFS 逐进程强杀，**与 `GameExe` 同名的进程树排除在外**、生杀归游戏管理）；**任务失败时无条件强制结束游戏进程**；成功或部分完成时按 `ForceCloseGame` 设置决定是否关闭游戏。
 9. **重试**：失败且未达 `MaxAttempts` → 进程确认退出后继续复用当前活动 `config`，在下一轮开始前应用判断脚本返回的 `replaceConfigs`；每次尝试仍独立 LogMonitor 与 SessionJudge。
 10. **运行收尾（finally）**：`ConfigRunSession` 固定执行自动更新配置收尾同步（按文件差异写入 store，仅开关开时）→ 还原配置替换（swap-backup → config）→ 清空判断脚本目录 → 配置交换还原现场（original → config）。同步先于插队还原与配置交换还原，确保 store 看到脚本最终态，同时避免恢复动作覆盖用户快照。

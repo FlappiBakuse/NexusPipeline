@@ -183,8 +183,12 @@ internal sealed class ConfigEditCommands
         OperationResult<ConfigEditTarget> resolved = ResolveTarget(scriptId, userId);
         if (!resolved.Succeeded) return OperationResult<RepairCandidate>.Failure(resolved.Error!);
         ConfigEditTarget target = resolved.Value!;
-        if (target.Script.PluginType != "march7th" || target.Spec?.PluginVersion != "0.3.0"
-            || target.Spec.ExtraConfigPaths.Count > 0 || !Path.IsPathFullyQualified(target.Script.ConfigPath))
+        if (target.Script.PluginType != "march7th" || target.Spec?.TaskProtocol?.RepairRules
+                .SingleOrDefault(rule => rule.Id == "queue_finish_action") is not { } repairRule
+            || target.Spec.ExtraConfigPaths.Count > 0 || !Path.IsPathFullyQualified(target.Script.ConfigPath)
+            || !string.Equals(Path.GetFileName(target.Script.ConfigPath), "config.yaml", StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(Path.GetDirectoryName(Path.GetFullPath(target.Script.ConfigPath)),
+                Path.GetDirectoryName(Path.GetFullPath(target.Script.MainExe)), StringComparison.OrdinalIgnoreCase))
             return Validation<RepairCandidate>("当前插件版本或配置范围不支持自动修复，请手动编辑", "config_repair_unavailable");
         if (PluginAvailability.GetUnavailableReason(target.Script, _pluginAvailability) is not null)
             return Validation<RepairCandidate>("当前插件不可用，请先核对安装状态", "config_repair_unavailable");
@@ -207,7 +211,7 @@ internal sealed class ConfigEditCommands
         if (info.Length > 2 * 1024 * 1024)
             return Validation<RepairCandidate>("配置快照超过自动修复上限", "config_repair_unavailable");
         byte[] before = File.ReadAllBytes(storeFile);
-        ConfigRepairProposal? proposal = ConfigRepairPolicy.TryPropose(target.Script.PluginType,
+        ConfigRepairProposal? proposal = ConfigRepairPolicy.TryPropose(repairRule, target.Script.PluginType,
             target.Spec.PluginVersion, target.UserKey, scriptId, target.Spec.ProfileHash,
             metadata.ConfigLocatorHash, metadata.Generation, before, out byte[]? after);
         if (proposal is null || after is null)

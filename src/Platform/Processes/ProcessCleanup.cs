@@ -20,6 +20,8 @@ internal static class ProcessCleanup
         {
             return ProcessCleanupResult.Unconfirmed(new[] { pid }, "无效根 PID，禁止使用 PID 0 作为身份清理哨兵");
         }
+        if (excludeProcessBaseName is not null && Path.IsPathFullyQualified(excludeProcessBaseName))
+            return ProcessCleanupResult.Unconfirmed([pid], "Toolhelp 名称快照不足以核验需保留的完整游戏映像；拒绝按名清理");
         try
         {
             IReadOnlyDictionary<int, ProcessTree.ProcessNode> nodes = ProcessTree.SnapshotProcesses();
@@ -118,7 +120,7 @@ internal static class ProcessCleanup
         }
         catch (InvalidOperationException)
         {
-            return false;
+            return true;
         }
         catch
         {
@@ -128,8 +130,8 @@ internal static class ProcessCleanup
 
     /// <summary>
     /// 检测指定可执行程序是否已有进程在运行（编辑配置/运行前的防冲突检查）。
-    /// 按进程名（不含扩展名，不区分大小写）检测：覆盖程序从其他目录/副本或提升权限运行等全路径比对不可靠的场景；
-    /// 同名无关进程可能误报（可接受的权衡）；批处理等经 cmd 包装的脚本不产生同名进程，无法按名检测，保持放行。
+    /// 按完整映像路径检测；捕获权限不足时保守按可能运行处理。
+    /// 批处理等经 cmd 包装的脚本不产生同名进程，无法按名检测，保持放行。
     /// </summary>
     public static bool IsExeRunning(string exePath)
     {
@@ -142,14 +144,30 @@ internal static class ProcessCleanup
         {
             return false;
         }
+        if (ProcessLaunch.IsCommandFile(exePath)) return false;
         try
         {
-            return Process.GetProcessesByName(baseName).Length > 0;
+            foreach (Process process in Process.GetProcessesByName(baseName))
+            {
+                using (process)
+                {
+                    ProcessIdentity? identity = ProcessIdentity.Capture(process);
+                    if (identity is null)
+                    {
+                        try { if (process.HasExited) continue; }
+                        catch { }
+                        return true;
+                    }
+                    if (!Path.IsPathFullyQualified(identity.Value.ImageName)) return true;
+                    if (IsExpectedImage(identity.Value.ImageName, exePath)) return true;
+                }
+            }
+            return false;
         }
         catch (Exception ex)
         {
-            Logger.Warn($"进程检测失败（{exePath}），按未运行处理：{ex.Message}");
-            return false;
+            Logger.Warn($"进程检测失败（{exePath}），按仍可能运行处理：{ex.Message}");
+            return true;
         }
     }
 
@@ -254,6 +272,7 @@ internal static class ProcessCleanup
         // A populated Job that is now empty proves the launched process and its
         // owned descendants exited. No second fixed stability window is needed.
         if (cleanup.ConfirmedExited && ownership is { IsUsable: true, HasAssignedProcess: true }
+            && ownership.Observe().IsComplete
             && CaptureOwnedAndExpectedIdentities(ownership, exePath, excludeProcessBaseName, rootPid).Count == 0
             && !IsExeRunning(exePath))
         {
@@ -268,7 +287,37 @@ internal static class ProcessCleanup
             intervalMs,
             excludeProcessBaseName,
             cleanup,
-            stableSeconds);
+            stableSeconds,
+            ownership is null ? null : () => ownership.Observe().IsComplete);
+    }
+
+    /// <summary>Stop only identities required for this attempt; an exact retained launcher remains in its Job.</summary>
+    public static bool KillOwnedRequiredProcesses(
+        ProcessOwnership? ownership,
+        ProcessIdentity preservedLauncher,
+        string? excludeGame,
+        int timeoutMs = 5000)
+    {
+        if (ownership is not { IsUsable: true, HasAssignedProcess: true }) return false;
+        long started = Stopwatch.GetTimestamp();
+        do
+        {
+            ProcessObservation observation = ownership.Observe();
+            if (observation.IsComplete)
+            {
+                ProcessIdentity[] required = observation.Identities.Where(identity =>
+                    !preservedLauncher.Matches(identity)
+                    && !ProcessRoleClassifier.IsConsoleSidecar(identity)
+                    && (excludeGame is null
+                        || !ProcessTree.IsSameProcessName(identity.ImageName, excludeGame))).ToArray();
+                if (required.Length == 0) return true;
+                foreach (ProcessIdentity identity in required)
+                    TryKillIdentity(identity, allowWeakImageName: true);
+            }
+            Thread.Sleep(50);
+        }
+        while (Stopwatch.GetElapsedTime(started).TotalMilliseconds < timeoutMs);
+        return false;
     }
 
     /// <summary>
@@ -312,7 +361,8 @@ internal static class ProcessCleanup
                 intervalMs,
                 excludeProcessBaseName: null,
                 initial,
-                stableSeconds);
+                stableSeconds,
+                ownership is null ? null : () => ownership.Observe().IsComplete);
         }
 
         // 无法建立或捕获进程所有权时的保守身份回退路径；该路径保留稳定退出窗口。
@@ -337,8 +387,9 @@ internal static class ProcessCleanup
         KillEditOwnedFromJob(ownership, rootPid);
         while (DateTime.UtcNow < deadline)
         {
-            IReadOnlyList<ProcessIdentity> owned = ownership.Snapshot();
-            if (owned.Count == 0 && !IsIdentityRunning(identity))
+            ProcessObservation observation = ownership.Observe();
+            IReadOnlyList<ProcessIdentity> owned = observation.Identities;
+            if (observation.IsTrustworthyEmpty && !IsIdentityRunning(identity))
             {
                 IReadOnlyList<ProcessIdentity> unexpected = CaptureExecutableIdentities(
                     exePath,
@@ -391,7 +442,8 @@ internal static class ProcessCleanup
 
     private static ProcessCleanupResult KillEditOwnedFromJob(ProcessOwnership ownership, int rootPid)
     {
-        IReadOnlyList<ProcessIdentity> owned = ownership.Snapshot();
+        ProcessObservation before = ownership.Observe();
+        IReadOnlyList<ProcessIdentity> owned = before.Identities;
         int killed = 0;
         foreach (ProcessIdentity identity in owned)
         {
@@ -400,12 +452,13 @@ internal static class ProcessCleanup
                 killed++;
             }
         }
-        IReadOnlyList<ProcessIdentity> remaining = ownership.Snapshot();
-        return remaining.Count == 0
+        ProcessObservation after = ownership.Observe();
+        IReadOnlyList<ProcessIdentity> remaining = after.Identities;
+        return before.IsComplete && after.IsTrustworthyEmpty
             ? ProcessCleanupResult.Confirmed($"编辑 Job Object 已清理 {killed} 个 owned 进程")
             : ProcessCleanupResult.Unconfirmed(
-                remaining.Select(item => item.Pid),
-                $"编辑 Job Object 中仍有 {remaining.Count} 个 owned 进程存活");
+                remaining.Select(item => item.Pid).Concat(after.UnresolvedPids),
+                $"编辑 Job Object 观测未确认（{after.Quality}，剩余 {remaining.Count} 个身份）");
     }
 
     private static IReadOnlyList<ProcessIdentity> CaptureEditIdentities(
@@ -435,11 +488,20 @@ internal static class ProcessCleanup
         {
             using Process process = Process.GetProcessById(identity.Pid);
             ProcessIdentity? current = ProcessIdentity.Capture(process);
-            return current is not null && identity.Matches(current.Value);
+            return current is null || identity.Matches(current.Value);
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+        catch (InvalidOperationException)
+        {
+            // Invalid/unreadable handles do not prove that this identity exited.
+            return true;
         }
         catch
         {
-            return false;
+            return true;
         }
     }
 
@@ -623,12 +685,14 @@ internal static class ProcessCleanup
 
     private static ProcessCleanupResult KillOwnedFromJob(ProcessOwnership ownership, int rootPid, string? excludeProcessBaseName)
     {
-        IReadOnlyList<ProcessIdentity> owned = ownership.Snapshot();
+        ProcessObservation before = ownership.Observe();
+        IReadOnlyList<ProcessIdentity> owned = before.Identities;
         if (owned.Count == 0)
         {
-            return ownership.HasAssignedProcess
+            return ownership.HasAssignedProcess && before.IsTrustworthyEmpty
                 ? ProcessCleanupResult.Confirmed("已分配的 Job Object 内无待清理进程")
-                : KillTree(rootPid, excludeProcessBaseName);
+                : ProcessCleanupResult.Unconfirmed(before.RawPids.Concat(before.UnresolvedPids),
+                    $"Job Object 观测未确认（{before.Quality}）");
         }
         int killed = 0;
         var remaining = new List<ProcessIdentity>();
@@ -644,7 +708,8 @@ internal static class ProcessCleanup
                 killed++;
             }
         }
-        foreach (ProcessIdentity identity in ownership.Snapshot())
+        ProcessObservation after = ownership.Observe();
+        foreach (ProcessIdentity identity in after.Identities)
         {
             bool isRoot = identity.Pid == rootPid;
             if (!isRoot && excludeProcessBaseName is not null && ProcessTree.IsSameProcessName(identity.ImageName, excludeProcessBaseName))
@@ -653,14 +718,15 @@ internal static class ProcessCleanup
             }
             remaining.Add(identity);
         }
-        if (remaining.Count > 0)
+        if (!before.IsComplete || !after.IsComplete || remaining.Count > 0)
         {
-            return ProcessCleanupResult.Unconfirmed(remaining.Select(item => item.Pid), $"Job Object 中仍有 {remaining.Count} 个 owned 进程存活");
+            return ProcessCleanupResult.Unconfirmed(remaining.Select(item => item.Pid).Concat(after.UnresolvedPids),
+                $"Job Object 观测未确认（{after.Quality}，剩余 {remaining.Count} 个 owned 身份）");
         }
         return ProcessCleanupResult.Confirmed($"Job Object 已清理 {killed} 个 owned 进程");
     }
 
-    private static bool TryKillIdentity(ProcessIdentity identity, bool allowWeakImageName)
+    internal static bool TryKillIdentity(ProcessIdentity identity, bool allowWeakImageName = false)
     {
         try
         {
@@ -674,7 +740,10 @@ internal static class ProcessCleanup
             {
                 return false;
             }
-            return ProcessTree.KillProcess(identity.Pid);
+            // Retain the verified instance handle through termination instead
+            // of passing a recyclable PID to a separate taskkill process.
+            process.Kill(entireProcessTree: false);
+            return true;
         }
         catch
         {
@@ -691,7 +760,8 @@ internal static class ProcessCleanup
         int intervalMs,
         string? excludeProcessBaseName,
         ProcessCleanupResult initial,
-        int? stableSecondsOverride)
+        int? stableSecondsOverride,
+        Func<bool>? observationReliable = null)
     {
         int maxRounds = Math.Max(1, rounds);
         int killRound = 0;
@@ -710,7 +780,8 @@ internal static class ProcessCleanup
             bool knownRemaining = cleanup.RemainingPids.Any(IsProcessAlive);
             IReadOnlyList<ProcessIdentity> observed = observeIdentities();
             bool identityRunning = observed.Count > 0 || IsExeRunning(exePath);
-            if (!knownRemaining && !identityRunning)
+            if (!knownRemaining && !identityRunning && cleanup.ConfirmedExited
+                && (observationReliable?.Invoke() ?? true))
             {
                 // 批处理启动器的真实映像是 cmd.exe，无法按 .bat 文件名做身份观测。
                 // 根进程/Job 已确认退出且没有可观测映像时，继续等待固定窗口只会拖慢
@@ -727,9 +798,9 @@ internal static class ProcessCleanup
             else
             {
                 stability.Observe(hasOwnedProcess: true, DateTime.UtcNow);
-                if (killRound < maxRounds)
+                if (killRound < maxRounds || !cleanup.ConfirmedExited)
                 {
-                    killRound++;
+                    if (killRound < maxRounds) killRound++;
                     Logger.Info($"[提示] {display}进程仍在运行（第 {killRound}/{maxRounds} 轮按身份/owned tree 清理）。");
                     cleanup = refresh();
                 }
@@ -738,7 +809,9 @@ internal static class ProcessCleanup
         }
 
         cleanup = refresh();
-        bool remains = cleanup.RemainingPids.Any(IsProcessAlive)
+        bool remains = !cleanup.ConfirmedExited
+            || !(observationReliable?.Invoke() ?? true)
+            || cleanup.RemainingPids.Any(IsProcessAlive)
             || observeIdentities().Count > 0
             || IsExeRunning(exePath);
         if (remains || !stability.IsStable)

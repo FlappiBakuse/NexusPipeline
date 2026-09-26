@@ -7,9 +7,10 @@ import { globToRegExp } from "../tools/path-glob.mjs";
 import { parseTapResults, parseTrxResults, parseVitestResults, parsePlaywrightResults, validateTimingSelection } from "../tools/test-results.mjs";
 import { getIntegrityLevel } from "./support/windows-process.mjs";
 import { getProcessRunnerState, resetProcessRunnerState, runProcess as runOwnedProcess } from "./support/process-runner.mjs";
-import { findAvailablePort } from "./support/test-runtime.mjs";
+import { findAvailablePort, resolveTestRunRoot } from "./support/test-runtime.mjs";
 import { gateSequence, runtimePolicy } from "./support/runtime-policy.mjs";
 import { FRONTEND_TEST_GROUPS, GOVERNANCE_DOMAINS, HOST_TEST_AREAS, SYSTEM_TEST_GROUPS, TIMING_TESTS, selectHostTestFiles, systemRuntimeName, validateRegistry } from "./registry.mjs";
+import { deriveCandidateVersion, readProjectVersion } from "./support/project-version.mjs";
 
 validateRegistry();
 
@@ -25,8 +26,9 @@ const playwrightCli = path.join(e2eDir, "node_modules", "playwright", "cli.js");
 const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
 const runId = process.env.NEXUS_TEST_RUN_ID?.trim()
   || `run-${Date.now()}-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
-const runRoot = path.join(projectRoot, "tests", ".artifacts", "runs", runId);
+const runRoot = resolveTestRunRoot(projectRoot, runId);
 let testHostDir = path.join(runRoot, "test-host-uninitialized");
+let updateTestHostDir = null;
 const emulatorFixturePluginDir = path.join(runRoot, "emulator-fixture");
 const reportRoot = path.join(runRoot, "reports");
 const frontendBuildStamp = path.join(projectRoot, ".generated", "frontend-build.hash");
@@ -469,11 +471,20 @@ function buildTestHost() {
   }).trim();
   const key = `test-host:${inputHash}`;
   testHostDir = path.join(projectRoot, ".generated", "test-host-cache", inputHash);
-  if (!buildPromises.has(key)) buildPromises.set(key, buildTestHostCore());
+  if (!buildPromises.has(key)) buildPromises.set(key, buildTestHostCore(testHostDir));
   return buildPromises.get(key);
 }
 
-async function buildTestHostCore() {
+async function buildUpdateTestHost() {
+  const version = deriveCandidateVersion(readProjectVersion(projectRoot));
+  const inputHash = createHash("sha256").update(path.basename(testHostDir) + ":update-version:" + version).digest("hex");
+  updateTestHostDir = path.join(projectRoot, ".generated", "test-host-cache", inputHash);
+  const key = "update-test-host:" + inputHash;
+  if (!buildPromises.has(key)) buildPromises.set(key, buildTestHostCore(updateTestHostDir, version));
+  return buildPromises.get(key);
+}
+
+async function buildTestHostCore(testHostDir, version = null) {
   const dependencyCode = await ensureNpmWorkspace(frontendDir);
   if (dependencyCode !== 0) return dependencyCode;
   const code = await runFrontendBuild();
@@ -500,6 +511,7 @@ async function buildTestHostCore() {
   const publishCode = await runProcess("dotnet", [
     "publish", "src\\NexusPipeline.csproj", "-c", "Release", "-r", "win-x64", "--self-contained", "false",
     "-p:PublishSingleFile=true", "-p:DebugType=none", "-p:DebugSymbols=false", "-p:NexusTestHost=true",
+    ...(version ? ["-p:Version=" + version] : []),
     "-o", temporary, "--nologo", "-m:1", "-nr:false",
   ], { timeoutMs: 15 * 60 * 1000 });
   if (publishCode !== 0) { fs.rmSync(temporary, { recursive: true, force: true }); return publishCode; }
@@ -624,9 +636,25 @@ async function runSystem(args = [], { phase = "accelerated" } = {}) {
   if (suites.length === 0) return 1;
   let code = await buildTestHost();
   if (code !== 0) return code;
+  if (suites.some(suite => suite.group === "update")) {
+    code = await buildUpdateTestHost();
+    if (code !== 0) return code;
+  }
   if (suites.some(suite => suite.group === "emulator")) {
     code = await buildEmulatorFixturePlugin();
     if (code !== 0) { cleanEmulatorFixturePlugin(); return code; }
+  }
+  let maaInputs = null;
+  if (suites.some(suite => suite.group === "maa")) {
+    code = await ensureNpmWorkspace(e2eDir);
+    if (code !== 0) return code;
+    officialPluginsRoot = officialPluginsRoot || resolveOfficialPluginsRoot();
+    maaInputs = path.join(runRoot, "maa-inputs");
+    code = await runProcess(pythonCommand, [
+      path.join(officialPluginsRoot, "tools", "repository.py"), "prepare-maa-integration",
+      "--root", officialPluginsRoot, "--host-root", projectRoot, "--output", maaInputs,
+    ], { timeoutMs: 10 * 60 * 1000 });
+    if (code !== 0) return code;
   }
   try {
     for (const suite of suites) {
@@ -642,9 +670,12 @@ async function runSystem(args = [], { phase = "accelerated" } = {}) {
         exitFile: path.join(runRoot, runtimeName, ".nxp", "test-host.exit"),
       });
       env.NEXUS_SYSTEM_WEB_PORT = String(port);
+      if (suite.group === "update") env.NEXUS_SYSTEM_UPDATE_RELEASE_DIR = updateTestHostDir;
       if (suite.group === "emulator") env.NEXUS_SYSTEM_EMULATOR_PLUGIN_DIR = emulatorFixturePluginDir;
+      if (suite.group === "maa") env.NEXUS_SYSTEM_MAA_INPUTS = maaInputs;
       console.error(`[System Smoke] 开始 ${suite.group}/${runtimeName}，port=${port}，timeScale=${env.NEXUS_TIME_SCALE}`);
-      code = await runReported(nodeCommand, ["--test", "--test-concurrency=1", suite.file], { env, timeoutMs: 5 * 60 * 1000 }, "tap", {
+      code = await runReported(nodeCommand, ["--test", "--test-concurrency=1", suite.file], { env,
+        timeoutMs: parsed.realtime && suite.group === "execution" ? 10 * 60 * 1000 : 5 * 60 * 1000 }, "tap", {
         expectedFiles: [normalizePath(suite.file)],
         invokedFiles: [normalizePath(suite.file)],
       });
@@ -664,6 +695,10 @@ async function runTiming(keys = TIMING_TESTS.map(test => test.key)) {
   }
   let code = await buildTestHost();
   if (code !== 0) return code;
+  if (selected.some(item => item.key === "update")) {
+    code = await buildUpdateTestHost();
+    if (code !== 0) return code;
+  }
   for (const timing of selected) {
     const port = await findAvailablePort();
     const env = testHostEnvironment({
@@ -673,6 +708,7 @@ async function runTiming(keys = TIMING_TESTS.map(test => test.key)) {
       exitFile: path.join(runRoot, timing.runtimeName, ".nxp", "test-host.exit"),
     });
     env.NEXUS_SYSTEM_WEB_PORT = String(port);
+    if (timing.key === "update") env.NEXUS_SYSTEM_UPDATE_RELEASE_DIR = updateTestHostDir;
     console.error(`[Timing] 开始 ${timing.key}/${timing.runtimeName}，pattern=${timing.namePattern}，timeScale=${env.NEXUS_TIME_SCALE}`);
     code = await runReported(
       nodeCommand,
@@ -785,7 +821,7 @@ async function runRelease(group) {
     core: [runBuild, runUnit, runDocs, runTooling, runSyntax, runArchitectureCheck],
     "frontend-contract": [runFrontend, runContracts],
     "ui-runtime": [runUi, () => runSystem(["runtime", "control", "config", "plugins"], { phase: "accelerated" })],
-    "execution-emulator": [() => runSystem(["execution", "judge", "emulator"], { phase: "accelerated" })],
+    "execution-emulator": [() => runSystem(["execution", "judge", "emulator", "maa"], { phase: "accelerated" })],
     "update-acceptance": [
       () => runProcess(nodeCommand, ["tools\\validate-update-policy-history.mjs"]),
       () => runSystem(["update"], { phase: "accelerated" }),

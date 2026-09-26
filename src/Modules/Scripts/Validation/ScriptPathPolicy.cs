@@ -21,6 +21,30 @@ internal static class ScriptPathPolicy
     /// </summary>
     public static string? CheckScriptPaths(ScriptInstance script, IPluginCapabilityResolver capabilities)
     {
+        if (!string.IsNullOrWhiteSpace(script.ExecutionProviderId))
+        {
+            if (!string.IsNullOrWhiteSpace(script.PluginType)
+                || !string.IsNullOrWhiteSpace(script.MainExe)
+                || !string.IsNullOrWhiteSpace(script.Args)
+                || !string.IsNullOrWhiteSpace(script.ConfigPath)
+                || !string.IsNullOrWhiteSpace(script.LogPath)
+                || script.JudgeScriptEnabled || script.HasKeywords())
+                return "直驱实例不能同时声明外部脚本、专项插件或日志判定路径";
+            if (!IsProviderConfigId(script.ExecutionProviderConfigId))
+                return "直驱实例 provider 配置身份无效";
+            if (string.IsNullOrWhiteSpace(script.RootPath) || !Directory.Exists(script.RootPath))
+                return $"项目根目录不存在或不是文件夹：{script.RootPath}";
+            if (script.LaunchGame || script.ForceCloseGame)
+            {
+                if (IsEmulator(script) ? !IsValidAdbAddress(script.GameExe) : !ExecutablePathRules.IsExecutable(script.GameExe))
+                    return "直驱 Host 启动/关闭目标必须为有效的游戏可执行文件或模拟器 ADB 地址";
+                if (IsEmulator(script) && script.LaunchGame && string.IsNullOrWhiteSpace(script.GameArgs))
+                    return "直驱模拟器 Host 启动需要明确 am start 参数";
+            }
+            return null;
+        }
+        if (!string.IsNullOrWhiteSpace(script.ExecutionProviderConfigId))
+            return "未声明执行 provider，不能保存 provider 配置身份";
         bool specialized = !string.IsNullOrWhiteSpace(script.PluginType);
         string root = script.RootPath.Trim();
         if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
@@ -66,6 +90,10 @@ internal static class ScriptPathPolicy
         }
         return null;
     }
+
+    internal static bool IsProviderConfigId(string? value) => value is { Length: > 0 and <= 128 }
+        && value.All(character => character is >= 'a' and <= 'z' or >= 'A' and <= 'Z'
+            or >= '0' and <= '9' or '-' or '_');
 
     /// <summary>拒绝配置路径与宿主自管目录重叠，避免添加用户/自动镜像递归复制或删除宿主运行数据。</summary>
     private static string? CheckManagedPathOverlap(string configPath)

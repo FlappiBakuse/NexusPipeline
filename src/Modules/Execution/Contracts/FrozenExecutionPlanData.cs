@@ -4,6 +4,7 @@ using NexusPipeline.Modules.Queues;
 using NexusPipeline.Modules.Scripts;
 using NexusPipeline.Modules.Scripts.Contracts;
 using NexusPipeline.Modules.Users;
+using NexusPipeline.Platform.Processes;
 
 namespace NexusPipeline.Modules.Execution.Contracts;
 
@@ -34,6 +35,9 @@ internal sealed class FrozenQueueTaskData
 
 internal sealed class FrozenResolvedScriptSpecData
 {
+    public NexusPipeline.Plugin.Abstractions.PluginProviderPlan? ProviderPlan { get; set; }
+    public ProcessRole RootProcessRole { get; set; } = ProcessRole.AutomationWorker;
+    public string OutputEncoding { get; set; } = "";
     public TaskProtocolDescriptor? TaskProtocol { get; set; }
 
     public string PluginVersion { get; set; } = "";
@@ -56,6 +60,9 @@ internal sealed class FrozenResolvedScriptSpecData
     {
         return new FrozenResolvedScriptSpecData
         {
+            ProviderPlan = spec.ProviderPlan is null ? null : JsonSerializer.Deserialize<NexusPipeline.Plugin.Abstractions.PluginProviderPlan>(JsonSerializer.Serialize(spec.ProviderPlan)),
+            RootProcessRole = spec.RootProcessRole,
+            OutputEncoding = spec.OutputEncoding,
             TaskProtocol = spec.TaskProtocol is {} protocol ? protocol with
             {
                 ReadResources = protocol.ReadResources.ToArray(),
@@ -97,6 +104,9 @@ internal sealed class FrozenResolvedScriptSpecData
             ProfileHash,
             Error)
         {
+            ProviderPlan = ProviderPlan is null ? null : JsonSerializer.Deserialize<NexusPipeline.Plugin.Abstractions.PluginProviderPlan>(JsonSerializer.Serialize(ProviderPlan)),
+            RootProcessRole = RootProcessRole,
+            OutputEncoding = OutputEncoding,
             TaskProtocol = TaskProtocol is {} protocol ? protocol with
             {
                 ReadResources = protocol.ReadResources.ToArray(),
@@ -141,6 +151,7 @@ internal sealed class FrozenResolvedUserData
 
 internal sealed class FrozenAdmissionProfileData
 {
+    public int ResourceSchemaVersion { get; set; }
     public string Kind { get; set; } = "queue";
 
     public string? QueueClass { get; set; }
@@ -164,6 +175,8 @@ internal sealed class FrozenAdmissionProfileData
     public List<string> AuxiliaryExecutablePaths { get; set; } = new();
 
     public List<string> AuxiliaryProcessNames { get; set; } = new();
+    public List<string> DesktopDomains { get; set; } = new();
+    public List<string> WritableRoots { get; set; } = new();
 }
 
 internal sealed class FrozenLogResourceData

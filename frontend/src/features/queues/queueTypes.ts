@@ -18,6 +18,7 @@ export interface QueueTask {
   id?: string;
   index: number;
   scriptInstanceId: string;
+  dependsOnTaskIds?: string[];
 }
 
 export interface TimeSet {

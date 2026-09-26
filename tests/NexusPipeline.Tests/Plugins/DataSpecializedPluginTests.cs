@@ -34,6 +34,7 @@ public sealed class DataSpecializedPluginTests
             }));
             File.WriteAllText(Path.Combine(pluginDir, "data", "resolve.json"), JsonSerializer.Serialize(new
             {
+                outputEncoding = "windows-936",
                 require = new[] { new { var = "tool", file = "tool.exe" } },
                 paths = new { mainExe = "{tool}", args = "", configPath = "config.json", logPath = "log.txt" },
             }));
@@ -44,6 +45,7 @@ public sealed class DataSpecializedPluginTests
 
             Assert.Contains(PluginCapabilityKeys.Emulator, plugin.CapabilityKeys);
             Assert.Equal(mainExe, profile.MainExe);
+            Assert.Equal("windows-936", profile.OutputEncoding);
             Assert.Equal("javascript", profile.JudgeScriptLanguage);
         }
         finally

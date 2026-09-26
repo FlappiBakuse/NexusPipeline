@@ -19,6 +19,7 @@ internal sealed class RunAttemptFinalizer
     private readonly ScriptInstance _script;
     private readonly string _modeText;
     private readonly Func<IEmulatorDriver?> _emulatorDriver;
+    private readonly List<ProcessIdentity> _gameTargets = [];
 
     public RunAttemptFinalizer(ScriptInstance script, string modeText, Func<IEmulatorDriver?> emulatorDriver)
     {
@@ -33,14 +34,19 @@ internal sealed class RunAttemptFinalizer
             || (result.Status == "cancelled" && forceCloseGame);
     }
 
-    public bool KillScript(Process? process, string launchExe, string? excludeGame, ProcessOwnership? ownership = null)
+    public bool KillScript(Process? process, string launchExe, string? excludeGame,
+        ProcessOwnership? ownership = null, ProcessIdentity? preservedLauncher = null)
     {
         if (process is null)
         {
             return true;
         }
+        if (ownership is not null)
+            foreach (ProcessIdentity identity in ownership.Observe().Identities) TrackGameIdentity(identity);
         // Job Object 优先提供 launcher 已退出后的 owned child；无 Job 时回退到 root PID + 稳定身份窗口。
-        return SystemActions.KillOwnedProcessTree(ownership, process.Id, launchExe, "脚本", excludeProcessBaseName: excludeGame);
+        return preservedLauncher is { } launcher
+            ? ProcessCleanup.KillOwnedRequiredProcesses(ownership, launcher, excludeGame)
+            : SystemActions.KillOwnedProcessTree(ownership, process.Id, launchExe, "脚本", excludeProcessBaseName: excludeGame);
     }
 
     public async Task CleanupGameAsync(RunAttemptResult result, int attemptNumber, int maxAttempts)
@@ -95,12 +101,12 @@ internal sealed class RunAttemptFinalizer
                 if (!string.IsNullOrWhiteSpace(_script.GameExe))
                 {
                     Logger.Info($"[{_modeText}运行] 脚本「{_script.Name}」任务失败，强制结束游戏进程。");
-                    SystemActions.KillByName(_script.GameExe, "游戏");
+                    StopTrackedGame();
                 }
             }
             else if (_script.ForceCloseGame && !string.IsNullOrWhiteSpace(_script.GameExe))
             {
-                SystemActions.KillByName(_script.GameExe, "游戏");
+                StopTrackedGame();
             }
             Logger.Info($"[{_modeText}运行] 脚本「{_script.Name}」本次尝试清理完成。");
         }
@@ -140,7 +146,7 @@ internal sealed class RunAttemptFinalizer
             }
             else
             {
-                SystemActions.KillByName(_script.GameExe, "游戏");
+                StopTrackedGame();
             }
         }
         catch (OperationCanceledException) when (cleanupCts.IsCancellationRequested)
@@ -151,6 +157,22 @@ internal sealed class RunAttemptFinalizer
         {
             Logger.Warn($"[警告] 运行提前结束时清理游戏失败：{ex.Message}");
         }
+    }
+
+    internal void TrackGameIdentity(ProcessIdentity identity)
+    {
+        if (!string.IsNullOrWhiteSpace(_script.GameExe) && Path.IsPathFullyQualified(identity.ImageName)
+            && ProcessTree.IsSameProcessName(identity.ImageName, _script.GameExe)
+            && !_gameTargets.Any(target => target.Matches(identity))) _gameTargets.Add(identity);
+    }
+
+    private void StopTrackedGame()
+    {
+        foreach (ProcessIdentity identity in _gameTargets)
+            if (!ProcessCleanup.TryKillIdentity(identity))
+                Logger.Warn($"[游戏清理] 已确权游戏停止未确认（PID {identity.Pid}）；保留身份诊断。");
+        if (_gameTargets.Count == 0)
+            Logger.Info("[游戏清理] 没有本次已确权游戏身份，保留预存在或外部启动的进程。");
     }
 
     private static CancellationTokenSource CreateCleanupCancellation()

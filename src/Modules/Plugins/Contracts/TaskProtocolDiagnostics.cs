@@ -6,6 +6,11 @@ namespace NexusPipeline.Modules.Plugins.Contracts;
 /// <summary>Manifest-owned configuration rule declaration for taskProtocol 0.1.0.</summary>
 internal sealed record TaskConfigRuleDescriptor(string RuleId, bool Required, string Criticality);
 
+/// <summary>Frozen, declarative repair of a single main-config enum value.</summary>
+internal sealed record TaskConfigRepairDescriptor(string Id, string RuleId, string ResourceId,
+    JsonArray Selector, string Source, string Format, string[] FromValues, string ToValue,
+    string Explanation);
+
 /// <summary>Manifest-owned, non-arbitrary environment target declaration.</summary>
 internal sealed record TaskEnvironmentCheckDescriptor(
     string Id,
@@ -35,6 +40,9 @@ internal sealed record TaskExecutionContext(
     TaskEffectiveLaunch EffectiveLaunch,
     TaskLogSourceContext LogSource)
 {
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RuntimeActivity { get; init; }
+
     internal static TaskExecutionContext Unknown(string userId, string scriptInstanceId, string trigger) => new(
         userId,
         scriptInstanceId,
@@ -55,7 +63,11 @@ internal sealed record TaskGameTarget(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? InspectionId,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? Ready = null);
 
-internal sealed record TaskQueueContext(string Kind, string HasFollowingWork);
+internal sealed record TaskQueueContext(
+    string Kind,
+    string HasFollowingWork,
+    string NextTargetRelation = "unknown",
+    string NextLaunchOwner = "unknown");
 
 internal sealed record TaskCleanupContext(bool HostWillTerminateScript, bool HostWillCloseGame, string HostManagedSystemAction);
 
