@@ -15,6 +15,36 @@ public sealed class ProviderRunnerTests : IClassFixture<HostTestScope>
 {
     public ProviderRunnerTests(HostTestScope host) { }
 
+    [Fact]
+    public async Task CoordinatorPublishesBoundedIndependentSnapshotsDuringTenThousandProgressFrames()
+    {
+        using var fixture = new ProviderWorkerPortTests.Fixture();
+        var script = new ScriptInstance { Id = "progress-" + Guid.NewGuid().ToString("N"), Name = "progress pressure", RootPath = fixture.Root,
+            ExecutionProviderId = "dummy", ExecutionProviderConfigId = "p", MaxAttempts = 1 };
+        var plan = new PluginProviderPlan("plan", "revision", "authorization", [new("writable_root", fixture.Root)], [new("task", "Task", 0)], new());
+        var spec = new ResolvedScriptSpec(script, "1", new(false, "javascript", "provider", "", ""), "hash") { ProviderPlan = plan };
+        var user = new ResolvedScriptUser("user", "User", new() { ScriptInstanceId = script.Id, Enabled = true }, spec);
+        var reports = new List<JsonObject>();
+        var coordinator = new ExecutionCoordinator(script, "manual", "", "", "User", default, null, null, null, null,
+            new PluginAvailabilityPolicyTestsFixture.EmptyUserRepository(), new PluginAvailabilityPolicyTestsFixture.EmptyEmulatorSupportProviderResolver(),
+            user, spec, executionProviders: new Providers(fixture.Root, true, 10000));
+        coordinator.TaskReportChanged = report => reports.Add(report);
+        try
+        {
+            var record = await coordinator.RunAsync();
+            Assert.Equal("unverified", record.Status);
+            Assert.InRange(reports.Count, 4, 7);
+            Assert.Equal("succeeded", reports[^1]["engineStatus"]!.GetValue<string>());
+            Assert.Equal(4, reports[^1]["structuredEvidence"]!.AsArray().Count);
+            Assert.Equal("succeeded", record.Outcomes!.EngineStatus);
+            reports[0]["engineStatus"] = "consumer-modification";
+            Assert.Equal("succeeded", reports[^1]["engineStatus"]!.GetValue<string>());
+            Assert.Equal("succeeded", record.TaskReport!["engineStatus"]!.GetValue<string>());
+            Assert.Contains(reports, report => report["structuredEvidence"]!.AsArray().Any(item => item?["kind"]?.GetValue<string>() == "task_event"));
+        }
+        finally { coordinator.DisposeScreenshots(); }
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -55,21 +85,21 @@ public sealed class ProviderRunnerTests : IClassFixture<HostTestScope>
         finally { Directory.Delete(root, true); }
     }
 
-    private sealed class Providers(string root, bool useWorker) : IPluginAvailability, IPluginExecutionProviderResolver
+    private sealed class Providers(string root, bool useWorker, int progressCount = 0) : IPluginAvailability, IPluginExecutionProviderResolver
     {
         public bool IsKnownPlugin(string name) => name == "dummy";
         public bool IsDataSpecializedPlugin(string name) => false;
         public bool IsEnabled(string name) => name == "dummy";
-        public ExecutionProviderDescriptor? ResolveExecutionProvider(string id) => id == "dummy" ? new(id, "1", root, new Provider(root, useWorker)) : null;
+        public ExecutionProviderDescriptor? ResolveExecutionProvider(string id) => id == "dummy" ? new(id, "1", root, new Provider(root, useWorker, progressCount)) : null;
     }
-    private sealed class Provider(string root, bool useWorker) : IPluginExecutionProvider
+    private sealed class Provider(string root, bool useWorker, int progressCount) : IPluginExecutionProvider
     {
         public string Id => "dummy";
         public ValueTask<PluginProviderInspection> InspectAsync(PluginProviderInspectRequest request, CancellationToken token) => throw new NotSupportedException();
         public ValueTask<PluginProviderPlan> PrepareAsync(PluginProviderPrepareRequest request, CancellationToken token) => throw new NotSupportedException();
         public async Task<PluginProviderRunResult> RunAsync(PluginProviderRunContext context, CancellationToken token)
         {
-            if (useWorker) await context.Worker.RunAsync(new("NexusPipeline.TestProviderWorker.exe", [], root, new()), context.PublishEvent, token);
+            if (useWorker) await context.Worker.RunAsync(new("NexusPipeline.TestProviderWorker.exe", [], root, new() { ["progressCount"] = progressCount }), context.PublishEvent, token);
             else await context.PublishEvent(new("completed", 1, "task", "succeeded", new JsonObject()));
             return new("succeeded", "dummy completed", true);
         }
