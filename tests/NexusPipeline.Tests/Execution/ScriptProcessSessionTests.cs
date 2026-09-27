@@ -2,6 +2,9 @@ using System.Collections.Concurrent;
 using System.Text;
 using NexusPipeline.Modules.Execution;
 using NexusPipeline.Modules.Scripts;
+using NexusPipeline.Modules.Scripts.Contracts;
+using NexusPipeline.Modules.Users.Contracts;
+using NexusPipeline.Tests.Support;
 using NexusPipeline.Platform.Processes;
 using Xunit;
 
@@ -9,6 +12,101 @@ namespace NexusPipeline.Tests.Execution;
 
 public sealed class ScriptProcessSessionTests
 {
+    [Fact]
+    public async Task CoordinatorPreservesProvedSuccessWhenRetainedLauncherKeepsStdoutOpen()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "launcher-result-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        string powershell = Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe");
+        string command = "$PID | Set-Content -LiteralPath '" + Path.Combine(root, "pid.txt")
+            + "'; Start-Process -FilePath $env:ComSpec -ArgumentList '/d','/c','ping -n 3 127.0.0.1 >nul' -NoNewWindow | Out-Null; "
+            + "Set-Content -LiteralPath '" + Path.Combine(root, "run.log") + "' -Value 'business-completed'; Write-Output 'business-completed'; Start-Sleep -Seconds 60";
+        var script = new ScriptInstance { Id = Path.GetFileName(root), Name = "retained launcher success", RootPath = root,
+            MainExe = powershell, Args = "-NoProfile -NonInteractive -EncodedCommand " + Convert.ToBase64String(Encoding.Unicode.GetBytes(command)),
+            LogPath = Path.Combine(root, "run.log"), SuccessKeywords = "business-completed", MaxAttempts = 1 };
+        var spec = new ResolvedScriptSpec(script, "1", new(false, "javascript", "fixture", "", ""), "fixture")
+            { RootProcessRole = ProcessRole.GameLauncher };
+        var user = new ResolvedScriptUser("fixture", "Fixture", new() { ScriptInstanceId = script.Id, Enabled = true });
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(25));
+        var coordinator = new ExecutionCoordinator(script, "manual", "", "", "Fixture", stop.Token, null, null, null, null,
+            new PluginAvailabilityPolicyTestsFixture.EmptyUserRepository(), new PluginAvailabilityPolicyTestsFixture.EmptyEmulatorSupportProviderResolver(), user, spec);
+        ProcessIdentity? launcher = null;
+        System.Diagnostics.Process? launcherProcess = null;
+        try
+        {
+            Task<NexusPipeline.Modules.History.RunRecord> run = coordinator.RunAsync();
+            await SpinWaitAsync(() => File.Exists(Path.Combine(root, "pid.txt")), TimeSpan.FromSeconds(5));
+            launcherProcess = System.Diagnostics.Process.GetProcessById(int.Parse(File.ReadAllText(Path.Combine(root, "pid.txt"))));
+            launcher = ProcessIdentity.Capture(launcherProcess);
+            var record = await run;
+            Assert.Equal("success", record.Status);
+            Assert.True(Assert.Single(record.AttemptDetails).OutputIncomplete);
+            Assert.Equal("success", record.AttemptDetails[0].Status);
+            Assert.NotNull(launcher);
+            Assert.Equal(launcher, ProcessIdentity.Capture(launcherProcess));
+            Assert.Null(NexusPipeline.Modules.Configuration.Recovery.ConfigSessionMark.TryRead(script.Id, user.UserId));
+        }
+        finally
+        {
+            stop.Cancel();
+            coordinator.DisposeScreenshots();
+            if (launcher is { } identity && launcherProcess is not null && !launcherProcess.HasExited)
+            {
+                using var process = System.Diagnostics.Process.GetProcessById(identity.Pid);
+                Assert.Equal(identity, ProcessIdentity.Capture(process));
+                process.Kill(); Assert.True(process.WaitForExit(5000));
+            }
+            launcherProcess?.Dispose();
+            Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
+    public async Task ExitedRootDoesNotReleaseDifferentImageWriterBeforeOwnedCleanup()
+    {
+        string powershell = Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe");
+        string command = "Start-Process -FilePath $env:ComSpec -ArgumentList '/d','/c','ping -n 30 127.0.0.1 >nul' -NoNewWindow | Out-Null";
+        using var session = ScriptProcessSession.Start(new() { Name = "different image writer" }, "test", powershell,
+            Path.GetTempPath(), ["-NoProfile", "-NonInteractive", "-EncodedCommand", Convert.ToBase64String(Encoding.Unicode.GetBytes(command))], null, null);
+        session.AttachOutput((_, _) => { });
+        await SpinWaitAsync(() => session.Process.HasExited, TimeSpan.FromSeconds(10));
+        var observation = session.Ownership!.Observe();
+        Assert.Contains(observation.Identities, identity => Path.GetFileName(identity.ImageName).Equals("cmd.exe", StringComparison.OrdinalIgnoreCase));
+        var monitor = new AttemptMonitor();
+        Assert.False(monitor.IsScriptExited(session.Process, powershell, session.Ownership, null, null));
+        Assert.True(session.KillAndConfirm(new RunAttemptFinalizer(new() { Name = "different image writer" }, "test", () => null), null));
+        Assert.True(session.Ownership.Observe().IsTrustworthyEmpty);
+        Assert.True(monitor.IsScriptExited(session.Process, powershell, session.Ownership, null, null));
+        await session.WaitForOutputDrainAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task RetainedLauncherHoldingOutputHasBoundedIncompleteDrain()
+    {
+        string powershell = Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe");
+        using var session = ScriptProcessSession.Start(new() { Name = "output holder" }, "test", powershell,
+            Path.GetTempPath(), ["-NoProfile", "-NonInteractive", "-Command", "Write-Output 'business-completed'; Start-Sleep -Seconds 60"],
+            null, null, ProcessRole.GameLauncher);
+        var lines = new ConcurrentQueue<string>();
+        session.AttachOutput((line, _) => { if (line is not null) lines.Enqueue(line); });
+        try
+        {
+            await SpinWaitAsync(() => lines.Contains("business-completed"), TimeSpan.FromSeconds(5));
+            Assert.True(new AttemptMonitor().IsScriptExited(session.Process, powershell, session.Ownership,
+                null, null, session.PreservedLauncher, automationBoundaryConfirmed: true));
+            var timer = System.Diagnostics.Stopwatch.StartNew();
+            await session.WaitForOutputDrainAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(13));
+            Assert.InRange(timer.Elapsed.TotalSeconds, 9, 13);
+            Assert.True(session.OutputIncomplete);
+            Assert.False(session.Process.HasExited);
+            Assert.Contains("business-completed", lines);
+        }
+        finally
+        {
+            if (!session.Process.HasExited) { session.Process.Kill(); session.Process.WaitForExit(5000); }
+        }
+    }
+
     [Fact]
     public void DeclaredLauncherWithExactOwnedIdentityIsRetainedAfterAutomationBoundary()
     {

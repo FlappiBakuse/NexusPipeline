@@ -176,9 +176,11 @@ internal sealed class ProcessOwnership : IDisposable
     }
 
     public ProcessObservation Observe()
+        => Observe(QueryProcessIds(), ProcessIdentity.Capture);
+
+    internal ProcessObservation Observe(JobPidQueryResult query, Func<Process, ProcessIdentity?> captureIdentity)
     {
         DateTimeOffset observedAt = DateTimeOffset.UtcNow;
-        JobPidQueryResult query = QueryProcessIds();
         var identities = new List<ProcessIdentity>();
         var unresolved = new List<int>();
         var exited = new List<int>();
@@ -193,7 +195,7 @@ internal sealed class ProcessOwnership : IDisposable
             try
             {
                 using Process process = Process.GetProcessById(pid);
-                ProcessIdentity? identity = ProcessIdentity.Capture(process);
+                ProcessIdentity? identity = captureIdentity(process);
                 if (identity is not null && Path.IsPathFullyQualified(identity.Value.ImageName))
                 {
                     identities.Add(identity.Value);
