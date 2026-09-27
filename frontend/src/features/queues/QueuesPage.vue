@@ -15,7 +15,7 @@ import type { NxpOption } from "../../ui/primitives/NxpSelect.vue";
 import NxpPager from "../../ui/primitives/NxpPager.vue";
 import NxpModal from "../../ui/primitives/NxpModal.vue";
 import NxpSortableList from "../../ui/composites/NxpSortableList.vue";
-import { queueCountdown } from "./queueUtils";
+import { queueCountdown, reorderTimeSetItems } from "./queueUtils";
 import QueueCard from "./QueueCard.vue";
 import QueueEditorModal from "./QueueEditorModal.vue";
 import type {
@@ -174,10 +174,7 @@ function removeTimeSet(index: number) {
   if (draft.timeSets.length > 1) draft.timeSets.splice(index, 1);
 }
 function reorderTimeSets(ids: string[]) {
-  const current = draft.timeSets.slice();
-  const next = ids.map(id => current[Number(id)]).filter((item): item is TimeSet => Boolean(item));
-  if (next.length !== current.length || next.every((item, index) => item === current[index])) return;
-  draft.timeSets = next;
+  draft.timeSets = reorderTimeSetItems(draft.timeSets, ids);
 }
 function reorderTasks(ids: string[]) {
   const current = draft.tasks.slice();

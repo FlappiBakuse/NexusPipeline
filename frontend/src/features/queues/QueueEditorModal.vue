@@ -13,6 +13,7 @@ import NxpDragHandle from "../../ui/composites/NxpDragHandle.vue";
 import NxpScheduleCard from "../../ui/composites/NxpScheduleCard.vue";
 import NxpSortableList from "../../ui/composites/NxpSortableList.vue";
 import type { QueueDraft, QueueEditorOptions, QueueTranslator } from "./queueTypes";
+import { timeSetKey } from "./queueUtils";
 
 const props = defineProps<{
   open: boolean;
@@ -68,8 +69,6 @@ const dayShortNames = computed(() => [
 ]);
 
 const expandedTimeSetKeys = ref<string[]>([]);
-const timeSetKey = (timeSet: QueueDraft["timeSets"][number], index: number) =>
-  timeSet.id || `new-time-set-${index}`;
 const timeSetKeys = computed(() =>
   props.draft.timeSets.map((timeSet, index) => timeSetKey(timeSet, index)),
 );
