@@ -13,6 +13,37 @@ namespace NexusPipeline.Tests.Execution;
 public sealed class ScriptProcessSessionTests
 {
     [Fact]
+    public async Task CancellationDuringActualPreHookPreventsMainAndFurtherAttempts()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "prehook-cancel-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        string hook = Path.Combine(root, "before.cmd"), main = Path.Combine(root, "main.cmd");
+        File.WriteAllText(hook, "@echo off\r\necho entered>hook-entered\r\nping -n 30 127.0.0.1 >nul\r\necho finished>hook-finished\r\n");
+        File.WriteAllText(main, "@echo off\r\necho started>main-started\r\n");
+        var script = new ScriptInstance { Id = Path.GetFileName(root), Name = "cancel actual hook", RootPath = root,
+            MainExe = main, MaxAttempts = 3 };
+        var spec = new ResolvedScriptSpec(script, "1", new(false, "javascript", "fixture", "", ""), "fixture");
+        var user = new ResolvedScriptUser("fixture", "Fixture", new() { ScriptInstanceId = script.Id, Enabled = true, PreRunScript = hook });
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var coordinator = new ExecutionCoordinator(script, "manual", "", "", "Fixture", stop.Token, null, null, null, null,
+            new PluginAvailabilityPolicyTestsFixture.EmptyUserRepository(), new PluginAvailabilityPolicyTestsFixture.EmptyEmulatorSupportProviderResolver(), user, spec);
+        try
+        {
+            var run = coordinator.RunAsync();
+            await SpinWaitAsync(() => File.Exists(Path.Combine(root, "hook-entered")), TimeSpan.FromSeconds(5));
+            stop.Cancel();
+            var record = await run.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal("cancelled", record.Status);
+            Assert.Equal(1, record.Attempts);
+            Assert.Equal("cancelled", Assert.Single(record.AttemptDetails).Status);
+            Assert.False(File.Exists(Path.Combine(root, "main-started")));
+            Assert.False(File.Exists(Path.Combine(root, "hook-finished")));
+            Assert.Null(NexusPipeline.Modules.Configuration.Recovery.ConfigSessionMark.TryRead(script.Id, user.UserId));
+        }
+        finally { stop.Cancel(); coordinator.DisposeScreenshots(); Directory.Delete(root, true); }
+    }
+
+    [Fact]
     public async Task CoordinatorPreservesProvedSuccessWhenRetainedLauncherKeepsStdoutOpen()
     {
         string root = Path.Combine(Path.GetTempPath(), "launcher-result-" + Guid.NewGuid().ToString("N"));
