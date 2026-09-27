@@ -178,11 +178,14 @@ def archive_production(
     if zip_path.exists():
         zip_path.unlink()
     files = []
-    for path in sorted(production_root.rglob("*")):
+    for path in production_root.rglob("*"):
         if not path.is_file() or path == zip_path:
             continue
         relative = _safe_archive_name(path, production_root)
         files.append((relative, path))
+    folded = [name.casefold() for name, _ in files]
+    _require(len(folded) == len(set(folded)), "生产载荷大小写路径冲突")
+    files.sort(key=lambda item: (item[0].casefold(), item[0]))
     _require({name for name, _ in files if "/" not in name} == {"nexus-pipeline.exe", "README.md"}, "生产载荷根文件不符")
     _require(any(name.startswith("plugins/EmulatorSupport/") for name, _ in files)
              and any(name.startswith("plugins/LiveScreenshot/") for name, _ in files)

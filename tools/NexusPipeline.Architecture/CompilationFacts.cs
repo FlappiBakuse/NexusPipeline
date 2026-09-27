@@ -60,7 +60,7 @@ public static class CompilationFactsBuilder
             .ToArray();
         var outsideWorkspace = sourcePaths
             .Where(file => !file.StartsWith(Path.GetFullPath(root) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
-            .Where(file => !file.Replace('\\', '/').Contains("/.nuget/packages/", StringComparison.OrdinalIgnoreCase))
+            .Where(file => !ProjectLoader.IsExternalPackageDocument(file))
             .ToArray();
         if (outsideWorkspace.Length > 0)
         {
