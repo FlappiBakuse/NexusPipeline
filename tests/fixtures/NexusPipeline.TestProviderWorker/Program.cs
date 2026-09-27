@@ -3,6 +3,29 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using NexusPipeline.Plugin.Abstractions;
 
+if (args.Length == 2 && args[0] == "--owned-window")
+{
+    if (!File.Exists(".nxp-test-fixture") || File.ReadAllText(".nxp-test-fixture") != "owned-process-contract"
+        || !int.TryParse(args[1], out int delay) || delay is < 0 or > 10000) return 4;
+    string root = Environment.CurrentDirectory;
+    var thread = new Thread(() =>
+    {
+        var wait = System.Diagnostics.Stopwatch.StartNew();
+        while (wait.ElapsedMilliseconds < delay)
+        {
+            if (File.Exists(Path.Combine(root, "stop-window"))) return;
+            Thread.Sleep(20);
+        }
+        using var window = new System.Windows.Forms.Form { Text = "Nexus owned readiness fixture", Width = 300, Height = 200 };
+        using var timer = new System.Windows.Forms.Timer { Interval = 50 };
+        timer.Tick += (_, _) => { if (File.Exists(Path.Combine(root, "stop-window"))) window.Close(); };
+        window.Shown += (_, _) => { File.WriteAllText(Path.Combine(root, "window-ready"), "owned-window"); timer.Start(); };
+        System.Windows.Forms.Application.Run(window);
+    });
+    thread.SetApartmentState(ApartmentState.STA); thread.Start(); thread.Join();
+    return 0;
+}
+
 if (args.SequenceEqual(new[] { "--owned-lifetime" }))
 {
     if (!File.Exists(".nxp-test-fixture") || File.ReadAllText(".nxp-test-fixture") != "owned-process-contract") return 4;
