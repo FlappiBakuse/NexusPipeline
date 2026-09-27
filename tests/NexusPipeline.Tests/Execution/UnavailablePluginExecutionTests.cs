@@ -136,11 +136,17 @@ public sealed class UnavailablePluginExecutionTests : IClassFixture<HostTestScop
     public async Task QueueRunner_RecordsQuarantinedItemWithoutAttemptAndContinuesIndependentItems()
     {
         string suffix = Guid.NewGuid().ToString("N");
+        string fixtureRoot = Path.Combine(Path.GetTempPath(), "independent-target-" + suffix);
+        Directory.CreateDirectory(fixtureRoot);
+        string fixtureExe = Path.Combine(fixtureRoot, "NxpOwnedQueueTarget.exe");
+        File.Copy(Path.Combine(Environment.SystemDirectory, "cmd.exe"), fixtureExe);
         ScriptInstance first = SpecializedScript("isolation-first-" + suffix, "A");
         string sharedConfig = Path.Combine(Path.GetTempPath(), "isolation-" + suffix, "shared.json");
         ScriptInstance blocked = new() { Id = "isolation-blocked-" + suffix, Name = "B", ConfigPath = sharedConfig };
         ScriptInstance independentC = new() { Id = "isolation-c-" + suffix, Name = "C" };
-        ScriptInstance independentD = new() { Id = "isolation-d-" + suffix, Name = "D" };
+        ScriptInstance independentD = new() { Id = "isolation-d-" + suffix, Name = "D",
+            MainExe = fixtureExe, RootPath = fixtureRoot, Args = "/d /c echo independent-business-completed",
+            SuccessKeywords = "independent-business-completed", MaxAttempts = 1 };
         var queue = new DispatchQueue
         {
             Id = "isolation-queue-" + suffix,
@@ -199,12 +205,19 @@ public sealed class UnavailablePluginExecutionTests : IClassFixture<HostTestScop
             Assert.Equal("quarantined", history.Records[2].Outcomes?.RecoveryOutcome);
             Assert.NotEqual("run.not_started_quarantined", history.Records[3].ResultCode);
             Assert.NotEqual("run.not_started_dependency", history.Records[3].ResultCode);
+            Assert.Equal("success", history.Records[3].Status);
+            Assert.Equal(1, history.Records[3].Attempts);
+            Assert.NotNull(ConfigSessionMark.TryRead(first.Id, "recovery-owner")?.RecoveryIsolation);
+            Assert.Equal("done", execution.Status);
+            Assert.Contains(history.Records, record => record.Status != "success");
+            Assert.Null(state.TryAcquireMaintenanceLease(out _));
             Assert.Null(state.CurrentSystemAction);
         }
         finally
         {
             string directory = Path.Combine(AppPaths.DataDir, first.Id);
             if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+            Directory.Delete(fixtureRoot, true);
         }
     }
 

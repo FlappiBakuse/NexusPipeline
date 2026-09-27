@@ -18,6 +18,36 @@ public sealed class ExecutionResourceScopeTests
     };
 
     [Fact]
+    public void WritableAncestorCaseAndDirectoryJunctionAreOneConflictScope()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "resource-alias-" + Guid.NewGuid().ToString("N"));
+        string target = Path.Combine(root, "physical");
+        string alias = Path.Combine(root, "alias");
+        Directory.CreateDirectory(Path.Combine(target, "child"));
+        try
+        {
+            var start = new System.Diagnostics.ProcessStartInfo(Environment.GetEnvironmentVariable("ComSpec")!)
+            {
+                UseShellExecute = false, CreateNoWindow = true,
+                Arguments = $"/d /c mklink /J \"{alias}\" \"{target}\"",
+            };
+            using var link = System.Diagnostics.Process.Start(start)!;
+            Assert.True(link.WaitForExit(5000)); Assert.Equal(0, link.ExitCode);
+            var owner = ExecutionResourceSetBuilder.Build([(ScriptId: "a", Script: Script("a", target, "emulator", "device-a"))]);
+            foreach (string candidate in new[] { target.ToUpperInvariant(), Path.Combine(target, "child"), Path.Combine(alias, "child") })
+            {
+                var contender = ExecutionResourceSetBuilder.Build([(ScriptId: "b", Script: Script("b", candidate, "emulator", "device-b"))]);
+                Assert.StartsWith("writable:", owner.FindConflict(contender));
+            }
+        }
+        finally
+        {
+            if (Directory.Exists(alias)) Directory.Delete(alias);
+            Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
     public void DistinctAdbProjectsMayShareReadOnlyPythonButNotWritableRoots()
     {
         string baseDir = Path.Combine(Path.GetTempPath(), "resource-scopes-" + Guid.NewGuid().ToString("N"));

@@ -9,6 +9,20 @@ namespace NexusPipeline.Tests.Configuration;
 
 public sealed class ConfigRepairPolicyTests
 {
+    [Theory]
+    [InlineData("other-plugin", "user_snapshot", "yaml")]
+    [InlineData("march7th", "shared", "yaml")]
+    [InlineData("march7th", "external", "yaml")]
+    [InlineData("march7th", "user_snapshot", "json")]
+    public void UnknownPluginSharedExternalAndUndeclaredJsonRemainManual(string plugin, string scope, string format)
+    {
+        byte[] original = Encoding.UTF8.GetBytes("\uFEFF# private\r\nafter_finish: Shutdown # preserve\r\nsecret: 'do-not-disclose'\r\n");
+        var proposal = ConfigRepairPolicy.TryPropose(Rule with { Source = scope, Format = format }, plugin,
+            "0.3.1", "user", "script", "profile", "locator", 1, original, out var after);
+        Assert.Null(proposal); Assert.Null(after);
+        Assert.Equal("\uFEFF# private\r\nafter_finish: Shutdown # preserve\r\nsecret: 'do-not-disclose'\r\n", Encoding.UTF8.GetString(original));
+    }
+
     [Fact]
     public void BackendRepairEndpointsAreDisabledByDefault()
     {

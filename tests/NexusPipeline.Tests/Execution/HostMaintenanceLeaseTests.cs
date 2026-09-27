@@ -6,6 +6,23 @@ namespace NexusPipeline.Tests.Execution;
 
 public sealed class HostMaintenanceLeaseTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ActiveExecutionOrEditMustEndBeforeMaintenanceAdmission(bool edit)
+    {
+        var store = new ExecutionStateStore();
+        var execution = new RunningExecution { Kind = "script", TargetId = "maintenance-busy" };
+        if (edit) Assert.True(store.TryBeginEditSession(execution.TargetId, "user", Path.Combine(Path.GetTempPath(), "maintenance-config.json"), out _));
+        else Assert.True(store.TryRegister(execution, new("script", null, ExecutionResourceSet.Empty, "none"), out _));
+        Assert.Null(store.TryAcquireMaintenanceLease(out var reason));
+        Assert.Contains(edit ? "编辑" : "运行", reason);
+        Assert.Equal(ExecutionGroupState.Open, store.GroupState);
+        if (edit) store.EndEditSession(execution.TargetId, "user");
+        else store.Unregister(execution);
+        using var maintenance = store.TryAcquireMaintenanceLease(out _);
+        Assert.NotNull(maintenance);
+    }
 
     [Fact]
     public void HostMaintenanceLease_AtomicallyBlocksNewExecutionAndEditAdmission()

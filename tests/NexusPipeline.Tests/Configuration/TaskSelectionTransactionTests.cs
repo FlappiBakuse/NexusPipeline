@@ -9,6 +9,35 @@ namespace NexusPipeline.Tests.Configuration;
 public sealed class TaskSelectionTransactionTests
 {
     [Theory]
+    [InlineData("json", "staged")]
+    [InlineData("json", "file:0")]
+    [InlineData("json", "file:1")]
+    [InlineData("json", "committed")]
+    [InlineData("yaml", "staged")]
+    [InlineData("yaml", "file:0")]
+    [InlineData("yaml", "file:1")]
+    [InlineData("yaml", "committed")]
+    public void TwoSnapshotsRecoverBomCrLfCommentsUnknownFieldsAndPrivateBytes(string format, string point)
+    {
+        WithFiles(format, (root, files) =>
+        {
+            byte[][] originals = files.Select((file, index) => System.Text.Encoding.UTF8.GetBytes(format == "json"
+                ? $"\uFEFF{{\r\n  \"_comment\": \"user {index}\",\r\n  \"enabled\": true,\r\n  \"count\": 7,\r\n  \"unknown\": {{\"private\": \"user-{index}-credential\"}}\r\n}}\r\n"
+                : $"\uFEFF# user {index}\r\nenabled: true # selection\r\ncount: 7\r\nunknown:\r\n  private: 'user-{index}-credential'\r\n")).ToArray();
+            for (int index = 0; index < files.Length; index++) File.WriteAllBytes(files[index], originals[index]);
+            var view = View(files, format);
+            string journal = Path.Combine(root, "journal");
+            var transaction = TaskSelectionTransaction.Freeze(journal, view, Fields(files), phase =>
+            { if (phase == point) throw new IOException("owned transaction fault " + phase); });
+            Assert.Throws<IOException>(() => transaction.Apply(view, Patches(view, files, format)));
+            var recovery = TaskSelectionTransaction.Load(journal, files.ToHashSet(StringComparer.OrdinalIgnoreCase));
+            recovery.Restore(); recovery.Complete();
+            for (int index = 0; index < files.Length; index++) Assert.Equal(originals[index], File.ReadAllBytes(files[index]));
+            Assert.False(File.Exists(Path.Combine(journal, "journal.json")));
+        });
+    }
+
+    [Theory]
     [InlineData("json")]
     [InlineData("yaml")]
     public void RestoresOriginalSelectionOverFinalBusinessCounters(string format)
