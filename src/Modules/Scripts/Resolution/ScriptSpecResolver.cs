@@ -168,8 +168,19 @@ internal sealed class ScriptSpecResolver
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
             var request = new NexusPipeline.Plugin.Abstractions.PluginProviderPrepareRequest(
                 configId, userId, script.Id, script.RootPath, "interface.json", "", new());
-            var plan = Task.Run(async () => await provider.Provider.PrepareAsync(request, timeout.Token)
-                .ConfigureAwait(false), timeout.Token).WaitAsync(timeout.Token).GetAwaiter().GetResult();
+            var preparation = Task.Run(async () => await provider.Provider.PrepareAsync(request, timeout.Token)
+                .ConfigureAwait(false), timeout.Token);
+            NexusPipeline.Plugin.Abstractions.PluginProviderPlan plan;
+            try { plan = preparation.WaitAsync(timeout.Token).GetAwaiter().GetResult(); }
+            catch (OperationCanceledException)
+            {
+                // The timeout stops the wait; observe the cooperative producer before
+                // releasing this preparation boundary so file reads do not detach silently.
+                try { preparation.WaitAsync(TimeSpan.FromMilliseconds(500)).GetAwaiter().GetResult(); }
+                catch (OperationCanceledException) { }
+                catch (TimeoutException) { throw new InvalidDataException("provider.prepare_cancellation_unconfirmed"); }
+                throw;
+            }
             ProviderPlanPolicy.Validate(script.RootPath, plan);
             var frozen = JsonSerializer.Deserialize<NexusPipeline.Plugin.Abstractions.PluginProviderPlan>(
                 JsonSerializer.Serialize(plan))!;
