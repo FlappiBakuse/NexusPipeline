@@ -178,12 +178,23 @@ end;
 
 function ValidDestination(const Path: String): Boolean;
 var
-  Drive: String;
+  Drive, RegisteredRoot: String;
+  HasRegisteredRoot: Boolean;
 begin
   Result := False;
   if (Copy(Path, 1, 2) = '\\') or HasLinkInPath(Path) then Exit;
   Drive := ExtractFileDrive(Path);
   if (Length(Drive) <> 2) or (GetDriveTypeW(Drive + '\') <> 3) then Exit;
+  HasRegisteredRoot := RegQueryStringValue(HKCU, 'Software\NexusPipeline\Installer', 'DataRoot', RegisteredRoot);
+  if not HasRegisteredRoot then
+    HasRegisteredRoot := RegQueryStringValue(HKCU, 'Software\NexusPipeline\Installer', 'AppDir', RegisteredRoot);
+  if HasRegisteredRoot then begin
+    // Registration owns one per-user root, including retained data after uninstall.
+    // Refuse before writing payload; Register must not be the first ownership check.
+    if CompareText(RemoveBackslashUnlessRoot(ExpandFileName(RegisteredRoot)),
+       RemoveBackslashUnlessRoot(ExpandFileName(Path))) <> 0 then Exit;
+    if not InstanceOwned(Path) then Exit;
+  end;
   if not IsEmptyDirectory(Path) and not InstanceOwned(Path) then Exit;
   Result := True;
 end;
