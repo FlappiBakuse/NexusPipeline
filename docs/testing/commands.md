@@ -89,6 +89,14 @@ dotnet bin/test-host/RuntimeEfficiencyDiagnostic/Release/net8.0-windows/NexusPip
 
 `--runtime <新运行目录> --output <报告.json> --ticks 600 --append-bytes 4096` 测量 100 MiB 合成日志的检查点/追加读取和空闲 tick。30 样本需使用 30 个独立目录；无等待 tick 复放不等于 10 分钟墙钟运行，截图消费者门控不等于 GDI 采集。
 
+Maa 编译计量使用实际构建的独立插件 DLL，不建立 Host 对插件实现的产品依赖：
+
+```text
+dotnet bin/test-host/RuntimeEfficiencyDiagnostic/Release/net8.0-windows/NexusPipeline.StressDiagnostics.dll --maa-compile <MaaFrameworkDriver DLL绝对路径> <不存在的自有报告目录> <源码指纹标签>
+```
+
+对 1／10／50 任务、1／100 资源文件的每个组合保留 30 样本，测量新建／重复有效视图、授权、准备与运行重验的共享编译边界，以及 10000 progress 投影。原值包含 wall、CPU、分配、工作集、解析／散列字节与次数。新建视图不代表清空 OS 文件缓存，计量不包含 provider 存储或 native 启动；取消实际 producer 的停止与读取计数由 Maa compiler cancellation 回归独立验证。
+
 Test Host 使用 `NexusTestHost=true` 的 `asInvoker` 清单。只读二进制输出按源码、前端锁、构建配方、Node/.NET SDK、模式与平台的内容指纹保存在 `.generated/test-host-cache/<hash>/`，完整性元数据缺失或不匹配时重建；不同命令可复用同一完整缓存。运行数据、端口、PID 与退出标记始终位于每次运行独立的 `tests/.artifacts/runs/<runId>/`，不会随二进制缓存复用。完整性等级只作为诊断信息，不决定是否跳过测试。
 
 完整集成与发行诊断在加速系统套件后执行独立的 Update 与 Execution 真实计时用例：
