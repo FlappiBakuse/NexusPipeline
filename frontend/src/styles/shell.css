@@ -930,6 +930,10 @@ body[data-secondary-surface-transparency="off"] :is(.secondary-surface, .overflo
 .history-entry { display: grid; width: 100%; grid-template-columns: 3px minmax(0, 1fr) 28px; align-items: center; gap: 12px; min-height: 64px; padding: 10px 12px 10px 0; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; background: transparent; color: var(--text); text-align: left; box-shadow: none; }
 .history-entry:last-child { border-bottom: 0; }
 .history-entry:hover { background: transparent; }
+.history-date-row,
+.history-user-row,
+.history-entry { --nx-button-hover-background: transparent; }
+.history-user-row.active { --nx-button-hover-background: var(--accent-soft); }
 .history-entry:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .history-entry-bar { width: 3px; height: 34px; border-radius: 0 2px 2px 0; background: var(--muted); }
 .history-entry.history-status-success .history-entry-bar { background: var(--ok); }
