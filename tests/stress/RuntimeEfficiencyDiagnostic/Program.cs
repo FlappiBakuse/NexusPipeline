@@ -28,6 +28,8 @@ internal static class Program
     {
         try
         {
+            if (args.FirstOrDefault() == "--maa-compile")
+                return MaaCompilePerformance.Measure(args.Skip(1).ToArray());
             if (args.FirstOrDefault() == "--task-discovery")
                 return TaskDiscoveryPerformance.Measure(args.Skip(1).ToArray());
             if (args.FirstOrDefault() == "--runtime-observe")
