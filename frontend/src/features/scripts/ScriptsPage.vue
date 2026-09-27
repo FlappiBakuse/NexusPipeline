@@ -228,14 +228,15 @@ onBeforeUnmount(() => {
             type="button"
             @click.stop="openEditor(null, '')"
           >
-            <strong>{{ t("scripts.new_general_script_instance") }}</strong>
+            <strong>{{ t("scripts.general_script") }}</strong>
             <span class="muted">{{ t("scripts.editor.manual_config_help") }}</span>
           </NxpButton>
           <NxpButton v-for="provider in executionProviders" :key="provider.executionProviderId" class="chooser-card"
             type="button" @click.stop="openEditor(null, 'provider:' + provider.executionProviderId)">
-            <strong>{{ t('scripts.framework_driver', {}, '框架直驱') }} / {{ provider.displayName || provider.name }}</strong>
+            <strong>{{ provider.displayName || provider.name }}</strong>
             <span class="muted">{{ t('scripts.driver_independent_profile', {}, '独立配置 · 显式导入 · 使用现有队列') }}</span>
           </NxpButton>
+          <hr v-if="executionProviders.length" class="chooser-divider" />
           <NxpButton
             v-for="plugin in specializedPlugins"
             :key="plugin.name"

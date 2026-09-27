@@ -828,6 +828,10 @@ watch(
 </template>
 
 <style scoped>
+.script-editor-plugin-slot:not([hidden]) {
+  margin-top: var(--space-4, 16px);
+}
+
 .script-editor-header {
   display: flex;
   min-width: 0;

@@ -357,7 +357,7 @@ tbody tr:hover td { background: var(--content-card-hover); }
 .timeset-body { flex: 1; min-width: 0; }
 .tasks-body { flex: 1; min-width: 0; }
 .new-script-chooser { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
-.new-script-chooser .chooser-card:first-child { grid-column: 1 / -1; }
+.new-script-chooser .chooser-divider { grid-column: 1 / -1; width: 100%; margin: 0; border: 0; border-top: 1px solid var(--border); }
 .first-edit-chooser { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
 .chooser-card { display: block; width: 100%; min-height: 64px; margin-left: 0; padding: 14px 16px; border: 1px solid var(--content-card-border); border-radius: 8px; background: var(--content-card-soft); color: var(--text); text-align: left; box-shadow: none; }
 .chooser-card:hover { background: var(--content-card-hover); }
