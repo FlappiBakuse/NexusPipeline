@@ -115,6 +115,12 @@ test("主导航：核心页面可以按路由打开", async ({ page }) => {
   await expect(page.getByTestId("history-entry").getByText("已跳过", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "返回用户列表", exact: true })).toBeHidden();
   const requestsAfterInitialUser = historyRecordRequests;
+  for (const width of [360, 768, 1280]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect(page.getByTestId("history-entry")).toBeVisible();
+    await expect(page.getByTestId("history-records-count")).toHaveText("1 条记录");
+    expect(historyRecordRequests).toBe(requestsAfterInitialUser);
+  }
   await page.setViewportSize({ width: 1280, height: 900 });
   await expect(page.getByRole("button", { name: "返回用户列表", exact: true })).toBeHidden();
   await page.locator(`[data-testid="history-date"][data-date="${date}"]`).click();

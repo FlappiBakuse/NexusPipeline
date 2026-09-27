@@ -86,7 +86,7 @@ async function loadDates() {
     }
     if (!mobile.value && !expanded.value.size && dates.value.length) expanded.value.add(dates.value[0].date);
     if (!mobile.value && !selectedDate.value && dates.value.length) selectedDate.value = dates.value[0].date;
-    if (!selectedDate.value || mobile.value) {
+    if (!selectedDate.value || (mobile.value && !selectedUserKey.value)) {
       await disposeListSlots();
       records.value = [];
       historyDir.value = "";
