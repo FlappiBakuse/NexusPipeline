@@ -8,11 +8,79 @@ using NexusPipeline.Modules.Configuration.Scripting;
 using NexusPipeline.Modules.Plugins.Contracts;
 using NexusPipeline.Modules.Users;
 using Xunit;
+using System.Text;
+using NexusPipeline.Platform.Processes;
 
 namespace NexusPipeline.Tests.Execution;
 
 public sealed class RecoveryIsolationTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task UnconfirmedWriterPreservesActiveBytesAndBackupUntilRecoveryOwnerRuns(bool rootExited)
+    {
+        ConfigSwapSession.ConfigureRecovery(_ => null, () => []);
+        string id = "writer-recovery-" + Guid.NewGuid().ToString("N");
+        string root = Path.Combine(Path.GetTempPath(), id), path = Path.Combine(root, "config.json");
+        string data = Path.Combine(AppPaths.DataDir, id);
+        Directory.CreateDirectory(root);
+        byte[] original = Encoding.UTF8.GetBytes("\uFEFF{\r\n \"enabled\":true, \"private\":\"preserved\"\r\n}\r\n");
+        File.WriteAllBytes(path, original);
+        var config = new ConfigRunSession(id, "owner", path, false, originExecutionId: "controlled-run", originRecordId: "controlled-item");
+        Assert.True(config.Prepare(out string? error), error);
+        byte[] active = Encoding.UTF8.GetBytes("{\"enabled\":false,\"work\":\"writer-active\"}");
+        File.WriteAllBytes(path, active);
+        string exe = Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe");
+        string command = rootExited
+            ? "Start-Process -FilePath $env:ComSpec -ArgumentList '/d','/c','ping -n 30 127.0.0.1 >nul' -NoNewWindow | Out-Null"
+            : "Start-Sleep -Seconds 30";
+        using var process = ScriptProcessSession.Start(new() { Id = id, Name = id }, "test", exe, root,
+            ["-NoProfile", "-NonInteractive", "-EncodedCommand", Convert.ToBase64String(Encoding.Unicode.GetBytes(command))], null, null);
+        process.AttachOutput((_, _) => { });
+        try
+        {
+            if (rootExited) await process.Process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+            var observed = process.Ownership!.Observe();
+            if (rootExited)
+                Assert.Contains(observed.Identities, value => Path.GetFileName(value.ImageName).Equals("cmd.exe", StringComparison.OrdinalIgnoreCase));
+            else
+            {
+                observed = process.Ownership.Observe(JobProcessIdReader.Read((_, _) => new(false, 5, 0)), ProcessIdentity.Capture);
+                Assert.Equal(ProcessObservationQuality.Unavailable, observed.Quality);
+                Assert.Equal(5, observed.NativeErrorCode);
+                Assert.False(process.Process.HasExited);
+            }
+            Assert.False(observed.IsTrustworthyEmpty);
+            bool selectionRestored = false;
+            config.RestoreTaskSelections = () => { selectionRestored = true; return null; };
+            config.MarkProcessCleanupUnconfirmed("controlled native observation / live child");
+            Assert.NotNull(config.FinalizeRun(true));
+            Assert.NotNull(config.FinalizeRun(true));
+            Assert.False(selectionRestored);
+            Assert.Equal(active, File.ReadAllBytes(path));
+            Assert.Equal(original, File.ReadAllBytes(Path.Combine(ConfigPaths.CacheDir(id, "owner"), "config.json")));
+            Assert.Equal("process_cleanup_unconfirmed", ConfigSessionMark.TryRead(id, "owner")!.RecoveryIsolation!.CauseCode);
+            var state = new ExecutionStateStore();
+            Assert.NotNull(state.FindRecoveryIsolationConflict(ExecutionResourceSet.Empty with { ConfigPaths = [path] }));
+            Assert.Null(state.TryAcquireMaintenanceLease(out _));
+            Assert.True(process.KillAndConfirm(new RunAttemptFinalizer(new() { Id = id, Name = id }, "test", () => null), null));
+            Assert.True(process.Ownership.Observe().IsTrustworthyEmpty);
+            await process.WaitForOutputDrainAsync(CancellationToken.None);
+            Assert.Equal(active, File.ReadAllBytes(path));
+            ConfigRecoveryService.RecoverInterrupted([new NexusUser { Id = "owner", Bindings = [new() { ScriptInstanceId = id }] }]);
+            Assert.Equal(original, File.ReadAllBytes(path));
+            Assert.Null(ConfigSessionMark.TryRead(id, "owner"));
+            Assert.Null(state.FindRecoveryIsolationConflict(ExecutionResourceSet.Empty with { ConfigPaths = [path] }));
+        }
+        finally
+        {
+            if (!process.Process.HasExited) { process.Process.Kill(); await process.Process.WaitForExitAsync(); }
+            if (Directory.Exists(data)) Directory.Delete(data, true);
+            Directory.Delete(root, true);
+        }
+    }
+
     [Fact]
     public void RecoveryOwnerMustResolveSelectionCasBeforeIsolationIsReleasedWithoutReplayingQueue()
     {
