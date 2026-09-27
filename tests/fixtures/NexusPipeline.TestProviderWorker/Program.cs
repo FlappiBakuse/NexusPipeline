@@ -34,6 +34,11 @@ if (bootstrap.Input["waitForCancel"]?.GetValue<bool>() == true || bootstrap.Inpu
 }
 await Send("ready", new());
 await Send("task_event", new() { ["taskId"] = "task", ["status"] = "running" });
+if (bootstrap.Input["progressCount"]?.GetValue<int>() is int count)
+{
+    if (count is < 0 or > 10000) return 66;
+    for (int index = 0; index < count; index++) await Send("progress", new() { ["code"] = "fixture.progress" });
+}
 await Send("task_event", new() { ["taskId"] = "task", ["status"] = "succeeded" });
-await Send("completed", new() { ["status"] = "succeeded" });
+await Send("completed", new() { ["status"] = "succeeded", ["producedAtTicks"] = System.Diagnostics.Stopwatch.GetTimestamp() });
 return 0;

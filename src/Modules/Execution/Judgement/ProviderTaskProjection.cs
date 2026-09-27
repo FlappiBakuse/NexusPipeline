@@ -18,6 +18,11 @@ internal sealed class ProviderTaskProjection
     private string _engine = "running";
     private readonly JsonArray _structured = new();
     private readonly JsonArray _diagnostics = new();
+    private readonly JsonArray _progress = new();
+    private readonly Queue<long> _progressSequences = new();
+    private int _progressBytes;
+    private long _lastSequence;
+    private bool _diagnosticTruncated;
     private readonly HashSet<string> _evidenceIds = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> _engineTasks = new(StringComparer.Ordinal);
     private readonly Dictionary<long, string> _replays = new();
@@ -40,7 +45,7 @@ internal sealed class ProviderTaskProjection
         _reducer.BeginAttempt(_attempt, number, tasks.Select(task => task.Id));
     }
 
-    internal void Accept(PluginProviderEvent item)
+    internal bool Accept(PluginProviderEvent item)
     {
         if (_lifecycle != "running") throw new InvalidDataException("provider.event_after_terminal");
         // Store only protocol facts. Arbitrary project output and secrets never become evidence.
@@ -57,17 +62,20 @@ internal sealed class ProviderTaskProjection
             if (item.Evidence[key] is JsonValue value && value.ToJsonString().Length <= 512) fact[key] = value.DeepClone();
         string json = fact.ToJsonString();
         if (_replays.TryGetValue(item.Sequence, out string? old))
-        { if (old != json) throw new InvalidDataException("provider.conflicting_event"); return; }
-        if (_replays.Count > 0 && item.Sequence != _replays.Keys.Max() + 1)
+        { if (old != json) throw new InvalidDataException("provider.conflicting_event"); return false; }
+        if (_lastSequence > 0 && item.Sequence != _lastSequence + 1)
             throw new InvalidDataException("provider.event_gap");
         int bytes = System.Text.Encoding.UTF8.GetByteCount(json);
-        if (_structured.Count >= 2048 || _evidenceBytes + bytes > 256 * 1024)
-            throw new InvalidDataException("provider.evidence_limit");
-        string evidenceId = Guid.NewGuid().ToString("N");
-        _replays.Add(item.Sequence, json); _evidenceIds.Add(evidenceId);
-        fact["id"] = evidenceId; _structured.Add(fact); _evidenceBytes += bytes;
         if (item.Kind == "progress")
         {
+            _lastSequence = item.Sequence;
+            _replays.Add(item.Sequence, json); _progressSequences.Enqueue(item.Sequence);
+            _progress.Add(fact); _progressBytes += bytes;
+            while (_progress.Count > 256 || _progressBytes > 128 * 1024)
+            {
+                _progressBytes -= System.Text.Encoding.UTF8.GetByteCount(_progress[0]!.ToJsonString());
+                _progress.RemoveAt(0); _replays.Remove(_progressSequences.Dequeue()); _diagnosticTruncated = true;
+            }
             // Only a bounded protocol code is public; project text may contain secrets.
             if (item.Evidence["code"] is JsonValue codeValue
                 && codeValue.TryGetValue<string>(out string? code)
@@ -75,18 +83,34 @@ internal sealed class ProviderTaskProjection
                 && code.All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '_' or '-')
                 && _diagnostics.Count < 32
                 && !_diagnostics.OfType<JsonObject>().Any(d => d["code"]?.GetValue<string>() == code))
-                _diagnostics.Add(new JsonObject { ["code"] = code, ["severity"] = "warning",
-                    ["structuredEvidenceRefs"] = new JsonArray(evidenceId) });
-            return;
+            {
+                _diagnostics.Add(new JsonObject { ["code"] = code, ["severity"] = "warning" });
+                return true;
+            }
+            return false;
         }
-        if (item.Kind is "ready" or "cancel_ack") return;
+        if (item.Kind is not ("ready" or "cancel_ack" or "task_event" or "completed" or "fault"))
+            throw new InvalidDataException("provider.event_kind");
+        if (_structured.Count >= 8192 || _evidenceBytes + bytes + 64 > 4 * 1024 * 1024)
+            throw new InvalidDataException("provider.evidence_limit");
+        string evidenceId = Guid.NewGuid().ToString("N");
+        _lastSequence = item.Sequence;
+        _replays.Add(item.Sequence, json); _evidenceIds.Add(evidenceId);
+        fact["id"] = evidenceId; _structured.Add(fact); _evidenceBytes += bytes + 64;
+        if (item.Kind is "ready" or "cancel_ack") return true;
         if (item.Kind == "task_event")
         {
             if (!_reducer.OriginalPlan.Tasks.Any(task => task.Id == item.TaskId)
                 || item.Status is not ("running" or "succeeded" or "failed"))
                 throw new InvalidDataException("provider.task_identity_or_status");
+            if (_engineTasks.TryGetValue(item.TaskId!, out string? previous)
+                ? previous != "running" || item.Status == "running" : item.Status != "running")
+                throw new InvalidDataException("provider.task_transition");
             _engineTasks[item.TaskId!] = item.Status!;
         }
+        if (item.Kind == "completed" && (item.Status != "succeeded"
+            || _reducer.OriginalPlan.Tasks.Any(task => _engineTasks.GetValueOrDefault(task.Id) != "succeeded")))
+            throw new InvalidDataException("provider.missing_task_terminal");
         var observation = item.Kind == "task_event" ? new TaskObservation
         {
             Id = "native:" + item.Sequence, TaskId = item.TaskId ?? "", ExecutionOrdinal = 1,
@@ -101,6 +125,7 @@ internal sealed class ProviderTaskProjection
             BoundaryEvidence = [], StructuredEvidenceVersion = 1,
             BoundaryStructuredEvidenceRefs = item.Kind is "completed" or "fault" ? [evidenceId] : null, Diagnostics = [],
         }, _evidenceIds);
+        return true;
     }
 
     internal void Finish(string engine, bool cancelled)
@@ -126,6 +151,7 @@ internal sealed class ProviderTaskProjection
         ["lifecycleOutcome"] = _lifecycle, ["engineStatus"] = _engine,
         ["businessVerification"] = "unverified", ["structuredEvidenceVersion"] = 1,
         ["structuredEvidence"] = _structured.DeepClone(),
+        ["progressEvidence"] = _progress.DeepClone(), ["diagnosticTruncated"] = _diagnosticTruncated,
         ["attemptReports"] = new JsonArray(new JsonObject { ["attemptId"] = _attempt, ["number"] = _number,
             ["selectedTaskIds"] = new JsonArray(_reducer.OriginalPlan.Tasks.Select(task => (JsonNode?)JsonValue.Create(task.Id)).ToArray()),
             ["taskResults"] = Results() }),

@@ -24,15 +24,8 @@ public sealed class ProviderRunnerTests : IClassFixture<HostTestScope>
         Directory.CreateDirectory(root);
         try
         {
-            for (string? path = AppContext.BaseDirectory; path is not null; path = Path.GetDirectoryName(path))
-            {
-                string configuration = AppContext.BaseDirectory.Split(Path.DirectorySeparatorChar)
-                    .FirstOrDefault(part => part is "Debug" or "Release") ?? throw new InvalidOperationException("test build configuration missing");
-                string source = Path.Combine(path, "tests", "fixtures", "NexusPipeline.TestProviderWorker", "bin", configuration, "net8.0-windows");
-                if (!Directory.Exists(source)) continue;
-                foreach (string file in Directory.EnumerateFiles(source)) File.Copy(file, Path.Combine(root, Path.GetFileName(file)));
-                break;
-            }
+            using var workerFixture = new ProviderWorkerPortTests.Fixture();
+            foreach (string file in Directory.EnumerateFiles(workerFixture.Root)) File.Copy(file, Path.Combine(root, Path.GetFileName(file)));
             var script = new ScriptInstance { Id = "dummy-" + Guid.NewGuid().ToString("N"), Name = "Dummy provider", RootPath = root,
                 ExecutionProviderId = "dummy", ExecutionProviderConfigId = "p", MaxAttempts = 1 };
             var plan = new PluginProviderPlan("plan", "revision", "authorization", [new("writable_root", root)],

@@ -982,10 +982,16 @@ internal sealed class ExecutionCoordinator : RunSession
             _providerRecordId, attempt.Number, _logLine);
         // Only authenticated frames received through the Host port become evidence.
         // A managed plugin's PublishEvent callback cannot manufacture native success.
+        long lastProgressPublish = 0;
         async ValueTask Publish(NexusPipeline.Plugin.Abstractions.PluginProviderEvent item)
         {
-            _providerProjection.Accept(item);
-            TaskReportChanged?.Invoke(_providerProjection.Snapshot());
+            bool changed = _providerProjection.Accept(item);
+            if (item.Kind != "progress" || changed && (lastProgressPublish == 0
+                || Stopwatch.GetElapsedTime(lastProgressPublish) >= TimeSpan.FromMilliseconds(250)))
+            {
+                TaskReportChanged?.Invoke(_providerProjection.Snapshot());
+                if (item.Kind == "progress") lastProgressPublish = Stopwatch.GetTimestamp();
+            }
             await ValueTask.CompletedTask;
         }
         var mediated = new ProviderEvidenceWorkerPort(port, Publish);

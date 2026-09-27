@@ -9,6 +9,29 @@ namespace NexusPipeline.Tests.Execution;
 public sealed class ProviderWorkerPortTests
 {
     [Fact]
+    public async Task TenThousandProgressEventsWithSlowConsumerRetainPromptTerminalAndHistory()
+    {
+        using var fixture = new Fixture();
+        var port = new ProviderWorkerPort(fixture.Root, fixture.Root, "execution", "record", 1, null);
+        var projection = new ProviderTaskProjection(new("plan", "revision", "authorization", [], [new("task", "Task", 0)], new()),
+            "dummy", "1", "record", "user", "script", 1);
+        int progress = 0;
+        double terminalDelay = double.PositiveInfinity;
+        var result = await port.RunAsync(new("NexusPipeline.TestProviderWorker.exe", [], fixture.Root,
+            new() { ["progressCount"] = 10000 }), async item =>
+        {
+            projection.Accept(item);
+            if (item.Kind == "progress" && ++progress % 100 == 0) await Task.Delay(1);
+            if (item.Kind == "completed") terminalDelay = System.Diagnostics.Stopwatch.GetElapsedTime(item.Evidence["producedAtTicks"]!.GetValue<long>()).TotalMilliseconds;
+        }, default);
+        Assert.Equal(10000, progress); Assert.Equal("completed", result.ExitKind); Assert.True(result.CleanupConfirmed);
+        Assert.True(terminalDelay < 250, "Critical terminal delivery delay: " + terminalDelay);
+        projection.Finish("succeeded", false);
+        Assert.Equal(4, projection.Snapshot()["structuredEvidence"]!.AsArray().Count);
+        Assert.Equal("succeeded", projection.Snapshot()["engineStatus"]!.GetValue<string>());
+        Assert.Equal("unverified", projection.Result("done").Status);
+    }
+    [Fact]
     public async Task AuthenticatedWorkerFeedsExistingReducerAndIndependentCleanup()
     {
         using var fixture = new Fixture();
