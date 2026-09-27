@@ -40,7 +40,12 @@ public sealed class RecoveryIsolationTests
         process.AttachOutput((_, _) => { });
         try
         {
-            if (rootExited) await process.Process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+            if (rootExited)
+            {
+                var deadline = System.Diagnostics.Stopwatch.StartNew();
+                while (!process.Process.HasExited && deadline.Elapsed < TimeSpan.FromSeconds(10)) await Task.Delay(20);
+                Assert.True(process.Process.HasExited);
+            }
             var observed = process.Ownership!.Observe();
             if (rootExited)
                 Assert.Contains(observed.Identities, value => Path.GetFileName(value.ImageName).Equals("cmd.exe", StringComparison.OrdinalIgnoreCase));
@@ -75,7 +80,9 @@ public sealed class RecoveryIsolationTests
         }
         finally
         {
-            if (!process.Process.HasExited) { process.Process.Kill(); await process.Process.WaitForExitAsync(); }
+            if (!process.Ownership!.Observe().IsTrustworthyEmpty)
+                Assert.True(process.KillAndConfirm(new RunAttemptFinalizer(new() { Id = id, Name = id }, "test", () => null), null));
+            await process.WaitForOutputDrainAsync(CancellationToken.None);
             if (Directory.Exists(data)) Directory.Delete(data, true);
             Directory.Delete(root, true);
         }
