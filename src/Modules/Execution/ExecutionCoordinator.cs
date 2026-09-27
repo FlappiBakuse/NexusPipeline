@@ -22,8 +22,6 @@ namespace NexusPipeline.Modules.Execution;
 /// <summary>一次运行的应用层协调器；状态由基类 RunSession 持有。</summary>
 internal sealed class ExecutionCoordinator : RunSession
 {
-    /// <summary>成功判定后等待脚本自行退出的宽限秒数（NEXUS_TIME_SCALE 加速时按比例缩放）。</summary>
-
     private readonly IUserRepository _users;
 
     private readonly ResolvedScriptSpec? _resolvedSpec;
@@ -626,6 +624,15 @@ internal sealed class ExecutionCoordinator : RunSession
                 if (_token.IsCancellationRequested)
                     CancellationMilestoneChanged?.Invoke(CancellationMilestone.RestoreFinished,
                         restoreError is null ? "配置恢复完成" : "配置恢复失败，现场已保留");
+            }
+            // 取消可能在同步恢复期间到达；仍须完成恢复，但不能将该次运行记为正常完成。
+            if (_token.IsCancellationRequested && record.Status is "success" or "partial" or "unverified")
+            {
+                record.Status = "cancelled";
+                record.ResultCode = "run.cancelled";
+                record.ResultArgs.Clear();
+                record.ResultDetail += "（运行收尾期间已取消）";
+                TaskProtocolRun?.SetFinalLifecycleFailure(true);
             }
             if (TaskProtocolRun is not null)
             {

@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Text;
 using NexusPipeline.Modules.Execution;
 using NexusPipeline.Modules.Scripts;
@@ -12,6 +12,64 @@ namespace NexusPipeline.Tests.Execution;
 
 public sealed class ScriptProcessSessionTests
 {
+    [Fact]
+    public async Task CancellationDuringRestorationPreservesOriginalBytesAndCancelledOutcome()
+    {
+        NexusPipeline.Modules.Configuration.Exchange.ConfigSwapSession.ConfigureRecovery(_ => null, () => []);
+        string root = Path.Combine(Path.GetTempPath(), "restore-cancel-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        string main = Path.Combine(root, "main.cmd"), config = Path.Combine(root, "config.json");
+        byte[] original = [0xef, 0xbb, 0xbf, .. Encoding.UTF8.GetBytes("{\"after_finish\":\"None\"}\r\n")];
+        File.WriteAllBytes(config, original);
+        File.WriteAllText(main, "@echo off\r\nping -n 3 127.0.0.1 >nul\r\necho business-completed>run.log\r\n");
+        var script = new ScriptInstance { Id = Path.GetFileName(root), Name = "cancel during restoration", RootPath = root,
+            MainExe = main, ConfigPath = config, LogPath = Path.Combine(root, "run.log"), SuccessKeywords = "business-completed", MaxAttempts = 1 };
+        var spec = new ResolvedScriptSpec(script, "1", new(false, "javascript", "fixture", "", ""), "fixture");
+        var user = new ResolvedScriptUser("fixture-" + script.Id, "Fixture", new() { ScriptInstanceId = script.Id, Enabled = true });
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        using var restoring = new ManualResetEventSlim();
+        using var release = new ManualResetEventSlim();
+        var coordinator = new ExecutionCoordinator(script, "manual", "", "", "Fixture", stop.Token, null, null, null, null,
+            new PluginAvailabilityPolicyTestsFixture.EmptyUserRepository(), new PluginAvailabilityPolicyTestsFixture.EmptyEmulatorSupportProviderResolver(), user, spec);
+        try
+        {
+            var run = Task.Run(coordinator.RunAsync);
+            await SpinWaitAsync(() => coordinator.ConfigRun?.IsPrepared == true || run.IsCompleted, TimeSpan.FromSeconds(5));
+            if (run.IsCompleted) { var early = await run; Assert.Fail(System.Text.Json.JsonSerializer.Serialize(early)); }
+            coordinator.ConfigRun!.RestoreTaskSelections = () =>
+            {
+                restoring.Set();
+                if (!release.Wait(TimeSpan.FromSeconds(10))) throw new TimeoutException("owned restore gate");
+                return null;
+            };
+            Assert.True(await Task.Run(() => restoring.Wait(TimeSpan.FromSeconds(10))));
+            stop.Cancel();
+            Assert.False(run.IsCompleted);
+            release.Set();
+            var record = await run.WaitAsync(TimeSpan.FromSeconds(5));
+            string evidence = Path.Combine(Path.GetTempPath(), "restore-cancel-cases", script.Id);
+            Directory.CreateDirectory(evidence);
+            File.WriteAllText(Path.Combine(evidence, "actual.json"), System.Text.Json.JsonSerializer.Serialize(new
+            { record, originalRestored = original.SequenceEqual(File.ReadAllBytes(config)), cancellationRequestedDuringRestore = true }));
+            Assert.Equal("cancelled", record.Status);
+            Assert.Equal("run.cancelled", record.ResultCode);
+            Assert.Equal("success", Assert.Single(record.AttemptDetails).Status);
+            Assert.Equal("cancelled", record.Outcomes!.ExecutionOutcome);
+            Assert.Equal("restored", record.Outcomes.RecoveryOutcome);
+            Assert.Equal(original, File.ReadAllBytes(config));
+            Assert.Null(NexusPipeline.Modules.Configuration.Recovery.ConfigSessionMark.TryRead(script.Id, user.UserId));
+        }
+        finally
+        {
+            stop.Cancel();
+            release.Set();
+            coordinator.DisposeScreenshots();
+            Directory.Delete(root, true);
+            string data = Path.Combine(NexusPipeline.Platform.Storage.AppPaths.DataDir, script.Id);
+            if (Directory.Exists(data)) Directory.Delete(data, true);
+        }
+    }
+
     [Fact]
     public async Task CancellationDuringActualPreHookPreventsMainAndFurtherAttempts()
     {
