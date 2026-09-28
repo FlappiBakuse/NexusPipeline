@@ -14,16 +14,6 @@
 | PluginSdk | `src/NexusPipeline.Plugin.Abstractions` | 对插件公开的稳定 SDK 契约 |
 | Tests/TestFixtures | `tests/NexusPipeline.Tests`、`tests/fixtures` | 宿主测试与隔离夹具 |
 
-逐文件 owner、声明、依赖和入口地图由 `FileOwnerResolver` 与 Roslyn/MSBuild 生成。地图是本地/CI 诊断产物，不是运行时输入，也不提交到 Git：
-
-```text
-dotnet run --project tools/NexusPipeline.Architecture -- check --root . --mode both
-dotnet run --project tools/NexusPipeline.Architecture -- map --root . --mode both --out .generated/architecture/backend-map.json
-dotnet run --project tools/NexusPipeline.Architecture -- map --root . --mode both --check --out .generated/architecture/backend-map.json
-```
-
-`tests/run.mjs release core` 会用 production 和 Test Host 的真实 MSBuild/Roslyn 模型执行 `check`，重复生成并比对规范化地图，再把带候选 SHA 的副本写入当前 run 的报告 artifact；正式程序和 `release/` 不依赖该 JSON。
-
 ## 专题导航
 
 | 专题 | 范围 | 代码与验证方向 |

@@ -14,7 +14,7 @@
 ### 发布前置
 
 1. 确认版本开发计划、CHANGELOG 与 `docs/STATUS.md` 已反映当前状态；
-2. 按[测试命令](../testing/commands.md)执行默认质量门禁，并运行修改范围适用的 System Smoke、Stress 或 Soak；
+2. 按[测试命令](../testing/commands.md)执行默认质量门禁，并运行修改范围适用的 System Smoke；
 3. 确认 `git diff --check` 通过，工作树中没有运行产物、用户配置、日志、密钥和测试 runtime；
 4. 核对发布包只包含程序运行所需文件，用户配置和运行数据不进入资产；
 5. 确认 Release Notes 使用当前版本的真实变更，SHA 资产与 zip 一一对应。
@@ -88,8 +88,7 @@ Get-FileHash $zip -Algorithm SHA256 | ForEach-Object { $_.Hash.ToLower() } |
 
 - Release 必须同时具备 zip 与 sha256 资产；缺少任一项时更新清单会跳过该版本；
 - 上传后在本机设置页点击「检查更新」，或调用 `POST /api/update/check`，确认更新源识别到刚发布的 tag 与两项资产；
-- 无法以管理员上下文启动宿主时，用 `python tools/update-visibility-check.py [vX.Y.Z[-beta.N|-rc.N]]` 按同一契约核对默认更新源的发布列表、tag 解析、宿主 Release 分类、资产命名、下载主机白名单与资产哈希；省略参数时读取当前 `src/NexusPipeline.csproj` 版本；
-- 如果检查不到，先核对 `gh release view vX.Y.Z` 的资产列表、资产命名和 zip 根布局。
+- 无法以管理员上下文启动宿主时，用 `gh release view vX.Y.Z --json tagName,isPrerelease,assets` 核对发布列表、tag 与 Pre-release 分类、资产命名、资产摘要和 zip 根布局。
 
 ### 更新策略与破坏性版本屏障
 
@@ -103,7 +102,7 @@ Get-FileHash $zip -Algorithm SHA256 | ForEach-Object { $_.Hash.ToLower() } |
 }
 ```
 
-版本必须使用当前受限格式，`code` 使用小写字母、数字、点、下划线或连字符，`migrationUrl` 使用 HTTPS。宿主从桥接版本开始检查当前版本到目标版本之间的所有屏障；命中后保留更新发现结果，禁止内置下载、启动前自动应用、下次启动应用和闲时自动应用，页面显示手动下载安装包与迁移配置的指引。策略文件使用独立的 policy URI 安全域：默认源固定为官方仓库 main 分支的 `update-policy.json`，自定义源使用同源地址，重定向继续按 policy 规则校验。策略文件无法验证时同样禁止内置下载，页面显示策略暂不可验证。仓库根目录策略文件由生产解析器校验，CI 另行校验 barrier 历史只能追加且既有记录不可删除、修改或重排。发布破坏性版本前需先提交策略文件，再发布对应版本，并在 Release Notes 写明迁移步骤。
+版本必须使用当前受限格式，`code` 使用小写字母、数字、点、下划线或连字符，`migrationUrl` 使用 HTTPS。宿主从桥接版本开始检查当前版本到目标版本之间的所有屏障；命中后保留更新发现结果，禁止内置下载、启动前自动应用、下次启动应用和闲时自动应用，页面显示手动下载安装包与迁移配置的指引。策略文件使用独立的 policy URI 安全域：默认源固定为官方仓库 main 分支的 `update-policy.json`，自定义源使用同源地址，重定向继续按 policy 规则校验。策略文件无法验证时同样禁止内置下载，页面显示策略暂不可验证。仓库根目录策略文件由生产解析器校验。barrier 历史只追加，既有记录不删除、不修改、不重排。发布破坏性版本前需先提交策略文件，再发布对应版本，并在 Release Notes 写明迁移步骤。
 
 ### Release Notes 格式
 
