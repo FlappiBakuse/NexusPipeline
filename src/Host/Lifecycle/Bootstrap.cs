@@ -427,61 +427,25 @@ internal sealed class Bootstrap
         // Stop producers and new admissions first. The normal caller has already
         // waited for active runs/edit sessions through CanStopServices; force is
         // reserved for a failed startup/Dispose path where no public work may leak.
+        Guarded("插件自动更新停止", _pluginAutoUpdateService.Stop);
+        Guarded("更新自动化停止", _updates.Stop);
+        Guarded("调度器停止", _runtime.Scheduler.Stop);
+        Guarded("配置恢复重试停止", ConfigRecoveryService.StopRecoveryRetry);
+        Guarded("Web 服务停止", () => web?.Stop());
+        Guarded("MCP 服务停止", () => mcp?.Stop());
+        Guarded("插件停止", _runtime.Plugins.ShutdownAll);
+    }
+
+    /// <summary>分步保护：单步异常不影响其余清理步骤执行。</summary>
+    private static void Guarded(string label, Action step)
+    {
         try
         {
-            _pluginAutoUpdateService.Stop();
+            step();
         }
         catch (Exception ex)
         {
-            Logger.Warn($"[警告] 插件自动更新停止异常：{ex.Message}");
-        }
-        try
-        {
-            _updates.Stop();
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn($"[警告] 更新自动化停止异常：{ex.Message}");
-        }
-        try
-        {
-            _runtime.Scheduler.Stop();
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn($"[警告] 调度器停止异常：{ex.Message}");
-        }
-        try
-        {
-            ConfigRecoveryService.StopRecoveryRetry();
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn($"[警告] 配置恢复重试停止异常：{ex.Message}");
-        }
-        try
-        {
-            web?.Stop();
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn($"[警告] Web 服务停止异常：{ex.Message}");
-        }
-        try
-        {
-            mcp?.Stop();
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn($"[警告] MCP 服务停止异常：{ex.Message}");
-        }
-        try
-        {
-            _runtime.Plugins.ShutdownAll();
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn($"[警告] 插件停止异常：{ex.Message}");
+            Logger.Warn($"[警告] {label}异常：{ex.Message}");
         }
     }
 }
