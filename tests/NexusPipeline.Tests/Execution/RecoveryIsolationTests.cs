@@ -31,7 +31,9 @@ public sealed class RecoveryIsolationTests
         Assert.True(config.Prepare(out string? error), error);
         byte[] active = Encoding.UTF8.GetBytes("{\"enabled\":false,\"work\":\"writer-active\"}");
         File.WriteAllBytes(path, active);
-        string exe = Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe");
+        string exe = Path.Combine(root, "writer-isolated.exe");
+        // Cleanup observes every process with the launch image; use a unique image so runner shells are not mistaken for this writer.
+        File.Copy(Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe"), exe);
         string command = rootExited
             ? "Start-Process -FilePath $env:ComSpec -ArgumentList '/d','/c','ping -n 30 127.0.0.1 >nul' -NoNewWindow | Out-Null"
             : "Start-Sleep -Seconds 30";
