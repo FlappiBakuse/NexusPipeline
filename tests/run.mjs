@@ -96,18 +96,29 @@ async function buildFrontendBundle() {
   step("前端生产构建");
   let code = await ensureNpm(frontendDir);
   if (code !== 0) return code;
+  const bundle = path.join(frontendDir, "dist");
+  const stampPath = path.join(projectRoot, ".generated", "frontend-build.hash");
+  const sourceHash = () => execFileSync(
+    process.execPath,
+    [path.join(projectRoot, "tools", "source-hash.mjs"), "--frontend"],
+    { cwd: projectRoot, encoding: "utf8" },
+  ).trim();
+  // 发行候选按 --frontend-ready 读取该指纹；指纹仍匹配时不再改动源码树，
+  // 否则候选的干净工作树检查会失败。
+  const current = sourceHash();
+  if (fs.existsSync(path.join(bundle, "index.html"))
+    && fs.existsSync(path.join(bundle, ".vite", "manifest.json"))
+    && fs.existsSync(stampPath)
+    && fs.readFileSync(stampPath, "utf8").trim() === current) {
+    console.error(`[前端] 复用已验证构建：${current}`);
+    return 0;
+  }
   code = await run(npmCommand, ["run", "typecheck"], { cwd: frontendDir });
   if (code !== 0) return code;
   code = await run(npmCommand, ["run", "build"], { cwd: frontendDir });
   if (code !== 0) return code;
-  // 发行候选校验 --frontend-ready 时按该指纹确认 dist 与源码一致。
-  const stamp = execFileSync(process.execPath, [path.join(projectRoot, "tools", "source-hash.mjs"), "--frontend"], {
-    cwd: projectRoot,
-    encoding: "utf8",
-  }).trim();
-  const stampPath = path.join(projectRoot, ".generated", "frontend-build.hash");
   fs.mkdirSync(path.dirname(stampPath), { recursive: true });
-  fs.writeFileSync(stampPath, `${stamp}\n`, "utf8");
+  fs.writeFileSync(stampPath, `${sourceHash()}\n`, "utf8");
   return 0;
 }
 
@@ -161,6 +172,8 @@ async function runUiSmoke() {
     exitFile: path.join(runRoot, "ui", ".nxp", "test-host.exit"),
   });
   env.NEXUS_E2E_BASE_URL = `http://127.0.0.1:${webPort}/`;
+  // Playwright 产物放在本次运行目录内，源码树保持干净。
+  env.NEXUS_E2E_OUTPUT_DIR = path.join(runRoot, "ui", "playwright");
   return run(process.execPath, [playwrightCli, "test"], { cwd: e2eDir, env, timeoutMs: 15 * 60 * 1000 });
 }
 
