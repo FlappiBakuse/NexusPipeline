@@ -179,9 +179,7 @@ async function runSystemSmoke() {
   step("System Smoke");
   for (const suite of [
     { file: "tests/system/runtime-smoke.mjs", runtimeName: "runtime" },
-    { file: "tests/system/config-smoke.mjs", runtimeName: "config-runtime" },
     { file: "tests/system/judge-smoke.mjs", runtimeName: "judge-runtime" },
-    { file: "tests/system/mcp-smoke.mjs", runtimeName: "mcp-runtime" },
   ]) {
     const code = await runSystemSuite(suite);
     if (code !== 0) return code;

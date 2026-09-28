@@ -107,7 +107,7 @@ NexusPipeline/
 ├── .nxp/               安装目录内的内部运行状态（runtime 标记与 state 持久状态）
 ├── tests/
 │   ├── NexusPipeline.Tests/  xUnit 单元测试（通过 InternalsVisibleTo 访问 internal 契约）
-│   ├── system/               Windows 真实进程 System Smoke（runtime/config/judge/mcp）
+│   ├── system/               Windows 真实进程 System Smoke（runtime/judge）
 │   ├── e2e/                  Playwright 端到端测试（黑盒，@playwright/test 框架）
 │   └── support/              Windows 进程、版本解析、测试运行时公共设施
 └── tests/run.mjs              统一测试调度入口

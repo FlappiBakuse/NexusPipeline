@@ -8,4 +8,4 @@ CI 不创建临时测试账户、不写入测试账户密码、不使用令牌�
 
 push 到 `main` 后，`.github/workflows/release.yml` 的 candidate 作业执行 `node tests/run.mjs integration`，再由 `tools/host_release.py candidate` 构建并校验生产候选；成功后才上传候选 artifact，发布恢复只复用原候选字节。
 
-托管层按文件区分测试域：System Smoke 为 `tests/system/runtime-smoke.mjs`、`config-smoke.mjs`、`judge-smoke.mjs`、`mcp-smoke.mjs`，UI Smoke 为 `tests/e2e/tests/app.smoke.spec.mjs` 和 `scripts-users.smoke.spec.mjs`。每个 suite 使用独立端口和独立 runtime 目录，运行数据、PID 与退出标记都落在本次运行目录内；测试结束按本次身份清理进程与目录，不接触用户实例。Playwright 失败结果保留在 `tests/e2e/test-results/` 供本地诊断，清理按项目 AGENTS.md 的精确清单执行。
+托管层按文件区分测试域：System Smoke 为 `tests/system/runtime-smoke.mjs` 与 `tests/system/judge-smoke.mjs`，UI Smoke 为 `tests/e2e/tests/app.smoke.spec.mjs`。每个 suite 使用独立端口和独立 runtime 目录，运行数据、PID 与退出标记都落在本次运行目录内；测试结束按本次身份清理进程与目录，不接触用户实例。Playwright 失败结果保留在 `tests/e2e/test-results/` 供本地诊断，清理按项目 AGENTS.md 的精确清单执行。

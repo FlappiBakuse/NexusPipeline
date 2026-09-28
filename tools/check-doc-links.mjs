@@ -8,7 +8,8 @@ import { fileURLToPath } from "node:url";
  */
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const SKIP_DIRECTORIES = new Set([".git", "node_modules", "bin", "obj", "release", "dist", ".generated"]);
+// tests/.artifacts 与 .generated 是运行产物，其中的插件 README 相对链接在 runtime 内必然失效。
+const SKIP_DIRECTORIES = new Set([".git", "node_modules", "bin", "obj", "release", "dist", ".generated", ".artifacts"]);
 const EXTERNAL = /^[a-z][a-z0-9+.-]*:/iu;
 const LINK = /!?\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/gu;
 const HEADING = /^(#{1,6})\s+(.+?)\s*#*\s*$/gmu;

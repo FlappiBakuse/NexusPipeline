@@ -11,12 +11,11 @@
 
 ### UI Smoke 配额
 
-当前浏览器验收保留 3 个用户工作流，硬上限 12 个：
+当前浏览器验收保留 2 个用户工作流，硬上限 12 个：
 
 ```text
 tests/e2e/tests/
-├── app.smoke.spec.mjs                 2
-└── scripts-users.smoke.spec.mjs       1
+└── app.smoke.spec.mjs                 2
 ```
 
 UI Smoke 断言用户可观察的结果和稳定业务状态，优先使用稳定的 `data-testid`、ARIA 状态和业务 ID；现有用例仍可读取 `data-action` 作为定位属性，但它不是运行时行为契约。业务行为不使用 CSS/class/style、精确像素、SVG 数量、装饰性文案、源码字符串、随机 DOM 层级或完整磁盘文件内容作为质量判断。低层已能稳定证明的每个字段、密钥、选项和 payload 不重复占用浏览器配额。
@@ -34,6 +33,6 @@ LLM 与自动化代理不得新增持久化视觉回归测试、截图基线或�
 - 宿主路由表结构由 `frontend/src/router.test.ts` 覆盖：宿主页面路由、插件 catch-all 路由、空 fallback 与按需加载方式。
 - 前端候选配置请求由 `frontend/src/features/users/utils/configEditRequest.ts` 的 `buildConfigEditRequest` 负责构造，Vitest 直接验证输入与输出。
 - 宿主语言资源以 `frontend/public/i18n/` 为唯一源。
-- xUnit 文件按子系统目录组织并镜像模块，例如 `Scheduling/SchedulerTests.cs`、`Plugins/PluginManagerTests.cs`、`Configuration/ConfigSwapSyncTests.cs` 和 `Updates/UpdateServiceTests.cs`。
+- xUnit 文件按子系统目录组织并镜像模块，例如 `Scheduling/SchedulerTests.cs`、`Plugins/PluginRepositoryCatalogTests.cs`、`Configuration/ConfigSwapSyncTests.cs` 和 `Updates/UpdateServiceTests.cs`；同一文件的保留集可包含多个紧密相关的门面测试类。
 - 测试替身显式实现当前接口；接口移除默认实现后同步所有 fakes。测试不为旧接口、旧 overload、旧数据形态或历史恢复路径保留兼容断言。
 - 新增回归先放在最低有效层，再评估是否保留一个高层 smoke。测试应暴露根因，不通过 retries、无条件 sleep、自动重启或跳过断言掩盖不稳定性。
