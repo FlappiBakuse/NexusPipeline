@@ -59,6 +59,7 @@ internal sealed record PluginManagementView(
     public string MinHostVersion { get; init; } = "0.0.0";
 
     public string? RuntimeErrorCode { get; init; }
+    public string ExecutionProviderId { get; init; } = "";
 
     public static PluginManagementView Create(
         PluginSummary summary,
@@ -109,6 +110,7 @@ internal sealed record PluginManagementView(
             Inputs = summary.Inputs,
             MinHostVersion = summary.MinHostVersion,
             RuntimeErrorCode = manager.GetRuntimeErrorCode(summary.Name),
+            ExecutionProviderId = manager.ResolveExecutionProvider(summary.Name)?.PluginId ?? "",
         };
     }
 }

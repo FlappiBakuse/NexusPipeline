@@ -10,7 +10,7 @@ export const HOST_TEST_AREAS = Object.freeze([
   { key: "core", paths: ["src/Host/**", "src/Shared/**", "src/Platform/**"], testPaths: ["Host/RuntimeContextQueryTests.cs", "Host/RuntimeEntityStateTests.cs", "Host/RuntimeInitializationBoundaryTests.cs", "Host/HostInstanceTests.cs", "Host/HostLifecycleLocalizationTests.cs", "Platform/NativePathPickerServiceTests.cs", "Platform/RuntimeGuardsTests.cs", "Platform/ProcessCleanupResultTests.cs", "Shared/EntityNameRulesTests.cs", "Shared/LocalizationTests.cs", "Shared/NexusVersionTests.cs"] },
   { key: "persistence", paths: ["src/Modules/**/Persistence/**", "src/Modules/Configuration/Snapshots/**"], testPaths: ["Platform/JsonStoreTests.cs", "Platform/RuntimeStateLayoutTests.cs", "Scripts/ScriptPersistenceTests.cs"] },
   { key: "config", paths: ["src/Modules/Configuration/**", "src/Modules/Settings/**", "src/Modules/Users/**", "src/Modules/Scripts/**", "src/Modules/Queues/**"], testPaths: ["Configuration/**/*.cs", "Settings/**/*.cs", "Users/User*.cs", "Users/ScriptBindingCleanupTests.cs", "Queues/**/*.cs", "Scripts/ScriptInstanceTests.cs", "Scripts/ScriptPluginAvailabilityTests.cs", "Scripts/ScriptSpecInputOverrideTests.cs"] },
-  { key: "execution", paths: ["src/Modules/Execution/**"], testPaths: ["Execution/AdbEndpointPolicyTests.cs", "Execution/AdmissionFailurePolicyTests.cs", "Execution/AttemptHookPolicyTests.cs", "Execution/EmulatorSupportTests.cs", "Execution/Execution*.cs", "Execution/HostMaintenanceLeaseTests.cs", "Execution/LogCandidateStartPolicyTests.cs", "Execution/ParallelAdmissionTests.cs", "Execution/PendingSystemActionTests.cs", "Execution/PerUserExecutionPlanTests.cs", "Platform/ProcessTreeTests.cs", "Execution/RecentScreenshotCacheTests.cs", "Execution/RunAttemptResultTests.cs", "Execution/RunScreenshotStoreTests.cs", "Execution/RuntimeWorkerTests.cs", "Execution/SelfManagedPcLaunchTests.cs", "Execution/UnavailablePluginExecutionTests.cs"] },
+  { key: "execution", paths: ["src/Modules/Execution/**"], testPaths: ["Execution/**/*.cs", "Platform/ProcessTreeTests.cs", "Platform/JobProcessIdReaderTests.cs", "Platform/OkRuntimeActivityProbeTests.cs", "Platform/WindowPollingTests.cs", "Configuration/ProviderRunJournalTests.cs", "Scripts/ExecutionProviderScriptStorageTests.cs"] },
   { key: "scheduling", paths: ["src/Modules/Scheduling/**"], testPaths: ["Scheduling/**/*.cs", "Users/RunDaysTests.cs"] },
   { key: "judgement", paths: ["src/Modules/Execution/Judgement/**", "src/Modules/Execution/Monitoring/**"], testPaths: ["Execution/Judge*.cs", "Execution/SessionJudgeTests.cs", "Execution/KeywordRuleTests.cs", "Execution/ResultCollectorTests.cs", "Execution/LogPatternTests.cs"] },
   { key: "plugins", paths: ["src/Modules/Plugins/**", "src/NexusPipeline.Plugin.Abstractions/**"], testPaths: ["Plugins/**/*.cs", "Execution/EmulatorPluginSupportTests.cs"] },
@@ -34,6 +34,7 @@ export const SYSTEM_TEST_GROUPS = Object.freeze([
   { key: "judge", suitePaths: ["tests/system/judge-smoke.mjs"], runtimeNames: ["runtime-judge"] },
   { key: "emulator", suitePaths: ["tests/system/emulator-smoke.mjs"], runtimeNames: ["runtime-emulator"] },
   { key: "plugins", suitePaths: ["tests/system/plugin-smoke.mjs"], runtimeNames: ["runtime-plugins"] },
+  { key: "maa", suitePaths: ["tests/system/maa-provider-smoke.mjs"], runtimeNames: ["runtime-maa"] },
   { key: "update", suitePaths: ["tests/system/startup-update-smoke.mjs", "tests/system/update-smoke.mjs"], runtimeNames: ["runtime-startup-update", "runtime-update"] },
 ]);
 
@@ -54,8 +55,8 @@ export const TIMING_TESTS = Object.freeze([
     key: "execution",
     suitePath: "tests/system/execution-resilience.mjs",
     runtimeName: "runtime-execution-timing",
-    namePattern: "ER07|ER10",
-    caseIds: ["ER07", "ER10"],
+    namePattern: "ER07|ER10|ER14|EX01",
+    caseIds: ["ER07", "ER10", "ER14 stdout only", "ER14 stderr only", "EX01"],
   },
 ]);
 

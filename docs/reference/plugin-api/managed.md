@@ -1,10 +1,12 @@
 # Managed Plugin API
 
-## managed-code C# 插件（Plugin API v1.8）
+## managed-code C# 插件（Plugin API v1.9）
 
 代码插件必须在独立项目中引用 `src/NexusPipeline.Plugin.Abstractions/`，宿主不会向插件公开 `IServiceProvider`、`AppSettings`、`ScriptInstance` 或 `RunRecord`。插件由 `AssemblyLoadContext` 隔离加载，入口程序集从 manifest 声明，禁用或 API 不兼容时不会加载程序集。
 
-宿主当前 API 版本为 `1.8`：主版本必须相同，插件 minor 版本必须小于或等于宿主 minor 版本，因此 `1.0` 至 `1.8` 插件可加载，`2.0` 插件会被拒绝。既有插件仍按自身声明的 API minor 加载；使用模拟器 provider 的插件至少需要 `1.7`，使用通知收件人覆盖的插件需要 `1.8`。
+宿主当前 API 版本为 `1.9`：主版本必须相同，插件 minor 版本必须小于或等于宿主 minor 版本，因此 `1.0` 至 `1.9` 插件可加载，`2.0` 插件会被拒绝。既有插件仍按自身声明的 API minor 加载；使用模拟器 provider 的插件至少需要 `1.7`，使用通知收件人覆盖的插件需要 `1.8`，使用独立执行 provider 的插件需要 `1.9`。
+
+`IPluginHostContextV1_9.ExecutionProviders` 的冻结计划、配置门禁、worker 与事件协议见 [执行 provider](execution-provider.md)。新插件须声明相应 API 与最低 Host，旧插件不需要修改 minor。
 
 ```text
 plugins/GameCheckIn/

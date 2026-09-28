@@ -39,6 +39,9 @@ internal static class RunResultLocalization
                 new Dictionary<string, object?> { ["attempt"] = attempt },
                 locale),
             "run.partial" when fallback == "判断脚本判定部分完成" => HostLocalization.TranslateNamed("run.partial_judge", fallback, args, locale),
+            "tasks_unverified" when record.TaskReport?["summary"]?["counts"]?["unknown"]?.GetValue<int>() is int unknown && unknown > 0 =>
+                HostLocalization.TranslateNamed("tasks.outcome.unverified", $"流程已结束 · 有 {unknown} 项未核验",
+                    new Dictionary<string, object?> { ["count"] = unknown }, locale),
             _ => fallback,
         };
     }

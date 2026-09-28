@@ -18,9 +18,11 @@ import {
 const enabled = process.env.NEXUS_SYSTEM_SMOKE === "1";
 const skip = enabled ? false : "设置 NEXUS_SYSTEM_SMOKE=1 后运行";
 
-const pluginName = "bettergi";
-const artifactName = "BetterGI";
-const pluginVersions = ["0.2.9", "0.2.10"];
+const pluginName = "maaend";
+const artifactName = "MaaEnd";
+// Both fixed official packages use the current contract without configValidator.
+// BetterGI 0.2.9/0.2.10 are intentionally rejected by v0.16.9.
+const pluginVersions = ["0.2.5", "0.3.0"];
 const configuredPluginRoot = process.env.NEXUS_OFFICIAL_PLUGINS_ROOT?.trim();
 if (enabled && !configuredPluginRoot) throw new Error("必须显式设置 NEXUS_OFFICIAL_PLUGINS_ROOT");
 const pluginRepositoryRoot = path.resolve(projectRoot, configuredPluginRoot || ".");
@@ -48,7 +50,7 @@ function catalogEntry(version) {
   entry.packageUrl = `http://127.0.0.1:${pluginServerPort}/packages/${artifactName}/${artifactName}-${version}.zip`;
   entry.sizeBytes = bytes.length;
   entry.sha256 = createHash("sha256").update(bytes).digest("hex");
-  entry.minHostVersion = version === "0.2.9" ? "0.14.4" : "0.15.11";
+  entry.minHostVersion = version === pluginVersions[0] ? "0.15.11" : "0.16.8";
   entry.updatedAt = "2026-09-17";
   entry.changelog = [{ version, date: "2026-09-17", items: [`System Smoke fixture ${version}`] }];
   for (const locale of Object.values(entry.locales || {})) {
@@ -200,7 +202,7 @@ test(`${executionMode} 官方插件包经真实 API、pending journal 与连续�
   assert.equal(installResponse.status, 200, `${JSON.stringify(installBody)} requests=${pluginServerRequests.join(",")}`);
   assert.equal(installBody.pending, true);
   assert.equal(installBody.action, "install");
-  assert.equal(installBody.version, "0.2.9");
+  assert.equal(installBody.version, pluginVersions[0]);
   const pendingInstall = readJson(pendingPath, null);
   assert.equal(pendingInstall?.Operations?.length, 1);
   assert.equal(pendingInstall.Operations[0].Name, pluginName);
@@ -212,27 +214,27 @@ test(`${executionMode} 官方插件包经真实 API、pending journal 与连续�
   let plugin = findPlugin(plugins);
   assert.equal(pluginsResponse.status, 200);
   assert.ok(plugin);
-  assert.equal(plugin.version, "0.2.9");
+  assert.equal(plugin.version, pluginVersions[0]);
   assert.equal(plugin.artifactName, artifactName);
   assert.equal(plugin.kind, "data-specialized");
   assert.equal(plugin.managedByStore, true);
-  assert.equal(plugin.installedVersion, "0.2.9");
+  assert.equal(plugin.installedVersion, pluginVersions[0]);
   assert.equal(plugin.pendingAction, "");
   assert.equal(readJson(pendingPath, { Operations: [] }).Operations.length, 0);
-  assert.equal(readJson(ownershipPath, { Plugins: [] }).Plugins[0]?.Version, "0.2.9");
+  assert.equal(readJson(ownershipPath, { Plugins: [] }).Plugins[0]?.Version, pluginVersions[0]);
   assert.equal(fs.readFileSync(witness, "utf8"), "keep-through-plugin-lifecycle");
 
-  catalogVersion = "0.2.10";
+  catalogVersion = pluginVersions[1];
   const refreshResponse = await api("POST", "/api/plugins/store/refresh");
   const refreshBody = await refreshResponse.json();
   assert.equal(refreshResponse.status, 200, JSON.stringify(refreshBody));
-  assert.equal(refreshBody.plugins.find(item => item.name === pluginName)?.version, "0.2.10");
+  assert.equal(refreshBody.plugins.find(item => item.name === pluginName)?.version, pluginVersions[1]);
   const updateResponse = await api("POST", `/api/plugins/store/${pluginName}/update`);
   const updateBody = await updateResponse.json();
   assert.equal(updateResponse.status, 200, JSON.stringify(updateBody));
   assert.equal(updateBody.pending, true);
   assert.equal(updateBody.action, "update");
-  assert.equal(updateBody.version, "0.2.10");
+  assert.equal(updateBody.version, pluginVersions[1]);
   assert.equal(readJson(pendingPath, null)?.Operations[0]?.Phase, "pending");
 
   await restartRuntime();
@@ -240,11 +242,11 @@ test(`${executionMode} 官方插件包经真实 API、pending journal 与连续�
   plugins = await pluginsResponse.json();
   plugin = findPlugin(plugins);
   assert.ok(plugin);
-  assert.equal(plugin.version, "0.2.10");
-  assert.equal(plugin.installedVersion, "0.2.10");
+  assert.equal(plugin.version, pluginVersions[1]);
+  assert.equal(plugin.installedVersion, pluginVersions[1]);
   assert.equal(plugin.managedByStore, true);
   assert.equal(plugin.pendingAction, "");
-  assert.equal(readJson(ownershipPath, { Plugins: [] }).Plugins[0]?.Version, "0.2.10");
+  assert.equal(readJson(ownershipPath, { Plugins: [] }).Plugins[0]?.Version, pluginVersions[1]);
   assert.equal(fs.readFileSync(witness, "utf8"), "keep-through-plugin-lifecycle");
 
   const uninstallResponse = await api("POST", `/api/plugins/store/${pluginName}/uninstall`);
@@ -252,7 +254,7 @@ test(`${executionMode} 官方插件包经真实 API、pending journal 与连续�
   assert.equal(uninstallResponse.status, 200, JSON.stringify(uninstallBody));
   assert.equal(uninstallBody.pending, true);
   assert.equal(uninstallBody.action, "uninstall");
-  assert.equal(uninstallBody.version, "0.2.10");
+  assert.equal(uninstallBody.version, pluginVersions[1]);
   assert.equal(readJson(pendingPath, null)?.Operations[0]?.Phase, "pending");
 
   await restartRuntime();

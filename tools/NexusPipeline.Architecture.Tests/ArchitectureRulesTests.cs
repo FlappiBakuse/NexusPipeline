@@ -8,6 +8,15 @@ namespace NexusPipeline.Architecture.Tests;
 public sealed class ArchitectureRulesTests
 {
     [Fact]
+    public void PackageInjectedDocumentsRespectTheConfiguredCacheBoundary()
+    {
+        string cache = Path.Combine(Path.GetTempPath(), "owned-nuget");
+        Assert.True(ProjectLoader.IsExternalPackageDocument(Path.Combine(cache, "microsoft.net.test.sdk", "17.11.1", "build", "Program.cs"), cache));
+        Assert.False(ProjectLoader.IsExternalPackageDocument(Path.Combine(cache + "-other", "Program.cs"), cache));
+        Assert.False(ProjectLoader.IsExternalPackageDocument(Path.Combine(Path.GetTempPath(), "foreign", ".nuget", "packages", "Program.cs"), cache));
+    }
+
+    [Fact]
     public void BackendMapUsesRepositoryLfRegardlessOfPlatform()
     {
         var directory = Path.Combine(Path.GetTempPath(), "nxp-map-newline-" + Guid.NewGuid().ToString("N"));

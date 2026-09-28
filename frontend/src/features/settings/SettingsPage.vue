@@ -126,6 +126,7 @@ function servicePayload() {
   return {
     autoStart: settings.autoStart === true,
     lightweightMode: settings.lightweightMode === true,
+    allowConfigRepair: settings.allowConfigRepair === true,
     autoOpenBrowser: settings.autoOpenBrowser === true,
     historyRetentionDays: Number(settings.historyRetentionDays) || 3,
     webPort: Number(settings.webPort) || 58731,

@@ -282,10 +282,14 @@ async function paintBindingSlots() {
   await nextTick();
   const slots = root.value?.querySelectorAll<HTMLElement>('[data-plugin-slot="users.binding.sections"]') || [];
   for (const slot of slots) {
+    const script = props.scripts.find(item => item.id === slot.dataset.pluginPrimaryId);
     await renderPluginSlot(slot, "users.binding.sections", {
       mode: "binding",
       primaryId: slot.dataset.pluginPrimaryId || "",
       secondaryId: draft.value?.id || "",
+      executionProviderId: script?.executionProviderId || '',
+      executionProviderConfigId: script?.executionProviderConfigId || '',
+      packageRoot: script?.rootPath || '',
     });
   }
 }

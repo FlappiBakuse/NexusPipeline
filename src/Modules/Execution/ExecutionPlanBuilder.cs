@@ -125,7 +125,7 @@ internal sealed class ExecutionPlanBuilder
         return new ScriptExecutionPlan(
             script,
             users,
-            ExecutionAdmissionProfile.ForScript(script, userName, _capabilities, resolvedUsers),
+            ExecutionAdmissionProfile.ForScript(script, userName, _capabilities, resolvedUsers, resolvedSpec),
             string.IsNullOrWhiteSpace(userName) ? Math.Max(1, users.Count) : 1,
             resolvedUsers,
             resolvedSpec);
@@ -170,7 +170,9 @@ internal sealed class ExecutionPlanBuilder
                     ? null
                     : item.ResolvedSpec.ToRuntime(item.Script.Clone())))
             .ToList();
-        ExecutionAdmissionProfile admission = data.Admission is null
+        // Old snapshots did not persist desktop/writable scopes. Rebuild those
+        // scopes from the frozen task declarations rather than weakening leases.
+        ExecutionAdmissionProfile admission = data.Admission is null || data.Admission.ResourceSchemaVersion < 2
             ? ExecutionAdmissionProfile.ForQueue(queue, tasks, _capabilities)
             : RestoreAdmission(data.Admission);
         int totalTasks = tasks.Sum(task => task.Script is null || task.ResolvedUsers is null || task.ResolvedUsers.Count == 0
@@ -208,6 +210,7 @@ internal sealed class ExecutionPlanBuilder
     {
         return new FrozenAdmissionProfileData
         {
+            ResourceSchemaVersion = 2,
             Kind = profile.Kind,
             QueueClass = profile.QueueClass?.ToString(),
             CompletionAction = profile.CompletionAction,
@@ -226,6 +229,8 @@ internal sealed class ExecutionPlanBuilder
             }).ToList(),
             AuxiliaryExecutablePaths = profile.Resources.AuxiliaryExecutablePaths.ToList(),
             AuxiliaryProcessNames = profile.Resources.AuxiliaryProcessNames.ToList(),
+            DesktopDomains = profile.Resources.DesktopDomains.ToList(),
+            WritableRoots = profile.Resources.WritableRoots.ToList(),
         };
     }
 
@@ -246,6 +251,8 @@ internal sealed class ExecutionPlanBuilder
                 resource.DisplayPath)).ToList(),
             AuxiliaryExecutablePaths = new HashSet<string>(data.AuxiliaryExecutablePaths, StringComparer.OrdinalIgnoreCase),
             AuxiliaryProcessNames = new HashSet<string>(data.AuxiliaryProcessNames, StringComparer.OrdinalIgnoreCase),
+            DesktopDomains = new HashSet<string>(data.DesktopDomains, StringComparer.OrdinalIgnoreCase),
+            WritableRoots = data.WritableRoots.ToList(),
         };
         ExecutionConcurrencyClass? queueClass = Enum.TryParse(
             data.QueueClass,
@@ -348,9 +355,8 @@ internal sealed class ExecutionPlanBuilder
         {
             // 插件缺失/禁用时保留声明交给既有 runner fallback，执行记录仍会明确报告插件不可用；
             // 当前插件已启用但 profile/用户判断脚本损坏时则立即阻止计划，避免空路径启动。
-            bool unavailable = !string.IsNullOrWhiteSpace(declaration.PluginType)
-                && _availability is not null
-                && PluginAvailability.GetUnavailableReason(declaration.PluginType, _availability) is not null;
+            bool unavailable = _availability is not null
+                && PluginAvailability.GetUnavailableReason(declaration, _availability) is not null;
             if (!unavailable && !allowFailedSpec)
             {
                 throw new InvalidOperationException(resolved.Error);
@@ -367,18 +373,18 @@ internal sealed class ExecutionPlanBuilder
     private ResolvedScriptUser ResolveUserWithSpec(ScriptInstance script, ResolvedScriptUser user)
     {
         if (_specs is null
-            || string.IsNullOrWhiteSpace(script.PluginType)
-            || user.Binding.ConfigInputs.Count == 0)
+            || (string.IsNullOrWhiteSpace(script.ExecutionProviderId)
+                && (string.IsNullOrWhiteSpace(script.PluginType) || user.Binding.ConfigInputs.Count == 0)))
         {
             return user;
         }
         // 解析失败保留为失败快照（coordinator 生成该用户的失败记录），不影响计划内其他用户
-        return user with { Spec = _specs.Resolve(script, user.Binding.ConfigInputs) };
+        return user with { Spec = _specs.Resolve(script, user.Binding.ConfigInputs, user.UserId) };
     }
 
     private IReadOnlyList<ResolvedScriptUser> ResolveUsersWithSpecs(ScriptInstance script, IReadOnlyList<ResolvedScriptUser> users)
     {
-        if (_specs is null || string.IsNullOrWhiteSpace(script.PluginType) || users.Count == 0)
+        if (_specs is null || (string.IsNullOrWhiteSpace(script.PluginType) && string.IsNullOrWhiteSpace(script.ExecutionProviderId)) || users.Count == 0)
         {
             return users;
         }
@@ -392,6 +398,7 @@ internal sealed class ExecutionPlanBuilder
             Id = task.Id,
             Index = task.Index,
             ScriptInstanceId = task.ScriptInstanceId,
+            DependsOnTaskIds = task.DependsOnTaskIds?.ToList() ?? new(),
         };
     }
 

@@ -47,13 +47,8 @@ internal static class ConfigEditPreparationScriptRunner
                 fields["configInputValue"] = ResolveCurrentInputValue(script, mark);
             }
 
-            var validatorDescriptor = new ConfigValidatorDescriptor(
-                descriptor.PluginName,
-                descriptor.PluginDirectory,
-                descriptor.EditorPath,
-                descriptor.Script);
-            return ConfigValidationScriptRunner.ExecuteAsync(
-                    validatorDescriptor,
+            return ConfigEditScriptRunner.ExecuteAsync(
+                    descriptor,
                     script,
                     user,
                     temporaryRoot,

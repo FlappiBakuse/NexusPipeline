@@ -12,7 +12,7 @@ internal static class Logger
     private static readonly object Sync = new();
 
     /// <summary>日志阈值由宿主初始化显式配置；设置加载前使用 Info。</summary>
-    private static LogLevel _currentThreshold = LogLevel.Info;
+    private static volatile LogLevel _currentThreshold = LogLevel.Info;
 
     /// <summary>CLI machine mode 下将诊断输出转到 stderr，保证 stdout 只承载协议 JSON。</summary>
     internal static bool ConsoleOutputToError { get; set; }
@@ -20,22 +20,11 @@ internal static class Logger
     /// <summary>显式设置日志阈值；调用方应在设置成功加载或保存后调用。</summary>
     public static void ConfigureLevel(string? level)
     {
-        lock (Sync)
-        {
-            _currentThreshold = LogLevelUtil.Parse(level);
-        }
+        _currentThreshold = LogLevelUtil.Parse(level);
     }
 
-    private static LogLevel Threshold
-    {
-        get
-        {
-            lock (Sync)
-            {
-                return _currentThreshold;
-            }
-        }
-    }
+    // A disabled diagnostic must not wait for another thread's file append.
+    private static LogLevel Threshold => _currentThreshold;
 
     public static void Debug(string message) => Log(LogLevel.Debug, message);
 

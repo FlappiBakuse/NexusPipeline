@@ -47,6 +47,9 @@ export interface User {
 }
 
 export interface Script {
+  executionProviderId?: string;
+  executionProviderConfigId?: string;
+  rootPath?: string;
   id: string;
   name: string;
   index?: number;

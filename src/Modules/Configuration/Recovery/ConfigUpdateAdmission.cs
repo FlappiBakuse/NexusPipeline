@@ -33,7 +33,7 @@ internal static class ConfigUpdateAdmission
 
     // Path.Exists also returns false for access/I/O failures. Only a definite missing
     // path may be treated as clean; all other failures reach the conservative outer catch.
-    private static bool ExistsOrThrow(string path)
+    internal static bool ExistsOrThrow(string path)
     {
         try { _ = File.GetAttributes(path); return true; }
         catch (FileNotFoundException) { return false; }

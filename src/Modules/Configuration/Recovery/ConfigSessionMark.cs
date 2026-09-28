@@ -18,6 +18,8 @@ internal sealed record ConfigSessionRuntimeMetadata(
     string PluginVersion,
     string ConfigKind)
 {
+    public string OriginExecutionId { get; init; } = "";
+    public string WritableRoot { get; init; } = "";
     /// <summary>已解析并冻结的附加配置路径；启动恢复不重新加载插件 profile。</summary>
     public IReadOnlyList<ConfigSessionExtraPath> ExtraConfigPaths { get; init; } = Array.Empty<ConfigSessionExtraPath>();
 }
@@ -66,6 +68,32 @@ internal sealed record ConfigEditPreparationOptions(
     IReadOnlyList<string> CandidatePaths,
     ConfigEditPendingInput? PendingConfigInput = null);
 
+/// <summary>Recovery responsibility attached to the existing session journal.</summary>
+internal sealed class ConfigSessionRecoveryIsolation
+{
+    public int Version { get; set; } = 1;
+    public string RecoveryId { get; set; } = Guid.NewGuid().ToString("N");
+    public string OriginExecutionId { get; set; } = "";
+    public string OriginRecordId { get; set; } = "";
+    public int OriginAttempt { get; set; }
+    public string CauseCode { get; set; } = "";
+    public string ScopeQuality { get; set; } = "unavailable";
+    public string Phase { get; set; } = "pending";
+    public DateTimeOffset CreatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset UpdatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
+    public string DiagnosticCode { get; set; } = "run.recovery_isolated";
+    public bool MayContinueIndependent { get; set; }
+
+    internal bool IsValid() => Version == 1
+        && Guid.TryParseExact(RecoveryId, "N", out _)
+        && CauseCode is "config_restore_failed" or "process_cleanup_unconfirmed"
+        && ScopeQuality is "complete" or "partial" or "unavailable"
+        && Phase is "pending" or "restoring"
+        && CreatedAtUtc != default
+        && UpdatedAtUtc >= CreatedAtUtc
+        && (!MayContinueIndependent || ScopeQuality == "complete");
+}
+
 /// <summary>配置交换会话标记：交换开始写入、完成删除；崩溃后可据此恢复（安全优先：原配置必还原）。</summary>
 internal sealed class ConfigSessionMark
 {
@@ -91,6 +119,13 @@ internal sealed class ConfigSessionMark
 
     public string PluginVersion { get; set; } = "";
 
+    /// <summary>Only a currently active run with this exact ID may treat an unisolated run journal as in-flight.</summary>
+    public string OriginExecutionId { get; set; } = "";
+
+    public string WritableRoot { get; set; } = "";
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public bool? ProviderWorkersStopped { get; set; }
+
     /// <summary>本次会话已冻结的 extraConfigPaths。</summary>
     public List<ConfigSessionExtraPath> ExtraConfigPaths { get; set; } = new();
 
@@ -102,6 +137,9 @@ internal sealed class ConfigSessionMark
 
     /// <summary>主快照提交后等待写入用户绑定的输入值。</summary>
     public ConfigEditPendingInput? PendingConfigInput { get; set; }
+
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public ConfigSessionRecoveryIsolation? RecoveryIsolation { get; set; }
 
     /// <summary>全新配置编辑会话且原配置形态为 Missing：缓存区为空时 config 位置的脚本生成物仍需还原清理。</summary>
     public bool NeedsFreshRestore =>
@@ -140,6 +178,10 @@ internal sealed class ConfigSessionMark
             .Append(nameof(NeedsFreshRestore))
             .Append(nameof(EditIsolationPaths))
             .Append(nameof(PendingConfigInput))
+            .Append(nameof(RecoveryIsolation))
+            .Append(nameof(OriginExecutionId))
+            .Append(nameof(WritableRoot))
+            .Append(nameof(ProviderWorkersStopped))
             .ToHashSet(StringComparer.Ordinal);
 
     public static string MarkFile(string scriptId, string userId)
@@ -169,11 +211,12 @@ internal sealed class ConfigSessionMark
             launchExe,
             string.IsNullOrWhiteSpace(launchExe) ? "" : Path.GetFileNameWithoutExtension(launchExe),
             profileHash,
-            script.PluginType,
+            string.IsNullOrWhiteSpace(script.ExecutionProviderId) ? script.PluginType : script.ExecutionProviderId,
             pluginVersion,
             PathKindUtil.Text(PathKindUtil.KindOf(script.ConfigPath)))
         {
             ExtraConfigPaths = FromExtraPaths(extraConfigPaths),
+            WritableRoot = string.IsNullOrWhiteSpace(script.RootPath) ? "" : Path.GetFullPath(script.RootPath),
         };
     }
 
@@ -223,6 +266,7 @@ internal sealed class ConfigSessionMark
             return null;
         }
 
+        ConfigSessionMark? first = null;
         foreach (string file in new[] { primary, backup })
         {
             if (!File.Exists(file))
@@ -244,28 +288,48 @@ internal sealed class ConfigSessionMark
                     Logger.Warn($"[警告] 配置会话标记字段无效，保留现场：{file}");
                     continue;
                 }
-                return mark;
+                if (first is null) first = mark;
+                else if (first.SessionPhase == "provider_run" && first.ProviderWorkersStopped == false
+                    && mark.ProviderWorkersStopped == true && SameProviderJournal(first, mark))
+                    first = mark;
             }
             catch (Exception ex)
             {
                 Logger.Warn($"[警告] 读取配置会话标记失败（{file}）：{ex.Message}");
             }
         }
-        return null;
+        return first;
+    }
+
+    private static bool SameProviderJournal(ConfigSessionMark first, ConfigSessionMark second)
+    {
+        // Write commits the redundant copy first. A stop proof is monotonic within
+        // one exact provider session, even if replacing its primary file fails.
+        if (second.SessionPhase != "provider_run" || string.IsNullOrWhiteSpace(first.OriginExecutionId)) return false;
+        var left = JsonSerializer.SerializeToNode(first, Options)!.AsObject();
+        var right = JsonSerializer.SerializeToNode(second, Options)!.AsObject();
+        foreach (string field in new[] { nameof(ProviderWorkersStopped), nameof(RecoveryIsolation) })
+        {
+            left.Remove(field); right.Remove(field);
+        }
+        return System.Text.Json.Nodes.JsonNode.DeepEquals(left, right);
     }
 
     private bool IsValidCurrent() =>
         !string.IsNullOrWhiteSpace(ScriptId)
         && !string.IsNullOrWhiteSpace(UserId)
         && !string.IsNullOrWhiteSpace(ConfigPath)
-        && SessionPhase is "run" or "edit" or "edit-commit-pending"
+        && SessionPhase is "run" or "edit" or "edit-commit-pending" or "provider_run"
         && (ConfigKind is "missing" or "file" or "dir")
         && (EditMode is "normal" or "fresh" or "reuse")
         && ExtraConfigPaths is not null
         && ExtraConfigPaths.All(IsValidExtraPath)
         && EditIsolationPaths is not null
         && EditIsolationPaths.All(IsValidIsolationPath)
-        && (PendingConfigInput is null || IsValidPendingInput(PendingConfigInput));
+        && (PendingConfigInput is null || IsValidPendingInput(PendingConfigInput))
+        && (RecoveryIsolation is null || RecoveryIsolation.IsValid())
+        && (WritableRoot.Length == 0 || Path.IsPathFullyQualified(WritableRoot))
+        && (SessionPhase != "provider_run" || ProviderWorkersStopped is not null && Path.IsPathFullyQualified(WritableRoot));
 
     private static bool IsValidExtraPath(ConfigSessionExtraPath entry)
     {
@@ -320,19 +384,9 @@ internal sealed class ConfigSessionMark
 
     public static void Clear(string scriptId, string userName)
     {
-        try
-        {
-            File.Delete(MarkFile(scriptId, userName));
-        }
-        catch
-        {
-        }
-        try
-        {
-            File.Delete(BackupMarkFile(scriptId, userName));
-        }
-        catch
-        {
-        }
+        // Keep the redundant committed stop proof if removing the primary fails.
+        // Callers must retain recovery responsibility until both deletions succeed.
+        File.Delete(MarkFile(scriptId, userName));
+        File.Delete(BackupMarkFile(scriptId, userName));
     }
 }

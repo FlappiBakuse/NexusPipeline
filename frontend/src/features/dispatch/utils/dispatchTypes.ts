@@ -18,6 +18,7 @@ export interface DispatchStatus {
 
 export interface DispatchLogEntry {
   sequence?: number;
+  logSegmentId?: string;
   timestamp?: string;
   level?: string;
   text?: string;
@@ -43,6 +44,11 @@ export interface DispatchRunningRecord {
   logEntries?: DispatchLogEntry[];
   logTail?: string[];
   logTruncated?: boolean;
+  logSegmentId?: string;
+  logSegmentSequence?: number;
+  logSegment?: { id: string; generation: number; runRecordId?: string | null; attemptNumber: number } | null;
+  cancelRequested?: boolean;
+  cancellationPhase?: string;
 }
 
 export interface DispatchSystemAction {
@@ -66,6 +72,19 @@ function mergeRunningRecord(
   next: DispatchRunningRecord,
 ): DispatchRunningRecord {
   if (!previous) return next;
+  if (typeof next.logSegmentSequence === "number"
+    && typeof previous.logSegmentSequence === "number"
+    && next.logSegmentSequence < previous.logSegmentSequence) return previous;
+  if (next.logSegmentId && next.logSegmentId !== previous.logSegmentId) {
+    return {
+      ...previous,
+      ...next,
+      // An empty snapshot is authoritative at the start of a new record.
+      logEntries: next.logEntries || [],
+      logTail: next.logTail || [],
+      logTruncated: Boolean(next.logTruncated),
+    };
+  }
   const previousEntries = Array.isArray(previous.logEntries) ? previous.logEntries : [];
   const nextEntries = Array.isArray(next.logEntries) ? next.logEntries : [];
   const entries = new Map<number, DispatchLogEntry>();
@@ -81,6 +100,34 @@ function mergeRunningRecord(
     logEntries: mergedEntries.length ? mergedEntries : next.logEntries,
     logTruncated: Boolean(previous.logTruncated || next.logTruncated || entries.size > 500),
   };
+}
+
+/** Accept only entries from the record currently shown by the running card. */
+export function appendRunningLogEntries(
+  record: DispatchRunningRecord,
+  incoming: readonly Record<string, unknown>[],
+): DispatchRunningRecord {
+  const entries = [...(record.logEntries || [])];
+  const seen = new Set(entries.map(entry => entry.sequence).filter(sequence => typeof sequence === "number"));
+  for (const item of incoming) {
+    if (!item || typeof item !== "object") continue;
+    const segmentId = typeof item.logSegmentId === "string" ? item.logSegmentId : "";
+    if ((record.logSegmentId || "") !== segmentId) continue;
+    const sequence = Number(item.sequence);
+    if (!Number.isFinite(sequence) || seen.has(sequence)) continue;
+    seen.add(sequence);
+    entries.push({
+      sequence,
+      logSegmentId: segmentId,
+      timestamp: typeof item.timestamp === "string" ? item.timestamp : undefined,
+      level: String(item.level || "info"),
+      text: String(item.formattedText || item.message || ""),
+      message: String(item.message || ""),
+      formattedText: String(item.formattedText || ""),
+    });
+  }
+  entries.sort((left, right) => (left.sequence || 0) - (right.sequence || 0));
+  return { ...record, logEntries: entries.slice(-500), logTruncated: Boolean(record.logTruncated || entries.length > 500) };
 }
 
 export interface DispatchPlanTask {

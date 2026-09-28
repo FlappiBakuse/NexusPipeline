@@ -18,9 +18,18 @@ internal static class RuntimeInitializer
 {
     public static AppSettings InitialSettings { get; private set; } = new();
 
+    /// <summary>在任何运行数据写入前冻结首次安装事实；不会按插件目录缺失推断新装。</summary>
+    internal static bool BundledPluginSeedEligible { get; private set; }
+
     public static int Initialize()
     {
         InitializeEarlyHostLocale();
+        BundledPluginSeedEligible = new[]
+        {
+            AppPaths.ConfigDir, AppPaths.DataDir, AppPaths.HistoryDir, AppPaths.LogDir,
+            AppPaths.InternalDir, AppPaths.OutputDir, AppPaths.UserAssetsDir,
+            AppPaths.UpdateDir, AppPaths.UpdateBackupDir,
+        }.All(path => !Directory.Exists(path) && !File.Exists(path));
         if (!IsTestHost() && !IsAdministrator())
         {
             string msg = AdministratorRequiredMessage();

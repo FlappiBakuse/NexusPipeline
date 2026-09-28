@@ -384,7 +384,7 @@ public sealed class PluginRepositoryCatalogTests
     public void PluginApiCompatibility_UsesMajorAndMinorVersion()
     {
         Assert.Equal(1, PluginApiVersion.Major);
-        Assert.Equal(8, PluginApiVersion.Minor);
+        Assert.Equal(9, PluginApiVersion.Minor);
         Assert.True(PluginRepositoryCatalog.TryParseApiVersion("1.0", out int major, out int minor));
         Assert.Equal(1, major);
         Assert.Equal(0, minor);
@@ -398,9 +398,9 @@ public sealed class PluginRepositoryCatalogTests
         Assert.True(PluginRepositoryCatalog.IsCompatible(compatible, "0.11.0", out _));
         PluginCatalogEntry previousMinor = compatible with { ApiVersion = "1.6" };
         Assert.True(PluginRepositoryCatalog.IsCompatible(previousMinor, "0.11.0", out _));
-        PluginCatalogEntry currentMinor = compatible with { ApiVersion = "1.8" };
+        PluginCatalogEntry currentMinor = compatible with { ApiVersion = "1.9" };
         Assert.True(PluginRepositoryCatalog.IsCompatible(currentMinor, "0.11.0", out _));
-        PluginCatalogEntry newerMinor = compatible with { ApiVersion = "1.9" };
+        PluginCatalogEntry newerMinor = compatible with { ApiVersion = "1.10" };
         Assert.False(PluginRepositoryCatalog.IsCompatible(newerMinor, "0.11.0", out string reason));
         Assert.Contains("Plugin API", reason);
 
@@ -412,7 +412,7 @@ public sealed class PluginRepositoryCatalogTests
     public void CompatibilityEvaluator_DistinguishesHostApiAndInvalidVersionFailures()
     {
         PluginCatalogEntry managed = new(
-            "fixture", "fixture", "", "", "0.1.0", "managed-code", "1.9", Array.Empty<string>(),
+            "fixture", "fixture", "", "", "0.1.0", "managed-code", "1.10", Array.Empty<string>(),
             UpdateService.CurrentVersion,
             "https://raw.githubusercontent.com/FlappiBakuse/NexusPipeline-Plugins/main/packages/fixture/fixture-0.1.0.zip",
             new string('a', 64),

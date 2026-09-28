@@ -164,13 +164,16 @@ describe("task history", () => {
       { ...base, id: 'login', name: 'Login', role: 'technical' },
       { ...base, id: 'not-unit', name: 'Informational', countsAsUnit: false });
     data.summary!.counts = { total: 1, succeeded: 0, skipped: 0, partial: 1 };
-    for (const layout of ['cards', 'steps'] as const) {
-      const wrapper = mount(TaskReportPanel, { props: { report: data, layout } });
-      expect(wrapper.text()).toContain('tasks.progress 0/1');
-      expect(wrapper.text()).toContain('Login');
-      expect(wrapper.text()).toContain('Child reward');
-      wrapper.unmount();
-    }
+    const cards = mount(TaskReportPanel, { props: { report: data, layout: 'cards' } });
+    expect(cards.text()).toContain('tasks.progress 0/1');
+    expect(cards.text()).toContain('Login');
+    expect(cards.text()).toContain('Child reward');
+    cards.unmount();
+    const steps = mount(TaskReportPanel, { props: { report: data, layout: 'steps' } });
+    expect(steps.findAll('.task-step').map(step => step.text())).toEqual([expect.stringContaining('Mail')]);
+    expect(steps.text()).not.toContain('Login');
+    expect(steps.text()).not.toContain('Child reward');
+    steps.unmount();
     const preview = mount(TaskReportPanel, { props: { plan: data.originalPlan } });
     expect(preview.text()).toContain('tasks.enabled_count 0/1');
     preview.unmount();
@@ -224,17 +227,31 @@ describe("task history", () => {
     expect(document.activeElement?.textContent).not.toContain('tasks.status.partial');
     wrapper.unmount(); window.location.hash = '';
   });
-  it("renders steps without disclosure controls, parent subtitles or evidence details", () => {
+  it("does not promote an orphan child into a business step", () => {
     const data = report();
     data.originalPlan.tasks[0].parentId = 'disabled-parent';
     data.originalPlan.tasks.push({ ...data.originalPlan.tasks[0], id: 'disabled-parent', name: 'Parent subtitle', enabled: false });
     const wrapper = mount(TaskReportPanel, { props: { report: data, layout: 'steps' } });
-    expect(wrapper.get('li').text()).toContain('1');
-    expect(wrapper.get('li').text()).toContain('Mail');
-    expect(wrapper.get('li').text()).toContain('tasks.status.succeeded');
+    expect(wrapper.findAll('li.task-step')).toHaveLength(0);
     expect(wrapper.find('button[aria-expanded]').exists()).toBe(false);
     expect(wrapper.text()).not.toContain('Parent subtitle');
     expect(wrapper.text()).not.toContain('Exact evidence');
+    wrapper.unmount();
+  });
+  it("shows three business parents for a six-node plan", () => {
+    const data = report();
+    const base = data.originalPlan.tasks[0];
+    data.originalPlan.tasks.push(
+      { ...base, id: 'power', name: 'Power', order: 1 },
+      { ...base, id: 'rewards', name: 'Rewards', order: 2 },
+      { ...base, id: 'mail-child', name: 'Mail child', parentId: 'mail', order: 3 },
+      { ...base, id: 'power-child', name: 'Power child', parentId: 'power', order: 4 },
+      { ...base, id: 'technical', name: 'Login', role: 'technical', order: 5 },
+    );
+    data.summary!.counts = { total: 3, succeeded: 1, unknown: 2 };
+    const wrapper = mount(TaskReportPanel, { props: { report: data, layout: 'steps' } });
+    expect(wrapper.findAll('li.task-step').map(step => step.find('.task-step-name').text())).toEqual(['Mail', 'Power', 'Rewards']);
+    expect(wrapper.text()).toContain('tasks.outcome.unverified_count');
     wrapper.unmount();
   });
   it("lets users dismiss plan warnings and restores them after a new plan is read", async () => {

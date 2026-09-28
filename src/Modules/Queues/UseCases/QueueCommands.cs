@@ -75,6 +75,7 @@ internal sealed class QueueCommands
                     }
                     error ??= Limits.CheckTimeSets(candidate.TimeSets.Count)
                         ?? CheckTimeFormat(candidate)
+                        ?? QueueCompositionPolicy.CheckDependencies(candidate)
                         ?? Limits.CheckQueueTotalUsers(QueueCompositionPolicy.QueueTotalUsers(scripts, _users, candidate))
                         ?? CheckQueuePluginAvailability(scripts, candidate)
                         ?? QueueCompositionPolicy.CheckQueueMix(scripts, candidate);
@@ -145,8 +146,7 @@ internal sealed class QueueCommands
                         }
                         else
                         {
-                            RemoveDuplicateTasks(candidate);
-                            NormalizeTimeSets(candidate);
+                            NormalizeQueue(candidate);
                             error = Limits.CheckNameBytes(candidate.Name, AppFixedLimits.MaxEntityNameBytes, "队列名称");
                             if (error is null && EntityNameRules.HasConflict(
                                     queues,
@@ -159,6 +159,7 @@ internal sealed class QueueCommands
                             }
                             error ??= Limits.CheckTimeSets(candidate.TimeSets.Count)
                                 ?? CheckTimeFormat(candidate)
+                                ?? QueueCompositionPolicy.CheckDependencies(candidate)
                                 ?? Limits.CheckQueueTotalUsers(QueueCompositionPolicy.QueueTotalUsers(scripts, _users, candidate))
                                 ?? CheckQueuePluginAvailability(scripts, candidate)
                                 ?? QueueCompositionPolicy.CheckQueueMix(scripts, candidate);
@@ -373,6 +374,7 @@ internal sealed class QueueCommands
         }
         NormalizeTimeSets(queue);
     }
+
 
     /// <summary>按列表顺序保留同启用状态、同一时间的第一项，并将后续项的星期选择合并到第一项。</summary>
     private static void NormalizeTimeSets(DispatchQueue queue)

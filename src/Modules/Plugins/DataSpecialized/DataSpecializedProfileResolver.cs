@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using NexusPipeline.Modules.Plugins.Contracts;
+using NexusPipeline.Platform.Processes;
 using NexusPipeline.Shared.Logging;
 
 namespace NexusPipeline.Modules.Plugins.DataSpecialized;
@@ -46,6 +47,27 @@ internal sealed class DataSpecializedProfileResolver
             return null;
         }
         JsonNode resolve = parsed;
+        string outputEncoding = resolve["outputEncoding"]?.ToString() ?? "";
+        if (outputEncoding.Length > 0 && outputEncoding is not ("utf-8" or "windows-936" or "system-default"))
+        {
+            Logger.Warn($"[插件] 输出编码声明无效：{_plugin.Name}");
+            return null;
+        }
+        ProcessRole rootRole = ProcessRole.AutomationWorker;
+        if (resolve["process"] is JsonNode processContract)
+        {
+            string declaredRole = processContract["rootRole"]?.ToString() ?? "";
+            bool noManagedConfigWrites = processContract["writesManagedConfig"]?.GetValue<bool>() == false;
+            if (declaredRole == "game_launcher" && processContract["writesManagedConfig"] is JsonValue && _plugin.TaskProtocol is not null)
+                // A launcher with a writer responsibility remains a necessary
+                // process; only the explicitly pure role may be retained.
+                rootRole = noManagedConfigWrites ? ProcessRole.GameLauncher : ProcessRole.ConfigurationWriter;
+            else
+            {
+                Logger.Warn($"[插件] 根进程角色声明无效或缺少终态协议：{_plugin.Name}");
+                return null;
+            }
+        }
         List<PluginInputDeclaration> inputDeclarations = DataSpecializedResolveParser.ParseInputDeclarations(resolve["inputs"], out string? declarationError);
         if (declarationError is not null)
         {
@@ -151,6 +173,8 @@ internal sealed class DataSpecializedProfileResolver
         }
         var profile = new ScriptProfile
         {
+            RootProcessRole = rootRole,
+            OutputEncoding = outputEncoding,
             MainExe = DataSpecializedResolveParser.ResolvePath(DataSpecializedResolveParser.SubstituteInputs(mainExeTemplate, inputValues), rootPath, bindings),
             Args = DataSpecializedResolveParser.ResolveArgs(DataSpecializedResolveParser.SubstituteInputs(argsTemplate, inputValues), rootPath, bindings),
             ConfigPath = DataSpecializedResolveParser.ResolvePath(DataSpecializedResolveParser.SubstituteInputs(configPathTemplate, inputValues), rootPath, bindings),

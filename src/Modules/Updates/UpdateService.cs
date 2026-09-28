@@ -563,11 +563,52 @@ internal sealed class UpdateService
             _state = UpdateState.Applying;
             _maintenanceLease = lease;
         }
+        return StartImmediateApply(lease, version, stagingDir, auditSource);
+    }
 
+    /// <summary>Explicit same-instance Setup handoff; all runtime admission uses the existing maintenance owner.</summary>
+    internal UpdateApplyResult RequestInstallerApply(string stagingDir, string version, string imageHash, string transactionId, string auditSource)
+    {
+        if (!Guid.TryParseExact(transactionId, "N", out _) || !NexusVersion.TryParse(version, out var target)
+            || !NexusVersion.TryParse(CurrentVersion, out var current) || target.CompareTo(current) < 0)
+            return UpdateApplyResult.Busy("installer-input-invalid", "安装器版本或事务参数无效");
+        try
+        {
+            if (InstallationOwnership.Read(_installDir, true) is null)
+                throw new IOException("安装器实例归属无法确认");
+            string full = Path.GetFullPath(stagingDir);
+            string expected = Path.Combine(_installDir, ".nxp-update", "staging", version);
+            if (!string.Equals(full, Path.GetFullPath(expected), StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("安装器暂存不属于本实例");
+            for (string? path = full; path is not null; path = Path.GetDirectoryName(path))
+            {
+                if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0) throw new IOException("安装器暂存包含链接");
+                if (string.Equals(path.TrimEnd('\\'), _installDir.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase)) break;
+            }
+            if (UpdateApply.ImageHash(Path.Combine(full, "nexus-pipeline.exe")) != imageHash)
+                throw new InvalidDataException("安装器程序摘要不匹配");
+        }
+        catch (Exception ex) { return UpdateApplyResult.Busy("installer-staging-invalid", ex.Message); }
+        var (lease, reason) = _acquireMaintenance();
+        if (lease is null) return UpdateApplyResult.Busy("busy", reason ?? "宿主当前繁忙");
+        lock (_gate)
+        {
+            if (_state != UpdateState.Idle || HasRecoveryArtifacts()
+                || ConfigUpdateAdmission.HasPendingRecovery(Path.Combine(_installDir, "data")))
+            { lease.Dispose(); return UpdateApplyResult.Busy("recovery-pending", "存在活动更新或恢复现场"); }
+            _state = UpdateState.Applying; _maintenanceLease = lease;
+        }
+        return StartImmediateApply(lease, version, stagingDir, auditSource, transactionId, imageHash);
+    }
+
+    private UpdateApplyResult StartImmediateApply(HostMaintenanceLease lease, string version, string stagingDir,
+        string auditSource, string? transactionId = null, string? imageHash = null)
+    {
         bool workerLaunched = false;
         try
         {
-            new UpdateTask("apply", version, stagingDir, UpdatePhase.ApplyRequested, DateTimeOffset.UtcNow).Write(TaskFile);
+            new UpdateTask("apply", version, stagingDir, UpdatePhase.ApplyRequested, DateTimeOffset.UtcNow)
+            { TransactionId = transactionId, TargetImageHash = imageHash }.Write(TaskFile);
             if (!UpdateApply.LaunchApplyWorker(stagingDir, _isWebOnly()))
             {
                 throw new InvalidOperationException("apply-update 子进程未能拉起");
@@ -604,7 +645,7 @@ internal sealed class UpdateService
             {
                 if (_state == UpdateState.Applying)
                 {
-                    _state = UpdateState.Ready;
+                    _state = transactionId is null ? UpdateState.Ready : UpdateState.Idle;
                 }
                 _maintenanceLease = null;
             }

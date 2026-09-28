@@ -14,6 +14,9 @@ public class AppSettings
 
     public bool LightweightMode { get; set; }
 
+    /// <summary>User-initiated specialized configuration repair is opt-in and disabled by default.</summary>
+    public bool AllowConfigRepair { get; set; }
+
     public bool AutoOpenBrowser { get; set; }
 
     public int HistoryRetentionDays { get; set; } = 7;

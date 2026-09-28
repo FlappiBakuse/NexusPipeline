@@ -44,7 +44,6 @@ NexusPipeline-Plugins/plugins/
   "minHostVersion": "0.12.8",
   "resolve": "data/resolve.json",
   "judgeScript": "data/judge.js",
-  "configValidator": "data/config-validator.js",
   "configEditor": "data/config-editor.js"
 }
 ```
@@ -59,7 +58,7 @@ NexusPipeline-Plugins/plugins/
 | `minHostVersion` | 可选的最低宿主版本；使用同一受限格式，缺省按 `0.0.0` 处理。宿主版本低于该值时保留插件元数据并标记为不兼容，不解析配置、能力或 managed-code 程序集 |
 | `resolve` | 推导配置文件（相对插件目录） |
 | `judgeScript` | 判断脚本文件（扩展名决定语言：`.js` → javascript / `.py` → python） |
-| `configValidator` | 配置编辑完成后运行的可选配置校验/自修复脚本；仅 `data-specialized` 可声明，必须是插件目录内存在的 `.js` 文件 |
+| `configValidator` | v0.16.9 已退役；声明此字段的旧包会被拒绝并提示升级到 taskProtocol 配置诊断或卸载；不会修改用户配置 |
 | `configEditor` | 配置编辑准备阶段运行的可选工作副本调整脚本；仅 `data-specialized` 可声明，必须是插件目录内存在的 `.js` 文件 |
 | `capabilities` | 可选能力 key 数组。已接入宿主语义的 key：`emulator`（脚本实例可选「安卓模拟器」启动方式）、`self-managed-pc-launch`（PC 客户端启动由脚本自身含启动器完成；脚本弹窗在选择「PC 客户端」时关闭并禁用「启动游戏」开关、禁用启动参数与等待秒数，游戏路径保留填写用于任务失败时强制关闭游戏；持久化启动开关、参数和等待时间保留，仅在运行时生成宿主启动计划约束）、`execution-preview-client`、`no-fresh-config`（插件不允许使用全新配置文件模式） |
 
@@ -67,9 +66,9 @@ NexusPipeline-Plugins/plugins/
 
 
 
-### 配置校验脚本
+### 配置诊断与编辑准备
 
-`configValidator` 在两个时机执行：用户完成配置编辑并保存（trigger=`config-edit`），以及保存专项脚本实例（新建/编辑）后按绑定用户逐个执行（trigger=`script-save`）。宿主先提交编辑/保存结果，再以用户配置 store 作为主工作根目录运行脚本；取消编辑不会触发执行。脚本错误或超时会记录并通过结果反馈，已提交的配置及脚本此前写入的文件保持不变。校验结论通过 `nexus.notify` / `nexus.toast` 传回前端角落通知，当前版本的校验器只做比较与提醒，不修改配置。
+配置编辑提交和脚本实例保存后的检查统一使用 taskProtocol `discover.configAssessment`。没有声明 taskProtocol 的旧包不运行旧校验；若仍声明 `configValidator`，Host 拒绝加载并保留已有文件与用户快照。
 
 `configEditor` 在配置编辑目标软件启动前运行（trigger=`config-edit-preparation`）。`resolve.json` 可声明 `configEdit.isolateSiblingCandidates`，宿主按当前 profile 的实际候选文件或目录建立 `work/edit-isolation`；`configEdit.freshInput` 可为 fresh 编辑提供稳定的输入名和值。编辑器脚本读取 `nexus.input.mode`、`nexus.input.configInputName`、`nexus.input.configInputValue` 和 `nexus.input.extras`，其中 `@extra<序号>/` 指向附加配置工作副本并允许写入，主配置写入请求会被拒绝。脚本失败、超时或写入失败会阻断目标程序启动并回滚准备现场。
 
@@ -77,7 +76,7 @@ NexusPipeline-Plugins/plugins/
 
 ```json
 {
-  "trigger": "config-edit",
+  "trigger": "config-edit-preparation",
   "script": {
     "id": "...", "name": "...", "pluginType": "...", "rootPath": "...",
     "mainExe": "...", "args": "...", "configPath": "...", "logPath": "...",

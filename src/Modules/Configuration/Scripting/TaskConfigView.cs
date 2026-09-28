@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using NexusPipeline.Modules.Plugins.Contracts;
 
 namespace NexusPipeline.Modules.Configuration.Scripting;
 
@@ -10,8 +11,49 @@ internal sealed record TaskDeclaredTarget(string Value, string BaseDirectory);
 /// <summary>Owner-local revisions; opaque tokens never expose configuration hashes.</summary>
 internal sealed class TaskConfigView
 {
-    private sealed record Entry(string Path, string BaseDirectory, byte[] Bytes, string Revision, string Format, bool Writable, string? Integrity);
+    private sealed class Entry
+    {
+        internal string Path { get; }
+        internal string BaseDirectory { get; }
+        internal byte[] Bytes { get; }
+        internal string Revision { get; }
+        internal string Format { get; }
+        internal bool Writable { get; }
+        internal string? Integrity { get; }
+        internal Lazy<TaskConfigDocument?> Parsed { get; }
+        internal Lazy<string> Serialized { get; }
+
+        internal Entry(string path, string baseDirectory, byte[] bytes, string revision,
+            string format, bool writable, string? integrity, Action parsed)
+        {
+            Path = path;
+            BaseDirectory = baseDirectory;
+            Bytes = bytes;
+            Revision = revision;
+            Format = format;
+            Writable = writable;
+            Integrity = integrity;
+            Parsed = new Lazy<TaskConfigDocument?>(() =>
+            {
+                if (format is not ("json" or "yaml")) return null;
+                parsed();
+                return new TaskConfigDocument(bytes, format);
+            });
+            Serialized = new Lazy<string>(() =>
+            {
+                TaskConfigMetrics.Count(6);
+                JsonNode? document = integrity == "mismatch" ? null : format == "text"
+                    ? JsonValue.Create(new System.Text.UTF8Encoding(false, true).GetString(bytes))
+                    : Parsed.Value!.Document;
+                var result = new JsonObject { ["document"] = document, ["revision"] = revision, ["format"] = format };
+                if (integrity is not null) result["integrity"] = integrity;
+                return result.ToJsonString();
+            });
+        }
+    }
     private readonly Dictionary<string, Entry> _entries = new(StringComparer.Ordinal);
+    private int _parseCount;
+    internal int ParseCount => Volatile.Read(ref _parseCount);
     internal TaskConfigResource[] ConfigResources => _entries.Where(p => p.Value.Writable).Select(p => new TaskConfigResource(p.Key, p.Value.Format)).ToArray();
     internal IReadOnlySet<string> DeclaredResourceIds => _entries.Keys.ToHashSet(StringComparer.Ordinal);
     private static readonly byte[] RevisionKey = RandomNumberGenerator.GetBytes(32);
@@ -41,6 +83,7 @@ internal sealed class TaskConfigView
         ValidatePath(path);
         var info = new FileInfo(path);
         if (!info.Exists || info.Length > 2 * 1024 * 1024) throw new InvalidDataException("config_unavailable: missing/oversize resource");
+        TaskConfigMetrics.Count(4);
         byte[] bytes = File.ReadAllBytes(path);
         if (bytes.Length > 2 * 1024 * 1024) throw new InvalidDataException("resource_limit: resource changed while reading");
         if (_entries.Values.Sum(e => (long)e.Bytes.Length) + bytes.Length > 32 * 1024 * 1024)
@@ -49,7 +92,8 @@ internal sealed class TaskConfigView
         string fullBaseDirectory = Path.GetFullPath(baseDirectory ?? Path.GetDirectoryName(fullPath) ?? fullPath);
         string? integrity = sha256 is null ? null
             : Convert.ToHexString(SHA256.HashData(bytes)).Equals(sha256, StringComparison.OrdinalIgnoreCase) ? "verified" : "mismatch";
-        _entries.Add(id, new(fullPath, fullBaseDirectory, bytes, Convert.ToHexString(RandomNumberGenerator.GetBytes(24)), format, writable, integrity));
+        _entries.Add(id, new(fullPath, fullBaseDirectory, bytes, Convert.ToHexString(RandomNumberGenerator.GetBytes(24)),
+            format, writable, integrity, () => Interlocked.Increment(ref _parseCount)));
     }
 
     internal static void ValidatePath(string path)
@@ -84,10 +128,10 @@ internal sealed class TaskConfigView
         try
         {
             if (entry.Format is not ("json" or "yaml")) return false;
-            var document = new TaskConfigDocument(entry.Bytes, entry.Format);
+            var document = entry.Parsed.Value!;
             bool useDefault = defaultValue is not null && selector.Count == 1
                 && selector[0] is JsonValue property && property.TryGetValue<string>(out string? name)
-                && document.Document is JsonObject obj && !obj.ContainsKey(name);
+                && !document.ContainsTopLevelProperty(name);
             JsonNode? selected = useDefault ? JsonValue.Create(defaultValue) : document.ReadSelection(selector);
             string? text = null;
             if (selected is JsonValue scalar)
@@ -128,15 +172,7 @@ internal sealed class TaskConfigView
         }
     }
 
-    private static string Read(Entry entry)
-    {
-        JsonNode? document = entry.Integrity == "mismatch" ? null : entry.Format == "text"
-            ? JsonValue.Create(new System.Text.UTF8Encoding(false, true).GetString(entry.Bytes))
-            : new TaskConfigDocument(entry.Bytes, entry.Format).Document;
-        var result = new JsonObject { ["document"] = document, ["revision"] = entry.Revision, ["format"] = entry.Format };
-        if (entry.Integrity is not null) result["integrity"] = entry.Integrity;
-        return result.ToJsonString();
-    }
+    private static string Read(Entry entry) => entry.Serialized.Value;
 
     internal byte[] Stage(string id, string revision, IReadOnlyList<TaskConfigOperation> operations, IReadOnlySet<string> allowed)
     {
@@ -144,6 +180,14 @@ internal sealed class TaskConfigView
             throw new InvalidDataException("configuration_conflict: revision");
         VerifyUnchanged(entry);
         return new TaskConfigDocument(entry.Bytes, entry.Format).Patch(operations, allowed);
+    }
+
+    /// <summary>Read a behavior field from the immutable capture, sharing its parsed tree with other fields.</summary>
+    internal JsonNode? ReadFrozenSelection(string id, JsonArray selector)
+    {
+        if (!_entries.TryGetValue(id, out var entry) || !entry.Writable || entry.Format is not ("json" or "yaml"))
+            throw new InvalidDataException("config_unavailable: undeclared behavior resource");
+        return entry.Parsed.Value!.ReadSelection(selector);
     }
 
     internal void VerifyPinnedResourcesUnchanged()
@@ -160,17 +204,90 @@ internal sealed class TaskConfigView
         foreach (var entry in _entries.Values) VerifyUnchanged(entry);
     }
 
+    // Writable configuration is restored by the existing transaction. Each
+    // read-only runtime resource stays byte-stable except manifest-declared,
+    // type-constrained operational fields.
+    internal void VerifyRestrictedRuntimeUnchanged(IReadOnlyList<TaskReadResource> resources)
+    {
+        var declarations = resources.ToDictionary(resource => resource.Id, StringComparer.Ordinal);
+        foreach (var (id, entry) in _entries)
+        {
+            if (entry.Writable) continue;
+            if (!declarations.TryGetValue(id, out TaskReadResource? resource)
+                || resource.OperationalFields.Count == 0)
+            {
+                VerifyUnchanged(entry);
+                continue;
+            }
+            ValidatePath(entry.Path);
+            var info = new FileInfo(entry.Path);
+            if (!info.Exists || info.Length > 2 * 1024 * 1024)
+                throw new InvalidDataException("runtime_identity_changed: app metadata unavailable");
+            TaskConfigMetrics.Count(5);
+            byte[] current = File.ReadAllBytes(entry.Path);
+            if (!StableRuntimeFields(entry.Bytes, resource.OperationalFields)
+                .SequenceEqual(StableRuntimeFields(current, resource.OperationalFields)))
+                throw new InvalidDataException("runtime_identity_changed: app metadata changed");
+        }
+    }
+
+    private static IEnumerable<KeyValuePair<string, string>> StableRuntimeFields(
+        byte[] bytes, IReadOnlyDictionary<string, string> operationalFields)
+    {
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(bytes);
+            if (document.RootElement.ValueKind != JsonValueKind.Object)
+                throw new InvalidDataException("runtime_identity_changed: invalid app metadata");
+            var fields = new SortedDictionary<string, string>(StringComparer.Ordinal);
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            foreach (JsonProperty property in document.RootElement.EnumerateObject())
+            {
+                if (!seen.Add(property.Name))
+                    throw new InvalidDataException("runtime_identity_changed: duplicate app metadata");
+                if (operationalFields.TryGetValue(property.Name, out string? kind))
+                {
+                    bool valid = kind switch
+                    {
+                        "boolean" => property.Value.ValueKind is JsonValueKind.True or JsonValueKind.False,
+                        "timestamp" => property.Value.ValueKind == JsonValueKind.String
+                            && property.Value.GetString() is { Length: <= 64 } stamp
+                            && DateTimeOffset.TryParse(stamp, System.Globalization.CultureInfo.InvariantCulture,
+                                System.Globalization.DateTimeStyles.None, out _),
+                        _ => false,
+                    };
+                    if (!valid) throw new InvalidDataException("runtime_identity_changed: invalid operational field");
+                    continue;
+                }
+                if (!fields.TryAdd(property.Name, property.Value.GetRawText()))
+                    throw new InvalidDataException("runtime_identity_changed: duplicate app metadata");
+            }
+            foreach (var (name, kind) in operationalFields)
+                if (kind == "boolean" && !seen.Contains(name))
+                    throw new InvalidDataException("runtime_identity_changed: missing required operational field");
+            return fields;
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidDataException("runtime_identity_changed: malformed app metadata", ex);
+        }
+    }
+
     internal (string Path, byte[] Bytes, string Format) Snapshot(string id)
     {
         if (!_entries.TryGetValue(id, out var entry) || !entry.Writable) throw new InvalidDataException("undeclared writable resource");
         VerifyUnchanged(entry);
+        TaskConfigMetrics.Count(7);
         return (entry.Path, entry.Bytes.ToArray(), entry.Format);
     }
 
     private static void VerifyUnchanged(Entry entry)
     {
         ValidatePath(entry.Path);
-        if (new FileInfo(entry.Path).Length != entry.Bytes.Length || !File.ReadAllBytes(entry.Path).AsSpan().SequenceEqual(entry.Bytes))
+        if (new FileInfo(entry.Path).Length != entry.Bytes.Length)
+            throw new InvalidDataException("configuration_conflict: resource changed after snapshot");
+        TaskConfigMetrics.Count(5);
+        if (!File.ReadAllBytes(entry.Path).AsSpan().SequenceEqual(entry.Bytes))
             throw new InvalidDataException("configuration_conflict: resource changed after snapshot");
     }
 }

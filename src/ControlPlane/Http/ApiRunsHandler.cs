@@ -50,6 +50,11 @@ internal static class ApiRunsHandler
                     snapshot.CurrentMaxAttempts,
                     persistenceWarning = snapshot.PersistenceWarning,
                     logTail = snapshot.LogTail,
+                    logSegmentId = snapshot.LogSegmentId,
+                    logSegmentSequence = snapshot.LogSegmentSequence,
+                    logSegment = snapshot.LogSegment,
+                    cancelRequested = snapshot.CancelRequested,
+                    cancellationPhase = snapshot.CancellationPhase,
                     logEntries = snapshot.LogEntries.Select(ToLogEntry).ToArray(),
                 };
             })
@@ -60,6 +65,7 @@ internal static class ApiRunsHandler
     private static object ToLogEntry(ExecutionLogEntry entry) => new
     {
         sequence = entry.Sequence,
+        logSegmentId = entry.LogSegmentId,
         timestamp = entry.Timestamp,
         level = entry.Level.ToString().ToLowerInvariant(),
         text = entry.FormattedText,

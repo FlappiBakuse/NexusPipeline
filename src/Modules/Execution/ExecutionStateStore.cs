@@ -1,4 +1,5 @@
 using NexusPipeline.Modules.Configuration.Contracts;
+using NexusPipeline.Modules.Configuration.Recovery;
 
 namespace NexusPipeline.Modules.Execution;
 
@@ -71,6 +72,11 @@ internal sealed class ExecutionStateStore
                 if (_maintenanceActive || _groupState == ExecutionGroupState.Maintenance)
                 {
                     reason = "宿主正在进行维护操作";
+                    return null;
+                }
+                if (UnownedRecoveryIsolationLocked().Count > 0)
+                {
+                    reason = "存在未解决的配置恢复隔离，暂不能维护宿主";
                     return null;
                 }
                 if (_active.Count > 0)
@@ -274,6 +280,14 @@ internal sealed class ExecutionStateStore
                 "当前并行运行组已进入收尾阶段，新的任务暂不能加入");
         }
 
+        // A queue is admitted as an ordered scan; each frozen item is checked again
+        // immediately before its own start. Unknown scope still blocks the whole scan.
+        string? isolationConflict = FindRecoveryIsolationConflictLocked(profile.Resources,
+            unknownOnly: candidateKind == "queue");
+        if (isolationConflict is not null)
+            return new ExecutionAdmissionFailure(ExecutionAdmissionFailureCode.ResourceConflict,
+                $"存在未解决的恢复隔离（{isolationConflict}）", Resource: isolationConflict);
+
         foreach ((string leaseKey, ExecutionResourceSet leaseResources) in _editSessionLeases)
         {
             string? editConflict = profile.Resources.FindConflict(leaseResources);
@@ -303,6 +317,44 @@ internal sealed class ExecutionStateStore
             _completionIntents);
     }
 
+    internal string? FindRecoveryIsolationConflict(ExecutionResourceSet candidate)
+    {
+        lock (_coordinationSync)
+        {
+            lock (_sync) return FindRecoveryIsolationConflictLocked(candidate, unknownOnly: false);
+        }
+    }
+
+    private IReadOnlyList<ConfigRecoveryIsolationProjection> UnownedRecoveryIsolationLocked() =>
+        ConfigRecoveryService.SnapshotIsolation()
+            .Where(isolation => isolation.ExplicitIsolation
+                || string.IsNullOrWhiteSpace(isolation.OriginExecutionId)
+                || !_active.Any(exec => exec.Id == isolation.OriginExecutionId))
+            .ToArray();
+
+    private string? FindRecoveryIsolationConflictLocked(ExecutionResourceSet candidate, bool unknownOnly)
+    {
+        foreach (ConfigRecoveryIsolationProjection isolation in UnownedRecoveryIsolationLocked())
+        {
+            if (isolation.ScopeQuality != "complete" || !isolation.MayContinueIndependent)
+                return $"recovery:{isolation.CauseCode}";
+            if (unknownOnly) continue;
+            ExecutionResourceSet isolated = ExecutionResourceSet.Empty with
+            {
+                ScriptIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                    { $"script:{isolation.ScriptId}" },
+                ConfigPaths = new[] { isolation.ConfigPath }.Concat(isolation.ExtraConfigPaths)
+                    .Where(path => !string.IsNullOrWhiteSpace(path))
+                    .Select(ExecutionResourceSetBuilder.NormalizePath).ToArray(),
+                WritableRoots = string.IsNullOrWhiteSpace(isolation.WritableRoot)
+                    ? Array.Empty<string>() : new[] { ExecutionResourceSetBuilder.NormalizePath(isolation.WritableRoot) },
+            };
+            string? conflict = candidate.FindConflict(isolated);
+            if (conflict is not null) return conflict;
+        }
+        return null;
+    }
+
     /// <summary>
     /// 释放活动运行并提交完成意图；若这次释放使系统空闲且存在意图，则在同一锁内预留 pending action。
     /// 返回值交给 SystemActionExecutor 启动倒计时或系统操作。
@@ -325,6 +377,12 @@ internal sealed class ExecutionStateStore
                     _finished.RemoveRange(0, _finished.Count - 100);
                 }
 
+                if (UnownedRecoveryIsolationLocked().Count > 0)
+                {
+                    intent = null;
+                    _completionIntents.Clear();
+                    if (_groupState == ExecutionGroupState.Closing) _groupState = ExecutionGroupState.Open;
+                }
                 if (intent is not null)
                 {
                     string action = ExecutionAdmissionProfile.NormalizeCompletionAction(intent.Action);
@@ -492,6 +550,11 @@ internal sealed class ExecutionStateStore
                     failureCode = "host_maintenance";
                     return false;
                 }
+                if (UnownedRecoveryIsolationLocked().Count > 0)
+                {
+                    failureCode = "recovery_isolated";
+                    return false;
+                }
                 failureCode = null;
                 mutation();
                 return true;
@@ -600,6 +663,12 @@ internal sealed class ExecutionStateStore
                     conflict = "宿主正在进行维护操作，暂不能开始配置编辑";
                     return false;
                 }
+                string? isolationConflict = FindRecoveryIsolationConflictLocked(resources, unknownOnly: false);
+                if (isolationConflict is not null)
+                {
+                    conflict = $"配置恢复隔离占用资源 {isolationConflict}";
+                    return false;
+                }
                 foreach (ExecutionAdmissionEntry active in _active.Select(exec => new ExecutionAdmissionEntry(
                     exec.Id,
                     exec.Kind,
@@ -650,7 +719,7 @@ internal sealed class ExecutionStateStore
         string? userKey = string.IsNullOrWhiteSpace(userName)
             ? null
             : $"user:{scriptId.Trim()}:{userName.Trim()}";
-        return _active
+        IReadOnlyList<ExecutionLeaseReference> active = _active
             .Select(exec => new
             {
                 Exec = exec,
@@ -664,6 +733,15 @@ internal sealed class ExecutionStateStore
                 item.Exec.TargetId,
                 item.Exec.TargetName))
             .ToList();
+        IReadOnlyList<ExecutionLeaseReference> isolated = UnownedRecoveryIsolationLocked()
+            .Where(item => item.ScriptId.Length == 0
+                || string.Equals(item.ScriptId, scriptId.Trim(), StringComparison.OrdinalIgnoreCase)
+                && (userName is null || string.Equals(item.UserId, userName.Trim(), StringComparison.OrdinalIgnoreCase)))
+            .Select(item => new ExecutionLeaseReference(
+                item.RecoveryId.Length == 0 ? "recovery-unknown" : item.RecoveryId,
+                "recovery", item.ScriptId, "配置恢复隔离"))
+            .ToArray();
+        return active.Concat(isolated).ToArray();
     }
 }
 

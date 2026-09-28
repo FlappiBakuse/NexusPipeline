@@ -4,4 +4,5 @@ namespace NexusPipeline.Modules.Plugins.Contracts;
 internal interface IPluginConfigurationMutationGate
 {
     bool TryExecute(Action mutation, out string? failureCode);
+    IDisposable? TryAcquireProviderConfiguration(string scriptId, string userId, string packageRoot) => null;
 }

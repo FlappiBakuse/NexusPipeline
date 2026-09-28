@@ -1,11 +1,12 @@
 # NexusPipeline 文档
 
-产品安装与使用见仓库根目录 [README.md](../README.md)。本门户面向开发、维护和插件作者，按任务连接当前规则、代码入口与验证要求；版本历史由 CHANGELOG 和历史索引负责。
+产品安装与使用见[用户指南](user/README.md)和仓库根目录 [README.md](../README.md)，关键限制另有 [English guide](user/README.en.md)。本门户也面向开发、维护和插件作者，按任务连接当前规则、代码入口与验证要求；版本历史由 CHANGELOG 和历史索引负责。
 
 ## 按任务选择
 
 | 任务 | 这里解释什么 | 阅读入口 |
 |---|---|---|
+| 安装、运行或升级 | 依赖、取消、日志、结果、修复、卸载与常见问题 | [用户指南](user/README.md)、[English guide](user/README.en.md) |
 | 修改配置交换或处理残留 | 配置归属、会话阶段、保全优先级与恢复失败边界 | [配置专题](architecture/configuration.md)、[恢复专题](architecture/recovery.md) |
 | 排查取消、超时或资源租约 | 取消传播、进程退出、配置还原与租约释放的先后 | [执行专题](architecture/execution.md) |
 | 修改调度去重或 occurrence | 队列计划、触发窗口、去重 fence 与调度恢复 | [调度专题](architecture/scheduling.md) |

@@ -15,6 +15,7 @@ import {
   installEmulatorStubs,
   requireExecutionMode,
   resolveTestHostDir,
+  resolveTestRunRoot,
   resolveTestHostExitFile,
   sleep,
   stopSpawnedService,
@@ -27,7 +28,7 @@ export const executionMode = testMode;
 export const runId = process.env.NEXUS_TEST_RUN_ID?.trim()
   || `standalone-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 export const testHostDir = resolveTestHostDir(projectRoot);
-export const runtimeDir = path.join(projectRoot, "tests", ".artifacts", "runs", runId, "ui");
+export const runtimeDir = path.join(resolveTestRunRoot(projectRoot, runId), "ui");
 export const runtimeExe = path.join(runtimeDir, "nexus-pipeline.exe");
 export const servicePidPath = path.join(runtimeDir, ".nxp", "runtime", "service.pid");
 export const runMarkerPath = path.join(runtimeDir, ".nxp", "test-run-marker.json");

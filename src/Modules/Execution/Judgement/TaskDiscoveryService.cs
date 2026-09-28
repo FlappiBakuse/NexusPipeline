@@ -4,6 +4,8 @@ using System.Text.Json.Nodes;
 using NexusPipeline.Modules.Configuration.Scripting;
 using NexusPipeline.Modules.Plugins;
 using NexusPipeline.Modules.Plugins.Contracts;
+using NexusPipeline.Platform.Processes;
+using NexusPipeline.Modules.Execution.Targets;
 
 namespace NexusPipeline.Modules.Execution.Judgement;
 
@@ -14,6 +16,8 @@ internal static class TaskDiscoveryService
         TaskExecutionContext? executionContext = null, string scriptRoot = "", string scriptExecutable = "")
     {
         TaskExecutionContext context = executionContext ?? TaskExecutionContext.Unknown(userId, scriptId, preview ? "preview" : "pre_launch");
+        if ((pluginId is "oknte" or "okww") && !string.IsNullOrWhiteSpace(scriptRoot))
+            context = context with { RuntimeActivity = OkRuntimeActivityProbe.Observe(pluginId, scriptRoot) };
         TaskEnvironmentProbe probe = new(protocol.EnvironmentChecks, view, context, scriptRoot, scriptExecutable);
         var result = await TaskProtocolScriptRunner.ExecuteAsync<TaskDiscovery>(protocol.DiscoverScript,
             new { protocolVersion = protocol.Version, phase = "discover", origin = preview ? "preview" : "run",
@@ -27,12 +31,13 @@ internal static class TaskDiscoveryService
             protocol,
             view.DeclaredResourceIds.Where(id => id.StartsWith("config:", StringComparison.Ordinal)).ToHashSet(StringComparer.Ordinal),
             view.DeclaredResourceIds.Where(id => !id.StartsWith("config:", StringComparison.Ordinal)).ToHashSet(StringComparer.Ordinal));
-        var behavior = result.BehaviorFields.Select(field =>
+        var behavior = result.BehaviorFields.Select(field => new
         {
-            var resource = view.Snapshot(field.ResourceId);
-            return new { field.ResourceId, field.Selector,
-                value = Canonical(new TaskConfigDocument(resource.Bytes, resource.Format).ReadSelection(field.Selector)) };
-        }).OrderBy(field => field.ResourceId, StringComparer.Ordinal).ThenBy(field => field.Selector.ToJsonString(), StringComparer.Ordinal).ToArray();
+            field.ResourceId,
+            field.Selector,
+            value = Canonical(view.ReadFrozenSelection(field.ResourceId, field.Selector)),
+        }).OrderBy(field => field.ResourceId, StringComparer.Ordinal)
+            .ThenBy(field => field.Selector.ToJsonString(), StringComparer.Ordinal).ToArray();
         view.VerifyUnchanged();
         TaskReadiness? readiness = result.ConfigAssessment is { } assessment
             ? BuildReadiness(assessment, view, context)

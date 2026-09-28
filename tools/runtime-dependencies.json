@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "dependencies": [
+    {
+      "framework": "Microsoft.WindowsDesktop.App",
+      "version": "8.0.31",
+      "rid": "win-x64",
+      "url": "https://builds.dotnet.microsoft.com/dotnet/WindowsDesktop/8.0.31/windowsdesktop-runtime-8.0.31-win-x64.exe",
+      "sizeBytes": 58715896,
+      "sha512": "605189223cf0a64bfb5453520b794d1d386a97c7e65e3944feaf9214db1a8b247f66c569265aef4204447baf5b5ff19559c323d887e1318f17deb28a5af0fa12",
+      "sha256": "c375dfd80a967405cfeff634912c1fccc56261ce3d9209ea473f60a21184d1cc",
+      "metadataUrl": "https://dotnetcli.blob.core.windows.net/dotnet/release-metadata/8.0/releases.json"
+    },
+    {
+      "framework": "Microsoft.AspNetCore.App",
+      "version": "8.0.31",
+      "rid": "win-x64",
+      "url": "https://builds.dotnet.microsoft.com/dotnet/aspnetcore/Runtime/8.0.31/aspnetcore-runtime-8.0.31-win-x64.exe",
+      "sizeBytes": 10505248,
+      "sha512": "39c032419a5d6fc786280f7f69af9aebc137b1bc59c560a3cf7b7a4effa68b664f8e7325c941bad8a6134f7adb0f6b3fd2b6eb9376760070b0cc080873cc5a26",
+      "sha256": "6b9d183e26df9bd33bd50c2ce5e7bfacb44eb4d65b99553ec431b166d1e10b40",
+      "metadataUrl": "https://dotnetcli.blob.core.windows.net/dotnet/release-metadata/8.0/releases.json"
+    }
+  ]
+}

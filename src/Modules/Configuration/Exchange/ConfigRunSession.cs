@@ -25,28 +25,38 @@ internal sealed class ConfigRunSession
     private readonly bool _hasJudgeScript;
     private readonly ConfigSessionRuntimeMetadata? _metadata;
     private readonly IReadOnlyList<string> _extraConfigPaths;
+    private readonly string _originExecutionId;
+    private readonly string _originRecordId;
     private readonly object _finalizationGate = new();
     private bool _processCleanupConfirmed = true;
     private bool _finalizationCompleted;
+    private readonly bool _providerSession;
     private string? _finalizationError;
     internal Func<string?>? RestoreTaskSelections { get; set; }
+    internal int OriginAttempt { get; set; }
 
     public ConfigRunSession(
         string scriptId,
         string? userKey,
         string configPath,
         bool hasJudgeScript,
-        ResolvedScriptSpec? resolvedSpec = null)
+        ResolvedScriptSpec? resolvedSpec = null,
+        string originExecutionId = "",
+        string originRecordId = "")
     {
         _scriptId = scriptId;
         _userKey = userKey;
         _configPath = configPath;
         _hasJudgeScript = hasJudgeScript;
-        _metadata = resolvedSpec is null ? null : BuildMetadata(resolvedSpec);
+        _metadata = resolvedSpec is null ? null : BuildMetadata(resolvedSpec) with { OriginExecutionId = originExecutionId };
         _extraConfigPaths = resolvedSpec?.ExtraConfigPaths ?? Array.Empty<string>();
+        _originExecutionId = originExecutionId;
+        _originRecordId = originRecordId;
+        _providerSession = resolvedSpec?.ProviderPlan is not null;
     }
 
     public bool IsPrepared { get; private set; }
+    internal bool RequiresRestoration => IsPrepared && !_providerSession;
 
     public string ScriptDir => ConfigPaths.ScriptDir(_scriptId, _userKey);
 
@@ -58,6 +68,18 @@ internal sealed class ConfigRunSession
     public bool Prepare(out string? error)
     {
         error = null;
+        if (_providerSession)
+        {
+            if (string.IsNullOrWhiteSpace(_userKey) || _metadata is null) { error = "provider requires a Host user binding"; return false; }
+            if (File.Exists(ConfigSessionMark.MarkFile(_scriptId, _userKey)) || File.Exists(ConfigSessionMark.BackupMarkFile(_scriptId, _userKey)))
+            { error = "provider recovery journal already exists"; return false; }
+            new ConfigSessionMark { ScriptId = _scriptId, UserId = _userKey, SessionPhase = "provider_run",
+                ConfigPath = _metadata.WritableRoot, ConfigKind = "dir", WorkingDirectory = _metadata.WorkingDirectory,
+                WritableRoot = _metadata.WritableRoot, ProfileHash = _metadata.ProfileHash,
+                PluginName = _metadata.PluginName, PluginVersion = _metadata.PluginVersion,
+                OriginExecutionId = _originExecutionId, ProviderWorkersStopped = false }.Write();
+            IsPrepared = true; return true;
+        }
         if (string.IsNullOrWhiteSpace(_userKey) || string.IsNullOrWhiteSpace(_configPath))
         {
             return true;
@@ -77,7 +99,7 @@ internal sealed class ConfigRunSession
 
     public string? PrepareForRetry()
     {
-        if (!IsPrepared || string.IsNullOrWhiteSpace(_userKey))
+        if (_providerSession || !IsPrepared || string.IsNullOrWhiteSpace(_userKey))
         {
             return null;
         }
@@ -86,7 +108,7 @@ internal sealed class ConfigRunSession
 
     public void SyncToStore(bool firstCheck)
     {
-        if (IsPrepared && !string.IsNullOrWhiteSpace(_userKey))
+        if (!_providerSession && IsPrepared && !string.IsNullOrWhiteSpace(_userKey))
         {
             ConfigSwapSession.SyncConfigToStore(_scriptId, _userKey, _configPath, firstCheck);
             if (_extraConfigPaths.Count > 0)
@@ -114,6 +136,7 @@ internal sealed class ConfigRunSession
     /// <summary>唯一权威的运行收尾顺序；顺序由测试保护，业务调用者不再手工拼接。</summary>
     internal IReadOnlyList<FinalizationStep> GetFinalizationOrder(bool autoUpdateConfig)
     {
+        if (_providerSession) return [];
         return BuildFinalizationOrder(
             autoUpdateConfig && IsPrepared,
             _hasJudgeScript,
@@ -152,8 +175,30 @@ internal sealed class ConfigRunSession
             if (!_processCleanupConfirmed)
             {
                 _finalizationError = "脚本进程树未确认退出，已保留配置交换现场供恢复";
+                PersistIsolation("process_cleanup_unconfirmed", mayContinueIndependent: false);
                 _finalizationCompleted = true;
                 return _finalizationError;
+            }
+
+            if (_providerSession && IsPrepared && !string.IsNullOrWhiteSpace(_userKey))
+            {
+                var mark = ConfigSessionMark.TryRead(_scriptId, _userKey);
+                if (mark is null || mark.SessionPhase != "provider_run" || mark.OriginExecutionId != _originExecutionId)
+                    throw new IOException("provider journal ownership mismatch");
+                try
+                {
+                    mark.ProviderWorkersStopped = true; mark.Write();
+                    ConfigSessionMark.Clear(_scriptId, _userKey);
+                    if (File.Exists(ConfigSessionMark.MarkFile(_scriptId, _userKey)) || File.Exists(ConfigSessionMark.BackupMarkFile(_scriptId, _userKey)))
+                        _finalizationError = "provider journal cleanup pending";
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    _finalizationError = "provider journal cleanup pending: " + ex.GetType().Name;
+                }
+                if (_finalizationError is not null)
+                    PersistIsolation("config_restore_failed", mayContinueIndependent: true);
+                _finalizationCompleted = true; return _finalizationError;
             }
 
             string? restoreError = null;
@@ -162,6 +207,7 @@ internal sealed class ConfigRunSession
                 restoreError = RestoreTaskSelections();
                 if (restoreError is not null)
                 {
+                    PersistIsolation("config_restore_failed", mayContinueIndependent: true);
                     _finalizationError = restoreError;
                     _finalizationCompleted = true;
                     return restoreError; // Preserve the user snapshot and the complete recovery site.
@@ -194,6 +240,8 @@ internal sealed class ConfigRunSession
             }
 
             _finalizationError = restoreError;
+            if (restoreError is not null)
+                PersistIsolation("config_restore_failed", mayContinueIndependent: true);
             if (restoreError is null)
             {
                 ConfigWorkDirMaintenance.SweepIdleWorkDir(_scriptId, _userKey);
@@ -211,5 +259,33 @@ internal sealed class ConfigRunSession
             return null;
         }
         return ConfigExchangeService.RestoreAfterRun(_scriptId, _userKey, _configPath, _extraConfigPaths);
+    }
+
+    private void PersistIsolation(string causeCode, bool mayContinueIndependent)
+    {
+        if (!IsPrepared || string.IsNullOrWhiteSpace(_userKey)) return;
+        ConfigSessionMark? mark = ConfigSessionMark.TryRead(_scriptId, _userKey);
+        if (mark is null)
+        {
+            Logger.Error($"[恢复隔离] 脚本「{_scriptId}」缺少会话 journal，范围不可确认。");
+            return;
+        }
+        try
+        {
+            ConfigSessionRecoveryIsolation isolation = mark.RecoveryIsolation ?? new ConfigSessionRecoveryIsolation();
+            isolation.OriginExecutionId = _originExecutionId;
+            isolation.OriginRecordId = _originRecordId;
+            isolation.OriginAttempt = OriginAttempt;
+            isolation.CauseCode = causeCode;
+            isolation.ScopeQuality = mayContinueIndependent ? "complete" : "unavailable";
+            isolation.MayContinueIndependent = mayContinueIndependent;
+            isolation.UpdatedAtUtc = DateTimeOffset.UtcNow;
+            mark.RecoveryIsolation = isolation;
+            mark.Write();
+        }
+        catch (Exception ex)
+        {
+            Logger.Error($"[恢复隔离] journal 写入失败，保留原配置现场：{ex.GetType().Name}: {ex.Message}");
+        }
     }
 }

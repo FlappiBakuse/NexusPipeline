@@ -23,6 +23,10 @@ internal sealed class SingleFlightWorker<TInput, TOutput> : IAsyncDisposable
     }
 
     public bool TryStart(TInput input)
+        => TryStart(() => input);
+
+    /// <summary>Capture input only after admission; busy ticks must not copy a discarded snapshot.</summary>
+    public bool TryStart(Func<TInput> capture)
     {
         lock (_gate)
         {
@@ -30,6 +34,7 @@ internal sealed class SingleFlightWorker<TInput, TOutput> : IAsyncDisposable
             {
                 return false;
             }
+            TInput input = capture();
             _active = Task.Run(() => _handler(input, _stopCts.Token), CancellationToken.None);
             return true;
         }

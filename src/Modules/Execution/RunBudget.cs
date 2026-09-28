@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using NexusPipeline.Platform.Testing;
 
 namespace NexusPipeline.Modules.Execution;
@@ -10,16 +11,25 @@ internal sealed class RunBudget
 {
     private readonly int _timeoutMinutes;
     private readonly DateTime _startedAt;
-    private readonly Func<DateTime> _clock;
+    private readonly Func<DateTime>? _clock;
+    private readonly long _startedStamp;
+    private readonly double _initialElapsedSeconds;
 
     public RunBudget(int timeoutMinutes, DateTime startedAt, Func<DateTime>? clock = null)
     {
         _timeoutMinutes = timeoutMinutes;
         _startedAt = startedAt;
-        _clock = clock ?? (() => DateTime.Now);
+        _clock = clock;
+        // Production duration is monotonic. The optional clock remains for
+        // deterministic tests and the initial offset preserves a preexisting
+        // start timestamp passed by older callers.
+        _initialElapsedSeconds = clock is null ? (DateTime.Now - startedAt).TotalSeconds : 0;
+        _startedStamp = Stopwatch.GetTimestamp();
     }
 
-    public double ElapsedSeconds => (_clock() - _startedAt).TotalSeconds;
+    public double ElapsedSeconds => _clock is null
+        ? _initialElapsedSeconds + Stopwatch.GetElapsedTime(_startedStamp).TotalSeconds
+        : (_clock() - _startedAt).TotalSeconds;
 
     public double RemainingSeconds
     {

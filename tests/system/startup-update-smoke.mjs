@@ -8,6 +8,7 @@ import path from "node:path";
 import {
   api,
   prepareRuntime,
+  updateReleaseDirectory,
   projectRoot,
   runtimeDir,
   runtimeDiagnostic,
@@ -111,8 +112,9 @@ function createUpdatePackageFixture() {
   fs.rmSync(packageRoot, { recursive: true, force: true });
   fs.rmSync(zipPath, { force: true });
   fs.mkdirSync(packageRoot, { recursive: true });
-  fs.copyFileSync(path.join(runtimeDir, "nexus-pipeline.exe"), path.join(packageRoot, "nexus-pipeline.exe"));
-  fs.cpSync(path.join(runtimeDir, "wwwroot"), path.join(packageRoot, "wwwroot"), { recursive: true });
+  const candidate = updateReleaseDirectory();
+  fs.copyFileSync(path.join(candidate, "nexus-pipeline.exe"), path.join(packageRoot, "nexus-pipeline.exe"));
+  fs.cpSync(path.join(candidate, "wwwroot"), path.join(packageRoot, "wwwroot"), { recursive: true });
   fs.writeFileSync(path.join(packageRoot, "wwwroot", "startup-update-marker.txt"), "startup-update-installed", "utf8");
 
   const packageScript = [
@@ -237,6 +239,10 @@ test("闲时自动更新开关：启动时下载并应用后再启动 Web 服务
   try {
     startRuntime(["web"], { NEXUS_UPDATE_URL: sourceUrl });
     await waitForService(null, 90000);
+    // Control API opens under the maintenance lease so the candidate can prove
+    // readiness. Wait for the qualified transaction and its startup check.
+    await waitFor(() => fixture.releaseRequests >= 2
+      && !fs.existsSync(path.join(runtimeDir, ".nxp-update", "task.json")), 30000);
 
     const installed = path.join(runtimeDir, "wwwroot", "startup-update-marker.txt");
     assert.equal(
@@ -249,7 +255,7 @@ test("闲时自动更新开关：启动时下载并应用后再启动 Web 服务
     assert.equal(fixture.checksumRequests, 1);
     assert.ok(fixture.releaseRequests >= 2, "更新后的宿主应执行下一次启动检查");
     const status = await (await api("GET", "/api/status")).json();
-    assert.ok(status.version);
+    assert.equal(status.version, updateVersion);
   } finally {
     await close(fixture.server);
   }

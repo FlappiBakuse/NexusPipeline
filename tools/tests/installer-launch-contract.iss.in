@@ -1,0 +1,79 @@
+#define NEXUS_INSTALLER_TEST
+[Setup]
+AppId=NexusPipeline.LaunchContract
+AppName=NexusPipeline Launch Contract
+AppVersion=1.0.0
+DefaultDirName=@@ROOT@@
+DisableDirPage=yes
+DisableProgramGroupPage=yes
+Uninstallable=no
+CreateUninstallRegKey=no
+PrivilegesRequired=lowest
+OutputDir=@@OUTPUT@@
+OutputBaseFilename=nxp-launch-contract
+Compression=lzma2
+WizardStyle=modern
+
+[Code]
+var
+  TransactionId: String;
+  MetadataHelperPath: String;
+  Qualified: Boolean;
+
+function ContractLaunch(var Code: Integer): Boolean;
+var
+  Scenario: String;
+begin
+  Scenario := GetEnv('NXP_CONTRACT_CASE');
+  Result := False;
+  if Scenario = 'F1223' then Code := 1223
+  else if Scenario = 'F5' then Code := 5
+  else if Scenario = 'F2' then Code := 2
+  else if Scenario = 'F32' then Code := 32
+  else if Scenario = 'REAL2' then
+    Result := ShellExec('', AddBackslash(GetEnv('NXP_CONTRACT_ROOT')) +
+      'missing-worker.exe', '', GetEnv('NXP_CONTRACT_ROOT'), SW_HIDE,
+      ewWaitUntilTerminated, Code)
+  else if Scenario = 'T1' then begin Result := True; Code := 1; end
+  else if Scenario = 'T0' then begin Result := True; Code := 0; end
+  else RaiseException('未识别的启动契约场景');
+end;
+
+@@LAUNCH_CODE@@
+
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  Launched, Resolved: Boolean;
+  Code: Integer;
+  Failure: String;
+  Receipt: TArrayOfString;
+begin
+  if CurStep <> ssPostInstall then Exit;
+  TransactionId := GetEnv('NXP_CONTRACT_TX');
+  MetadataHelperPath := GetEnv('NXP_CONTRACT_HELPER');
+  Launched := False;
+  Resolved := False;
+  Code := 1;
+  Failure := '';
+  try
+    ApplyInstallerLaunch('ignored', '', GetEnv('NXP_CONTRACT_ROOT'),
+      Launched, Resolved, Code);
+    Qualified := True;
+  except
+    Failure := GetExceptionMessage;
+  end;
+  SetArrayLength(Receipt, 6);
+  Receipt[0] := 'case=' + GetEnv('NXP_CONTRACT_CASE');
+  Receipt[1] := 'launched=' + IntToStr(Ord(Launched));
+  Receipt[2] := 'code=' + IntToStr(Code);
+  Receipt[3] := 'resolved=' + IntToStr(Ord(Resolved));
+  Receipt[4] := 'qualified=' + IntToStr(Ord(Qualified));
+  Receipt[5] := 'error=' + Failure;
+  if not SaveStringsToUTF8FileWithoutBOM(GetEnv('NXP_CONTRACT_RECEIPT'), Receipt, False) then
+    RaiseException('无法写入启动契约原始回执');
+end;
+
+function GetCustomSetupExitCode: Integer;
+begin
+  if Qualified then Result := 0 else Result := 12;
+end;

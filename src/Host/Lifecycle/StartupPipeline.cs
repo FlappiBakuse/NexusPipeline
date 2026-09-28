@@ -59,6 +59,11 @@ internal static class StartupPipeline
                 return;
             }
             runtime.Bootstrap.PrepareStartupPluginUpdates();
+            bool qualifyUpdate = UpdateApply.RequiresStartupQualification;
+            using var updateReadinessLease = qualifyUpdate
+                ? runtime.Bootstrap.TryAcquireUpdateMaintenanceLease().Lease : null;
+            if (UpdateApply.RequiresStartupQualification && updateReadinessLease is null)
+            { ClearServicePid(); return; }
             runtime.Start();
 
             WebServerOptions webOptions = WebServerOptions.FromSettings(
@@ -85,6 +90,12 @@ internal static class StartupPipeline
                 ClearServicePid();
                 return;
             }
+            if (!UpdateApply.ConfirmStartupReadiness())
+            { runtime.Stop(web, mcp); ClearServicePid(); return; }
+            updateReadinessLease?.Dispose();
+            runtime.UpdateService.RefreshStartupRecoveryState();
+            if (qualifyUpdate && RunStartupUpdateGate(runtime) != StartupUpdateDisposition.ContinueStartup)
+            { runtime.Stop(web, mcp); ClearServicePid(); return; }
 
 #if NEXUS_TEST_HOST
             StartTestHostExitMonitor();
@@ -276,6 +287,11 @@ internal static class StartupPipeline
             return 1;
         }
         runtime.Bootstrap.PrepareStartupPluginUpdates();
+        bool qualifyUpdate = UpdateApply.RequiresStartupQualification;
+        using var updateReadinessLease = qualifyUpdate
+            ? runtime.Bootstrap.TryAcquireUpdateMaintenanceLease().Lease : null;
+        if (UpdateApply.RequiresStartupQualification && updateReadinessLease is null)
+        { ClearServicePid(); return 1; }
         runtime.Start();
         WebServer? web = runtime.Bootstrap.StartWebWithRetry(
             runtime.Settings.WebPort,
@@ -288,6 +304,12 @@ internal static class StartupPipeline
         }
         runtime.Bootstrap.AfterWebStarted(web);
         McpHost? mcp = runtime.Bootstrap.StartMcp();
+        if (!UpdateApply.ConfirmStartupReadiness())
+        { runtime.Stop(web, mcp); ClearServicePid(); return 1; }
+        updateReadinessLease?.Dispose();
+        runtime.UpdateService.RefreshStartupRecoveryState();
+        if (qualifyUpdate && RunStartupUpdateGate(runtime) != StartupUpdateDisposition.ContinueStartup)
+        { runtime.Stop(web, mcp); ClearServicePid(); return 1; }
         Console.WriteLine(CliText.Get("startup.web_started", "Web 界面：http://127.0.0.1:{port}/（按回车停止）", ("port", web.Port)));
         if (runtime.Settings.AutoOpenBrowser)
         {

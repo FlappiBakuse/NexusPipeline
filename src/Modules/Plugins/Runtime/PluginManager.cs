@@ -80,7 +80,7 @@ internal enum PluginRuntimeState
     Shutdown,
 }
 
-internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailability, IUserRunStartingPublisher, IEmulatorSupportProviderResolver
+internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailability, IUserRunStartingPublisher, IEmulatorSupportProviderResolver, IPluginExecutionProviderResolver
 {
     private const int PluginApiMajor = PluginApiVersion.Major;
     private const int PluginApiMinor = PluginApiVersion.Minor;
@@ -107,6 +107,7 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
     private readonly PluginWebApiRegistry _webApi = new();
     private readonly PluginHistoryContributionRegistry _historyContributions = new();
     private readonly PluginEmulatorSupportRegistry _emulatorSupport = new();
+    private readonly PluginExecutionProviderRegistry _executionProviders;
     private readonly PluginManagementSnapshotCache _managementSnapshotCache = new();
 
     internal PluginManager(
@@ -120,6 +121,7 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
         _settings = settings;
         _notifications = notifications;
         _configurationGate = configurationGate;
+        _executionProviders = new(configurationGate);
         _discovery = new PluginDiscovery(_settings);
         _http = http ?? new OutboundHttpClientProvider(() => OutboundProxyOptions.Direct);
         _hostVersion = hostVersion ?? HostVersionInfo.Current;
@@ -173,6 +175,15 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
         return _capabilities.GetAll<T>(IsRuntimeEnabled);
     }
 
+    public ExecutionProviderDescriptor? ResolveExecutionProvider(string providerId)
+    {
+        IPluginExecutionProvider? provider = _executionProviders.Resolve(providerId, IsRuntimeEnabled);
+        ManagedPluginDescriptor? owner = _managedPlugins.FirstOrDefault(item =>
+            string.Equals(item.Manifest.Name, providerId, StringComparison.Ordinal));
+        return provider is null || owner is null ? null
+            : new ExecutionProviderDescriptor(providerId, owner.Manifest.Version, owner.Directory, provider);
+    }
+
     public IReadOnlyList<EmulatorSupportProviderDescriptor> GetEmulatorSupportProviders() =>
         _emulatorSupport.Snapshot(IsRuntimeEnabled);
 
@@ -221,21 +232,6 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
             return null;
         }
         return candidates;
-    }
-
-    /// <summary>返回已发现、已启用且有效的数据化插件配置校验脚本；普通脚本和 managed-code 插件不参与。</summary>
-    internal bool TryGetConfigValidator(string pluginName, out ConfigValidatorDescriptor? descriptor)
-    {
-        descriptor = null;
-        pluginName = ResolveLoadedPluginName(pluginName);
-        DataSpecializedPlugin? plugin = _dataPlugins.FirstOrDefault(item =>
-            string.Equals(item.Name, pluginName, StringComparison.OrdinalIgnoreCase));
-        if (plugin is null || !IsRuntimeEnabled(plugin.Name) || !plugin.HasConfigValidator)
-        {
-            return false;
-        }
-        descriptor = plugin.ReadConfigValidator();
-        return descriptor is not null;
     }
 
     /// <summary>返回已发现、已启用且有效的数据化插件配置编辑脚本。</summary>
@@ -412,6 +408,7 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
         _webApi.Clear();
         _historyContributions.Clear();
         _emulatorSupport.Clear();
+        _executionProviders.Clear();
         _dataPlugins.Clear();
         _managedPlugins.Clear();
         _managedRuntimes.Clear();
@@ -509,6 +506,7 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
         _webApi.Clear();
         _historyContributions.Clear();
         _emulatorSupport.Clear();
+        _executionProviders.Clear();
         foreach (DataSpecializedPlugin plugin in _dataPlugins)
         {
             _runtimeStates[plugin.Name] = PluginRuntimeState.Shutdown;
@@ -559,6 +557,7 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
                 _webApi,
                 _historyContributions,
                 _emulatorSupport,
+                _executionProviders,
                 ex =>
                 {
                     _runtimeErrors[name] = ex.Message;

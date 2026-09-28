@@ -13,6 +13,7 @@ import NxpDragHandle from "../../ui/composites/NxpDragHandle.vue";
 import NxpScheduleCard from "../../ui/composites/NxpScheduleCard.vue";
 import NxpSortableList from "../../ui/composites/NxpSortableList.vue";
 import type { QueueDraft, QueueEditorOptions, QueueTranslator } from "./queueTypes";
+import { timeSetKey } from "./queueUtils";
 
 const props = defineProps<{
   open: boolean;
@@ -44,6 +45,19 @@ const dayNames = computed(() => [
   props.translate("queues.friday"),
   props.translate("queues.saturday"),
 ]);
+
+function toggleDependency(taskIndex: number, prerequisiteId: string, enabled: boolean) {
+  const task = props.draft.tasks[taskIndex];
+  if (!task) return;
+  const current = task.dependsOnTaskIds || [];
+  task.dependsOnTaskIds = enabled
+    ? [...new Set([...current, prerequisiteId])]
+    : current.filter(id => id !== prerequisiteId);
+}
+
+function taskLabel(scriptId: string) {
+  return props.options.scripts.find(option => option.value === scriptId)?.label || scriptId;
+}
 const dayShortNames = computed(() => [
   props.translate("common.sun"),
   props.translate("common.mon"),
@@ -55,8 +69,6 @@ const dayShortNames = computed(() => [
 ]);
 
 const expandedTimeSetKeys = ref<string[]>([]);
-const timeSetKey = (timeSet: QueueDraft["timeSets"][number], index: number) =>
-  timeSet.id || `new-time-set-${index}`;
 const timeSetKeys = computed(() =>
   props.draft.timeSets.map((timeSet, index) => timeSetKey(timeSet, index)),
 );
@@ -244,6 +256,17 @@ function toggleDay(timeSet: QueueDraft["timeSets"][number], day: number) {
                 @click="emit('removeTask', index)"
                 >{{ translate("common.delete") }}</NxpButton
               >
+              <details v-if="index > 0" class="task-prerequisites">
+                <summary>{{ translate('queues.task.prerequisites') }}</summary>
+                <div v-for="prior in draft.tasks.slice(0, index)" :key="prior.id" class="task-prerequisite-row">
+                  <NxpSwitch
+                    :model-value="(task.dependsOnTaskIds || []).includes(prior.id || '')"
+                    :label="taskLabel(prior.scriptInstanceId)"
+                    semantic-role="switch"
+                    @update:model-value="enabled => prior.id && toggleDependency(index, prior.id, enabled)"
+                  />
+                </div>
+              </details>
             </div>
           </NxpSortableList>
         </div>

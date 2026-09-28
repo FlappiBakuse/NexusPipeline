@@ -48,7 +48,8 @@ const specializedPlugins = computed(() =>
       (!plugin.state || plugin.state === "Active"),
   ),
 );
-const hasSpecialized = computed(() => specializedPlugins.value.length > 0);
+const executionProviders = computed(() => plugins.value.filter(plugin => plugin.executionProviderId && plugin.runtimeEnabled !== false));
+const hasSpecialized = computed(() => specializedPlugins.value.length > 0 || executionProviders.value.length > 0);
 const existingScriptNames = computed(() => scripts.value.map(script => script.name));
 
 function openNew() {
@@ -227,9 +228,15 @@ onBeforeUnmount(() => {
             type="button"
             @click.stop="openEditor(null, '')"
           >
-            <strong>{{ t("scripts.new_general_script_instance") }}</strong>
+            <strong>{{ t("scripts.general_script") }}</strong>
             <span class="muted">{{ t("scripts.editor.manual_config_help") }}</span>
           </NxpButton>
+          <NxpButton v-for="provider in executionProviders" :key="provider.executionProviderId" class="chooser-card"
+            type="button" @click.stop="openEditor(null, 'provider:' + provider.executionProviderId)">
+            <strong>{{ provider.displayName || provider.name }}</strong>
+            <span class="muted">{{ t('scripts.driver_independent_profile', {}, '独立配置 · 显式导入 · 使用现有队列') }}</span>
+          </NxpButton>
+          <hr v-if="executionProviders.length" class="chooser-divider" />
           <NxpButton
             v-for="plugin in specializedPlugins"
             :key="plugin.name"

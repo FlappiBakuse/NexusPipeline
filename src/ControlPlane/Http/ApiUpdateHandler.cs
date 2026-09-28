@@ -28,6 +28,18 @@ internal static class ApiUpdateHandler
         string sub = seg[1].ToLowerInvariant();
         switch (sub)
         {
+            case "installer-apply" when method == "POST":
+            {
+                if (context.Request.RemoteEndPoint is not { } endpoint || !IPAddress.IsLoopback(endpoint.Address))
+                { await HttpHelper.ErrorAsync(context, "operation_forbidden", 403).ConfigureAwait(false); return; }
+                var node = HttpHelper.ParseBody(body);
+                var result = updates.RequestInstallerApply(node?["stagedDir"]?.GetValue<string>() ?? "",
+                    node?["version"]?.GetValue<string>() ?? "", node?["imageHash"]?.GetValue<string>() ?? "",
+                    node?["transactionId"]?.GetValue<string>() ?? "", Audit.Web);
+                if (!result.Succeeded)
+                { await HttpHelper.ErrorAsync(context, result.Code ?? "installer_apply_failed", 409).ConfigureAwait(false); return; }
+                await HttpHelper.WriteJsonAsync(context, new { ok = true }).ConfigureAwait(false); return;
+            }
             case "status" when method == "GET":
             {
                 UpdateStatusSnapshot status = updates.GetStatus();

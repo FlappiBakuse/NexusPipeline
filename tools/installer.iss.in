@@ -1,0 +1,497 @@
+; Generated from this template and one frozen production payload by host_installer.py.
+[Setup]
+AppId=NexusPipeline.PerUser
+AppName=NexusPipeline
+AppVersion=@@VERSION@@
+AppPublisher=FlappiBakuse
+DefaultDirName={localappdata}\Programs\NexusPipeline
+DefaultGroupName=NexusPipeline
+UninstallFilesDir={localappdata}\NexusPipeline\installer
+PrivilegesRequired=lowest
+ArchitecturesAllowed=x64
+ArchitecturesInstallIn64BitMode=x64
+AllowUNCPath=no
+AllowNetworkDrive=no
+CloseApplications=no
+RestartApplications=no
+UsePreviousAppDir=no
+DisableProgramGroupPage=yes
+OutputDir=@@OUTPUT_DIR@@
+OutputBaseFilename=NexusPipeline-v@@VERSION@@-win-x64-setup
+Compression=lzma2
+SolidCompression=yes
+WizardStyle=modern
+DefaultDialogFontName=Microsoft YaHei UI
+
+[Tasks]
+Name: desktopicon; Description: "创建桌面快捷方式"; Flags: unchecked
+
+[Icons]
+Name: "{autoprograms}\NexusPipeline"; Filename: "{app}\nexus-pipeline.exe"
+Name: "{autodesktop}\NexusPipeline"; Filename: "{app}\nexus-pipeline.exe"; Tasks: desktopicon
+
+[Files]
+@@FILES@@
+
+[Code]
+var
+  UpgradeMode: Boolean;
+  RetainedMode: Boolean;
+  SetupMutex: Integer;
+  TransactionId: String;
+  MetadataHelperPath: String;
+  DependencyDownloadPage: TDownloadWizardPage;
+  InstallationQualified: Boolean;
+  DeleteInstanceData: Boolean;
+
+procedure InitializeWizard;
+begin
+  DependencyDownloadPage := CreateDownloadPage('下载必需的运行时',
+    '从微软官方地址下载并验证依赖。可以取消下载后重新尝试。', nil);
+  DependencyDownloadPage.ShowBaseNameInsteadOfUrl := True;
+end;
+
+function CreateMutexW(Attributes: Integer; InitialOwner: Boolean; Name: String): Integer;
+  external 'CreateMutexW@kernel32.dll stdcall';
+
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  if (CurPageID = wpFinished) and not InstallationQualified then begin
+    WizardForm.FinishedHeadingLabel.Caption := 'NexusPipeline 安装未完成';
+    WizardForm.FinishedLabel.Caption := '安装归属登记或升级事务未通过。请保留日志和恢复现场，修复后再安装。';
+  end;
+end;
+
+function GetCustomSetupExitCode: Integer;
+begin
+  Result := 0;
+  if not InstallationQualified then Result := 12;
+end;
+
+function CloseHandle(Handle: Integer): Boolean;
+  external 'CloseHandle@kernel32.dll stdcall';
+function NativeLastError: Integer;
+  external 'GetLastError@kernel32.dll stdcall';
+
+@@LAUNCH_CODE@@
+
+procedure DeinitializeSetup;
+begin
+  if SetupMutex <> 0 then CloseHandle(SetupMutex);
+end;
+
+function GetDriveTypeW(RootPath: String): Integer;
+  external 'GetDriveTypeW@kernel32.dll stdcall';
+
+function IsReparse(const Path: String): Boolean;
+var
+  Entry: TFindRec;
+begin
+  Result := False;
+  if FindFirst(Path, Entry) then begin
+    Result := (Entry.Attributes and FILE_ATTRIBUTE_REPARSE_POINT) <> 0;
+    FindClose(Entry);
+  end;
+end;
+
+function HasLinkInPath(const Path: String): Boolean;
+var
+  Current, Parent: String;
+begin
+  Result := False;
+  Current := RemoveBackslashUnlessRoot(Path);
+  while Current <> '' do begin
+    if FileOrDirExists(Current) and IsReparse(Current) then begin
+      Result := True;
+      Exit;
+    end;
+    Parent := ExtractFileDir(Current);
+    if (Parent = Current) or (Parent = '') then Exit;
+    Current := Parent;
+  end;
+end;
+
+function IsEmptyDirectory(const Path: String): Boolean;
+var
+  Entry: TFindRec;
+begin
+  Result := True;
+  if not DirExists(Path) then Exit;
+  if FindFirst(AddBackslash(Path) + '*', Entry) then begin
+    try
+      repeat
+        if (Entry.Name <> '.') and (Entry.Name <> '..') then begin
+          Result := False;
+          Exit;
+        end;
+      until not FindNext(Entry);
+    finally
+      FindClose(Entry);
+    end;
+  end;
+end;
+
+function ProtectedInstanceState(const Path: String; CheckHelper: Boolean): String;
+var
+  Script, Params, ResultFile: String;
+  Code: Integer;
+  State: AnsiString;
+begin
+  Result := '';
+  if HasLinkInPath(Path) or HasLinkInPath(ExpandConstant('{localappdata}\NexusPipeline\installer')) then Exit;
+  Script := ExpandConstant('{tmp}\nxp-instance-check.ps1');
+  ResultFile := ExpandConstant('{tmp}\nxp-instance-check.result');
+  if FileExists(ResultFile) and not DeleteFile(ResultFile) then Exit;
+  if not SaveStringToFile(Script,
+    'param([string]$Root,[string]$CheckHelper,[string]$ResultFile)' + #13#10 +
+    '$ErrorActionPreference = ''Stop''' + #13#10 +
+    'try {' + #13#10 +
+    'Add-Type -AssemblyName System.Security' + #13#10 +
+    '$k = Get-ItemProperty -LiteralPath ''HKCU:\Software\NexusPipeline\Installer''' + #13#10 +
+    '$m = Join-Path $env:LOCALAPPDATA ''NexusPipeline\installer''' + #13#10 +
+    '$s = [IO.File]::ReadAllText((Join-Path $m ''identity.protected''))' + #13#10 +
+    '$h = [BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($s))).Replace(''-'','''').ToLowerInvariant()' + #13#10 +
+    'if ($h -ne $k.IdentityDigest) { exit 1 }' + #13#10 +
+    '$b = [Security.Cryptography.ProtectedData]::Unprotect([Convert]::FromBase64String($s),$null,[Security.Cryptography.DataProtectionScope]::CurrentUser)' + #13#10 +
+    '$i = [Text.Encoding]::UTF8.GetString($b) | ConvertFrom-Json' + #13#10 +
+    'if ($i.SchemaVersion -ne 1 -or $i.InstanceId -ne $k.InstanceId -or $i.WindowsUserId -ne [Security.Principal.WindowsIdentity]::GetCurrent().User.Value -or [IO.Path]::GetFullPath($i.AppRoot).TrimEnd(''\'') -ne [IO.Path]::GetFullPath($Root).TrimEnd(''\'') -or $i.State -notin @(''active'',''retained-data'')) { exit 1 }' + #13#10 +
+    'if ($CheckHelper -eq ''true'') {' + #13#10 +
+    '$exe = Join-Path $m ''nexus-installer-helper.exe''' + #13#10 +
+    'if ((Get-Item -LiteralPath $exe).Attributes -band [IO.FileAttributes]::ReparsePoint) { exit 1 }' + #13#10 +
+    '$expected = @($i.PayloadFiles | Where-Object Path -eq ''nexus-pipeline.exe'')' + #13#10 +
+    'if ($expected.Count -ne 1 -or (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash -ne $expected[0].Sha256) { exit 1 }' + #13#10 +
+    '}' + #13#10 + '[IO.File]::WriteAllText($ResultFile,$i.State,[Text.Encoding]::ASCII)' + #13#10 + '} catch { exit 1 }' + #13#10, False) then Exit;
+  Params := '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + Script + '" -Root "' + Path + '" -CheckHelper ';
+  if CheckHelper then Params := Params + 'true' else Params := Params + 'false';
+  Params := Params + ' -ResultFile "' + ResultFile + '"';
+  try
+    if Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+      Params, '', SW_HIDE, ewWaitUntilTerminated, Code) and (Code = 0) and
+      LoadStringFromFile(ResultFile, State) and
+      ((State = 'active') or (State = 'retained-data')) then Result := State;
+  except
+    Result := '';
+  end;
+end;
+
+function InstanceOwned(const Path: String): Boolean;
+begin
+  Result := ProtectedInstanceState(Path, False) <> '';
+end;
+
+function ValidDestination(const Path: String): Boolean;
+var
+  Drive, RegisteredRoot: String;
+  HasRegisteredRoot: Boolean;
+begin
+  Result := False;
+  if (Copy(Path, 1, 2) = '\\') or HasLinkInPath(Path) then Exit;
+  Drive := ExtractFileDrive(Path);
+  if (Length(Drive) <> 2) or (GetDriveTypeW(Drive + '\') <> 3) then Exit;
+  HasRegisteredRoot := RegQueryStringValue(HKCU, 'Software\NexusPipeline\Installer', 'DataRoot', RegisteredRoot);
+  if not HasRegisteredRoot then
+    HasRegisteredRoot := RegQueryStringValue(HKCU, 'Software\NexusPipeline\Installer', 'AppDir', RegisteredRoot);
+  if HasRegisteredRoot then begin
+    // Registration owns one per-user root, including retained data after uninstall.
+    // Refuse before writing payload; Register must not be the first ownership check.
+    if CompareText(RemoveBackslashUnlessRoot(ExpandFileName(RegisteredRoot)),
+       RemoveBackslashUnlessRoot(ExpandFileName(Path))) <> 0 then Exit;
+    if not InstanceOwned(Path) then Exit;
+  end;
+  if not IsEmptyDirectory(Path) and not InstanceOwned(Path) then Exit;
+  Result := True;
+end;
+
+function NextButtonClick(CurPageID: Integer): Boolean;
+begin
+  Result := True;
+  if CurPageID = wpSelectDir then begin
+    Result := ValidDestination(WizardDirValue);
+    if not Result then begin
+      Log('目标目录不是可信的本地空目录或已登记实例。');
+      if not WizardSilent then
+        MsgBox('请选择可写的本地空目录，或此用户已登记且身份匹配的安装目录；不会接管不明旧目录、网络盘或链接目录。', mbError, MB_OK);
+    end;
+  end;
+end;
+
+function HasFramework(const Framework: String): Boolean;
+var
+  Dotnet, Line, Prefix, VersionText, ExpectedPath: String;
+  I, Code, Marker: Integer;
+  Version, Minimum, Maximum: Int64;
+  Output: TExecOutput;
+begin
+  Result := False;
+  if not IsWin64 then Exit;
+  if not StrToVersion('8.0.0', Minimum) or not StrToVersion('9.0.0', Maximum) then Exit;
+  Dotnet := ExpandConstant('{commonpf64}\dotnet\dotnet.exe');
+  ExpectedPath := ExpandConstant('{commonpf64}\dotnet\shared\') + Framework;
+  if not FileExists(Dotnet) or HasLinkInPath(Dotnet) then Exit;
+  try
+    if not ExecAndCaptureOutput(Dotnet, '--list-runtimes', '', SW_HIDE,
+      ewWaitUntilTerminated, Code, Output) then Exit;
+  except
+    Exit;
+  end;
+  if (Code <> 0) or Output.Error then Exit;
+  Prefix := Framework + ' ';
+  for I := 0 to GetArrayLength(Output.StdOut) - 1 do begin
+    Line := Output.StdOut[I];
+    Marker := Pos(' [', Line);
+    if (Copy(Line, 1, Length(Prefix)) = Prefix) and (Marker > Length(Prefix)) then begin
+      VersionText := Copy(Line, Length(Prefix) + 1, Marker - Length(Prefix) - 1);
+      if StrToVersion(VersionText, Version) and (Version >= Minimum) and (Version < Maximum)
+        and (CompareText(Copy(Line, Marker + 2, Length(ExpectedPath)), ExpectedPath) = 0)
+        and (Copy(Line, Marker + 2 + Length(ExpectedPath), 1) = ']') then begin
+        Result := True;
+        Exit;
+      end;
+    end;
+  end;
+end;
+
+function VerifyMicrosoftSignature(const Package: String): Boolean;
+var
+  Script, Params: String;
+  Code: Integer;
+begin
+  Result := False;
+  Script := ExpandConstant('{tmp}\nxp-verify-microsoft.ps1');
+  if not SaveStringToFile(Script,
+    'param([string]$Package)' + #13#10 +
+    '$s = Get-AuthenticodeSignature -LiteralPath $Package' + #13#10 +
+    'if ($s.Status -ne ''Valid'' -or $s.SignerCertificate.Subject -notmatch ''O=Microsoft Corporation'') { exit 1 }' + #13#10,
+    False) then Exit;
+  Params := '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + Script + '" -Package "' + Package + '"';
+  Result := Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), Params,
+    '', SW_HIDE, ewWaitUntilTerminated, Code) and (Code = 0);
+end;
+
+function InstallFramework(const Framework, Description, URL, FileName, Digest: String;
+  var NeedsRestart: Boolean): String;
+var
+  Package: String;
+  Code: Integer;
+begin
+  Result := '';
+  if HasFramework(Framework) then Exit;
+  if WizardSilent then begin
+    Result := '缺少 ' + Description + '；请交互运行安装器并确认依赖安装。';
+    Exit;
+  end;
+  if MsgBox('缺少 ' + Description + '。将从微软官方地址下载已锁定的 x64 安装包并运行，是否继续？',
+    mbConfirmation, MB_YESNO) <> IDYES then begin
+    Result := '用户取消了 ' + Description + ' 依赖安装。';
+    Exit;
+  end;
+  DependencyDownloadPage.Clear;
+  DependencyDownloadPage.Add(URL, FileName, Digest);
+  DependencyDownloadPage.Show;
+  try
+    try
+      DependencyDownloadPage.Download;
+    except
+      if DependencyDownloadPage.AbortedByUser then
+        Result := '用户取消了 ' + Description + ' 依赖下载。'
+      else
+        Result := Description + ' 下载或摘要校验失败：' + GetExceptionMessage;
+      Log(Result);
+    end;
+  finally
+    DependencyDownloadPage.Hide;
+  end;
+  if Result <> '' then Exit;
+  Package := ExpandConstant('{tmp}\') + FileName;
+  if not VerifyMicrosoftSignature(Package) then begin
+    Result := Description + ' 的微软数字签名无法确认。';
+    Exit;
+  end;
+  if not ShellExec('runas', Package, '/install /quiet /norestart', '', SW_SHOWNORMAL,
+    ewWaitUntilTerminated, Code) then begin
+    Result := Description + ' 安装器无法启动：' + SysErrorMessage(Code);
+    Exit;
+  end;
+  if Code = 3010 then begin
+    NeedsRestart := True;
+    Result := Description + ' 安装需要重启；请自行重启后重新运行本安装器。';
+    Exit;
+  end;
+  if Code <> 0 then begin
+    Result := Description + ' 安装失败，退出码 ' + IntToStr(Code) + '。';
+    Exit;
+  end;
+  if not HasFramework(Framework) then
+    Result := Description + ' 安装后仍未检测到适用的 x64 框架。';
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  Path: String;
+begin
+  Result := '';
+  UpgradeMode := False;
+  if not ValidDestination(WizardDirValue) then begin
+    Result := '目标目录不是可信的本地空目录或已登记实例。';
+    Exit;
+  end;
+  Path := WizardDirValue;
+  RetainedMode := ProtectedInstanceState(Path, False) = 'retained-data';
+  if RetainedMode then begin
+    if WizardSilent then begin Result := '保留数据重装需要交互确认。'; Exit; end;
+    if MsgBox('使用本实例保留的数据重新安装？已有插件和用户配置将保留。', mbConfirmation, MB_YESNO) <> IDYES then begin
+      Result := '已取消保留数据重装。'; Exit;
+    end;
+  end;
+  UpgradeMode := not IsEmptyDirectory(Path) and not RetainedMode;
+  if SetupMutex = 0 then begin
+    SetupMutex := CreateMutexW(0, True, 'NexusPipeline.Setup.' + GetSHA256OfString(Lowercase(RemoveBackslashUnlessRoot(Path))));
+    if (SetupMutex = 0) or (NativeLastError = 183) then begin
+      if SetupMutex <> 0 then CloseHandle(SetupMutex);
+      SetupMutex := 0;
+      Result := '另一个安装器正在处理此实例，请等待其完成。'; Exit;
+    end;
+  end;
+  Result := InstallFramework('Microsoft.WindowsDesktop.App', '.NET Desktop Runtime 8 x64',
+    '@@DESKTOP_URL@@', 'windowsdesktop-runtime-8.0.31-win-x64.exe', '@@DESKTOP_SHA256@@', NeedsRestart);
+  if Result <> '' then Exit;
+  Result := InstallFramework('Microsoft.AspNetCore.App', 'ASP.NET Core Runtime 8 x64',
+    '@@ASPNET_URL@@', 'aspnetcore-runtime-8.0.31-win-x64.exe', '@@ASPNET_SHA256@@', NeedsRestart);
+  if Result <> '' then Exit;
+  TransactionId := Copy(GetSHA256OfString(Path + GetDateTimeString('yyyymmddhhnnss', #0, #0) +
+    IntToStr(Random(2147483647)) + IntToStr(Random(2147483647))), 1, 32);
+  ExtractTemporaryFile('nxp-metadata-helper.exe');
+  MetadataHelperPath := ExpandConstant('{tmp}\nxp-metadata-helper.exe');
+  RequireInstallerMetadata('recover', '');
+  if UpgradeMode and
+     (DirExists(AddBackslash(Path) + '.nxp-update') or
+      DirExists(AddBackslash(Path) + '.nxp-backup') or
+      FileExists(AddBackslash(Path) + '.nxp-version')) then begin
+    Result := '已有更新或恢复现场；请先在原实例完成恢复，不覆盖现场。';
+    Exit;
+  end;
+  if UpgradeMode then
+    RequireInstallerMetadata('begin', ' --version @@VERSION@@ --image-hash @@EXE_SHA256@@ --upgrade true')
+  else
+    RequireInstallerMetadata('begin', ' --version @@VERSION@@ --image-hash @@EXE_SHA256@@ --upgrade false');
+end;
+
+function IsFreshInstall: Boolean;
+begin
+  Result := not UpgradeMode;
+end;
+
+function IsTrustedUpgrade: Boolean;
+begin
+  Result := UpgradeMode;
+end;
+
+procedure VerifyStagedFile(const Relative, Digest: String);
+var
+  Path: String;
+begin
+  Path := AddBackslash(ExpandConstant('{app}')) + '.nxp-update\staging\@@VERSION@@\' + Relative;
+  if not FileExists(Path) or HasLinkInPath(Path) or
+     (CompareText(GetSHA256OfFile(Path), Digest) <> 0) then
+    RaiseException('暂存载荷校验失败：' + Relative);
+end;
+
+procedure VerifyStagedPayload;
+begin
+@@VERIFY_STAGED@@
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  Path, ManagerDir, Staged, Helper, Manifest: String;
+  Code, Resolution: Integer;
+  Launched, Resolved: Boolean;
+  Failure: String;
+begin
+  if CurStep <> ssPostInstall then Exit;
+  Path := ExpandConstant('{app}');
+  RequireInstallerMetadata('observe', '');
+  Launched := False;
+  Resolved := False;
+  Code := 1;
+  try
+    if UpgradeMode then begin
+      Staged := AddBackslash(Path) + '.nxp-update\staging\@@VERSION@@';
+      VerifyStagedPayload;
+      Helper := AddBackslash(Path) + '.nxp-update-worker-setup-' + TransactionId + '.exe';
+      if not FileCopy(AddBackslash(Staged) + 'nexus-pipeline.exe', Helper, True) then
+        RaiseException('无法建立同根独立安装器交接副本；保留 staging。');
+      if CompareText(GetSHA256OfFile(Helper), '@@EXE_SHA256@@') <> 0 then
+        RaiseException('安装器交接副本摘要不匹配。');
+      ApplyInstallerLaunch(Helper,
+        'installer-update --staged "' + Staged + '" --version @@VERSION@@ --image-hash @@EXE_SHA256@@ --transaction ' + TransactionId,
+        Path, Launched, Resolved, Code);
+      InstallationQualified := True;
+      DeleteFile(Helper);
+      Exit;
+    end;
+    ManagerDir := ExpandConstant('{localappdata}\NexusPipeline\installer');
+    if not ForceDirectories(ManagerDir) then
+      RaiseException('无法创建此实例的安装归属记录。');
+    Manifest := ExpandConstant('{tmp}\nxp-payload-manifest.json');
+    if not SaveStringToFile(Manifest, '@@PAYLOAD_MANIFEST@@', False) then
+      RaiseException('无法写入冻结载荷清单。');
+    Launched := ShellExec('runas', AddBackslash(Path) + 'nexus-pipeline.exe',
+      'installer-state register --root "' + Path + '" --version @@VERSION@@ --manifest "' + Manifest + '"',
+      Path, SW_HIDE, ewWaitUntilTerminated, Code);
+    Resolution := ResolveInstallerMetadata(Launched, Code, True);
+    Resolved := True;
+    if not Launched or (Code <> 0) or (Resolution <> 0) then
+      RaiseException('实例归属登记未通过；保留程序与数据供诊断。');
+    InstallationQualified := True;
+  except
+    Failure := GetExceptionMessage;
+    if not Resolved then begin
+      Resolution := ResolveInstallerMetadata(Launched, Code, not UpgradeMode);
+      if Resolution <> 0 then
+        RaiseException(Failure + '；登记补偿未确认，检查点保留。');
+    end;
+    RaiseException(Failure);
+  end;
+end;
+
+function InitializeUninstall: Boolean;
+var
+  Path: String;
+  Choice: Integer;
+begin
+  Result := False;
+  Path := ExpandConstant('{app}');
+  if ProtectedInstanceState(Path, True) <> 'active' then begin
+    MsgBox('无法确认本实例归属或当前卸载程序载荷；程序与数据均保留。', mbError, MB_OK);
+    Exit;
+  end;
+  if CheckForMutexes('NexusPipeline.SingleInstance') then begin
+    MsgBox('宿主仍在运行。请先正常退出，等待任务和配置恢复完成，再卸载。', mbError, MB_OK); Exit;
+  end;
+  Choice := IDNO;
+  if not UninstallSilent then
+    Choice := MsgBox('是否同时删除本实例的 config、data、history、logs、.nxp、plugins、outputs 和 user-assets？' + #13#10 +
+      '选择“否”仅移除已核验的应用文件并保留数据；选择“取消”退出卸载。不会跟随外部路径或链接。',
+      mbConfirmation, MB_YESNOCANCEL or MB_DEFBUTTON2);
+  if Choice = IDCANCEL then Exit;
+  DeleteInstanceData := Choice = IDYES;
+  Result := True;
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  Path, Helper, Params: String;
+  Code: Integer;
+begin
+  if CurUninstallStep <> usUninstall then Exit;
+  Path := ExpandConstant('{app}');
+  if (ProtectedInstanceState(Path, True) <> 'active') or
+     CheckForMutexes('NexusPipeline.SingleInstance') then
+    RaiseException('实例归属或运行状态已变化；程序与数据均保留。');
+  Helper := ExpandConstant('{localappdata}\NexusPipeline\installer\nexus-installer-helper.exe');
+  Params := 'installer-state uninstall --root "' + Path + '" --delete-data ';
+  if DeleteInstanceData then Params := Params + 'true' else Params := Params + 'false';
+  if not ShellExec('runas', Helper, Params, Path, SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then
+    RaiseException('卸载归属、恢复状态或文件处理未通过。保留未知文件与恢复证据，请先核对或恢复。');
+end;

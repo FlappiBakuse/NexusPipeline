@@ -9,7 +9,7 @@ test("脚本入口：创建、编辑和删除一个普通脚本", async ({ page 
     await page.getByTestId("new-script").click();
     let modal = page.locator(".nxp-modal");
     await expect(modal).toBeVisible();
-    const genericChooser = modal.getByRole("button", { name: /新建通用脚本实例/ });
+    const genericChooser = modal.getByRole("button", { name: /^通用脚本/ });
     if (await genericChooser.count()) {
       await genericChooser.click();
       modal = page.locator(".nxp-modal");

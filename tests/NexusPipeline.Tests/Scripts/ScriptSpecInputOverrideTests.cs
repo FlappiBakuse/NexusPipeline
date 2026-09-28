@@ -45,6 +45,7 @@ public sealed class ScriptSpecInputOverrideTests
         });
 
         Assert.True(resolved.Succeeded);
+        Assert.Equal("utf-8", resolved.OutputEncoding);
         Assert.Equal("--start 用户2", resolved.Script.Args);
         Assert.EndsWith(Path.Combine("configs", "用户2.json"), resolved.Script.ConfigPath, StringComparison.OrdinalIgnoreCase);
     }
@@ -74,6 +75,7 @@ public sealed class ScriptSpecInputOverrideTests
         File.WriteAllText(Path.Combine(pluginDir, "data", "judge.js"), "console.log('{}');");
         File.WriteAllText(Path.Combine(pluginDir, "data", "resolve.json"), $$"""
             {
+              "outputEncoding": "utf-8",
               "inputs": [
                 { "name": "config", "label": "配置名", "description": "configs 下的配置文件名", "required": {{(requiredConfig ? "true" : "false").ToLowerInvariant()}}, "default": "{{(requiredConfig ? "用户1" : "")}}" }
               ],

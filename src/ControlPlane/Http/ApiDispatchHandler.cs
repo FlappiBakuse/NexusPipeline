@@ -138,9 +138,16 @@ internal static class ApiDispatchHandler
             snapshot.CurrentMaxAttempts,
             persistenceWarning = snapshot.PersistenceWarning,
             logTail = snapshot.LogTail,
+            logSegmentId = snapshot.LogSegmentId,
+            logSegmentSequence = snapshot.LogSegmentSequence,
+            logSegment = snapshot.LogSegment,
+            cancelRequested = snapshot.CancelRequested,
+            cancellationPhase = snapshot.CancellationPhase,
+            cancellationTimingMs = snapshot.CancellationTimingMs,
             logEntries = snapshot.LogEntries.Select(entry => new
             {
                 sequence = entry.Sequence,
+                logSegmentId = entry.LogSegmentId,
                 timestamp = entry.Timestamp,
                 level = entry.Level.ToString().ToLowerInvariant(),
                 text = entry.FormattedText,
@@ -161,12 +168,23 @@ internal static class ApiDispatchHandler
             await HttpHelper.MethodNotAllowedAsync(context).ConfigureAwait(false);
             return;
         }
+        long handlerTimestamp = System.Diagnostics.Stopwatch.GetTimestamp();
+        DateTime requestReceivedUtc = DateTime.UtcNow;
         JsonNode? node = HttpHelper.ParseBody(body);
         string runId = node.Get("runId").Str();
         try
         {
-            dispatchCenter.Cancel(runId, Audit.Web);
-            await HttpHelper.WriteJsonAsync(context, new { ok = true }).ConfigureAwait(false);
+            CancellationRequestResult result = dispatchCenter.RequestCancellation(runId, Audit.Web);
+            double requestMs = System.Diagnostics.Stopwatch.GetElapsedTime(context.AcceptedTimestamp, handlerTimestamp).TotalMilliseconds;
+            double cancelMs = System.Diagnostics.Stopwatch.GetElapsedTime(handlerTimestamp).TotalMilliseconds;
+            context.Response.Headers["Server-Timing"] = FormattableString.Invariant($"request;dur={requestMs:F3}, cancel;dur={cancelMs:F3}, received;desc=\"{requestReceivedUtc:O}\"");
+            string state = result switch
+            {
+                CancellationRequestResult.Accepted => "accepted",
+                CancellationRequestResult.AlreadyRequested => "already_requested",
+                _ => "already_finished",
+            };
+            await HttpHelper.WriteJsonAsync(context, new { ok = true, cancellation = state }).ConfigureAwait(false);
         }
         catch (Exception ex)
         {

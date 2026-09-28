@@ -14,12 +14,6 @@ namespace NexusPipeline.Modules.Plugins.DataSpecialized;
 /// paths 模板占位符 {var}（绑定文件绝对路径）/ {rel:var}（相对脚本根目录的相对路径）；
 /// 可选 inputs 声明用户输入变量，模板中以 {input:名称} 内联替换（可与相对路径文本自由组合，不与绑定占位符混用）。
 /// </summary>
-internal sealed record ConfigValidatorDescriptor(
-    string PluginName,
-    string PluginDirectory,
-    string ValidatorPath,
-    string Script);
-
 internal sealed record ConfigEditorDescriptor(
     string PluginName,
     string PluginDirectory,
@@ -43,7 +37,6 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
         TaskProtocol = TaskProtocolManifest.Freeze((JsonObject)JsonNode.Parse(File.ReadAllText(Path.Combine(pluginDir, "plugin.json")))!, pluginDir);
         _resolvePath = manifest.ResolvePath;
         _judgeScriptPath = manifest.JudgeScriptPath;
-        _configValidatorPath = manifest.ConfigValidatorPath;
         _configEditorPath = manifest.ConfigEditorPath;
         foreach (string capability in manifest.Capabilities)
         {
@@ -89,10 +82,6 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
     internal string _resolvePath = "";
 
     internal string _judgeScriptPath = "";
-
-    internal string? _configValidatorPath;
-
-    private string? _configValidator;
 
     internal string? _configEditorPath;
 
@@ -174,32 +163,6 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
         {
             Logger.Warn($"专项判断脚本读取失败（{_judgeScriptPath}），判定将退化为进程退出语义：{ex.Message}");
             return "";
-        }
-    }
-
-    internal bool HasConfigValidator => _configValidatorPath is not null;
-
-    internal ConfigValidatorDescriptor? ReadConfigValidator()
-    {
-        if (_configValidatorPath is null)
-        {
-            return null;
-        }
-        lock (_sync)
-        {
-            if (_configValidator is null)
-            {
-                try
-                {
-                    _configValidator = File.ReadAllText(_configValidatorPath);
-                }
-                catch (Exception ex)
-                {
-                    Logger.Warn($"专项配置校验脚本读取失败（{_configValidatorPath}）：{ex.Message}");
-                    _configValidator = "";
-                }
-            }
-            return new ConfigValidatorDescriptor(Name, PluginDirectory, _configValidatorPath!, _configValidator);
         }
     }
 

@@ -4,6 +4,7 @@ using Xunit;
 using NexusPipeline.Modules.Plugins.Contracts;
 using NexusPipeline.Modules.Plugins.DataSpecialized;
 using NexusPipeline.Modules.Scripts;
+using NexusPipeline.Platform.Processes;
 
 namespace NexusPipeline.Tests.Plugins;
 
@@ -60,6 +61,36 @@ public class DataSpecializedPluginInputsTests
           }
         }
         """;
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void LauncherWithConfigurationWriterResponsibilityRemainsNecessary(bool writesConfig)
+    {
+        JsonObject resolve = JsonNode.Parse(BaahResolveJson)!.AsObject();
+        resolve["process"] = new JsonObject { ["rootRole"] = "game_launcher", ["writesManagedConfig"] = writesConfig };
+        (string pluginDir, string scriptRoot) = MakeBaahLikePlugin(resolve.ToJsonString());
+        try
+        {
+            string manifestPath = Path.Combine(pluginDir, "plugin.json");
+            JsonObject manifest = JsonNode.Parse(File.ReadAllText(manifestPath))!.AsObject();
+            manifest["minHostVersion"] = "0.16.9";
+            manifest["taskProtocol"] = JsonNode.Parse("""
+                {"version":"0.1.1","discoverScript":"data/discover.js","retryScript":"data/retry.js","readResources":[],
+                "configRules":[{"id":"fixture","required":false,"criticality":"advisory_or_contextual"}],"environmentChecks":[],"repairRules":[],
+                "localization":{"defaultLocale":"zh-CN","messages":{"zh-CN":"data/i18n/zh-CN.json"}}}
+                """);
+            File.WriteAllText(manifestPath, manifest.ToJsonString());
+            File.WriteAllText(Path.Combine(pluginDir, "data", "discover.js"), "// owned contract fixture");
+            File.WriteAllText(Path.Combine(pluginDir, "data", "retry.js"), "// owned contract fixture");
+            Directory.CreateDirectory(Path.Combine(pluginDir, "data", "i18n"));
+            File.WriteAllText(Path.Combine(pluginDir, "data", "i18n", "zh-CN.json"), "{}");
+            var plugin = Assert.IsType<DataSpecializedPlugin>(DataSpecializedPlugin.Load(pluginDir));
+            Assert.Equal(writesConfig ? ProcessRole.ConfigurationWriter : ProcessRole.GameLauncher,
+                Assert.IsType<ScriptProfile>(plugin.Resolve(scriptRoot, null)).RootProcessRole);
+        }
+        finally { Directory.Delete(Path.GetDirectoryName(pluginDir)!, recursive: true); }
+    }
 
     [Fact]
     public void Resolve_SubstitutesInputs_IntoArgsAndConfigPath()

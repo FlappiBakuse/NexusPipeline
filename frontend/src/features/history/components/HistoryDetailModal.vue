@@ -184,7 +184,7 @@ onBeforeUnmount(() => {
           <div class="history-detail-meta-item"><span class="k">{{ t("history.start_time") }}</span><span>{{ formatDateTime(detailData.record.startTime) }}</span></div>
           <div class="history-detail-meta-item"><span class="k">{{ t("history.end_time") }}</span><span>{{ formatDateTime(detailData.record.endTime) }}</span></div>
           <div class="history-detail-meta-item"><span class="k">{{ t("history.duration.label") }}</span><span>{{ formatDurationMs(detailData.record.durationMs) }}</span></div>
-          <div class="history-detail-meta-item history-detail-meta-wide"><span class="k">{{ t("history.result_description") }}</span><span>{{ detailData.record.taskReport ? taskOutcomeLabel(detailData.record.resultDetail) : detailData.record.resultDetail || "-" }}</span></div>
+          <div class="history-detail-meta-item history-detail-meta-wide"><span class="k">{{ t("history.result_description") }}</span><span>{{ detailData.record.taskReport ? taskOutcomeLabel(detailData.record.resultDetail, detailData.record.taskReport.summary?.counts.unknown) : detailData.record.resultDetail || "-" }}</span></div>
         </div>
         <TaskReportPanel :report="detailData.record.taskReport" />
         <section v-if="detailData.record.pluginHistory?.length" class="plugin-history-section">

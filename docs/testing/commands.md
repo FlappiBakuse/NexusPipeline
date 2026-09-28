@@ -2,6 +2,8 @@
 
 ## 默认命令
 
+嵌套检出过深时，Windows 批处理 fixture 的工作目录可能超出系统启动限制。可设置 `NEXUS_TEST_ARTIFACT_ROOT` 指向本次新建的短路径普通目录；其中 `.nxp-test-artifact-root.json` 必须声明 `schemaVersion: 1`、`owner: "NexusPipeline.Tests"`、`directory` 为该目录的完整路径。runner 与 UI／系统 helper 将报告和独立运行目录放在其 `runs/<runId>/` 下。缺归属、相对路径、链接或非法 run ID 拒绝执行；默认仍使用仓内 `tests/.artifacts/runs/`。不要把已有用户目录登记为测试目录。
+
 以下命令均在 `NexusPipeline/` 根目录执行：
 
 当前本地与 CI 使用同一快速、集成分层入口：
@@ -63,10 +65,37 @@ node tests\run.mjs dev all
 System Smoke 支持按影响域分组运行，便于 CI 与本地只跑受影响的 suite：
 
 ```text
-node tests\run.mjs dev system [runtime|control|config|execution|judge|emulator|plugins|update] [--realtime]
+node tests\run.mjs dev system [runtime|control|config|execution|judge|emulator|plugins|maa|update] [--realtime]
 ```
 
 可以列出多个分组，也可以用 `--group <名称>` 重复指定；省略分组等于全部 suite。未知分组会打印可用分组并以 exit code 2 退出。每个 suite 都会实际启动独立 Test Host，不提供 dry-run 替代测试。
+
+`maa` 通过显式 `NEXUS_OFFICIAL_PLUGINS_ROOT` 的官方工具准备实际可选插件包、原生库及自有无游戏 Win32／ADB／Agent／pretask 夹具，使用同一 Test Host 验证安装、绑定、队列与持久历史。`NEXUS_MAA_NATIVE_ARCHIVE` 可指定锁定的官方 v5.14.0 ZIP，`NEXUS_MAA_PROJECT_ARCHIVES` 可指定包含两款锁定官方项目 ZIP 的目录；均重新验摘要后在新归属目录解压。真实账号与设备测试不替代该必需 native 组。
+
+真实发现热路的测量使用现役 stress 项目：
+
+```text
+dotnet build tests/stress/RuntimeEfficiencyDiagnostic/RuntimeEfficiencyDiagnostic.csproj -c Release -p:NexusTestHost=true --nologo -m:1 -nr:false
+dotnet bin/test-host/RuntimeEfficiencyDiagnostic/Release/net8.0-windows/NexusPipeline.StressDiagnostics.dll --task-discovery <不存在的自有报告目录> <源码指纹标签>
+```
+
+它对 1／10／50 个冻结资源各采集 30 份真实 Jint 发现样本，分开输出冷读／热读、CPU、工作集、GC、分配字节、全部配置构造／JSON 验证／YAML 解析／复制／磁盘读取计数。该命令不测队列端到端或取消延迟；基线必须来自实际源码并记录测量插桩差异。CPU 的系统计时分辨率和进程工作集采样不能作为每操作精确消耗。
+
+同一 stress 项目还提供真实 Jint 无变化观察和单飞忙时快照测量；每个调用输出 30 份样本并保留 final 发布断言：
+
+```text
+dotnet bin/test-host/RuntimeEfficiencyDiagnostic/Release/net8.0-windows/NexusPipeline.StressDiagnostics.dll --runtime-observe <不存在的自有报告目录> <源码指纹标签>
+```
+
+`--runtime <新运行目录> --output <报告.json> --ticks 600 --append-bytes 4096` 测量 100 MiB 合成日志的检查点/追加读取和空闲 tick。30 样本需使用 30 个独立目录；无等待 tick 复放不等于 10 分钟墙钟运行，截图消费者门控不等于 GDI 采集。
+
+Maa 编译计量使用实际构建的独立插件 DLL，不建立 Host 对插件实现的产品依赖：
+
+```text
+dotnet bin/test-host/RuntimeEfficiencyDiagnostic/Release/net8.0-windows/NexusPipeline.StressDiagnostics.dll --maa-compile <MaaFrameworkDriver DLL绝对路径> <不存在的自有报告目录> <源码指纹标签>
+```
+
+对 1／10／50 任务、1／100 资源文件的每个组合保留 30 样本，测量新建／重复有效视图、授权、准备与运行重验的共享编译边界，以及 10000 progress 投影。原值包含 wall、CPU、分配、工作集、解析／散列字节与次数。新建视图不代表清空 OS 文件缓存，计量不包含 provider 存储或 native 启动；取消实际 producer 的停止与读取计数由 Maa compiler cancellation 回归独立验证。
 
 Test Host 使用 `NexusTestHost=true` 的 `asInvoker` 清单。只读二进制输出按源码、前端锁、构建配方、Node/.NET SDK、模式与平台的内容指纹保存在 `.generated/test-host-cache/<hash>/`，完整性元数据缺失或不匹配时重建；不同命令可复用同一完整缓存。运行数据、端口、PID 与退出标记始终位于每次运行独立的 `tests/.artifacts/runs/<runId>/`，不会随二进制缓存复用。完整性等级只作为诊断信息，不决定是否跳过测试。
 
@@ -83,6 +112,27 @@ System Smoke 的 `emulator` suite 覆盖宿主内置 Generic ADB、MuMuManager�
 
 
 ## 质量门禁顺序
+
+### v0.16.9 安装器闭合诊断
+
+以下命令在 Windows 上运行，`HOST_ROOT`、`PLUGINS_ROOT` 均为实际仓库绝对路径，`ISCC` 是 `tools/host_installer.py` 锁定 SHA256 的 Inno Setup 6.7.3 编译器；`WORK` 为 `D:\Projects\Temp` 内本次新建且不存在的目录。设置当前进程的 `TEMP`、`TMP`、`NUGET_PACKAGES`、`NPM_CONFIG_CACHE` 后执行，不修改全局设置。普通功能测试使用 asInvoker Test Host，不弹出 UAC。
+
+```powershell
+python -m unittest tools.tests.test_host_release tools.tests.test_host_installer -v
+dotnet test tests/NexusPipeline.Tests/NexusPipeline.Tests.csproj -p:NexusTestHost=true --nologo -m:1
+python tools/tests/run_installer_launch_contract.py --compiler $ISCC --test-helper '<asInvoker Test Host EXE绝对路径>' --work "$WORK\pascal"
+python tools/tests/build_installer_version_fixture.py --host-root $HOST_ROOT --plugins-root $PLUGINS_ROOT --compiler $ISCC --work "$WORK\versions"
+```
+
+Pascal 入口从生产 `tools/installer-launch.iss` 编译同一份代码，以编译期 `NEXUS_INSTALLER_TEST` 仅替换 OS 调用返回。它在当前身份执行 False/1223、其他错误码、True 结果和真实 OS 找不到目标的非 UAC 边界；原始 Inno 日志、每例状态与二进制哈希保存在 `--work`。该证据不代表人工安全桌面拒绝。A/B 入口只在隔离源中覆盖 Host 本体 0.16.9001/0.16.9002 版本，产生带 `TEST_FIXTURE_NOT_FOR_DISTRIBUTION` 标识的真实构建；输出 `pair.json`、各自 Setup、ZIP、载荷清单和构建日志。它不执行安装，也不替代产品 0.16.9 候选。
+
+跨版本原生安装只在事先批准、依赖已安装的全新隔离 Windows VM 中运行。VM 内先创建匹配本机名称的 attestation JSON（`isolatedVm=true`、`approvedForNativeSetup=true`、`computerName`），将 A/B 输出复制入 VM，然后执行：
+
+```powershell
+python tools/tests/run_native_version_fixture.py --pair '<VM内pair.json绝对路径>' --work '<VM内全新本地测试目录>' --vm-attestation '<VM内批准记录.json>'
+```
+
+该入口只运行 A 的原生 Setup，再经 A 的内置检查、下载、应用更新到 B，核对旧原生 unins、B 当前清单与用户文件后调用旧卸载器；失败保留 VM 现场和原始日志。运行前确认 VM 当前用户没有 NexusPipeline 安装登记或安装器目录。无此 VM 时记 `NOT_RUN`，不能将 A/B 构建或 asInvoker Pascal 结果写成原生安装通过。最终门禁仍执行下述 Host 全集、插件 `verify --scope all`、真实 0.16.9 候选；候选要求干净且配对的源码，不能为本地脏源诊断放宽校验。
 
 1. 修改宿主代码、测试或前端纯函数后运行 `node tests\run.mjs dev default` 的适用组合。
 2. 涉及配置交换、Windows 进程、端口、解释器、插件、模拟器或更新事务时，追加 `node tests\run.mjs dev system`；宿主模拟器系统边界通过 TestPlugin 验证 provider 注册到执行及清理，厂商驱动行为由官方扩展插件测试覆盖。

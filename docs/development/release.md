@@ -23,7 +23,7 @@
 
 以下步骤需要维护者明确授权：
 
-当前阶段的新候选路径在受保护 `main` 每次 push 后运行 Host Release 的 `candidate` job；也可从 `main` 显式选择 `operation=candidate` 和受保护 main 历史中的 `source_ref` 手动重建已过期候选。candidate 不需要 tag：它用固定源码构建隔离 Test Host，完成 UI、系统与独立真实计时检查，再打出生产 ZIP，验证后才上传 `host-candidate-<runId>-<attempt>`。失败报告使用独立 diagnostics artifact；候选不会创建或移动 tag，也不会自行发布。
+当前阶段的新候选路径在受保护 `main` 每次 push 后运行 Host Release 的 `candidate` job；也可从 `main` 显式选择 `operation=candidate` 和受保护 main 历史中的 `source_ref` 手动重建已过期候选。candidate 不需要 tag：它用固定源码构建隔离 Test Host，完成 UI、系统与独立真实计时检查，再用同一 production staging 生成 ZIP 和 Setup。Inno Setup 6.7.3 的下载包与编译器分别验固定 SHA256；两种分发物及各自纯 SHA 侧文件进入同一 `host-candidate-<runId>-<attempt>`，候选清单还记录 ZIP/Setup 构建元数据。失败报告使用独立 diagnostics artifact；候选不会创建或移动 tag，也不会自行发布。
 
 已有 tag 指向候选源码且候选 job 真正成功时，发布者可从 `main` 手动执行同包恢复：
 
@@ -31,7 +31,7 @@
 gh workflow run release.yml --ref main -f operation=publish-only -f tag=<已有 tag> -f candidate_run_id=<原候选 run ID>
 ```
 
-同一 run 出现多个成功候选 artifact 时，再传 `-f candidate_artifact_id=<服务端 artifact ID>`。独立 writer 核对原 attempt/job、服务端 artifact 摘要、候选清单、Git tree、现有 tag 与包；只复用原 ZIP，不安装或重新编译业务依赖。同 tag 同资产不同字节仍拒绝覆盖，远端读回通过后才公开 Release。仅在本地合成 run ID 打出的候选不能用于发布。
+同一 run 出现多个成功候选 artifact 时，再传 `-f candidate_artifact_id=<服务端 artifact ID>`。独立 writer 核对原 attempt/job、服务端 artifact 摘要、候选清单、Git tree、现有 tag、ZIP 与 Setup 来源及摘要；只复用原候选，不重新编译。四个分发资产（ZIP、Setup 与各自 SHA 侧文件）采用固定白名单；同 tag 同资产不同字节拒绝覆盖，远端逐项读回通过后才公开 Release。仅在本地合成 run ID 打出的候选不能用于发布。
 
 新版本需先在受保护 `main` 的对应合并提交完成候选验收；获授权后才能创建并推送指向该提交的 tag。已有 tag 不因发布工具修复而移动。Release Notes 依据该 tag 的真实变更写入 UTF-8 无 BOM 文件；独立下载 ZIP/SHA 复核后，再按授权更新 Release 正文并检查更新可见性。控制工具修复通过正常源码 PR 和 Required 检查；恢复始终使用原候选，已有资产必须字节一致。
 
@@ -52,10 +52,27 @@ nexus-pipeline.exe
 wwwroot/
 plugins/
 README.md
-LICENSE
 ```
 
-主程序更新引擎只交换 `nexus-pipeline.exe` 和 `wwwroot/`，不会覆盖运行时 `plugins/`。包内排除 `config/`、`data/`、`history/` 和 `logs/`。更新引擎支持当前发布包布局，并拒绝绝对路径、`..` 路径和重复目录条目。
+主程序更新引擎交换 `nexus-pipeline.exe`、`wwwroot/` 和包内提供的 `README.md`，不会覆盖运行时 `plugins/`。包内排除 `config/`、`data/`、`history/` 和 `logs/`。更新引擎支持当前发布包布局，并拒绝绝对路径、`..` 路径和重复目录条目。已发行 v0.16.8 的旧 worker 及 README 收尾限制见[自动更新](../architecture/update.md)。
+
+### 安装器运行时依赖
+
+Setup 只认可标准 x64 安装路径下的 .NET 8 Desktop Runtime 和 ASP.NET Core Runtime；不以 SDK、PATH、x86 或其他主版本替代。每个缺失框架分别请求用户确认，再从 `tools/runtime-dependencies.json` 的固定微软 URL 下载，核验 SHA256 和微软有效数字签名后执行官方安装包。下载页显示进度并允许取消；取消或下载、摘要、签名错误阻止应用部署，用户可返回重试。静默安装缺依赖时退出并提示使用交互向导。
+
+依赖安装退出码 0 后重新检测实际框架；3010 提示用户自行重启再运行 Setup，不强制重启，选择稍后重启时 Setup 返回 Inno 标准退出码 8，且不部署或登记应用；其他依赖失败使 Setup 返回 7。依赖包的退出码与 Setup 退出码分别记录。安装、升级与卸载不移除共享 .NET。实际 Windows 验收必须记录运行环境、依赖包摘要和签名、子进程退出码以及应用部署顺序；编译 Setup 不能代替该项验收。
+
+Setup 的文件解压完成不等于安装成功。新装须完成实例归属登记；升级须等独立 worker 返回成功，且新 Host 启动核对及事务提交完成。登记或交接异常时完成页显示“安装未完成”，即使 Inno 已结束文件安装，进程仍返回非零退出码 12，并保留诊断和恢复现场。
+
+Setup 在 Inno 写入 ARP 与原生 `unins*.exe/.dat/.msg` 之前保存当前用户实例的窄元数据检查点（DPAPI 状态、原字节备份和摘要）。写入后先观察 ARP 与原生卸载器，再启动独立 worker。未启动或确认回滚时，按检查点恢复原登记和原卸载器；事务与新程序身份均确认提交时保留新登记。提交后仅清理失败时仍按提交处理，Setup 继续返回失败供诊断。阶段不明、外部字节改动或补偿失败时保留检查点，拒绝覆盖；下次可信 Setup 会先恢复可判定的检查点。初装登记失败同样撤回 Inno 成功登记，程序与用户数据保留供诊断。测试入口及原始证据要求见[测试命令](../testing/commands.md)。
+
+登记检查点调用的是 Setup 内嵌、只接受 `installer-state metadata-*` 命令的 asInvoker 辅助程序；它操作当前用户的登记与安装器目录。正式 Host 保持 `requireAdministrator`，独立更新 worker 仍由 `runas` 启动。worker 的授权请求被拒后，补偿不再发出第二次提权请求。辅助程序不进入 ZIP 的四项应用载荷。
+
+0.16.9001/0.16.9002 是隔离 Windows VM 跨版本实验夹具，仅供旧原生卸载器验证，不是公开历史版本；正式候选只接受产品 0.16.9 干净配对源码。未获源码提交授权时，可保存当前脏源指纹与本地 ZIP/Setup 诊断摘要，但不能称为正式候选通过。
+
+交互卸载先选择保留或删除此实例的数据，默认保留；该选择和最终卸载确认都可以取消，确认之前不会删除文件。最终确认后再次核对归属、运行状态，由既有 helper 持有单实例锁执行删除；恢复现场或归属核对失败使卸载中止并保留登记。静默卸载始终保留数据。
+
+卸载先检查当前确权清单中的全部应用路径，任一路径包含链接就整体拒绝，不能先删除其他应用文件再发现链接。管理身份核对使用本次安装器的临时结果文件，仅接受 DPAPI 解封、当前用户、目录和 helper 摘要全部核验后的状态；不明非空目录在静默模式下直接失败并记日志。内置更新刷新当前载荷确权清单，旧卸载器据此移除新程序，保留不在清单中的用户文件。
 
 “闲时自动更新”与“定期检查更新”同时开启时，宿主在每次启动恢复完成后、初始化服务前检查更新；检查预算为 30 秒、下载预算为 5 分钟，若发现可安全应用的新版本或已有 `Ready` 暂存就先应用再启动。失败或超时会继续启动当前版本，同一目标自动失败后冷却 12 小时；无法安全完成更新恢复时停止服务启动。运行期原有等待闲时应用和手动检查、下载、应用流程继续生效。单独的“插件自动更新”开关会在插件事务恢复与加载前暂存所有符合 catalog 的已安装插件（包括已禁用项；手动安装项须与 catalog artifact 精确匹配），运行期每 12 小时检查并在维护租约空闲后安排安全重启；插件启用偏好保留。
 

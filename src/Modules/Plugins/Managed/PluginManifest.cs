@@ -36,9 +36,6 @@ internal sealed class PluginManifest
 
     public string JudgeScriptPath { get; private init; } = "";
 
-    /// <summary>数据化插件可选的配置校验脚本，相对插件目录且仅允许 JavaScript。</summary>
-    public string? ConfigValidatorPath { get; private init; }
-
     /// <summary>数据化插件可选的配置编辑准备脚本，相对插件目录且仅允许 JavaScript。</summary>
     public string? ConfigEditorPath { get; private init; }
 
@@ -114,33 +111,15 @@ internal sealed class PluginManifest
                 error = "plugin.json 不支持 supportsEmulator 或 replaces 字段，请使用 capabilities 声明插件能力";
                 return false;
             }
-            if (root.ContainsKey("configValidator") && kind != "data-specialized")
+            if (root.ContainsKey("configValidator"))
             {
-                error = "configValidator 仅支持 data-specialized 插件";
+                error = "此插件声明已退役的 configValidator；请升级到支持 taskProtocol 配置诊断的版本，或卸载此插件。现有用户配置不会被修改。";
                 return false;
             }
             if (root.ContainsKey("configEditor") && kind != "data-specialized")
             {
                 error = "configEditor 仅支持 data-specialized 插件";
                 return false;
-            }
-
-            string? configValidatorPath = null;
-            if (root.ContainsKey("configValidator"))
-            {
-                configValidatorPath = root["configValidator"]?.ToString()?.Trim();
-                if (!IsSafeRelativeScriptPath(configValidatorPath, ".js"))
-                {
-                    error = "configValidator 必须是插件目录内的安全相对 .js 路径";
-                    return false;
-                }
-                string validatorPath = Path.GetFullPath(Path.Combine(pluginDir, configValidatorPath!));
-                string pluginRoot = Path.GetFullPath(pluginDir);
-                if (!IsWithin(pluginRoot, validatorPath) || !File.Exists(validatorPath))
-                {
-                    error = "configValidator 文件不存在或超出插件目录";
-                    return false;
-                }
             }
 
             string? configEditorPath = null;
@@ -179,7 +158,6 @@ internal sealed class PluginManifest
                 EntryType = root["entryType"]?.ToString()?.Trim() ?? "",
                 ResolvePath = root["resolve"]?.ToString()?.Trim() ?? "",
                 JudgeScriptPath = root["judgeScript"]?.ToString()?.Trim() ?? "",
-                ConfigValidatorPath = configValidatorPath,
                 ConfigEditorPath = configEditorPath,
             };
             if (root["capabilities"] is JsonArray capabilities)

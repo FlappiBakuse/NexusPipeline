@@ -74,7 +74,7 @@ node tests/run.mjs all
 
 Preview 同版本 hash 变化可更新；hash 相同不因 sourceCommit 变化重装；可信 preview 可被同版本 stable 替换；高版本安装不自动降级。稳定包版本对应字节不可变。新增 journal 字段同步白名单、克隆、读写、恢复和 ownership 提交，保持当前格式数据安全。
 
-专项插件只声明宿主支持的能力，前端代码写在 Host；专项不包含 frontend 对象、frontend-module、web/frontend 浏览器代码或 .NET 程序集。后端 judge/configEditor/configValidator 脚本保持有效。managed 插件可通过 Frontend API 1.5、公开 slot/route 和 `nxp-*` Native Custom Elements 扩展。未声明能力不得静默当作支持。
+专项插件只声明宿主支持的能力，前端代码写在 Host；专项不包含 frontend 对象、frontend-module、web/frontend 浏览器代码或 .NET 程序集。后端 judge/configEditor 脚本保持有效；configValidator 已退役，声明旧字段的包显式拒绝，配置诊断通过 taskProtocol discover.configAssessment，不改用户快照。managed 插件可通过 Frontend API 1.5、公开 slot/route 和 `nxp-*` Native Custom Elements 扩展。未声明能力不得静默当作支持。
 
 `frontend/` 是唯一宿主前端源码；Vite 输出同步到发行 `wwwroot/`。`frontend/src/platform` 管平台服务，`app/bootstrap.ts` 管启动，`features/<domain>` 管业务。桥接仅通过 `plugin-bridge/host-adapter.ts` 使用宿主平台；app/features/ui 经 `@bridge/index` facade，不依赖 bridge 私有实现。插件不引用 Vue 私有组件/class。
 

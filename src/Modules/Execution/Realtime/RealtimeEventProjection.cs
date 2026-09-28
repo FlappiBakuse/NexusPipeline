@@ -26,6 +26,11 @@ internal static class RealtimeEventProjection
             currentMaxAttempts = snapshot.CurrentMaxAttempts,
             persistenceWarning = snapshot.PersistenceWarning,
             logTruncated = snapshot.LogTruncated,
+            logSegmentId = snapshot.LogSegmentId,
+            logSegmentSequence = snapshot.LogSegmentSequence,
+            logSegment = snapshot.LogSegment,
+            cancelRequested = snapshot.CancelRequested,
+            cancellationPhase = snapshot.CancellationPhase,
         };
     }
 
@@ -37,6 +42,7 @@ internal static class RealtimeEventProjection
             entries = entries.Select(entry => new
             {
                 sequence = entry.Sequence,
+                logSegmentId = entry.LogSegmentId,
                 timestamp = entry.Timestamp,
                 level = entry.Level.ToString().ToLowerInvariant(),
                 message = entry.Message,

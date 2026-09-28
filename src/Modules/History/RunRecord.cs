@@ -12,6 +12,8 @@ public class RunAttempt
 
     public string Reason { get; set; } = "";
 
+    public bool OutputIncomplete { get; set; }
+
     /// <summary>稳定的结果语义 key；Reason 保留当前展示文本并兼容既有历史文件。</summary>
     public string ReasonCode { get; set; } = "";
 
@@ -49,6 +51,10 @@ public class RunHistoryScreenshot
 
 public class RunRecord
 {
+    /// <summary>可选的四层事实；旧历史缺省时不合成已核验成功。</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public RunOutcomeDimensions? Outcomes { get; set; }
+
     /// <summary>Versioned immutable task facts; absent for legacy runs. Contains no raw configuration.</summary>
     public System.Text.Json.Nodes.JsonObject? TaskReport { get; set; }
 

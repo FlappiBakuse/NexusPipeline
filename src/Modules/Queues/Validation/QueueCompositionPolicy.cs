@@ -10,6 +10,20 @@ namespace NexusPipeline.Modules.Queues.Validation;
 /// <summary>约束体系：首次启动缺失时生成默认配置；绝对安全区间（内置默认值）静默生效；超安全值但入警告区间 → 启动警告；超警告区间或区间矛盾 → FATAL 拒绝启动。</summary>
 internal static class QueueCompositionPolicy
 {
+    internal static string? CheckDependencies(DispatchQueue queue)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (QueueTask task in queue.Tasks.OrderBy(item => item.Index))
+        {
+            if (string.IsNullOrWhiteSpace(task.Id) || !seen.Add(task.Id))
+                return "队列任务 ID 缺失或重复，无法确认后继依赖";
+            IReadOnlyList<string> dependencies = task.DependsOnTaskIds ?? [];
+            if (dependencies.Count > 64 || dependencies.Any(id => !seen.Contains(id) || id == task.Id)
+                || dependencies.Distinct(StringComparer.Ordinal).Count() != dependencies.Count)
+                return "队列任务依赖必须引用不重复的前序任务 ID";
+        }
+        return null;
+    }
 
     /// <summary>
     /// 队列长时/普通混排校验：队列链式串行执行，长时脚本（日志无更新上限为 -1）可能持续运行并阻塞后续任务——

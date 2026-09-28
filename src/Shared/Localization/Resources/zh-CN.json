@@ -574,6 +574,7 @@
   "startup.admin_title": "NexusPipeline 需要管理员权限",
   "startup.limits_fatal": "约束配置存在致命错误，拒绝启动。请修正 config/limits.json 后重试。",
   "system.local_only": "此操作仅允许本机请求",
+  "tasks.outcome.unverified": "流程已结束 · 有 {count} 项未核验",
   "tray.cli_menu": "命令行管理菜单",
   "tray.exit": "退出 NexusPipeline",
   "tray.lightweight_open_failed": "轻量运行模式未启动 Web 服务，无法打开管理页面（请使用命令行管理菜单）。",

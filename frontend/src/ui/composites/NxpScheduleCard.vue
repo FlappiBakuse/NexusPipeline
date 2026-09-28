@@ -93,7 +93,7 @@ function toggle() {
   color: var(--nx-color-text, var(--text));
 }
 .nxp-schedule-card:last-child { border-bottom: 0; }
-.nxp-schedule-card:hover { background: var(--content-card-hover, var(--nx-color-surface)); }
+.nxp-schedule-card:hover { background: transparent; }
 .nxp-schedule-card.dnd-dragging { opacity: .55; }
 .nxp-schedule-card.dnd-drop-before { box-shadow: inset 0 2px 0 var(--nx-color-accent, var(--accent)); }
 

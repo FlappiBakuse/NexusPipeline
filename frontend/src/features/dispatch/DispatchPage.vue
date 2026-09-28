@@ -16,7 +16,7 @@ import NxpPageHeader from "../../ui/composites/NxpPageHeader.vue";
 import NxpSelect, { type NxpOption } from "../../ui/primitives/NxpSelect.vue";
 import RunPlanModal from "./components/RunPlanModal.vue";
 import RunningExecution from "./components/RunningExecution.vue";
-import { mergeRunningRecords, type DispatchPlanResult, type DispatchRunningRecord, type DispatchStatus } from "./utils/dispatchTypes";
+import { appendRunningLogEntries, mergeRunningRecords, type DispatchPlanResult, type DispatchRunningRecord, type DispatchStatus } from "./utils/dispatchTypes";
 
 interface Script {
   id: string;
@@ -225,6 +225,10 @@ function realtimeRunningRecord(data: Record<string, unknown>): RunningRecord | n
     totalTasks: Number(data.totalTasks || 0),
     persistenceWarning: String(data.persistenceWarning || ""),
     logTruncated: Boolean(data.logTruncated),
+    logSegmentId: typeof data.logSegmentId === "string" ? data.logSegmentId : undefined,
+    logSegmentSequence: typeof data.logSegmentSequence === "number" ? data.logSegmentSequence : undefined,
+    cancelRequested: data.cancelRequested === true,
+    cancellationPhase: typeof data.cancellationPhase === "string" ? data.cancellationPhase : undefined,
   };
 }
 
@@ -252,26 +256,7 @@ function applyRealtimeRunLog(data: Record<string, unknown>) {
   const current = status.value.running || [];
   const existing = current.find(item => item.id === runId);
   if (!existing) return;
-  const entries = [...(existing.logEntries || [])];
-  const seen = new Set(entries.map(entry => entry.sequence).filter(sequence => typeof sequence === "number"));
-  for (const value of incoming) {
-    if (!value || typeof value !== "object") continue;
-    const item = value as Record<string, unknown>;
-    const sequence = Number(item.sequence);
-    if (!Number.isFinite(sequence) || seen.has(sequence)) continue;
-    seen.add(sequence);
-    entries.push({
-      sequence,
-      timestamp: typeof item.timestamp === "string" ? item.timestamp : undefined,
-      level: String(item.level || "info"),
-      text: String(item.formattedText || item.message || ""),
-      message: String(item.message || ""),
-      formattedText: String(item.formattedText || ""),
-    });
-  }
-  entries.sort((left, right) => (left.sequence || 0) - (right.sequence || 0));
-  const truncated = entries.length > 500;
-  const nextRecord = { ...existing, logEntries: entries.slice(-500), logTruncated: Boolean(existing.logTruncated || truncated) };
+  const nextRecord = appendRunningLogEntries(existing, incoming as Record<string, unknown>[]);
   status.value = { ...status.value, running: current.map(item => item.id === runId ? nextRecord : item) };
 }
 

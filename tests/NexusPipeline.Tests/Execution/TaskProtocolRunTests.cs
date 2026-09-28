@@ -10,6 +10,36 @@ namespace NexusPipeline.Tests.Execution;
 
 public sealed class TaskProtocolRunTests
 {
+    [Fact]
+    public async Task EmptyObservationsDoNotPublishCopiesButFinalAndUnverifiedOutcomeRemainVisible()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "nxp-empty-tick-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            string config = Path.Combine(root, "config.json");
+            File.WriteAllText(config, "{\"tasks\":[{\"id\":\"a\",\"enabled\":true},{\"id\":\"b\",\"enabled\":true}]}");
+            var protocol = new TaskProtocolDescriptor("0.1.0", Discover, """
+              console.log({protocolVersion:'0.1.0',type:'observation',runId:input.runId,attemptId:input.attemptId,
+              observations:[],runBoundary:'unknown',boundaryEvidence:[],diagnostics:[],cursorState:{}});
+              """, Retry, []) { ConfigRules = [new("fixture.default", true, "critical_when_applicable")] };
+            var script = new ScriptInstance { Id = "fixture", PluginType = "fictional", ConfigPath = config, RootPath = root };
+            var spec = new ResolvedScriptSpec(script, "1", new(true, "javascript", "plugin-file", "", ""), "fixture") { TaskProtocol = protocol };
+            var run = new TaskProtocolRun(spec, "run", "user", Path.Combine(root, "journal"));
+            await run.BeginAsync(1, default);
+            int publications = 0;
+            run.Changed += _ => publications++;
+            Assert.Null((await run.ObserveAsync(false, default)).JudgeError);
+            Assert.Null((await run.ObserveAsync(false, default)).JudgeError);
+            Assert.Equal(0, publications);
+            Assert.Null((await run.ObserveAsync(true, default)).JudgeError);
+            Assert.Equal(1, publications);
+            Assert.Equal("unverified", run.Finish(RunAttemptResult.Partial("normal exit"), 1).Status);
+            Assert.Equal("completed", run.Snapshot()!["lifecycleOutcome"]!.GetValue<string>());
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
     [Theory]
     [InlineData(false, "failed")]
     [InlineData(true, "partial")]
@@ -212,6 +242,48 @@ public sealed class TaskProtocolRunTests
 
             JsonObject report = run.Snapshot()!;
             Assert.True(report["originalPlan"]!["currentReadiness"]!["stale"]!.GetValue<bool>());
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [Fact]
+    public async Task RestrictedOfficialRuntimeNeverUsesOldObserverOrSelectionRetry()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "nxp-restricted-runtime-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            string config = Path.Combine(root, "config.json");
+            File.WriteAllText(config, "{}");
+            File.WriteAllText(Path.Combine(root, "advanced.py"), "new official source bytes");
+            const string discover = """
+                console.log({protocolVersion:'0.1.0',type:'discovery',coverage:'partial',
+                  diagnostics:[{code:'okscript.runtime_restricted',message:'base only'}],selectionFields:[],
+                  configAssessment:{schemaVersion:'1',checks:[{ruleId:'fixture.runtime',evaluation:'unknown',
+                    severity:'warning',executionEffect:'warn',scope:{kind:'binding'},locations:[],actions:[],
+                    reasonText:{kind:'literal',value:'New release base-only run'}}]},
+                  tasks:[{id:'oknte:runtime_unverified',sourceKey:'runtime_unverified',name:'Unverified run',
+                    parentId:null,role:'business',enabled:true,order:0,countsAsUnit:true,requiredForParent:true,
+                    retryUnitId:'oknte:runtime_unverified',retryRisk:'unsafe',dependencies:[],detection:'unsupported'}]});
+                """;
+            var protocol = new TaskProtocolDescriptor("0.1.0", discover,
+                "throw new Error('Old task interpreter must not run');", "throw new Error('Old retry must not run');",
+                [new("runtime-code-0", "root", "advanced.py", "text", false, new string('0', 64))])
+            { ConfigRules = [new("fixture.runtime", true, "critical_when_applicable")] };
+            var script = new ScriptInstance { Id = "fixture", PluginType = "oknte", ConfigPath = config, RootPath = root };
+            var spec = new ResolvedScriptSpec(script, "0.1.0", new(true, "javascript", "plugin-file", "", ""), "fixture")
+            { TaskProtocol = protocol };
+            var run = new TaskProtocolRun(spec, "run", "user", Path.Combine(root, "journal"));
+            await run.PreflightAsync(default);
+            await run.BeginAsync(1, default);
+            run.Append("stdout", "old task success text\n");
+            Assert.Null((await run.ObserveAsync(true, default)).JudgeError);
+            Assert.Equal("unverified", run.Finish(RunAttemptResult.Partial("normal exit"), 1).Status);
+            Assert.False(await run.PrepareRetryAsync(2, false, false, default));
+            JsonObject report = run.Snapshot()!;
+            Assert.Equal("unknown", report["finalTaskResults"]![0]!["status"]!.GetValue<string>());
+            Assert.Equal("retry.version_restricted", report["attemptReports"]![0]!["retryDecision"]!["reasonCode"]!.GetValue<string>());
+            Assert.Null(run.Restore());
         }
         finally { Directory.Delete(root, true); }
     }

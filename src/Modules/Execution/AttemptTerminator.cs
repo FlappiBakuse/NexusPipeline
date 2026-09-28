@@ -137,8 +137,11 @@ internal sealed class AttemptTerminator
     public RunAttemptResult? OnStall(StallObservation stall, bool skipFinalJudge)
     {
         RunAttemptResult? result = null;
-        if (_judge.ScriptMode && !skipFinalJudge)
+        if (_judge.ScriptMode)
         {
+            // Stall is a terminal fact. A periodic request started this tick may
+            // still be pending; it cannot be treated as a completed failure.
+            // The existing single-flight owner queues and consumes final work.
             _statusChanged?.Invoke("日志超时，触发判断脚本最终判定...");
             RequestFinalJudge(stall.Reason);
         }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-/** 开关分组容器：与设置页的开关列表使用同一呈现（分组边框 + 分隔行 + 悬停高亮），
+/** 开关分组容器：与设置页的开关列表使用同一呈现（分组边框 + 分隔行），
  *  插件与声明式表单用它把多个 `nxp-switch-setting` 组成与设置页一致的列表。 */
 </script>
 
@@ -28,6 +28,6 @@
   --nx-switch-setting-border-bottom: 0;
   --nx-switch-setting-radius: 0;
   --nx-switch-setting-background: var(--content-card, var(--nx-color-surface));
-  --nx-switch-setting-hover-background: var(--content-card-hover, var(--nx-color-surface));
+  --nx-switch-setting-hover-background: var(--nx-switch-setting-background);
 }
 </style>

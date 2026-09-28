@@ -5,6 +5,7 @@ import http from "node:http";
 import net from "node:net";
 import fs from "node:fs";
 import path from "node:path";
+import { readRunMarker, resolveTestRunRoot } from "../support/test-runtime.mjs";
 import {
   api,
   createUserBinding,
@@ -17,6 +18,8 @@ import {
   projectRoot,
   runtimeExe,
   runtimeDir,
+  runId,
+  runMarkerPath,
   runtimeDiagnostic,
   startRuntime,
   stopRuntime,
@@ -572,6 +575,11 @@ test("重启接受后立即冻结旧服务的运行与配置写入准入", { ski
 });
 
 test("System Smoke runtime 位于隔离目录", { skip }, () => {
-  assert.ok(path.resolve(runtimeDir).startsWith(path.resolve(projectRoot, "tests")));
+  const runRoot = resolveTestRunRoot(projectRoot, runId);
+  const relative = path.relative(runRoot, runtimeDir);
+  assert.ok(relative && !relative.startsWith("..") && !path.isAbsolute(relative));
+  const marker = readRunMarker(runMarkerPath);
+  assert.equal(marker?.runId, runId);
+  assert.equal(path.resolve(marker?.executablePath || ""), path.resolve(runtimeExe));
   assert.ok(fs.existsSync(path.join(runtimeDir, "nexus-pipeline.exe")));
 });

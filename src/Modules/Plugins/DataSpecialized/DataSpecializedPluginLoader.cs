@@ -44,19 +44,6 @@ internal static class DataSpecializedPluginLoader
             {
                 return null;
             }
-            if (plugin._configValidatorPath is not null)
-            {
-                if (!IsSafeRelativePath(plugin._configValidatorPath)
-                    || !plugin._configValidatorPath.EndsWith(".js", StringComparison.OrdinalIgnoreCase))
-                {
-                    return null;
-                }
-                plugin._configValidatorPath = Path.Combine(plugin.PluginDirectory, plugin._configValidatorPath);
-                if (!File.Exists(plugin._configValidatorPath))
-                {
-                    return null;
-                }
-            }
             if (plugin._configEditorPath is not null)
             {
                 if (!IsSafeRelativePath(plugin._configEditorPath)

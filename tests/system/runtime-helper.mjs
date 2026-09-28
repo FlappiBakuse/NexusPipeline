@@ -21,6 +21,7 @@ import {
   requireExecutionMode,
   readRunMarker,
   resolveTestHostDir,
+  resolveTestRunRoot,
   resolveTestHostExitFile,
   sleep,
   stopSpawnedService,
@@ -36,6 +37,12 @@ export const runId = process.env.NEXUS_TEST_RUN_ID?.trim()
   || `standalone-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 export const testHostDir = resolveTestHostDir(projectRoot);
 export const releaseDir = testHostDir;
+export function updateReleaseDirectory() {
+  const supplied = process.env.NEXUS_SYSTEM_UPDATE_RELEASE_DIR;
+  if (!supplied || !fs.existsSync(path.join(supplied, "nexus-pipeline.exe")) || !fs.existsSync(path.join(supplied, ".complete.json")))
+    throw new Error("Update tests require the runner's actual versioned candidate Test Host build.");
+  return supplied;
+}
 const configuredWebPort = Number(process.env.NEXUS_SYSTEM_WEB_PORT?.trim() || "58731");
 if (!Number.isInteger(configuredWebPort) || configuredWebPort < 1024 || configuredWebPort > 65535) {
   throw new Error(`非法 NEXUS_SYSTEM_WEB_PORT：${process.env.NEXUS_SYSTEM_WEB_PORT}`);
@@ -45,7 +52,7 @@ const runtimeName = process.env.NEXUS_SYSTEM_RUNTIME_NAME || "runtime";
 if (!/^[A-Za-z0-9_-]+$/.test(runtimeName)) {
   throw new Error(`非法 NEXUS_SYSTEM_RUNTIME_NAME：${runtimeName}`);
 }
-export const runtimeDir = path.join(projectRoot, "tests", ".artifacts", "runs", runId, runtimeName);
+export const runtimeDir = path.join(resolveTestRunRoot(projectRoot, runId), runtimeName);
 export const runtimeExe = path.join(runtimeDir, "nexus-pipeline.exe");
 export const servicePidPath = path.join(runtimeDir, ".nxp", "runtime", "service.pid");
 export const runMarkerPath = path.join(runtimeDir, ".nxp", "test-run-marker.json");

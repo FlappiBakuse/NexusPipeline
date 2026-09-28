@@ -187,8 +187,13 @@ public static class ProjectLoader
         }
     }
 
-    private static bool IsExternalPackageDocument(string path)
-        => path.Replace('\\', '/').Contains("/.nuget/packages/", StringComparison.OrdinalIgnoreCase);
+    public static bool IsExternalPackageDocument(string path, string? packageRoot = null)
+    {
+        string packages = packageRoot ?? Environment.GetEnvironmentVariable("NUGET_PACKAGES")
+            ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".nuget", "packages");
+        return Path.GetFullPath(path).StartsWith(Path.GetFullPath(packages).TrimEnd(Path.DirectorySeparatorChar)
+            + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+    }
 
     private static bool IsNonFatalNuGetAuditDiagnostic(string message)
         => message.Contains("获取包漏洞数据时出错", StringComparison.OrdinalIgnoreCase)

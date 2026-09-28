@@ -70,10 +70,14 @@ internal sealed class PluginDiscovery
         }
         foreach (string directory in Directory.GetDirectories(AppPaths.PluginsDir))
         {
-            if (!PluginManifest.TryLoad(directory, out PluginManifest? manifest, out _)
+            if (!PluginManifest.TryLoad(directory, out PluginManifest? manifest, out string? error)
                 || manifest is null
                 || manifest.Kind != "data-specialized")
             {
+                if (error is not null && error.Contains("configValidator", StringComparison.Ordinal))
+                {
+                    Logger.Warn($"[插件] {Path.GetFileName(directory)}：{error}");
+                }
                 continue;
             }
             if (!string.Equals(Path.GetFileName(directory), manifest.ArtifactName, StringComparison.Ordinal))

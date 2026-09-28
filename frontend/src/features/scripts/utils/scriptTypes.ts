@@ -2,6 +2,8 @@ export interface Script {
   id: string;
   name: string;
   pluginType?: string;
+  executionProviderId?: string;
+  executionProviderConfigId?: string;
   pluginInputs?: Record<string, unknown>;
   rootPath?: string;
   mainExe?: string;
@@ -26,6 +28,7 @@ export interface Script {
 }
 
 export interface ScriptPlugin {
+  executionProviderId?: string;
   name?: string;
   displayName?: string;
   kind?: string;
@@ -68,6 +71,8 @@ export const emptyScriptDraft: ScriptDraft = {
   id: "",
   name: "",
   pluginType: "",
+  executionProviderId: "",
+  executionProviderConfigId: "",
   pluginInputs: {},
   rootPath: "",
   mainExe: "",
@@ -105,7 +110,9 @@ export function scriptDraftFrom(script: Script | null, plugin = ""): ScriptDraft
   return {
     ...emptyScriptDraft,
     id: value.id || "",
-    pluginType: value.pluginType || plugin,
+    pluginType: value.pluginType || (plugin.startsWith('provider:') ? '' : plugin),
+    executionProviderId: value.executionProviderId || (plugin.startsWith('provider:') ? plugin.slice(9) : ''),
+    executionProviderConfigId: value.executionProviderConfigId || '',
     name: value.name || "",
     pluginInputs: value.pluginInputs && typeof value.pluginInputs === "object" ? { ...value.pluginInputs } : {},
     rootPath: value.rootPath || "",
@@ -135,6 +142,8 @@ export function scriptPayload(draft: ScriptDraft) {
   return {
     id: draft.id,
     pluginType: draft.pluginType || "",
+    executionProviderId: draft.executionProviderId || "",
+    executionProviderConfigId: draft.executionProviderConfigId || "",
     name: draft.name.trim(),
     rootPath: stripQuotes(draft.rootPath),
     pluginInputs: draft.pluginType ? { ...draft.pluginInputs } : {},
@@ -162,8 +171,9 @@ export function scriptPayload(draft: ScriptDraft) {
 
 /** 保存前校验：返回错误提示的 i18n key，无错误时返回空字符串。 */
 export function validateScriptDraft(draft: ScriptDraft): { key: string; args?: Record<string, unknown> } | null {
-  const required = [draft.name, draft.rootPath, draft.gameExe, draft.maxAttempts, draft.logStallTimeoutMinutes, draft.totalTimeoutMinutes];
-  if (!draft.pluginType) required.push(draft.mainExe, draft.configPath, draft.logPath);
+  const required = [draft.name, draft.rootPath, draft.maxAttempts, draft.logStallTimeoutMinutes, draft.totalTimeoutMinutes];
+  if (draft.executionProviderId) required.push(draft.executionProviderConfigId || '');
+  else { required.push(draft.gameExe); if (!draft.pluginType) required.push(draft.mainExe, draft.configPath, draft.logPath); }
   if (required.some((value) => !String(value || "").trim())) {
     return { key: "scripts.validation.required_fields" };
   }

@@ -3,7 +3,29 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { copyReleaseArtifacts } from "../support/test-runtime.mjs";
+import { copyReleaseArtifacts, resolveTestRunRoot } from "../support/test-runtime.mjs";
+
+test("explicit short artifact roots require ownership and keep run identities scoped", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "nexus-artifact-root-"));
+  const saved = process.env.NEXUS_TEST_ARTIFACT_ROOT;
+  try {
+    delete process.env.NEXUS_TEST_ARTIFACT_ROOT;
+    assert.equal(resolveTestRunRoot(root, "sample"), path.join(root, "tests", ".artifacts", "runs", "sample"));
+    process.env.NEXUS_TEST_ARTIFACT_ROOT = root;
+    assert.throws(() => resolveTestRunRoot(root, "sample"), /ENOENT/);
+    fs.writeFileSync(path.join(root, ".nxp-test-artifact-root.json"), JSON.stringify({ schemaVersion: 1,
+      owner: "NexusPipeline.Tests", directory: root }));
+    assert.equal(resolveTestRunRoot(root, "sample"), path.join(root, "runs", "sample"));
+    assert.throws(() => resolveTestRunRoot(root, "../another"), /identity/);
+    fs.writeFileSync(path.join(root, ".nxp-test-artifact-root.json"), JSON.stringify({ schemaVersion: 1,
+      owner: "NexusPipeline.Tests", directory: path.join(root, "another") }));
+    assert.throws(() => resolveTestRunRoot(root, "sample"), /Unowned/);
+  } finally {
+    if (saved === undefined) delete process.env.NEXUS_TEST_ARTIFACT_ROOT;
+    else process.env.NEXUS_TEST_ARTIFACT_ROOT = saved;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test("runtime copy accepts but does not copy the verified build-cache manifest", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "nexus-runtime-copy-"));

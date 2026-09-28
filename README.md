@@ -6,7 +6,7 @@
 
 NexusPipeline 是一个运行在 Windows 上的本地游戏自动化脚本管家。它可以按计划启动脚本、监控日志、处理重试、隔离多账号配置，并在任务结束后发送通知或执行关机、休眠、重启等操作。
 
-程序常驻托盘，管理页面默认位于 `http://127.0.0.1:58731/`。配置、历史、日志和插件都保存在本机，不需要云平台或数据库。运行程序需要 .NET 8 Desktop Runtime 和管理员权限。
+程序常驻托盘，管理页面默认位于 `http://127.0.0.1:58731/`。配置、历史、日志和插件都保存在本机，不需要云平台或数据库。运行程序需要 .NET 8 Desktop Runtime、ASP.NET Core Runtime 8 和管理员权限。
 
 ## 主要功能
 
@@ -25,13 +25,13 @@ NexusPipeline 是一个运行在 Windows 上的本地游戏自动化脚本管家
 
 ## 安装
 
-1. 从 [GitHub Releases](https://github.com/FlappiBakuse/NexusPipeline/releases) 下载 `NexusPipeline-vX.Y.Z[-beta.N|-rc.N]-win-x64.zip`。
-2. 解压到固定目录，例如 `D:\NexusPipeline\`。
+1. 从 [GitHub Releases](https://github.com/FlappiBakuse/NexusPipeline/releases) 下载当前版本提供的安装器或便携包。
+2. 首次使用安装器时按向导选择空目录；同一 Windows 用户已登记的安装实例可选择原路径升级，安装器会先暂存并核验应用文件，再交给宿主现有更新事务切换。使用便携包时解压到固定空目录，例如 `D:\NexusPipeline\`。请勿把新包直接解压覆盖旧实例，安装器也不会接管未登记的旧便携目录。
 3. 双击 `nexus-pipeline.exe`，按系统提示允许管理员权限。
 4. 浏览器打开 `http://127.0.0.1:58731/`，完成脚本、用户和队列设置。
 5. 需要开机运行时，在「设置」中开启开机自启动。
 
-未安装运行时的电脑请从 [.NET 8 下载页](https://dotnet.microsoft.com/download/dotnet/8.0)安装 Desktop Runtime 8.x。
+便携版缺少运行时会显示 .NET 自带的提示。可直接打开包内的 `wwwroot/help/runtime-prerequisites.html`，或分别下载官方 [Desktop Runtime 8.0.31 x64](https://builds.dotnet.microsoft.com/dotnet/WindowsDesktop/8.0.31/windowsdesktop-runtime-8.0.31-win-x64.exe) 和 [ASP.NET Core Runtime 8.0.31 x64](https://builds.dotnet.microsoft.com/dotnet/aspnetcore/Runtime/8.0.31/aspnetcore-runtime-8.0.31-win-x64.exe)。安装器会检查两项依赖；便携版不会自动下载。
 
 ## 升级前备份（重要）
 
@@ -43,7 +43,9 @@ config/    data/    history/    logs/    plugins/    .nxp/
 
 「更新」页中的版本备份用于更新文件切换与回滚，不能替代用户数据备份。更新完成后若发现无法识别的旧现场，请保留现场目录和日志，使用备份恢复数据，再根据当前版本格式重新配置。
 
-手动升级时，保留上述运行时目录，仅替换新版本发布包中的程序文件和 `wwwroot/`。如果更新页提示跨越破坏性版本屏障，请手动下载对应安装包，按发布说明迁移配置后再启动。插件仓库独立维护，插件版本和最低宿主版本以插件 manifest 为准。
+手动升级时，保留上述运行时目录，仅替换新版本发布包中的 `nexus-pipeline.exe`、`wwwroot/` 和 `README.md`。不要将新版包的 `plugins/` 覆盖已有插件或用户数据。如果更新页提示跨越破坏性版本屏障，请手动下载对应安装包，按发布说明迁移配置后再启动。插件仓库独立维护，插件版本和最低宿主版本以插件 manifest 为准。
+
+从 v0.16.8 通过内置更新到 v0.16.9 时，旧版更新 worker 只交换 EXE 和 `wwwroot/`。新版首次启动会在原目录没有 `README.md` 时，从已暂存的包补上说明文件；已存在的 README 保留原字节，必要时可按上述手动步骤更新。旧实例中的插件及启用状态保持原样；两个预装插件仅用于全新安装。
 
 ## 快速开始
 
@@ -88,6 +90,8 @@ MCP 仅监听本机 loopback；运行队列若带有休眠、重启、关机或�
 
 | 文档 | 内容 |
 |---|---|
+| [docs/user/README.md](docs/user/README.md) | 用户安装、运行、结果、升级、卸载与 FAQ |
+| [docs/user/README.en.md](docs/user/README.en.md) | Key user limits in English |
 | [CHANGELOG.md](CHANGELOG.md) | 版本变更与升级注意事项 |
 | [docs/DESIGN.md](docs/DESIGN.md) | 运行流程、持久化和模块边界 |
 | [docs/CONTROL_PLANE.md](docs/CONTROL_PLANE.md) | Web、CLI、MCP 能力入口 |
@@ -122,6 +126,30 @@ Web 默认端口被占用时会顺延到可用端口；实际端口可在状态�
 
 ## License
 
-[MIT](LICENSE) © 2026 FlappiBakuse
+NexusPipeline 的 MIT 许可全文如下；源码中的 [LICENSE](LICENSE) 与本文相同。
+
+```text
+MIT License
+
+Copyright (c) 2026 FlappiBakuse
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
 
 专项任务支持只读任务预览、日志证据、受控选择重试和历史报告，详见[专项任务协议](docs/reference/plugin-api/task-protocol.md)。

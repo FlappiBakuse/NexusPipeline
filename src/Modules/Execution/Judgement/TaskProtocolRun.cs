@@ -31,6 +31,8 @@ internal sealed class TaskProtocolRun
     private int _attemptNumber;
     private bool _protocolFailed;
     private bool _runtimeIdentityChanged;
+    private bool _restrictedRuntime;
+    private string _engineStatus = "not_started";
     private string _lifecycle = "not_started";
     private TaskPlan? _expectedRetryPlan;
     private TaskPlan? _admissionPlan;
@@ -40,6 +42,10 @@ internal sealed class TaskProtocolRun
     private JsonObject? _cursorState;
     private long _revision;
     internal Action<JsonObject>? Changed { get; set; }
+    internal bool HasTerminalBoundary
+    {
+        get { lock (_gate) return _reducer?.RunBoundary is "ended" or "aborted"; }
+    }
     private void Publish() { _revision++; var snapshot = Snapshot(); if (snapshot is not null) Changed?.Invoke(snapshot); }
 
     internal void SetTerminationReason(string reason) { lock (_gate) { if (_terminationReason == "none") _terminationReason = reason; } }
@@ -114,6 +120,10 @@ internal sealed class TaskProtocolRun
         if (plan.Coverage == "unsupported") throw new InvalidDataException("unsupported_schema: cannot establish original task plan");
         if (_reducer is null)
         {
+            _restrictedRuntime = _spec.Script.PluginType is "oknte" or "okww"
+                && plan.Diagnostics.Any(d => d.Code == "okscript.runtime_restricted")
+                && plan.Tasks.Length == 1 && plan.Tasks[0].SourceKey == "runtime_unverified"
+                && plan.Tasks[0].Detection == "unsupported";
             _reducer = new(_runId, plan);
             _selected = plan.Tasks.Where(t => t.Enabled).Select(t => t.Id).ToArray();
             var metadata = ConfigSessionMark.FromScript(_spec.Script, _spec.ProfileHash, _spec.PluginVersion, _spec.ExtraConfigPaths);
@@ -149,6 +159,9 @@ internal sealed class TaskProtocolRun
         try
         {
             if (!VerifyRuntimeIdentity()) return new JudgeScriptResult { JudgeError = "runtime_identity_changed" };
+            // A new official release may use the base lifecycle, but the old
+            // interpreter must not turn its logs into verified task outcomes.
+            if (_restrictedRuntime) return new JudgeScriptResult();
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
             deadline.CancelAfter(TimeSpan.FromSeconds(30));
             bool more;
@@ -176,6 +189,7 @@ internal sealed class TaskProtocolRun
                 _view!.ReadConfig, _view!.ReadResource, false, deadline.Token).ConfigureAwait(false);
             lock (_gate)
             {
+                string previousBoundary = _reducer!.RunBoundary;
                 _reducer!.Accept(observation, batch);
                 var evidence = observation.Observations.SelectMany(o => o.Evidence).Concat(observation.BoundaryEvidence)
                     .Concat((observation.Incidents ?? []).SelectMany(i => i.Evidence))
@@ -187,7 +201,10 @@ internal sealed class TaskProtocolRun
                     if (_diagnostics.Count < 128 && !_diagnostics.Contains(diagnostic)) _diagnostics.Add(diagnostic);
                 _cursorState = observation.CursorState is null ? null : (JsonObject)observation.CursorState.DeepClone();
                 _logs.Acknowledge(batch);
-                Publish();
+                if (final || batch.HasGap || _reducer.RunBoundary != previousBoundary
+                    || observation.Observations.Length > 0 || (observation.Incidents?.Length ?? 0) > 0
+                    || observation.Diagnostics.Length > 0)
+                    Publish();
                 if (!more && (_reducer!.RunBoundary is "ended" or "aborted" || final))
                     return new JudgeScriptResult { Status = "partial", Reason = "tasks.observation_complete" };
             }
@@ -209,7 +226,8 @@ internal sealed class TaskProtocolRun
     {
         try
         {
-            _view?.VerifyPinnedResourcesUnchanged();
+            if (_restrictedRuntime) _view?.VerifyRestrictedRuntimeUnchanged(_protocol.ReadResources);
+            else _view?.VerifyPinnedResourcesUnchanged();
             return !_runtimeIdentityChanged;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
@@ -230,6 +248,13 @@ internal sealed class TaskProtocolRun
         VerifyRuntimeIdentity();
         lock (_gate)
         {
+            _engineStatus = processResult.Status switch
+            {
+                "success" => "succeeded",
+                "failed" or "blocked" => "failed",
+                "cancelled" => "cancelled",
+                _ => "unknown",
+            };
             if (_reducer is null) return processResult;
             if (_attemptNumber != number)
             {
@@ -268,7 +293,8 @@ internal sealed class TaskProtocolRun
                     ? RunAttemptResult.Success("tasks.all_satisfied", "tasks.all_satisfied")
                 : summary.Outcome == "no_tasks" || summary.Tone == "ok"
                     ? new RunAttemptResult { Status = "skipped", Reason = "tasks.no_execution_required", ReasonCode = "tasks.no_execution_required" }
-                : RunAttemptResult.Partial(summary.Outcome, summary.Tone == "warn" ? "tasks.partial_failure" : "tasks_unverified");
+                : summary.Tone == "warn" ? RunAttemptResult.Partial(summary.Outcome, "tasks.partial_failure")
+                : new RunAttemptResult { Status = "unverified", Reason = "流程已结束 · 有未核验项", ReasonCode = "tasks.unverified", IsFatal = true };
             _lastCompletedAttemptResult = outcome;
             return outcome;
         }
@@ -282,6 +308,11 @@ internal sealed class TaskProtocolRun
 
     internal async Task<bool> PrepareRetryAsync(int maximum, bool cancelled, bool budgetExpired, CancellationToken token)
     {
+        if (_restrictedRuntime)
+        {
+            SaveRetry(new("stop", "retry.version_restricted", [], [], []));
+            return false;
+        }
         TaskRetrySelection safe;
         lock (_gate) safe = _reducer!.SelectRetry(maximum, cancelled, budgetExpired);
         if (_protocolFailed || safe.Decision == "stop") { SaveRetry(safe); return false; }
@@ -378,6 +409,7 @@ internal sealed class TaskProtocolRun
                     ["scriptInstanceId"] = _spec.Script.Id,
                     ["originalPlan"] = JsonNode.Parse(TaskProtocolJson.Write(HistoricalPlan(blockedPlan))),
                     ["lifecycleOutcome"] = "not_started",
+                    ["engineStatus"] = "not_started",
                     ["attemptReports"] = new JsonArray(),
                     ["finalTaskResults"] = new JsonArray(),
                     ["incidents"] = new JsonArray(),
@@ -408,6 +440,7 @@ internal sealed class TaskProtocolRun
                 ["originalPlan"] = JsonNode.Parse(TaskProtocolJson.Write(
                     _lifecycle == "running" ? _reducer.OriginalPlan : HistoricalPlan(_reducer.OriginalPlan))),
                 ["lifecycleOutcome"] = _lifecycle,
+                ["engineStatus"] = _engineStatus,
                 ["attemptReports"] = attempts,
                 ["finalTaskResults"] = ResultsJson(_reducer.Results),
                 ["incidents"] = JsonNode.Parse(TaskProtocolJson.Write(_reducer.IncidentHistory)),

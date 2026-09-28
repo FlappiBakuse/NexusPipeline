@@ -12,6 +12,12 @@ public class ScriptInstance
     /// <summary>专用插件名（空 = 通用脚本实例）；非空时主程序/参数/配置/日志由当前插件在运行时解析。</summary>
     public string PluginType { get; set; } = "";
 
+    /// <summary>Optional managed execution provider. Empty keeps the existing external-script path.</summary>
+    public string ExecutionProviderId { get; set; } = "";
+
+    /// <summary>Provider-owned configuration identity; no executable path is fabricated for direct drive.</summary>
+    public string ExecutionProviderConfigId { get; set; } = "";
+
     /// <summary>专用插件用户输入值（resolve.json inputs 声明的 name → 用户填写值；通用脚本恒为空）。键大小写以声明为准。</summary>
     public Dictionary<string, string> PluginInputs { get; set; } = new();
 

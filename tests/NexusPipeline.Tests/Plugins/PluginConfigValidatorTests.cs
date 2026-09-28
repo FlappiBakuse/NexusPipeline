@@ -1,188 +1,47 @@
 using System.Text.Json.Nodes;
-using Xunit;
-using NexusPipeline.Modules.Notifications;
-using NexusPipeline.Modules.Plugins.DataSpecialized;
 using NexusPipeline.Modules.Plugins.Managed;
-using NexusPipeline.Modules.Plugins.Runtime;
-using NexusPipeline.Modules.Settings.Contracts;
-using NexusPipeline.Modules.Settings;
+using Xunit;
 
 namespace NexusPipeline.Tests.Plugins;
 
 public sealed class PluginConfigValidatorTests
 {
-    private static string MakeTempDir()
-    {
-        string root = Path.Combine(Path.GetTempPath(), "np-plugin-validator-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
-        return root;
-    }
-
-    [Fact]
-    public void DataManifestLoadsOptionalJavaScriptValidator()
-    {
-        string root = MakeTempDir();
-        try
-        {
-            WriteDataManifest(root, "data/config-validator.js");
-            File.WriteAllText(Path.Combine(root, "data", "config-validator.js"), "nexus.toast('ok');");
-
-            Assert.True(PluginManifest.TryLoad(root, out PluginManifest? manifest, out string? error), error);
-            Assert.Equal("data/config-validator.js", manifest!.ConfigValidatorPath);
-            Assert.IsType<DataSpecializedPlugin>(DataSpecializedPlugin.Load(root));
-        }
-        finally
-        {
-            DeleteExact(root);
-        }
-    }
-
     [Theory]
-    [InlineData("../config-validator.js")]
-    [InlineData("data/../config-validator.js")]
-    [InlineData("C:/outside/config-validator.js")]
-    [InlineData("data/config-validator.py")]
-    [InlineData("data/")]
-    public void DataManifestRejectsUnsafeValidatorPath(string validatorPath)
+    [InlineData("data/config-validator.js", "data-specialized")]
+    [InlineData("../unsafe.js", "data-specialized")]
+    [InlineData("data/config-validator.js", "managed-code")]
+    public void RetiredValidatorIsRejectedWithActionableMessage(string path, string kind)
     {
-        string root = MakeTempDir();
+        string root = Path.Combine(Path.GetTempPath(), "np-retired-validator-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(root, "data"));
         try
         {
-            WriteDataManifest(root, validatorPath);
-            File.WriteAllText(Path.Combine(root, "data", "config-validator.js"), "");
-
-            Assert.False(PluginManifest.TryLoad(root, out _, out string? error));
-            Assert.Contains("configValidator", error);
-        }
-        finally
-        {
-            DeleteExact(root);
-        }
-    }
-
-    [Fact]
-    public void DataManifestRejectsMissingValidatorFile()
-    {
-        string root = MakeTempDir();
-        try
-        {
-            WriteDataManifest(root, "data/config-validator.js");
-            Assert.False(PluginManifest.TryLoad(root, out _, out string? error));
-            Assert.Contains("configValidator", error);
-        }
-        finally
-        {
-            DeleteExact(root);
-        }
-    }
-
-    [Fact]
-    public void ManagedManifestCannotOptIntoDataValidator()
-    {
-        string root = MakeTempDir();
-        try
-        {
-            Directory.CreateDirectory(Path.Combine(root, "data"));
-            File.WriteAllText(Path.Combine(root, "data", "config-validator.js"), "");
             var manifest = new JsonObject
             {
                 ["schemaVersion"] = 2,
-                ["name"] = "fixture-managed-validator",
-                ["artifactName"] = "FixtureManagedValidator",
-                ["displayName"] = "Fixture",
+                ["name"] = "fixture-validator",
+                ["artifactName"] = "FixtureValidator",
                 ["version"] = "1.0.0",
-                ["kind"] = "managed-code",
+                ["kind"] = kind,
+                ["resolve"] = "data/resolve.json",
+                ["judgeScript"] = "data/judge.js",
                 ["apiVersion"] = "1.0",
                 ["entryAssembly"] = "fixture.dll",
                 ["entryType"] = "Fixture.Entry",
-                ["configValidator"] = "data/config-validator.js",
+                ["configValidator"] = path,
             };
             File.WriteAllText(Path.Combine(root, "plugin.json"), manifest.ToJsonString());
-
+            File.WriteAllText(Path.Combine(root, "data", "config-validator.js"), "throw new Error('must not execute');");
             Assert.False(PluginManifest.TryLoad(root, out _, out string? error));
-            Assert.Contains("data-specialized", error);
+            Assert.Contains("configValidator", error);
+            Assert.Contains("升级", error);
+            Assert.Contains("卸载", error);
+            Assert.Contains("不会被修改", error);
+            Assert.True(File.Exists(Path.Combine(root, "data", "config-validator.js")));
         }
         finally
         {
-            DeleteExact(root);
+            Directory.Delete(root, recursive: true);
         }
-    }
-
-    [Fact]
-    public void PluginManagerReturnsValidatorOnlyForEnabledDataPlugin()
-    {
-        string root = MakeTempDir();
-        string name = "fixture-validator-" + Guid.NewGuid().ToString("N")[..8];
-        try
-        {
-            WriteDataManifest(root, "data/config-validator.js", name);
-            File.WriteAllText(Path.Combine(root, "data", "config-validator.js"), "nexus.toast('fixture');");
-            DataSpecializedPlugin plugin = Assert.IsType<DataSpecializedPlugin>(DataSpecializedPlugin.Load(root));
-            var settings = new AppSettings();
-            var manager = new PluginManager(
-                new TestSettingsProvider(settings),
-                new TestPluginNotificationSink(),
-                new AllowAllPluginConfigurationMutationGate(),
-                discoverData: () => [plugin]);
-            try
-            {
-                manager.LoadAll();
-                Assert.True(manager.TryGetConfigValidator(name, out ConfigValidatorDescriptor? descriptor));
-                Assert.Equal(name, descriptor!.PluginName);
-                Assert.Equal("nexus.toast('fixture');", descriptor.Script);
-
-                settings.PluginPreferences = new Dictionary<string, PluginPreference>(StringComparer.OrdinalIgnoreCase)
-                {
-                    [name] = new PluginPreference { Enabled = false },
-                };
-                manager.LoadAll();
-                Assert.False(manager.TryGetConfigValidator(name, out _));
-            }
-            finally
-            {
-                manager.ShutdownAll();
-            }
-        }
-        finally
-        {
-            DeleteExact(root);
-        }
-    }
-
-    private static void WriteDataManifest(string root, string validatorPath, string name = "fixture-validator")
-    {
-        Directory.CreateDirectory(Path.Combine(root, "data"));
-        var manifest = new JsonObject
-        {
-            ["schemaVersion"] = 2,
-            ["name"] = name,
-            ["artifactName"] = "FixtureValidator",
-            ["displayName"] = "Fixture Validator",
-            ["version"] = "1.0.0",
-            ["kind"] = "data-specialized",
-            ["resolve"] = "data/resolve.json",
-            ["judgeScript"] = "data/judge.js",
-            ["configValidator"] = validatorPath,
-        };
-        File.WriteAllText(Path.Combine(root, "plugin.json"), manifest.ToJsonString());
-        File.WriteAllText(Path.Combine(root, "data", "resolve.json"), "{\"paths\":{\"mainExe\":\"tool.exe\",\"configPath\":\"config.json\",\"logPath\":\"log.txt\"}}");
-        File.WriteAllText(Path.Combine(root, "data", "judge.js"), "");
-    }
-
-    private static void DeleteExact(string path)
-    {
-        try
-        {
-            if (File.Exists(path)) File.Delete(path);
-            else if (Directory.Exists(path)) Directory.Delete(path, recursive: true);
-        }
-        catch
-        {
-        }
-    }
-
-    private sealed class LocalSettingsProvider : ISettingsProvider
-    {
-        public AppSettings Current { get; } = new();
     }
 }

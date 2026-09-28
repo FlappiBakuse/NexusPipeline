@@ -136,6 +136,7 @@ internal static class ApiSettingsHandler
             settings.AutoStart,
             settings.MinimizeToTray,
             settings.LightweightMode,
+            settings.AllowConfigRepair,
             settings.AutoOpenBrowser,
             settings.HistoryRetentionDays,
             settings.WebPort,

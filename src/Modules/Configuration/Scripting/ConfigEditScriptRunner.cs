@@ -12,10 +12,10 @@ using NexusPipeline.Platform.Storage;
 
 namespace NexusPipeline.Modules.Configuration.Scripting;
 
-/// <summary>配置校验脚本向前端请求的短消息。</summary>
+/// <summary>配置脚本向前端请求的短消息。</summary>
 internal sealed record ConfigValidationToast(string Message, string Kind);
 
-/// <summary>配置校验脚本向前端请求的页面角落通知。</summary>
+/// <summary>配置脚本向前端请求的页面角落通知。</summary>
 internal sealed record ConfigValidationNotification(string Title, string Body, string Kind);
 
 /// <summary>宿主统一任务协议配置诊断；按绑定用户保留，不跨用户去重。</summary>
@@ -52,7 +52,7 @@ internal sealed record ConfigValidationResult(
         Array.Empty<ConfigValidationNotification>());
 }
 
-/// <summary>配置快照文件清单 DTO；只向 validator 暴露逻辑相对路径和大小。</summary>
+/// <summary>配置快照文件清单 DTO；只向编辑脚本暴露逻辑相对路径和大小。</summary>
 internal sealed record ConfigValidationFile(string Path, long Size);
 
 /// <summary>附加配置路径的只读快照视图：声明路径 + 该用户的 store-extra 快照目录。</summary>
@@ -64,10 +64,10 @@ internal sealed record ConfigValidationExtraSnapshot(string Path, string StoreDi
 }
 
 /// <summary>
-/// data-specialized 插件配置校验器。它与运行期 JudgeScriptRunner 分离，固定以用户 store 为唯一文件根，
+/// data-specialized 插件配置编辑准备脚本运行器。它与运行期 JudgeScriptRunner 分离，
 /// 只提供受限的 UTF-8 文件 API 与当前请求内的 UI feedback 队列。
 /// </summary>
-internal static class ConfigValidationScriptRunner
+internal static class ConfigEditScriptRunner
 {
     internal const int MaxExecutionSeconds = 5;
     internal const long MaxReadFileBytes = 2 * 1024 * 1024;
@@ -81,10 +81,10 @@ internal static class ConfigValidationScriptRunner
 
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
 
-    /// <summary>执行一次 JS validator；任何异常都转为结果错误并保留已经完成的文件写入。
+    /// <summary>执行一次 JS 配置编辑准备脚本；任何异常都转为结果错误并保留已经完成的文件写入。
     /// trigger 标识触发语境（config-edit/script-save）；extraSnapshots 提供附加配置路径的只读快照（@extra&lt;i&gt;/ 前缀访问）。</summary>
     internal static async Task<ConfigValidationResult> ExecuteAsync(
-        ConfigValidatorDescriptor descriptor,
+        ConfigEditorDescriptor descriptor,
         ScriptInstance script,
         ResolvedScriptUser? user,
         string storeRoot,
@@ -651,7 +651,7 @@ internal static class ConfigValidationScriptRunner
         return value.Replace('\\', '/');
     }
 
-    private static void LogFailure(ConfigValidatorDescriptor descriptor, string error)
+    private static void LogFailure(ConfigEditorDescriptor descriptor, string error)
     {
         Logger.Warn($"[专项配置校验:{descriptor.PluginName}] {error}");
     }
