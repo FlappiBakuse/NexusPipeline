@@ -1,8 +1,17 @@
 # 项目状态（Status）
 
-**更新日期**：2026-09-28｜**发布模式**：`major=0` 或带 `-beta.N` / `-rc.N` 后缀的版本为 Pre-release；`major>=1` 且无后缀的版本为正式 Release。日常开发分支为 `develop`；源码进入 `main` 必须经过 PR、`Host / Required` 检查与 squash merge。
+**更新日期**：2026-09-29｜**发布模式**：`major=0` 或带 `-beta.N` / `-rc.N` 后缀的版本为 Pre-release；`major>=1` 且无后缀的版本为正式 Release。日常开发分支为 `develop`；源码进入 `main` 必须经过 PR、`Host / Required` 检查与 squash merge。
 
 > 本文件记录尚未完成的开发计划、活跃技术验证和当前未解决问题。已完成版本以 [CHANGELOG.md](../CHANGELOG.md)、代码和测试结果为准。版本号只在用户明确指定时修改；开发检查点保存在仓库外，不以 Git 标签代替文件备份。
+
+## 已知验证边界
+
+v0.16.10 收敛了自动门禁的范围；以下能力不再由自动测试覆盖，须人工验收：
+
+- [ ] 脚本、用户与调度队列的管理页面 CRUD：UI Smoke 只保留主导航与手机导航两个用例。
+- [ ] MCP 端点、损坏配置的真实重启恢复、模拟器边界与更新事务的真实进程场景：System Smoke 只保留 runtime 与 judge 两个套件。
+- [ ] 官方 MaaFrameworkDriver 的原生 Win32／ADB controller、标准 Agent、pretask 与真实设备：该门禁依赖的外部锁定输入已从仓库移除，改为人工验收。
+- [ ] 更新事务故障注入与计时边界：真实计时用例组已随门禁精简移除。
 
 ## 后续版本开发
 
