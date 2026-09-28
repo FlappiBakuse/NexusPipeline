@@ -1,25 +1,17 @@
 # 项目状态（Status）
 
-**更新日期**：2026-09-27｜**发布模式**：`major=0` 或带 `-beta.N` / `-rc.N` 后缀的版本为 Pre-release；`major>=1` 且无后缀的版本为正式 Release。日常开发分支为 `develop`；源码进入 `main` 必须经过 PR、`Host / Required` 检查与 squash merge。
+**更新日期**：2026-09-28｜**发布模式**：`major=0` 或带 `-beta.N` / `-rc.N` 后缀的版本为 Pre-release；`major>=1` 且无后缀的版本为正式 Release。日常开发分支为 `develop`；源码进入 `main` 必须经过 PR、`Host / Required` 检查与 squash merge。
 
 > 本文件记录尚未完成的开发计划、活跃技术验证和当前未解决问题。已完成版本以 [CHANGELOG.md](../CHANGELOG.md)、代码和测试结果为准。版本号只在用户明确指定时修改；开发检查点保存在仓库外，不以 Git 标签代替文件备份。
 
-## 当前未完成事项
+## 后续版本开发
 
-### v0.16.9 发行前环境验收
+- [ ] 在具备人工操作条件的隔离 Windows 环境观察安全桌面 UAC 拒绝，并与现有共享 Pascal OS 返回边界契约分开记录；不自动触发或代替用户点击。
+- [ ] 扩展安装器交互验收：缺失 .NET 运行时的在线下载、签名校验、取消与重启提示，以及可信保留数据实例的交互重装。当前静默拒绝与离线依赖首装结果不能代替这些路径。
+- [ ] 扩展生产安装事务的原生故障注入，覆盖依赖安装中断、Inno 登记部分写入、worker 回滚及检查点恢复；按归属保存每次失败现场。
+- [ ] 扩展不同真实游戏、账号、机器人和模拟器环境的业务终态验证，不将受控夹具或单配置成功外推到其他组合。
 
-- [ ] 以干净的提交来源运行正式配对候选门禁，并保留源码 SHA、构建输入、原始报告和资产摘要。开发分支的本地候选不提供受保护主干的远端发行资格。
-- [ ] 完成原生安装依赖交互、可信保留数据重装及故障注入的全部适用矩阵。静默拒绝、编译和托管单元测试分别记录，不能替代实际交互安装。
-
-当前本地正式 Host fast 与 Plugins 全范围验证通过；Maa 原生集合包含标准 Agent、pretask、5.13/5.14、取消后重启和目标重新发现。最终双仓配对候选须固定实际 Host SDK 提交，并使用干净来源重新构建和验证。
-
-无游戏原生队列链已覆盖恢复失败后的局部隔离、受阻 B 未执行、独立 C 继续、文件锁下重启拒绝、解除锁后恢复及整队取消。性能测量边界与未改善项见[语义债务与性能处置](development/debt-ledger.md)。真实游戏与系统安装环境的范围仍按下列台账单独管理。
-
-已完成事项见 [CHANGELOG.md](../CHANGELOG.md)；以下为后续功能与长期技术验证，不作为已完成发行的待办。
-
-公共 UI 元件由对应 SFC 维护 DOM、交互和内部样式；feature 负责业务布局、状态与公开 props/events，插件通过注册的 `nxp-*` 元件消费宿主能力。
-
-当前版本治理与验证结果记录在 [CHANGELOG.md](../CHANGELOG.md)；后续工作聚焦下方插件生态扩展和专项技术验证。前端架构现状以[架构索引](architecture/README.md)和[前端架构专题](architecture/frontend.md)为准；插件契约调整以[插件 API 索引](reference/plugin-api/README.md)为准。
+已完成版本见 [CHANGELOG.md](../CHANGELOG.md)。正式候选、受保护分支检查和发行资产资格由[发布流程](development/release.md)及相应运行记录判定，不以本台账的勾选状态代替。
 
 ## 后续功能：插件生态扩展
 
@@ -35,17 +27,6 @@
 - [ ] 完成更新事务的进一步故障注入矩阵，覆盖长时间运行、文件锁和异常退出组合。
 - [ ] 持续维护运行时版本动态展示、真实计时回归和 Release 资产校验。
 - [ ] 在 NexusPipeline-Plugins 的 `EmulatorSupport` 插件完成雷电、夜神和 BlueStacks 真机验证；实例识别、ADB 路由、启动/前台查询/截图/应用停止与安全关闭矩阵由[插件发行指南](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/docs/RELEASING.md)维护。宿主 System Smoke 覆盖 Generic ADB、MuMuManager 和 managed-code provider 跨边界调用。
-
-## v0.16.9 本地处置
-
-| 活跃项 | 处置 | 本轮证据或再触发条件 |
-|---|---|---|
-| 八适配器内部业务分支 | bounded-support | 仅已审查且有本轮证据的任务给终态；新官方发行与匿名 focus 保持受限，见 Plugins 支持表 |
-| 真实账号/游戏、机器人、模拟器真机 | bounded-support | 本轮均未运行；支持范围按插件现役说明保持受限 |
-| managed 设置、密钥、事件和清理 | bounded-support | GameCheckIn 现有 mock 覆盖保存/遮盖/回退，EmulatorSupport 新增 provider 停止注销；其余插件按实际使用接口再扩展 |
-| 插件设置贡献与用户级清理 | defer | 触发条件为新的具体字段、目录元数据或删除场景；不将本轮安装器脚本编译当实际卸载通过 |
-| 更新文件锁/磁盘满/异常恢复 | bounded-support | 以本轮实际 Sandbox 报告逐项核对；旧的分层结论没有本轮来源与原始报告配对时不提供当前资格 |
-| 运行时版本显示、资产回读与性能扩展 | defer | 远端发行尚未授权；同平台扩展基准需原始样本 |
 
 ## 维护规则
 
