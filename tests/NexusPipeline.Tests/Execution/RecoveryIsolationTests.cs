@@ -46,7 +46,7 @@ public sealed class RecoveryIsolationTests
             {
                 var deadline = System.Diagnostics.Stopwatch.StartNew();
                 while (!process.Process.HasExited && deadline.Elapsed < TimeSpan.FromSeconds(10)) await Task.Delay(20);
-                Assert.True(process.Process.HasExited);
+                Assert.True(process.Process.HasExited, "The writer root did not exit before ownership observation.");
             }
             var observed = process.Ownership!.Observe();
             if (rootExited)
@@ -71,8 +71,10 @@ public sealed class RecoveryIsolationTests
             var state = new ExecutionStateStore();
             Assert.NotNull(state.FindRecoveryIsolationConflict(ExecutionResourceSet.Empty with { ConfigPaths = [path] }));
             Assert.Null(state.TryAcquireMaintenanceLease(out _));
-            Assert.True(process.KillAndConfirm(new RunAttemptFinalizer(new() { Id = id, Name = id }, "test", () => null), null));
-            Assert.True(process.Ownership.Observe().IsTrustworthyEmpty);
+            Assert.True(process.KillAndConfirm(new RunAttemptFinalizer(new() { Id = id, Name = id }, "test", () => null), null),
+                $"Owned cleanup was not confirmed: {process.Ownership.Observe()}");
+            Assert.True(process.Ownership.Observe().IsTrustworthyEmpty,
+                $"Owned cleanup left a nonempty or incomplete Job: {process.Ownership.Observe()}");
             await process.WaitForOutputDrainAsync(CancellationToken.None);
             Assert.Equal(active, File.ReadAllBytes(path));
             ConfigRecoveryService.RecoverInterrupted([new NexusUser { Id = "owner", Bindings = [new() { ScriptInstanceId = id }] }]);
@@ -83,7 +85,8 @@ public sealed class RecoveryIsolationTests
         finally
         {
             if (!process.Ownership!.Observe().IsTrustworthyEmpty)
-                Assert.True(process.KillAndConfirm(new RunAttemptFinalizer(new() { Id = id, Name = id }, "test", () => null), null));
+                Assert.True(process.KillAndConfirm(new RunAttemptFinalizer(new() { Id = id, Name = id }, "test", () => null), null),
+                    $"Final cleanup was not confirmed: {process.Ownership.Observe()}");
             await process.WaitForOutputDrainAsync(CancellationToken.None);
             if (Directory.Exists(data)) Directory.Delete(data, true);
             Directory.Delete(root, true);
