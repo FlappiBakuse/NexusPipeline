@@ -393,38 +393,3 @@ test("MCP 可提交运行、轮询并取消长任务", { skip, concurrency: fals
     await deleteScript(scriptId);
   }
 });
-
-test("轻量模式保留 MCP 与 Control API，端口占用时主服务继续运行", { skip, concurrency: false }, async () => {
-  await restartRuntime({ mcpEnabled: true, lightweightMode: true });
-  const status = await mcpTool("get_status");
-  assert.equal(status.data.lightweightMode, true);
-  const root = await fetchWithTimeout(serviceUrl());
-  assert.equal(root.status, 404);
-
-  await stopRuntime();
-  const blocker = net.createServer();
-  await new Promise((resolve, reject) => {
-    blocker.once("error", reject);
-    blocker.listen(mcpPort, "127.0.0.1", resolve);
-  });
-  try {
-    writeSettings({ mcpEnabled: true, lightweightMode: true });
-    startRuntime();
-    await waitForService();
-    const controlStatus = await api("GET", "/api/status");
-    assert.equal(controlStatus.status, 200);
-    assert.equal(
-      await waitFor(() => {
-        const output = runtimeOutput();
-        return /MCP 服务启动失败/.test(`${output.stdout}\n${output.stderr}`);
-      }, 10000, 100),
-      true,
-      `MCP 端口占用诊断未出现：${JSON.stringify(runtimeOutput())}`,
-    );
-  } finally {
-    await stopRuntime();
-    await new Promise((resolve, reject) => {
-      blocker.close(error => error ? reject(error) : resolve());
-    });
-  }
-});

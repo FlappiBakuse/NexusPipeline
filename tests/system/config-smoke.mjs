@@ -78,3 +78,4 @@ test("配置诊断返回可审计的 recovery 检查项", { skip }, async () => 
   assert.ok(check);
   assert.match(String(check.status), /^(pass|warn|fail|skipped)$/);
 });
+

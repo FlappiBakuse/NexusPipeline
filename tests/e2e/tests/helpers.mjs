@@ -58,12 +58,15 @@ export let baseUrl = configuredBaseUrl
 export const JSON_HDR = { "Content-Type": "application/json" };
 export const PING_GAME = "C:\\Windows\\System32\\PING.EXE";
 
-/** 测试插件仓库与 contract 使用同一个显式来源。 */
+/** 测试插件仓库来源：显式配置优先，否则使用相邻的官方插件检出。 */
 export function pluginRepositoryRoot() {
   const configured = process.env.NEXUS_OFFICIAL_PLUGINS_ROOT?.trim();
-  if (!configured) throw new Error("必须显式设置 NEXUS_OFFICIAL_PLUGINS_ROOT");
-  const repository = path.resolve(projectRoot, configured);
-  if (!fs.existsSync(path.join(repository, "catalog.json"))) throw new Error(`插件仓库缺少 catalog.json：${repository}`);
+  const repository = configured
+    ? path.resolve(projectRoot, configured)
+    : path.resolve(projectRoot, "..", "NexusPipeline-Plugins");
+  if (!fs.existsSync(path.join(repository, "catalog.json"))) {
+    throw new Error(`插件仓库缺少 catalog.json：${repository}；可设置 NEXUS_OFFICIAL_PLUGINS_ROOT 指定检出位置`);
+  }
   return repository;
 }
 
@@ -83,11 +86,16 @@ export async function setupRuntime() {
   if (!fs.existsSync(sourceExe)) throw new Error(`${releaseDir}/nexus-pipeline.exe 不存在，请先运行 node tests/run.mjs release ui-runtime`);
   const repositoryPlugins = path.join(pluginRepositoryRoot(), "plugins");
   const frontendFixture = path.join(__dirname, "fixtures", "frontend-plugin");
-  const pluginDirectories = fs.existsSync(repositoryPlugins)
-    ? fs.readdirSync(repositoryPlugins, { withFileTypes: true })
-      .filter(entry => entry.isDirectory())
-      .map(entry => path.join(repositoryPlugins, entry.name))
-    : [];
+  const pluginDirectories = [];
+  if (fs.existsSync(repositoryPlugins)) {
+    // 插件按 general/specialized 分组存放，逐个插件的根目录才是装配单位。
+    for (const group of fs.readdirSync(repositoryPlugins, { withFileTypes: true })) {
+      if (!group.isDirectory()) continue;
+      for (const entry of fs.readdirSync(path.join(repositoryPlugins, group.name), { withFileTypes: true })) {
+        if (entry.isDirectory()) pluginDirectories.push(path.join(repositoryPlugins, group.name, entry.name));
+      }
+    }
+  }
   if (fs.existsSync(frontendFixture)) pluginDirectories.push(frontendFixture);
   copyReleaseArtifacts(releaseDir, runtimeDir, { pluginDirectories });
 

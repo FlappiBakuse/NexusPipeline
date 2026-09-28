@@ -18,12 +18,10 @@
 
 ## 验证结果
 
-- [ ] `build.cmd`
-- [ ] 单元测试
-- [ ] UI Smoke
-- [ ] System Smoke / Stress 测试（按修改范围适用时）
-- [ ] 文档一致性检查（涉及文档、模板或 CI 文案时）
-- [ ] 文档与测试命令已同步
+- [ ] `node tests\run.mjs smoke`
+- [ ] `node tests\run.mjs integration`（涉及 UI、进程、配置交换、插件或更新事务时）
+- [ ] `node tests\run.mjs release`（涉及构建或发布时）
+- [ ] 测试命令与 `docs/TESTING.md` 保持一致
 
 ## 安全与配置影响
 
