@@ -18,7 +18,7 @@ public sealed class ProviderRunnerTests : IClassFixture<HostTestScope>
     [Fact]
     public async Task CoordinatorPublishesBoundedIndependentSnapshotsDuringTenThousandProgressFrames()
     {
-        using var fixture = new ProviderWorkerPortTests.Fixture();
+        using var fixture = new ProviderWorkerFixture();
         var script = new ScriptInstance { Id = "progress-" + Guid.NewGuid().ToString("N"), Name = "progress pressure", RootPath = fixture.Root,
             ExecutionProviderId = "dummy", ExecutionProviderConfigId = "p", MaxAttempts = 1 };
         var plan = new PluginProviderPlan("plan", "revision", "authorization", [new("writable_root", fixture.Root)], [new("task", "Task", 0)], new());
@@ -54,7 +54,7 @@ public sealed class ProviderRunnerTests : IClassFixture<HostTestScope>
         Directory.CreateDirectory(root);
         try
         {
-            using var workerFixture = new ProviderWorkerPortTests.Fixture();
+            using var workerFixture = new ProviderWorkerFixture();
             foreach (string file in Directory.EnumerateFiles(workerFixture.Root)) File.Copy(file, Path.Combine(root, Path.GetFileName(file)));
             var script = new ScriptInstance { Id = "dummy-" + Guid.NewGuid().ToString("N"), Name = "Dummy provider", RootPath = root,
                 ExecutionProviderId = "dummy", ExecutionProviderConfigId = "p", MaxAttempts = 1 };

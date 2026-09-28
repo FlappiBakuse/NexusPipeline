@@ -8,12 +8,12 @@ using NexusPipeline.Modules.Users;
 namespace NexusPipeline.Tests.Host;
 
 /// <summary>运行时实体状态的核心所有权、快照隔离和执行输入一致性。</summary>
-public sealed class RuntimeEntityStateTests
+public sealed class AutomationDefinitionStateTests
 {
     [Fact]
     public void Snapshots_AreDeepCopiesAndCannotMutateOwnedState()
     {
-        var state = new RuntimeEntityState();
+        var state = new AutomationDefinitionState();
         var script = new ScriptInstance { Id = "s1", Name = "script" };
         var user = new NexusUser
         {
@@ -35,7 +35,7 @@ public sealed class RuntimeEntityStateTests
     [Fact]
     public void FindUser_IsCaseInsensitiveButReturnsClone()
     {
-        var state = new RuntimeEntityState();
+        var state = new AutomationDefinitionState();
         state.Mutate(mutation => mutation.Users.Add(new NexusUser { Id = "User-1", Name = "user" }));
 
         NexusUser? found = state.FindUser("USER-1");
@@ -49,7 +49,7 @@ public sealed class RuntimeEntityStateTests
     [Fact]
     public void ExecutionSnapshots_ContainOneConsistentEntityMoment()
     {
-        var state = new RuntimeEntityState();
+        var state = new AutomationDefinitionState();
         var script = new ScriptInstance { Id = "s1", Name = "script" };
         var queue = new DispatchQueue
         {
@@ -76,7 +76,7 @@ public sealed class RuntimeEntityStateTests
     [Fact]
     public void Mutate_UpdatesOwnedStateAtomicallyForConcurrentCallers()
     {
-        var state = new RuntimeEntityState();
+        var state = new AutomationDefinitionState();
         state.Mutate(mutation => mutation.Users.Add(new NexusUser { Id = "u1", Name = "user" }));
 
         Parallel.For(0, 64, _ => state.Mutate(mutation => mutation.Users[0].Index++));
