@@ -153,20 +153,28 @@ public sealed class ScriptProcessSessionTests
     [Fact]
     public async Task ExitedRootDoesNotReleaseDifferentImageWriterBeforeOwnedCleanup()
     {
-        string powershell = Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe");
+        string root = Path.Combine(Path.GetTempPath(), "nxp-owned-writer-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        string powershell = Path.Combine(root, "writer-isolated.exe");
+        // A unique image keeps runner shells outside this attempt's cleanup observation.
+        File.Copy(Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe"), powershell);
         string command = "Start-Process -FilePath $env:ComSpec -ArgumentList '/d','/c','ping -n 30 127.0.0.1 >nul' -NoNewWindow | Out-Null";
         using var session = ScriptProcessSession.Start(new() { Name = "different image writer" }, "test", powershell,
-            Path.GetTempPath(), ["-NoProfile", "-NonInteractive", "-EncodedCommand", Convert.ToBase64String(Encoding.Unicode.GetBytes(command))], null, null);
+            root, ["-NoProfile", "-NonInteractive", "-EncodedCommand", Convert.ToBase64String(Encoding.Unicode.GetBytes(command))], null, null);
         session.AttachOutput((_, _) => { });
         await SpinWaitAsync(() => session.Process.HasExited, TimeSpan.FromSeconds(10));
         var observation = session.Ownership!.Observe();
         Assert.Contains(observation.Identities, identity => Path.GetFileName(identity.ImageName).Equals("cmd.exe", StringComparison.OrdinalIgnoreCase));
         var monitor = new AttemptMonitor();
         Assert.False(monitor.IsScriptExited(session.Process, powershell, session.Ownership, null, null));
-        Assert.True(session.KillAndConfirm(new RunAttemptFinalizer(new() { Name = "different image writer" }, "test", () => null), null));
-        Assert.True(session.Ownership.Observe().IsTrustworthyEmpty);
-        Assert.True(monitor.IsScriptExited(session.Process, powershell, session.Ownership, null, null));
+        Assert.True(session.KillAndConfirm(new RunAttemptFinalizer(new() { Name = "different image writer" }, "test", () => null), null),
+            $"Owned writer cleanup was not confirmed: {session.Ownership.Observe()}");
+        Assert.True(session.Ownership.Observe().IsTrustworthyEmpty,
+            $"Owned writer Job was not empty: {session.Ownership.Observe()}");
+        Assert.True(monitor.IsScriptExited(session.Process, powershell, session.Ownership, null, null),
+            $"Attempt monitor retained the isolated writer: {session.Ownership.Observe()}");
         await session.WaitForOutputDrainAsync(CancellationToken.None);
+        Directory.Delete(root, true);
     }
 
     [Fact]
