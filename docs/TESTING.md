@@ -8,8 +8,8 @@
 |---|---|
 | 了解测试层级与行为归属 | [测试层级与入口](testing/README.md) · [测试归属与写法](testing/policy.md) |
 | 核对当前格式、恢复和隔离契约 | [当前格式与恢复契约](testing/fixtures.md) |
-| 运行默认命令、模式入口与质量门禁 | [测试命令](testing/commands.md) |
-| 了解 CI 影响域、作业选择与清理边界 | [CI 与清理](testing/domains.md#ci-与清理) |
+| 运行 smoke、integration 与 release 命令 | [测试命令](testing/commands.md) |
+| 了解 CI 作业与清理边界 | [CI 与清理](testing/domains.md#ci-与清理) |
 | 返回全部开发、架构和参考文档 | [文档门户](README.md) |
 
 ## 旧顶层锚点

@@ -68,7 +68,7 @@ public sealed class UserBindingOverrideTests
                 new UserScriptBinding { ScriptInstanceId = script.Id, Enabled = false, RunDays = 5 },
             },
         };
-        var state = new RuntimeEntityState();
+        var state = new AutomationDefinitionState();
         state.Mutate(mutation => mutation.Users.Add(user));
         var repository = new RuntimeUserRepository(state);
 
@@ -97,7 +97,7 @@ public sealed class UserBindingOverrideTests
                 Bindings = { new UserScriptBinding { ScriptInstanceId = "s1", RunDays = 7 } },
             },
         };
-        var state = new RuntimeEntityState();
+        var state = new AutomationDefinitionState();
         state.Mutate(mutation => mutation.Users.AddRange(users));
         int saves = 0;
         var writer = new RuntimeUserRunDaysWriter(state, _ => saves++);

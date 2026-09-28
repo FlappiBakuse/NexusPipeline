@@ -72,7 +72,7 @@ NexusPipeline 定位为**本地游戏自动化脚本管家**：一个常驻托�
 | 项 | 语义 | 锁死方式 |
 |---|---|---|
 | 判断脚本（尤其 Python）可读写边界无法技术强制 | 信任边界：config 只读 + script 可读写以契约约束，宿主不把解释器当沙箱 | [判断脚本信任边界](judgement-logs.md#判断脚本信任边界) |
-| 定时触发为秒级 tick，跨整点/休眠错过不补跑 | 该分钟内处于运行状态即可触发，错过即错过 | [已知行为与边界](overview.md#已知行为与边界) + L1 测试 `ScheduledTrigger_DoesNotBackfillMissedOccurrence` |
+| 定时触发为秒级 tick，跨整点/休眠错过不补跑 | 该分钟内处于运行状态即可触发，错过即错过 | [已知行为与边界](overview.md#已知行为与边界) + xUnit 测试 `ScheduledTrigger_DoesNotBackfillMissedOccurrence` |
 | `IsExeRunning` 按进程名检测同名进程可能误报 | 保守优先：宁可误报防重复启动 | [已知行为与边界](overview.md#已知行为与边界) |
 | 通知单通道失败仅告警不阻断 | 一通道异常不影响其余通道与运行流程 | [通知分发](observability.md#通知分发) + 既有测试 |
 | 首次配置同步在运行开始约 15 秒后执行一次 | 关闭自动更新时也执行首次检测；收尾同步仅在自动更新开启时执行 | `RunSession.ShouldRunFirstSync` 与配置同步回归测试 |
@@ -107,12 +107,9 @@ NexusPipeline/
 ├── .nxp/               安装目录内的内部运行状态（runtime 标记与 state 持久状态）
 ├── tests/
 │   ├── NexusPipeline.Tests/  xUnit 单元测试（通过 InternalsVisibleTo 访问 internal 契约）
-│   ├── system/               Windows 真实进程 System Smoke（mcp/runtime/judge/execution-resilience/emulator/update）
+│   ├── system/               Windows 真实进程 System Smoke（runtime/judge）
 │   ├── e2e/                  Playwright 端到端测试（黑盒，@playwright/test 框架）
-│   ├── documentation/        Node 内建模块文档一致性检查
-│   ├── support/              Windows 进程、版本解析、测试运行时公共设施
-│   └── stress/               压力与专项诊断资产（不进入默认 CI/发布门禁）
-├── tools/NexusPipeline.Architecture/  MSBuild/Roslyn 架构 check 与地图生成器
+│   └── support/              Windows 进程、版本解析、测试运行时公共设施
 └── tests/run.mjs              统一测试调度入口
 ```
 
@@ -149,9 +146,9 @@ Host/Composition（唯一组合根）
 | `Bootstrap` | src/Host/Lifecycle/Bootstrap.cs | 服务启动/停止编排、Web 端口重试 |
 | `HostRestartCoordinator` | src/Host/Lifecycle/HostRestartCoordinator.cs | 统一 Web/MCP/CLI 间接重启生命周期；原子取得维护租约、延迟拉起子进程、处理失败释放与旧进程退出延迟 |
 | `HostCompositionRoot` | src/Host/Composition/HostCompositionRoot.cs | 组合根：内部 ServiceProvider 注册各领域服务、查询和运行时适配器；设置生命周期与服务解析出口，不拥有实体集合 |
-| `RuntimeEntityState` | src/Host/State/AutomationDefinitionState.cs | Scripts/Queues/Users 的唯一内存所有权、同步边界、查找、深拷贝快照、原子执行输入快照与状态替换；不承载业务规则或持久化 |
+| `AutomationDefinitionState` | src/Host/State/AutomationDefinitionState.cs | Scripts/Queues/Users 的唯一内存所有权、同步边界、查找、深拷贝快照、原子执行输入快照与状态替换；不承载业务规则或持久化 |
 | `ScriptQueries` / `QueueQueries` / `UserQueries` | src/Modules/*/Queries/ | 为控制面提供脚本、队列、用户读取用例与业务读取模型；集中有效脚本、调度时间、绑定覆盖和锁状态计算 |
-| `IScriptRepository` / `IQueueRepository` / `IUserRepository` / `IExecutionSnapshotProvider` | src/Modules/*/Contracts/、src/Modules/*/Persistence/ | 执行/调度域读取脚本、队列、启用用户及同一实体状态同步边界内的执行输入快照；运行时适配器直接依赖 `RuntimeEntityState` |
+| `IScriptRepository` / `IQueueRepository` / `IUserRepository` / `IExecutionSnapshotProvider` | src/Modules/*/Contracts/、src/Modules/*/Persistence/ | 执行/调度域读取脚本、队列、启用用户及同一实体状态同步边界内的执行输入快照；运行时适配器直接依赖 `AutomationDefinitionState` |
 | `ISettingsProvider` / `IHistoryStore` | src/Modules/*/Contracts/、src/Modules/*/Persistence/、src/Modules/History/ | 设置读取与历史写入端口，避免服务直接反向查组合根或具体历史文件实现 |
 | `IExecutionService` / `IFrozenQueueExecutionService` / `INotificationService` / `IPluginCapabilityResolver` | src/Modules/*/Contracts/ | Web、Scheduler、执行域和插件能力消费端口；执行端口由 `DispatchCenter` 直接实现，其他端口由 `NotificationDispatcher`、`PluginManager` 提供 |
 | `ScriptCommands` / `QueueCommands` / `UserCommands` / `SettingsCommands` / `ConfigEditCommands` | src/Modules/*/UseCases/ | 脚本、队列、全局用户、绑定、头像、设置和配置编辑生命周期的校验、租约协调、持久化和副作用收尾；Web 只负责请求解析与展示投影 |
@@ -274,7 +271,7 @@ Host/Composition（唯一组合根）
 ### 数据流速览
 
 ```
-Web 请求      → WebServer → ApiXxxHandler → Application Query/Command → RuntimeEntityState/DataStore/Logger
+Web 请求      → WebServer → ApiXxxHandler → Application Query/Command → AutomationDefinitionState/DataStore/Logger
 CLI / manage  → CliApiClient → Control API → Application Command → DispatchCenter → ExecutionPlanBuilder → ExecutionValidator → ExecutionAdmissionPolicy/ExecutionStateStore → ExecutionRunner
 MCP 请求      → McpHost → Mcp*Tools/McpToolContext → Application Command/核心服务 → DataStore/Logger
 Scheduler     → Application Command → DispatchCenter → ExecutionPlanBuilder → ExecutionValidator → ExecutionAdmissionPolicy/ExecutionStateStore → ExecutionRunner

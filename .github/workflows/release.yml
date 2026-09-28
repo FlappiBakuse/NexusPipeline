@@ -35,7 +35,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: host-release-${{ inputs.tag }}
+  group: host-release-${{ inputs.tag || github.sha }}
   cancel-in-progress: false
 
 jobs:
@@ -120,8 +120,6 @@ jobs:
           persist-credentials: false
       - name: Run merged-source integration
         working-directory: NexusPipeline
-        env:
-          NEXUS_OFFICIAL_PLUGINS_ROOT: ${{ github.workspace }}\NexusPipeline-Plugins
         run: node tests/run.mjs integration
       - name: Build and verify original candidate
         working-directory: NexusPipeline
@@ -140,13 +138,6 @@ jobs:
           --plugins-root ../NexusPipeline-Plugins
           --inno-compiler ../inno-tool/compiler/ISCC.exe
           --output .generated/candidate/$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT
-      - name: Upload diagnostic reports
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: host-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
-          path: NexusPipeline/tests/.artifacts/runs/*/reports/**
-          if-no-files-found: warn
       - name: Upload validated candidate
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:

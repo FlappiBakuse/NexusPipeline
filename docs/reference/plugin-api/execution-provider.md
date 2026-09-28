@@ -30,6 +30,6 @@ provider 事实使用 `structuredEvidenceVersion: 1` 和受限 `structuredEviden
 
 ## 验证入口
 
-Host 单元测试覆盖 registry、计划、worker、既有 runner、资源和 journal。现役系统 runner 的 `node tests/run.mjs dev system maa` 使用显式 `NEXUS_OFFICIAL_PLUGINS_ROOT`，经官方仓库工具生成实际插件 ZIP、锁定 native、受控窗口／ADB／Agent，然后验证商店安装、绑定、队列和跨重启历史。它不连接真实账号或设备。
+Host xUnit 覆盖 registry、计划、worker、既有 runner、资源和 journal。真实 Jint 的生产适配器联调显式提供插件 checkout，见[插件 API 索引](README.md)与[测试命令](../../testing/commands.md)。
 
 框架和项目的使用范围在 [官方 Plugins 仓库](https://github.com/FlappiBakuse/NexusPipeline-Plugins) 的 `docs/MAAFRAMEWORK_DRIVER.md` 维护；本公共协议不复制项目解析规则。该指南随驱动源码交付，商店正式上架状态以实际发行记录为准。

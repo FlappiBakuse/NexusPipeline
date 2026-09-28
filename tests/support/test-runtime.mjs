@@ -19,7 +19,7 @@ import {
 export function requireExecutionMode(layerLabel) {
   const mode = process.env.NEXUS_TEST_MODE?.trim().toLowerCase();
   if (mode !== "test-host") {
-    throw new Error(`${layerLabel} 必须使用 NexusTestHost；请通过 tests\\run.mjs 的 dev/release 入口启动。`);
+    throw new Error(`${layerLabel} 必须使用 NexusTestHost；请通过 node tests\\run.mjs integration 启动。`);
   }
   return mode;
 }

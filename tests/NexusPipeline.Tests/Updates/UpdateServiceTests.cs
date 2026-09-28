@@ -34,9 +34,6 @@ public sealed class UpdateServiceTests : IAsyncLifetime
     private TcpListener? _listener;
     private CancellationTokenSource? _listenerCts;
     private Task? _listenerTask;
-    private bool _holdManifest;
-    private TaskCompletionSource<bool>? _manifestRequestStarted;
-    private TaskCompletionSource<bool>? _manifestRelease;
     private int _port;
     private string? _root;
     private string? _installDir;
@@ -179,11 +176,6 @@ public sealed class UpdateServiceTests : IAsyncLifetime
                 string path = requestParts.Length >= 2
                     ? requestParts[1].Split('?', 2)[0]
                     : "/";
-                if (_holdManifest && (path == "/releases" || path == "/"))
-                {
-                    _manifestRequestStarted?.TrySetResult(true);
-                    await _manifestRelease!.Task.WaitAsync(token);
-                }
                 (int statusCode, string contentType, byte[] body) = BuildResponse(path);
                 string reason = statusCode == 200 ? "OK" : "Not Found";
                 byte[] header = Encoding.ASCII.GetBytes(
@@ -258,21 +250,6 @@ public sealed class UpdateServiceTests : IAsyncLifetime
             _installDir!,
             () => _canApply,
             () => _exited = true);
-    }
-
-    [Fact]
-    public void RefreshStartupRecoveryStateReturnsToIdleAfterFinalizationRemovesArtifacts()
-    {
-        string marker = Path.Combine(_installDir!, ".nxp-version");
-        File.WriteAllText(marker, "0.16.7\n");
-        UpdateService service = NewService();
-
-        Assert.Equal(UpdateState.RecoveryPending, service.State);
-
-        File.Delete(marker);
-        service.RefreshStartupRecoveryState();
-
-        Assert.Equal(UpdateState.Idle, service.State);
     }
 
     private static async Task WaitStateAsync(UpdateService service, UpdateState state, int timeoutMs = 15000)
@@ -385,34 +362,6 @@ public sealed class UpdateServiceTests : IAsyncLifetime
         await WaitStateAsync(service, UpdateState.Idle);
         UpdateStatusSnapshot status = service.GetStatus();
         Assert.Contains("SHA256", status.Error);
-    }
-
-    [Fact]
-    public async Task Check_RejectsSecondConcurrentCheck()
-    {
-        UpdateService service = NewService();
-        // 直接并发：第一次检查完成后第二次检查仍应正常（检查串行安全）。
-        UpdateStatusSnapshot first = await service.CheckAsync("test");
-        UpdateStatusSnapshot second = await service.CheckAsync("test");
-        Assert.True(first.Available);
-        Assert.True(second.Available);
-    }
-
-    [Fact]
-    public async Task Cancel_MidCheckReturnsToIdleWithCancelNote()
-    {
-        // 用本地测试源明确挂起清单响应，避免依赖外部网络的连接超时行为。
-        _holdManifest = true;
-        _manifestRequestStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        _manifestRelease = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        UpdateService service = NewService();
-        Task<UpdateStatusSnapshot> check = service.CheckAsync("test");
-        await _manifestRequestStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        Assert.True(service.CancelDownload());
-        _manifestRelease.TrySetResult(true);
-        await check;
-        UpdateStatusSnapshot status = service.GetStatus();
-        Assert.Equal(UpdateState.Idle, status.State);
     }
 
     [Fact]

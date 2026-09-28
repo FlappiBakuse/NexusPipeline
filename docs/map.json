@@ -24,17 +24,6 @@
       "status": "current"
     },
     {
-      "id": "development.debt-ledger",
-      "path": "development/debt-ledger.md",
-      "summary": "v0.16.9 已证删除、兼容保留、生成资产与性能测量缺口",
-      "topics": ["死代码", "性能", "债务", "兼容"],
-      "aliases": ["debt ledger", "性能基准"],
-      "codePaths": ["src/Modules/Configuration/Scripting/TaskConfigView.cs", "src/Modules/Execution/Judgement/TaskProtocolRun.cs"],
-      "testDomains": ["hostAreas.execution", "hostAreas.config"],
-      "authorityFor": ["v0169-debt-audit"],
-      "status": "current"
-    },
-    {
       "id": "architecture.index",
       "path": "architecture/README.md",
       "summary": "架构专题入口与模块责任边界",
@@ -49,8 +38,7 @@
         "系统架构"
       ],
       "codePaths": [
-        "tools/docs-index.mjs",
-        "tests/documentation/documentation-consistency.mjs"
+        "tools/check-doc-links.mjs"
       ],
       "testDomains": [
         "governanceDomains.docs-links-contracts"
@@ -413,8 +401,7 @@
       ],
       "codePaths": [
         "src/NexusPipeline.Plugin.Abstractions",
-        "frontend/src/plugin-bridge",
-        "tools/docs-index.mjs"
+        "frontend/src/plugin-bridge"
       ],
       "testDomains": [
         "hostAreas.plugins",
@@ -692,7 +679,7 @@
       ],
       "codePaths": [
         "tests/run.mjs",
-        "tests/documentation/documentation-consistency.mjs"
+        "tools/check-doc-links.mjs"
       ],
       "testDomains": [
         "governanceDomains.test-policy",
@@ -706,7 +693,7 @@
     {
       "id": "testing.commands",
       "path": "testing/commands.md",
-      "summary": "Unit、Frontend、Docs、System 与快速/集成检查命令",
+      "summary": "smoke、integration 与 release 三个入口命令",
       "topics": [
         "命令",
         "门禁",
@@ -732,21 +719,20 @@
     {
       "id": "testing.domains",
       "path": "testing/domains.md",
-      "summary": "测试 registry、PR 范围与候选清理边界",
+      "summary": "CI 作业、候选校验与测试清理边界",
       "topics": [
-        "影响域",
         "CI",
-        "逻辑组",
+        "候选",
+        "隔离",
         "清理"
       ],
       "aliases": [
-        "测试域选择",
-        "CI 计划"
+        "CI 清理",
+        "测试隔离"
       ],
       "codePaths": [
-        "tests/registry.mjs",
-        "tools/ci-scope.mjs",
-        ".github/workflows/ci.yml"
+        ".github/workflows/ci.yml",
+        "tests/run.mjs"
       ],
       "testDomains": [
         "governanceDomains.tooling"
@@ -771,7 +757,6 @@
         "测试治理"
       ],
       "codePaths": [
-        "tests/documentation/test-policy-consistency.mjs",
         "AGENTS.md"
       ],
       "testDomains": [
@@ -959,8 +944,9 @@
         "版本决策"
       ],
       "codePaths": [
-        "tools/frontend-boundaries.mjs",
-        "tests/registry.mjs"
+        "frontend/src/ui/register.ts",
+        "frontend/src/ui/composites",
+        "tests/run.mjs"
       ],
       "testDomains": [
         "governanceDomains.architecture-boundaries",

@@ -24,15 +24,6 @@ scheduler-state.json
 tests/e2e/node_modules/
 **/node_modules/
 tests/.artifacts/
-tests/e2e/runtime/
-tests/system/runtime/
-tests/system/runtime-*/
-tests/stress/runtime/
-tests/legacy/runtime/
-tests/e2e/browsers/
-tests/e2e/test-results/
-tests/e2e/flake-monitor-logs/
-tests/stress/diagnostics/flake-monitor-logs/
 playwright-report/
 .build-src-hash
 web.port

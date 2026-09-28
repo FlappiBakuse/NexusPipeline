@@ -64,17 +64,9 @@ dotnet publish src\NexusPipeline.csproj -c Release -r win-x64 --self-contained f
 
 ## 测试入口
 
-测试分层与归属见[测试索引](../testing/README.md)和[测试政策](../testing/policy.md)，命令、快速/集成检查、System Smoke 和清理要求见[测试命令](../testing/commands.md)。统一入口为 `node tests/run.mjs fast`、`integration` 或 `all`；每次改动按照修改范围执行对应范围；涉及进程、端口、解释器、模拟器、插件或更新事务时，追加 Test Host System Smoke。
+测试分层与归属见[测试索引](../testing/README.md)和[测试政策](../testing/policy.md)，三个入口命令、隔离 Test Host 与运行输出见[测试命令](../testing/commands.md)。统一入口为 `node tests\run.mjs smoke`、`integration` 或 `release`：本地改动先跑 `smoke`；涉及进程、端口、解释器、模拟器、插件或更新事务时再跑 `integration`。
 
-System Smoke 可按 registry 分组运行；省略分组等于全部 suite，每次调用都真实构建并启动隔离运行时：
-
-```text
-node tests\run.mjs dev system runtime
-node tests\run.mjs dev system execution emulator
-node tests\run.mjs dev system --group update --realtime
-```
-
-PR 范围由 `tools/ci-scope.mjs` 选择；scope 工具、runner、workflow、依赖锁或未知改动按全量处理。`Host / Required` 对所选范围聚合判定，合并后的候选任务另行运行完整集成与生产包验收。
+PR 的唯一自动门禁是 `Host / Required` 单作业（`windows-latest`、超时 20 分钟），检出后安装 .NET 8 与 Node 24 并执行 `node tests/run.mjs smoke`；它不按 diff 选择范围、不条件准备工具链。合并后的候选任务另行运行 `integration` 与生产包构建。
 
 
 

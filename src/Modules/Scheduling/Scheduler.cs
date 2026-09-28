@@ -347,40 +347,6 @@ internal sealed class Scheduler : IDisposable, IQueueScheduleProjection, ISchedu
 
     internal void MakePendingTriggersDueForTest() => _retryQueue.MakeAllPendingDueForTest();
 
-    internal string AddPendingForTest(QueueExecutionPlan plan, string queueId, string occurrenceKey)
-    {
-        var occurrence = new ScheduledOccurrence
-        {
-            QueueId = queueId,
-            QueueName = plan.Queue.Name,
-            OccurrenceKey = occurrenceKey,
-            OriginalTriggerTime = DateTime.Now,
-            Status = "Waiting",
-            NextAttemptAt = DateTime.Now.AddHours(1),
-            Plan = plan,
-        };
-        lock (_sync)
-        {
-            if (!_stateFence.Occurrences.TryAdd(occurrence.Key, occurrence)
-                || !_retryQueue.TryAddPending(occurrence))
-            {
-                throw new InvalidOperationException($"测试 occurrence 已存在：{occurrence.Key}");
-            }
-            MarkStateDirtyLocked();
-        }
-        return occurrence.Key;
-    }
-
-    internal void RemoveOccurrenceForTest(string key)
-    {
-        lock (_sync)
-        {
-            _retryQueue.RemovePending(key);
-            _stateFence.Occurrences.Remove(key);
-            MarkStateDirtyLocked();
-        }
-    }
-
     private async Task LoopAsync(CancellationToken token)
     {
         while (true)

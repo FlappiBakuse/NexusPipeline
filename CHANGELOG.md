@@ -2,6 +2,20 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本使用 `major.minor.patch`、`-beta.N` 或 `-rc.N` 的受限格式；GitHub Release 分类遵循宿主项目发布策略：`major=0` 或带 `-beta.N` / `-rc.N` 后缀的版本为 Pre-release，`major>=1` 且无后缀的版本为正式 Release。
 
+## v0.16.10（Pre-release）
+
+发布日期：2026-09-29。
+
+### 开发验证
+
+- 测试入口收敛为 `smoke`、`integration`、`release` 三条命令；`smoke` 是 PR 的唯一自动门禁，单作业执行语法检查、核心 xUnit、前端类型与 Vitest 以及文档内链检查。
+- xUnit、前端 Vitest、UI Smoke 与 System Smoke 收敛到核心链路保留集；删除治理审计脚本、测试基础设施自测、架构地图生成门禁和变更范围分类器。
+- 关闭流程中重复的单步失败保护收敛为一处帮助方法，单步异常仍不影响其余清理步骤。
+
+### 维护
+
+- 官方 MaaFrameworkDriver 插件以 0.1.1 重新发布，包内许可说明不再引用已移除的原生测试锁定文件。
+
 ## v0.16.9（Pre-release）
 
 发布日期：2026-09-28。
