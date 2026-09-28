@@ -48,7 +48,12 @@ public sealed class GameReadinessTests
             if (scenario == "ready")
             {
                 Assert.Null(result); Assert.Equal(game.Id, selected);
-                Assert.Equal("owned-window", File.ReadAllText(Path.Combine(fixture.Root, "window-ready")));
+                string marker = Path.Combine(fixture.Root, "window-ready");
+                var markerWait = Stopwatch.StartNew();
+                while (!File.Exists(marker) && markerWait.Elapsed < TimeSpan.FromSeconds(1))
+                    await Task.Delay(10);
+                Assert.True(File.Exists(marker), "The fixture window never completed its Shown callback.");
+                Assert.Equal("owned-window", File.ReadAllText(marker));
                 Assert.InRange(watch.Elapsed.TotalSeconds, .25, 2.5);
                 int pid = game.Id;
                 var alreadyReady = Stopwatch.StartNew();
