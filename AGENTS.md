@@ -6,12 +6,12 @@
 
 NexusPipeline（枢链）是 Windows 本地自动化脚本管家：.NET 8/C# WinForms 托盘、HttpListener 服务、CLI/MCP 控制面，以及构建为静态文件的 Vue 3/TypeScript 前端。最终用户不需要 Node/npm。官方插件仓库为 `FlappiBakuse/NexusPipeline-Plugins`；两个仓库版本独立。单仓库开发不要求特定父目录名称。
 
-开始修改前，在本仓库运行 `git status --short --branch`、`git rev-parse HEAD`，确认用户未提交内容。读取下面与任务有关的最小文档集合；根据 `docs/architecture/README.md` 与 `docs/map.json` 定位专题和责任，再读对应代码和测试。需要逐文件 owner、声明和依赖图时，按架构索引中的正式命令生成 `.generated/architecture/backend-map.json`；该生成物不入仓，也不能回退为依赖外部迁移清单。
+开始修改前，在本仓库运行 `git status --short --branch`、`git rev-parse HEAD`，确认用户未提交内容。读取下面与任务有关的最小文档集合；根据 `docs/architecture/README.md` 与 `docs/map.json` 定位专题和责任，再读对应代码和测试。
 
 | 事项 | 仓库内权威入口 |
 |---|---|
 | 用户行为、安装、管理员运行原因 | `README.md` |
-| 模块、约束与代码定位 | `docs/architecture/README.md`、`docs/map.json`；详细生成地图见 `.generated/architecture/backend-map.json` |
+| 模块、约束与代码定位 | `docs/architecture/README.md`、`docs/map.json` |
 | 环境、构建、发布 | `docs/DEVELOPMENT.md` |
 | 测试政策与完整命令 | `docs/TESTING.md` → `docs/testing/commands.md` |
 | Web/CLI/MCP 的能力与状态 | `docs/CONTROL_PLANE.md` |
@@ -35,7 +35,7 @@ NexusPipeline（枢链）是 Windows 本地自动化脚本管家：.NET 8/C# Win
 
 顶层为 `src/Host`、`src/ControlPlane`、`src/Modules`、`src/Platform`、`src/Shared`；独立 `src/NexusPipeline.Plugin.Abstractions` 保持 SDK 边界。模块包含 Settings、Plugins、Scripts、Users、Queues、Configuration、History、Notifications、Execution、Scheduling、Updates、Diagnostics。
 
-`Settings` 管宿主自身设置；`Configuration` 管被自动化目标的配置、快照、编辑会话、交换与恢复。一个业务概念一个 owner。目录和 namespace 对齐，测试按模块镜像组织。新增模块/入口同步 backend map 和架构门禁。
+`Settings` 管宿主自身设置；`Configuration` 管被自动化目标的配置、快照、编辑会话、交换与恢复。一个业务概念一个 owner。目录和 namespace 对齐，测试按模块镜像组织。新增模块/入口同步 `docs/map.json` 与 `docs/architecture/README.md`。
 
 只有 `Host/Composition` 创建/解析/释放 DI 容器；创建完毕向生命周期和控制面传递具体依赖。业务代码禁止 `IServiceProvider`、全局组合根、泛型服务定位器和捕获容器的延迟 delegate。不要通过把 RuntimeContext 改名成其他 Singleton 绕过边界。
 
@@ -51,18 +51,17 @@ HTTP 只处理路由、认证、参数、用例调用和响应映射；图标、
 
 正式发行程序保持 `app.manifest` 的 `requireAdministrator`；自动化功能测试统一使用 `NexusTestHost=true`、`asInvoker` 的隔离测试构建。测试继承启动终端的权限：普通终端直接运行，GitHub 托管 Windows runner 使用其默认管理员环境。测试入口不要求提权，不触发 UAC，不降权，不按权限跳过用例；实际权限写入日志。
 
-主要入口如下，完整参数和工具链版本以 `docs/testing/commands.md` 为准：
+主要入口为三个命令，完整参数和工具链版本以 `docs/testing/commands.md` 为准：
 
 ```text
-node tests/run.mjs prepare
-node tests/run.mjs fast
+node tests/run.mjs smoke
 node tests/run.mjs integration
-node tests/run.mjs all
+node tests/run.mjs release
 ```
 
-`fast` 不构建生产包，`integration` 复用同一次 Test Host 运行 UI、系统与真实计时检查；候选任务在合并后另行验收生产包。未知组、空选择、零用例、意外 skip、缺报告、子进程失败和超时不得报告通过。环境限制与断言失败分开记录；未运行就是 NOT_RUN。
+`smoke` 是 PR 的唯一自动门禁：`.github/workflows/ci.yml` 的 `Host / Required` 单作业在 `windows-latest` 上安装 .NET 8 与 Node 24 后执行它，不按 diff 选择范围、不条件准备工具链；它依次运行 `tests/` 与 `tools/` 的 `.mjs` 语法检查、核心 xUnit、前端 typecheck 与 Vitest，以及 `tools/check-doc-links.mjs` 文档内链检查。现役测试层为 xUnit（`tests/NexusPipeline.Tests/`）、前端 Vitest（`frontend/src/**/*.test.ts`）和托管层 UI Smoke 与 System Smoke。`integration` 复用同一次 asInvoker Test Host 发布运行 UI Smoke 与 System Smoke，不构建生产包；`release` 单独执行生产 requireAdministrator 构建与内嵌清单校验，候选任务在合并后另行验收生产包。未知命令、多余参数、零用例、意外 skip、缺报告、子进程失败和超时不得报告通过。环境限制与断言失败分开记录；未运行就是 NOT_RUN。
 
-生产/Test Host 构建的输出和中间目录分离；两者共享同一业务源实现，禁止将测试 EXE 发布给用户。测试使用独立端口和受控进程/模拟器 fixture，操作系统授权边界通过平台适配器契约验证，不冒称普通权限已执行了系统级操作。
+生产/Test Host 构建的输出和中间目录分离；两者共享同一业务源实现，禁止将测试 EXE 发布给用户。功能测试统一使用 `NexusTestHost=true`、asInvoker 的隔离 Test Host，每次运行使用独立端口与独立 runtime 目录，运行数据、PID 与退出标记只写入 `tests/.artifacts/runs/<runId>/`，不读写用户实例的进程、端口或数据。托管层使用受控进程/模拟器 fixture，操作系统授权边界通过平台适配器契约验证，不冒称普通权限已执行了系统级操作。
 
 先搜索现役测试，在最低有效层增加覆盖。普通业务测试验证 API、结果、状态、文件效果和生命周期，不读取源码函数体匹配实现。UI Smoke 只保留必须跨浏览器证明的核心流程，总量不超过 12；不新增持久视觉截图/像素/布局基线，不断言私有 class、DOM 层级或装饰文案。临时人工浏览器验证材料放系统临时目录并按本次所有权清理。
 
@@ -84,6 +83,6 @@ Preview 同版本 hash 变化可更新；hash 相同不因 sourceCommit 变化�
 
 README 描述当前产品，架构文档描述现役结构，TESTING 描述实际入口和测试政策，DEVELOPMENT 描述构建发布，CONTROL_PLANE 列公开能力，STATUS 只保留未完成问题，CHANGELOG 记录已发布历史。完成的迁移教程、版本专项清单、外部会话依赖、旧路径和零调用兼容层不进入长期维护入口。
 
-架构 `check` 与生成地图的 schema、owner、路径和确定性校验必须进入默认门禁；报告输出不能代替失败退出。地图只写入本地 `.generated/architecture/backend-map.json` 或当前 CI run 的 artifact，不放入产品 release。保留低层工具和测试，不长期保留迁移债务豁免。修改公开能力同步控制面表、相应测试与官方插件作者文档。
+保留低层工具和测试，不长期保留迁移债务豁免。修改公开能力同步控制面表、相应测试与官方插件作者文档。
 
 交付时逐项列明改动、已运行命令/退出码、未运行范围及原因；本地测试通过不等于远端发布已启用，上传候选包不等于发布成功。正式完成前，在无父目录文档、无实施资料包的新 checkout 中验证导航、构建、测试和文档。

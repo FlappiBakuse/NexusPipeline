@@ -83,7 +83,7 @@ export async function setupRuntime() {
     "utf8",
   );
   const sourceExe = path.join(releaseDir, "nexus-pipeline.exe");
-  if (!fs.existsSync(sourceExe)) throw new Error(`${releaseDir}/nexus-pipeline.exe 不存在，请先运行 node tests/run.mjs release ui-runtime`);
+  if (!fs.existsSync(sourceExe)) throw new Error(`${releaseDir}/nexus-pipeline.exe 不存在，请先运行 node tests/run.mjs integration`);
   const repositoryPlugins = path.join(pluginRepositoryRoot(), "plugins");
   const frontendFixture = path.join(__dirname, "fixtures", "frontend-plugin");
   const pluginDirectories = [];

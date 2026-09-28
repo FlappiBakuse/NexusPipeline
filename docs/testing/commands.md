@@ -30,7 +30,7 @@ node tests\run.mjs release
 
 1. PR 的唯一自动门禁是 `.github/workflows/ci.yml` 的 `Host / Required` 单作业：`windows-latest`、`timeout-minutes: 20`，检出后安装 .NET 8 与 Node 24，执行 `node tests/run.mjs smoke`。作业不按 diff 选择范围、不条件准备工具链、不上传产物。
 2. push 到 `main` 后，`.github/workflows/release.yml` 的 candidate 作业执行 `node tests/run.mjs integration`，再用 `python tools/host_release.py candidate` 构建并校验生产候选；候选要求源码工作树干净且可从受保护 `main` 到达。
-3. 本地生产验收执行 `node tests\run.mjs release` 或等价的 `build.cmd`，两者都以发行 `requireAdministrator` 清单为准。`integration` 与 `release` 都会写出 `.generated/frontend-build.hash`；候选的 `--frontend-ready` 按该指纹确认 `frontend/dist` 与前端源码一致。
+3. 本地生产验收执行 `node tests\run.mjs release` 或等价的 `build.cmd`：两者都按生产 `requireAdministrator` 清单发布到 `release/`，其中 runner 还会用 `tools/pe_manifest.py` 校验内嵌清单。`integration` 与 `release` 都会写出 `.generated/frontend-build.hash`；候选的 `--frontend-ready` 按该指纹确认 `frontend/dist` 与前端源码一致。
 4. `tools/host_release.py` 承担生产发布边界，子命令为 `candidate`（构建并校验候选）、`release`（默认，构建生产包）、`verify-package`、`verify-installer`、`extract-candidate`、`inspect-candidate` 和 `validate-candidate`（后三者解包并独立校验已产出的候选，不重新编译）。
 5. `tools/tests/` 下的 `test_host_release.py`、`test_host_installer.py`、`test_pe_manifest.py` 和 `test_host_candidate_source.py` 不进入任何自动门禁，需要时手工执行 `python -m unittest`。
 

@@ -28,4 +28,4 @@
 - [决策索引](decisions/README.md)：仍影响当前实现的架构取舍。
 - [历史索引](history/README.md)：已发布版本归档，不作为当前行为规范。
 
-机器路由保存在 [map.json](map.json)。本地可执行 `node tools/docs-index.mjs find 配置恢复 --json`，默认只返回当前主题。
+机器路由保存在 [map.json](map.json)。本地执行 `node tests\run.mjs smoke` 会用 `tools/check-doc-links.mjs` 核对本目录的相对链接与片段；测试命令见[测试命令](testing/commands.md)。

@@ -3,7 +3,7 @@
 ## 测试层级
 
 | 层级 | 目录或工程 | 运行产品进程 | 浏览器 | 主要职责 |
-|---|---|---:|---:|---|
+|---|---|---|---:|---:|---|
 | xUnit | `tests/NexusPipeline.Tests/` | 否 | 否 | 模型规则、状态机、解析、规划、重试、临时目录、仓储、配置事务、应用命令和外部端口替身 |
 | Frontend Vitest | `frontend/src/**/*.test.ts` | 否 | 否 | 可独立导入的 ES module 纯函数、Vue 组件契约和协议转换 |
 | 托管层 | `tests/system/`（System Smoke）、`tests/e2e/tests/*.smoke.spec.mjs`（UI Smoke） | 是 | UI Smoke 使用 | Windows 进程、HTTP/CLI/MCP、判断脚本、配置交换、端口和运行解释；页面加载、导航与关键用户工作流 |
