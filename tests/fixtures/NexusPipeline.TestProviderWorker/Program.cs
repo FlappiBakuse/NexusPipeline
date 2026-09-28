@@ -19,13 +19,7 @@ if (args.Length == 2 && args[0] == "--owned-window")
         using var window = new System.Windows.Forms.Form { Text = "Nexus owned readiness fixture", Width = 300, Height = 200 };
         using var timer = new System.Windows.Forms.Timer { Interval = 50 };
         timer.Tick += (_, _) => { if (File.Exists(Path.Combine(root, "stop-window"))) window.Close(); };
-        window.Shown += (_, _) =>
-        {
-            string marker = Path.Combine(root, "window-ready");
-            File.WriteAllText(marker + ".tmp", "owned-window");
-            File.Move(marker + ".tmp", marker);
-            timer.Start();
-        };
+        window.Shown += (_, _) => { File.WriteAllText(Path.Combine(root, "window-ready"), "owned-window"); timer.Start(); };
         System.Windows.Forms.Application.Run(window);
     });
     thread.SetApartmentState(ApartmentState.STA); thread.Start(); thread.Join();

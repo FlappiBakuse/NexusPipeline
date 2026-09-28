@@ -15,9 +15,9 @@ public sealed class GameReadinessTests
     [InlineData("cancel", 10000)]
     public async Task ActualWindowReadinessWaitsWithinBudgetAndCancellationStopsWaiting(string scenario, int delay)
     {
-        using var fixture = new ProviderWorkerPortTests.Fixture();
+        using var fixture = new WindowFixture();
         File.WriteAllText(Path.Combine(fixture.Root, ".nxp-test-fixture"), "owned-process-contract");
-        string exe = Path.Combine(fixture.Root, "NexusPipeline.TestProviderWorker.exe");
+        string exe = Path.Combine(fixture.Root, "NexusPipeline.TestWindowFixture.exe");
         var script = new ScriptInstance { Name = scenario, LaunchGame = true, GameMode = "pc", GameExe = exe,
             GameArgs = "--owned-window " + delay, GameWaitSeconds = 2 };
         using var cancellation = new CancellationTokenSource();
@@ -84,5 +84,33 @@ public sealed class GameReadinessTests
                 game.Dispose();
             }
         }
+    }
+
+    private sealed class WindowFixture : IDisposable
+    {
+        public string Root { get; } = Path.Combine(Path.GetTempPath(), "nxp-window-fixture-" + Guid.NewGuid().ToString("N"));
+
+        public WindowFixture()
+        {
+            Directory.CreateDirectory(Root);
+            string repository = FindRoot();
+            string configuration = AppContext.BaseDirectory.Split(Path.DirectorySeparatorChar)
+                .Last(part => part is "Debug" or "Release");
+            bool testHost = AppContext.BaseDirectory.StartsWith(Path.Combine(repository, "bin", "test-host") + Path.DirectorySeparatorChar,
+                StringComparison.OrdinalIgnoreCase);
+            string source = testHost
+                ? Path.Combine(repository, "bin", "test-host", "NexusPipeline.TestWindowFixture", configuration, "net8.0-windows")
+                : Path.Combine(repository, "tests", "fixtures", "NexusPipeline.TestWindowFixture", "bin", configuration, "net8.0-windows");
+            foreach (string file in Directory.EnumerateFiles(source)) File.Copy(file, Path.Combine(Root, Path.GetFileName(file)));
+        }
+
+        private static string FindRoot()
+        {
+            for (string? path = AppContext.BaseDirectory; path is not null; path = Path.GetDirectoryName(path))
+                if (File.Exists(Path.Combine(path, "src", "NexusPipeline.csproj"))) return path;
+            throw new InvalidOperationException("test repository not found");
+        }
+
+        public void Dispose() => Directory.Delete(Root, true);
     }
 }
