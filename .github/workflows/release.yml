@@ -199,7 +199,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Path '.generated' -Force | Out-Null
           $uri = "https://api.github.com/repos/FlappiBakuse/NexusPipeline/actions/artifacts/$env:ARTIFACT_ID/zip"
-          curl.exe -fsSL --connect-timeout 10 --max-time 60 --retry 2 -H "Authorization: Bearer $env:GITHUB_TOKEN" -H 'Accept: application/octet-stream' --output '.generated/host-candidate-artifact.zip' $uri
+          curl.exe -fsSL --connect-timeout 10 --max-time 60 --retry 2 -H "Authorization: Bearer $env:GITHUB_TOKEN" -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2026-03-10' --output '.generated/host-candidate-artifact.zip' $uri
           if ($LASTEXITCODE -ne 0) { throw 'Candidate artifact download failed' }
           python tools/host_release.py extract-candidate --artifact-zip '.generated/host-candidate-artifact.zip' --expected-digest $env:ARTIFACT_DIGEST --output '.generated/host-candidate'
           if ($LASTEXITCODE -ne 0) { throw 'Candidate artifact failed server digest or path validation' }
