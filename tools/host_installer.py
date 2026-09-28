@@ -14,8 +14,10 @@ from pathlib import Path
 
 try:
     from .host_release import HostReleaseError, PAYLOAD_ROOTS, _safe_archive_name, _safe_package_entry, _require, verify_received_package
+    from .pe_manifest import verify_embedded_manifest
 except ImportError:
     from host_release import HostReleaseError, PAYLOAD_ROOTS, _safe_archive_name, _safe_package_entry, _require, verify_received_package
+    from pe_manifest import verify_embedded_manifest
 
 
 INNO_COMPILER_SHA256 = "0a8757031b33777e4c9cbffee40f11a5062b36d25cbe144c1db73b6102b80ad7"
@@ -75,13 +77,20 @@ def dependency_pair(path: Path) -> dict[str, dict]:
 
 
 def render_script(template: str, *, production_root: Path, output_dir: Path,
-                  metadata: dict, files: list[dict], dependencies: dict[str, dict]) -> str:
+                  metadata: dict, files: list[dict], dependencies: dict[str, dict],
+                  metadata_helper: Path | None = None) -> str:
     version = metadata.get("version")
     _require(isinstance(version, str) and re.fullmatch(r"\d+\.\d+\.\d+", version) is not None,
              "安装器版本无效")
     for path in (production_root, output_dir):
         _require('"' not in str(path) and ';' not in str(path) and "\n" not in str(path), "安装器路径无法安全写入脚本")
+    image = production_root / "nexus-pipeline.exe"
     file_lines: list[str] = []
+    if "@@LAUNCH_CODE@@" in template:
+        _require(metadata_helper is not None and metadata_helper.is_file(),
+                 "安装器元数据辅助程序缺失")
+        file_lines.append(f'Source: "{metadata_helper}"; DestDir: "{{tmp}}"; '
+                          'DestName: "nxp-metadata-helper.exe"; Flags: dontcopy noencryption')
     stage_checks: list[str] = []
     for item in files:
         relative = item["path"]
@@ -103,6 +112,7 @@ def render_script(template: str, *, production_root: Path, output_dir: Path,
         "@@OUTPUT_DIR@@": str(output_dir),
         "@@FILES@@": "\n".join(file_lines),
         "@@VERIFY_STAGED@@": "\n".join(stage_checks),
+        "@@LAUNCH_CODE@@": Path(__file__).with_name("installer-launch.iss").read_text(encoding="utf-8"),
         "@@PAYLOAD_MANIFEST@@": json.dumps(
             [{"Path": item["path"], "Sha256": item["sha256"]} for item in files
              if not item["path"].startswith("plugins/")], ensure_ascii=True, separators=(",", ":")).replace("'", "''"),
@@ -135,8 +145,15 @@ def build_installer(production_root: Path, metadata_path: Path, dependency_path:
                             expected_source_sha=metadata["sourceSha"], expected_tag=metadata["tag"])
     files = verified_payload(production_root, metadata)
     dependencies = dependency_pair(dependency_path)
-    script = render_script(template_path.read_text(encoding="utf-8"), production_root=production_root,
-                           output_dir=output_dir, metadata=metadata, files=files, dependencies=dependencies)
+    template = template_path.read_text(encoding="utf-8")
+    helper = None
+    if "@@LAUNCH_CODE@@" in template:
+        helper = metadata_path.parent / "installer-helper" / "nxp-metadata-helper.exe"
+        _require(helper.is_file() and not helper.is_symlink(), "安装器元数据辅助程序缺失")
+        verify_embedded_manifest(helper, "asInvoker")
+    script = render_script(template, production_root=production_root,
+                           output_dir=output_dir, metadata=metadata, files=files,
+                           dependencies=dependencies, metadata_helper=helper)
     output_dir.mkdir(parents=True)
     script_path = output_dir / "installer.generated.iss"
     script_path.write_text(script, encoding="utf-8")

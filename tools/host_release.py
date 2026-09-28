@@ -263,6 +263,10 @@ def build_production(
         _run_checked([npm, "run", "build"], frontend, runner)
     _run_checked([dotnet, "publish", str(root / "src" / "NexusPipeline.csproj"), "--configuration", "Release", "--runtime", "win-x64", "--self-contained", "false", "-p:PublishSingleFile=true", "-p:DebugType=none", "-p:DebugSymbols=false", "-p:NexusTestHost=false", "--output", str(production_root)], root, runner)
     verify_embedded_manifest(production_root / "nexus-pipeline.exe", "requireAdministrator")
+    if "@@LAUNCH_CODE@@" in (root / "tools" / "installer.iss.in").read_text(encoding="utf-8"):
+        helper_root = output_dir.resolve() / "installer-helper"
+        _run_checked([dotnet, "publish", str(root / "src" / "NexusPipeline.csproj"), "--configuration", "Release", "--runtime", "win-x64", "--self-contained", "false", "-p:PublishSingleFile=true", "-p:DebugType=none", "-p:DebugSymbols=false", "-p:NexusTestHost=false", "-p:NexusInstallerMetadataHelper=true", "--output", str(helper_root)], root, runner)
+        verify_embedded_manifest(helper_root / "nxp-metadata-helper.exe", "asInvoker")
     wwwroot = production_root / "wwwroot"
     if wwwroot.exists():
         shutil.rmtree(wwwroot)
@@ -726,6 +730,9 @@ def main(argv: list[str] | None = None) -> int:
         build_installer(production, output / "build-metadata.json",
                         root / "tools" / "runtime-dependencies.json", args.inno_compiler,
                         installer_dir, root / "tools" / "installer.iss.in")
+        helper_dir = output / "installer-helper"
+        if helper_dir.is_dir() and helper_dir.resolve().parent == output:
+            shutil.rmtree(helper_dir)
         for name in (f"NexusPipeline-v{project_version(root)}-win-x64-setup.exe",
                      f"NexusPipeline-v{project_version(root)}-win-x64-setup.exe.sha256",
                      "installer-build-metadata.json"):

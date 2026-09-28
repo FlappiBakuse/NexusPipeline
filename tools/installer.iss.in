@@ -39,6 +39,7 @@ var
   RetainedMode: Boolean;
   SetupMutex: Integer;
   TransactionId: String;
+  MetadataHelperPath: String;
   DependencyDownloadPage: TDownloadWizardPage;
   InstallationQualified: Boolean;
   DeleteInstanceData: Boolean;
@@ -71,6 +72,8 @@ function CloseHandle(Handle: Integer): Boolean;
   external 'CloseHandle@kernel32.dll stdcall';
 function NativeLastError: Integer;
   external 'GetLastError@kernel32.dll stdcall';
+
+@@LAUNCH_CODE@@
 
 procedure DeinitializeSetup;
 begin
@@ -349,6 +352,17 @@ begin
       Result := '另一个安装器正在处理此实例，请等待其完成。'; Exit;
     end;
   end;
+  Result := InstallFramework('Microsoft.WindowsDesktop.App', '.NET Desktop Runtime 8 x64',
+    '@@DESKTOP_URL@@', 'windowsdesktop-runtime-8.0.31-win-x64.exe', '@@DESKTOP_SHA256@@', NeedsRestart);
+  if Result <> '' then Exit;
+  Result := InstallFramework('Microsoft.AspNetCore.App', 'ASP.NET Core Runtime 8 x64',
+    '@@ASPNET_URL@@', 'aspnetcore-runtime-8.0.31-win-x64.exe', '@@ASPNET_SHA256@@', NeedsRestart);
+  if Result <> '' then Exit;
+  TransactionId := Copy(GetSHA256OfString(Path + GetDateTimeString('yyyymmddhhnnss', #0, #0) +
+    IntToStr(Random(2147483647)) + IntToStr(Random(2147483647))), 1, 32);
+  ExtractTemporaryFile('nxp-metadata-helper.exe');
+  MetadataHelperPath := ExpandConstant('{tmp}\nxp-metadata-helper.exe');
+  RequireInstallerMetadata('recover', '');
   if UpgradeMode and
      (DirExists(AddBackslash(Path) + '.nxp-update') or
       DirExists(AddBackslash(Path) + '.nxp-backup') or
@@ -356,11 +370,10 @@ begin
     Result := '已有更新或恢复现场；请先在原实例完成恢复，不覆盖现场。';
     Exit;
   end;
-  Result := InstallFramework('Microsoft.WindowsDesktop.App', '.NET Desktop Runtime 8 x64',
-    '@@DESKTOP_URL@@', 'windowsdesktop-runtime-8.0.31-win-x64.exe', '@@DESKTOP_SHA256@@', NeedsRestart);
-  if Result <> '' then Exit;
-  Result := InstallFramework('Microsoft.AspNetCore.App', 'ASP.NET Core Runtime 8 x64',
-    '@@ASPNET_URL@@', 'aspnetcore-runtime-8.0.31-win-x64.exe', '@@ASPNET_SHA256@@', NeedsRestart);
+  if UpgradeMode then
+    RequireInstallerMetadata('begin', ' --version @@VERSION@@ --image-hash @@EXE_SHA256@@ --upgrade true')
+  else
+    RequireInstallerMetadata('begin', ' --version @@VERSION@@ --image-hash @@EXE_SHA256@@ --upgrade false');
 end;
 
 function IsFreshInstall: Boolean;
@@ -391,39 +404,55 @@ end;
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   Path, ManagerDir, Staged, Helper, Manifest: String;
-  Code: Integer;
+  Code, Resolution: Integer;
+  Launched, Resolved: Boolean;
+  Failure: String;
 begin
   if CurStep <> ssPostInstall then Exit;
   Path := ExpandConstant('{app}');
-  if UpgradeMode then begin
-    Staged := AddBackslash(Path) + '.nxp-update\staging\@@VERSION@@';
-    VerifyStagedPayload;
-    TransactionId := Copy(GetSHA256OfString(Path + GetDateTimeString('yyyymmddhhnnss', #0, #0) + IntToStr(Random(2147483647)) + IntToStr(Random(2147483647))), 1, 32);
-    Helper := AddBackslash(Path) + '.nxp-update-worker-setup-' + TransactionId + '.exe';
-    if not FileCopy(AddBackslash(Staged) + 'nexus-pipeline.exe', Helper, True) then
-      RaiseException('无法建立同根独立安装器交接副本；保留 staging。');
-    if CompareText(GetSHA256OfFile(Helper), '@@EXE_SHA256@@') <> 0 then
-      RaiseException('安装器交接副本摘要不匹配。');
-    if not ShellExec('runas', Helper,
-      'installer-update --staged "' + Staged + '" --version @@VERSION@@ --image-hash @@EXE_SHA256@@ --transaction ' + TransactionId,
-      Path, SW_HIDE, ewWaitUntilTerminated, Code) then
-      RaiseException('独立安装器交接无法启动或授权被取消；保留 staging。');
-    if Code <> 0 then
-      RaiseException('升级事务未通过，退出码 ' + IntToStr(Code) + '；保留 journal/backup/result 供诊断。');
+  RequireInstallerMetadata('observe', '');
+  Launched := False;
+  Resolved := False;
+  Code := 1;
+  try
+    if UpgradeMode then begin
+      Staged := AddBackslash(Path) + '.nxp-update\staging\@@VERSION@@';
+      VerifyStagedPayload;
+      Helper := AddBackslash(Path) + '.nxp-update-worker-setup-' + TransactionId + '.exe';
+      if not FileCopy(AddBackslash(Staged) + 'nexus-pipeline.exe', Helper, True) then
+        RaiseException('无法建立同根独立安装器交接副本；保留 staging。');
+      if CompareText(GetSHA256OfFile(Helper), '@@EXE_SHA256@@') <> 0 then
+        RaiseException('安装器交接副本摘要不匹配。');
+      ApplyInstallerLaunch(Helper,
+        'installer-update --staged "' + Staged + '" --version @@VERSION@@ --image-hash @@EXE_SHA256@@ --transaction ' + TransactionId,
+        Path, Launched, Resolved, Code);
+      InstallationQualified := True;
+      DeleteFile(Helper);
+      Exit;
+    end;
+    ManagerDir := ExpandConstant('{localappdata}\NexusPipeline\installer');
+    if not ForceDirectories(ManagerDir) then
+      RaiseException('无法创建此实例的安装归属记录。');
+    Manifest := ExpandConstant('{tmp}\nxp-payload-manifest.json');
+    if not SaveStringToFile(Manifest, '@@PAYLOAD_MANIFEST@@', False) then
+      RaiseException('无法写入冻结载荷清单。');
+    Launched := ShellExec('runas', AddBackslash(Path) + 'nexus-pipeline.exe',
+      'installer-state register --root "' + Path + '" --version @@VERSION@@ --manifest "' + Manifest + '"',
+      Path, SW_HIDE, ewWaitUntilTerminated, Code);
+    Resolution := ResolveInstallerMetadata(Launched, Code, True);
+    Resolved := True;
+    if not Launched or (Code <> 0) or (Resolution <> 0) then
+      RaiseException('实例归属登记未通过；保留程序与数据供诊断。');
     InstallationQualified := True;
-    DeleteFile(Helper);
-    Exit;
+  except
+    Failure := GetExceptionMessage;
+    if not Resolved then begin
+      Resolution := ResolveInstallerMetadata(Launched, Code, not UpgradeMode);
+      if Resolution <> 0 then
+        RaiseException(Failure + '；登记补偿未确认，检查点保留。');
+    end;
+    RaiseException(Failure);
   end;
-  ManagerDir := ExpandConstant('{localappdata}\NexusPipeline\installer');
-  if not ForceDirectories(ManagerDir) then
-    RaiseException('无法创建此实例的安装归属记录。');
-  Manifest := ExpandConstant('{tmp}\nxp-payload-manifest.json');
-  if not SaveStringToFile(Manifest, '@@PAYLOAD_MANIFEST@@', False) then RaiseException('无法写入冻结载荷清单。');
-  if not ShellExec('runas', AddBackslash(Path) + 'nexus-pipeline.exe',
-    'installer-state register --root "' + Path + '" --version @@VERSION@@ --manifest "' + Manifest + '"',
-    Path, SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then
-    RaiseException('实例归属登记未通过；保留程序与数据供诊断。');
-  InstallationQualified := True;
 end;
 
 function InitializeUninstall: Boolean;

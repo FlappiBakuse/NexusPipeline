@@ -21,6 +21,12 @@
     <DefineConstants>$(DefineConstants);NEXUS_TEST_HOST</DefineConstants>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(NexusInstallerMetadataHelper)' == 'true'">
+    <AssemblyName>nxp-metadata-helper</AssemblyName>
+    <ApplicationManifest>app.installer-helper.manifest</ApplicationManifest>
+    <DefineConstants>$(DefineConstants);NEXUS_INSTALLER_METADATA_HELPER</DefineConstants>
+  </PropertyGroup>
+
   <ItemGroup>
     <Compile Remove="..\tests\NexusPipeline.Tests\**" />
     <Compile Remove="NexusPipeline.Plugin.Abstractions\**" />

@@ -11,6 +11,19 @@ from tools.host_release import HostReleaseError
 
 
 class HostInstallerTests(unittest.TestCase):
+    def test_production_inno_script_has_real_os_launch_and_no_test_define(self) -> None:
+        source = Path(__file__).parents[1]
+        template = (source / "installer.iss.in").read_text(encoding="utf-8")
+        launch = (source / "installer-launch.iss").read_text(encoding="utf-8")
+        self.assertEqual(template.count("@@LAUNCH_CODE@@"), 1)
+        self.assertIn("ShellExec('runas', Helper, Params, Path, SW_HIDE, ewWaitUntilTerminated, Code)", launch)
+        self.assertIn("ShellExec('', MetadataHelperPath, Params", launch)
+        self.assertIn("#ifdef NEXUS_INSTALLER_TEST", launch)
+        self.assertNotIn("#define NEXUS_INSTALLER_TEST", template + launch)
+        self.assertIn("RequireInstallerMetadata('begin'", template)
+        self.assertLess(template.index("RequireInstallerMetadata('begin'"),
+                        template.index("procedure CurStepChanged(CurStep: TSetupStep)"))
+
     def test_installer_rejects_staging_byte_drift_and_unknown_files(self) -> None:
         with tempfile.TemporaryDirectory(prefix="nxp-installer-payload-") as temporary:
             root = Path(temporary)

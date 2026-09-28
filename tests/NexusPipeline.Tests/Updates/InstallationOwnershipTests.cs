@@ -123,13 +123,256 @@ public sealed class InstallationOwnershipTests
         });
     }
 
+    [Theory]
+    [InlineData("not-launched")]
+    [InlineData("rolled-back")]
+    [InlineData("committed-cleanup-failed")]
+    [InlineData("committed")]
+    public void InnoMetadataFollowsProductTransaction(string outcome)
+    {
+        WithOwnedScope(root =>
+        {
+            string install = Path.Combine(root, "instance");
+            Directory.CreateDirectory(install);
+            string exe = Path.Combine(install, "nexus-pipeline.exe");
+            File.WriteAllText(exe, "A image");
+            string manifest = Path.Combine(root, "manifest.json");
+            File.WriteAllText(manifest, JsonSerializer.Serialize(new[]
+            {
+                new InstalledPayloadFile("nexus-pipeline.exe", UpdateApply.ImageHash(exe)),
+            }));
+            InstallationOwnership.Register(install, "0.16.9001", manifest);
+            string manager = InstallationOwnership.ManagerDirectory;
+            string uninstaller = Path.Combine(manager, "unins000.exe");
+            string uninstallData = Path.Combine(manager, "unins000.dat");
+            File.WriteAllText(uninstaller, "A uninstaller");
+            File.WriteAllText(uninstallData, "A data");
+            string arp = InstallationOwnership.CurrentUninstallRegistryPath;
+            using (var key = Registry.CurrentUser.CreateSubKey(arp, true)!)
+            {
+                key.SetValue("DisplayVersion", "0.16.9001", RegistryValueKind.String);
+                key.SetValue("InstallLocation", install, RegistryValueKind.String);
+                key.SetValue("EstimatedSize", 12, RegistryValueKind.DWord);
+            }
+            string transaction = Guid.NewGuid().ToString("N");
+            string targetHash = UpdateApply.ImageHash(exe);
+            File.WriteAllText(exe, "B image");
+            targetHash = UpdateApply.ImageHash(exe);
+            File.WriteAllText(exe, "A image");
+            InstallerMetadataCheckpoint.Begin(install, transaction, "0.16.9002", targetHash, true);
+            using (var key = Registry.CurrentUser.CreateSubKey(arp, true)!)
+            {
+                key.SetValue("DisplayVersion", "0.16.9002", RegistryValueKind.String);
+                key.SetValue("EstimatedSize", 42, RegistryValueKind.DWord);
+            }
+            File.WriteAllText(uninstaller, "B uninstaller");
+            File.WriteAllText(uninstallData, "B data");
+            InstallerMetadataCheckpoint.Observe(install, transaction);
+
+            if (outcome is "committed" or "committed-cleanup-failed")
+            {
+                File.WriteAllText(exe, "B image");
+                InstallationOwnership.RefreshAfterUpdate(install, "0.16.9002");
+                WriteTransaction(install, transaction, "0.16.9002", outcome == "committed",
+                    outcome == "committed" ? "committed" : "committed_cleanup_pending");
+                if (outcome == "committed-cleanup-failed")
+                    File.WriteAllText(Path.Combine(install, ".nxp-version"), "0.16.9002");
+            }
+            else if (outcome == "rolled-back")
+            {
+                string taskPath = Path.Combine(install, ".nxp-update", "task.json");
+                new UpdateTask("apply", "0.16.9002", Path.Combine(install, "stage"), UpdatePhase.RollbackConfirmed)
+                { TransactionId = transaction, TargetImageHash = targetHash }.Write(taskPath);
+                WriteTransaction(install, transaction, "0.16.9002", false, "apply_failed");
+            }
+
+            string resolved = InstallerMetadataCheckpoint.Resolve(install, transaction,
+                outcome != "not-launched", outcome == "committed" ? 0 : 1, false);
+            bool committed = outcome is "committed" or "committed-cleanup-failed";
+            Assert.Equal(committed ? "Committed" : "Restored", resolved);
+            using var finalKey = Registry.CurrentUser.OpenSubKey(arp, false)!;
+            Assert.Equal(committed ? "0.16.9002" : "0.16.9001", finalKey.GetValue("DisplayVersion"));
+            Assert.Equal(committed ? 42 : 12, finalKey.GetValue("EstimatedSize"));
+            Assert.Equal(committed ? "B uninstaller" : "A uninstaller", File.ReadAllText(uninstaller));
+            Assert.Equal(committed ? "B data" : "A data", File.ReadAllText(uninstallData));
+            Assert.Equal(committed ? "0.16.9002" : "0.16.9001", InstallationOwnership.Read(install)!.Version);
+        });
+    }
+
+    [Fact]
+    public void FailedFirstRegistrationRemovesInnoSuccessMetadataButRetainsPayload()
+    {
+        WithOwnedScope(root =>
+        {
+            string install = Path.Combine(root, "instance");
+            Directory.CreateDirectory(install);
+            string transaction = Guid.NewGuid().ToString("N");
+            string exe = Path.Combine(install, "nexus-pipeline.exe");
+            string hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData("new image"u8.ToArray())).ToLowerInvariant();
+            InstallerMetadataCheckpoint.Begin(install, transaction, "0.16.9", hash, false);
+            File.WriteAllText(exe, "new image");
+            string arp = InstallationOwnership.CurrentUninstallRegistryPath;
+            using (var key = Registry.CurrentUser.CreateSubKey(arp, true)!)
+                key.SetValue("DisplayVersion", "0.16.9", RegistryValueKind.String);
+            string uninstaller = Path.Combine(InstallationOwnership.ManagerDirectory, "unins000.exe");
+            File.WriteAllText(uninstaller, "new uninstaller");
+            InstallerMetadataCheckpoint.Observe(install, transaction);
+            Assert.Equal("Restored", InstallerMetadataCheckpoint.Resolve(install, transaction, true, 1, true));
+            Assert.Null(Registry.CurrentUser.OpenSubKey(arp, false));
+            Assert.False(File.Exists(uninstaller));
+            Assert.Equal("new image", File.ReadAllText(exe));
+        });
+    }
+
+    [Fact]
+    public void PartialRegistrationDoesNotLeaveSuccessfulArpEntry()
+    {
+        WithOwnedScope(root =>
+        {
+            string install = Path.Combine(root, "instance");
+            Directory.CreateDirectory(install);
+            string transaction = Guid.NewGuid().ToString("N");
+            string exe = Path.Combine(install, "nexus-pipeline.exe");
+            string hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData("new image"u8.ToArray())).ToLowerInvariant();
+            InstallerMetadataCheckpoint.Begin(install, transaction, "0.16.9", hash, false);
+            File.WriteAllText(exe, "new image");
+            string arp = InstallationOwnership.CurrentUninstallRegistryPath;
+            using (var key = Registry.CurrentUser.CreateSubKey(arp, true)!)
+                key.SetValue("DisplayVersion", "0.16.9", RegistryValueKind.String);
+            string uninstaller = Path.Combine(InstallationOwnership.ManagerDirectory, "unins000.exe");
+            File.WriteAllText(uninstaller, "new uninstaller");
+            InstallerMetadataCheckpoint.Observe(install, transaction);
+            string manifest = Path.Combine(root, "manifest.json");
+            File.WriteAllText(manifest, JsonSerializer.Serialize(new[]
+            {
+                new InstalledPayloadFile("nexus-pipeline.exe", hash),
+            }));
+            InstallationOwnership.Register(install, "0.16.9", manifest);
+            Assert.Throws<IOException>(() =>
+                InstallerMetadataCheckpoint.Resolve(install, transaction, true, 1, true));
+            Assert.Null(Registry.CurrentUser.OpenSubKey(arp, false));
+            Assert.False(File.Exists(uninstaller));
+            Assert.True(Directory.Exists(Path.Combine(InstallationOwnership.ManagerDirectory, "metadata-checkpoint")));
+        });
+    }
+
+    [Fact]
+    public void ConcurrentUninstallerChangeKeepsCheckpointAndRejectsOverwrite()
+    {
+        WithOwnedScope(root =>
+        {
+            string install = Path.Combine(root, "instance");
+            Directory.CreateDirectory(install);
+            string transaction = Guid.NewGuid().ToString("N");
+            string arp = InstallationOwnership.CurrentUninstallRegistryPath;
+            string hash = new string('a', 64);
+            InstallerMetadataCheckpoint.Begin(install, transaction, "0.16.9", hash, false);
+            using (var key = Registry.CurrentUser.CreateSubKey(arp, true)!)
+                key.SetValue("DisplayVersion", "0.16.9", RegistryValueKind.String);
+            string uninstaller = Path.Combine(InstallationOwnership.ManagerDirectory, "unins000.exe");
+            File.WriteAllText(uninstaller, "Inno bytes");
+            InstallerMetadataCheckpoint.Observe(install, transaction);
+            File.WriteAllText(uninstaller, "external changed bytes");
+            Assert.Throws<IOException>(() =>
+                InstallerMetadataCheckpoint.Resolve(install, transaction, false, 1223, false));
+            Assert.Equal("external changed bytes", File.ReadAllText(uninstaller));
+            using (var key = Registry.CurrentUser.OpenSubKey(arp, false)!)
+                Assert.Equal("0.16.9", key.GetValue("DisplayVersion"));
+            Assert.True(Directory.Exists(Path.Combine(InstallationOwnership.ManagerDirectory, "metadata-checkpoint")));
+        });
+    }
+
+    [Fact]
+    public void NextInstallerReconcilesObservedUnlaunchedCheckpoint()
+    {
+        WithOwnedScope(root =>
+        {
+            string install = Path.Combine(root, "instance");
+            Directory.CreateDirectory(install);
+            string transaction = Guid.NewGuid().ToString("N");
+            InstallerMetadataCheckpoint.Begin(install, transaction, "0.16.9", new string('a', 64), false);
+            string arp = InstallationOwnership.CurrentUninstallRegistryPath;
+            using (var key = Registry.CurrentUser.CreateSubKey(arp, true)!)
+                key.SetValue("DisplayVersion", "0.16.9", RegistryValueKind.String);
+            InstallerMetadataCheckpoint.Observe(install, transaction);
+            Assert.Equal("Restored", InstallerMetadataCheckpoint.RecoverPending(install));
+            Assert.Null(Registry.CurrentUser.OpenSubKey(arp, false));
+            Assert.Equal("None", InstallerMetadataCheckpoint.RecoverPending(install));
+        });
+    }
+
+    [Fact]
+    public void NextInstallerArchivesPreparedCheckpointWhenInnoWroteNothing()
+    {
+        WithOwnedScope(root =>
+        {
+            string install = Path.Combine(root, "instance");
+            Directory.CreateDirectory(install);
+            string transaction = Guid.NewGuid().ToString("N");
+            InstallerMetadataCheckpoint.Begin(install, transaction, "0.16.9", new string('a', 64), false);
+            Assert.Equal("Aborted", InstallerMetadataCheckpoint.RecoverPending(install));
+            Assert.False(Directory.Exists(Path.Combine(InstallationOwnership.ManagerDirectory, "metadata-checkpoint")));
+            Assert.Equal("None", InstallerMetadataCheckpoint.RecoverPending(install));
+        });
+    }
+
+    [Fact]
+    public void NextInstallerObservesInnoWriteAndRestoresFailedRegistration()
+    {
+        WithOwnedScope(root =>
+        {
+            string install = Path.Combine(root, "instance");
+            Directory.CreateDirectory(install);
+            string transaction = Guid.NewGuid().ToString("N");
+            InstallerMetadataCheckpoint.Begin(install, transaction, "0.16.9", new string('a', 64), false);
+            string arp = InstallationOwnership.CurrentUninstallRegistryPath;
+            using (var key = Registry.CurrentUser.CreateSubKey(arp, true)!)
+                key.SetValue("DisplayVersion", "0.16.9", RegistryValueKind.String);
+            string uninstaller = Path.Combine(InstallationOwnership.ManagerDirectory, "unins000.exe");
+            File.WriteAllText(uninstaller, "new uninstaller");
+            Assert.Equal("Restored", InstallerMetadataCheckpoint.RecoverPending(install));
+            Assert.Null(Registry.CurrentUser.OpenSubKey(arp, false));
+            Assert.False(File.Exists(uninstaller));
+        });
+    }
+
+    [Fact]
+    public void NextInstallerRestoresPartialInnoRegistrationWithoutDisplayVersion()
+    {
+        WithOwnedScope(root =>
+        {
+            string install = Path.Combine(root, "instance");
+            Directory.CreateDirectory(install);
+            string transaction = Guid.NewGuid().ToString("N");
+            InstallerMetadataCheckpoint.Begin(install, transaction, "0.16.9", new string('a', 64), false);
+            string arp = InstallationOwnership.CurrentUninstallRegistryPath;
+            using (var key = Registry.CurrentUser.CreateSubKey(arp, true)!)
+                key.SetValue("DisplayName", "NexusPipeline", RegistryValueKind.String);
+            string uninstaller = Path.Combine(InstallationOwnership.ManagerDirectory, "unins000.exe");
+            File.WriteAllText(uninstaller, "partial uninstaller");
+            Assert.Equal("Restored", InstallerMetadataCheckpoint.RecoverPending(install));
+            Assert.Null(Registry.CurrentUser.OpenSubKey(arp, false));
+            Assert.False(File.Exists(uninstaller));
+        });
+    }
+
+    private static void WriteTransaction(string install, string transaction, string version, bool succeeded, string code)
+    {
+        string path = Path.Combine(install, ".nxp", "state", "updates", transaction + ".result.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, JsonSerializer.Serialize(new { TransactionId = transaction, Version = version,
+            Succeeded = succeeded, Code = code }));
+    }
+
     private static void WithOwnedScope(Action<string> verify)
     {
         string id = Guid.NewGuid().ToString("N");
         string root = Path.Combine(Path.GetTempPath(), "nxp-installer-" + id); Directory.CreateDirectory(root);
         File.WriteAllText(Path.Combine(root, ".nxp-installer-lab"), id);
         string key = @"Software\NexusPipeline\Tests\Installer\" + id;
+        string uninstallKey = @"Software\NexusPipeline\Tests\Uninstall\" + id;
         Assert.Null(Registry.CurrentUser.OpenSubKey(key, false));
+        Assert.Null(Registry.CurrentUser.OpenSubKey(uninstallKey, false));
         string? previousId = Environment.GetEnvironmentVariable("NEXUS_INSTALLER_TEST_SCOPE");
         string? previousRoot = Environment.GetEnvironmentVariable("NEXUS_INSTALLER_TEST_ROOT");
         Environment.SetEnvironmentVariable("NEXUS_INSTALLER_TEST_SCOPE", id);
@@ -138,6 +381,7 @@ public sealed class InstallationOwnershipTests
         finally
         {
             Registry.CurrentUser.DeleteSubKeyTree(key, false);
+            Registry.CurrentUser.DeleteSubKeyTree(uninstallKey, false);
             Environment.SetEnvironmentVariable("NEXUS_INSTALLER_TEST_SCOPE", previousId);
             Environment.SetEnvironmentVariable("NEXUS_INSTALLER_TEST_ROOT", previousRoot);
             Directory.Delete(root, true);

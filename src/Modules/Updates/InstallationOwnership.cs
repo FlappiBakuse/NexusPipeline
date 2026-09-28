@@ -18,6 +18,9 @@ internal static class InstallationOwnership
 {
     internal const string RegistryPath = @"Software\NexusPipeline\Installer";
     internal static string CurrentRegistryPath => TestScope() is { } scope ? @"Software\NexusPipeline\Tests\Installer\" + scope.Id : RegistryPath;
+    internal static string CurrentUninstallRegistryPath => TestScope() is { } scope
+        ? @"Software\NexusPipeline\Tests\Uninstall\" + scope.Id
+        : @"Software\Microsoft\Windows\CurrentVersion\Uninstall\NexusPipeline.PerUser_is1";
     internal static string ManagerDirectory => TestScope() is { } scope ? Path.Combine(scope.Root, "manager")
         : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "NexusPipeline", "installer");
     private static (string Id, string Root)? TestScope()

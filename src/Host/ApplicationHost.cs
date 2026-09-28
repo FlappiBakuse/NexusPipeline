@@ -72,6 +72,12 @@ internal static class ApplicationHost
 
         // machine mode 必须在初始化之前生效，stdout 从第一字节起只承载 JSON envelope。
         CliOutput.Configure(args);
+#if NEXUS_INSTALLER_METADATA_HELPER
+        if (args.Length >= 2 && args[0] == "installer-state"
+            && args[1].StartsWith("metadata-", StringComparison.Ordinal))
+            return RunInstallerStateCli(args.Skip(1).ToArray());
+        return 2;
+#else
         // Installer metadata helpers act on the explicit instance root and never initialize a second Host.
         if (args.FirstOrDefault() == "installer-state") return RunInstallerStateCli(args.Skip(1).ToArray());
 
@@ -147,6 +153,7 @@ internal static class ApplicationHost
         {
             runtime.DisposeAsync().AsTask().GetAwaiter().GetResult();
         }
+#endif
     }
 
     /// <summary>读取重启交接标识；旧进程未传该参数时为空，按普通重启启动。</summary>
@@ -249,6 +256,22 @@ internal static class ApplicationHost
                         InstallationOwnership.Uninstall(root, options.GetValueOrDefault("--delete-data") == "true");
                     }
                     break;
+                case "metadata-begin":
+                    InstallerMetadataCheckpoint.Begin(root, options["--transaction"],
+                        options["--version"], options["--image-hash"], bool.Parse(options["--upgrade"]));
+                    break;
+                case "metadata-recover":
+                    Console.WriteLine(InstallerMetadataCheckpoint.RecoverPending(root));
+                    break;
+                case "metadata-observe":
+                    InstallerMetadataCheckpoint.Observe(root, options["--transaction"]);
+                    break;
+                case "metadata-resolve":
+                    string resolution = InstallerMetadataCheckpoint.Resolve(root, options["--transaction"],
+                        bool.Parse(options["--launched"]), int.Parse(options["--child-exit"]),
+                        bool.Parse(options["--registration"]));
+                    Console.WriteLine(resolution);
+                    return resolution == "Committed" ? 0 : 10;
                 default: throw new InvalidDataException("installer.command");
             }
             return 0;
