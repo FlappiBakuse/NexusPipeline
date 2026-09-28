@@ -113,6 +113,27 @@ System Smoke 的 `emulator` suite 覆盖宿主内置 Generic ADB、MuMuManager�
 
 ## 质量门禁顺序
 
+### v0.16.9 安装器闭合诊断
+
+以下命令在 Windows 上运行，`HOST_ROOT`、`PLUGINS_ROOT` 均为实际仓库绝对路径，`ISCC` 是 `tools/host_installer.py` 锁定 SHA256 的 Inno Setup 6.7.3 编译器；`WORK` 为 `D:\Projects\Temp` 内本次新建且不存在的目录。设置当前进程的 `TEMP`、`TMP`、`NUGET_PACKAGES`、`NPM_CONFIG_CACHE` 后执行，不修改全局设置。普通功能测试使用 asInvoker Test Host，不弹出 UAC。
+
+```powershell
+python -m unittest tools.tests.test_host_release tools.tests.test_host_installer -v
+dotnet test tests/NexusPipeline.Tests/NexusPipeline.Tests.csproj -p:NexusTestHost=true --nologo -m:1
+python tools/tests/run_installer_launch_contract.py --compiler $ISCC --test-helper '<asInvoker Test Host EXE绝对路径>' --work "$WORK\pascal"
+python tools/tests/build_installer_version_fixture.py --host-root $HOST_ROOT --plugins-root $PLUGINS_ROOT --compiler $ISCC --work "$WORK\versions"
+```
+
+Pascal 入口从生产 `tools/installer-launch.iss` 编译同一份代码，以编译期 `NEXUS_INSTALLER_TEST` 仅替换 OS 调用返回。它在当前身份执行 False/1223、其他错误码、True 结果和真实 OS 找不到目标的非 UAC 边界；原始 Inno 日志、每例状态与二进制哈希保存在 `--work`。该证据不代表人工安全桌面拒绝。A/B 入口只在隔离源中覆盖 Host 本体 0.16.9001/0.16.9002 版本，产生带 `TEST_FIXTURE_NOT_FOR_DISTRIBUTION` 标识的真实构建；输出 `pair.json`、各自 Setup、ZIP、载荷清单和构建日志。它不执行安装，也不替代产品 0.16.9 候选。
+
+跨版本原生安装只在事先批准、依赖已安装的全新隔离 Windows VM 中运行。VM 内先创建匹配本机名称的 attestation JSON（`isolatedVm=true`、`approvedForNativeSetup=true`、`computerName`），将 A/B 输出复制入 VM，然后执行：
+
+```powershell
+python tools/tests/run_native_version_fixture.py --pair '<VM内pair.json绝对路径>' --work '<VM内全新本地测试目录>' --vm-attestation '<VM内批准记录.json>'
+```
+
+该入口只运行 A 的原生 Setup，再经 A 的内置检查、下载、应用更新到 B，核对旧原生 unins、B 当前清单与用户文件后调用旧卸载器；失败保留 VM 现场和原始日志。运行前确认 VM 当前用户没有 NexusPipeline 安装登记或安装器目录。无此 VM 时记 `NOT_RUN`，不能将 A/B 构建或 asInvoker Pascal 结果写成原生安装通过。最终门禁仍执行下述 Host 全集、插件 `verify --scope all`、真实 0.16.9 候选；候选要求干净且配对的源码，不能为本地脏源诊断放宽校验。
+
 1. 修改宿主代码、测试或前端纯函数后运行 `node tests\run.mjs dev default` 的适用组合。
 2. 涉及配置交换、Windows 进程、端口、解释器、插件、模拟器或更新事务时，追加 `node tests\run.mjs dev system`；宿主模拟器系统边界通过 TestPlugin 验证 provider 注册到执行及清理，厂商驱动行为由官方扩展插件测试覆盖。
 3. PR 的 `Host / Required` 执行适用的 `fast` 范围；合并后的候选任务执行 `integration`、生产构建及包验收。发行前核对该源码提交的候选确实成功。
