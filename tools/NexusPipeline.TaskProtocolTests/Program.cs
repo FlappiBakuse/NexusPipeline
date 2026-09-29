@@ -6,9 +6,32 @@ using NexusPipeline.Modules.Plugins;
 using NexusPipeline.Modules.Plugins.Contracts;
 
 // Explicit checkout input: never discovers a sibling repo or reads user configurations.
-if (args.Length is not (2 or 4) || args[0] != "--plugin-root") throw new ArgumentException("Usage: --plugin-root <checkout>");
+bool selectedMode = args.Contains("--plugin", StringComparer.Ordinal);
+if ((!selectedMode && args.Length is not (2 or 4)) || args.Length < 2 || args[0] != "--plugin-root")
+    throw new ArgumentException("Usage: --plugin-root <checkout> [--plugin <artifact> --report <file> [--scenario <fixture>]]");
 string root = Path.GetFullPath(args[1]);
-if (args.Length == 4)
+string[] supportedArtifacts = ["BetterGI", "March7thAssistant", "BAAH", "ZenlessZoneZeroOneDragon", "MaaEnd", "MaaStellaSora", "OkNTE", "OkWutheringWaves"];
+string? selectedArtifact = null, selectedScenario = null, reportPath = null;
+int observeCount = 0;
+if (selectedMode)
+{
+    var options = new Dictionary<string, string>(StringComparer.Ordinal);
+    if (args.Length % 2 != 0) throw new ArgumentException("Missing option value");
+    for (int i = 2; i < args.Length; i += 2)
+    {
+        if (args[i] is not ("--plugin" or "--report" or "--scenario" or "--observe-count") || string.IsNullOrWhiteSpace(args[i + 1])
+            || !options.TryAdd(args[i], args[i + 1])) throw new ArgumentException("Unknown or duplicate option");
+    }
+    if (!options.TryGetValue("--plugin", out selectedArtifact) || !supportedArtifacts.Contains(selectedArtifact, StringComparer.Ordinal)
+        || !options.TryGetValue("--report", out reportPath)) throw new ArgumentException("Known plugin and report path are required");
+    options.TryGetValue("--scenario", out selectedScenario);
+    if (options.TryGetValue("--observe-count", out string? countText)
+        && (selectedScenario is null || !int.TryParse(countText, out observeCount) || observeCount != 12))
+        throw new ArgumentException("Finite observation requires one scenario and exactly 12 inputs");
+    reportPath = Path.GetFullPath(reportPath);
+    if (File.Exists(reportPath)) throw new IOException("Report already exists; use a new run path");
+}
+if (!selectedMode && args.Length == 4)
 {
     if (args[2] == "--runtime-installations")
     {
@@ -36,6 +59,12 @@ if (args.Length == 4)
 }
 string fixtures = Path.Combine(root, "tools", "task-protocol", "fixtures");
 var files = Directory.GetFiles(fixtures, "*.json").Order(StringComparer.Ordinal).ToArray();
+if (selectedMode)
+{
+    files = files.Where(file => JsonNode.Parse(File.ReadAllText(file))?["artifact"]?.GetValue<string>() == selectedArtifact).ToArray();
+    if (selectedScenario is not null)
+        files = files.Where(file => Path.GetFileNameWithoutExtension(file) == selectedScenario).ToArray();
+}
 if (files.Length == 0) throw new InvalidDataException("Zero task protocol fixtures");
 var artifacts = new HashSet<string>();
 var phaseChecked = new HashSet<string>();
@@ -172,8 +201,10 @@ foreach (string file in files)
             reducer.BeginAttempt("attempt", 1, selected);
             JsonObject? cursor = null;
             long sequence = 0;
+            int observed = 0;
             foreach (var batchNode in fixture["batches"]!.AsArray())
             {
+                observed++;
                 var records = batchNode!["lines"]!.AsArray().Select(line => new TaskLogRecord(
                     batchNode["source"]?.GetValue<string>() ?? "stdout", batchNode["epoch"]?.GetValue<int>() ?? 0, ++sequence, line!.GetValue<string>())).ToArray();
                 var batch = new TaskLogBatch(records, batchNode["gap"]?.GetValue<bool>() ?? false);
@@ -192,6 +223,35 @@ foreach (string file in files)
                 if (batchNode["states"] is JsonObject expectedStates)
                     foreach (var item in expectedStates)
                         Check(reducer.Results.Single(r => r.TaskId == plan.Tasks.Single(t => t.SourceKey == item.Key).Id).Status == item.Value!.GetValue<string>(), "intermediate state " + item.Key);
+            }
+            if (observeCount != 0)
+            {
+                Check(observed <= observeCount, "fixture exceeds finite observation count");
+                string accepted = TaskProtocolJson.Write(reducer.AcceptedResults);
+                string? boundaryBeforeIdle = reducer.RunBoundary;
+                while (observed++ < observeCount)
+                {
+                    var idleBatch = new TaskLogBatch([], false);
+                    var idleObservation = await TaskProtocolScriptRunner.ExecuteAsync<TaskObservationBatch>(protocol.ObserveScript,
+                        new { protocolVersion = protocol.Version, phase = "observe", runId = "run", attemptId = "attempt", attemptNumber = 1,
+                            originalPlan = plan, attemptTaskIds = selected, adapterState = cursor,
+                            acceptedState = reducer.AcceptedResults.ToDictionary(r => r.TaskId, r => new { r.Status, r.ExecutionOrdinal }),
+                            logBatch = idleBatch, isFinalCall = false, terminationReason = "none" }, view.ReadConfig, view.ReadResource, false, default);
+                    reducer.Accept(idleObservation, idleBatch); cursor = idleObservation.CursorState;
+                    Check(TaskProtocolJson.Write(reducer.AcceptedResults) == accepted && reducer.RunBoundary == boundaryBeforeIdle,
+                        "idle observation cannot fabricate or erase evidence");
+                }
+                var fresh = new TaskRunReducer("isolated-run", plan);
+                fresh.BeginAttempt("isolated-attempt", 1, selected);
+                string initial = TaskProtocolJson.Write(fresh.AcceptedResults);
+                var empty = new TaskLogBatch([], false);
+                var isolatedObservation = await TaskProtocolScriptRunner.ExecuteAsync<TaskObservationBatch>(protocol.ObserveScript,
+                    new { protocolVersion = protocol.Version, phase = "observe", runId = "isolated-run", attemptId = "isolated-attempt", attemptNumber = 1,
+                        originalPlan = plan, attemptTaskIds = selected, adapterState = (JsonObject?)null,
+                        acceptedState = fresh.AcceptedResults.ToDictionary(r => r.TaskId, r => new { r.Status, r.ExecutionOrdinal }),
+                        logBatch = empty, isFinalCall = false, terminationReason = "none" }, view.ReadConfig, view.ReadResource, false, default);
+                fresh.Accept(isolatedObservation, empty);
+                Check(TaskProtocolJson.Write(fresh.AcceptedResults) == initial, "new run must not inherit prior evidence");
             }
             if (fixture["boundary"] is {} expectedBoundary) Check(reducer.RunBoundary == expectedBoundary.GetValue<string>(), "run boundary");
             string lifecycle = fixture["lifecycle"]?.GetValue<string>() ?? "completed";
@@ -242,9 +302,23 @@ foreach (string file in files)
     catch (Exception ex) { throw new InvalidDataException(Path.GetFileName(file) + ": " + ex.Message, ex); }
     finally { Directory.Delete(temporary, true); }
 }
-if (!artifacts.SetEquals(["BetterGI", "March7thAssistant", "BAAH", "ZenlessZoneZeroOneDragon", "MaaEnd", "MaaStellaSora", "OkNTE", "OkWutheringWaves"]))
-    throw new InvalidDataException("All eight production adapters must execute");
+if (!artifacts.SetEquals(selectedMode ? [selectedArtifact!] : supportedArtifacts))
+    throw new InvalidDataException("Selected production adapters did not all execute");
 Console.WriteLine($"Task protocol: {passed} passed, 0 skipped; {artifacts.Count} production adapters through Host Jint/reducer/config journal.");
+string[] editorCaseIds = observeCount == 12 ? await FiniteEditor.RunAsync(root, selectedArtifact!) : [];
+if (reportPath is not null)
+{
+    Directory.CreateDirectory(Path.GetDirectoryName(reportPath)!);
+    File.WriteAllText(reportPath, System.Text.Json.JsonSerializer.Serialize(new
+    {
+        schemaVersion = 1, evidenceType = "actual", artifact = selectedArtifact,
+        expectedCaseIds = files.Select(Path.GetFileNameWithoutExtension).ToArray(),
+        completedCaseIds = files.Select(Path.GetFileNameWithoutExtension).ToArray(),
+        passed, failed = 0, skipped = 0, observeCount, isolatedRunChecked = observeCount != 0, editorCaseIds,
+        real = new[] { "production Jint", "discovery", "reducer", "configuration journal" },
+        substituted = new[] { "repository synthetic configuration and log fixtures" },
+    }));
+}
 static void Check(bool condition, string message) { if (!condition) throw new InvalidDataException(message); }
 
 // Explicit, read-only replay of external script-instance exports. No history JSON is trusted as a verdict.

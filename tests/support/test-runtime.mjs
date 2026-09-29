@@ -366,9 +366,10 @@ export async function stopSpawnedService({ child, exitFile, pidFilePath, markerP
   // 在发出退出信号前固定当前 service.pid；服务优雅退出时可能先删除 PID 文件，
   // 仅在等待 child 后重新读取会漏掉仍在收尾的更新重拉服务。
   const initialMarked = readPidFile(pidFilePath);
-  const hasKnownProcess = Number.isInteger(initialMarked) || Number.isInteger(child?.pid);
   let marker = markerPath ? readRunMarker(markerPath) : null;
-  const candidatePids = [...new Set([initialMarked, child?.pid].filter(pid => Number.isInteger(pid) && pid > 0))];
+  const recordedPids = [marker?.pid, ...(marker?.handoffProcesses ?? []).map(item => item.pid)];
+  const candidatePids = [...new Set([initialMarked, child?.pid, ...recordedPids].filter(pid => Number.isInteger(pid) && pid > 0))];
+  const hasKnownProcess = candidatePids.length > 0;
   if (candidatePids.some(pid => aliveReader(pid)) && (!markerPath || !marker)) {
     throw new Error(`拒绝清理缺少有效运行 marker 的进程：markerPath=${markerPath || "missing"}`);
   }
@@ -392,6 +393,7 @@ export async function stopSpawnedService({ child, exitFile, pidFilePath, markerP
     }
   }
   const pids = new Set();
+  for (const pid of candidatePids) pids.add(pid);
   if (initialMarked) pids.add(initialMarked);
   const marked = readPidFile(pidFilePath);
   if (marked) pids.add(marked);

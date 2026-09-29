@@ -8,6 +8,10 @@
     <IsTestProject>true</IsTestProject>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(NexusTestHost)' == 'true'">
+    <DefineConstants>$(DefineConstants);NEXUS_TEST_HOST</DefineConstants>
+  </PropertyGroup>
+
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
     <PackageReference Include="ModelContextProtocol" Version="2.2.0" />

@@ -1,4 +1,4 @@
-# 用户指南（v0.16.9 本地开发版）
+# 用户指南
 
 正式下载地址与已发布版本以 [Releases](https://github.com/FlappiBakuse/NexusPipeline/releases) 为准。本页说明当前源码实现的操作方式；隔离安装、旧版升级及真实游戏验收尚需对应环境验证。
 

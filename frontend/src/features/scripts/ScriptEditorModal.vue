@@ -49,7 +49,9 @@ const lastDerivedPaths = reactive<Partial<Record<ScriptPathField, string>>>({});
 const manualPathOverrides = reactive<Partial<Record<ScriptPathField, boolean>>>({});
 const scriptLabel = computed(() => props.script || null);
 const modalTitle = computed(() =>
-  scriptLabel.value
+  draft.executionProviderId === "maa-framework"
+    ? t(scriptLabel.value ? "scripts.edit_maa_framework_instance" : "scripts.new_maa_framework_instance")
+    : scriptLabel.value
     ? t("scripts.edit_script_instance")
     : draft.executionProviderId ? t('scripts.framework_driver', {}, '框架直驱') + ' / ' + draft.executionProviderId
     : draft.pluginType
@@ -443,7 +445,7 @@ watch(
     :locked="true"
     :open="true"
     :title="modalTitle"
-    :aria-label="scriptLabel ? t('scripts.edit_script_instance') : t('scripts.new_script_instance')"
+    :aria-label="modalTitle"
     panel-class="secondary-surface"
     size="wide"
     @close="close"

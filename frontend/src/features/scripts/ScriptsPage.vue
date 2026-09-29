@@ -225,6 +225,7 @@ onBeforeUnmount(() => {
       <div class="new-script-chooser">
           <NxpButton
             class="chooser-card"
+            :class="{ 'chooser-card-full': !executionProviders.length }"
             type="button"
             @click.stop="openEditor(null, '')"
           >
@@ -236,7 +237,7 @@ onBeforeUnmount(() => {
             <strong>{{ provider.displayName || provider.name }}</strong>
             <span class="muted">{{ t('scripts.driver_independent_profile', {}, '独立配置 · 显式导入 · 使用现有队列') }}</span>
           </NxpButton>
-          <hr v-if="executionProviders.length" class="chooser-divider" />
+          <hr v-if="specializedPlugins.length" class="chooser-divider" />
           <NxpButton
             v-for="plugin in specializedPlugins"
             :key="plugin.name"

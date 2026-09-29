@@ -85,10 +85,13 @@ internal sealed record ProxyConfiguration(
 internal sealed class OutboundHttpClientProvider
 {
     private readonly Func<OutboundProxyOptions> _options;
+    private readonly Func<ProxyConfiguration, OutboundHttpTarget, bool, HttpMessageHandler> _handlerFactory;
 
-    public OutboundHttpClientProvider(Func<OutboundProxyOptions> options)
+    public OutboundHttpClientProvider(Func<OutboundProxyOptions> options,
+        Func<ProxyConfiguration, OutboundHttpTarget, bool, HttpMessageHandler>? handlerFactory = null)
     {
-        _options = options;
+        _options = options ?? throw new ArgumentNullException(nameof(options));
+        _handlerFactory = handlerFactory ?? ((proxy, target, redirect) => proxy.CreateHandler(target, redirect));
     }
 
     public HttpClient CreateClient(
@@ -99,12 +102,7 @@ internal sealed class OutboundHttpClientProvider
         OutboundHttpTarget target = destination?.IsLoopback == true
             ? OutboundHttpTarget.Loopback
             : OutboundHttpTarget.External;
-        ProxyConfiguration proxy = ProxyConfiguration.FromOptions(_options());
-        HttpClient client = new(proxy.CreateHandler(target, allowAutoRedirect))
-        {
-            Timeout = timeout,
-        };
-        return client;
+        return CreateClient(target, timeout, allowAutoRedirect);
     }
 
     public HttpClient CreateClient(
@@ -113,7 +111,7 @@ internal sealed class OutboundHttpClientProvider
         bool allowAutoRedirect = false)
     {
         ProxyConfiguration proxy = ProxyConfiguration.FromOptions(_options());
-        return new HttpClient(proxy.CreateHandler(target, allowAutoRedirect))
+        return new HttpClient(_handlerFactory(proxy, target, allowAutoRedirect))
         {
             Timeout = timeout,
         };

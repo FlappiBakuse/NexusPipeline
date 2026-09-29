@@ -1,0 +1,175 @@
+{
+  "schemaVersion": 1,
+  "invocationBudgetMs": 180000,
+  "cleanupReserveMs": 10000,
+  "groups": {
+    "backend": {
+      "scenarioIds": [
+        "host.backend.rules"
+      ],
+      "filter": "FullyQualifiedName!~.Updates.&FullyQualifiedName!~.Shared.&FullyQualifiedName!~.PluginManagerTests.&FullyQualifiedName!~CoordinatorPublishesBoundedIndependentSnapshotsDuringTenThousandProgressFrames&FullyQualifiedName!~RouteRegistry_ContainsTheCompletePublicResourceSet&FullyQualifiedName!~UserAvatarValidation_MapsMimeAndBase64ErrorsToStableCodes",
+      "caseIds": [
+        "NexusPipeline.Tests.Configuration.ConfigStoreTransactionTests.Apply_CommitWriteFailureRollsBackStoreBeforeReturningError",
+        "NexusPipeline.Tests.Configuration.ConfigStoreTransactionTests.Apply_MetadataWriteFailureLeavesCommittedSceneForNextRecovery",
+        "NexusPipeline.Tests.Configuration.ConfigStoreTransactionTests.Apply_RejectsFileDirectoryShapeConflictBeforeMutation",
+        "NexusPipeline.Tests.Configuration.ConfigStoreTransactionTests.Apply_UsesFileDeltaForMostlyUnchangedStore",
+        "NexusPipeline.Tests.Configuration.ConfigStoreTransactionTests.RepairSourcePreservesSnapshotIdentityAndRejectsStaleBytes",
+        "NexusPipeline.Tests.Configuration.ConfigSwapSyncTests.ApplyToggle_ArrayAndMap_RestoreInitialAndKeepUnlisted",
+        "NexusPipeline.Tests.Configuration.ConfigSwapSyncTests.ApplyToggle_BoolArrayAndInvalidTargetFailClosed",
+        "NexusPipeline.Tests.Configuration.ConfigSwapSyncTests.LocateNode_InvalidPath_ReturnsNull",
+        "NexusPipeline.Tests.Configuration.ConfigSwapSyncTests.LocateNode_ResolvesArrayIndexAndStableIdSelector",
+        "NexusPipeline.Tests.Configuration.ConfigSwapSyncTests.ReadRestoreDescriptor_ParsesArrayAndBoolArrayAndRejectsMalformed",
+        "NexusPipeline.Tests.Configuration.ConfigSwapSyncTests.RestoreConfigReplacements_CorruptMeta_IsQuarantined",
+        "NexusPipeline.Tests.Configuration.ConfigSwapSyncTests.ShouldRunFirstSyncAndRestoreKindFollowCurrentContract",
+        "NexusPipeline.Tests.Configuration.ConfigSwapSyncTests.ValidForSync_SkipsEmptyBrokenAndShrinkingSources",
+        "NexusPipeline.Tests.ControlPlane.WebApiContractTests.RouteRegistry_PreservesRawPluginApiLimitAndJsonDefaults",
+        "NexusPipeline.Tests.ControlPlane.WebApiContractTests.SettingsProjection_MasksEverySecretAndKeepsNonSecretValues",
+        "NexusPipeline.Tests.Execution.CoordinatorTests.CompletionIsArmedOnlyWhenLastExecutionReleases",
+        "NexusPipeline.Tests.Execution.CoordinatorTests.CoordinatorException_ProducesSyntheticFailedHistoryRecord",
+        "NexusPipeline.Tests.Execution.CoordinatorTests.EvaluateCandidateUsesRegistrationPolicyWithoutMutatingState",
+        "NexusPipeline.Tests.Execution.CoordinatorTests.RegistrationGuardsAndLifecycleHistoryArePreserved",
+        "NexusPipeline.Tests.Execution.CoordinatorTests.RetryPolicy_OnlyRetriesRecoverableFailures",
+        "NexusPipeline.Tests.Execution.CoordinatorTests.RunBudget_CentralizesElapsedRemainingAndCommandCap",
+        "NexusPipeline.Tests.Execution.JudgeScriptRunnerTests.BuildInputSerializesCurrentAttemptContract",
+        "NexusPipeline.Tests.Execution.JudgeScriptRunnerTests.ExtensionMappingResolveWithinAndFileCollectionStayBounded",
+        "NexusPipeline.Tests.Execution.JudgeScriptRunnerTests.JavaScriptCanWriteInsideScriptRootAndPartialRequiresReason",
+        "NexusPipeline.Tests.Execution.ProviderRunnerTests.ExistingRunnerPublishesHistoryAndRejectsProviderOnlySuccess(useWorker: False)",
+        "NexusPipeline.Tests.Execution.ProviderRunnerTests.ExistingRunnerPublishesHistoryAndRejectsProviderOnlySuccess(useWorker: True)",
+        "NexusPipeline.Tests.Execution.SessionJudgeTests.ApplyJudgeResult_FailureTriggersReplaceOnceAndKeepsFailureFirstMarker",
+        "NexusPipeline.Tests.Execution.SessionJudgeTests.ApplyJudgeResult_InvalidStatusIgnoredAndUnconfiguredJudgeNeverHits",
+        "NexusPipeline.Tests.Execution.SessionJudgeTests.ApplyJudgeResult_PartialIsTerminalAndDoesNotReplaceConfig",
+        "NexusPipeline.Tests.Execution.SessionJudgeTests.KeywordMode_FailureWinsRegardlessOfOrder",
+        "NexusPipeline.Tests.Execution.SessionJudgeTests.KeywordMode_GroupAndSemantics_AccumulateAcrossLines",
+        "NexusPipeline.Tests.Execution.SessionJudgeTests.KeywordMode_LineOr_SecondGroupHitsAndMissingWordNeverHits",
+        "NexusPipeline.Tests.Execution.SessionJudgeTests.KeywordMode_SameLine_UsesTextOrder",
+        "NexusPipeline.Tests.Execution.SessionJudgeTests.ScriptMode_IgnoresKeywords_KeywordLinesNeverHit",
+        "NexusPipeline.Tests.Host.AutomationDefinitionStateTests.ExecutionSnapshots_ContainOneConsistentEntityMoment",
+        "NexusPipeline.Tests.Host.AutomationDefinitionStateTests.FindUser_IsCaseInsensitiveButReturnsClone",
+        "NexusPipeline.Tests.Host.AutomationDefinitionStateTests.Mutate_UpdatesOwnedStateAtomicallyForConcurrentCallers",
+        "NexusPipeline.Tests.Host.AutomationDefinitionStateTests.Snapshots_AreDeepCopiesAndCannotMutateOwnedState",
+        "NexusPipeline.Tests.Plugins.PluginInstallRecoveryTests.ApplyPending_CompletesSwapWhenJournalWriteWasInterrupted",
+        "NexusPipeline.Tests.Plugins.PluginInstallRecoveryTests.ApplyPending_CorruptJournalIsRetainedAndDoesNotCreateRecoverySideEffects",
+        "NexusPipeline.Tests.Plugins.PluginInstallRecoveryTests.ApplyPending_CorruptOwnershipIsRetainedAndDoesNotCreateRecoveryDirectories",
+        "NexusPipeline.Tests.Plugins.PluginInstallRecoveryTests.ApplyPending_FailedStageKeepsJournalForRetry",
+        "NexusPipeline.Tests.Plugins.PluginInstallRecoveryTests.ApplyPending_InstallsAndUninstallsPluginTransactionally",
+        "NexusPipeline.Tests.Plugins.PluginInstallRecoveryTests.ApplyPending_LockedJournalRetainsOperationUntilNextStartupAttempt",
+        "NexusPipeline.Tests.Plugins.PluginInstallRecoveryTests.ApplyPending_ThreeWayDirectoryConflictRetainsAllOwnedScenes",
+        "NexusPipeline.Tests.Plugins.PluginInstallRecoveryTests.ApplyPending_UninstallAfterOwnershipCommitFinishesWithoutDeletingUnrelatedData",
+        "NexusPipeline.Tests.Plugins.PluginInstallRecoveryTests.ApplyPending_UnownedUpdateRetainsLocalAndStaging",
+        "NexusPipeline.Tests.Plugins.PluginInstallRecoveryTests.ReadOwnership_AcceptsLegacyStableRecordWithoutProvenanceFields",
+        "NexusPipeline.Tests.Plugins.PluginInstallRecoveryTests.ReadPending_AcceptsLegacyStableOperationWithoutProvenanceFields",
+        "NexusPipeline.Tests.Plugins.PluginRepositoryCatalogTests.CompareVersions_UsesNumericSemverOrdering",
+        "NexusPipeline.Tests.Plugins.PluginRepositoryCatalogTests.CompatibilityEvaluator_DistinguishesHostApiAndInvalidVersionFailures",
+        "NexusPipeline.Tests.Plugins.PluginRepositoryCatalogTests.IsCanonicalPluginId_EnforcesLowerKebabCase",
+        "NexusPipeline.Tests.Plugins.PluginRepositoryCatalogTests.TryParse_RejectsUnsafeHomepageArtifactNameNonSemverAndDuplicateEntries",
+        "NexusPipeline.Tests.Plugins.PluginRepositoryCatalogTests.TryParse_Schema2_ParsesArtifactChangelogAndPresentationMetadata",
+        "NexusPipeline.Tests.Plugins.PluginRepositoryCatalogTests.TryParse_ValidOfficialCatalog_ReturnsNormalizedEntry",
+        "NexusPipeline.Tests.Plugins.PluginRepositoryCatalogTests.UpdateEligibility_RequiresStoreOwnershipAndCurrentInstallableUpdate",
+        "NexusPipeline.Tests.Plugins.PluginRepositoryCatalogTests.ValidatePackageUrl_AcceptsOfficialRawAndRejectsEverythingElse",
+        "NexusPipeline.Tests.Scheduling.SchedulerTests.AutoUpdateBlocker_IgnoresScheduledOccurrenceAfterHorizon",
+        "NexusPipeline.Tests.Scheduling.SchedulerTests.AutoUpdateBlocker_IgnoresScheduledOccurrenceBeforeCurrentMinuteDespiteStaleWatermark",
+        "NexusPipeline.Tests.Scheduling.SchedulerTests.AutoUpdateBlocker_IncludesOccurrenceAtFiveMinuteBoundary",
+        "NexusPipeline.Tests.Scheduling.SchedulerTests.AutoUpdateBlocker_StopsForStartupQueueBeforeFirstTick",
+        "NexusPipeline.Tests.Scheduling.SchedulerTests.ScheduledTrigger_DoesNotBackfillMissedOccurrence",
+        "NexusPipeline.Tests.Scheduling.SchedulerTests.ScheduledTrigger_DurableWatermarkPreventsCompletedMinuteReplay",
+        "NexusPipeline.Tests.Scheduling.SchedulerTests.ScheduledTrigger_DoesNotBackfillOccurrenceAfterRestartWithStaleWatermark",
+        "NexusPipeline.Tests.Scheduling.SchedulerTests.StartupTrigger_RemainsPendingAfterTransientAdmissionConflict",
+        "NexusPipeline.Tests.Users.UserBindingOverrideTests.Resolve_AppliesEffectiveValuesWithoutChangingRawBinding",
+        "NexusPipeline.Tests.Users.UserBindingOverrideTests.RunDaysWriter_UsesGlobalRunDaysWhenGeneralSyncIsEnabled",
+        "NexusPipeline.Tests.Users.UserBindingOverrideTests.RuntimeRepository_UsesEffectiveBindingForExecutionSelection",
+        "NexusPipeline.Tests.Platform.OutboundHttpTests.InjectedTransportPreservesUriAndReadsCurrentProxyOptions",
+        "NexusPipeline.Tests.Platform.OutboundHttpTests.ControlledTransportEnforcesIdentityRequestsAndRestartReceipts"
+      ],
+      "boundaries": {
+        "real": [
+          "production C# rules, file transactions, coordinator and provider runner"
+        ],
+        "substituted": [
+          "external provider worker and dependency ports"
+        ],
+        "notProven": [
+          "browser/CLI/MCP/store-download/restart/scheduler E2E"
+        ]
+      }
+    },
+    "frontend": {
+      "scenarioIds": [
+        "host.frontend.state"
+      ],
+      "files": [
+        "src/platform/api.test.ts",
+        "src/platform/events.test.ts",
+        "src/platform/service-restart.test.ts",
+        "src/plugin-bridge/contract.test.ts",
+        "src/stores/shell.test.ts",
+        "src/features/users/utils/configEditRequest.test.ts"
+      ],
+      "caseIds": [
+        "Frontend API 1.5 contract accepts dispose-style renderer results as cleanup",
+        "Frontend API 1.5 contract accepts only the exact 1.5 frontend API version",
+        "Frontend API 1.5 contract delivers lifecycle notifications and stops after dispose",
+        "Frontend API 1.5 contract exposes plugin slot surface context and runs renderer cleanup on dispose",
+        "Frontend API 1.5 contract exposes the plugin descriptor, localization, appearance surface and execution preview",
+        "Frontend API 1.5 contract exposes ui.query/save/action/toast with the documented payloads",
+        "Frontend API 1.5 contract isolates renderer failures so one plugin cannot break the host slot",
+        "Frontend API 1.5 contract keeps the runtime refresh path available to the host shell",
+        "Frontend API 1.5 contract leaves no registration behind after dispose",
+        "Frontend API 1.5 contract publishes exactly the 18 public slots",
+        "Frontend API 1.5 contract queries contributions with the documented payload",
+        "Frontend API 1.5 contract registers navigation items, syncs active state, and removes them on dispose",
+        "Frontend API 1.5 contract registers routes per plugin namespace and rejects duplicates",
+        "Frontend API 1.5 contract rejects a duplicate renderer for the same plugin and slot",
+        "Frontend API 1.5 contract rejects an empty or invalid route registration",
+        "Frontend API 1.5 contract rejects querying an unknown slot instead of silently rendering it",
+        "Frontend API 1.5 contract rejects unknown lifecycle kinds instead of registering silently",
+        "Frontend API 1.5 contract routes plugin api calls into the plugin namespace with all http verbs",
+        "Frontend API 1.5 contract routes plugin binary api calls into the plugin namespace",
+        "Frontend API 1.5 contract validates slot registration input",
+        "buildConfigEditRequest passes the candidate selection through session-level input override",
+        "host api client normalizes browser-specific cancellation messages",
+        "host api client projects backend error codes through the host locale resources",
+        "host api client returns null for empty responses and JSON payloads otherwise",
+        "host api client sends the bearer token for protected binary resources",
+        "realtime SSE transport does not invoke callbacks or schedule retry when the stream is aborted",
+        "realtime SSE transport parses split CRLF frames, comments, ids, and multiline data",
+        "realtime SSE transport resyncs a missed stream event before handling the disconnect",
+        "realtime SSE transport retries HTTP 500 after notifying disconnection",
+        "realtime SSE transport retries a network failure after notifying disconnection",
+        "realtime SSE transport treats HTTP 401 as fatal without fallback polling or retry",
+        "realtime SSE transport treats HTTP 403 as fatal without fallback polling or retry",
+        "realtime SSE transport uses TextDecoder streaming and dispatches ready plus runtime events",
+        "service restart orchestration accepts only the instance launched by this restart",
+        "service restart orchestration covers the ports the host may fall back to",
+        "service restart orchestration gives up at the timeout without navigating",
+        "service restart orchestration ignores an unrelated service that occupies the configured port",
+        "service restart orchestration keeps protocol, hostname, path and hash while switching to the new port",
+        "service restart orchestration keeps the current address when the port is unknown",
+        "service restart orchestration navigates to the new port when the restarted service moved",
+        "service restart orchestration probes immediately before applying the retry interval",
+        "service restart orchestration probes the service origin without the page path or hash route",
+        "service restart orchestration reads the restart handoff from the host reply",
+        "service restart orchestration rejects replies that are not NexusPipeline",
+        "service restart orchestration reloads the page when the restarted service keeps the same address",
+        "service restart orchestration reports a failed request without probing",
+        "service restart orchestration reuses the submitted handoff when the caller retries",
+        "service restart orchestration stops waiting when the caller aborts",
+        "service restart orchestration submits the restart, waits for the new instance and navigates to its actual port",
+        "service restart orchestration waits for the new instance instead of the still-running old one",
+        "shell restart state records reasons without duplicates and clears them on request",
+        "shell restart state starts without a pending restart",
+        "shell restart state tracks the restart lifecycle and clears previous errors"
+      ],
+      "boundaries": {
+        "real": [
+          "production frontend state and bridge modules"
+        ],
+        "substituted": [
+          "unit-level DOM and service responses"
+        ],
+        "notProven": [
+          "real Host/browser end-to-end"
+        ]
+      }
+    }
+  }
+}
