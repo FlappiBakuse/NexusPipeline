@@ -42,6 +42,8 @@ internal sealed record UpdateTask(
     public string? TargetImageHash { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public ProcessIdentity? WorkerIdentity { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RestartHandoffId { get; init; }
     public static UpdateTask? Read(string? path = null)
     {
         string file = path ?? AppPaths.UpdateTaskFile;
@@ -71,6 +73,8 @@ internal sealed record UpdateTask(
                 || task.TargetImageHash is not { Length: 64 }
                 || task.TargetImageHash.Any(ch => !Uri.IsHexDigit(ch))))
                 throw new InvalidDataException("更新事务身份无效");
+            if (task.RestartHandoffId is not null && !Guid.TryParseExact(task.RestartHandoffId, "N", out _))
+                throw new InvalidDataException("更新恢复交接标识无效");
             return task;
         }
         catch (Exception ex)
@@ -224,7 +228,7 @@ internal static class UpdateApply
 
             journal = journal with { Phase = UpdatePhase.AwaitingStartup };
             journal.Write();
-            candidateProcess = LaunchService(installDir, webOnly);
+            candidateProcess = LaunchService(installDir, webOnly, journal.RestartHandoffId);
             candidateIdentity = CaptureCandidateIdentity(candidateProcess, oldExe);
             if (candidateIdentity is null) throw new IOException("新宿主启动身份无法确认");
             WaitForStartupReceipt(journal, candidateProcess, candidateIdentity.Value);
@@ -290,7 +294,7 @@ internal static class UpdateApply
                     try
                     {
                         Logger.Warn("[更新] 正在重新拉起回滚后的宿主版本。");
-                        LaunchService(AppPaths.AppRoot, webOnly).Dispose();
+                        LaunchService(AppPaths.AppRoot, webOnly, journal.RestartHandoffId).Dispose();
                     }
                     catch (Exception launchEx)
                     {
@@ -306,7 +310,7 @@ internal static class UpdateApply
                     try
                     {
                         Logger.Warn("[更新] 文件交换前更新失败，正在重新拉起现有宿主版本。");
-                        LaunchService(AppPaths.AppRoot, webOnly).Dispose();
+                        LaunchService(AppPaths.AppRoot, webOnly, journal.RestartHandoffId).Dispose();
                     }
                     catch (Exception launchEx)
                     {
@@ -323,7 +327,7 @@ internal static class UpdateApply
     /// 新实例启动收尾：完成 commit 后只在所有临时项清理成功时删除 version marker；
     /// apply/defer 启动失败保留 journal，rollback 失败保留 backup 与 journal。
     /// </summary>
-    public static bool RunStartupFinalization(bool webOnly = false, string? mutexName = null)
+    public static bool RunStartupFinalization(bool webOnly = false, string? mutexName = null, string? restartHandoffId = null)
     {
         Volatile.Write(ref _startupRecoveryUnsafe, 0);
         string? appliedVersion = ReadVersionFile();
@@ -361,6 +365,22 @@ internal static class UpdateApply
             Logger.Error("[更新] journal 存在但无法读取，保留现场并停止自动更新。");
             Volatile.Write(ref _startupRecoveryUnsafe, 1);
             return false;
+        }
+        if (Guid.TryParseExact(restartHandoffId, "N", out _)
+            && pending.RestartHandoffId != restartHandoffId)
+        {
+            try
+            {
+                UpdateTask handoff = pending with { RestartHandoffId = restartHandoffId };
+                handoff.Write();
+                pending = handoff;
+            }
+            catch (Exception ex)
+            {
+                Logger.Error($"[更新] 无法保存恢复交接标识，保留原 journal：{ex.Message}");
+                Volatile.Write(ref _startupRecoveryUnsafe, 1);
+                return false;
+            }
         }
         if (pending.Phase == UpdatePhase.AwaitingStartup)
         {
@@ -497,7 +517,7 @@ internal static class UpdateApply
         try
         {
             Rollback(pending with { Mode = "apply", Phase = UpdatePhase.RollbackPending });
-            LaunchService(AppPaths.AppRoot, webOnly).Dispose();
+            LaunchService(AppPaths.AppRoot, webOnly, pending.RestartHandoffId).Dispose();
             return 0;
         }
         catch (Exception ex)
@@ -1131,7 +1151,7 @@ internal static class UpdateApply
     /// <summary>测试注入点：L2 单测替换 recovery worker 拉起。</summary>
     internal static Func<bool>? LaunchRecoveryOverride;
 
-    private static Process LaunchService(string installDir, bool webOnly)
+    private static Process LaunchService(string installDir, bool webOnly, string? restartHandoffId = null)
     {
         string exePath = Path.Combine(installDir, "nexus-pipeline.exe");
         var startInfo = new ProcessStartInfo(exePath)
@@ -1139,7 +1159,18 @@ internal static class UpdateApply
             UseShellExecute = false,
             CreateNoWindow = true,
         };
-        if (webOnly)
+        if (!string.IsNullOrEmpty(restartHandoffId))
+        {
+            startInfo.ArgumentList.Add("restart");
+            if (webOnly)
+            {
+                startInfo.ArgumentList.Add("--web");
+                startInfo.ArgumentList.Add("--keep-alive");
+            }
+            startInfo.ArgumentList.Add("--handoff");
+            startInfo.ArgumentList.Add(restartHandoffId);
+        }
+        else if (webOnly)
         {
             startInfo.ArgumentList.Add("web");
             startInfo.ArgumentList.Add("--keep-alive");

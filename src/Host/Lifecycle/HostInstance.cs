@@ -1,3 +1,6 @@
+using System.Security.Cryptography;
+using NexusPipeline.Platform.Storage;
+
 namespace NexusPipeline.Host.Lifecycle;
 
 /// <summary>
@@ -7,7 +10,25 @@ namespace NexusPipeline.Host.Lifecycle;
 /// </summary>
 internal static class HostInstance
 {
+    private static int _ready;
+    private static readonly Lazy<string> BuildId = new(() =>
+    {
+        string index = Path.Combine(AppPaths.AppRoot, "wwwroot", "index.html");
+        try
+        {
+            return File.Exists(index) ? Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(index))).ToLowerInvariant() : "";
+        }
+        catch
+        {
+            return "";
+        }
+    });
+
     public static string Id { get; } = Guid.NewGuid().ToString("N");
+    public static bool Ready => Volatile.Read(ref _ready) != 0;
+    public static string FrontendBuildId => BuildId.Value;
+    public static void MarkReady() => Volatile.Write(ref _ready, 1);
+    public static void MarkNotReady() => Volatile.Write(ref _ready, 0);
 
     /// <summary>本次进程由重启交接拉起时携带的交接标识；正常启动为空。</summary>
     public static string RestartHandoffId { get; private set; } = "";

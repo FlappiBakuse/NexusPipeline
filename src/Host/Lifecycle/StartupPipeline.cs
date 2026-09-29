@@ -96,6 +96,7 @@ internal static class StartupPipeline
             runtime.UpdateService.RefreshStartupRecoveryState();
             if (qualifyUpdate && RunStartupUpdateGate(runtime) != StartupUpdateDisposition.ContinueStartup)
             { runtime.Stop(web, mcp); ClearServicePid(); return; }
+            HostInstance.MarkReady();
 
 #if NEXUS_TEST_HOST
             StartTestHostExitMonitor();
@@ -310,6 +311,7 @@ internal static class StartupPipeline
         runtime.UpdateService.RefreshStartupRecoveryState();
         if (qualifyUpdate && RunStartupUpdateGate(runtime) != StartupUpdateDisposition.ContinueStartup)
         { runtime.Stop(web, mcp); ClearServicePid(); return 1; }
+        HostInstance.MarkReady();
         Console.WriteLine(CliText.Get("startup.web_started", "Web 界面：http://127.0.0.1:{port}/（按回车停止）", ("port", web.Port)));
         if (runtime.Settings.AutoOpenBrowser)
         {
@@ -337,7 +339,7 @@ internal static class StartupPipeline
     private static bool PrepareHostedStart(HostRuntime runtime)
     {
         AppPaths.RuntimeState.EnsureDirectories();
-        if (UpdateApply.RunStartupFinalization(ApplicationHost.IsWebOnly, SingleInstanceMutexName))
+        if (UpdateApply.RunStartupFinalization(ApplicationHost.IsWebOnly, SingleInstanceMutexName, HostInstance.RestartHandoffId))
         {
             return false;
         }
@@ -357,6 +359,7 @@ internal static class StartupPipeline
     /// <summary>常驻模式（service/web）共享的关闭不变量：等待任务/编辑会话安全结束 → 停服务 → 清 service.pid。</summary>
     private static void ShutdownHosted(HostRuntime runtime, WebServer? web, McpHost? mcp, string? exitLog = null)
     {
+        HostInstance.MarkNotReady();
         WaitForSafeShutdown(runtime);
         runtime.Stop(web, mcp);
         ClearServicePid();
