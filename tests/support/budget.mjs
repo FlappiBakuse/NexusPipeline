@@ -8,14 +8,19 @@ export class BudgetExceeded extends Error {
 }
 
 export class Budget {
-  constructor(label, limitMs, { parent = null, reserveMs = 0, clock = () => performance.now() } = {}) {
+  constructor(label, limitMs, { parent = null, reserveMs = 0, qualificationMs = limitMs,
+    clock = () => performance.now() } = {}) {
     if (!Number.isFinite(limitMs) || limitMs <= 0 || !Number.isFinite(reserveMs)
-      || reserveMs < 0 || reserveMs >= limitMs) throw new TypeError("Invalid budget");
+      || reserveMs < 0 || reserveMs >= limitMs || !Number.isFinite(qualificationMs)
+      || qualificationMs <= 0 || qualificationMs > limitMs) throw new TypeError("Invalid budget");
     this.label = label;
     this.clock = parent?.clock ?? clock;
     this.started = this.clock();
+    this.startedMonotonic = this.started;
     this.deadline = Math.min(this.started + limitMs, parent?.workDeadline ?? Infinity);
-    this.workDeadline = this.deadline - reserveMs;
+    this.cleanupDeadline = this.deadline;
+    this.qualificationDeadline = Math.min(this.started + qualificationMs, this.deadline);
+    this.workDeadline = Math.min(this.qualificationDeadline, this.deadline - reserveMs);
     this.limitMs = limitMs;
   }
 
@@ -25,6 +30,10 @@ export class Budget {
   }
   check() {
     if (this.remainingMs() <= 0) throw new BudgetExceeded(this.label);
+  }
+  assertWithinBudget() {
+    if (this.clock() > this.qualificationDeadline || this.clock() > this.deadline)
+      throw new BudgetExceeded(this.label);
   }
   child(label, limitMs, reserveMs = 0) {
     this.check();

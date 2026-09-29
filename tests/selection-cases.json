@@ -1,0 +1,171 @@
+{
+  "schemaVersion": 1,
+  "cases": [
+    {
+      "id": "SC01",
+      "repository": "Host",
+      "changes": [
+        "docs/user/README.en.md"
+      ],
+      "mustInclude": [
+        "host.scope",
+        "host.docs",
+        "host.required"
+      ],
+      "mustExclude": [
+        "host.backend.*",
+        "host.frontend.*",
+        "host.integration.*"
+      ],
+      "reason": "普通文档不运行业务"
+    },
+    {
+      "id": "SC02",
+      "repository": "Host",
+      "changes": [
+        "README.md"
+      ],
+      "mustInclude": [
+        "host.docs",
+        "host.release-contract"
+      ],
+      "mustExclude": [
+        "host.backend.*",
+        "host.frontend.*"
+      ],
+      "reason": "发行载荷文字需包输入规则，不必构建业务"
+    },
+    {
+      "id": "SC03",
+      "repository": "Host",
+      "changes": [
+        "frontend/src/features/dispatch/DispatchPage.vue"
+      ],
+      "mustInclude": [
+        "host.frontend.typecheck",
+        "host.frontend.build"
+      ],
+      "mustExclude": [
+        "host.backend.*"
+      ],
+      "reason": "纯布局diff，状态测试依赖按实际import闭包确定"
+    },
+    {
+      "id": "SC04",
+      "repository": "Host",
+      "changes": [
+        "src/Modules/Updates/UpdateApply.cs"
+      ],
+      "mustInclude": [
+        "host.backend.updates-restart",
+        "host.architecture.backend",
+        "host.integration.restart-update"
+      ],
+      "mustExclude": [
+        "plugins.plugin.capability:all"
+      ],
+      "reason": "更新生命周期改动不全量运行无关插件"
+    },
+    {
+      "id": "SC05",
+      "repository": "Host",
+      "changes": [
+        "src/Modules/Settings/UseCases/SettingsCommands.cs"
+      ],
+      "mustInclude": [
+        "host.backend.settings-notifications",
+        "host.backend.control",
+        "host.architecture.backend"
+      ],
+      "mustExclude": [
+        "host.frontend.build"
+      ],
+      "reason": "设置命令行为，其他依赖者按语义扩展"
+    },
+    {
+      "id": "SC06",
+      "repository": "Host",
+      "changes": [
+        "frontend/src/platform/service-restart.ts"
+      ],
+      "mustInclude": [
+        "host.frontend.state",
+        "host.frontend.typecheck",
+        "host.frontend.build",
+        "host.integration.restart-update"
+      ],
+      "mustExclude": [],
+      "reason": "跨宿主恢复语义需真实闭环"
+    },
+    {
+      "id": "SC07",
+      "repository": "Host",
+      "changes": [
+        "frontend/src/plugin-bridge/runtime.ts"
+      ],
+      "mustInclude": [
+        "host.partner-contract",
+        "host.architecture.frontend",
+        "host.frontend.state"
+      ],
+      "mustExclude": [],
+      "reason": "桥接公共能力按实际对端依赖展开"
+    },
+    {
+      "id": "SC08",
+      "repository": "Host",
+      "changes": [
+        "tools/installer.iss.in"
+      ],
+      "mustInclude": [
+        "host.installer-localization",
+        "host.release-contract"
+      ],
+      "mustExclude": [
+        "host.backend.execution"
+      ],
+      "reason": "安装器独立，不重跑无关业务"
+    },
+    {
+      "id": "SC15",
+      "repository": "Host",
+      "changes": [
+        ".github/workflows/ci.yml"
+      ],
+      "mustInclude": [
+        "host.ci-policy"
+      ],
+      "mustExclude": [],
+      "reason": "被改gate的行为选择需同时验证"
+    },
+    {
+      "id": "SC18",
+      "repository": "Host",
+      "changes": [
+        "docs/README.md",
+        "frontend/src/platform/plugin-list.ts"
+      ],
+      "mustInclude": [
+        "host.docs",
+        "host.frontend.state",
+        "host.frontend.typecheck",
+        "host.frontend.build"
+      ],
+      "mustExclude": [],
+      "reason": "混合变化合并，docs不能覆盖代码"
+    },
+    {
+      "id": "SC19",
+      "repository": "Host",
+      "changes": [
+        "src/NewUnknown/Feature.cs"
+      ],
+      "mustInclude": [
+        "host.ci-policy",
+        "host.architecture.backend"
+      ],
+      "mustExclude": [],
+      "reason": "未知代码保守扩大后端核心并要求登记，不得文档化"
+    }
+  ]
+}

@@ -6,9 +6,11 @@ import { sha256, validateResult } from "./report.mjs";
 
 export async function runCore({ group, policy, policyBytes, workspace, runRoot, runId, budget, run }) {
   const selected = policy.groups[group];
+  const backend = group === "backend" || group.startsWith("backend.");
+  const gateId = group.startsWith("backend.") ? `host.${group}` : group === "frontend" ? "host.frontend.state" : null;
   const directory = path.join(runRoot, group);
   fs.mkdirSync(directory, { recursive: true });
-  const rawReport = path.join(directory, group === "backend" ? "native.trx" : "native.json");
+  const rawReport = path.join(directory, backend ? "native.trx" : "native.json");
   const normalized = path.join(directory, "native-counts.json");
   const logPath = path.join(directory, "commands.log");
   const log = fs.openSync(logPath, "wx");
@@ -21,6 +23,7 @@ export async function runCore({ group, policy, policyBytes, workspace, runRoot, 
     runId, repository: "FlappiBakuse/NexusPipeline", source: workspace.source,
     partner: null, policySha256: sha256(policyBytes), profile: group, plugin: null,
     scenarioIds: selected.scenarioIds, caseIds: selected.caseIds, budgetMs: policy.invocationBudgetMs,
+    qualificationMs: policy.qualificationMs,
   };
   async function step(label, command, args, cwd = workspace.directory, failureCode = null) {
     const started = budget.elapsedMs;
@@ -35,7 +38,7 @@ export async function runCore({ group, policy, policyBytes, workspace, runRoot, 
     }
   }
   try {
-    if (group === "backend") {
+    if (backend) {
       await step("构建并验证执行与配置规则", "dotnet", [
         "test", "tests/NexusPipeline.Tests/NexusPipeline.Tests.csproj", "-p:NexusTestHost=true",
         "-p:UseSharedCompilation=false", "--disable-build-servers", "--nologo",
@@ -53,7 +56,7 @@ export async function runCore({ group, policy, policyBytes, workspace, runRoot, 
     }
     await step("读取原生报告", process.platform === "win32" ? "python" : "python3", [
       path.join(workspace.directory, "tests", "support", "native-report.py"),
-      group === "backend" ? "trx" : "vitest", rawReport, normalized,
+      backend ? "trx" : "vitest", rawReport, normalized,
     ], workspace.directory, 4);
     native = JSON.parse(fs.readFileSync(normalized, "utf8"));
   } catch (error) {
@@ -64,7 +67,7 @@ export async function runCore({ group, policy, policyBytes, workspace, runRoot, 
   }
   const cleanup = getProcessRunnerState();
   const report = {
-    schemaVersion: 1, evidenceType: "actual", runId, repository: plan.repository, source: plan.source,
+    schemaVersion: 1, evidenceType: "actual", gateId, runId, repository: plan.repository, source: plan.source,
     partner: null, policySha256: plan.policySha256,
     scope: { profile: group, plugin: null, applicability: "required", selectionReason: "explicit core group",
       expectedScenarioIds: selected.scenarioIds, completedScenarioIds: code === 0 ? selected.scenarioIds : [],
@@ -74,7 +77,8 @@ export async function runCore({ group, policy, policyBytes, workspace, runRoot, 
       environmentFingerprint: sha256(`${os.platform()} ${os.release()} ${JSON.stringify(workspace.toolchain)}`), ci: null },
     status: code === 0 ? "PASS" : code === 5 ? "TIMEOUT" : code === 130 ? "CANCELLED" : "FAIL",
     exitCode: code,
-    timing: { budgetMs: policy.invocationBudgetMs, elapsedMs: budget.elapsedMs, exclusivePluginMs: null,
+    timing: { budgetMs: policy.invocationBudgetMs, qualificationMs: policy.qualificationMs,
+      elapsedMs: budget.elapsedMs, exclusivePluginMs: null,
       ciJobElapsedMs: null, queueMs: null, startedAt, completedAt: new Date().toISOString(), phases },
     counts: { passed: native.passed, failed: native.failed, skipped: native.skipped },
     boundaries: selected.boundaries,

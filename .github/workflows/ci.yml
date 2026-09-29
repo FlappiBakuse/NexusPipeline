@@ -14,62 +14,112 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  core:
-    name: ${{ matrix.name }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - group: backend
-            name: Host / 执行与配置
-          - group: frontend
-            name: Host / 前端核心状态
-    runs-on: windows-latest
+  scope:
+    name: Host / 范围判定
+    runs-on: ubuntu-latest
     timeout-minutes: 3
-    env:
-      NEXUS_TEST_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.group }}
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      count: ${{ steps.plan.outputs.count }}
+      partnerSha: ${{ steps.plan.outputs.partnerSha }}
     steps:
-      - name: 检出本次源码
+      - name: 检出完整源码与基线
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
+          path: Host
+          fetch-depth: 0
           persist-credentials: false
-      - name: 准备 .NET 工具链
-        if: matrix.group == 'backend'
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
-        with:
-          dotnet-version: "8.0.x"
       - name: 准备 Node 工具链
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: "24"
-      - name: 验证核心规则
-        run: node tests/run.mjs ci --group ${{ matrix.group }}
-      - name: 保存原始计数与身份报告
+      - name: 选择受影响门禁
+        id: plan
+        working-directory: Host
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SCOPE_RESULT: ${{ runner.temp }}/scope.json
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node tests/ci-scope.mjs
+      - name: 保存范围计划
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: scope
+          path: ${{ runner.temp }}/scope.json
+          if-no-files-found: error
+          retention-days: 7
+
+  gates:
+    name: ${{ matrix.name }}
+    needs: scope
+    if: needs.scope.outputs.count != '0'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.scope.outputs.matrix) }}
+    runs-on: windows-latest
+    timeout-minutes: 3
+    env:
+      NEXUS_TEST_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.key }}
+      NEXUS_PARTNER_ROOT: ${{ github.workspace }}/Plugins
+    steps:
+      - name: 检出本次源码
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: Host
+          persist-credentials: false
+      - name: 检出固定插件输入
+        if: matrix.id == 'host.partner-contract'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: FlappiBakuse/NexusPipeline-Plugins
+          ref: ${{ needs.scope.outputs.partnerSha }}
+          path: Plugins
+          persist-credentials: false
+      - name: 准备 Node 工具链
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: "24"
+      - name: 准备 .NET 工具链
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+        with:
+          dotnet-version: "8.0.x"
+      - name: 准备 Python 工具链
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.13"
+      - name: 验证独立门禁
+        working-directory: Host
+        shell: pwsh
+        run: node tests/run.mjs gate --id '${{ matrix.id }}'
+      - name: 保存原生报告与门禁结果
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: host-${{ matrix.group }}
+          name: host-gate-${{ matrix.key }}
           path: ${{ runner.temp }}/NexusPipeline.Tests/runs/${{ env.NEXUS_TEST_RUN_ID }}
           if-no-files-found: error
           retention-days: 7
+
   required:
     name: Host / Required
-    needs: core
+    needs: [scope, gates]
     if: always()
     runs-on: ubuntu-latest
-    timeout-minutes: 1
+    timeout-minutes: 3
     steps:
       - name: 检出汇总策略
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
+          path: Host
           persist-credentials: false
-      - name: 读取本次核心报告
+      - name: 下载范围与原生报告
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          pattern: host-*
           path: ${{ runner.temp }}/reports
-      - name: 汇总结果与实际 job 耗时
+      - name: 核验来源、用例与完整前序耗时
+        working-directory: Host
         env:
           GH_TOKEN: ${{ github.token }}
           CI_NEEDS: ${{ toJSON(needs) }}
-        run: python tests/ci-gate.py . '${{ runner.temp }}/reports' host
+        run: python tests/gate-required.py . '${{ runner.temp }}/reports'
