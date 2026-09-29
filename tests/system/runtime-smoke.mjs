@@ -212,6 +212,10 @@ test("重启接受后立即冻结旧服务的运行与配置写入准入", { ski
     scriptId = JSON.parse(createBody).id;
     const userName = "Restart Maintenance User";
     await createUserBinding(scriptId, userName);
+    const beforeSettingsResponse = await api("GET", "/api/settings");
+    assert.equal(beforeSettingsResponse.status, 200);
+    const beforeLogLevel = (await beforeSettingsResponse.json()).settings.logLevel;
+    const attemptedLogLevel = beforeLogLevel === "debug" ? "warn" : "debug";
 
     const oldUrl = serviceUrl();
     const restart = await api("POST", "/api/settings/restart");
@@ -240,7 +244,9 @@ test("重启接受后立即冻结旧服务的运行与配置写入准入", { ski
       try {
         response = await api(method, route, body, oldUrl);
       } catch (error) {
-        assert.equal(error?.cause?.code, "ECONNREFUSED", `旧服务关闭时出现非拒绝连接错误：${error?.message}`);
+        // 监听器关闭可拒绝新连接，也可重置已经建立但尚未返回的连接。
+        assert.ok(["ECONNREFUSED", "ECONNRESET"].includes(error?.cause?.code),
+          `旧服务关闭时出现非预期连接错误：${error?.message}`);
         return;
       }
       const responseBody = await response.text();
@@ -248,13 +254,18 @@ test("重启接受后立即冻结旧服务的运行与配置写入准入", { ski
       assert.equal(JSON.parse(responseBody).code, "host_maintenance");
     };
     await assertOldServiceRejects("POST", "/api/dispatch/script", { scriptId, mode: "manual", userName });
-    await assertOldServiceRejects("PUT", "/api/settings", { logLevel: "info" });
+    await assertOldServiceRejects("PUT", "/api/settings", { logLevel: attemptedLogLevel });
 
     const restarted = await waitForRestartedService(restartOptions);
     restartedConfirmed = true;
     assert.equal(restarted.service, "NexusPipeline");
     assert.notEqual(restarted.instanceId, previousInstanceId, "重启后必须由新的进程实例提供服务");
     assert.equal(restarted.restartHandoffId, restartPayload.handoffId, "新实例必须携带本次重启的交接标识");
+    const afterSettingsResponse = await api("GET", "/api/settings");
+    assert.equal(afterSettingsResponse.status, 200);
+    assert.equal((await afterSettingsResponse.json()).settings.logLevel, beforeLogLevel,
+      "旧服务关闭期间不得保存设置写入");
+    assert.equal(fs.existsSync(fixture.log), false, "旧服务关闭期间不得执行新派发的脚本");
   } catch (error) {
     failure = error;
   }
