@@ -88,7 +88,7 @@ export function planForChanges(root, changes, registry, policy) {
     if (/^(README(?:\.en)?\.md|LICENSE(?:\.md)?|NOTICE(?:\.md)?)$/i.test(name)) {
       host("docs", reason); host("release-contract", reason); return;
     }
-    if (/^(tests\/(?:scope-plan|scope-cli|selection-cases|ci-scope|gate-required|test_gate_required|policy|gates|run|ci-gate|audit-jobs|test_audit_jobs)|\.github\/workflows\/ci\.yml)/.test(name)) {
+    if (/^(tests\/(?:scope-plan|scope-cli|selection-cases|ci-scope|gate-required|test_gate_required|policy|gates|run|ci-gate|audit-jobs|test_audit_jobs|final-budget|test_final_budget)|\.github\/workflows\/(?:ci|final-budget)\.yml)/.test(name)) {
       host("ci-policy", reason); return;
     }
     if (/^(tools\/installer|tools\/host_installer|tools\/installer-languages)/.test(name)) {
@@ -144,7 +144,7 @@ export function planForChanges(root, changes, registry, policy) {
     if (/^(tools\/repository|tools\/.*release|\.github\/workflows\/(?:stable|develop|release))/.test(name)) {
       add("plugins.release-contract", reason); add("plugins.ci-policy", reason); return;
     }
-    if (/^(tests\/(?:scope-plan|scope-cli|selection|ci-scope|gate-runner|gate-required|policy|gates|run|ci-gate|audit-jobs|test_audit_jobs|inputs\.lock)|\.github\/workflows\/ci\.yml)/.test(name)) {
+    if (/^(tests\/(?:scope-plan|scope-cli|selection|ci-scope|gate-runner|gate-required|policy|gates|run|ci-gate|audit-jobs|test_audit_jobs|final-budget|test_final_budget|inputs\.lock)|\.github\/workflows\/(?:ci|final-budget)\.yml)/.test(name)) {
       add("plugins.ci-policy", reason); if (name === "tests/inputs.lock.json") add("plugins.inventory", reason); return;
     }
     if (name.startsWith("tests/architecture-check") || name === "tests/test_architecture_check.py") {

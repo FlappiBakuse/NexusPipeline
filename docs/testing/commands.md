@@ -54,7 +54,7 @@ node tests/run.mjs gate --id host.ci-policy
 
 ## 质量门禁顺序
 
-`.github/workflows/ci.yml` 先生成完整 base/head 范围计划，再并行运行选中 gate。`Host / Required` 核验本次计划、报告、原生计数、清理与 Actions API 返回的完整前序 job 时长；每个 job 硬限制三分钟。完成后还须执行只读 `python tests/audit-jobs.py --run-id <ID> --attempt <N>`，检查包括 Required 在内的完整 job 时长。终结 job 的自动检查回写尚待受控远端部署，因此本地或原始 Actions success 不代表该子项已通过。
+`.github/workflows/ci.yml` 先生成完整 base/head 范围计划，再并行运行选中 gate。`Host / Required` 核验本次计划、报告、原生计数、清理与 Actions API 返回的完整前序 job 时长；每个 job 硬限制三分钟。完成后还须执行只读 `python tests/audit-jobs.py --run-id <ID> --attempt <N>`，检查包括 Required 在内的完整 job 时长。`Host Final Budget` 在 CI 完成后从受信 `main` 控制器审计所有 job，写入 `Host / Final Budget` 检查；该检查须与 `Host / Required` 一同绑定到 main 规则。回写检查不存在或失败时不得合并。
 
 工具自测与文档检查按改动显式运行，例如：
 
