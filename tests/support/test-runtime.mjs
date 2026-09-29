@@ -170,10 +170,12 @@ export function createRunMarker(markerPath, executablePath, child, { nonce = ran
   // This registration is tied to the live ChildProcess, never to a PID read
   // later during cleanup. Once captured, creation time is immutable.
   const registration = (async () => {
-    const deadline = Date.now() + 5000;
+    const deadline = Date.now() + 15000;
+    let lastIdentity = null;
     do {
       if (child.exitCode !== null || child.signalCode !== null) return;
       const identity = identityReader(pid);
+      lastIdentity = identity;
       if (child.exitCode !== null || child.signalCode !== null) return;
       if (identity?.startTime && sameExecutable(identity.executablePath, executablePath)) {
         const current = readRunMarker(markerPath);
@@ -183,7 +185,7 @@ export function createRunMarker(markerPath, executablePath, child, { nonce = ran
       }
       await sleep(50);
     } while (Date.now() < deadline);
-    throw new Error(`无法确认本次子进程启动身份：PID=${pid}`);
+    throw new Error(`无法确认本次子进程启动身份：PID=${pid}；最近读取=${JSON.stringify(lastIdentity)}`);
   })();
   // Keep rejection observable by waitForRunMarker without unhandled rejection.
   spawnedRegistrations.set(child, registration.then(() => null, error => error));

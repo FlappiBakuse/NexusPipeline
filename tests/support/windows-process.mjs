@@ -1,12 +1,12 @@
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 
-function run(command, args) {
+function run(command, args, timeout = 2_000) {
   try {
     return spawnSync(command, args, {
       encoding: "utf8",
       windowsHide: true,
-      timeout: 2_000,
+      timeout,
     });
   } catch {
     return { status: null, stdout: "", stderr: "" };
@@ -49,7 +49,7 @@ export function readProcessIdentity(pid) {
     }
   }
   const script = `$p=Get-Process -Id ${numericPid} -ErrorAction SilentlyContinue; if ($null -ne $p) { [pscustomobject]@{ pid=$p.Id; executablePath=$p.Path; startTime=$p.StartTime.ToUniversalTime().ToString('o') } | ConvertTo-Json -Compress }`;
-  const result = run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script]);
+  const result = run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], 5_000);
   if (result.status !== 0 || !String(result.stdout || "").trim()) return null;
   try {
     const identity = JSON.parse(String(result.stdout).trim());
