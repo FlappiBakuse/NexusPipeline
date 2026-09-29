@@ -5,34 +5,63 @@
 以下命令均在仓库根目录执行：
 
 ```text
-node tests\run.mjs smoke
-node tests\run.mjs integration
-node tests\run.mjs release
+node tests/run.mjs list --json
+node tests/run.mjs ci --group backend
+node tests/run.mjs ci --group frontend
+node tests/run.mjs smoke
+node tests/run.mjs daily
+node tests/run.mjs daily --group schedule
+node tests/run.mjs diagnostic --group store
+node tests/run.mjs integration
+node tests/run.mjs release
 ```
 
-| 命令 | 内容 |
-|---|---|
-| `smoke` | `tests/` 与 `tools/` 下全部 `.mjs` 的逐文件语法检查；核心 xUnit（`tests/NexusPipeline.Tests/`，`NexusTestHost=true`）；前端 `typecheck` 与 Vitest；`tools/check-doc-links.mjs` 文档内链检查 |
-| `integration` | 构建前端生产包，发布 `NexusTestHost=true` 的 asInvoker Test Host，再运行 UI Smoke 与 System Smoke |
-| `release` | 生产 `requireAdministrator` 构建到 `release/`，并用 `tools/pe_manifest.py` 校验内嵌清单 |
+`ci` 必须指定一个已知分组。backend 选择真实后端规则、文件事务、执行与调度窄测试；frontend 运行类型检查及核心状态、用户配置请求与公开桥接测试。`tests/policy.json` 中的预期用例与实际原生报告严格匹配。新增或更名选中用例时同步清单，不能删除失败用例以绕过验证。
 
-`smoke` 按顺序执行各步骤，任一步非零退出即中止并保留该步原始输出与退出码。未知命令或多余参数打印用法并以 exit code 2 退出。
+`smoke` 与两条 `ci` 使用同一实现，并行执行 backend/frontend，共享 180 秒父预算，最后 10 秒预留收尾。输入识别、隔离复制、必要增量构建、依赖准备、测试、报告和清理均计入预算。失败保留原退出码；超时返回 5，清理失败返回 6，主动取消返回 130。报告不完整返回 4。未知命令或参数返回 2。
+
+`daily` 使用两个独立 Host 槽位，先启动真实分钟调度，另一槽运行执行和配置，空闲槽接续控制面；共享准备、四组工作及清理合计 180 秒。支持 `--group execution|config|control|schedule` 进行明确的单组诊断。每组保留 `evidence.json`，父级 `daily-evidence.json` 只有全部预期组及清理通过才成功。
+
+| 场景 | 真实证明 | 外部替代 |
+|---|---|---|
+| H-E01 execution | 浏览器选择队列并运行，6 脚本、3 队列、4 账号，12 次请求、4 次取消、64 次读取，进程退出和历史归属 | 拥有的外部目标程序 |
+| H-E02 config | A/B 保存、取消、正常/失败执行，目录配置还原，落盘 journal 后异常终止与两次启动恢复 | 合成配置与拥有的目标进程 |
+| H-E03 control | 真实 CLI、MCP HTTP 初始化与运行观察、合法包安装更新、坏 hash 阻断、两次重启交接 | 官方 HTTPS 响应和合成测试插件 |
+| H-E04 schedule | 真实分钟计时产生队列执行、结果归属、持久化水位与重启去重 | 拥有的外部目标程序 |
+
+`integration` 保留已有 UI Smoke/System Smoke 诊断，部分 UI 响应由夹具提供；它不是 `daily` 的替代。`release` 是生产构建入口。
+
+`diagnostic --group store` 在同一180秒父预算内构建实际 Test Host 和合成 managed fixture，访问官方 HTTPS catalog/package 地址，由 Test Host 的传输夹具返回固定响应。它验证坏 hash 拒绝、安装事务、默认禁用、显式启用、三次真实重启交接、插件加载和卸载。原生 TAP 与 `store-evidence.json` 位于本次运行目录；这是 H-C09 的安装生命周期诊断，不代表浏览器交互、全部商店恢复矩阵或四组 daily 已完成。
+
+受控 HTTP 实现 `tests/host/TestHostTransport.cs` 仅在 `NexusTestHost=true` 时编入宿主，生产程序不读取 `NEXUS_TEST_HTTP_PLAN`。测试计划必须是绝对路径且 `runId` 匹配 `NEXUS_TEST_RUN_ID`；每项按 HTTP 方法、完整 URI 及可选凭据头/请求体 hash 匹配，未知请求失败，不回退到真实外网。收据只包含场景标识和匹配结果，并在重启后继续消费剩余响应；不会记录凭据、URL或请求体。回环控制面保持真实网络通信。
 
 ## 隔离与运行输出
 
-托管层使用 `NexusTestHost=true` 的 asInvoker Test Host：不要求提权、不触发 UAC、不降权，服务、API、进程与系统操作按本地反馈语义运行；每个 suite 使用独立可用端口与独立 runtime 目录，不读写用户实例的进程、端口或数据。
+测试不提权或降权，使用当前终端权限。可设置 `NEXUS_TEST_ARTIFACT_ROOT` 为本次专用的绝对路径；目录内 `.nxp-test-artifact-root.json` 内容如下，`directory` 必须填写该目录的实际绝对路径：
 
-运行输出位于 `tests/.artifacts/runs/<runId>/`，run ID 取自 `NEXUS_TEST_RUN_ID`，缺省按本次进程生成。`integration` 发布的 Test Host 二进制在 `test-host/`，各 suite 的隔离 runtime 在同一 run 目录的独立子目录（UI Smoke 为 `ui/`，System Smoke 为 `runtime/`、`config-runtime/`、`judge-runtime/`、`mcp-runtime/`）。报告写到标准输出：System Smoke 使用 Node 内置 test runner 的 TAP 输出，xUnit 使用 `dotnet test` 控制台输出；UI Smoke 的 Playwright 失败工件留在 `tests/e2e/test-results/`。
+```json
+{"schemaVersion":1,"owner":"NexusPipeline.Tests","directory":"<absolute test root>"}
+```
 
-嵌套检出过深时，Windows 批处理 fixture 的工作目录可能超出系统启动限制。可设置 `NEXUS_TEST_ARTIFACT_ROOT` 指向本次新建的短路径普通目录；其中 `.nxp-test-artifact-root.json` 必须声明 `schemaVersion: 1`、`owner: "NexusPipeline.Tests"`、`directory` 为该目录的完整路径。runner 与 UI／系统 helper 将运行目录和 Test Host 产物放在其 `runs/<runId>/` 下。缺归属、相对路径、链接或非法 run ID 拒绝执行；默认仍使用仓内 `tests/.artifacts/runs/`。不要把已有用户目录登记为测试目录。
+未显式设置时使用 runner 临时目录或系统临时目录下的 `NexusPipeline.Tests`，已有无归属目录、链接和非法 run ID 均拒绝执行。本地有目录管理要求时先设置进程级 `TEMP`、`TMP` 或上述显式根；不要改变全局环境或登记已有用户目录。
+
+原字节隔离副本位于 `cache/<source-and-toolchain-fingerprint>/Host`。构建使用真实产品源和依赖，测试不修改产品工程。相同输入的缓存复用需匹配源文件和工具链；独占 lease 防止两个命令同时写同一构建图，未完成清理的 lease 保留供检查。后端与前端共享只读源副本，各自使用不同构建输出。
+
+报告位于 `runs/<runId>/<backend|frontend>/`：`commands.log`、原生 `native.trx` 或 `native.json`、`native-counts.json` 和 `summary.json`。只有预期场景/用例、原生计数、源码/输入身份、预算和清理全部一致才给 PASS；报告明确实际被测实现、外部替代及未证明范围。该 PASS 只覆盖所选组，不宣称 CLI、MCP、商店下载、真实调度和 native 设备已通过。
 
 ## 质量门禁顺序
 
-1. PR 的唯一自动门禁是 `.github/workflows/ci.yml` 的 `Host / Required` 单作业：`windows-latest`、`timeout-minutes: 20`，检出后安装 .NET 8 与 Node 24，执行 `node tests/run.mjs smoke`。作业不按 diff 选择范围、不条件准备工具链、不上传产物。
-2. push 到 `main` 后，`.github/workflows/release.yml` 的 candidate 作业执行 `node tests/run.mjs integration`，再用 `python tools/host_release.py candidate` 构建并校验生产候选；候选要求源码工作树干净且可从受保护 `main` 到达。
-3. 本地生产验收执行 `node tests\run.mjs release` 或等价的 `build.cmd`：两者都按生产 `requireAdministrator` 清单发布到 `release/`，其中 runner 还会用 `tools/pe_manifest.py` 校验内嵌清单。`integration` 与 `release` 都会写出 `.generated/frontend-build.hash`；候选的 `--frontend-ready` 按该指纹确认 `frontend/dist` 与前端源码一致。
-4. `tools/host_release.py` 承担生产发布边界，子命令为 `candidate`（构建并校验候选）、`release`（默认，构建生产包）、`verify-package`、`verify-installer`、`extract-candidate`、`inspect-candidate` 和 `validate-candidate`（后三者解包并独立校验已产出的候选，不重新编译）。
-5. `tools/tests/` 下的 `test_host_release.py`、`test_host_installer.py`、`test_pe_manifest.py` 和 `test_host_candidate_source.py` 不进入任何自动门禁，需要时手工执行 `python -m unittest`。
+`.github/workflows/ci.yml` 并行运行 backend/frontend 两个核心 job；旧 `Host / Required` 名称保留为轻量汇总，检查当前输入、用例/场景、原生计数、清理和 Actions API 返回的完整前置 job 时长。测试 job 限制三分钟，汇总不构建或运行产品。命令通过不等于远端 job 已实测达标；API 缺失或超时使汇总失败。
+
+工具自测与文档检查按改动显式运行，例如：
+
+```text
+node --test tests/support/budget.test.mjs
+node tools/check-doc-links.mjs
+python -m unittest discover -s tools/tests -p test_pe_manifest.py
+```
+
+`tools/host_release.py` 继续负责生产构建、清单、打包、来源与发行完整性检查；不改变发行程序管理员清单或稳定包事实。
 
 ## 插件与任务协议联调
 
@@ -47,3 +76,9 @@ node tests\run.mjs release
 `dotnet run --project tools/NexusPipeline.TaskProtocolTests -- --plugin-root <Plugins> --replay-manifest <外部清单.json>` 使用真实 Jint/发现/归并器读取显式声明的实例文件，不把旁边的历史 JSON 当成成功证据，不启动游戏或修改配置。清单和报告必须保留在仓库外。
 
 清单字段：`report` 为外部报告路径；`scenarios` 每项包含 `artifact`、`resources`（每项 `id`、`path`、`format`）和 `logs`（每项 `path`、`source`）。资源 ID/日志来源须按插件实际启动契约映射：主配置为 `config:` 加相对文件名；额外资源使用 manifest 中声明的 ID；MXU 的任务回调来自 stdout，其他插件通常来自 file。报告按日志 SHA256 关联，记录发现覆盖、任务结果与运行边界。当前配置与历史配置可能不同，回放结果不能替代当时冻结的计划或真机运行验收。
+
+## 逐插件 Jint 选择
+
+`tools/NexusPipeline.TaskProtocolTests` 支持 `--plugin-root <Plugins> --plugin <已知专项> --report <新报告路径>`，可附加 `--scenario <fixture文件名去掉.json>`。未知插件、重复参数、空选择和已有报告路径均失败；不通过删除生产数据选择场景。
+
+使用 `NexusTestHost=true` 时先 `dotnet build tools/NexusPipeline.TaskProtocolTests -p:NexusTestHost=true`，再运行实际输出 `bin/test-host/NexusPipeline.TaskProtocolTests/Debug/net8.0-windows/NexusPipeline.TaskProtocolTests.dll` 并传上述参数。全部命令应在外部隔离副本中运行；该工具报告仅证明选中的真实 Jint/发现/归并/配置事务，不表示上游真实设备已经验证。

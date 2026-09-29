@@ -51,19 +51,15 @@ HTTP 只处理路由、认证、参数、用例调用和响应映射；图标、
 
 正式发行程序保持 `app.manifest` 的 `requireAdministrator`；自动化功能测试统一使用 `NexusTestHost=true`、`asInvoker` 的隔离测试构建。测试继承启动终端的权限：普通终端直接运行，GitHub 托管 Windows runner 使用其默认管理员环境。测试入口不要求提权，不触发 UAC，不降权，不按权限跳过用例；实际权限写入日志。
 
-主要入口为三个命令，完整参数和工具链版本以 `docs/testing/commands.md` 为准：
+核心验证入口为 `node tests/run.mjs ci --group backend`、`ci --group frontend`；`smoke` 并行运行这两组，共享从命令开始的 180 秒预算。测试只在原字节隔离副本中构建，输出及依赖缓存使用外部测试目录。`tests/policy.json` 固定选择与预期用例；原生 TRX／Vitest JSON、场景和用例集合、计数、源码指纹、预算和清理都必须匹配，零用例、意外 skip、缺报告、取消和超时不得成功。普通测试不自动运行全仓语法扫描、文档链接或全部工具自测；这些按改动显式运行。
 
-```text
-node tests/run.mjs smoke
-node tests/run.mjs integration
-node tests/run.mjs release
-```
+`daily` 在两个独立 Host 槽位中运行执行、配置恢复、控制面和真实分钟调度四组 E2E，共享 180 秒父预算；预期场景不得缺失。`integration` 保留 UI/System Smoke 诊断，其中受控 API 响应不得冒称真实业务。`release` 单独执行生产 requireAdministrator 构建与清单校验。CI 核心 job 独立并行，Required 汇总核验报告和 Actions 完整 job 时长；本地通过不代表远端验收或发布完成。准确命令见 `docs/testing/commands.md`。
 
-`smoke` 是 PR 的唯一自动门禁：`.github/workflows/ci.yml` 的 `Host / Required` 单作业在 `windows-latest` 上安装 .NET 8 与 Node 24 后执行它，不按 diff 选择范围、不条件准备工具链；它依次运行 `tests/` 与 `tools/` 的 `.mjs` 语法检查、核心 xUnit、前端 typecheck 与 Vitest，以及 `tools/check-doc-links.mjs` 文档内链检查。现役测试层为 xUnit（`tests/NexusPipeline.Tests/`）、前端 Vitest（`frontend/src/**/*.test.ts`）和托管层 UI Smoke 与 System Smoke。`integration` 复用同一次 asInvoker Test Host 发布运行 UI Smoke 与 System Smoke，不构建生产包；`release` 单独执行生产 requireAdministrator 构建与内嵌清单校验，候选任务在合并后另行验收生产包。未知命令、多余参数、零用例、意外 skip、缺报告、子进程失败和超时不得报告通过。环境限制与断言失败分开记录；未运行就是 NOT_RUN。
-
-生产/Test Host 构建的输出和中间目录分离；两者共享同一业务源实现，禁止将测试 EXE 发布给用户。功能测试统一使用 `NexusTestHost=true`、asInvoker 的隔离 Test Host，每次运行使用独立端口与独立 runtime 目录，运行数据、PID 与退出标记只写入 `tests/.artifacts/runs/<runId>/`，不读写用户实例的进程、端口或数据。托管层使用受控进程/模拟器 fixture，操作系统授权边界通过平台适配器契约验证，不冒称普通权限已执行了系统级操作。
+生产/Test Host 构建的输出和中间目录分离；两者共享同一业务源实现，禁止将测试 EXE 发布给用户。功能测试统一使用 `NexusTestHost=true`、asInvoker 的隔离 Test Host，每次运行使用独立端口与独立 runtime 目录，运行数据、PID 与退出标记只写入已登记外部测试根的 `runs/<runId>/`，不读写用户实例的进程、端口或数据。托管层使用受控进程/模拟器 fixture，操作系统授权边界通过平台适配器契约验证，不冒称普通权限已执行了系统级操作。
 
 先搜索现役测试，在最低有效层增加覆盖。普通业务测试验证 API、结果、状态、文件效果和生命周期，不读取源码函数体匹配实现。UI Smoke 只保留必须跨浏览器证明的核心流程，总量不超过 12；不新增持久视觉截图/像素/布局基线，不断言私有 class、DOM 层级或装饰文案。临时人工浏览器验证材料放系统临时目录并按本次所有权清理。
+
+正式核心门禁中的新增测试必须直接验证项目核心功能的运行结果、状态、持久化或恢复。只检查卡片排列、分隔线、标题文案、CSS 类等展示细节，不能充当核心功能测试纳入现役门禁；此类改动使用类型检查、生产构建和人工验收核查。违反本条属于严重违规。
 
 测试失败保留原始报告并修根因。禁止自动重试掩盖不稳定、跳过失败、catch 后成功或降低通过条件。命令非交互、UTF-8、实时显示阶段/用例/退出码，不加无条件 pause。Python 用于适合的文件/数据与辅助脚本；既有 dotnet/node/npm/.cmd 入口按当前文档执行。
 
