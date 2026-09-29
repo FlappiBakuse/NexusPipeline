@@ -27,7 +27,6 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 3
     env:
-      NEXUS_TEST_ARTIFACT_ROOT: ${{ runner.temp }}/NexusPipeline.Tests
       NEXUS_TEST_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.group }}
     steps:
       - name: 检出本次源码
@@ -44,6 +43,8 @@ jobs:
         with:
           node-version: "24"
       - name: 验证核心规则
+        env:
+          NEXUS_TEST_ARTIFACT_ROOT: ${{ runner.temp }}/NexusPipeline.Tests
         run: node tests/run.mjs ci --group ${{ matrix.group }}
       - name: 保存原始计数与身份报告
         if: ${{ !cancelled() }}
