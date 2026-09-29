@@ -7,7 +7,7 @@ import NxpSelect, { type NxpOption } from "../../../ui/primitives/NxpSelect.vue"
 import NxpSwitchSetting from "../../../ui/composites/NxpSwitchSetting.vue";
 import type { Settings } from "../utils/settingsTypes";
 
-/** 服务行为 section：启动注册、轻量模式、浏览器打开、保留期、端口、日志级别与语言。 */
+/** 服务行为 section：启动注册、浏览器打开、保留期、端口、日志级别与语言。 */
 
 const props = defineProps<{
   settings: Settings;
@@ -16,7 +16,6 @@ const props = defineProps<{
   localeOptions: NxpOption[];
   save: () => void;
   saveWithRestart: () => void;
-  onLightweightChange: () => void;
 }>();
 const emit = defineEmits<{ toggle: []; changeLocale: [value: string | string[]] }>();
 
@@ -50,27 +49,11 @@ const logLevelOptions = computed<NxpOption[]>(() => [
         @change="props.save"
       />
       <NxpSwitchSetting
-        id="st-lightweight"
-        v-model="props.settings.lightweightMode"
-        :label="t('settings.lightweight_mode')"
-        :description="t('settings.service.web_disabled')"
-        :aria-label="t('settings.lightweight_mode')"
-        @change="props.onLightweightChange"
-      />
-      <NxpSwitchSetting
         id="st-browser"
         v-model="props.settings.autoOpenBrowser"
         :label="t('settings.open_browser')"
         :description="t('settings.service.console_startup')"
         :aria-label="t('settings.open_browser')"
-        @change="props.save"
-      />
-      <NxpSwitchSetting
-        id="st-config-repair"
-        v-model="props.settings.allowConfigRepair"
-        :label="t('settings.config_repair')"
-        :description="t('settings.config_repair_help')"
-        :aria-label="t('settings.config_repair')"
         @change="props.save"
       />
     </div>
@@ -132,8 +115,5 @@ const logLevelOptions = computed<NxpOption[]>(() => [
         </div>
       </div>
     </div>
-    <p v-if="props.settings.lightweightMode" class="callout callout-warning">
-      {{ t("settings.service.lightweight_not_started") }}
-    </p>
   </NxpCollapsibleCard>
 </template>

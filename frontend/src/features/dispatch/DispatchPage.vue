@@ -387,20 +387,7 @@ onBeforeUnmount(() => {
         :description="t('dispatch.page.help')"
       />
       <div class="plugin-slot" data-plugin-slot="dispatch.cards" data-plugin-anchor="dispatch.cards" hidden></div>
-      <RunningExecution
-        :running="running"
-        :system-action="status.systemAction || null"
-        :busy="busy"
-        :execution-preview-layout-enabled="executionPreviewLayoutEnabled"
-        @cancel="requestCancelRun"
-        @cancelled="refreshStatus"
-      />
-      <div class="plugin-slot" data-plugin-slot="dispatch.running.badges" data-plugin-anchor="dispatch.running.badges" hidden></div>
-      <section class="content-section" aria-labelledby="dispatch-run-heading">
-        <div class="section-heading">
-          <h3 id="dispatch-run-heading">{{ t("dispatch.start_one_run") }}</h3>
-          <span class="muted">{{ t("dispatch.plan.target_help") }}</span>
-        </div>
+      <section class="content-section" :aria-label="t('dispatch.target_type')">
         <div class="dispatch-runbar">
           <div class="field">
             <label class="field-label" for="dc-kind-trigger">{{ t("dispatch.target_type") }}</label>
@@ -439,6 +426,15 @@ onBeforeUnmount(() => {
       </section>
       <RunPlanModal :plan="plan" @close="plan = null" />
       <div class="plugin-slot" data-plugin-slot="dispatch.run.sections" data-plugin-anchor="dispatch.run.sections" hidden></div>
+      <RunningExecution
+        :running="running"
+        :system-action="status.systemAction || null"
+        :busy="busy"
+        :execution-preview-layout-enabled="executionPreviewLayoutEnabled"
+        @cancel="requestCancelRun"
+        @cancelled="refreshStatus"
+      />
+      <div class="plugin-slot" data-plugin-slot="dispatch.running.badges" data-plugin-anchor="dispatch.running.badges" hidden></div>
     </template>
     <NxpConfirmDialog
       :open="cancelConfirmRunId !== null"
