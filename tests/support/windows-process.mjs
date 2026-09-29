@@ -49,7 +49,7 @@ export function readProcessIdentity(pid, onFailure) {
     }
   }
   const script = `$p=Get-Process -Id ${numericPid} -ErrorAction SilentlyContinue; if ($null -ne $p) { [pscustomobject]@{ pid=$p.Id; executablePath=$p.Path; startTime=$p.StartTime.ToUniversalTime().ToString('o') } | ConvertTo-Json -Compress }`;
-  const result = run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], 5_000);
+  const result = run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], 15_000);
   if (result.status !== 0 || !String(result.stdout || "").trim()) {
     onFailure?.({ status: result.status, error: result.error?.message, stderr: String(result.stderr || "").slice(0, 500) });
     return null;

@@ -170,7 +170,7 @@ export function createRunMarker(markerPath, executablePath, child, { nonce = ran
   // This registration is tied to the live ChildProcess, never to a PID read
   // later during cleanup. Once captured, creation time is immutable.
   const registration = (async () => {
-    const deadline = Date.now() + 15000;
+    const deadline = Date.now() + 30000;
     let lastIdentity = null;
     let lastFailure = null;
     do {
