@@ -364,7 +364,7 @@ export function installEmulatorStubs(runtimeDir, fixtureDir) {
  * 受控停止本层拉起的服务进程：Test Host 模式先写退出文件，
  * 再走 stdin EOF 退出，最后按 service.pid 与子进程 PID 做隔离进程树清理。
  */
-export async function stopSpawnedService({ child, exitFile, pidFilePath, markerPath, exitWaitPollMs = 250, identityReader = readProcessIdentity, aliveReader = isProcessAliveSafe, terminator = killProcessTree, exitWaiter = waitForExit }) {
+export async function stopSpawnedService({ child, exitFile, pidFilePath, markerPath, exitWaitPollMs = 250, allowReusedPid = false, identityReader = readProcessIdentity, aliveReader = isProcessAliveSafe, terminator = killProcessTree, exitWaiter = waitForExit }) {
   await waitForRunMarker(child);
   // 在发出退出信号前固定当前 service.pid；服务优雅退出时可能先删除 PID 文件，
   // 仅在等待 child 后重新读取会漏掉仍在收尾的更新重拉服务。
@@ -372,6 +372,7 @@ export async function stopSpawnedService({ child, exitFile, pidFilePath, markerP
   let marker = markerPath ? readRunMarker(markerPath) : null;
   const recordedPids = [marker?.pid, ...(marker?.handoffProcesses ?? []).map(item => item.pid)];
   const candidatePids = [...new Set([initialMarked, child?.pid, ...recordedPids].filter(pid => Number.isInteger(pid) && pid > 0))];
+  const reusedPids = new Set();
   const hasKnownProcess = candidatePids.length > 0;
   if (candidatePids.some(pid => aliveReader(pid)) && (!markerPath || !marker)) {
     throw new Error(`拒绝清理缺少有效运行 marker 的进程：markerPath=${markerPath || "missing"}`);
@@ -381,6 +382,7 @@ export async function stopSpawnedService({ child, exitFile, pidFilePath, markerP
     registerHandoffProcess(markerPath, pid, { identityReader });
     const inspector = pid === marker.pid ? inspectProcessOwnership : inspectHandoffProcessOwnership;
     const status = inspector(markerPath, pid, { identityReader, aliveReader });
+    if (allowReusedPid && status === OWNERSHIP.NOT_OWNED) { reusedPids.add(pid); continue; }
     if (status !== OWNERSHIP.OWNED && status !== OWNERSHIP.EXITED) throw new Error(`拒绝发送退出信号：PID=${pid}，ownership=${status}`);
   }
   if (hasKnownProcess && process.env.NEXUS_TEST_MODE?.trim().toLowerCase() === "test-host") {
@@ -401,12 +403,13 @@ export async function stopSpawnedService({ child, exitFile, pidFilePath, markerP
   const marked = readPidFile(pidFilePath);
   if (marked) pids.add(marked);
   if (child?.pid) pids.add(Number(child.pid));
-  const owned = [...pids].filter(pid => Number.isInteger(pid) && pid > 0);
+  const owned = [...pids].filter(pid => Number.isInteger(pid) && pid > 0 && !reusedPids.has(pid));
   for (const pid of owned) {
     if (!aliveReader(pid)) continue;
     const inspector = pid === marker.pid ? inspectProcessOwnership : inspectHandoffProcessOwnership;
     const status = inspector(markerPath, pid, { identityReader, aliveReader });
     if (status === OWNERSHIP.EXITED) continue;
+    if (allowReusedPid && status === OWNERSHIP.NOT_OWNED) { reusedPids.add(pid); continue; }
     if (status !== OWNERSHIP.OWNED) {
       throw new Error(`拒绝清理未通过运行 marker 身份核验的进程：PID=${pid}，ownership=${status}`);
     }
@@ -415,14 +418,17 @@ export async function stopSpawnedService({ child, exitFile, pidFilePath, markerP
     }
   }
   for (const pid of owned) {
+    if (reusedPids.has(pid)) continue;
     if (!await exitWaiter(pid, 10000, 250)) {
+      const inspector = pid === marker.pid ? inspectProcessOwnership : inspectHandoffProcessOwnership;
+      if (allowReusedPid && inspector(markerPath, pid, { identityReader, aliveReader }) === OWNERSHIP.NOT_OWNED) continue;
       throw new Error(`受控停止未确认进程已退出：PID=${pid}`);
     }
   }
   // 进程被强制终止时可能来不及自行删除 service.pid。只有本次已确认退出的
   // PID 仍写在文件中，才清理这个过期指针；新进程改写的 PID 必须保留。
   const finalMarked = readPidFile(pidFilePath);
-  if (finalMarked && owned.includes(finalMarked)) fs.rmSync(pidFilePath, { force: true });
+  if (finalMarked && owned.includes(finalMarked) && !reusedPids.has(finalMarked)) fs.rmSync(pidFilePath, { force: true });
   // 保留 marker 作为下一次 prepareRuntime 的 ownership 证据；下一次会先核验所有
   // 记录的 PID 已退出，再清理整个隔离目录。无 marker 的目录永远不因本流程被删除。
 }

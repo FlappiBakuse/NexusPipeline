@@ -335,7 +335,7 @@ async function runGate(id) {
     return code || publishTestHost();
   }
   if (id === "host.ci-policy") {
-    let code = await run(process.execPath, ["--test", "tests/scope-plan.test.mjs", "tests/support/budget.test.mjs"]);
+    let code = await run(process.execPath, ["--test", "tests/scope-plan.test.mjs", "tests/support/budget.test.mjs", "tests/support/test-runtime.test.mjs"]);
     if (code) return code;
     return run(pythonCommand, ["-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py", "-v"]);
   }
