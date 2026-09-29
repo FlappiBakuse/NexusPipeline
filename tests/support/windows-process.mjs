@@ -48,7 +48,7 @@ export function readProcessIdentity(pid) {
       return null;
     }
   }
-  const script = `$p=Get-Process -Id ${numericPid} -ErrorAction SilentlyContinue; $w=Get-CimInstance Win32_Process -Filter 'ProcessId = ${numericPid}' -ErrorAction SilentlyContinue; if ($null -ne $p) { [pscustomobject]@{ pid=$p.Id; executablePath=$p.Path; startTime=$p.StartTime.ToUniversalTime().ToString('o'); parentPid=if ($null -ne $w) { [int]$w.ParentProcessId } else { 0 } } | ConvertTo-Json -Compress }`;
+  const script = `$p=Get-Process -Id ${numericPid} -ErrorAction SilentlyContinue; if ($null -ne $p) { [pscustomobject]@{ pid=$p.Id; executablePath=$p.Path; startTime=$p.StartTime.ToUniversalTime().ToString('o') } | ConvertTo-Json -Compress }`;
   const result = run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script]);
   if (result.status !== 0 || !String(result.stdout || "").trim()) return null;
   try {
@@ -58,7 +58,7 @@ export function readProcessIdentity(pid) {
           pid: numericPid,
           executablePath: identity.executablePath,
           startTime: identity.startTime || "",
-          parentPid: Number.isInteger(Number(identity.parentPid)) ? Number(identity.parentPid) : null,
+          parentPid: null,
         }
       : null;
   } catch {
