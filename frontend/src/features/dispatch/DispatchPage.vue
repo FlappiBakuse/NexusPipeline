@@ -46,6 +46,7 @@ let pollTimer: ReturnType<typeof setInterval> | null = null;
 let statusController: AbortController | null = null;
 let pageToken = 0;
 let eventStream: EventStreamHandle | null = null;
+const renderedSlots = new WeakMap<HTMLElement, string>();
 
 const running = computed(() => Array.isArray(status.value.running) ? status.value.running : []);
 const executionPreviewLayoutEnabled = computed(() =>
@@ -99,15 +100,25 @@ function pluginSlotContext(element: HTMLElement) {
 }
 async function paintPluginSlots() {
   await nextTick();
-  const slots = root.value?.querySelectorAll<HTMLElement>("[data-plugin-slot]") || [];
+  const slots = root.value?.querySelectorAll<HTMLElement>("[data-plugin-anchor][data-plugin-slot]") || [];
   for (const slot of slots) {
     const name = slot.dataset.pluginSlot;
-    if (name) await renderPluginSlot(slot, name, pluginSlotContext(slot));
+    if (!name) continue;
+    const context = pluginSlotContext(slot);
+    const identity = JSON.stringify([name, context, status.value.plugins]);
+    // Status refreshes must not abort an unchanged sidecar's in-flight capture.
+    if (renderedSlots.get(slot) === identity) continue;
+    renderedSlots.set(slot, identity);
+    try { await renderPluginSlot(slot, name, context); }
+    catch (error) { renderedSlots.delete(slot); throw error; }
   }
 }
 async function disposePluginSlots() {
-  const slots = root.value?.querySelectorAll<HTMLElement>("[data-plugin-slot]") || [];
-  for (const slot of slots) await disposePluginSlot(slot);
+  const slots = root.value?.querySelectorAll<HTMLElement>("[data-plugin-anchor][data-plugin-slot]") || [];
+  for (const slot of slots) {
+    renderedSlots.delete(slot);
+    await disposePluginSlot(slot);
+  }
 }
 async function loadInitial() {
   const id = ++requestSerial;
