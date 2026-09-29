@@ -43,8 +43,6 @@ jobs:
         with:
           node-version: "24"
       - name: 验证核心规则
-        env:
-          NEXUS_TEST_ARTIFACT_ROOT: ${{ runner.temp }}/NexusPipeline.Tests
         run: node tests/run.mjs ci --group ${{ matrix.group }}
       - name: 保存原始计数与身份报告
         if: ${{ !cancelled() }}
