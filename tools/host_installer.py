@@ -22,6 +22,7 @@ except ImportError:
 
 INNO_COMPILER_SHA256 = "0a8757031b33777e4c9cbffee40f11a5062b36d25cbe144c1db73b6102b80ad7"
 INNO_DISTRIBUTION_SHA256 = "9c73c3bae7ed48d44112a0f48e66742c00090bdb5bef71d9d3c056c66e97b732"
+CHINESE_ISL_SHA256 = "7d544b9bb1d142cfa11f2e5d3cc8abe2e55f8e066c5124e3772675aa236e1278"
 
 
 def sha256(path: Path) -> str:
@@ -84,6 +85,32 @@ def render_script(template: str, *, production_root: Path, output_dir: Path,
              "安装器版本无效")
     for path in (production_root, output_dir):
         _require('"' not in str(path) and ';' not in str(path) and "\n" not in str(path), "安装器路径无法安全写入脚本")
+    if "@@CUSTOM_MESSAGES@@" in template:
+        resources = Path(__file__).with_name("installer-languages")
+        chinese = resources / "ChineseSimplified.isl"
+        chinese_ui = resources / "ChineseUI.isl"
+        _require(chinese.is_file() and sha256(chinese) == CHINESE_ISL_SHA256
+                 and chinese_ui.is_file(), "安装器中文语言资源未通过锁定校验")
+        _require(all('"' not in str(path) and ',' not in str(path) and '\n' not in str(path)
+                     for path in (chinese, chinese_ui)), "安装器语言资源路径无效")
+        messages = json.loads((resources / "messages.json").read_text(encoding="utf-8"))
+        used = set(re.findall(r"CustomMessage\('([A-Za-z0-9]+)'\)|\{cm:([A-Za-z0-9]+)\}",
+                              template + Path(__file__).with_name("installer-launch.iss").read_text(encoding="utf-8")))
+        used = {name for match in used for name in match if name}
+        _require(used == set(messages), "安装器自定义文案键不完整或存在闲置键")
+        message_lines = []
+        for key, pair in messages.items():
+            _require(re.fullmatch(r"[A-Za-z0-9]+", key) is not None
+                     and isinstance(pair, list) and len(pair) == 2
+                     and all(isinstance(value, str) and value and '\n' not in value and '\r' not in value
+                             and not value.startswith(' ') for value in pair), "安装器双语文案无效")
+            placeholders = [set(re.findall(r"%[1-9n]", value)) for value in pair]
+            _require(placeholders[0] == placeholders[1], f"安装器双语参数不一致：{key}")
+            message_lines.extend((f"en.{key}={pair[0]}", f"zh.{key}={pair[1]}",
+                                  f"zh_ui.{key}={pair[1]}"))
+        template = template.replace("@@CUSTOM_MESSAGES@@", "\n".join(message_lines))
+        template = template.replace("@@CHINESE_ISL@@", str(chinese))
+        template = template.replace("@@CHINESE_UI_ISL@@", str(chinese_ui))
     image = production_root / "nexus-pipeline.exe"
     file_lines: list[str] = []
     if "@@LAUNCH_CODE@@" in template:
@@ -186,9 +213,10 @@ def main() -> int:
     parser.add_argument("--dependencies", type=Path, default=Path(__file__).with_name("runtime-dependencies.json"))
     parser.add_argument("--compiler", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--template", type=Path, default=Path(__file__).with_name("installer.iss.in"))
     args = parser.parse_args()
     result = build_installer(args.production_root, args.metadata, args.dependencies, args.compiler,
-                             args.output, Path(__file__).with_name("installer.iss.in"))
+                             args.output, args.template)
     print(json.dumps({key: result[key] for key in ("version", "zipSha256", "setupSha256", "setupSizeBytes")}, sort_keys=True))
     return 0
 

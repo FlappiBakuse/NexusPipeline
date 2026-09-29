@@ -8,17 +8,23 @@ import { findAvailablePort, resolveTestRunRoot } from "./support/test-runtime.mj
 import { Budget } from "./support/budget.mjs";
 import { stageWorkspace } from "./support/workspace.mjs";
 import { runCore } from "./support/core.mjs";
+import { runScopeCommand } from "./scope-cli.mjs";
+import { readRegistry } from "./scope-plan.mjs";
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+if (process.argv[2] === "plan") {
+  try { runScopeCommand(projectRoot, process.argv.slice(3)); process.exit(0); }
+  catch (error) { console.error(error.stack || error.message); process.exit(2); }
+}
 const policyBytes = fs.readFileSync(path.join(projectRoot, "tests", "policy.json"));
 const policy = JSON.parse(policyBytes);
-if (policy.invocationBudgetMs !== 180_000 || policy.cleanupReserveMs < 10_000
+if (policy.invocationBudgetMs !== 180_000 || policy.qualificationMs !== 150_000 || policy.cleanupReserveMs < 10_000
   || policy.cleanupReserveMs >= policy.invocationBudgetMs) throw new Error("Invalid Host budget policy");
 let executionRoot = projectRoot;
 let frontendDir = path.join(projectRoot, "frontend");
 let e2eDir = path.join(projectRoot, "tests", "e2e");
 const runId = process.env.NEXUS_TEST_RUN_ID?.trim() || `run-${Date.now()}-${process.pid}`;
-if (["ci", "smoke", "daily", "integration", "diagnostic"].includes(process.argv[2]?.toLowerCase())
+if (["ci", "smoke", "daily", "integration", "diagnostic", "gate"].includes(process.argv[2]?.toLowerCase())
     && !process.env.NEXUS_TEST_ARTIFACT_ROOT) {
   const base = path.join(process.env.RUNNER_TEMP || os.tmpdir(), "NexusPipeline.Tests");
   if (!fs.existsSync(base)) {
@@ -31,7 +37,8 @@ if (["ci", "smoke", "daily", "integration", "diagnostic"].includes(process.argv[
 }
 const runRoot = resolveTestRunRoot(projectRoot, runId);
 const invocationBudget = process.argv[2]?.toLowerCase() === "release" ? null
-  : new Budget("Host 测试命令", policy.invocationBudgetMs, { reserveMs: policy.cleanupReserveMs });
+  : new Budget("Host 测试命令", policy.invocationBudgetMs,
+    { reserveMs: policy.cleanupReserveMs, qualificationMs: policy.qualificationMs });
 const cancellation = new AbortController();
 const cancel = () => cancellation.abort();
 process.once("SIGINT", cancel);
@@ -123,7 +130,7 @@ async function buildFrontendBundle() {
 }
 
 /** 发布 asInvoker Test Host：nexus-pipeline.exe 与 wwwroot 放在同一次运行目录内。 */
-async function publishTestHost() {
+async function publishTestHost({ withFrontend = true } = {}) {
   step("发布 asInvoker Test Host");
   fs.rmSync(testHostDir, { recursive: true, force: true, maxRetries: 120, retryDelay: 250 });
   fs.mkdirSync(testHostDir, { recursive: true });
@@ -136,7 +143,8 @@ async function publishTestHost() {
   if (code !== 0) return code;
   const manifestCode = await verifyManifest(path.join(testHostDir, "nexus-pipeline.exe"), "asInvoker");
   if (manifestCode !== 0) return manifestCode;
-  fs.cpSync(path.join(frontendDir, "dist"), path.join(testHostDir, "wwwroot"), { recursive: true });
+  if (withFrontend) fs.cpSync(path.join(frontendDir, "dist"), path.join(testHostDir, "wwwroot"), { recursive: true });
+  else fs.mkdirSync(path.join(testHostDir, "wwwroot"), { recursive: true });
   fs.mkdirSync(path.join(testHostDir, "plugins"), { recursive: true });
   return 0;
 }
@@ -274,9 +282,7 @@ async function runStoreDiagnostic() {
   workspace ??= stageWorkspace(projectRoot, process.env.NEXUS_TEST_ARTIFACT_ROOT, invocationBudget);
   executionRoot = workspace.directory;
   frontendDir = path.join(executionRoot, "frontend");
-  let code = await buildFrontendBundle();
-  if (code !== 0) return code;
-  code = await publishTestHost();
+  let code = await publishTestHost({ withFrontend: false });
   if (code !== 0) return code;
   code = await run("dotnet", ["build", "tests/fixtures/NexusPipeline.TestPlugin/NexusPipeline.TestPlugin.csproj",
     "-c", "Release", "-p:NexusTestHost=true", "-p:UseSharedCompilation=false", "--disable-build-servers", "--nologo"]);
@@ -305,6 +311,88 @@ async function runStoreDiagnostic() {
     rawReport: report,
   }, null, 2));
   return code;
+}
+
+async function runGate(id) {
+  const { registry } = readRegistry(projectRoot);
+  const gate = registry.gates.find(item => item.id === id);
+  if (!gate || gate.kind === "aggregate" || gate.kind === "scope" || gate.kind === "release")
+    throw new Error(`Unknown or non-executable Host gate: ${id}`);
+  fs.mkdirSync(runRoot, { recursive: true });
+  workspace ??= stageWorkspace(projectRoot, process.env.NEXUS_TEST_ARTIFACT_ROOT, invocationBudget);
+  executionRoot = workspace.directory;
+  frontendDir = path.join(executionRoot, "frontend");
+  e2eDir = path.join(executionRoot, "tests/e2e");
+  if (id.startsWith("host.backend.")) return runSelectedCore(id.slice("host.".length));
+  if (id === "host.frontend.state") return runSelectedCore("frontend");
+  if (id === "host.frontend.typecheck") {
+    let code = await ensureNpm(frontendDir);
+    return code || run(npmCommand, ["run", "typecheck"], { cwd: frontendDir });
+  }
+  if (id === "host.frontend.build") return buildFrontendBundle();
+  if (id === "host.build.test-host") {
+    const code = await buildFrontendBundle();
+    return code || publishTestHost();
+  }
+  if (id === "host.ci-policy") {
+    let code = await run(process.execPath, ["--test", "tests/scope-plan.test.mjs", "tests/support/budget.test.mjs", "tests/support/test-runtime.test.mjs"]);
+    if (code) return code;
+    return run(pythonCommand, ["-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py", "-v"]);
+  }
+  if (id === "host.docs") {
+    const required = ["README.md", "docs/user/README.md", "docs/user/README.en.md"];
+    if (required.some(name => !fs.existsSync(path.join(executionRoot, name)))) return 4;
+    fs.writeFileSync(path.join(runRoot, "docs-manifest.json"), JSON.stringify({ files: required,
+      source: workspace.source }, null, 2));
+    return 0;
+  }
+  if (id === "host.release-contract")
+    return run(pythonCommand, ["-m", "unittest", "tools.tests.test_host_release", "-v"]);
+  if (id === "host.installer-localization")
+    return run(pythonCommand, ["-m", "unittest", "tools.tests.test_host_installer", "-v"]);
+  if (id === "host.architecture.backend") {
+    const project = "tools/NexusPipeline.Architecture/NexusPipeline.Architecture.csproj";
+    const output = path.join(runRoot, "architecture-bin") + path.sep;
+    const intermediate = path.join(runRoot, "architecture-obj") + path.sep;
+    let code = await run("dotnet", ["build", project, "-c", "Release", `-p:BaseOutputPath=${output}`,
+      `-p:BaseIntermediateOutputPath=${intermediate}`, "-p:UseSharedCompilation=false", "--disable-build-servers", "--nologo"]);
+    if (code) return code;
+    code = await run("dotnet", ["build", "src/NexusPipeline.csproj", "-c", "Release", "-r", "win-x64",
+      "-p:NexusTestHost=true", "-p:UseSharedCompilation=false", "--disable-build-servers", "--nologo"]);
+    if (code) return code;
+    code = await run("dotnet", ["build", "src/NexusPipeline.csproj", "-c", "Release", "-r", "win-x64",
+      "-p:UseSharedCompilation=false", "--disable-build-servers", "--nologo"]);
+    if (code) return code;
+    const checker = path.join(output, "Release", "net8.0", "NexusPipeline.Architecture.dll");
+    code = await run("dotnet", [checker, executionRoot, "--report", path.join(runRoot, "architecture-backend.json")]);
+    if (code) return code;
+    return run(pythonCommand, ["tests/architecture-fixture.py", checker]);
+  }
+  if (id === "host.architecture.frontend") {
+    const code = await ensureNpm(frontendDir);
+    if (code) return code;
+    const report = path.join(runRoot, "architecture-frontend.json");
+    const checked = await run(process.execPath, ["scripts/architecture-check.mjs", frontendDir, "--report", report],
+      { cwd: frontendDir });
+    return checked || run(process.execPath, ["--test", "scripts/architecture-check.test.mjs"], { cwd: frontendDir });
+  }
+  if (id === "host.integration.store") return runStoreDiagnostic();
+  if (id === "host.integration.restart-update") {
+    const code = await publishTestHost({ withFrontend: false });
+    return code || runSystemSuite({ file: "tests/system/runtime-smoke.mjs", runtimeName: "runtime" });
+  }
+  const finite = {
+    "host.integration.execution": "execution", "host.integration.config": "config",
+    "host.integration.control": "control", "host.integration.schedule": "schedule",
+  }[id];
+  if (finite) return runFinite(finite);
+  if (id === "host.partner-contract") {
+    const partner = process.env.NEXUS_PARTNER_ROOT;
+    if (!partner || !path.isAbsolute(partner)) throw new Error("Fixed partner checkout is required");
+    return run(pythonCommand, ["tests/partner-contract.py", "--plugins-root", partner,
+      "--host-root", executionRoot, "--report", path.join(runRoot, "partner-contract.json")]);
+  }
+  throw new Error(`Gate has no execution contract: ${id}`);
 }
 
 /** 生产构建只发布程序自有文件，release/ 下的用户运行数据保持原样。 */
@@ -336,6 +424,7 @@ function printUsage() {
 const [command = ""] = process.argv.slice(2);
 const commands = { smoke: runSmoke, daily: () => runFinite(), integration: runIntegration, release: runRelease };
 let exitCode = 2;
+let gateId = null;
 resetProcessRunnerState();
 try {
   const selected = commands[command.toLowerCase()];
@@ -348,6 +437,9 @@ try {
   } else if (command === "ci" && process.argv.length === 5 && process.argv[3] === "--group"
       && Object.hasOwn(policy.groups, process.argv[4])) {
     exitCode = await runSelectedCore(process.argv[4]);
+  } else if (command === "gate" && process.argv.length === 5 && process.argv[3] === "--id") {
+    gateId = process.argv[4];
+    exitCode = await runGate(gateId);
   } else if (command === "diagnostic" && process.argv.length === 5 && process.argv[3] === "--group" && process.argv[4] === "store") {
     exitCode = await runStoreDiagnostic();
   } else if (command === "daily" && process.argv.length === 5 && process.argv[3] === "--group" && finiteGroups.includes(process.argv[4])) {
@@ -364,7 +456,9 @@ try {
   console.error(`[错误] ${error.stack || error.message}`);
   exitCode = 1;
 } finally {
-  if (["integration", "diagnostic"].includes(command.toLowerCase()) && fs.existsSync(runRoot)) {
+  if (["integration", "diagnostic"].includes(command.toLowerCase())
+      || ["host.integration.store", "host.integration.restart-update"].includes(gateId)) {
+    if (!fs.existsSync(runRoot)) fs.mkdirSync(runRoot, { recursive: true });
     const cleanupMs = Math.min(8_000, invocationBudget.remainingMs({ cleanup: true }) - 1_000);
     if (cleanupMs <= 0) {
       console.error("[清理] 命令剩余预算不足，保留运行现场");
@@ -386,6 +480,7 @@ try {
   } else if (workspace) {
     workspace.release();
   }
+  if (invocationBudget && invocationBudget.elapsedMs > policy.qualificationMs) exitCode ||= 5;
   if (invocationBudget?.remainingMs({ cleanup: true }) === 0) exitCode ||= 5;
   const storeEvidence = path.join(runRoot, "store-evidence.json");
   if (command === "diagnostic" && fs.existsSync(storeEvidence)) {
@@ -399,6 +494,32 @@ try {
       source: workspace?.source, runId, groups: finiteResults, budgetMs: policy.invocationBudgetMs,
       elapsedMs: invocationBudget.elapsedMs, exitCode, status: exitCode ? "FAIL" : "PASS",
       cleanup: getProcessRunnerState() }, null, 2));
+  }
+  if (gateId) {
+    fs.mkdirSync(runRoot, { recursive: true });
+    const { registry, digest } = readRegistry(projectRoot);
+    const gate = registry.gates.find(item => item.id === gateId);
+    const group = gateId.startsWith("host.backend.") ? gateId.slice("host.".length)
+      : gateId === "host.frontend.state" ? "frontend" : null;
+    const nativePath = group ? path.join(runRoot, group, "summary.json") : null;
+    const native = nativePath && fs.existsSync(nativePath) ? JSON.parse(fs.readFileSync(nativePath, "utf8")) : null;
+    const partnerRoot = process.env.NEXUS_PARTNER_ROOT;
+    const partner = gate?.partnerRequired && partnerRoot && path.isAbsolute(partnerRoot)
+      ? { commitSha: execFileSync("git", ["-C", partnerRoot, "rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
+        workingTreeDirty: Boolean(execFileSync("git", ["-C", partnerRoot, "status", "--porcelain"],
+          { encoding: "utf8" }).trim()) } : null;
+    if (invocationBudget.elapsedMs > policy.qualificationMs) exitCode ||= 5;
+    const report = {
+      schemaVersion: 1, scope: "LOCAL_GATE", gateId, kind: gate?.kind ?? null, runId,
+      source: workspace?.source ?? null, partner, policyDigest: digest,
+      digestFormat: "utf8-lf-v1", selectedCases: native?.scope.expectedCaseIds ?? null,
+      completedCases: native?.scope.completedCaseIds ?? null, counts: native?.counts ?? null,
+      status: exitCode === 0 ? "PASS" : "FAIL", exitCode,
+      timing: { qualificationMs: policy.qualificationMs, hardTimeoutMs: policy.invocationBudgetMs,
+        localElapsedMs: invocationBudget.elapsedMs, actualJobMs: null },
+      cleanup: getProcessRunnerState(), nativeReport: nativePath && fs.existsSync(nativePath) ? nativePath : null,
+    };
+    fs.writeFileSync(path.join(runRoot, "gate-report.json"), `${JSON.stringify(report, null, 2)}\n`);
   }
 }
 process.exitCode = exitCode;

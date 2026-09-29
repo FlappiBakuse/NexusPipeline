@@ -11,7 +11,7 @@ describe("host api client", () => {
       let request: { path: string; options: RequestInit } | null = null;
       globalThis.fetch = (async (path: string, options: RequestInit) => {
         request = { path, options };
-        return new Response(new Blob(["png"], { type: "image/png" }), {
+        return new Response("png", {
           status: 200,
           headers: { "Content-Type": "image/png" },
         });

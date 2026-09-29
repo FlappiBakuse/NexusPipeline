@@ -24,6 +24,20 @@ test("an exhausted budget never launches work", async () => {
   assert.equal(result, 5);
 });
 
+test("qualification stops new work at 150 seconds while preserving bounded cleanup", () => {
+  let time = 0;
+  const budget = new Budget("gate", 180_000, { qualificationMs: 150_000,
+    reserveMs: 10_000, clock: () => time });
+  time = 150_000;
+  budget.assertWithinBudget();
+  assert.equal(budget.remainingMs(), 0);
+  assert.equal(budget.remainingMs({ cleanup: true }), 30_000);
+  time = 150_001;
+  assert.throws(() => budget.assertWithinBudget());
+  time = 180_000;
+  assert.equal(budget.remainingMs({ cleanup: true }), 0);
+});
+
 test("nonzero child exit is preserved", async () => {
   const child = new EventEmitter();
   const result = runProcess("fixture", [], { spawnImpl: () => child, timeoutMs: 1_000 });

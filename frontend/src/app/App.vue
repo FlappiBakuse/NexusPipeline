@@ -12,6 +12,8 @@ import { enterPage } from "../platform/page-state";
 import { isAbortError } from "../platform/api";
 import { initAutoScroll } from "../platform/auto-scroll";
 import { registerTokenPromptRenderer } from "../platform/auth";
+import { resumeServiceRecovery, startServiceObserver } from "../platform/service-recovery";
+import NxpButton from "../ui/primitives/NxpButton.vue";
 import NxpIconButton from "../ui/primitives/NxpIconButton.vue";
 import NxpIcon from "../ui/primitives/NxpIcon.vue";
 import NxpScrollArea from "../ui/primitives/NxpScrollArea.vue";
@@ -36,6 +38,16 @@ const navigation = [
 ] as const;
 let autoScrollObserver: MutationObserver | null = null;
 let autoScrollFrame: number | null = null;
+let stopServiceObserver: (() => void) | null = null;
+const localAddress = computed(() => shell.actualPort > 0
+  ? t("service.with_host", { host: location.hostname, port: shell.actualPort })
+  : t("service.label"));
+const recoveryMessage = computed(() => {
+  if (shell.recoveryPhase === "dirty-blocked") return t("shell.recovery.dirty");
+  if (shell.recoveryPhase === "timeout") return t("shell.recovery.timeout");
+  if (shell.recoveryPhase === "failed") return t("shell.recovery.failed");
+  return t("shell.recovery.waiting");
+});
 
 function scheduleAutoScroll() {
   if (autoScrollFrame !== null) return;
@@ -68,6 +80,8 @@ watch(() => route.fullPath, () => {
 });
 
 onBeforeUnmount(() => {
+  stopServiceObserver?.();
+  stopServiceObserver = null;
   autoScrollObserver?.disconnect();
   autoScrollObserver = null;
   if (autoScrollFrame !== null && typeof window.cancelAnimationFrame === "function") {
@@ -101,6 +115,7 @@ onMounted(async () => {
       shell.markBooted();
       applyTranslations();
       scheduleAutoScroll();
+      stopServiceObserver = startServiceObserver(shell);
     }
   } catch (error) {
     if (!isAbortError(error)) shell.markBootError(error);
@@ -131,7 +146,7 @@ function openNav() {
       <nav class="main-nav" :aria-label="t('shell.system')" data-i18n-aria-label="shell.system">
         <a v-for="[path, icon, label] in navigation.slice(6)" :key="path" :href="`#/${path}`" :data-page="path" :data-testid="`nav-${path}`" :class="{ active: segments[0] === path }" :aria-current="segments[0] === path ? 'page' : undefined" @click="closeNav"><span class="nav-icon"><NxpIcon :name="icon" /></span><span :data-i18n="label"></span></a>
       </nav>
-      <div class="sidebar-foot"><div class="sidebar-foot-copy"><span id="local-addr" data-testid="local-addr"></span><span id="app-version" data-i18n="shell.current_version"></span></div><NxpIconButton :label="t('shell.theme_toggle')" data-i18n-aria-label="shell.theme_toggle" @click="cycleTheme"><span data-theme-icon aria-hidden="true"><NxpIcon name="theme" /></span></NxpIconButton></div>
+      <div class="sidebar-foot"><div class="sidebar-foot-copy"><span id="local-addr" data-testid="local-addr">{{ localAddress }}</span><span id="app-version" :title="shell.identityConnection === 'online' ? '' : t('shell.recovery.disconnected')">{{ t('common.current_version') }} · {{ shell.hostVersion || t('shell.version_unknown') }}</span></div><NxpIconButton :label="t('shell.theme_toggle')" data-i18n-aria-label="shell.theme_toggle" @click="cycleTheme"><span data-theme-icon aria-hidden="true"><NxpIcon name="theme" /></span></NxpIconButton></div>
     </aside>
     <div class="nav-backdrop" @click.capture="closeNav"><button type="button" :aria-label="t('shell.close_navigation')" data-i18n-aria-label="shell.close_navigation" @pointerdown="closeNav" @click.stop="closeNav"></button></div>
     <div class="page-shell">
@@ -146,6 +161,12 @@ function openNav() {
   </div>
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
   <div id="notice-stack" aria-live="polite" :aria-label="t('shell.page_notifications')" data-i18n-aria-label="shell.page_notifications"></div>
+  <div v-if="shell.recoveryPhase !== 'idle' && shell.recoveryPhase !== 'navigating'" class="dashboard-system-note" role="status" aria-live="polite">
+    <span>{{ recoveryMessage }}</span>
+    <NxpButton v-if="['timeout', 'failed', 'dirty-blocked'].includes(shell.recoveryPhase)" class="ghost" type="button" @click="resumeServiceRecovery(shell.recoveryPhase === 'dirty-blocked')">
+      {{ shell.recoveryPhase === 'dirty-blocked' ? t('shell.recovery.discard_refresh') : t('shell.recovery.continue') }}
+    </NxpButton>
+  </div>
   <NxpEmptyState
     v-if="shell.bootError"
     class="app-boot-error"

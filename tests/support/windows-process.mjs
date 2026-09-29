@@ -1,15 +1,15 @@
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 
-function run(command, args) {
+function run(command, args, timeout = 2_000) {
   try {
     return spawnSync(command, args, {
       encoding: "utf8",
       windowsHide: true,
-      timeout: 2_000,
+      timeout,
     });
-  } catch {
-    return { status: null, stdout: "", stderr: "" };
+  } catch (error) {
+    return { status: null, stdout: "", stderr: String(error) };
   }
 }
 
@@ -34,7 +34,7 @@ export function isAdministrator() {
 }
 
 /** Return OS-observed process identity for marker-protected cleanup. */
-export function readProcessIdentity(pid) {
+export function readProcessIdentity(pid, onFailure) {
   const numericPid = Number(pid);
   if (!Number.isInteger(numericPid) || numericPid <= 0) return null;
   if (process.platform !== "win32") {
@@ -48,20 +48,27 @@ export function readProcessIdentity(pid) {
       return null;
     }
   }
-  const script = `$p=Get-Process -Id ${numericPid} -ErrorAction SilentlyContinue; $w=Get-CimInstance Win32_Process -Filter 'ProcessId = ${numericPid}' -ErrorAction SilentlyContinue; if ($null -ne $p) { [pscustomobject]@{ pid=$p.Id; executablePath=$p.Path; startTime=$p.StartTime.ToUniversalTime().ToString('o'); parentPid=if ($null -ne $w) { [int]$w.ParentProcessId } else { 0 } } | ConvertTo-Json -Compress }`;
-  const result = run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script]);
-  if (result.status !== 0 || !String(result.stdout || "").trim()) return null;
+  const script = `$p=Get-Process -Id ${numericPid} -ErrorAction SilentlyContinue; if ($null -ne $p) { [pscustomobject]@{ pid=$p.Id; executablePath=$p.Path; startTime=$p.StartTime.ToUniversalTime().ToString('o') } | ConvertTo-Json -Compress }`;
+  const result = run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], 15_000);
+  if (result.status !== 0 || !String(result.stdout || "").trim()) {
+    onFailure?.({ status: result.status, error: result.error?.message, stderr: String(result.stderr || "").slice(0, 500) });
+    return null;
+  }
   try {
     const identity = JSON.parse(String(result.stdout).trim());
+    if (Number(identity?.pid) !== numericPid || typeof identity?.executablePath !== "string") {
+      onFailure?.({ status: result.status, identity });
+    }
     return Number(identity?.pid) === numericPid && typeof identity?.executablePath === "string"
       ? {
           pid: numericPid,
           executablePath: identity.executablePath,
           startTime: identity.startTime || "",
-          parentPid: Number.isInteger(Number(identity.parentPid)) ? Number(identity.parentPid) : null,
+          parentPid: null,
         }
       : null;
-  } catch {
+  } catch (error) {
+    onFailure?.({ status: result.status, error: String(error), stdout: String(result.stdout).slice(0, 500) });
     return null;
   }
 }

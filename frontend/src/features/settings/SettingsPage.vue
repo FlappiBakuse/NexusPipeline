@@ -17,13 +17,14 @@ import {
   t,
 } from "../../platform/i18n";
 import { setTopbarTitle } from "../../platform/shell";
+import { registerRecoveryDirtyGuard } from "../../platform/service-recovery";
 import { useShellStore } from "../../stores/shell";
 import { toast } from "../../platform/toast";
 import type { NxpOption } from "../../ui/primitives/NxpSelect.vue";
 import NxpEmptyState from "../../ui/primitives/NxpEmptyState.vue";
 import NxpPageHeader from "../../ui/composites/NxpPageHeader.vue";
 import NxpCollapsibleCard from "../../ui/composites/NxpCollapsibleCard.vue";
-import UpdateStatusCard from "./components/UpdateStatusCard.vue";
+import NxpSwitchSetting from "../../ui/composites/NxpSwitchSetting.vue";
 import DiagnosticsSection from "./components/DiagnosticsSection.vue";
 import ServiceRestartNotice from "./components/ServiceRestartNotice.vue";
 import SettingsNotificationsSection from "./components/SettingsNotificationsSection.vue";
@@ -33,7 +34,6 @@ import SettingsRemoteAccessSection from "./components/SettingsRemoteAccessSectio
 import SettingsUpdatesSection from "./components/SettingsUpdatesSection.vue";
 
 type Settings = Record<string, any>;
-type UpdateStatus = Record<string, any>;
 type DiagnosticCheck = Record<string, any>;
 const settings = reactive<Settings>({});
 const remoteAddresses = ref<string[]>([]);
@@ -49,7 +49,6 @@ const secretDraft = reactive<Record<string, string>>({
   webhookSecret: "",
   feishuAppSecret: "",
   slackBotToken: "",
-  dingTalkAppSecret: "",
   smtpPassword: "",
   proxyPassword: "",
 });
@@ -60,6 +59,11 @@ const settingsPanelToggleEvent = "nxp-settings-panel-toggle";
 const settingsPanelStateEvent = "nxp-settings-panel-state";
 let disposed = false;
 let saveChain: Promise<void> = Promise.resolve();
+let confirmedAllowConfigRepair = false;
+let editSerial = 0;
+let confirmedEditSerial = 0;
+let unregisterDirtyGuard: (() => void) | null = null;
+function markLocalEdit() { editSerial += 1; }
 
 const localeOptions = computed<NxpOption[]>(() =>
   getLocaleOptions().map((item) => ({
@@ -92,7 +96,10 @@ function markRestart() {
   shell.markRestartRequired("settings");
 }
 function applyResponse(data: any) {
-  if (data?.settings) Object.assign(settings, data.settings);
+  if (data?.settings) {
+    Object.assign(settings, data.settings);
+    confirmedAllowConfigRepair = data.settings.allowConfigRepair === true;
+  }
 }
 function queueSave(action: () => Promise<void>) {
   const pending = saveChain.then(action);
@@ -108,6 +115,7 @@ async function persist(
   secretValue?: string,
 ) {
   saving.value = true;
+  const savedSerial = editSerial;
   try {
     const data = await api("PUT", "/api/settings", payload);
     applyResponse(data);
@@ -118,6 +126,7 @@ async function persist(
       });
       applyResponse(secretData);
     }
+    if (editSerial === savedSerial) confirmedEditSerial = savedSerial;
   } finally {
     saving.value = false;
   }
@@ -125,8 +134,6 @@ async function persist(
 function servicePayload() {
   return {
     autoStart: settings.autoStart === true,
-    lightweightMode: settings.lightweightMode === true,
-    allowConfigRepair: settings.allowConfigRepair === true,
     autoOpenBrowser: settings.autoOpenBrowser === true,
     historyRetentionDays: Number(settings.historyRetentionDays) || 3,
     webPort: Number(settings.webPort) || 58731,
@@ -162,9 +169,6 @@ function saveNotifications() {
     webhookTemplate: settings.webhookTemplate || "",
     feishuAppId: settings.feishuAppId || "",
     slackChannelId: settings.slackChannelId || "",
-    dingTalkAppKey: settings.dingTalkAppKey || "",
-    dingTalkRobotCode: settings.dingTalkRobotCode || "",
-    dingTalkOpenConversationId: settings.dingTalkOpenConversationId || "",
     smtpHost: settings.smtpHost || "",
     smtpPort: Number(settings.smtpPort) || 465,
     smtpSecure: settings.smtpSecure || "auto",
@@ -213,6 +217,17 @@ function saveUpdates() {
     await updatesSection.value?.reload();
   });
 }
+function saveAdvanced() {
+  const value = settings.allowConfigRepair === true;
+  return queueSave(async () => {
+    try {
+      await persist({ allowConfigRepair: value });
+    } catch (reason) {
+      settings.allowConfigRepair = confirmedAllowConfigRepair;
+      throw reason;
+    }
+  });
+}
 async function refreshRemote() {
   try {
     const data = await api<any>("GET", "/api/settings");
@@ -237,9 +252,6 @@ function onMcpChange(value: boolean) {
   settings.mcpEnabled = value;
   markRestart();
   void saveService();
-}
-function onLightweightChange() {
-  void saveServiceWithRestart();
 }
 function onUpdateCheck(value: boolean) {
   settings.updateCheckEnabled = value;
@@ -308,6 +320,9 @@ async function disposePluginSlots() {
 
 onMounted(async () => {
   disposed = false;
+  unregisterDirtyGuard = registerRecoveryDirtyGuard(() =>
+    saving.value || editSerial !== confirmedEditSerial
+    || Object.values(secretDraft).some(value => value.trim().length > 0));
   window.addEventListener(settingsPanelToggleEvent, handleExternalSettingsPanelToggle);
   setTopbarTitle(t("shell.settings", {}, "Settings"));
   try {
@@ -316,6 +331,7 @@ onMounted(async () => {
       status?: { remote?: { lanAddresses?: string[] } };
     };
     Object.assign(settings, data.settings || {});
+    confirmedAllowConfigRepair = data.settings?.allowConfigRepair === true;
     remoteAddresses.value = Array.isArray(data.status?.remote?.lanAddresses)
       ? data.status.remote.lanAddresses || []
       : [];
@@ -333,13 +349,15 @@ onMounted(async () => {
 });
 onBeforeUnmount(() => {
   disposed = true;
+  unregisterDirtyGuard?.();
+  unregisterDirtyGuard = null;
   window.removeEventListener(settingsPanelToggleEvent, handleExternalSettingsPanelToggle);
   void disposePluginSlots();
 });
 </script>
 
 <template>
-  <main id="view" ref="root" class="view-root" data-testid="main-view">
+  <main id="view" ref="root" class="view-root" data-testid="main-view" @input="markLocalEdit">
     <NxpEmptyState v-if="loading" :title="t('common.loading')" />
     <NxpEmptyState
       v-else-if="error"
@@ -362,7 +380,6 @@ onBeforeUnmount(() => {
           :locale-options="localeOptions"
           :save="saveService"
           :save-with-restart="saveServiceWithRestart"
-          :on-lightweight-change="onLightweightChange"
           @toggle="togglePanel('service')"
           @change-locale="changeLocale"
         />
@@ -396,6 +413,27 @@ onBeforeUnmount(() => {
           :save="saveNetwork"
           @toggle="togglePanel('network')"
         />
+        <NxpCollapsibleCard
+          panel-id="settings-panel-advanced"
+          panel="advanced"
+          data-settings-panel="advanced"
+          :expanded="panelExpanded('advanced')"
+          :title="t('settings.advanced')"
+          :description="t('settings.advanced_help')"
+          @toggle="togglePanel('advanced')"
+        >
+          <div class="settings-list">
+            <NxpSwitchSetting
+              id="st-config-repair"
+              v-model="settings.allowConfigRepair"
+              :label="t('settings.config_repair')"
+              :description="t('settings.config_repair_help')"
+              :aria-label="t('settings.config_repair')"
+              @change="saveAdvanced"
+            />
+          </div>
+        </NxpCollapsibleCard>
+
         <SettingsUpdatesSection
           ref="updatesSection"
           :settings="settings"

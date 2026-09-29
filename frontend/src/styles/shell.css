@@ -269,7 +269,6 @@ body[data-wallpaper="on"] :is(.card, .section-surface, .list-surface, .table-sur
 .subsection:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
 .nested-panel { margin-top: var(--space-3); padding: var(--space-3); border: 1px solid var(--content-card-border); border-radius: var(--radius-md); background: var(--content-card-soft); }
 .nested-panel .form-grid + .form-grid { margin-top: 8px; }
-.webhook-advanced-fields[data-webhook-advanced="dingtalk"] > .form-grid + .form-grid { margin-top: var(--space-3); }
 .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
 .section-heading h3 { margin: 0; }
 .section-heading .muted { margin: 0; }

@@ -1,0 +1,43 @@
+name: Host Final Budget
+
+on:
+  workflow_run:
+    workflows: [Host CI]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Completed Host CI run to audit
+        required: true
+        type: string
+      attempt:
+        description: Completed attempt
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  checks: write
+  contents: read
+
+jobs:
+  audit:
+    name: Host / 完整预算回写
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: 检出受信控制器
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - name: 准备 Python 工具链
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.13"
+      - name: 审计完整运行并发布最终检查
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id || inputs.run_id }}
+          ATTEMPT: ${{ github.event.workflow_run.run_attempt || inputs.attempt }}
+        run: python tests/final-budget.py --run-id "$RUN_ID" --attempt "$ATTEMPT" --required-name 'Host / Required' --check-name 'Host / Final Budget'

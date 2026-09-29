@@ -32,6 +32,7 @@ internal sealed class Bootstrap
     private readonly HostRuntime _runtime;
     private readonly PluginAutoUpdateService _pluginAutoUpdateService;
     private readonly UpdateAutomationService _updates;
+    private readonly IPluginActivationPreferences _activationPreferences;
     private readonly Func<bool> _requestServiceExit;
     private readonly Func<bool> _requestWebOnlyExit;
     private HostRestartCoordinator? _restartCoordinator;
@@ -44,12 +45,14 @@ internal sealed class Bootstrap
         HostRuntime runtime,
         PluginAutoUpdateService pluginAutoUpdateService,
         UpdateAutomationService updates,
+        IPluginActivationPreferences activationPreferences,
         Func<bool> requestServiceExit,
         Func<bool> requestWebOnlyExit)
     {
         _runtime = runtime;
         _pluginAutoUpdateService = pluginAutoUpdateService;
         _updates = updates;
+        _activationPreferences = activationPreferences;
         _requestServiceExit = requestServiceExit;
         _requestWebOnlyExit = requestWebOnlyExit;
     }
@@ -80,7 +83,7 @@ internal sealed class Bootstrap
         }
         else
         {
-            pendingApplied = PluginInstallRecovery.ApplyPending();
+            pendingApplied = PluginInstallRecovery.ApplyPending(activationPreferences: _activationPreferences);
         }
         if (!pendingApplied)
         {
@@ -113,7 +116,7 @@ internal sealed class Bootstrap
     {
         // 现有 journal 必须先在当前进程中完成；只有成功后，RepositoryService
         // 才能按启动时冻结的 channel 查询 catalog 并创建新的暂存事务。
-        bool pendingApplied = PluginInstallRecovery.ApplyPending();
+        bool pendingApplied = PluginInstallRecovery.ApplyPending(activationPreferences: _activationPreferences);
         _startupRecoveryReady = pendingApplied;
         _startupRecoveryFailed = !pendingApplied;
         if (!pendingApplied)

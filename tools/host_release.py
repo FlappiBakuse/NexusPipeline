@@ -249,6 +249,8 @@ def build_production(
     runner: Callable[[list[str], Path], None] | None = None,
     frontend_ready: bool = False,
     plugins_root: Path | None = None,
+    bundled_phase: Path | None = None,
+    bundled_partner_sha: str | None = None,
 ) -> dict[str, Any]:
     root = root.resolve()
     production_root = output_dir.resolve() / "production"
@@ -272,8 +274,12 @@ def build_production(
         shutil.rmtree(wwwroot)
     shutil.copytree(frontend / "dist", wwwroot)
     shutil.copy2(root / "README.md", production_root / "README.md")
-    _require(plugins_root is not None, "必须显式提供官方 Plugins 检出路径")
-    stage_bundled_plugins(production_root, plugins_root.resolve(), root / "src" / "Modules" / "Plugins" / "Repository" / "BundledPlugins.json")
+    if bundled_phase is None:
+        _require(plugins_root is not None, "必须显式提供官方 Plugins 检出路径")
+        stage_bundled_plugins(production_root, plugins_root.resolve(), root / "src" / "Modules" / "Plugins" / "Repository" / "BundledPlugins.json")
+    else:
+        consume_bundled_phase(root, bundled_phase, production_root,
+                              source_sha=source_sha, partner_sha=bundled_partner_sha)
     _normalize_host_text(production_root)
     return archive_production(
         production_root,
@@ -282,6 +288,152 @@ def build_production(
         source_sha=source_sha,
         manifest_path=root / "src" / "app.manifest",
     )
+
+
+def build_frontend_phase(root: Path, output: Path, *, source_sha: str) -> dict[str, Any]:
+    root, output = root.resolve(), output.resolve()
+    _require(not output.exists(), "前端阶段输出已存在，拒绝覆盖")
+    _require(git_output(root, "rev-parse", "HEAD") == source_sha
+             and not git_output(root, "status", "--porcelain=v1", "--untracked-files=all"),
+             "前端阶段必须使用干净的固定源码")
+    frontend = root / "frontend"
+    npm = "npm.cmd" if os.name == "nt" else "npm"
+    for args in (("ci", "--no-audit", "--no-fund"), ("run", "typecheck"), ("run", "build")):
+        _run_checked([npm, *args], frontend, None)
+    digest = subprocess.run(["node", str(root / "tools" / "source-hash.mjs"), "--frontend"],
+                            cwd=root, check=True, capture_output=True, text=True, encoding="utf-8").stdout.strip()
+    _require(re.fullmatch(r"[0-9A-F]{64}", digest) is not None, "前端源码指纹无效")
+    source = frontend / "dist"
+    _require((source / "index.html").is_file() and (source / ".vite" / "manifest.json").is_file(),
+             "前端构建产物缺失")
+    output.mkdir(parents=True)
+    shutil.copytree(source, output / "dist")
+    files = []
+    for item in sorted((output / "dist").rglob("*")):
+        _require(not item.is_symlink(), "前端阶段包含链接")
+        if item.is_file():
+            name = item.relative_to(output).as_posix()
+            files.append({"path": name, "sha256": hashlib.sha256(item.read_bytes()).hexdigest(),
+                          "sizeBytes": item.stat().st_size})
+    _require(0 < len(files) <= 512 and sum(item["sizeBytes"] for item in files) <= 128 * 1024 * 1024,
+             "前端阶段文件数或大小越界")
+    manifest = {"schemaVersion": 1, "sourceSha": source_sha,
+                "sourceTreeSha": git_output(root, "rev-parse", f"{source_sha}^{{tree}}"),
+                "frontendHash": digest, "files": files}
+    (output / "phase.json").write_text(json.dumps(manifest, sort_keys=True) + "\n", encoding="utf-8")
+    return manifest
+
+
+def consume_frontend_phase(root: Path, phase: Path, *, source_sha: str) -> dict[str, Any]:
+    root, phase = root.resolve(), phase.resolve()
+    _require(phase.is_dir() and not phase.is_symlink(), "前端阶段目录无效")
+    manifest = json.loads((phase / "phase.json").read_text(encoding="utf-8"))
+    _require(isinstance(manifest, dict) and set(manifest) == {
+        "schemaVersion", "sourceSha", "sourceTreeSha", "frontendHash", "files"},
+        "前端阶段清单无效")
+    _require(manifest["schemaVersion"] == 1 and manifest["sourceSha"] == source_sha
+             and manifest["sourceTreeSha"] == git_output(root, "rev-parse", f"{source_sha}^{{tree}}"),
+             "前端阶段源码身份不符")
+    current = subprocess.run(["node", str(root / "tools" / "source-hash.mjs"), "--frontend"],
+                             cwd=root, check=True, capture_output=True, text=True, encoding="utf-8").stdout.strip()
+    _require(manifest["frontendHash"] == current, "前端阶段源码指纹不符")
+    files = manifest["files"]
+    _require(isinstance(files, list) and 0 < len(files) <= 512, "前端阶段文件清单无效")
+    actual = []
+    for item in sorted((phase / "dist").rglob("*")):
+        _require(not item.is_symlink(), "前端阶段包含链接")
+        if item.is_file():
+            actual.append({"path": item.relative_to(phase).as_posix(),
+                           "sha256": hashlib.sha256(item.read_bytes()).hexdigest(),
+                           "sizeBytes": item.stat().st_size})
+    _require(actual == files and sum(item["sizeBytes"] for item in actual) <= 128 * 1024 * 1024,
+             "前端阶段字节或文件集合不符")
+    destination = root / "frontend" / "dist"
+    _require(not destination.exists(), "源码检出已有前端输出，拒绝覆盖")
+    shutil.copytree(phase / "dist", destination)
+    stamp = root / ".generated" / "frontend-build.hash"
+    stamp.parent.mkdir(exist_ok=True)
+    stamp.write_text(current, encoding="ascii")
+    verify_frontend_ready(root)
+    return manifest
+
+
+def build_bundled_phase(root: Path, plugins_root: Path, output: Path, *,
+                        source_sha: str, partner_sha: str) -> dict[str, Any]:
+    root, plugins_root, output = root.resolve(), plugins_root.resolve(), output.resolve()
+    _require(not output.exists(), "预装插件阶段输出已存在，拒绝覆盖")
+    _require(git_output(root, "rev-parse", "HEAD") == source_sha
+             and git_output(plugins_root, "rev-parse", "HEAD") == partner_sha,
+             "预装插件阶段源码身份不符")
+    output.mkdir(parents=True)
+    stage_bundled_plugins(output, plugins_root,
+                          root / "src" / "Modules" / "Plugins" / "Repository" / "BundledPlugins.json")
+    files = []
+    for item in sorted((output / "plugins").rglob("*")):
+        _require(not item.is_symlink(), "预装插件阶段包含链接")
+        if item.is_file():
+            files.append({"path": item.relative_to(output).as_posix(),
+                          "sha256": hashlib.sha256(item.read_bytes()).hexdigest(),
+                          "sizeBytes": item.stat().st_size})
+    _require(0 < len(files) <= 512, "预装插件阶段文件数无效")
+    manifest = {"schemaVersion": 1, "sourceSha": source_sha, "partnerSha": partner_sha,
+                "files": files}
+    (output / "phase.json").write_text(json.dumps(manifest, sort_keys=True) + "\n", encoding="utf-8")
+    return manifest
+
+
+def consume_bundled_phase(root: Path, phase: Path, production_root: Path, *,
+                          source_sha: str | None = None, partner_sha: str | None = None) -> dict[str, Any]:
+    phase = phase.resolve()
+    _require(phase.is_dir() and not phase.is_symlink(), "预装插件阶段目录无效")
+    manifest = json.loads((phase / "phase.json").read_text(encoding="utf-8"))
+    _require(isinstance(manifest, dict) and set(manifest) == {
+        "schemaVersion", "sourceSha", "partnerSha", "files"}, "预装插件阶段清单无效")
+    _require(partner_sha is not None and manifest["schemaVersion"] == 1
+             and manifest["sourceSha"] == (source_sha or git_output(root, "rev-parse", "HEAD"))
+             and manifest["partnerSha"] == partner_sha, "预装插件阶段来源不符")
+    actual = []
+    for item in sorted((phase / "plugins").rglob("*")):
+        _require(not item.is_symlink(), "预装插件阶段包含链接")
+        if item.is_file():
+            actual.append({"path": item.relative_to(phase).as_posix(),
+                           "sha256": hashlib.sha256(item.read_bytes()).hexdigest(),
+                           "sizeBytes": item.stat().st_size})
+    _require(actual == manifest["files"] and 0 < len(actual) <= 512,
+             "预装插件阶段文件字节不符")
+    target = production_root / "plugins"
+    _require(not target.exists(), "生产 staging 已存在插件目录")
+    shutil.copytree(phase / "plugins", target)
+    return manifest
+
+
+def assemble_candidate_from_phases(root: Path, host_phase: Path, installer_phase: Path,
+                                   output: Path, *, source_sha: str, partner_sha: str,
+                                   workflow_sha: str, run_id: int, run_attempt: int) -> dict[str, Any]:
+    root, host_phase, installer_phase, output = (
+        root.resolve(), host_phase.resolve(), installer_phase.resolve(), output.resolve())
+    _require(not output.exists(), "候选输出已存在，拒绝覆盖")
+    _require(git_output(root, "rev-parse", "HEAD") == source_sha
+             and not git_output(root, "status", "--porcelain=v1", "--untracked-files=all"),
+             "候选装配必须使用干净的固定源码")
+    tag = "v" + project_version(root)
+    zip_name = f"NexusPipeline-{tag}-win-x64.zip"
+    setup_name = f"NexusPipeline-{tag}-win-x64-setup.exe"
+    host_files = (zip_name, f"{zip_name}.sha256", "build-metadata.json")
+    installer_files = (setup_name, f"{setup_name}.sha256", "installer-build-metadata.json")
+    for directory, names in ((host_phase, host_files), (installer_phase, installer_files)):
+        _require(directory.is_dir() and not directory.is_symlink()
+                 and all((directory / name).is_file() and not (directory / name).is_symlink() for name in names),
+                 "候选阶段文件缺失或无效")
+    output.mkdir(parents=True)
+    for directory, names in ((host_phase, host_files), (installer_phase, installer_files)):
+        for name in names:
+            shutil.copy2(directory / name, output / name)
+    candidate = write_candidate_manifest(root, output, source_sha=source_sha, partner_sha=partner_sha,
+                                         workflow_sha=workflow_sha, run_id=run_id, run_attempt=run_attempt)
+    validate_candidate_data(root, output, expected_source_sha=source_sha,
+                            expected_producer=candidate["producer"], expected_partner_sha=partner_sha)
+    return candidate
 
 
 def candidate_asset_names(tag: str) -> set[str]:
@@ -624,7 +776,7 @@ def verify_received_package(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="NexusPipeline Host production release boundary")
-    parser.add_argument("command", nargs="?", choices=("release", "verify-package", "verify-installer", "candidate", "extract-candidate", "inspect-candidate", "validate-candidate"), default="release")
+    parser.add_argument("command", nargs="?", choices=("release", "verify-package", "verify-installer", "candidate", "extract-candidate", "inspect-candidate", "validate-candidate", "build-frontend", "build-bundled", "build-host", "assemble-candidate"), default="release")
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--tag")
     parser.add_argument("--source-sha")
@@ -640,12 +792,54 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--run-attempt", type=int)
     parser.add_argument("--frontend-ready", action="store_true")
     parser.add_argument("--plugins-root", type=Path)
+    parser.add_argument("--frontend-phase", type=Path)
+    parser.add_argument("--bundled-phase", type=Path)
+    parser.add_argument("--host-phase", type=Path)
+    parser.add_argument("--installer-phase", type=Path)
     parser.add_argument("--inno-compiler", type=Path)
     parser.add_argument("--artifact-zip", type=Path)
     parser.add_argument("--expected-digest")
     parser.add_argument("--github-output", type=Path)
     args = parser.parse_args(argv)
     root = args.root.resolve()
+    if args.command in {"build-frontend", "build-bundled", "build-host", "assemble-candidate"}:
+        _require(args.source_sha is not None and args.output is not None,
+                 "阶段构建必须指定 --source-sha 和 --output")
+        output = args.output.resolve()
+        _require(root != output and output not in root.parents, "阶段输出不能覆盖仓库或父目录")
+        if root in output.parents:
+            _require(output.relative_to(root).parts[0] == ".generated", "仓库内阶段输出只允许位于 .generated")
+        _require(git_output(root, "rev-parse", "HEAD") == args.source_sha
+                 and not git_output(root, "status", "--porcelain=v1", "--untracked-files=all"),
+                 "阶段源码必须是干净的固定检出")
+        if args.command == "build-frontend":
+            result = build_frontend_phase(root, output, source_sha=args.source_sha)
+        elif args.command == "build-bundled":
+            _require(args.plugins_root is not None and args.partner_sha is not None,
+                     "预装插件阶段需要固定 Plugins 检出和 SHA")
+            result = build_bundled_phase(root, args.plugins_root, output,
+                                         source_sha=args.source_sha, partner_sha=args.partner_sha)
+        elif args.command == "build-host":
+            _require(args.frontend_phase is not None and args.bundled_phase is not None
+                     and args.partner_sha is not None, "生产宿主阶段缺少前端或预装插件输入")
+            consume_frontend_phase(root, args.frontend_phase, source_sha=args.source_sha)
+            result = build_production(root, output, source_sha=args.source_sha,
+                                      frontend_ready=True, bundled_phase=args.bundled_phase,
+                                      bundled_partner_sha=args.partner_sha)
+        else:
+            for value, label in ((args.host_phase, "--host-phase"),
+                                 (args.installer_phase, "--installer-phase"),
+                                 (args.partner_sha, "--partner-sha"),
+                                 (args.workflow_sha, "--workflow-sha"),
+                                 (args.run_id, "--run-id"), (args.run_attempt, "--run-attempt")):
+                _require(value is not None, f"{label} is required")
+            result = assemble_candidate_from_phases(root, args.host_phase, args.installer_phase,
+                                                    output, source_sha=args.source_sha,
+                                                    partner_sha=args.partner_sha,
+                                                    workflow_sha=args.workflow_sha,
+                                                    run_id=args.run_id, run_attempt=args.run_attempt)
+        print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+        return 0
     if args.command == "extract-candidate":
         for value, label in ((args.artifact_zip, "--artifact-zip"), (args.output, "--output"),
                              (args.expected_digest, "--expected-digest")):

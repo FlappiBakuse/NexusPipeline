@@ -23,6 +23,7 @@ if (fs.existsSync(runRoot)) {
       pidFilePath: path.join(directory, ".nxp", "runtime", "service.pid"),
       markerPath,
       exitWaitPollMs: 50,
+      allowReusedPid: true,
     });
     const portFile = path.join(directory, ".nxp", "runtime", "web.port");
     if (fs.existsSync(portFile)) {

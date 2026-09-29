@@ -17,6 +17,8 @@ const applyDialogDefer = ref(false);
 const applyDialogBusy = ref(false);
 let disposed = false;
 let updateTimer: ReturnType<typeof setTimeout> | null = null;
+let pollFailures = 0;
+let authBlocked = false;
 
 const completionActionText = computed(() => {
   const state = updateStatus.value?.state || "idle";
@@ -46,16 +48,23 @@ function errorText(reason: unknown) {
 async function loadUpdateStatus() {
   try {
     updateStatus.value = (await api("GET", "/api/update/status")) as UpdateStatus;
+    pollFailures = 0;
+    authBlocked = false;
+  } catch (reason) {
+    const status = (reason as { status?: number })?.status;
+    authBlocked = status === 401 || status === 403;
+    if (!authBlocked && !isAbortError(reason)) pollFailures += 1;
+  } finally {
     scheduleUpdatePoll();
-  } catch {
-    updateStatus.value = null;
   }
 }
 function scheduleUpdatePoll() {
   if (updateTimer) clearTimeout(updateTimer);
-  if (disposed) return;
+  if (disposed || authBlocked) return;
   const state = updateStatus.value?.state || "idle";
-  const delay =
+  const delay = pollFailures > 0
+    ? Math.min(60000, 2500 * 2 ** Math.min(5, pollFailures - 1))
+    :
     state === "checking" || state === "downloading"
       ? 1000
       : updateStatus.value?.automation?.checkEnabled === true

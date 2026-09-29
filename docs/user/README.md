@@ -6,6 +6,12 @@
 
 首次安装可选安装器或便携 ZIP。两者的初始应用文件来自同一份载荷：`nexus-pipeline.exe`、`wwwroot/`、`plugins/` 和 `README.md`。预装的 EmulatorSupport、LiveScreenshot 默认禁用，需要时再在插件页启用。安装器选择本地空目录；已登记且身份匹配的同一用户实例可选择原目录升级。它不会迁移或接管不明便携目录。便携包请解压到空目录，不要覆盖旧实例。
 
+安装器提供英文和简体中文；首次安装按 Windows 用户界面语言选择并允许手动切换，升级默认沿用上次选择。`/LANG=en` 或 `/LANG=zh` 可明确指定语言。静默安装仍按显式语言、上次选择、系统语言的顺序决定提示语言。
+
+从仓库首次安装 managed-code 插件且没有既有启用偏好时，安装事务完成后会记录启用，重启加载时生效。更新插件、显式禁用后重装及预装插件均保留原有偏好。安装请求返回需要重启时，插件还没有运行；实际加载状态以插件页为准。
+
+新配置默认在服务启动时打开管理页面；`autoOpenBrowser: false` 可关闭此行为。轻量模式只能在停止宿主后编辑 `config/settings.json` 中的 `"lightweightMode": true` 并重启启用；轻量模式保留本机 Control API，但不提供 Web UI。网页设置页的「高级设置」卡片可单独保存「允许逐次配置修复」，每次修复仍需明确预览和应用。
+
 程序需要 .NET Desktop Runtime 8 x64 和 ASP.NET Core Runtime 8 x64。安装器在缺少依赖时会逐项询问并从固定微软地址下载校验后的包。便携版保留 .NET 的缺运行时提示，两个准确下载按钮见可离线打开的 [`wwwroot/help/runtime-prerequisites.html`](../../frontend/public/help/runtime-prerequisites.html)。安装 .NET 依赖可能需要系统授权；取消后可重新运行安装器。
 
 ## 运行、取消和日志

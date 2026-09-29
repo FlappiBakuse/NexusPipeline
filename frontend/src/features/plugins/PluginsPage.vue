@@ -34,7 +34,7 @@ const details = reactive<Record<Tab, DetailState>>({
 });
 const view = reactive<Record<Tab, { query: string; kind: string; sortBy: string; direction: string }>>({
   local: defaultPluginViewState(),
-  store: defaultPluginViewState(),
+  store: defaultPluginViewState("store"),
 });
 const requestSerial = ref(0);
 const listSerial = ref(0);
@@ -45,7 +45,7 @@ const shell = useShellStore();
 
 const currentList = computed(() => list[activeTab.value]);
 const currentView = computed(() => view[activeTab.value]);
-const visiblePlugins = computed(() => filterAndSortPlugins(currentList.value.plugins, currentView.value) as Plugin[]);
+const visiblePlugins = computed(() => filterAndSortPlugins(currentList.value.plugins, currentView.value, activeTab.value) as Plugin[]);
 const detail = computed(() => details[activeTab.value]);
 const detailVisibleMobile = ref(false);
 const tabs = computed(() => [
@@ -131,7 +131,7 @@ function updateFilter(patch: Partial<typeof view.local>) {
   void loadDetail(activeTab.value);
 }
 function resetFilter() {
-  view[activeTab.value] = defaultPluginViewState();
+  view[activeTab.value] = defaultPluginViewState(activeTab.value);
   reconcile(activeTab.value);
   void loadDetail(activeTab.value);
 }
@@ -263,7 +263,7 @@ onBeforeUnmount(() => {
           <div class="plugin-filter-wrap">
             <NxpButton
               class="plugin-filter-trigger"
-              :class="{ 'is-active': isPluginViewStateActive(currentView) }"
+              :class="{ 'is-active': isPluginViewStateActive(currentView, activeTab) }"
               type="button"
               data-testid="plugin-filter"
               aria-haspopup="dialog"

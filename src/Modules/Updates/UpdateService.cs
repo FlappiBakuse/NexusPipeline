@@ -37,6 +37,7 @@ internal sealed class UpdateService
     private readonly Func<bool> _canApplyFallback;
     private readonly Func<bool> _requestExit;
     private readonly Func<bool> _isWebOnly;
+    private readonly Func<string> _restartHandoff;
     private readonly Func<(HostMaintenanceLease? Lease, string? Reason)> _acquireMaintenance;
     private readonly OutboundHttpClientProvider _outbound;
     private readonly object _gate = new();
@@ -67,13 +68,15 @@ internal sealed class UpdateService
         Func<bool> requestExit,
         Func<(HostMaintenanceLease? Lease, string? Reason)>? acquireMaintenance = null,
         OutboundHttpClientProvider? outbound = null,
-        Func<bool>? isWebOnly = null)
+        Func<bool>? isWebOnly = null,
+        Func<string>? restartHandoff = null)
     {
         _settings = settings;
         _installDir = installDir;
         _canApplyFallback = canApply;
         _requestExit = requestExit;
         _isWebOnly = isWebOnly ?? (() => false);
+        _restartHandoff = restartHandoff ?? (() => "");
         _outbound = outbound ?? new OutboundHttpClientProvider(() => OutboundProxyOptions.Direct);
         if (acquireMaintenance is not null)
         {
@@ -607,8 +610,10 @@ internal sealed class UpdateService
         bool workerLaunched = false;
         try
         {
+            string handoffId = _restartHandoff();
             new UpdateTask("apply", version, stagingDir, UpdatePhase.ApplyRequested, DateTimeOffset.UtcNow)
-            { TransactionId = transactionId, TargetImageHash = imageHash }.Write(TaskFile);
+            { TransactionId = transactionId, TargetImageHash = imageHash,
+              RestartHandoffId = Guid.TryParseExact(handoffId, "N", out _) ? handoffId : null }.Write(TaskFile);
             if (!UpdateApply.LaunchApplyWorker(stagingDir, _isWebOnly()))
             {
                 throw new InvalidOperationException("apply-update 子进程未能拉起");

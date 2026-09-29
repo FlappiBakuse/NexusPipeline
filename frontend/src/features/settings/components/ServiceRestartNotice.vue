@@ -3,15 +3,13 @@ import { computed, ref, watch } from "vue";
 import { useShellStore } from "../../../stores/shell";
 import { t } from "../../../platform/i18n";
 import { api } from "../../../platform/api";
-import { restartService, type ServiceRestartHandoff } from "../../../platform/service-restart";
+import { beginServiceRecovery, resumeServiceRecovery } from "../../../platform/service-recovery";
 import NxpConfirmDialog from "../../../ui/composites/NxpConfirmDialog.vue";
 import NxpButton from "../../../ui/primitives/NxpButton.vue";
 
 const shell = useShellStore();
 const lightweight = ref(false);
 const confirmationOpen = ref(false);
-/** 已提交的重启交接信息：失败后重试时复用，避免对已经退出的旧实例再次提交重启请求。 */
-const pendingHandoff = ref<ServiceRestartHandoff | null>(null);
 
 /** 轻量模式不启动 Web 服务，此时只提示手动重启，不显示不可执行的按钮。 */
 async function loadServiceMode() {
@@ -37,24 +35,17 @@ const actionVisible = computed(() => !shell.restarting && !lightweight.value);
 
 function requestRestart() {
   if (shell.restarting) return;
+  if (shell.recoveryPhase === "timeout" || shell.recoveryPhase === "failed") {
+    resumeServiceRecovery();
+    return;
+  }
   confirmationOpen.value = true;
 }
 
-async function confirmRestart() {
+function confirmRestart() {
   if (shell.restarting) return;
   confirmationOpen.value = false;
-  shell.beginRestart();
-  const outcome = await restartService({
-    timeoutMs: 40_000,
-    handoff: pendingHandoff.value || undefined,
-    onHandoff: handoff => {
-      pendingHandoff.value = handoff;
-    },
-  });
-  if (outcome === "ready") return;
-  shell.failRestart(outcome === "timeout"
-    ? t("settings.service.restart_timeout")
-    : t("settings.service.restart_failed"));
+  void beginServiceRecovery();
 }
 </script>
 

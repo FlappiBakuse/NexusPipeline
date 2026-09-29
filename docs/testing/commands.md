@@ -14,11 +14,14 @@ node tests/run.mjs daily --group schedule
 node tests/run.mjs diagnostic --group store
 node tests/run.mjs integration
 node tests/run.mjs release
+node tests/run.mjs plan --base <完整基线SHA> --include-working-tree
+node tests/run.mjs gate --id host.backend.updates-restart
+node tests/run.mjs gate --id host.ci-policy
 ```
 
 `ci` 必须指定一个已知分组。backend 选择真实后端规则、文件事务、执行与调度窄测试；frontend 运行类型检查及核心状态、用户配置请求与公开桥接测试。`tests/policy.json` 中的预期用例与实际原生报告严格匹配。新增或更名选中用例时同步清单，不能删除失败用例以绕过验证。
 
-`smoke` 与两条 `ci` 使用同一实现，并行执行 backend/frontend，共享 180 秒父预算，最后 10 秒预留收尾。输入识别、隔离复制、必要增量构建、依赖准备、测试、报告和清理均计入预算。失败保留原退出码；超时返回 5，清理失败返回 6，主动取消返回 130。报告不完整返回 4。未知命令或参数返回 2。
+正式 PR 门禁以 `plan` 选择的独立 `gate --id` 为准；每个 gate 单独计时，完整本地资格线为 150 秒，硬停止线为 180 秒。`smoke` 与两条 `ci` 是本地聚合诊断入口，使用同一核心执行器并共享 180 秒父预算，最后 10 秒预留收尾。输入识别、隔离复制、必要增量构建、依赖准备、测试、报告和清理均计入预算。失败保留原退出码；超时返回 5，清理失败返回 6，主动取消返回 130。报告不完整返回 4。未知命令或参数返回 2。
 
 `daily` 使用两个独立 Host 槽位，先启动真实分钟调度，另一槽运行执行和配置，空闲槽接续控制面；共享准备、四组工作及清理合计 180 秒。支持 `--group execution|config|control|schedule` 进行明确的单组诊断。每组保留 `evidence.json`，父级 `daily-evidence.json` 只有全部预期组及清理通过才成功。
 
@@ -31,7 +34,7 @@ node tests/run.mjs release
 
 `integration` 保留已有 UI Smoke/System Smoke 诊断，部分 UI 响应由夹具提供；它不是 `daily` 的替代。`release` 是生产构建入口。
 
-`diagnostic --group store` 在同一180秒父预算内构建实际 Test Host 和合成 managed fixture，访问官方 HTTPS catalog/package 地址，由 Test Host 的传输夹具返回固定响应。它验证坏 hash 拒绝、安装事务、默认禁用、显式启用、三次真实重启交接、插件加载和卸载。原生 TAP 与 `store-evidence.json` 位于本次运行目录；这是 H-C09 的安装生命周期诊断，不代表浏览器交互、全部商店恢复矩阵或四组 daily 已完成。
+`diagnostic --group store` 在同一180秒父预算内构建实际 Test Host 和合成 managed fixture，访问官方 HTTPS catalog/package 地址，由 Test Host 的传输夹具返回固定响应。它验证坏 hash 拒绝、安装事务、新安装后自动启用、重复重启保持启用、显式禁用、插件加载和卸载。商店与更新重启的 System gate 不访问浏览器资源，因此 Test Host 只准备空 `wwwroot`；前端资产由独立的生产构建和 UI gate 验证。原生 TAP 与 `store-evidence.json` 位于本次运行目录；这是 H-C09 的安装生命周期诊断，不代表浏览器交互、全部商店恢复矩阵或四组 daily 已完成。
 
 受控 HTTP 实现 `tests/host/TestHostTransport.cs` 仅在 `NexusTestHost=true` 时编入宿主，生产程序不读取 `NEXUS_TEST_HTTP_PLAN`。测试计划必须是绝对路径且 `runId` 匹配 `NEXUS_TEST_RUN_ID`；每项按 HTTP 方法、完整 URI 及可选凭据头/请求体 hash 匹配，未知请求失败，不回退到真实外网。收据只包含场景标识和匹配结果，并在重启后继续消费剩余响应；不会记录凭据、URL或请求体。回环控制面保持真实网络通信。
 
@@ -51,7 +54,7 @@ node tests/run.mjs release
 
 ## 质量门禁顺序
 
-`.github/workflows/ci.yml` 并行运行 backend/frontend 两个核心 job；旧 `Host / Required` 名称保留为轻量汇总，检查当前输入、用例/场景、原生计数、清理和 Actions API 返回的完整前置 job 时长。测试 job 限制三分钟，汇总不构建或运行产品。命令通过不等于远端 job 已实测达标；API 缺失或超时使汇总失败。
+`.github/workflows/ci.yml` 先生成完整 base/head 范围计划，再并行运行选中 gate。`Host / Required` 核验本次计划、报告、原生计数、清理与 Actions API 返回的完整前序 job 时长；每个 job 硬限制三分钟。完成后还须执行只读 `python tests/audit-jobs.py --run-id <ID> --attempt <N>`，检查包括 Required 在内的完整 job 时长。`Host Final Budget` 在 CI 完成后从受信 `main` 控制器审计所有 job，写入 `Host / Final Budget` 检查；该检查须与 `Host / Required` 一同绑定到 main 规则。回写检查不存在或失败时不得合并。
 
 工具自测与文档检查按改动显式运行，例如：
 

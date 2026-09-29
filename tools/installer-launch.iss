@@ -16,7 +16,7 @@ var
 begin
   Code := 0;
   if not RunInstallerMetadata(Action, Extra, Code) or (Code <> 0) then
-    RaiseException('安装元数据 ' + Action + ' 未通过；保留检查点，错误码 ' + IntToStr(Code) + '。');
+    RaiseException(FmtMessage(CustomMessage('MetadataFailed'), [Action, IntToStr(Code)]));
 end;
 
 function ResolveInstallerMetadata(Launched: Boolean; ChildExit: Integer;
@@ -30,7 +30,7 @@ begin
   else Extra := Extra + ' --registration false';
   Result := 0;
   if not RunInstallerMetadata('resolve', Extra, Result) then
-    RaiseException('安装元数据补偿进程未启动；保留检查点，原生错误 ' + IntToStr(Result) + '。');
+    RaiseException(FmtMessage(CustomMessage('MetadataCompensationFailed'), [IntToStr(Result)]));
 end;
 
 function LaunchInstallerHelper(const Helper, Params, Path: String; var Code: Integer): Boolean;
@@ -47,13 +47,13 @@ end;
 function InstallerLaunchFailure(Launched: Boolean; Code: Integer): String;
 begin
   if not Launched then begin
-    if Code = 1223 then Result := '授权请求已取消'
-    else if Code = 5 then Result := '访问被拒绝'
-    else if Code = 2 then Result := '交接程序不存在'
-    else if Code = 32 then Result := '交接程序被占用'
-    else Result := '交接程序无法启动，系统错误 ' + IntToStr(Code);
+    if Code = 1223 then Result := CustomMessage('ElevationCancelled')
+    else if Code = 5 then Result := CustomMessage('AccessDenied')
+    else if Code = 2 then Result := CustomMessage('HandoffMissing')
+    else if Code = 32 then Result := CustomMessage('HandoffBusy')
+    else Result := FmtMessage(CustomMessage('HandoffSystemError'), [IntToStr(Code)]);
   end else
-    Result := '交接进程退出码 ' + IntToStr(Code);
+    Result := FmtMessage(CustomMessage('HandoffExitCode'), [IntToStr(Code)]);
 end;
 
 procedure ApplyInstallerLaunch(const Helper, Params, Path: String;
@@ -65,7 +65,7 @@ begin
   Resolution := ResolveInstallerMetadata(Launched, Code, False);
   Resolved := True;
   if not Launched or (Code <> 0) then
-    RaiseException(InstallerLaunchFailure(Launched, Code) + '；保留 staging 和事务现场。');
+    RaiseException(FmtMessage(CustomMessage('HandoffRetained'), [InstallerLaunchFailure(Launched, Code)]));
   if Resolution <> 0 then
-    RaiseException('升级结果与已提交的元数据不一致；保留检查点。');
+    RaiseException(CustomMessage('UpgradeMetadataMismatch'));
 end;

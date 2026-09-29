@@ -73,6 +73,7 @@ internal class HostCompositionRoot
             runtime,
             composition.Get<PluginAutoUpdateService>(),
             composition.Get<UpdateAutomationService>(),
+            new PluginActivationPreferencesAdapter(composition._settingsState),
             StartupPipeline.TryRequestServiceExit,
             StartupPipeline.TryRequestWebOnlyExit);
         runtime.BindBootstrap(bootstrap);
@@ -282,7 +283,8 @@ internal class HostCompositionRoot
             _lifecycle.TryRequestUpdateExit,
             _lifecycle.TryAcquireUpdateMaintenanceLease,
             provider.GetRequiredService<OutboundHttpClientProvider>(),
-            () => ApplicationHost.IsWebOnly));
+            () => ApplicationHost.IsWebOnly,
+            () => HostInstance.RestartHandoffId));
         collection.AddSingleton<AutoUpdateIdlePolicy>(provider => new AutoUpdateIdlePolicy(
             provider.GetRequiredService<ExecutionDispatcher>(),
             provider.GetRequiredService<ISchedulerIdleReader>()));

@@ -1,4 +1,4 @@
-import { api, readAuthToken } from "./api";
+import { api } from "./api";
 
 /**
  * 服务重启恢复协议。
@@ -24,6 +24,10 @@ export interface ServiceInstanceProbe {
   instanceId: string;
   restartHandoffId: string;
   actualPort: number;
+  controlApiVersion?: string;
+  version?: string;
+  frontendBuildId?: string;
+  ready?: boolean;
 }
 
 export interface ServiceRecoveryOptions {
@@ -37,13 +41,6 @@ export interface ServiceRecoveryOptions {
   portScanLimit?: number;
   probe?: (url: string, handoff: ServiceRestartHandoff, signal?: AbortSignal) => Promise<ServiceInstanceProbe | null>;
 }
-
-export interface ServiceRecoveryResult {
-  url: string;
-  instance: ServiceInstanceProbe;
-}
-
-export type ServiceRestartOutcome = "ready" | "timeout" | "failed";
 
 const SERVICE_NAME = "NexusPipeline";
 
@@ -80,16 +77,24 @@ export function restartProbeUrl(href: string, port: number): string {
 }
 
 function statusPayload(value: unknown): ServiceInstanceProbe | null {
-  const payload = value as { service?: unknown; instanceId?: unknown; restartHandoffId?: unknown; actualPort?: unknown } | null;
+  const payload = value as { service?: unknown; controlApiVersion?: unknown; instanceId?: unknown; restartHandoffId?: unknown; actualPort?: unknown; ready?: unknown; version?: unknown; frontendBuildId?: unknown } | null;
   if (!payload || typeof payload !== "object") return null;
   if (String(payload.service || "") !== SERVICE_NAME) return null;
+  if (!String(payload.controlApiVersion || "") || payload.ready !== true) return null;
   const instanceId = String(payload.instanceId || "");
   if (!instanceId) return null;
+  const version = String(payload.version || "");
+  if (!version) return null;
   const actualPort = Number(payload.actualPort);
+  if (!Number.isInteger(actualPort) || actualPort < 1 || actualPort > 65535) return null;
   return {
     instanceId,
     restartHandoffId: String(payload.restartHandoffId || ""),
-    actualPort: Number.isFinite(actualPort) && actualPort > 0 ? actualPort : 0,
+    actualPort,
+    controlApiVersion: String(payload.controlApiVersion || ""),
+    version,
+    frontendBuildId: String(payload.frontendBuildId || ""),
+    ready: true,
   };
 }
 
@@ -101,23 +106,20 @@ export async function probeServiceInstance(
   url: string,
   handoff: ServiceRestartHandoff,
   signal?: AbortSignal): Promise<ServiceInstanceProbe | null> {
-  const timeout = typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function"
-    ? AbortSignal.timeout(2000)
-    : undefined;
-  const combined = signal && timeout && typeof AbortSignal.any === "function"
-    ? AbortSignal.any([signal, timeout])
-    : signal || timeout;
-  const token = readAuthToken();
+  const controller = new AbortController();
+  const onAbort = () => controller.abort();
+  signal?.addEventListener("abort", onAbort, { once: true });
+  if (signal?.aborted) controller.abort();
+  const timeout = setTimeout(() => controller.abort(), 2000);
   const origin = new URL(url, location.href);
   origin.pathname = "/";
   origin.search = "";
   origin.hash = "";
   try {
-    const response = await fetch(new URL("api/status", origin).toString(), {
+    const response = await fetch(new URL("api/status?view=identity", origin).toString(), {
       method: "GET",
       cache: "no-store",
-      signal: combined,
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      signal: controller.signal,
     });
     if (!response.ok) return null;
     const instance = statusPayload(await response.json().catch(() => null));
@@ -127,6 +129,9 @@ export async function probeServiceInstance(
     return instance;
   } catch {
     return null;
+  } finally {
+    clearTimeout(timeout);
+    signal?.removeEventListener("abort", onAbort);
   }
 }
 
@@ -165,8 +170,8 @@ export function restartCandidatePorts(href: string, handoff: ServiceRestartHando
  * 等待本次重启的新实例接管服务：按候选端口探测，只接受携带本次交接标识、且实例标识不同于旧实例的应答。
  * 超时返回 null，由调用方呈现"服务仍在启动"与重试入口。
  */
-export async function waitForRestartedService(options: ServiceRecoveryOptions): Promise<ServiceRecoveryResult | null> {
-  const timeoutMs = Math.max(1000, Number(options.timeoutMs) || 40_000);
+export async function waitForRestartedService(options: ServiceRecoveryOptions): Promise<ServiceInstanceProbe | null> {
+  const timeoutMs = Math.max(1000, Number(options.timeoutMs) || 120_000);
   const baseInterval = Math.max(200, Number(options.intervalMs) || 800);
   const maxInterval = Math.max(baseInterval, Number(options.maxIntervalMs) || 2500);
   const limit = Number.isFinite(Number(options.portScanLimit)) ? Math.max(0, Number(options.portScanLimit)) : 20;
@@ -187,30 +192,17 @@ export async function waitForRestartedService(options: ServiceRecoveryOptions): 
     }
     firstProbe = false;
     const results = await Promise.all(ports.map(async port => {
-      const target = restartProbeUrl(options.href, port);
       try {
-        return { port, target, instance: await probe(target, options.handoff, options.signal) };
+        return await probe(restartProbeUrl(options.href, port), options.handoff, options.signal);
       } catch {
-        return { port, target, instance: null };
+        return null;
       }
     }));
-    const ready = results.find(result => result.instance !== null);
-    if (ready && ready.instance) {
-      const actualPort = ready.instance.actualPort > 0 ? ready.instance.actualPort : ready.port;
-      return { url: restartTargetUrl(options.href, actualPort), instance: ready.instance };
-    }
+    const ready = results.find(result => result !== null);
+    if (ready) return ready;
     delay = Math.min(maxInterval, Math.round(delay * 1.4));
   }
   return null;
-}
-
-export interface RestartServiceOptions extends Omit<ServiceRecoveryOptions, "href" | "handoff"> {
-  navigate?: (url: string) => void;
-  /** 当前页面地址；省略时使用浏览器地址，跳转保留其路径与 hash 路由。 */
-  href?: string;
-  /** 重试时复用上一次重启的交接信息，避免对已经退出的旧实例重复提交重启请求。 */
-  handoff?: ServiceRestartHandoff;
-  onHandoff?: (handoff: ServiceRestartHandoff) => void;
 }
 
 /**
@@ -225,31 +217,10 @@ export function applyRestartNavigation(url: string, current: string): void {
     window.location.reload();
     return;
   }
-  if (target.href === new URL(current).href) {
+  const currentUrl = new URL(current);
+  if (target.origin === currentUrl.origin && target.pathname === currentUrl.pathname && target.search === currentUrl.search) {
     window.location.reload();
     return;
   }
   window.location.replace(target.href);
-}
-
-/**
- * 完整重启流程：提交重启（或复用已有交接信息）→ 探测新实例 → 顶层跳转到实际监听端口。
- * 超时返回 timeout，由调用方保留交接信息并提供重试入口。
- */
-export async function restartService(options: RestartServiceOptions = {}): Promise<ServiceRestartOutcome> {
-  let handoff = options.handoff || null;
-  if (!handoff) {
-    try {
-      handoff = await requestServiceRestart(options.signal);
-    } catch {
-      return "failed";
-    }
-    options.onHandoff?.(handoff);
-  }
-  const href = options.href || window.location.href;
-  const recovered = await waitForRestartedService({ ...options, href, handoff });
-  if (!recovered) return "timeout";
-  const navigate = options.navigate || ((url: string) => applyRestartNavigation(url, href));
-  navigate(recovered.url);
-  return "ready";
 }

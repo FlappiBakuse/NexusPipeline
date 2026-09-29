@@ -179,6 +179,8 @@ internal static class PluginInstallRecovery
         .. PendingOperationRequiredProperties,
         nameof(PluginPendingOperation.Channel),
         nameof(PluginPendingOperation.SourceCommit),
+        nameof(PluginPendingOperation.OperationId),
+        nameof(PluginPendingOperation.EnableAfterInstall),
     ];
 
     private static readonly string[] OwnershipStateProperties = [nameof(PluginOwnershipState.SchemaVersion), nameof(PluginOwnershipState.Plugins)];
@@ -260,7 +262,8 @@ internal static class PluginInstallRecovery
         string? pendingPath = null,
         string? ownershipPath = null,
         string? stagingRoot = null,
-        string? backupRoot = null)
+        string? backupRoot = null,
+        IPluginActivationPreferences? activationPreferences = null)
     {
         string localPlugins = Path.GetFullPath(pluginsDir ?? AppPaths.PluginsDir);
         string journalPath = Path.GetFullPath(pendingPath ?? AppPaths.PluginPendingPath);
@@ -301,7 +304,7 @@ internal static class PluginInstallRecovery
             {
                 foreach (PluginPendingOperation operation in state.Operations.ToArray())
                 {
-                    ApplyOne(operation, state, ownership, localPlugins, journalPath, ownersPath, stagingBase, backupBase);
+                    ApplyOne(operation, state, ownership, localPlugins, journalPath, ownersPath, stagingBase, backupBase, activationPreferences);
                 }
                 TryDeleteEmptyDirectories(stagingBase);
                 TryDeleteEmptyDirectories(backupBase);
@@ -328,7 +331,8 @@ internal static class PluginInstallRecovery
         string pendingPath,
         string ownershipPath,
         string stagingRoot,
-        string backupRoot)
+        string backupRoot,
+        IPluginActivationPreferences? activationPreferences)
     {
         if (!PluginRepositoryCatalog.IsCanonicalPluginId(operation.Name))
         {
@@ -480,6 +484,26 @@ internal static class PluginInstallRecovery
             InstalledAt = DateTimeOffset.UtcNow,
         });
         SaveOwnership(ownershipPath, ownership);
+        if (operation.EnableAfterInstall)
+        {
+            PluginOwnership owner = FindOwnership(operation.Name, ownership)
+                ?? throw new IOException($"插件安装归属未提交：{operation.Name}");
+            if (operation.Action != "install" || operation.Kind != "managed-code"
+                || owner.ArtifactName != operation.ArtifactName
+                || owner.Version != operation.Version
+                || !string.Equals(owner.Sha256, operation.Sha256, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new IOException($"插件安装归属与启用意图不一致：{operation.Name}");
+            }
+            PluginActivationResult result = activationPreferences?.ApplyInstallIntent(
+                new PluginInstallCompletion(operation.OperationId, operation.Name, operation.ArtifactName,
+                    operation.Kind, operation.Action, operation.EnableAfterInstall, owner))
+                ?? PluginActivationResult.Failed;
+            if (result is not (PluginActivationResult.Enabled or PluginActivationResult.Preserved))
+            {
+                throw new IOException($"插件启用偏好保存失败，保留安装事务：{operation.Name}");
+            }
+        }
         DeletePath(backupPath);
         state.Operations.Remove(operation);
         SavePending(pendingPath, state);
@@ -695,6 +719,15 @@ internal static class PluginInstallRecovery
         {
             throw new InvalidDataException($"插件 pending 操作字段无效：{operation.Name}");
         }
+        if ((!string.IsNullOrEmpty(operation.OperationId)
+                && (!Guid.TryParseExact(operation.OperationId, "N", out _)
+                    || operation.Action != "install"))
+            || operation.EnableAfterInstall
+                && (operation.Action != "install" || operation.Kind != "managed-code"
+                    || string.IsNullOrEmpty(operation.OperationId)))
+        {
+            throw new InvalidDataException($"插件 pending 启用意图无效：{operation.Name}");
+        }
         ValidateProvenance(operation.Channel, operation.SourceCommit, operation.Name);
     }
 
@@ -761,6 +794,8 @@ internal static class PluginInstallRecovery
             BackupPath = source.BackupPath,
             Phase = source.Phase,
             CreatedAt = source.CreatedAt,
+            OperationId = source.OperationId,
+            EnableAfterInstall = source.EnableAfterInstall,
         };
     }
 
@@ -852,6 +887,10 @@ internal sealed class PluginPendingOperation
     public string Phase { get; set; } = "pending";
 
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    public string OperationId { get; set; } = "";
+
+    public bool EnableAfterInstall { get; set; }
 }
 
 internal sealed class PluginOwnershipState

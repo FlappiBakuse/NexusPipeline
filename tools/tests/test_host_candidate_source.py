@@ -6,19 +6,19 @@ import unittest
 import urllib.error
 from unittest import mock
 
-from tools.host_candidate_source import CandidateSourceError, github_fetch, resolve_candidate
+from tools.host_candidate_source import CandidateSourceError, NEW_REQUIRED_JOBS, github_fetch, resolve_candidate
 
 
 REPO = "FlappiBakuse/NexusPipeline"
 PREFIX = f"repos/{REPO}/actions"
-SHA = "a" * 40
+SHA = "e6ff62b0f7ae32d83c0452229744f3ee55823657"
 
 
 class CandidateSourceTests(unittest.TestCase):
     def fixture(self):
         run = {"id": 12, "repository": {"full_name": REPO}, "workflow_id": 88,
                "path": ".github/workflows/release.yml", "event": "push", "head_branch": "main",
-               "head_sha": SHA, "conclusion": "failure"}
+               "head_sha": SHA, "conclusion": "failure", "run_attempt": 2}
         current = {"id": 99, "repository": {"full_name": REPO}, "workflow_id": 88}
         artifact = {"id": 42, "name": "host-candidate-12-2", "expired": False,
                     "size_in_bytes": 500, "workflow_run": {"id": 12}, "digest": "sha256:" + "b" * 64}
@@ -26,7 +26,7 @@ class CandidateSourceTests(unittest.TestCase):
             f"{PREFIX}/runs/12": run,
             f"{PREFIX}/runs/99": current,
             f"{PREFIX}/runs/12/artifacts?per_page=100&page=1": {"artifacts": [artifact]},
-            f"{PREFIX}/runs/12/attempts/2/jobs?per_page=100":
+            f"{PREFIX}/runs/12/attempts/2/jobs?per_page=100&page=1":
                 {"jobs": [{"name": "Build and validate Host candidate", "status": "completed", "conclusion": "success"}]},
         }
         return paths
@@ -63,7 +63,33 @@ class CandidateSourceTests(unittest.TestCase):
 
     def test_original_candidate_job_must_have_succeeded(self):
         paths = self.fixture()
-        paths[f"{PREFIX}/runs/12/attempts/2/jobs?per_page=100"]["jobs"][0]["conclusion"] = "cancelled"
+        paths[f"{PREFIX}/runs/12/attempts/2/jobs?per_page=100&page=1"]["jobs"][0]["conclusion"] = "cancelled"
+        with self.assertRaisesRegex(CandidateSourceError, "未真实成功"):
+            self.resolve(paths)
+
+    def test_legacy_requires_approved_controller_and_current_attempt(self):
+        paths = self.fixture()
+        paths[f"{PREFIX}/runs/12"]["head_sha"] = "f" * 40
+        with self.assertRaisesRegex(CandidateSourceError, "legacy candidate controller"):
+            self.resolve(paths)
+        paths = self.fixture()
+        paths[f"{PREFIX}/runs/12"]["run_attempt"] = 3
+        with self.assertRaisesRegex(CandidateSourceError, "过期 attempt"):
+            self.resolve(paths)
+
+    def test_staged_producer_requires_every_completed_job_with_full_budget(self):
+        paths = self.fixture()
+        paths[f"{PREFIX}/runs/12"]["head_sha"] = "c" * 40
+        jobs = [{"name": name, "status": "completed", "conclusion": "success",
+                 "started_at": "2026-09-29T00:00:00Z", "completed_at": "2026-09-29T00:02:30Z"}
+                for name in NEW_REQUIRED_JOBS]
+        paths[f"{PREFIX}/runs/12/attempts/2/jobs?per_page=100&page=1"] = {"jobs": jobs}
+        self.assertTrue(self.resolve(paths)["budgetQualified"])
+        jobs[-1]["completed_at"] = "2026-09-29T00:02:31Z"
+        with self.assertRaisesRegex(CandidateSourceError, "超过 150 秒"):
+            self.resolve(paths)
+        jobs[-1]["completed_at"] = "2026-09-29T00:02:30Z"
+        jobs[0]["conclusion"] = "skipped"
         with self.assertRaisesRegex(CandidateSourceError, "未真实成功"):
             self.resolve(paths)
 

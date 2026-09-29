@@ -22,9 +22,20 @@ Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
 DefaultDialogFontName=Microsoft YaHei UI
+LanguageDetectionMethod=uilanguage
+UsePreviousLanguage=yes
+ShowLanguageDialog=yes
+
+[Languages]
+Name: "en"; MessagesFile: "compiler:Default.isl"
+Name: "zh"; MessagesFile: "@@CHINESE_ISL@@"
+Name: "zh_ui"; MessagesFile: "@@CHINESE_ISL@@,@@CHINESE_UI_ISL@@"
+
+[CustomMessages]
+@@CUSTOM_MESSAGES@@
 
 [Tasks]
-Name: desktopicon; Description: "创建桌面快捷方式"; Flags: unchecked
+Name: desktopicon; Description: "{cm:DesktopIcon}"; Flags: unchecked
 
 [Icons]
 Name: "{autoprograms}\NexusPipeline"; Filename: "{app}\nexus-pipeline.exe"
@@ -46,8 +57,8 @@ var
 
 procedure InitializeWizard;
 begin
-  DependencyDownloadPage := CreateDownloadPage('下载必需的运行时',
-    '从微软官方地址下载并验证依赖。可以取消下载后重新尝试。', nil);
+  DependencyDownloadPage := CreateDownloadPage(CustomMessage('RuntimeDownloadTitle'),
+    CustomMessage('RuntimeDownloadDescription'), nil);
   DependencyDownloadPage.ShowBaseNameInsteadOfUrl := True;
 end;
 
@@ -57,8 +68,8 @@ function CreateMutexW(Attributes: Integer; InitialOwner: Boolean; Name: String):
 procedure CurPageChanged(CurPageID: Integer);
 begin
   if (CurPageID = wpFinished) and not InstallationQualified then begin
-    WizardForm.FinishedHeadingLabel.Caption := 'NexusPipeline 安装未完成';
-    WizardForm.FinishedLabel.Caption := '安装归属登记或升级事务未通过。请保留日志和恢复现场，修复后再安装。';
+    WizardForm.FinishedHeadingLabel.Caption := CustomMessage('InstallIncompleteTitle');
+    WizardForm.FinishedLabel.Caption := CustomMessage('InstallIncompleteDetail');
   end;
 end;
 
@@ -208,9 +219,9 @@ begin
   if CurPageID = wpSelectDir then begin
     Result := ValidDestination(WizardDirValue);
     if not Result then begin
-      Log('目标目录不是可信的本地空目录或已登记实例。');
+      Log(CustomMessage('DestinationLog'));
       if not WizardSilent then
-        MsgBox('请选择可写的本地空目录，或此用户已登记且身份匹配的安装目录；不会接管不明旧目录、网络盘或链接目录。', mbError, MB_OK);
+        MsgBox(CustomMessage('DestinationError'), mbError, MB_OK);
     end;
   end;
 end;
@@ -277,12 +288,12 @@ begin
   Result := '';
   if HasFramework(Framework) then Exit;
   if WizardSilent then begin
-    Result := '缺少 ' + Description + '；请交互运行安装器并确认依赖安装。';
+    Result := FmtMessage(CustomMessage('RuntimeMissingSilent'), [Description]);
     Exit;
   end;
-  if MsgBox('缺少 ' + Description + '。将从微软官方地址下载已锁定的 x64 安装包并运行，是否继续？',
+  if MsgBox(FmtMessage(CustomMessage('RuntimeInstallPrompt'), [Description]),
     mbConfirmation, MB_YESNO) <> IDYES then begin
-    Result := '用户取消了 ' + Description + ' 依赖安装。';
+    Result := FmtMessage(CustomMessage('RuntimeInstallCancelled'), [Description]);
     Exit;
   end;
   DependencyDownloadPage.Clear;
@@ -293,9 +304,9 @@ begin
       DependencyDownloadPage.Download;
     except
       if DependencyDownloadPage.AbortedByUser then
-        Result := '用户取消了 ' + Description + ' 依赖下载。'
+        Result := FmtMessage(CustomMessage('RuntimeDownloadCancelled'), [Description])
       else
-        Result := Description + ' 下载或摘要校验失败：' + GetExceptionMessage;
+        Result := FmtMessage(CustomMessage('RuntimeDownloadFailed'), [Description, GetExceptionMessage]);
       Log(Result);
     end;
   finally
@@ -304,25 +315,25 @@ begin
   if Result <> '' then Exit;
   Package := ExpandConstant('{tmp}\') + FileName;
   if not VerifyMicrosoftSignature(Package) then begin
-    Result := Description + ' 的微软数字签名无法确认。';
+    Result := FmtMessage(CustomMessage('RuntimeSignatureFailed'), [Description]);
     Exit;
   end;
   if not ShellExec('runas', Package, '/install /quiet /norestart', '', SW_SHOWNORMAL,
     ewWaitUntilTerminated, Code) then begin
-    Result := Description + ' 安装器无法启动：' + SysErrorMessage(Code);
+    Result := FmtMessage(CustomMessage('RuntimeLaunchFailed'), [Description, SysErrorMessage(Code)]);
     Exit;
   end;
   if Code = 3010 then begin
     NeedsRestart := True;
-    Result := Description + ' 安装需要重启；请自行重启后重新运行本安装器。';
+    Result := FmtMessage(CustomMessage('RuntimeNeedsRestart'), [Description]);
     Exit;
   end;
   if Code <> 0 then begin
-    Result := Description + ' 安装失败，退出码 ' + IntToStr(Code) + '。';
+    Result := FmtMessage(CustomMessage('RuntimeExitFailed'), [Description, IntToStr(Code)]);
     Exit;
   end;
   if not HasFramework(Framework) then
-    Result := Description + ' 安装后仍未检测到适用的 x64 框架。';
+    Result := FmtMessage(CustomMessage('RuntimeStillMissing'), [Description]);
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
@@ -332,15 +343,15 @@ begin
   Result := '';
   UpgradeMode := False;
   if not ValidDestination(WizardDirValue) then begin
-    Result := '目标目录不是可信的本地空目录或已登记实例。';
+    Result := CustomMessage('DestinationLog');
     Exit;
   end;
   Path := WizardDirValue;
   RetainedMode := ProtectedInstanceState(Path, False) = 'retained-data';
   if RetainedMode then begin
-    if WizardSilent then begin Result := '保留数据重装需要交互确认。'; Exit; end;
-    if MsgBox('使用本实例保留的数据重新安装？已有插件和用户配置将保留。', mbConfirmation, MB_YESNO) <> IDYES then begin
-      Result := '已取消保留数据重装。'; Exit;
+    if WizardSilent then begin Result := CustomMessage('RetainedSilent'); Exit; end;
+    if MsgBox(CustomMessage('RetainedPrompt'), mbConfirmation, MB_YESNO) <> IDYES then begin
+      Result := CustomMessage('RetainedCancelled'); Exit;
     end;
   end;
   UpgradeMode := not IsEmptyDirectory(Path) and not RetainedMode;
@@ -349,7 +360,7 @@ begin
     if (SetupMutex = 0) or (NativeLastError = 183) then begin
       if SetupMutex <> 0 then CloseHandle(SetupMutex);
       SetupMutex := 0;
-      Result := '另一个安装器正在处理此实例，请等待其完成。'; Exit;
+      Result := CustomMessage('ConcurrentSetup'); Exit;
     end;
   end;
   Result := InstallFramework('Microsoft.WindowsDesktop.App', '.NET Desktop Runtime 8 x64',
@@ -367,7 +378,7 @@ begin
      (DirExists(AddBackslash(Path) + '.nxp-update') or
       DirExists(AddBackslash(Path) + '.nxp-backup') or
       FileExists(AddBackslash(Path) + '.nxp-version')) then begin
-    Result := '已有更新或恢复现场；请先在原实例完成恢复，不覆盖现场。';
+    Result := CustomMessage('RecoveryPending');
     Exit;
   end;
   if UpgradeMode then
@@ -393,7 +404,7 @@ begin
   Path := AddBackslash(ExpandConstant('{app}')) + '.nxp-update\staging\@@VERSION@@\' + Relative;
   if not FileExists(Path) or HasLinkInPath(Path) or
      (CompareText(GetSHA256OfFile(Path), Digest) <> 0) then
-    RaiseException('暂存载荷校验失败：' + Relative);
+    RaiseException(FmtMessage(CustomMessage('StagedVerificationFailed'), [Relative]));
 end;
 
 procedure VerifyStagedPayload;
@@ -420,9 +431,9 @@ begin
       VerifyStagedPayload;
       Helper := AddBackslash(Path) + '.nxp-update-worker-setup-' + TransactionId + '.exe';
       if not FileCopy(AddBackslash(Staged) + 'nexus-pipeline.exe', Helper, True) then
-        RaiseException('无法建立同根独立安装器交接副本；保留 staging。');
+        RaiseException(CustomMessage('HandoffCopyFailed'));
       if CompareText(GetSHA256OfFile(Helper), '@@EXE_SHA256@@') <> 0 then
-        RaiseException('安装器交接副本摘要不匹配。');
+        RaiseException(CustomMessage('HandoffHashFailed'));
       ApplyInstallerLaunch(Helper,
         'installer-update --staged "' + Staged + '" --version @@VERSION@@ --image-hash @@EXE_SHA256@@ --transaction ' + TransactionId,
         Path, Launched, Resolved, Code);
@@ -432,24 +443,24 @@ begin
     end;
     ManagerDir := ExpandConstant('{localappdata}\NexusPipeline\installer');
     if not ForceDirectories(ManagerDir) then
-      RaiseException('无法创建此实例的安装归属记录。');
+      RaiseException(CustomMessage('OwnershipCreateFailed'));
     Manifest := ExpandConstant('{tmp}\nxp-payload-manifest.json');
     if not SaveStringToFile(Manifest, '@@PAYLOAD_MANIFEST@@', False) then
-      RaiseException('无法写入冻结载荷清单。');
+      RaiseException(CustomMessage('ManifestWriteFailed'));
     Launched := ShellExec('runas', AddBackslash(Path) + 'nexus-pipeline.exe',
       'installer-state register --root "' + Path + '" --version @@VERSION@@ --manifest "' + Manifest + '"',
       Path, SW_HIDE, ewWaitUntilTerminated, Code);
     Resolution := ResolveInstallerMetadata(Launched, Code, True);
     Resolved := True;
     if not Launched or (Code <> 0) or (Resolution <> 0) then
-      RaiseException('实例归属登记未通过；保留程序与数据供诊断。');
+      RaiseException(CustomMessage('OwnershipRegisterFailed'));
     InstallationQualified := True;
   except
     Failure := GetExceptionMessage;
     if not Resolved then begin
       Resolution := ResolveInstallerMetadata(Launched, Code, not UpgradeMode);
       if Resolution <> 0 then
-        RaiseException(Failure + '；登记补偿未确认，检查点保留。');
+        RaiseException(FmtMessage(CustomMessage('CompensationUnconfirmed'), [Failure]));
     end;
     RaiseException(Failure);
   end;
@@ -463,16 +474,15 @@ begin
   Result := False;
   Path := ExpandConstant('{app}');
   if ProtectedInstanceState(Path, True) <> 'active' then begin
-    MsgBox('无法确认本实例归属或当前卸载程序载荷；程序与数据均保留。', mbError, MB_OK);
+    MsgBox(CustomMessage('UninstallOwnershipUnknown'), mbError, MB_OK);
     Exit;
   end;
   if CheckForMutexes('NexusPipeline.SingleInstance') then begin
-    MsgBox('宿主仍在运行。请先正常退出，等待任务和配置恢复完成，再卸载。', mbError, MB_OK); Exit;
+    MsgBox(CustomMessage('UninstallHostRunning'), mbError, MB_OK); Exit;
   end;
   Choice := IDNO;
   if not UninstallSilent then
-    Choice := MsgBox('是否同时删除本实例的 config、data、history、logs、.nxp、plugins、outputs 和 user-assets？' + #13#10 +
-      '选择“否”仅移除已核验的应用文件并保留数据；选择“取消”退出卸载。不会跟随外部路径或链接。',
+    Choice := MsgBox(CustomMessage('UninstallDeleteDataPrompt'),
       mbConfirmation, MB_YESNOCANCEL or MB_DEFBUTTON2);
   if Choice = IDCANCEL then Exit;
   DeleteInstanceData := Choice = IDYES;
@@ -488,10 +498,10 @@ begin
   Path := ExpandConstant('{app}');
   if (ProtectedInstanceState(Path, True) <> 'active') or
      CheckForMutexes('NexusPipeline.SingleInstance') then
-    RaiseException('实例归属或运行状态已变化；程序与数据均保留。');
+    RaiseException(CustomMessage('UninstallStateChanged'));
   Helper := ExpandConstant('{localappdata}\NexusPipeline\installer\nexus-installer-helper.exe');
   Params := 'installer-state uninstall --root "' + Path + '" --delete-data ';
   if DeleteInstanceData then Params := Params + 'true' else Params := Params + 'false';
   if not ShellExec('runas', Helper, Params, Path, SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then
-    RaiseException('卸载归属、恢复状态或文件处理未通过。保留未知文件与恢复证据，请先核对或恢复。');
+    RaiseException(CustomMessage('UninstallFailed'));
 end;

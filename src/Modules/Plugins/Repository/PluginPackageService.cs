@@ -102,6 +102,8 @@ internal sealed class PluginPackageService
                 StagedPath = payloadPath,
                 Phase = "pending",
                 CreatedAt = DateTimeOffset.UtcNow,
+                OperationId = action == "install" ? Guid.NewGuid().ToString("N") : "",
+                EnableAfterInstall = action == "install" && entry.Kind == "managed-code",
             };
             PluginInstallRecovery.AddPending(operation);
             TryDeleteFile(zipPath);

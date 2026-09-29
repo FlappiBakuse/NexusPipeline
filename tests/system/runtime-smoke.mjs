@@ -189,6 +189,9 @@ test("重启接受后立即冻结旧服务的运行与配置写入准入", { ski
   const fixture = makeFixture("restart-maintenance");
   writeBatch(fixture, ["echo restart-maintenance>>\"" + fixture.log + "\""]);
   let scriptId = "";
+  let restartOptions = null;
+  let restartedConfirmed = false;
+  let failure = null;
   try {
     const create = await api("POST", "/api/scripts", {
       name: `Restart Maintenance ${Date.now()}`,
@@ -209,7 +212,12 @@ test("重启接受后立即冻结旧服务的运行与配置写入准入", { ski
     scriptId = JSON.parse(createBody).id;
     const userName = "Restart Maintenance User";
     await createUserBinding(scriptId, userName);
+    const beforeSettingsResponse = await api("GET", "/api/settings");
+    assert.equal(beforeSettingsResponse.status, 200);
+    const beforeLogLevel = (await beforeSettingsResponse.json()).settings.logLevel;
+    const attemptedLogLevel = beforeLogLevel === "debug" ? "warn" : "debug";
 
+    const oldUrl = serviceUrl();
     const restart = await api("POST", "/api/settings/restart");
     const restartBody = await restart.text();
     assert.equal(restart.status, 200, `提交重启失败：HTTP ${restart.status} ${restartBody}`);
@@ -219,39 +227,69 @@ test("重启接受后立即冻结旧服务的运行与配置写入准入", { ski
     assert.match(restartPayload.handoffId, /^[0-9a-f]{32}$/);
     assert.match(restartPayload.instanceId, /^[0-9a-f]{32}$/);
     const previousInstanceId = restartPayload.instanceId;
-
-    const run = await api("POST", "/api/dispatch/script", { scriptId, mode: "manual", userName });
-    const runBody = await run.text();
-    assert.equal(run.status, 409, `维护期间运行未被拒绝：HTTP ${run.status} ${runBody}`);
-    const runPayload = JSON.parse(runBody);
-    assert.equal(runPayload.code, "host_maintenance");
-
-    const settings = await api("PUT", "/api/settings", { logLevel: "info" });
-    const settingsBody = await settings.text();
-    assert.equal(settings.status, 409, `维护期间设置写入未被拒绝：HTTP ${settings.status} ${settingsBody}`);
-    const settingsPayload = JSON.parse(settingsBody);
-    assert.equal(settingsPayload.code, "host_maintenance");
-
     const configuredPort = Number(restartPayload.newPort);
     const candidatePorts = Number.isInteger(configuredPort) && configuredPort >= 1024
       ? Array.from({ length: 20 }, (_, offset) => configuredPort + offset)
         .filter(port => port <= 65535)
       : [];
-    const restarted = await waitForRestartedService({
+    restartOptions = {
       previousInstanceId,
       expectedHandoffId: restartPayload.handoffId,
       candidatePorts,
       timeoutMs: 30000,
-    });
+    };
+
+    const assertOldServiceRejects = async (method, route, body) => {
+      let response;
+      try {
+        response = await api(method, route, body, oldUrl);
+      } catch (error) {
+        // 监听器关闭可拒绝新连接，也可重置已经建立但尚未返回的连接。
+        assert.ok(["ECONNREFUSED", "ECONNRESET"].includes(error?.cause?.code),
+          `旧服务关闭时出现非预期连接错误：${error?.message}`);
+        return;
+      }
+      const responseBody = await response.text();
+      assert.equal(response.status, 409, `维护期间写入未被拒绝：HTTP ${response.status} ${responseBody}`);
+      assert.equal(JSON.parse(responseBody).code, "host_maintenance");
+    };
+    await assertOldServiceRejects("POST", "/api/dispatch/script", { scriptId, mode: "manual", userName });
+    await assertOldServiceRejects("PUT", "/api/settings", { logLevel: attemptedLogLevel });
+
+    const restarted = await waitForRestartedService(restartOptions);
+    restartedConfirmed = true;
     assert.equal(restarted.service, "NexusPipeline");
     assert.notEqual(restarted.instanceId, previousInstanceId, "重启后必须由新的进程实例提供服务");
     assert.equal(restarted.restartHandoffId, restartPayload.handoffId, "新实例必须携带本次重启的交接标识");
-  } finally {
-    if (scriptId) await deleteScript(scriptId);
+    const afterSettingsResponse = await api("GET", "/api/settings");
+    assert.equal(afterSettingsResponse.status, 200);
+    assert.equal((await afterSettingsResponse.json()).settings.logLevel, beforeLogLevel,
+      "旧服务关闭期间不得保存设置写入");
+    assert.equal(fs.existsSync(fixture.log), false, "旧服务关闭期间不得执行新派发的脚本");
+  } catch (error) {
+    failure = error;
+  }
+  let cleanupFailure = null;
+  if (restartOptions && !restartedConfirmed) {
+    try {
+      await waitForRestartedService(restartOptions);
+      restartedConfirmed = true;
+    } catch (error) {
+      cleanupFailure = error;
+    }
+  }
+  if (scriptId && (!restartOptions || restartedConfirmed)) {
+    try { await deleteScript(scriptId); } catch (error) { cleanupFailure ??= error; }
+  }
+  try {
     await stopRuntime();
     startRuntime(["web"]);
     await waitForService();
+  } catch (error) {
+    cleanupFailure ??= error;
   }
+  if (failure) throw failure;
+  if (cleanupFailure) throw cleanupFailure;
 });
 
 test("System Smoke runtime 位于隔离目录", { skip }, () => {

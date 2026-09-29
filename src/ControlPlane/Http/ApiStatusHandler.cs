@@ -30,11 +30,27 @@ internal static class ApiStatusHandler
             await HttpHelper.MethodNotAllowedAsync(context).ConfigureAwait(false);
             return;
         }
-        await HttpHelper.WriteJsonAsync(
-            context,
+        if (string.Equals(context.Request.QueryString["view"], "identity", StringComparison.OrdinalIgnoreCase))
+        {
+            await HttpHelper.WriteJsonAsync(context, BuildIdentity(settings.Current)).ConfigureAwait(false);
+            return;
+        }
+        await HttpHelper.WriteJsonAsync(context,
             BuildStatus(context.Request.Locale, settings, scheduler, dispatchCenter, scriptQueries, queueQueries, plugins))
             .ConfigureAwait(false);
     }
+
+    private static object BuildIdentity(AppSettings settings) => new
+    {
+        service = ControlApiContract.ServiceName,
+        controlApiVersion = ControlApiContract.Version,
+        instanceId = HostInstance.Id,
+        restartHandoffId = HostInstance.RestartHandoffId,
+        ready = HostInstance.Ready,
+        actualPort = WebServer.Current?.Port ?? settings.WebPort,
+        version = UpdateService.CurrentVersion,
+        frontendBuildId = HostInstance.FrontendBuildId,
+    };
 
     private static object BuildStatus(
         string locale,
@@ -60,6 +76,8 @@ internal static class ApiStatusHandler
             instanceId = HostInstance.Id,
             // 本次进程由重启交接拉起时携带的交接标识；控制面前端用它确认应答来自本次重启的新实例。
             restartHandoffId = HostInstance.RestartHandoffId,
+            ready = HostInstance.Ready,
+            frontendBuildId = HostInstance.FrontendBuildId,
             time = DateTime.Now,
             lightweightMode = settings.LightweightMode,
             webPort = settings.WebPort,

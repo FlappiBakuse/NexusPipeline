@@ -8,6 +8,7 @@ failure must not invalidate an earlier successful candidate job.
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 import json
 import os
 import re
@@ -21,7 +22,13 @@ from typing import Any
 
 REPOSITORY = "FlappiBakuse/NexusPipeline"
 WORKFLOW_PATH = ".github/workflows/release.yml"
-JOB_NAME = "Build and validate Host candidate"
+LEGACY_JOB_NAME = "Build and validate Host candidate"
+LEGACY_CONTROL_SHAS = {"e6ff62b0f7ae32d83c0452229744f3ee55823657"}
+NEW_JOB_NAME = "Host / 候选校验"
+NEW_REQUIRED_JOBS = (
+    "Host / 候选输入", "Host / 生产前端", "Host / 预装插件", "Host / 生产宿主",
+    "Host / 包校验", "Host / 安装器构建", NEW_JOB_NAME,
+)
 
 
 class CandidateSourceError(ValueError):
@@ -42,6 +49,34 @@ def full_sha(value: Any, label: str) -> str:
     require(isinstance(value, str) and re.fullmatch(r"[0-9a-f]{40}", value) is not None,
             f"{label} 必须是完整 SHA")
     return value
+
+
+def completed_job(entries: list[dict[str, Any]], name: str, *, qualified: bool) -> None:
+    matches = [job for job in entries if job.get("name") == name]
+    require(len(matches) == 1 and matches[0].get("conclusion") == "success"
+            and matches[0].get("status") == "completed", f"原 attempt {name} job 未真实成功")
+    if qualified:
+        try:
+            started = datetime.fromisoformat(matches[0]["started_at"].replace("Z", "+00:00"))
+            completed = datetime.fromisoformat(matches[0]["completed_at"].replace("Z", "+00:00"))
+            elapsed = (completed - started).total_seconds()
+        except (KeyError, AttributeError, TypeError, ValueError) as exc:
+            raise CandidateSourceError(f"{name} 缺少完整服务端时间") from exc
+        require(0 <= elapsed <= 150, f"{name} 完整耗时超过 150 秒")
+
+
+def list_attempt_jobs(fetch: Callable[[str], dict[str, Any]], prefix: str, run_id: int, attempt: int) -> list[dict[str, Any]]:
+    entries = []
+    for page in range(1, 101):
+        response = fetch(f"{prefix}/runs/{run_id}/attempts/{attempt}/jobs?per_page=100&page={page}")
+        batch = response.get("jobs")
+        require(isinstance(batch, list) and all(isinstance(job, dict) for job in batch), "原 attempt jobs 列表无效")
+        entries.extend(batch)
+        if len(batch) < 100:
+            break
+    else:
+        raise CandidateSourceError("原 attempt jobs 超过有界分页上限")
+    return entries
 
 
 def resolve_candidate(
@@ -90,6 +125,7 @@ def resolve_candidate(
             matches.append((item, int(match.group(1))))
     require(len(matches) == 1, "IDENTITY_UNVERIFIABLE：candidate artifact 不唯一或不存在；请指定 artifact ID")
     artifact, attempt = matches[0]
+    require(original.get("run_attempt", attempt) == attempt, "candidate artifact 属于过期 attempt")
     require(type(artifact.get("id")) is int and artifact["id"] > 0
             and artifact.get("expired") is False
             and type(artifact.get("size_in_bytes")) is int and artifact["size_in_bytes"] > 0
@@ -98,13 +134,17 @@ def resolve_candidate(
     digest = artifact.get("digest")
     require(isinstance(digest, str) and re.fullmatch(r"sha256:[0-9a-f]{64}", digest) is not None,
             "candidate artifact 缺少服务端 SHA256")
-    jobs = fetch(f"{prefix}/runs/{candidate_run_id}/attempts/{attempt}/jobs?per_page=100")
-    entries = jobs.get("jobs")
-    require(isinstance(entries, list), "原 attempt jobs 列表无效")
-    candidate_jobs = [job for job in entries if isinstance(job, dict) and job.get("name") == JOB_NAME]
-    require(len(candidate_jobs) == 1 and candidate_jobs[0].get("conclusion") == "success"
-            and candidate_jobs[0].get("status") == "completed",
-            "原 attempt candidate job 未真实成功")
+    entries = list_attempt_jobs(fetch, prefix, candidate_run_id, attempt)
+    names = {job.get("name") for job in entries}
+    if NEW_JOB_NAME in names:
+        require(LEGACY_JOB_NAME not in names, "candidate producer schema 混用")
+        for name in NEW_REQUIRED_JOBS:
+            completed_job(entries, name, qualified=True)
+        producer_schema = "staged-v2"
+    else:
+        require(controller_sha in LEGACY_CONTROL_SHAS, "legacy candidate controller 未在受控来源范围")
+        completed_job(entries, LEGACY_JOB_NAME, qualified=False)
+        producer_schema = "legacy-v1"
     return {
         "sourceSha": controller_sha,
         "workflowSha": controller_sha,
@@ -112,6 +152,8 @@ def resolve_candidate(
         "runAttempt": attempt,
         "artifactId": artifact["id"],
         "artifactDigest": digest,
+        "producerSchema": producer_schema,
+        "budgetQualified": producer_schema == "staged-v2",
     }
 
 

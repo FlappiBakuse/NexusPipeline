@@ -10,8 +10,21 @@ export const useShellStore = defineStore("shell", {
     restartReasons: [] as string[],
     restarting: false,
     restartError: "",
+    hostVersion: "",
+    hostInstanceId: "",
+    frontendBuildId: "",
+    actualPort: 0,
+    identityConnection: "connecting" as "connecting" | "online" | "offline" | "unauthorized",
+    recoveryPhase: "idle" as "idle" | "requesting" | "waiting" | "timeout" | "failed" | "dirty-blocked" | "navigating",
   }),
   actions: {
+    setHostIdentity(identity: { version: string; instanceId: string; frontendBuildId: string; actualPort: number }) {
+      this.hostVersion = identity.version;
+      this.hostInstanceId = identity.instanceId;
+      this.frontendBuildId = identity.frontendBuildId;
+      this.actualPort = identity.actualPort;
+      this.identityConnection = "online";
+    },
     markBooted() {
       this.booted = true;
       this.bootError = "";

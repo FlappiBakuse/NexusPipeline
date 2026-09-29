@@ -71,7 +71,6 @@ public sealed class WebApiContractTests
             WebhookSecret = "webhook-secret-plain",
             FeishuAppSecret = "feishu-secret-plain",
             SlackBotToken = "slack-token-plain",
-            DingTalkAppSecret = "dingtalk-secret-plain",
             SmtpPassword = "smtp-password-plain",
             AccessToken = "access-token-plain",
             WebPort = 58888,
@@ -87,7 +86,6 @@ public sealed class WebApiContractTests
         Assert.Equal("enc:***", projected["webhookSecret"]!.GetValue<string>());
         Assert.Equal("enc:***", projected["feishuAppSecret"]!.GetValue<string>());
         Assert.Equal("enc:***", projected["slackBotToken"]!.GetValue<string>());
-        Assert.Equal("enc:***", projected["dingTalkAppSecret"]!.GetValue<string>());
         Assert.Equal("enc:***", projected["smtpPassword"]!.GetValue<string>());
         Assert.Equal("enc:***", projected["accessToken"]!.GetValue<string>());
         Assert.DoesNotContain("proxy-password-plain", projected.ToJsonString(), StringComparison.Ordinal);
