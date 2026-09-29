@@ -73,6 +73,7 @@ internal class HostCompositionRoot
             runtime,
             composition.Get<PluginAutoUpdateService>(),
             composition.Get<UpdateAutomationService>(),
+            new PluginActivationPreferencesAdapter(composition._settingsState),
             StartupPipeline.TryRequestServiceExit,
             StartupPipeline.TryRequestWebOnlyExit);
         runtime.BindBootstrap(bootstrap);

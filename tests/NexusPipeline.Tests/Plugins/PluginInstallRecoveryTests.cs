@@ -12,6 +12,102 @@ namespace NexusPipeline.Tests.Plugins;
 public sealed class PluginInstallRecoveryTests
 {
     [Fact]
+    public void ApplyPending_ManagedInstallKeepsActivationIntentUntilPreferenceCommit()
+    {
+        string root = NewTempDir();
+        try
+        {
+            string plugins = Path.Combine(root, "plugins");
+            string pending = Path.Combine(root, "state", "pending.json");
+            string ownership = Path.Combine(root, "state", "ownership.json");
+            string staging = Path.Combine(root, "state", "staging");
+            string backup = Path.Combine(root, "state", "backup");
+            string staged = Path.Combine(staging, "bettergi.install");
+            Directory.CreateDirectory(staged);
+            File.WriteAllText(Path.Combine(staged, "plugin.json"), "{}");
+            string id = Guid.NewGuid().ToString("N");
+            PluginInstallRecovery.AddPending(new PluginPendingOperation
+            {
+                Action = "install",
+                Name = "bettergi",
+                ArtifactName = "BetterGI",
+                Version = "0.1.0",
+                Kind = "managed-code",
+                Sha256 = new string('A', 64),
+                StagedPath = staged,
+                OperationId = id,
+                EnableAfterInstall = true,
+            }, pending);
+
+            var preferences = new TestActivationPreferences { Fail = true };
+            Assert.False(PluginInstallRecovery.ApplyPending(plugins, pending, ownership, staging, backup, preferences));
+            Assert.True(File.Exists(Path.Combine(plugins, "BetterGI", "plugin.json")));
+            Assert.Single(PluginInstallRecovery.ReadPending(pending));
+            Assert.Single(PluginInstallRecovery.ReadOwnership(ownership));
+
+            preferences.Fail = false;
+            Assert.True(PluginInstallRecovery.ApplyPending(plugins, pending, ownership, staging, backup, preferences));
+            Assert.Empty(PluginInstallRecovery.ReadPending(pending));
+            Assert.Equal(2, preferences.Attempts);
+            Assert.Equal(id, preferences.LastCompletion?.OperationId);
+            Assert.Equal("BetterGI", preferences.LastCompletion?.InstalledIdentity.ArtifactName);
+            Assert.True(PluginInstallRecovery.ApplyPending(plugins, pending, ownership, staging, backup, preferences));
+            Assert.Equal(2, preferences.Attempts);
+        }
+        finally
+        {
+            DeleteTempDir(root);
+        }
+    }
+
+    [Fact]
+    public void ApplyPending_OldJournalDoesNotRequestActivation()
+    {
+        string root = NewTempDir();
+        try
+        {
+            string plugins = Path.Combine(root, "plugins");
+            string pending = Path.Combine(root, "state", "pending.json");
+            string ownership = Path.Combine(root, "state", "ownership.json");
+            string staging = Path.Combine(root, "state", "staging");
+            string backup = Path.Combine(root, "state", "backup");
+            string staged = Path.Combine(staging, "bettergi.install");
+            Directory.CreateDirectory(staged);
+            File.WriteAllText(Path.Combine(staged, "plugin.json"), "{}");
+            PluginInstallRecovery.AddPending(new PluginPendingOperation
+            {
+                Action = "install",
+                Name = "bettergi",
+                ArtifactName = "BetterGI",
+                Version = "0.1.0",
+                Kind = "managed-code",
+                StagedPath = staged,
+            }, pending);
+            var preferences = new TestActivationPreferences();
+            Assert.True(PluginInstallRecovery.ApplyPending(plugins, pending, ownership, staging, backup, preferences));
+            Assert.Equal(0, preferences.Attempts);
+        }
+        finally
+        {
+            DeleteTempDir(root);
+        }
+    }
+
+    private sealed class TestActivationPreferences : IPluginActivationPreferences
+    {
+        public bool Fail { get; set; }
+        public int Attempts { get; private set; }
+        public PluginInstallCompletion? LastCompletion { get; private set; }
+
+        public PluginActivationResult ApplyInstallIntent(PluginInstallCompletion completion)
+        {
+            Attempts++;
+            LastCompletion = completion;
+            return Fail ? PluginActivationResult.Failed : PluginActivationResult.Enabled;
+        }
+    }
+
+    [Fact]
     public void ApplyPending_InstallsAndUninstallsPluginTransactionally()
     {
         string root = NewTempDir();
