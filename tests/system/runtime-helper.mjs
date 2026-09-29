@@ -91,14 +91,12 @@ export async function prepareRuntime() {
     throw new Error(`${releaseDir}/nexus-pipeline.exe 不存在，请先运行 node tests/run.mjs ${executionMode} system`);
   }
   copyReleaseArtifacts(releaseDir, runtimeDir);
-  if (process.env.NEXUS_SYSTEM_WEB_PORT?.trim()) {
-    fs.mkdirSync(path.join(runtimeDir, "config"), { recursive: true });
-    fs.writeFileSync(
-      path.join(runtimeDir, "config", "settings.json"),
-      JSON.stringify({ WebPort: systemWebPort, HostLocale: "zh-CN" }),
-      "utf8",
-    );
-  }
+  fs.mkdirSync(path.join(runtimeDir, "config"), { recursive: true });
+  fs.writeFileSync(
+    path.join(runtimeDir, "config", "settings.json"),
+    JSON.stringify({ WebPort: systemWebPort, HostLocale: "zh-CN", AutoOpenBrowser: false }),
+    "utf8",
+  );
 
   installEmulatorStubs(runtimeDir, path.join(projectRoot, "tests", "e2e", "tests", "fixtures"));
 }

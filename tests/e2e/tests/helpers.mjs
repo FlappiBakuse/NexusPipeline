@@ -79,7 +79,7 @@ export async function setupRuntime() {
   fs.mkdirSync(path.join(runtimeDir, "config"), { recursive: true });
   fs.writeFileSync(
     path.join(runtimeDir, "config", "settings.json"),
-    JSON.stringify({ WebPort: webPort }, null, 2),
+    JSON.stringify({ WebPort: webPort, AutoOpenBrowser: false }, null, 2),
     "utf8",
   );
   const sourceExe = path.join(releaseDir, "nexus-pipeline.exe");
