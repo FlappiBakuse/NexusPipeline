@@ -241,6 +241,34 @@ public class SchedulerTests
         Assert.Equal(0, PendingCount(scheduler));
     }
 
+    [Fact]
+    public async Task ScheduledTrigger_DurableWatermarkPreventsCompletedMinuteReplay()
+    {
+        DateTime now = DateTime.Now;
+        var queue = new DispatchQueue
+        {
+            Id = "watermark-queue", Name = "Watermark", AutoRunMode = "scheduled",
+            Tasks = [new QueueTask { Id = "task", ScriptInstanceId = "missing-script" }],
+            TimeSets = [new QueueTimeSet { Enabled = true, Days = [(int)now.DayOfWeek], Time = now.ToString("HH:mm") }],
+        };
+        var queues = new TestQueueRepository(queue);
+        var commands = new TestExecutionService(failFirst: false);
+        var validator = new ExecutionValidator(new EmptyScriptRepository(), queues,
+            new EmptyUserRepository(), new AllowAllPluginAvailability());
+        var store = new MemorySchedulerStateStore();
+        using (var scheduler = new Scheduler(queues, new EmptyHistoryStore(), new TestSettingsProvider(), commands, validator, stateStore: store))
+        {
+            scheduler.TickForTest();
+            await EventuallyAsync(() => commands.SuccessfulStarts == 1 && PendingCount(scheduler) == 0);
+            scheduler.TickForTest();
+            scheduler.TickForTest();
+            scheduler.Stop();
+        }
+        using var restarted = new Scheduler(queues, new EmptyHistoryStore(), new TestSettingsProvider(), commands, validator, stateStore: store);
+        restarted.TickForTest();
+        Assert.Equal(1, commands.Attempts);
+    }
+
     private static async Task EventuallyAsync(Func<bool> condition)
     {
         DateTime deadline = DateTime.UtcNow.AddSeconds(3);

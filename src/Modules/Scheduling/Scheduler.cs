@@ -397,13 +397,15 @@ internal sealed class Scheduler : IDisposable, IQueueScheduleProjection, ISchedu
             }
         }
 
+        DateTime from = SchedulerTriggerPlanner.ScheduledScanStart(now);
         lock (_sync)
         {
-            // durable watermark 只作为恢复围栏保存；计划扫描严格限制在当前分钟，
-            // 宿主离线或长时间停顿期间错过的 occurrence 不在启动后补发。
+            // Completed occurrences leave memory after persistence, so the watermark
+            // must also bound subsequent scans and scans after a restart.
+            if (_stateFence.LastSchedulerCheck is DateTime previous && previous > from)
+                from = previous;
             _stateFence.LastSchedulerCheck = now;
         }
-        DateTime from = SchedulerTriggerPlanner.ScheduledScanStart(now);
         foreach (DispatchQueue queue in queues.Where(queue => queue.AutoRunMode == "scheduled" && queue.Tasks.Count > 0))
         {
             foreach ((string occurrenceKey, DateTime triggerTime) in SchedulerTriggerPlanner.EnumerateOccurrences(queue, from, now))
