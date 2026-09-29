@@ -107,8 +107,6 @@ async function load() {
     status.value = { running: [], plugins: [], ...next };
     loading.value = false;
     error.value = "";
-    const version = document.querySelector<HTMLElement>("#app-version");
-    if (version) version.textContent = `${t("common.current_version")} · ${next.version || "0.0.0"}`;
     await paintSlots();
   } catch (reason) {
     if (controller.signal.aborted || isAbortError(reason)) return;
