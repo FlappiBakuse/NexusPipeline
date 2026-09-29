@@ -6,6 +6,7 @@ function run(command, args) {
     return spawnSync(command, args, {
       encoding: "utf8",
       windowsHide: true,
+      timeout: 2_000,
     });
   } catch {
     return { status: null, stdout: "", stderr: "" };
@@ -96,7 +97,9 @@ export function isProcessAlive(pid) {
     process.kill(numericPid, 0);
     return true;
   } catch (error) {
-    return error?.code === "EPERM";
+    if (error?.code === "ESRCH") return false;
+    if (error?.code === "EPERM") return true;
+    throw error;
   }
 }
 
@@ -127,6 +130,7 @@ export async function waitForExit(pid, timeoutMs = 10000, intervalMs = 100) {
 export function readListeningPids(port) {
   if (process.platform !== "win32") return [];
   const result = run("netstat", ["-ano", "-p", "tcp"]);
+  if (result.status !== 0) throw new Error("无法确认监听端口，保留清理失败现场");
   const pids = new Set();
   for (const line of String(result.stdout || "").split(/\r?\n/)) {
     if (!line.includes(`:${port}`) || !/\bLISTENING\b|监听/i.test(line)) continue;

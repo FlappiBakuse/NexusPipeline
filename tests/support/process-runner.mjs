@@ -38,9 +38,15 @@ function positiveTimeout(value, fallback) {
  */
 export function runProcess(command, args, options = {}) {
   return new Promise(resolve => {
-    const timeoutMs = Number.isFinite(options.timeoutMs) && options.timeoutMs > 0 ? options.timeoutMs : null;
-    const timeoutCode = options.timeoutCode ?? 124;
-    const timeoutCleanupMs = positiveTimeout(options.timeoutCleanupMs, 15_000);
+    if (options.signal?.aborted) return resolve(130);
+    const available = options.budget?.remainingMs() ?? Infinity;
+    if (available <= 0) return resolve(options.timeoutCode ?? 5);
+    const requested = positiveTimeout(options.timeoutMs, Infinity);
+    const bounded = Math.min(available, requested);
+    const timeoutMs = Number.isFinite(bounded) ? Math.max(1, Math.floor(bounded)) : null;
+    const timeoutCode = options.timeoutCode ?? 5;
+    let stopCode = timeoutCode;
+    const timeoutCleanupMs = positiveTimeout(options.timeoutCleanupMs, 5_000);
     const isShim = process.platform === "win32" && /\.(?:cmd|bat)$/iu.test(command);
     const spawnCommand = isShim ? (process.env.ComSpec || "cmd.exe") : command;
     const spawnArgs = isShim
@@ -52,10 +58,10 @@ export function runProcess(command, args, options = {}) {
     }
     const label = [command, ...args].join(" ");
     const spawn = options.spawnImpl || defaultSpawn;
-    const killProcessTree = options.killProcessTreeImpl || (pid => new Promise(resolve => {
+    const killProcessTree = options.killProcessTreeImpl || ((pid, remainingMs) => new Promise(resolve => {
       // Only the still-live ChildProcess may authorize this numeric PID.
       if (child.exitCode !== null || child.signalCode !== null) return resolve(false);
-      execFile("taskkill", ["/PID", String(pid), "/T", "/F"], { windowsHide: true, timeout: timeoutCleanupMs }, error => resolve(!error));
+      execFile("taskkill", ["/PID", String(pid), "/T", "/F"], { windowsHide: true, timeout: Math.max(1, Math.floor(remainingMs)) }, error => resolve(!error));
     }));
     const waitForExit = options.waitForExitImpl || (async () => {
       while (!settled && child.exitCode === null && child.signalCode === null) {
@@ -75,6 +81,7 @@ export function runProcess(command, args, options = {}) {
       settled = true;
       if (timeoutHandle) clearTimeout(timeoutHandle);
       if (cleanupHandle) clearTimeout(cleanupHandle);
+      options.signal?.removeEventListener("abort", onAbort);
       if (timedOut) {
         runnerState.pendingCleanups--;
         child.removeListener("close", onClose);
@@ -107,7 +114,7 @@ export function runProcess(command, args, options = {}) {
       child.stdout?.setEncoding("utf8");
       child.stderr?.setEncoding("utf8");
       child.stdout?.on("data", chunk => { process.stdout.write(chunk); options.onOutput(chunk); });
-      child.stderr?.on("data", chunk => { process.stderr.write(chunk); });
+      child.stderr?.on("data", chunk => { process.stderr.write(chunk); options.onOutput(chunk); });
     }
 
     function onError(error) {
@@ -117,7 +124,7 @@ export function runProcess(command, args, options = {}) {
     function onClose(code, signal) {
       closed = true;
       if (timedOut) {
-        if (cleanupVerified) finish(timeoutCode);
+        if (cleanupVerified) finish(stopCode);
         return;
       }
       if (signal) {
@@ -129,22 +136,25 @@ export function runProcess(command, args, options = {}) {
     child.once("error", onError);
     child.once("close", onClose);
 
-    if (timeoutMs === null) return;
-    timeoutHandle = setTimeout(() => {
-      if (settled) return;
+    function onAbort() { stop(130); }
+    function stop(code) {
+      if (settled || timedOut) return;
+      stopCode = code;
       timedOut = true;
       runnerState.pendingCleanups++;
-      console.error(`[错误] ${label} 超时（${timeoutMs}ms），正在终止本次进程树`);
+      console.error(`[错误] ${label} ${code === 130 ? "取消" : `超时（${timeoutMs}ms）`}，正在终止本次进程树`);
+      const cleanupRemaining = Math.max(1, Math.min(timeoutCleanupMs,
+        options.budget?.remainingMs({ cleanup: true }) ?? timeoutCleanupMs));
       cleanupHandle = setTimeout(() => {
-        recordCleanupFailure(`超时进程清理未在 ${timeoutCleanupMs}ms 内确认完成：${label}`);
-        finish(timeoutCode);
-      }, timeoutCleanupMs);
+        recordCleanupFailure(`超时进程清理未在 ${cleanupRemaining}ms 内确认完成：${label}`);
+        finish(stopCode);
+      }, cleanupRemaining);
 
       void (async () => {
         let killed = false;
         try {
           if (child.pid && process.platform === "win32") {
-            killed = await killProcessTree(child.pid);
+            killed = await killProcessTree(child.pid, cleanupRemaining);
           } else if (typeof child.kill === "function") {
             killed = child.kill("SIGTERM") !== false;
           }
@@ -160,9 +170,12 @@ export function runProcess(command, args, options = {}) {
         if (settled) return;
         cleanupVerified = killed && exited;
         if (cleanupVerified && closed) {
-          finish(timeoutCode);
+          finish(stopCode);
         }
       })();
-    }, timeoutMs);
+    }
+    options.signal?.addEventListener("abort", onAbort, { once: true });
+    if (options.signal?.aborted) onAbort();
+    else if (timeoutMs !== null) timeoutHandle = setTimeout(() => stop(timeoutCode), timeoutMs);
   });
 }
