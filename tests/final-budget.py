@@ -5,6 +5,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import urllib.request
 
 
@@ -14,20 +15,34 @@ audit_jobs = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(audit_jobs)
 
 
+def resolve_pulls(run, repository):
+    pulls = run.get("pull_requests") or []
+    if pulls:
+        return pulls
+    sha = run.get("head_sha")
+    if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha):
+        raise ValueError("Invalid CI head SHA")
+    # Actions omits the PR relation from older runs after their PR is merged.
+    pulls = audit_jobs.api(f"/repos/{repository}/commits/{sha}/pulls?per_page=100")
+    if not isinstance(pulls, list) or len(pulls) != 1:
+        raise ValueError("Expected one PR associated with the completed commit")
+    return pulls
+
+
 def evaluate(run, jobs, repository, run_id, attempt, required_name):
     if (run.get("id") != run_id or run.get("run_attempt") != attempt
             or run.get("status") != "completed" or run.get("event") != "pull_request"
             or run.get("path") != ".github/workflows/ci.yml"
             or run.get("repository", {}).get("full_name") != repository):
         raise ValueError("Unexpected CI run identity")
-    pulls = run.get("pull_requests") or []
+    pulls = resolve_pulls(run, repository)
     if len(pulls) != 1 or pulls[0].get("base", {}).get("ref") != "main":
         raise ValueError("Expected one pull request into main")
     if (pulls[0].get("base", {}).get("repo", {}).get("url")
             != os.environ["GITHUB_API_URL"] + "/repos/" + repository):
         raise ValueError("Foreign pull request base")
     sha = run.get("head_sha")
-    if not isinstance(sha, str) or len(sha) != 40 or pulls[0].get("head", {}).get("sha") != sha:
+    if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha) or pulls[0].get("head", {}).get("sha") != sha:
         raise ValueError("Pull request head mismatch")
     report = audit_jobs.audit(jobs, run_id, attempt)
     required = [item for item in report if item["name"] == required_name]

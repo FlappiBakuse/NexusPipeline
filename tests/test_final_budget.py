@@ -55,6 +55,19 @@ class FinalBudgetTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             final_budget.evaluate(source, [job(1, "Required")], REPOSITORY, 12, 2, "Required")
 
+    @patch.dict(os.environ, {"GITHUB_API_URL": "https://api.github.com"})
+    def test_merged_pr_relation_is_recovered_from_commit(self):
+        source = run()
+        linked = source["pull_requests"]
+        source["pull_requests"] = []
+        with patch.object(final_budget.audit_jobs, "api", return_value=linked) as api:
+            self.assertTrue(final_budget.evaluate(source, [job(1, "Required")],
+                                                  REPOSITORY, 12, 2, "Required")[2])
+            api.assert_called_once_with(f"/repos/{REPOSITORY}/commits/{SHA}/pulls?per_page=100")
+        with patch.object(final_budget.audit_jobs, "api", return_value=linked * 2):
+            with self.assertRaises(ValueError):
+                final_budget.evaluate(source, [job(1, "Required")], REPOSITORY, 12, 2, "Required")
+
 
 if __name__ == "__main__":
     unittest.main()
