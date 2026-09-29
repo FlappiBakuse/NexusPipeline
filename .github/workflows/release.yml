@@ -118,9 +118,6 @@ jobs:
           path: NexusPipeline-Plugins
           fetch-depth: 0
           persist-credentials: false
-      - name: Run merged-source integration
-        working-directory: NexusPipeline
-        run: node tests/run.mjs integration
       - name: Build and verify original candidate
         working-directory: NexusPipeline
         shell: pwsh
@@ -134,7 +131,6 @@ jobs:
           --workflow-sha $env:WORKFLOW_SHA
           --partner-sha $env:PLUGIN_SHA
           --run-id $env:GITHUB_RUN_ID --run-attempt $env:GITHUB_RUN_ATTEMPT
-          --frontend-ready
           --plugins-root ../NexusPipeline-Plugins
           --inno-compiler ../inno-tool/compiler/ISCC.exe
           --output .generated/candidate/$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT

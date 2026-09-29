@@ -7,25 +7,70 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: host-ci-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
-  required:
-    name: Host / Required
+  core:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - group: backend
+            name: Host / 执行与配置
+          - group: frontend
+            name: Host / 前端核心状态
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 3
+    env:
+      NEXUS_TEST_ARTIFACT_ROOT: ${{ runner.temp }}/NexusPipeline.Tests
+      NEXUS_TEST_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.group }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: 检出本次源码
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+      - name: 准备 .NET 工具链
+        if: matrix.group == 'backend'
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
         with:
           dotnet-version: "8.0.x"
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+      - name: 准备 Node 工具链
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: "24"
-      - name: Run smoke checks
-        run: node tests/run.mjs smoke
+      - name: 验证核心规则
+        run: node tests/run.mjs ci --group ${{ matrix.group }}
+      - name: 保存原始计数与身份报告
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: host-${{ matrix.group }}
+          path: ${{ runner.temp }}/NexusPipeline.Tests/runs/${{ env.NEXUS_TEST_RUN_ID }}
+          if-no-files-found: error
+          retention-days: 7
+  required:
+    name: Host / Required
+    needs: core
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - name: 检出汇总策略
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: 读取本次核心报告
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: host-*
+          path: ${{ runner.temp }}/reports
+      - name: 汇总结果与实际 job 耗时
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_NEEDS: ${{ toJSON(needs) }}
+        run: python tests/ci-gate.py . '${{ runner.temp }}/reports' host
