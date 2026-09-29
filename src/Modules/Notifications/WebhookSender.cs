@@ -18,8 +18,6 @@ internal static class WebhookSender
 {
     private const string FeishuApiRoot = "https://open.feishu.cn/open-apis";
     private const string SlackApiRoot = "https://slack.com/api";
-    private const string DingTalkApiRoot = "https://api.dingtalk.com/v1.0";
-    private const string DingTalkLegacyApiRoot = "https://oapi.dingtalk.com";
 
     /// <summary>Webhook 类型白名单（单源化）：引用 AppSettings.WebhookTypes，不再独立维护副本。</summary>
     private static readonly string[] Types = AppSettings.WebhookTypes;
@@ -29,7 +27,6 @@ internal static class WebhookSender
         return type switch
         {
             "feishu" => "飞书",
-            "dingtalk" => "钉钉",
             "wecom" => "企业微信",
             "slack" => "Slack",
             "discord" => "Discord",
@@ -87,7 +84,8 @@ internal static class WebhookSender
             return false;
         }
 
-        (string targetUrl, Dictionary<string, string> signatureHeaders) = ApplySignature(type, webhookUrl, webhookSecret);
+        string targetUrl = webhookUrl;
+        var signatureHeaders = new Dictionary<string, string>();
         if (image is not null)
         {
             switch (type)
@@ -100,8 +98,6 @@ internal static class WebhookSender
                     return await SendFeishuWithImageAsync(settings, targetUrl, signatureHeaders, text, image, webhookSecret, outbound).ConfigureAwait(false);
                 case "slack":
                     return await SendSlackWithImageAsync(settings, targetUrl, signatureHeaders, text, image, outbound).ConfigureAwait(false);
-                case "dingtalk":
-                    return await SendDingTalkWithImageAsync(settings, targetUrl, signatureHeaders, text, image, outbound).ConfigureAwait(false);
                 case "generic":
                     return await SendJsonAsync(settings, type, targetUrl, signatureHeaders, BuildGenericBody(text, template, image), outbound).ConfigureAwait(false);
             }
@@ -274,68 +270,6 @@ internal static class WebhookSender
         return true;
     }
 
-    private static async Task<bool> SendDingTalkWithImageAsync(
-        AppSettings settings,
-        string targetUrl,
-        Dictionary<string, string> signatureHeaders,
-        string text,
-        NotificationImage image,
-        OutboundHttpClientProvider? outbound)
-    {
-        bool textOk = await SendJsonAsync(settings, "dingtalk", targetUrl, signatureHeaders, BuildBody("dingtalk", text, ""), outbound).ConfigureAwait(false);
-        if (!textOk)
-        {
-            return false;
-        }
-
-        string? appKey = settings.DingTalkAppKey?.Trim();
-        string? appSecret = TryDecrypt(settings.DingTalkAppSecret);
-        string? robotCode = settings.DingTalkRobotCode?.Trim();
-        string? conversationId = settings.DingTalkOpenConversationId?.Trim();
-        if (string.IsNullOrWhiteSpace(appKey) || string.IsNullOrWhiteSpace(appSecret)
-            || string.IsNullOrWhiteSpace(robotCode) || string.IsNullOrWhiteSpace(conversationId))
-        {
-            Logger.Warn("[通知] 钉钉应用机器人图片凭据未完整配置，已发送文字通知。");
-            return true;
-        }
-
-        string? accessToken = await GetDingTalkAccessTokenAsync(settings, appKey, appSecret, outbound).ConfigureAwait(false);
-        if (string.IsNullOrWhiteSpace(accessToken))
-        {
-            Logger.Warn("[通知] 钉钉 access_token 获取失败，图片附件发送失败。");
-            return false;
-        }
-        string? mediaId = await UploadDingTalkImageAsync(settings, accessToken, image, outbound).ConfigureAwait(false);
-        if (string.IsNullOrWhiteSpace(mediaId))
-        {
-            Logger.Warn("[通知] 钉钉图片上传失败。");
-            return false;
-        }
-
-        string msgParam = JsonSerializer.Serialize(new { photoURL = mediaId }, JsonOpts.Default);
-        string body = JsonSerializer.Serialize(new
-        {
-            msgKey = "sampleImageMsg",
-            msgParam,
-            openConversationId = conversationId,
-            robotCode,
-        }, JsonOpts.Default);
-        (bool sendOk, string sendText) = await SendApiRequestAsync(
-            settings,
-            "dingtalk",
-            $"{DingTalkApiRoot}/robot/groupMessages/send",
-            new Dictionary<string, string> { ["x-acs-dingtalk-access-token"] = accessToken },
-            new StringContent(body, Encoding.UTF8, "application/json"),
-            outbound).ConfigureAwait(false);
-        if (!sendOk || !IsDingTalkApiSuccess(sendText))
-        {
-            Logger.Warn("[通知] 钉钉应用机器人图片发送失败。");
-            return false;
-        }
-        Logger.Info("钉钉图片附件发送成功。");
-        return true;
-    }
-
     private static async Task<string?> GetFeishuTenantTokenAsync(
         AppSettings settings,
         string appId,
@@ -391,67 +325,6 @@ internal static class WebhookSender
         {
             JsonNode? root = JsonNode.Parse(responseText);
             return root.Get("code").Int(-1) == 0 ? root.Get("data").Get("image_key").Str() : null;
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private static async Task<string?> GetDingTalkAccessTokenAsync(
-        AppSettings settings,
-        string appKey,
-        string appSecret,
-        OutboundHttpClientProvider? outbound)
-    {
-        string body = JsonSerializer.Serialize(new { appKey, appSecret }, JsonOpts.Default);
-        (bool ok, string responseText) = await SendApiRequestAsync(
-            settings,
-            "dingtalk",
-            $"{DingTalkApiRoot}/oauth2/accessToken",
-            new Dictionary<string, string>(),
-            new StringContent(body, Encoding.UTF8, "application/json"),
-            outbound).ConfigureAwait(false);
-        if (!ok)
-        {
-            return null;
-        }
-        try
-        {
-            return JsonNode.Parse(responseText).Get("accessToken").Str();
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private static async Task<string?> UploadDingTalkImageAsync(
-        AppSettings settings,
-        string token,
-        NotificationImage image,
-        OutboundHttpClientProvider? outbound)
-    {
-        using var multipart = new MultipartFormDataContent();
-        var file = new ByteArrayContent(image.Data);
-        file.Headers.ContentType = new MediaTypeHeaderValue(image.ContentType);
-        multipart.Add(file, "media", image.FileName);
-        string target = $"{DingTalkLegacyApiRoot}/media/upload?access_token={Uri.EscapeDataString(token)}&type=image";
-        (bool ok, string responseText) = await SendApiRequestAsync(
-            settings,
-            "dingtalk",
-            target,
-            new Dictionary<string, string>(),
-            multipart,
-            outbound).ConfigureAwait(false);
-        if (!ok)
-        {
-            return null;
-        }
-        try
-        {
-            JsonNode? root = JsonNode.Parse(responseText);
-            return root.Get("errcode").Int(-1) == 0 ? root.Get("media_id").Str() : null;
         }
         catch
         {
@@ -547,14 +420,6 @@ internal static class WebhookSender
                 return (code is null || code.Int(-1) == 0)
                     && (statusCode is null || statusCode.Int(-1) == 0);
             }
-            if (type == "dingtalk")
-            {
-                JsonNode? code = response.Get("code");
-                JsonNode? errorCode = response.Get("errcode");
-                JsonNode? success = response.Get("success");
-                return code is null && errorCode is null && success is null
-                    || code.Int(0) == 0 && errorCode.Int(0) == 0 && (success is null || success.Bool());
-            }
             if (type == "wecom")
             {
                 return response.Get("errcode").Int(0) == 0;
@@ -572,7 +437,7 @@ internal static class WebhookSender
         string literal = JsonLiteral(text);
         return type switch
         {
-            "dingtalk" or "wecom" => $"{{\"msgtype\":\"text\",\"text\":{{\"content\":{literal}}}}}",
+            "wecom" => $"{{\"msgtype\":\"text\",\"text\":{{\"content\":{literal}}}}}",
             "slack" => $"{{\"text\":{literal}}}",
             "discord" => $"{{\"content\":{literal}}}",
             "generic" => string.IsNullOrWhiteSpace(template) ? literal : template.Replace("{text}", literal, StringComparison.Ordinal),
@@ -629,28 +494,6 @@ internal static class WebhookSender
         }
     }
 
-    private static bool IsDingTalkApiSuccess(string text)
-    {
-        if (string.IsNullOrWhiteSpace(text))
-        {
-            return true;
-        }
-        try
-        {
-            JsonNode? root = JsonNode.Parse(text);
-            JsonNode? success = root.Get("success");
-            JsonNode? code = root.Get("code");
-            JsonNode? errorCode = root.Get("errcode");
-            return (success is null || success.Bool())
-                && (code is null || code.Int(0) == 0)
-                && (errorCode is null || errorCode.Int(0) == 0);
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
     internal static Dictionary<string, string> BearerHeaders(string token) => new()
     {
         ["Authorization"] = $"Bearer {token}",
@@ -659,26 +502,6 @@ internal static class WebhookSender
     private static string? TryDecrypt(string stored)
     {
         return SecretStore.TryDecrypt(stored ?? "", out string? value) ? value : null;
-    }
-
-    /// <summary>
-    /// 签名注入：钉钉自定义机器人使用 URL 查询参数；飞书自定义机器人使用请求体字段。
-    /// 应用级图片 API 使用独立的凭据请求，不复用 Webhook 签名。
-    /// </summary>
-    internal static (string Url, Dictionary<string, string> Headers) ApplySignature(string type, string url, string? secret)
-    {
-        if (string.IsNullOrWhiteSpace(secret))
-        {
-            return (url, new Dictionary<string, string>());
-        }
-        if (type == "dingtalk")
-        {
-            string timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString(CultureInfo.InvariantCulture);
-            string sign = Uri.EscapeDataString(Sign(timestamp, secret));
-            string separator = url.Contains('?') ? "&" : "?";
-            return (url + separator + $"timestamp={timestamp}&sign={sign}", new Dictionary<string, string>());
-        }
-        return (url, new Dictionary<string, string>());
     }
 
     internal static string BuildSignedFeishuBody(string body, string? secret)

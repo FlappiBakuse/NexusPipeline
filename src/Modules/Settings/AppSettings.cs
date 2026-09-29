@@ -17,7 +17,7 @@ public class AppSettings
     /// <summary>User-initiated specialized configuration repair is opt-in and disabled by default.</summary>
     public bool AllowConfigRepair { get; set; }
 
-    public bool AutoOpenBrowser { get; set; }
+    public bool AutoOpenBrowser { get; set; } = true;
 
     public int HistoryRetentionDays { get; set; } = 7;
 
@@ -65,7 +65,7 @@ public class AppSettings
     public string WebhookType { get; set; } = "feishu";
 
     /// <summary>Webhook 类型白名单（单源化）：AppSettingsStore.Normalize 校验与 WebhookSender 状态/映射共用，避免双份维护漂移。</summary>
-    public static readonly string[] WebhookTypes = { "feishu", "dingtalk", "wecom", "slack", "discord", "generic" };
+    public static readonly string[] WebhookTypes = { "feishu", "wecom", "slack", "discord", "generic" };
 
     public string WebhookUrl { get; set; } = "";
 
@@ -84,15 +84,6 @@ public class AppSettings
     public string SlackBotToken { get; set; } = "";
 
     public string SlackChannelId { get; set; } = "";
-
-    /// <summary>钉钉应用机器人图片消息所需配置；AppSecret 使用 DPAPI 加密保存。</summary>
-    public string DingTalkAppKey { get; set; } = "";
-
-    public string DingTalkAppSecret { get; set; } = "";
-
-    public string DingTalkRobotCode { get; set; } = "";
-
-    public string DingTalkOpenConversationId { get; set; } = "";
 
     public string SmtpHost { get; set; } = "";
 

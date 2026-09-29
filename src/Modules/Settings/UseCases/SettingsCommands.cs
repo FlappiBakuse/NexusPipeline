@@ -32,7 +32,12 @@ internal sealed class SettingsCommands
     private static readonly HashSet<string> SecretFields = new(StringComparer.OrdinalIgnoreCase)
     {
         "webhookUrl", "webhookSecret", "smtpPassword", "proxyPassword", "accessToken",
-        "feishuAppSecret", "slackBotToken", "dingTalkAppSecret",
+        "feishuAppSecret", "slackBotToken",
+    };
+
+    private static readonly HashSet<string> RetiredDingTalkFields = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "dingTalkAppKey", "dingTalkAppSecret", "dingTalkRobotCode", "dingTalkOpenConversationId",
     };
 
     public OperationResult<AppSettings> Update(JsonObject patch, string source = Audit.Web)
@@ -57,6 +62,22 @@ internal sealed class SettingsCommands
                             bindError = "请求体包含空字段名";
                             break;
                         }
+                        if (field.Equals("lightweightMode", StringComparison.OrdinalIgnoreCase))
+                        {
+                            bindError = "轻量模式只能在配置文件中设置，并在重启后生效";
+                            break;
+                        }
+                        if (RetiredDingTalkFields.Contains(field))
+                        {
+                            bindError = "钉钉通知配置已不再支持";
+                            break;
+                        }
+                        if (field.Equals("webhookType", StringComparison.OrdinalIgnoreCase)
+                            && (pair.Value is null || !AppSettings.WebhookTypes.Contains(pair.Value.Str().Trim().ToLowerInvariant())))
+                        {
+                            bindError = "Webhook 类型无效";
+                            break;
+                        }
                         if (field.Equals("pluginRepository", StringComparison.OrdinalIgnoreCase)
                             || field.StartsWith("pluginRepository.", StringComparison.OrdinalIgnoreCase))
                         {
@@ -79,12 +100,17 @@ internal sealed class SettingsCommands
 
                     JsonNode? secretKeyNode = patch["secretKey"];
                     JsonNode? secretValueNode = patch["secretValue"];
+                    if (bindError is null && secretKeyNode is not null
+                        && RetiredDingTalkFields.Contains(secretKeyNode.Str()))
+                    {
+                        bindError = "钉钉通知密钥已不再支持";
+                    }
                     if (bindError is null && secretKeyNode is not null && secretValueNode is not null)
                     {
                         string key = secretKeyNode.Str();
                         string value = secretValueNode.Str();
                         if (key is "webhookUrl" or "webhookSecret" or "smtpPassword" or "proxyPassword" or "accessToken"
-                            or "feishuAppSecret" or "slackBotToken" or "dingTalkAppSecret")
+                            or "feishuAppSecret" or "slackBotToken")
                         {
                             if (string.IsNullOrWhiteSpace(value))
                             {
@@ -273,9 +299,6 @@ internal sealed class SettingsCommands
             case "slackBotToken":
                 settings.SlackBotToken = encrypted;
                 break;
-            case "dingTalkAppSecret":
-                settings.DingTalkAppSecret = encrypted;
-                break;
         }
     }
 
@@ -303,9 +326,6 @@ internal sealed class SettingsCommands
                 break;
             case "slackBotToken":
                 settings.SlackBotToken = "";
-                break;
-            case "dingTalkAppSecret":
-                settings.DingTalkAppSecret = "";
                 break;
         }
     }

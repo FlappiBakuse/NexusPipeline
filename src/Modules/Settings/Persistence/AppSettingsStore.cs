@@ -9,15 +9,17 @@ namespace NexusPipeline.Modules.Settings.Persistence;
 
 internal static class AppSettingsStore
 {
-    public static AppSettings Load(ConfigLoadMode mode = ConfigLoadMode.Repair)
+    public static AppSettings Load(ConfigLoadMode mode = ConfigLoadMode.Repair, string? configPath = null)
     {
+        string file = configPath ?? AppPaths.ConfigPath;
         var settings = new AppSettings();
-        if (File.Exists(AppPaths.ConfigPath))
+        bool retiredDingTalkConfiguration = false;
+        if (File.Exists(file))
         {
             string text;
             try
             {
-                text = File.ReadAllText(AppPaths.ConfigPath);
+                text = File.ReadAllText(file);
             }
             catch (Exception ex)
             {
@@ -32,6 +34,23 @@ internal static class AppSettingsStore
                 AppSettings? parsed = JsonSerializer.Deserialize<AppSettings>(text, JsonOpts.Default);
                 if (parsed is not null)
                 {
+                    bool oldType = document.RootElement.EnumerateObject().Any(property =>
+                        property.Name.Equals("webhookType", StringComparison.OrdinalIgnoreCase)
+                        && property.Value.ValueKind == JsonValueKind.String
+                        && string.Equals(property.Value.GetString()?.Trim(), "dingtalk", StringComparison.OrdinalIgnoreCase));
+                    retiredDingTalkConfiguration = oldType || document.RootElement.EnumerateObject().Any(property =>
+                        property.Name.Equals("dingTalkAppKey", StringComparison.OrdinalIgnoreCase)
+                        || property.Name.Equals("dingTalkAppSecret", StringComparison.OrdinalIgnoreCase)
+                        || property.Name.Equals("dingTalkRobotCode", StringComparison.OrdinalIgnoreCase)
+                        || property.Name.Equals("dingTalkOpenConversationId", StringComparison.OrdinalIgnoreCase));
+                    if (oldType)
+                    {
+                        parsed.WebhookEnabled = false;
+                        parsed.WebhookType = "feishu";
+                        parsed.WebhookUrl = "";
+                        parsed.WebhookSecret = "";
+                        parsed.WebhookTemplate = "";
+                    }
                     PluginRepositorySettingsValidator.Normalize(parsed.PluginRepository);
                     settings = parsed;
                 }
@@ -44,7 +63,7 @@ internal static class AppSettingsStore
             {
                 if (mode == ConfigLoadMode.Repair)
                 {
-                    string backup = JsonStore.PreserveCorruptFile(AppPaths.ConfigPath);
+                    string backup = JsonStore.PreserveCorruptFile(file);
                     if (string.IsNullOrWhiteSpace(backup))
                     {
                         throw new IOException("解析 settings.json 失败且无法保留原文件，已停止加载以保护原始数据", ex);
@@ -58,16 +77,21 @@ internal static class AppSettingsStore
             }
         }
         Normalize(settings);
+        if (retiredDingTalkConfiguration && mode == ConfigLoadMode.Repair)
+        {
+            Save(settings, file);
+        }
         LocaleCatalog.SetHostLocale(settings.HostLocale);
         Logger.ConfigureLevel(settings.LogLevel);
         return settings;
     }
 
-    public static void Save(AppSettings settings)
+    public static void Save(AppSettings settings, string? configPath = null)
     {
         Normalize(settings);
-        Directory.CreateDirectory(AppPaths.ConfigDir);
-        JsonUtil.WriteAtomic(AppPaths.ConfigPath, JsonSerializer.Serialize(settings, JsonOpts.Indented));
+        string file = configPath ?? AppPaths.ConfigPath;
+        Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+        JsonUtil.WriteAtomic(file, JsonSerializer.Serialize(settings, JsonOpts.Indented));
         LocaleCatalog.SetHostLocale(settings.HostLocale);
         // 原子保存成功后才更新日志阈值，失败时保留旧阈值。
         Logger.ConfigureLevel(settings.LogLevel);

@@ -50,7 +50,6 @@ function testNotifications() {
 
 const webhookTypeOptions = computed<NxpOption[]>(() => [
   { value: "feishu", label: "Feishu" },
-  { value: "dingtalk", label: "Dingtalk" },
   { value: "wecom", label: "WeCom" },
   { value: "slack", label: "Slack" },
   { value: "discord", label: "Discord" },
@@ -195,32 +194,6 @@ const secureOptions = computed<NxpOption[]>(() =>
                   type="password"
                   :aria-label="t('settings.slack_bot_token')"
                   :placeholder="settings.slackBotToken ? t('common.leave_blank_to_keep') : 'xoxb-…'"
-                  autocomplete="new-password"
-                  @blur="save"
-                />
-              </NxpField>
-            </div>
-          </div>
-          <div v-else-if="settings.webhookType === 'dingtalk'" class="webhook-advanced-fields">
-            <div class="form-grid">
-              <NxpField :label="t('settings.dingtalk_app_key')" for="st-dingtalk-key">
-                <NxpTextInput id="st-dingtalk-key" v-model="settings.dingTalkAppKey" :aria-label="t('settings.dingtalk_app_key')" @blur="save" />
-              </NxpField>
-              <NxpField :label="t('settings.dingtalk_robot_code')" for="st-dingtalk-robot">
-                <NxpTextInput id="st-dingtalk-robot" v-model="settings.dingTalkRobotCode" :aria-label="t('settings.dingtalk_robot_code')" @blur="save" />
-              </NxpField>
-            </div>
-            <div class="form-grid">
-              <NxpField :label="t('settings.dingtalk_open_conversation_id')" for="st-dingtalk-conversation">
-                <NxpTextInput id="st-dingtalk-conversation" v-model="settings.dingTalkOpenConversationId" :aria-label="t('settings.dingtalk_open_conversation_id')" @blur="save" />
-              </NxpField>
-              <NxpField :label="t('settings.dingtalk_app_secret')" for="st-dingtalk-secret" :help="t('settings.notification.app_secret_keep')">
-                <NxpTextInput
-                  id="st-dingtalk-secret"
-                  v-model="secretDraft.dingTalkAppSecret"
-                  type="password"
-                  :aria-label="t('settings.dingtalk_app_secret')"
-                  :placeholder="settings.dingTalkAppSecret ? t('common.leave_blank_to_keep') : undefined"
                   autocomplete="new-password"
                   @blur="save"
                 />
