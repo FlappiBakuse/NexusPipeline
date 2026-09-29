@@ -15,7 +15,7 @@ NexusPipeline 是一个运行在 Windows 上的本地游戏自动化脚本管家
 - 多用户配置：每个用户绑定独立配置，运行前切换，运行后恢复；运行产生的配置进度可按文件差异回写快照。
 - 完成判定：支持成功/失败关键字，也支持 JavaScript 或 Python 判断脚本；结果包含 `success`、`partial`、`failed`、`cancelled` 和 `skipped`。
 - 调度队列：按顺序运行多个脚本，支持按星期/时间触发、重试、资源冲突检查和完成后系统操作。
-- 历史与通知：保存状态、每次尝试的日志和运行截图；支持 Webhook、SMTP、飞书、钉钉、企业微信、Slack、Discord 等通知目标。
+- 历史与通知：保存状态、每次尝试的日志和运行截图；支持 Webhook、SMTP、飞书、企业微信、Slack、Discord 等通知目标。
 - 独立签到：GameCheckIn 提供多个独立签到任务，每个任务可设置游戏、凭据、本机时区的星期/时间计划和宿主全局通知；任务可覆盖 SMTP 收件人，不依赖绑定用户或脚本实例。
 - 专项插件：官方 [NexusPipeline-Plugins](https://github.com/FlappiBakuse/NexusPipeline-Plugins) 提供 BetterGI、March7th Assistant、ZenlessZoneZeroOneDragon、MaaEnd 等适配。
 - 模拟器支持：宿主内置 Generic ADB 与 MuMuManager；雷电、夜神和 BlueStacks 的专属识别与实例关闭由可选的“模拟器支持扩展”插件提供，安装并启用后可使用。专项插件通过 `emulator` capability 声明支持模拟器实例。
@@ -26,7 +26,7 @@ NexusPipeline 是一个运行在 Windows 上的本地游戏自动化脚本管家
 ## 安装
 
 1. 从 [GitHub Releases](https://github.com/FlappiBakuse/NexusPipeline/releases) 下载当前版本提供的安装器或便携包。
-2. 首次使用安装器时按向导选择空目录；同一 Windows 用户已登记的安装实例可选择原路径升级，安装器会先暂存并核验应用文件，再交给宿主现有更新事务切换。使用便携包时解压到固定空目录，例如 `D:\NexusPipeline\`。请勿把新包直接解压覆盖旧实例，安装器也不会接管未登记的旧便携目录。
+2. 首次使用安装器时按向导选择语言和空目录；支持英文与简体中文。升级默认沿用上次安装语言，可用 `/LANG=en` 或 `/LANG=zh` 指定。安装器会先暂存并核验应用文件，再交给宿主现有更新事务切换。同一 Windows 用户已登记的安装实例可选择原路径升级。使用便携包时解压到固定空目录，例如 `D:\NexusPipeline\`。请勿把新包直接解压覆盖旧实例，安装器也不会接管未登记的旧便携目录。
 3. 双击 `nexus-pipeline.exe`，按系统提示允许管理员权限。
 4. 浏览器打开 `http://127.0.0.1:58731/`，完成脚本、用户和队列设置。
 5. 需要开机运行时，在「设置」中开启开机自启动。

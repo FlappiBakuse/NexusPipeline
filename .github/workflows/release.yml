@@ -39,13 +39,16 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  candidate:
-    name: Build and validate Host candidate
+  source-plan:
+    name: Host / 候选输入
     if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.operation == 'candidate')
     runs-on: windows-latest
-    timeout-minutes: 90
+    timeout-minutes: 3
+    outputs:
+      source_sha: ${{ steps.source.outputs.sha }}
+      partner_sha: ${{ steps.plugins.outputs.sha }}
     steps:
-      - name: Validate candidate operation before checkout
+      - name: 校验候选操作参数
         shell: pwsh
         env:
           OPERATION: ${{ inputs.operation || 'candidate' }}
@@ -57,19 +60,14 @@ jobs:
           if ($env:GITHUB_REF -ne 'refs/heads/main') { throw 'Candidate controller must run from main' }
           if ($env:OPERATION -ne 'candidate' -or -not $env:SOURCE_REF) { throw 'Invalid candidate operation or source_ref' }
           if ($env:CANDIDATE_RUN_ID -or $env:CANDIDATE_ARTIFACT_ID -or $env:RELEASE_TAG) { throw 'candidate mode does not accept publish-only inputs' }
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          ref: ${{ github.workflow_sha }}
-          path: NexusPipeline-Control
-          fetch-depth: 1
-          persist-credentials: false
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: 检出候选源码
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ github.event_name == 'push' && github.sha || inputs.source_ref }}
           path: NexusPipeline
           fetch-depth: 0
           persist-credentials: false
-      - name: Require source reachable from protected main
+      - name: 固定受保护源码
         id: source
         working-directory: NexusPipeline
         shell: pwsh
@@ -79,16 +77,221 @@ jobs:
           git merge-base --is-ancestor HEAD origin/main
           if ($LASTEXITCODE -ne 0) { throw 'Candidate source is not reachable from main' }
           "sha=$((git rev-parse HEAD).Trim())" >> $env:GITHUB_OUTPUT
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+      - name: 固定官方插件输入
+        id: plugins
+        shell: pwsh
+        run: |
+          $line = @(git ls-remote https://github.com/FlappiBakuse/NexusPipeline-Plugins.git refs/heads/main)
+          if ($LASTEXITCODE -ne 0 -or $line.Count -ne 1) { throw 'Cannot resolve official Plugins main' }
+          $sha = ($line[0] -split '\s+')[0]
+          if ($sha -notmatch '^[0-9a-f]{40}$') { throw 'Invalid official Plugins SHA' }
+          "sha=$sha" >> $env:GITHUB_OUTPUT
+
+  production-frontend:
+    name: Host / 生产前端
+    needs: source-plan
+    runs-on: windows-latest
+    timeout-minutes: 3
+    steps:
+      - name: 检出候选控制源码
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: NexusPipeline-Control
+          persist-credentials: false
+      - name: 检出固定宿主源码
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ needs.source-plan.outputs.source_sha }}
+          path: NexusPipeline
+          persist-credentials: false
+      - name: 准备Node工具链
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: "24"
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
-        with:
-          dotnet-version: "8.0.424"
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      - name: 准备Python工具链
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: "3.13"
-      - name: Prepare pinned Inno Setup compiler
+      - name: 构建生产前端并记录字节
+        working-directory: NexusPipeline
+        shell: pwsh
+        run: python ../NexusPipeline-Control/tools/host_release.py build-frontend --root . --source-sha '${{ needs.source-plan.outputs.source_sha }}' --output .generated/frontend-phase
+      - name: 上传前端阶段产物
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: host-frontend-${{ github.run_id }}-${{ github.run_attempt }}
+          path: NexusPipeline/.generated/frontend-phase/
+          include-hidden-files: true
+          if-no-files-found: error
+
+  bundled-plugin-build:
+    name: Host / 预装插件
+    needs: source-plan
+    runs-on: windows-latest
+    timeout-minutes: 3
+    steps:
+      - name: 检出候选控制源码
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: NexusPipeline-Control
+          persist-credentials: false
+      - name: 检出固定宿主源码
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ needs.source-plan.outputs.source_sha }}
+          path: NexusPipeline
+          persist-credentials: false
+      - name: 检出固定插件源码
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: FlappiBakuse/NexusPipeline-Plugins
+          ref: ${{ needs.source-plan.outputs.partner_sha }}
+          path: NexusPipeline-Plugins
+          persist-credentials: false
+      - name: 准备Python工具链
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.13"
+      - name: 验证预装插件包并记录字节
+        working-directory: NexusPipeline
+        shell: pwsh
+        run: >-
+          python ../NexusPipeline-Control/tools/host_release.py build-bundled --root .
+          --source-sha '${{ needs.source-plan.outputs.source_sha }}'
+          --partner-sha '${{ needs.source-plan.outputs.partner_sha }}'
+          --plugins-root ../NexusPipeline-Plugins --output .generated/bundled-phase
+      - name: 上传预装插件阶段产物
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: host-bundled-${{ github.run_id }}-${{ github.run_attempt }}
+          path: NexusPipeline/.generated/bundled-phase/
+          include-hidden-files: true
+          if-no-files-found: error
+
+  production-host:
+    name: Host / 生产宿主
+    needs: [source-plan, production-frontend, bundled-plugin-build]
+    runs-on: windows-latest
+    timeout-minutes: 3
+    steps:
+      - name: 检出候选控制源码
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: NexusPipeline-Control
+          persist-credentials: false
+      - name: 检出固定宿主源码
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ needs.source-plan.outputs.source_sha }}
+          path: NexusPipeline
+          persist-credentials: false
+      - name: 准备Node工具链
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: "24"
+      - name: 准备.NET工具链
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+        with:
+          dotnet-version: "8.0.424"
+      - name: 准备Python工具链
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.13"
+      - name: 下载前端阶段产物
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: host-frontend-${{ github.run_id }}-${{ github.run_attempt }}
+          path: NexusPipeline/.generated/frontend-phase
+      - name: 下载预装插件阶段产物
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: host-bundled-${{ github.run_id }}-${{ github.run_attempt }}
+          path: NexusPipeline/.generated/bundled-phase
+      - name: 验证阶段输入并构建生产宿主
+        working-directory: NexusPipeline
+        shell: pwsh
+        run: >-
+          python ../NexusPipeline-Control/tools/host_release.py build-host --root .
+          --source-sha '${{ needs.source-plan.outputs.source_sha }}'
+          --partner-sha '${{ needs.source-plan.outputs.partner_sha }}'
+          --frontend-phase .generated/frontend-phase
+          --bundled-phase .generated/bundled-phase
+          --output .generated/host-phase
+      - name: 上传生产宿主阶段产物
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: host-production-${{ github.run_id }}-${{ github.run_attempt }}
+          path: NexusPipeline/.generated/host-phase/
+          include-hidden-files: true
+          if-no-files-found: error
+
+  package-verify:
+    name: Host / 包校验
+    needs: [source-plan, production-host]
+    runs-on: windows-latest
+    timeout-minutes: 3
+    steps:
+      - name: 检出候选控制源码
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: NexusPipeline-Control
+          persist-credentials: false
+      - name: 检出固定宿主源码
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ needs.source-plan.outputs.source_sha }}
+          path: NexusPipeline
+          persist-credentials: false
+      - name: 准备Python工具链
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.13"
+      - name: 下载生产宿主阶段产物
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: host-production-${{ github.run_id }}-${{ github.run_attempt }}
+          path: NexusPipeline/.generated/host-phase
+      - name: 核验生产包字节
+        working-directory: NexusPipeline
+        shell: pwsh
+        run: |
+          $meta = Get-Content .generated/host-phase/build-metadata.json -Raw | ConvertFrom-Json
+          $package = ".generated/host-phase/NexusPipeline-$($meta.tag)-win-x64.zip"
+          python ../NexusPipeline-Control/tools/host_release.py verify-package --package $package --metadata .generated/host-phase/build-metadata.json --expected-source-sha '${{ needs.source-plan.outputs.source_sha }}' --expected-tag $meta.tag
+          if ($LASTEXITCODE -ne 0) { throw 'Production package failed validation' }
+
+  installer-build:
+    name: Host / 安装器构建
+    needs: [source-plan, production-host]
+    runs-on: windows-latest
+    timeout-minutes: 3
+    steps:
+      - name: 检出候选控制源码
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: NexusPipeline-Control
+          persist-credentials: false
+      - name: 检出固定宿主源码
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ needs.source-plan.outputs.source_sha }}
+          path: NexusPipeline
+          persist-credentials: false
+      - name: 准备Python工具链
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.13"
+      - name: 下载生产宿主阶段产物
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: host-production-${{ github.run_id }}-${{ github.run_attempt }}
+          path: NexusPipeline/.generated/host-phase
+      - name: 准备锁定安装工具
         shell: pwsh
         run: |
           $toolRoot = Join-Path $env:GITHUB_WORKSPACE 'inno-tool'
@@ -102,39 +305,68 @@ jobs:
           if ($process.ExitCode -ne 0) { throw "Inno Setup portable extraction failed: $($process.ExitCode)" }
           $compiler = Join-Path $compilerDir 'ISCC.exe'
           if ((Get-FileHash -Algorithm SHA256 -LiteralPath $compiler).Hash.ToLowerInvariant() -ne '0a8757031b33777e4c9cbffee40f11a5062b36d25cbe144c1db73b6102b80ad7') { throw 'Inno compiler digest mismatch' }
-      - name: Resolve official Plugins input
-        id: plugins
-        shell: pwsh
-        run: |
-          $line = @(git ls-remote https://github.com/FlappiBakuse/NexusPipeline-Plugins.git refs/heads/main)
-          if ($LASTEXITCODE -ne 0 -or $line.Count -ne 1) { throw 'Cannot resolve official Plugins main' }
-          $sha = ($line[0] -split '\s+')[0]
-          if ($sha -notmatch '^[0-9a-f]{40}$') { throw 'Invalid official Plugins SHA' }
-          "sha=$sha" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          repository: FlappiBakuse/NexusPipeline-Plugins
-          ref: ${{ steps.plugins.outputs.sha }}
-          path: NexusPipeline-Plugins
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Build and verify original candidate
+      - name: 构建同源安装器
         working-directory: NexusPipeline
         shell: pwsh
-        env:
-          PLUGIN_SHA: ${{ steps.plugins.outputs.sha }}
-          WORKFLOW_SHA: ${{ github.workflow_sha }}
-          SOURCE_SHA: ${{ steps.source.outputs.sha }}
         run: >-
-          python ../NexusPipeline-Control/tools/host_release.py candidate
-          --root . --source-sha $env:SOURCE_SHA
-          --workflow-sha $env:WORKFLOW_SHA
-          --partner-sha $env:PLUGIN_SHA
-          --run-id $env:GITHUB_RUN_ID --run-attempt $env:GITHUB_RUN_ATTEMPT
-          --plugins-root ../NexusPipeline-Plugins
-          --inno-compiler ../inno-tool/compiler/ISCC.exe
-          --output .generated/candidate/$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT
-      - name: Upload validated candidate
+          python ../NexusPipeline-Control/tools/host_installer.py --production-root .generated/host-phase/production
+          --metadata .generated/host-phase/build-metadata.json
+          --dependencies tools/runtime-dependencies.json
+          --template tools/installer.iss.in
+          --compiler ../inno-tool/compiler/ISCC.exe
+          --output .generated/installer-phase
+      - name: 上传安装器阶段产物
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: host-installer-${{ github.run_id }}-${{ github.run_attempt }}
+          path: NexusPipeline/.generated/installer-phase/
+          include-hidden-files: true
+          if-no-files-found: error
+
+  candidate:
+    name: Host / 候选校验
+    needs: [source-plan, package-verify, installer-build]
+    runs-on: windows-latest
+    timeout-minutes: 3
+    steps:
+      - name: 检出候选控制源码
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: NexusPipeline-Control
+          persist-credentials: false
+      - name: 检出固定宿主源码
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ needs.source-plan.outputs.source_sha }}
+          path: NexusPipeline
+          persist-credentials: false
+      - name: 准备Python工具链
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.13"
+      - name: 下载生产宿主阶段产物
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: host-production-${{ github.run_id }}-${{ github.run_attempt }}
+          path: NexusPipeline/.generated/host-phase
+      - name: 下载安装器阶段产物
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: host-installer-${{ github.run_id }}-${{ github.run_attempt }}
+          path: NexusPipeline/.generated/installer-phase
+      - name: 汇集并核验原始候选
+        working-directory: NexusPipeline
+        shell: pwsh
+        run: >-
+          python ../NexusPipeline-Control/tools/host_release.py assemble-candidate --root .
+          --source-sha '${{ needs.source-plan.outputs.source_sha }}'
+          --partner-sha '${{ needs.source-plan.outputs.partner_sha }}'
+          --workflow-sha '${{ github.workflow_sha }}'
+          --run-id '${{ github.run_id }}' --run-attempt '${{ github.run_attempt }}'
+          --host-phase .generated/host-phase --installer-phase .generated/installer-phase
+          --output .generated/candidate/${{ github.run_id }}-${{ github.run_attempt }}
+      - name: 上传原始候选
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: host-candidate-${{ github.run_id }}-${{ github.run_attempt }}
@@ -143,21 +375,24 @@ jobs:
           if-no-files-found: error
 
   publish-only:
-    name: Publish original Host candidate
+    name: Host / 原包发布
     if: github.event_name == 'workflow_dispatch' && inputs.operation == 'publish-only'
     runs-on: windows-latest
+    timeout-minutes: 3
     environment: host-release
     permissions:
       actions: read
       contents: read
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: 检出发布控制源码
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ github.workflow_sha }}
           path: NexusPipeline
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+      - name: 准备Python工具链
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: "3.13"
       - name: Resolve original successful producer and artifact
@@ -201,7 +436,8 @@ jobs:
           --run-id '${{ steps.source.outputs.run_id }}'
           --run-attempt '${{ steps.source.outputs.run_attempt }}'
           --github-output $env:GITHUB_OUTPUT
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: 检出原始候选源码
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ steps.candidate.outputs.source_sha }}
           path: NexusPipeline-Source
