@@ -127,8 +127,12 @@ internal class HostCompositionRoot
         collection.AddSingleton<IQueueUserParticipationReader>(_ => new RuntimeQueueUserParticipationReader(_entityState));
         collection.AddSingleton<ISettingsProvider>(_settingsState);
         collection.AddSingleton<IControlPlaneStatusReader, ControlPlaneStatusAdapter>();
+        Func<ProxyConfiguration, OutboundHttpTarget, bool, HttpMessageHandler>? outboundHandlerFactory = null;
+#if NEXUS_TEST_HOST
+        outboundHandlerFactory = TestHostTransport.CreateFromEnvironment();
+#endif
         collection.AddSingleton<OutboundHttpClientProvider>(_ => new OutboundHttpClientProvider(
-            () => OutboundProxyOptionsAdapter.FromSettings(Settings)));
+            () => OutboundProxyOptionsAdapter.FromSettings(Settings), outboundHandlerFactory));
         collection.AddSingleton(HostVersionInfo.Current);
         collection.AddSingleton<IHistoryStore>(provider => provider.GetRequiredService<RunHistoryService>());
         collection.AddSingleton<PluginManager>(provider => new PluginManager(
