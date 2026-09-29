@@ -130,7 +130,7 @@ async function buildFrontendBundle() {
 }
 
 /** 发布 asInvoker Test Host：nexus-pipeline.exe 与 wwwroot 放在同一次运行目录内。 */
-async function publishTestHost() {
+async function publishTestHost({ withFrontend = true } = {}) {
   step("发布 asInvoker Test Host");
   fs.rmSync(testHostDir, { recursive: true, force: true, maxRetries: 120, retryDelay: 250 });
   fs.mkdirSync(testHostDir, { recursive: true });
@@ -143,7 +143,8 @@ async function publishTestHost() {
   if (code !== 0) return code;
   const manifestCode = await verifyManifest(path.join(testHostDir, "nexus-pipeline.exe"), "asInvoker");
   if (manifestCode !== 0) return manifestCode;
-  fs.cpSync(path.join(frontendDir, "dist"), path.join(testHostDir, "wwwroot"), { recursive: true });
+  if (withFrontend) fs.cpSync(path.join(frontendDir, "dist"), path.join(testHostDir, "wwwroot"), { recursive: true });
+  else fs.mkdirSync(path.join(testHostDir, "wwwroot"), { recursive: true });
   fs.mkdirSync(path.join(testHostDir, "plugins"), { recursive: true });
   return 0;
 }
@@ -281,9 +282,7 @@ async function runStoreDiagnostic() {
   workspace ??= stageWorkspace(projectRoot, process.env.NEXUS_TEST_ARTIFACT_ROOT, invocationBudget);
   executionRoot = workspace.directory;
   frontendDir = path.join(executionRoot, "frontend");
-  let code = await buildFrontendBundle();
-  if (code !== 0) return code;
-  code = await publishTestHost();
+  let code = await publishTestHost({ withFrontend: false });
   if (code !== 0) return code;
   code = await run("dotnet", ["build", "tests/fixtures/NexusPipeline.TestPlugin/NexusPipeline.TestPlugin.csproj",
     "-c", "Release", "-p:NexusTestHost=true", "-p:UseSharedCompilation=false", "--disable-build-servers", "--nologo"]);
@@ -379,9 +378,7 @@ async function runGate(id) {
   }
   if (id === "host.integration.store") return runStoreDiagnostic();
   if (id === "host.integration.restart-update") {
-    let code = await buildFrontendBundle();
-    if (code) return code;
-    code = await publishTestHost();
+    const code = await publishTestHost({ withFrontend: false });
     return code || runSystemSuite({ file: "tests/system/runtime-smoke.mjs", runtimeName: "runtime" });
   }
   const finite = {
