@@ -51,7 +51,7 @@
     {
       "id": "host.required",
       "repository": "Host",
-      "name": "Host / Required",
+      "name": "Host / 必需汇总",
       "kind": "aggregate",
       "hardTimeoutMs": 180000,
       "qualificationMs": 150000,

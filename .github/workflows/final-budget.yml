@@ -1,21 +1,21 @@
-name: Host Final Budget
+name: Host 完整预算
 
 on:
   workflow_run:
-    workflows: [Host CI, Host 持续集成]
+    workflows: [Host 持续集成]
     types: [requested, completed]
   workflow_dispatch:
     inputs:
       run_id:
-        description: Completed Host CI run to audit
+        description: 待审计的宿主持续集成运行 ID
         required: true
         type: string
       attempt:
-        description: Completed attempt
+        description: 已完成的运行次数
         required: true
         type: string
       phase:
-        description: Register a complete rerun attempt or finalize its completed producer
+        description: 登记完整重跑次数或复核已完成的构建运行
         required: true
         default: finalize
         type: choice
@@ -51,4 +51,4 @@ jobs:
           RUN_ID: ${{ github.event.workflow_run.id || inputs.run_id }}
           ATTEMPT: ${{ github.event.workflow_run.run_attempt || inputs.attempt }}
           PHASE: ${{ github.event.action == 'requested' && 'begin' || inputs.phase || 'finalize' }}
-        run: python tests/final-budget.py --phase "$PHASE" --run-id "$RUN_ID" --attempt "$ATTEMPT" --required-name 'Host / Required' --check-name 'Host / Final Budget'
+        run: python tests/final-budget.py --phase "$PHASE" --run-id "$RUN_ID" --attempt "$ATTEMPT" --required-name 'Host / 必需汇总' --check-name 'Host / 完整预算'

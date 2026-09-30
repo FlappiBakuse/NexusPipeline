@@ -249,9 +249,21 @@ class BeginPending(ValueError):
     pass
 
 
+def validate_job_names(audit, plan, jobs, expected_names):
+    skipped = [job for job in jobs if job.get("runnerlessSkipped")]
+    permitted = set()
+    if not plan["control"]["units"]:
+        permitted.add(audit.job_name(plan["repository"], "control"))
+    if not plan["batches"]:
+        permitted.add(audit.job_name(plan["repository"], "unselected"))
+    require(all(job["name"] in permitted for job in skipped), "Unexpected skipped physical position")
+    physical = [job for job in jobs if not job.get("runnerlessSkipped")]
+    require(exact([job["name"] for job in physical], expected_names) and len(physical)+2 <= 10, "Unexpected physical producer graph")
+
+
 def trusted_begin(audit, final, repository, plan, producer):
     suite = audit.api(f"/repos/{repository}/check-suites/{producer['check_suite_id']}")
-    check = final.current_check(repository,plan["headSha"],plan["repository"]+" / Final Budget",suite["app"]["id"],plan["prNumber"])
+    check = final.current_check(repository,plan["headSha"],audit.job_name(plan["repository"], "finalBudget"),suite["app"]["id"],plan["prNumber"])
     if check is None: raise BeginPending("Missing trusted begin registration")
     registration = final.registration(check)
     require(registration["pr"] == plan["prNumber"], "Foreign begin PR")
@@ -310,15 +322,10 @@ def main():
     require(0 <= elapsed < 130, "Required work budget exhausted/invalid start")
     deadline = time.monotonic()+min(100,130-elapsed)
     app_id = wait_for_trusted_begin(audit,final,repository,plan,producer,deadline=deadline)
-    jobs,_ = audit.physical_jobs(repository,producer,audit.completed_jobs(repository,int(plan["runId"]),int(plan["attempt"])),plan["repository"]+" / Final Budget",app_id)
-    names = [plan["repository"]+" / 范围判定",*([plan["repository"]+" / Control"] if plan["control"]["units"] else []),*[plan["repository"]+" / "+batch["id"] for batch in plan["batches"]]]
-    skipped = [job for job in jobs if job.get("runnerlessSkipped")]
-    permitted = set()
-    if not plan["control"]["units"]: permitted.add(plan["repository"]+" / Control")
-    if not plan["batches"]: permitted.add(plan["repository"]+" / Batches (not selected)")
-    require(all(job["name"] in permitted for job in skipped),"Unexpected skipped physical position")
-    physical = [job for job in jobs if not job.get("runnerlessSkipped")]
-    require(exact([job["name"] for job in physical],names+[plan["repository"]+" / Required"]) and len(physical)+2 <= 10,"Unexpected physical producer graph")
+    jobs,_ = audit.physical_jobs(repository,producer,audit.completed_jobs(repository,int(plan["runId"]),int(plan["attempt"])),audit.job_name(plan["repository"], "finalBudget"),app_id)
+    expected_names = json.loads(subprocess.check_output(["node", str(root/"tests/ci-names.mjs"), str(plans[0])], cwd=root, timeout=8))
+    names = expected_names[:-1]
+    validate_job_names(audit, plan, jobs, expected_names)
     before = [job for job in jobs if job["name"] in names]
     durations = audit.audit(before,int(plan["runId"]),int(plan["attempt"]))
     require(all(item["status"] == "PASS" for item in durations),"Complete predecessor job failed/budget exceeded")

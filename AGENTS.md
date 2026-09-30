@@ -24,7 +24,7 @@ NexusPipeline（枢链）是 Windows 本地自动化脚本管家：.NET 8/C# Win
 ## 2. 操作授权、版本和数据
 
 - 代码实施授权与 commit、push、tag、PR、合并、规则修改、实际发布授权分别判断。用户未授权的远端或版本操作不得执行。可以完成不依赖远端写入的实现和本地验证。
-- 日常开发目标为 `develop`；`main` 源码必须经 PR、`Host / Required` 与 `Host / Final Budget` 成功和 squash 合并。Host 没有生成物直推 `main` 例外。禁止普通直推/force push `main`。
+- 日常开发目标为 `develop`；`main` 源码必须经 PR、`Host / 必需汇总` 与 `Host / Final Budget` 成功和 squash 合并。Host 没有生成物直推 `main` 例外。禁止普通直推/force push `main`。
 - 正式版本号仅按用户指示修改；未指定版本不阻止普通修复、架构或工具工作。指定版本后同步相关元数据。`major=0` 或含 `-beta.N`/`-rc.N` 的发行标记为 Pre-release。预览插件通道与 Host 产品 Pre-release 是不同概念。
 - 修改前保存当前 HEAD、diff 和将修改文件的外部备份。备份必须包含未提交字节；只记录 tag 不足以保全工作树。未经针对性授权不使用 `reset --hard`、`clean -fd`、自动 stash 或覆盖恢复。已授权的版本化本地备份 tag 不推送远端。
 - `config/`、`data/`、`history/`、`logs/`、`.nxp/`、插件用户数据、更新/配置恢复现场属于用户或运行态。测试使用新建隔离目录；不得对用户现有实例、进程、端口或文件做“测试清理”。读日志先脱敏。
