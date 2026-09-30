@@ -50,30 +50,18 @@ def evaluate(run, jobs, repository, run_id, attempt, required_name):
     if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha) or pulls[0].get("head", {}).get("sha") != sha:
         raise ValueError("Pull request head mismatch")
     report = audit_jobs.audit(jobs, run_id, attempt)
-    if required_name.endswith(" / Required"):
-        localized = required_name.removesuffix(" / Required") + " / 必需汇总"
-        if any(item["name"] == localized for item in report):
-            required_name = localized
     required = [item for item in report if item["name"] == required_name]
     if len(required) != 1:
         raise ValueError("Missing or duplicate Required job")
     passed = (run.get("conclusion") == "success"
               and required[0]["status"] == "PASS"
               and all(item["status"] != "FAIL" for item in report))
-    prefix = required_name.rsplit(" / ", 1)[0]
+    prefix = required_name.removesuffix(" / " + audit_jobs.NAMES["required"])
     if prefix in ("Host", "Plugins"):
-        legacy = required_name.endswith(" / Required")
-        control = prefix+" / Control" if legacy else audit_jobs.job_name(prefix, "control")
-        unselected = prefix+" / Batches (not selected)" if legacy else audit_jobs.job_name(prefix, "unselected")
-        def index(name):
-            if not legacy:
-                return audit_jobs.batch_index(name, prefix)
-            match = re.fullmatch(re.escape(prefix)+r" / batch-(0[1-5])", name)
-            return int(match[1]) if match else None
         names = {item["name"] for item in report}
-        batches = sorted(index(name) for name in names if index(name) is not None)
-        permitted = {prefix+" / 范围判定", control, required_name, unselected}
-        permitted.update(name for name in names if index(name) is not None)
+        batches = sorted(audit_jobs.batch_index(name, prefix) for name in names if audit_jobs.batch_index(name, prefix) is not None)
+        permitted = {prefix+" / 范围判定", audit_jobs.job_name(prefix, "control"), required_name, audit_jobs.job_name(prefix, "unselected")}
+        permitted.update(name for name in names if audit_jobs.batch_index(name, prefix) is not None)
         physical_count = sum(not job.get("runnerlessSkipped") for job in jobs)
         if (not names <= permitted or prefix+" / 范围判定" not in names
                 or batches != list(range(1, len(batches)+1))

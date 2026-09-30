@@ -4,7 +4,7 @@
 
 CI 不创建临时测试账户、不写入测试账户密码、不使用令牌降级启动器，也不把日志、配置、密钥或运行产物加入版本库。
 
-`.github/workflows/ci.yml` 使用范围判定、可选轻量 control、最多五个 Windows batch 与 Required；每个物理 job 三分钟硬停止。逻辑义务和原生用例由固定策略登记，同程序集选中用例并集执行一次，准备按同输入 key 复用。`Host / Required` 保留为兼容现役保护规则的轻量汇总：核验输入、计数、场景、清理以及 Actions API 返回的前置 job 实际总时长。失败、取消、意外跳过、缺报告或 API 不可达都不放行。
+`.github/workflows/ci.yml` 使用范围判定、可选轻量 control、最多五个 Windows batch 与 必需汇总；每个物理 job 三分钟硬停止。逻辑义务和原生用例由固定策略登记，同程序集选中用例并集执行一次，准备按同输入 key 复用。`Host / 必需汇总` 保留为兼容现役保护规则的轻量汇总：核验输入、计数、场景、清理以及 Actions API 返回的前置 job 实际总时长。失败、取消、意外跳过、缺报告或 API 不可达都不放行。
 
 合入 `main` 后，`.github/workflows/release.yml` 按 source plan 分阶段构建前端、bundled 插件、正式 Host、ZIP 与 Setup，并验收候选清单、来源与包完整性；builder 与 writer 权限分离。发布恢复只复用原候选字节。发布权限和远端保护规则不由测试命令修改。
 
