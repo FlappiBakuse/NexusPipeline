@@ -9,7 +9,7 @@ export class BudgetExceeded extends Error {
 
 export class Budget {
   constructor(label, limitMs, { parent = null, reserveMs = 0, qualificationMs = limitMs,
-    clock = () => performance.now() } = {}) {
+    clock = () => performance.now(), inheritedWorkMs = Infinity, inheritedHardMs = Infinity } = {}) {
     if (!Number.isFinite(limitMs) || limitMs <= 0 || !Number.isFinite(reserveMs)
       || reserveMs < 0 || reserveMs >= limitMs || !Number.isFinite(qualificationMs)
       || qualificationMs <= 0 || qualificationMs > limitMs) throw new TypeError("Invalid budget");
@@ -17,10 +17,12 @@ export class Budget {
     this.clock = parent?.clock ?? clock;
     this.started = this.clock();
     this.startedMonotonic = this.started;
-    this.deadline = Math.min(this.started + limitMs, parent?.workDeadline ?? Infinity);
+    if (Number.isNaN(inheritedWorkMs) || Number.isNaN(inheritedHardMs)) throw new TypeError("Invalid inherited deadline");
+    const localDeadline = this.started + limitMs;
+    this.deadline = Math.min(localDeadline, parent?.deadline ?? Infinity, this.started + Math.max(0,inheritedHardMs));
     this.cleanupDeadline = this.deadline;
-    this.qualificationDeadline = Math.min(this.started + qualificationMs, this.deadline);
-    this.workDeadline = Math.min(this.qualificationDeadline, this.deadline - reserveMs);
+    this.qualificationDeadline = Math.min(this.started + qualificationMs, parent?.qualificationDeadline ?? Infinity, this.deadline);
+    this.workDeadline = Math.min(this.qualificationDeadline, localDeadline - reserveMs, parent?.workDeadline ?? Infinity, this.started + Math.max(0,inheritedWorkMs));
     this.limitMs = limitMs;
   }
 

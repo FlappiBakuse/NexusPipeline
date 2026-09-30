@@ -392,6 +392,17 @@
       "trigger": "发行DAG适用阶段；必须明确输入和权限",
       "dependsOn": [],
       "partnerRequired": false
+    },
+    {
+      "id": "host.partner-jint",
+      "repository": "Host",
+      "name": "Host / 专项生产Jint",
+      "kind": "test",
+      "hardTimeoutMs": 180000,
+      "qualificationMs": 150000,
+      "trigger": "Jint dependency or production scripting bridge",
+      "dependsOn": [],
+      "partnerRequired": true
     }
   ]
 }

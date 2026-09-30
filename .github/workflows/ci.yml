@@ -1,18 +1,14 @@
 name: Host CI
-
 on:
   pull_request:
     branches: [main]
     types: [opened, synchronize, reopened, ready_for_review]
-
 permissions:
   contents: read
   actions: read
-
 concurrency:
   group: host-ci-${{ github.event.pull_request.number }}
   cancel-in-progress: true
-
 jobs:
   scope:
     name: Host / 范围判定
@@ -21,37 +17,80 @@ jobs:
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
       count: ${{ steps.plan.outputs.count }}
+      control: ${{ steps.plan.outputs.control }}
       partnerSha: ${{ steps.plan.outputs.partnerSha }}
     steps:
-      - name: 检出完整源码与基线
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           path: Host
           fetch-depth: 0
           persist-credentials: false
-      - name: 准备 Node 工具链
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: "24"
-      - name: 选择受影响门禁
-        id: plan
+      - id: plan
         working-directory: Host
         env:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
           SCOPE_RESULT: ${{ runner.temp }}/scope.json
           GITHUB_TOKEN: ${{ github.token }}
         run: node tests/ci-scope.mjs
-      - name: 保存范围计划
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: scope
+          name: scope-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/scope.json
           if-no-files-found: error
           retention-days: 7
-
-  gates:
-    name: ${{ matrix.name }}
+  control:
+    name: Host / Control
+    needs: scope
+    if: needs.scope.outputs.control == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    env:
+      NEXUS_TEST_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}-control
+    steps:
+      - run: echo "NEXUS_TEST_JOB_STARTED_AT_MS=$(date +%s%3N)" >> "$GITHUB_ENV"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: Host
+          fetch-depth: 0
+          persist-credentials: false
+      - if: needs.scope.outputs.partnerSha != ''
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: FlappiBakuse/NexusPipeline-Plugins
+          ref: ${{ needs.scope.outputs.partnerSha }}
+          path: Plugins
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: "24"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.13"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: scope-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/scope
+      - working-directory: Host
+        env:
+          NEXUS_PARTNER_ROOT: ${{ needs.scope.outputs.partnerSha != '' && format('{0}/Plugins', github.workspace) || '' }}
+        run: node tests/run.mjs batch --plan '${{ runner.temp }}/scope/scope.json' --batch control
+      - if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: host-${{ github.run_id }}-${{ github.run_attempt }}-control
+          path: |
+            ${{ runner.temp }}/NexusPipeline.Tests/runs/${{ env.NEXUS_TEST_RUN_ID }}/batch-report.json
+            ${{ runner.temp }}/NexusPipeline.Tests/runs/${{ env.NEXUS_TEST_RUN_ID }}/commands.log
+            ${{ runner.temp }}/NexusPipeline.Tests/runs/${{ env.NEXUS_TEST_RUN_ID }}/evidence/
+          if-no-files-found: error
+          retention-days: 7
+  batches:
+    name: ${{ matrix.name || 'Host / Batches (not selected)' }}
     needs: scope
     if: needs.scope.outputs.count != '0'
     strategy:
@@ -60,66 +99,83 @@ jobs:
     runs-on: windows-2025
     timeout-minutes: 3
     env:
-      NEXUS_TEST_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.key }}
-      NEXUS_PARTNER_ROOT: ${{ github.workspace }}/Plugins
+      NEXUS_TEST_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.id }}
     steps:
-      - name: 检出本次源码
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - shell: pwsh
+        run: '"NEXUS_TEST_JOB_STARTED_AT_MS=$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())" >> $env:GITHUB_ENV'
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           path: Host
+          fetch-depth: 0
           persist-credentials: false
-      - name: 检出固定插件输入
-        if: matrix.id == 'host.partner-contract'
+      - if: matrix.partnerRequired
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: FlappiBakuse/NexusPipeline-Plugins
           ref: ${{ needs.scope.outputs.partnerSha }}
           path: Plugins
           persist-credentials: false
-      - name: 验证预装 Node 版本
-        shell: pwsh
-        run: |
-          node -e 'const [major, minor] = process.versions.node.split(".").map(Number); if (major < 22 || (major === 22 && minor < 12)) process.exit(1);'
-      - name: 准备 .NET 工具链
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: "24"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.13"
+      - if: matrix.dotnetRequired
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
         with:
           dotnet-version: "8.0.x"
-      - name: 准备 Python 工具链
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
-          python-version: "3.13"
-      - name: 验证独立门禁
-        working-directory: Host
+          name: scope-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/scope
+      - working-directory: Host
         shell: pwsh
-        run: node tests/run.mjs gate --id '${{ matrix.id }}'
-      - name: 保存原生报告与门禁结果
-        if: ${{ !cancelled() }}
+        run: |
+          $arguments = @('tests/run.mjs', 'batch', '--plan', "$env:RUNNER_TEMP/scope/scope.json", '--batch', '${{ matrix.id }}')
+          if ('${{ matrix.partnerRequired }}' -eq 'true') { $arguments += @('--partner-root', "$env:GITHUB_WORKSPACE/Plugins") }
+          node @arguments
+      - if: ${{ !cancelled() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: host-gate-${{ matrix.key }}
-          path: ${{ runner.temp }}/NexusPipeline.Tests/runs/${{ env.NEXUS_TEST_RUN_ID }}
+          name: host-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.id }}
+          path: |
+            ${{ runner.temp }}/NexusPipeline.Tests/runs/${{ env.NEXUS_TEST_RUN_ID }}/batch-report.json
+            ${{ runner.temp }}/NexusPipeline.Tests/runs/${{ env.NEXUS_TEST_RUN_ID }}/commands.log
+            ${{ runner.temp }}/NexusPipeline.Tests/runs/${{ env.NEXUS_TEST_RUN_ID }}/evidence/
           if-no-files-found: error
           retention-days: 7
-
   required:
     name: Host / Required
-    needs: [scope, gates]
+    needs: [scope, control, batches]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
-      - name: 检出汇总策略
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           path: Host
+          fetch-depth: 0
           persist-credentials: false
-      - name: 下载范围与原生报告
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+      - if: needs.scope.outputs.partnerSha != ''
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: FlappiBakuse/NexusPipeline-Plugins
+          ref: ${{ needs.scope.outputs.partnerSha }}
+          path: Plugins
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: "24"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           path: ${{ runner.temp }}/reports
-      - name: 核验来源、用例与完整前序耗时
-        working-directory: Host
+      - working-directory: Host
         env:
           GH_TOKEN: ${{ github.token }}
           CI_NEEDS: ${{ toJSON(needs) }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          NEXUS_PARTNER_ROOT: ${{ needs.scope.outputs.partnerSha != '' && format('{0}/Plugins', github.workspace) || '' }}
         run: python tests/gate-required.py . '${{ runner.temp }}/reports'

@@ -10,6 +10,7 @@ import { stageWorkspace } from "./support/workspace.mjs";
 import { runCore } from "./support/core.mjs";
 import { runScopeCommand } from "./scope-cli.mjs";
 import { readRegistry } from "./scope-plan.mjs";
+import { loadBatch, saveBatch } from "./batch-runner.mjs";
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 if (process.argv[2] === "plan") {
@@ -20,11 +21,12 @@ const policyBytes = fs.readFileSync(path.join(projectRoot, "tests", "policy.json
 const policy = JSON.parse(policyBytes);
 if (policy.invocationBudgetMs !== 180_000 || policy.qualificationMs !== 150_000 || policy.cleanupReserveMs < 10_000
   || policy.cleanupReserveMs >= policy.invocationBudgetMs) throw new Error("Invalid Host budget policy");
+const batchContext = process.argv[2] === "batch" ? loadBatch(projectRoot,process.argv.slice(3)) : null;
 let executionRoot = projectRoot;
 let frontendDir = path.join(projectRoot, "frontend");
 let e2eDir = path.join(projectRoot, "tests", "e2e");
-const runId = process.env.NEXUS_TEST_RUN_ID?.trim() || `run-${Date.now()}-${process.pid}`;
-if (["ci", "smoke", "daily", "integration", "diagnostic", "gate"].includes(process.argv[2]?.toLowerCase())
+let runId = process.env.NEXUS_TEST_RUN_ID?.trim() || `run-${Date.now()}-${process.pid}`;
+if (["batch", "ci", "smoke", "daily", "integration", "diagnostic", "gate"].includes(process.argv[2]?.toLowerCase())
     && !process.env.NEXUS_TEST_ARTIFACT_ROOT) {
   const base = path.join(process.env.RUNNER_TEMP || os.tmpdir(), "NexusPipeline.Tests");
   if (!fs.existsSync(base)) {
@@ -35,10 +37,17 @@ if (["ci", "smoke", "daily", "integration", "diagnostic", "gate"].includes(proce
   }
   process.env.NEXUS_TEST_ARTIFACT_ROOT = base;
 }
-const runRoot = resolveTestRunRoot(projectRoot, runId);
+let runRoot = resolveTestRunRoot(projectRoot, runId);
+const jobStartedAt=Number(process.env.NEXUS_TEST_JOB_STARTED_AT_MS||Date.now());
+if(!Number.isFinite(jobStartedAt)||jobStartedAt>Date.now()) throw new Error("Invalid controlled job start");
+const setupElapsedMs=Date.now()-jobStartedAt;
+if(batchContext) batchContext.setupElapsedMs=setupElapsedMs;
 const invocationBudget = process.argv[2]?.toLowerCase() === "release" ? null
   : new Budget("Host 测试命令", policy.invocationBudgetMs,
-    { reserveMs: policy.cleanupReserveMs, qualificationMs: policy.qualificationMs });
+    { reserveMs: batchContext ? 50000 : policy.cleanupReserveMs, qualificationMs: policy.qualificationMs,
+      inheritedWorkMs:Math.min(process.env.NEXUS_TEST_PARENT_WORK_DEADLINE_MS ? Number(process.env.NEXUS_TEST_PARENT_WORK_DEADLINE_MS)-Date.now() : Infinity,process.env.NEXUS_TEST_JOB_STARTED_AT_MS ? 130000-(Date.now()-Number(process.env.NEXUS_TEST_JOB_STARTED_AT_MS)) : Infinity),
+      inheritedHardMs:Math.min(process.env.NEXUS_TEST_PARENT_HARD_DEADLINE_MS ? Number(process.env.NEXUS_TEST_PARENT_HARD_DEADLINE_MS)-Date.now() : Infinity,
+        process.env.NEXUS_TEST_JOB_STARTED_AT_MS?180000-setupElapsedMs:Infinity) });
 const cancellation = new AbortController();
 const cancel = () => cancellation.abort();
 process.once("SIGINT", cancel);
@@ -65,6 +74,12 @@ async function run(command, args, options = {}) {
         DOTNET_GENERATE_ASPNET_CERTIFICATE: "false", DOTNET_CLI_USE_MSBUILD_SERVER: "0",
         PYTHONDONTWRITEBYTECODE: "1", PYTHONUTF8: "1" };
     }
+  }
+  if(batchContext) {
+    const log=path.join(runRoot,"commands.log");fs.mkdirSync(runRoot,{recursive:true});
+    fs.appendFileSync(log,JSON.stringify([command,...args])+"\n");
+    const onOutput=options.onOutput;
+    options={...options,onOutput:text=>{fs.appendFileSync(log,text);onOutput?.(text);}};
   }
   return runProcess(command, args, {
     defaultCwd: executionRoot, ...options, env, budget: invocationBudget, signal: cancellation.signal,
@@ -98,7 +113,7 @@ function runSelectedCore(group) {
   return runCore({ group, policy, policyBytes, workspace, runRoot, runId, budget: invocationBudget, run });
 }
 
-async function buildFrontendBundle() {
+async function buildFrontendBundle({typechecked=false}={}) {
   step("前端生产构建");
   let code = await ensureNpm(frontendDir);
   if (code !== 0) return code;
@@ -120,7 +135,7 @@ async function buildFrontendBundle() {
     console.error(`[前端] 复用已验证构建：${current}`);
     return 0;
   }
-  code = await run(npmCommand, ["run", "typecheck"], { cwd: frontendDir });
+  code = typechecked ? 0 : await run(npmCommand, ["run", "typecheck"], { cwd: frontendDir });
   if (code !== 0) return code;
   code = await run(npmCommand, ["run", "build"], { cwd: frontendDir });
   if (code !== 0) return code;
@@ -130,7 +145,14 @@ async function buildFrontendBundle() {
 }
 
 /** 发布 asInvoker Test Host：nexus-pipeline.exe 与 wwwroot 放在同一次运行目录内。 */
+let publishedTestHost=false, publishedFrontend=false;
 async function publishTestHost({ withFrontend = true } = {}) {
+  if (publishedTestHost) {
+    if(withFrontend&&!publishedFrontend) {
+      fs.cpSync(path.join(frontendDir,"dist"),path.join(testHostDir,"wwwroot"),{recursive:true});publishedFrontend=true;
+    }
+    return 0;
+  }
   step("发布 asInvoker Test Host");
   fs.rmSync(testHostDir, { recursive: true, force: true, maxRetries: 120, retryDelay: 250 });
   fs.mkdirSync(testHostDir, { recursive: true });
@@ -146,7 +168,113 @@ async function publishTestHost({ withFrontend = true } = {}) {
   if (withFrontend) fs.cpSync(path.join(frontendDir, "dist"), path.join(testHostDir, "wwwroot"), { recursive: true });
   else fs.mkdirSync(path.join(testHostDir, "wwwroot"), { recursive: true });
   fs.mkdirSync(path.join(testHostDir, "plugins"), { recursive: true });
+  publishedTestHost=true;publishedFrontend=withFrontend;
   return 0;
+}
+
+const batchResults=[];
+const batchParentId=runId, batchParentRoot=runRoot;
+async function runBatch() {
+  if(batchContext.partnerRoot) process.env.NEXUS_PARTNER_ROOT=batchContext.partnerRoot;
+  workspace=stageWorkspace(projectRoot,process.env.NEXUS_TEST_ARTIFACT_ROOT,invocationBudget,"Host",{
+    dotnetRequired:batchContext.batch.units.some(unit=>unit.kind==="backend"||unit.kind==="partner-jint"||unit.preparations.some(name=>name.includes("test-build"))||unit.id==="host.architecture.backend")});
+  executionRoot=workspace.directory;frontendDir=path.join(executionRoot,"frontend");e2eDir=path.join(executionRoot,"tests/e2e");
+  let primary=0;
+  for(const unit of batchContext.batch.units) {
+    const result={id:unit.id,providedObligations:unit.provides,completedCaseIds:[],completedMethodIds:[],completedScenarioIds:[],completedEditorCaseIds:[],
+      status:"NOT_RUN",exitCode:4,rawEvidence:[],real:[],substituted:[]};
+    batchResults.push(result);
+    try {
+      invocationBudget.check();
+      runId=`${batchParentId}-${unit.id.replaceAll(/[.:]/g,"-")}`;runRoot=resolveTestRunRoot(projectRoot,runId);
+      fs.mkdirSync(runRoot,{recursive:true});
+      let code=0;
+      if(unit.kind==="backend") {
+        const selected={caseIds:unit.expectedCaseIds,scenarioIds:unit.expectedScenarioIds,
+          filter:[...new Set(unit.expectedCaseIds.map(id=>`FullyQualifiedName=${id.split("(")[0]}`))].join("|"),
+          boundaries:{real:["production C# rules and transactions"],substituted:["controlled provider ports"]}};
+        code=await runCore({group:"backend.batch",policy:{...policy,groups:{...policy.groups,"backend.batch":selected}},policyBytes,workspace,runRoot,runId,budget:invocationBudget,run});
+        const summary=JSON.parse(fs.readFileSync(path.join(runRoot,"backend.batch/summary.json")));
+        result.completedCaseIds=summary.scope.completedCaseIds;result.completedScenarioIds=summary.scope.completedScenarioIds;
+        result.real=summary.boundaries.real;result.substituted=summary.boundaries.substituted;
+      } else if(unit.kind==="frontend") {
+        const state=unit.provides.includes("host.frontend.state");
+        if(state) {
+          code=await runSelectedCore("frontend");
+          const summary=JSON.parse(fs.readFileSync(path.join(runRoot,"frontend/summary.json")));
+          result.completedCaseIds=summary.scope.completedCaseIds;result.completedScenarioIds=summary.scope.completedScenarioIds;
+        } else {code=await ensureNpm(frontendDir);if(!code) code=await run(npmCommand,["run","typecheck"],{cwd:frontendDir});}
+        if(!code&&unit.provides.includes("host.frontend.build")) code=await buildFrontendBundle({typechecked:true});
+      } else if(unit.kind==="partner-jint") {
+        const partner=batchContext.partnerRoot;
+        const staged=stageWorkspace(partner,process.env.NEXUS_TEST_ARTIFACT_ROOT,invocationBudget,"Plugins");
+        batchContext.partnerSource=staged.source;batchContext.partnerFingerprint=staged.sourceFingerprint;
+        try {
+          code=await run("dotnet",["build","tools/NexusPipeline.TaskProtocolTests","-c","Release","-p:NexusTestHost=true","-p:UseSharedCompilation=false","--disable-build-servers","--nologo"]);
+          for(const plugin of unit.partnerPlugins) for(const [index,fixture] of plugin.fixtureIds.entries()) {
+            if(code) break;
+            invocationBudget.check();
+            const report=path.join(runRoot,`${plugin.artifact}-${fixture}.json`);
+            const args=[path.join(executionRoot,"bin/test-host/NexusPipeline.TaskProtocolTests/Release/net8.0-windows/NexusPipeline.TaskProtocolTests.dll"),"--plugin-root",staged.directory,
+              "--plugin",plugin.artifact,"--scenario",fixture,"--report",report];
+            if(index===0) args.push("--observe-count","12");
+            code=await run("dotnet",args);
+            if(code) break;
+            const native=JSON.parse(fs.readFileSync(report));
+            if(native.artifact!==plugin.artifact||native.passed!==1||native.failed||native.skipped||JSON.stringify(native.completedCaseIds)!==JSON.stringify([fixture])
+              ||index===0&&(native.observeCount!==12||!native.isolatedRunChecked||JSON.stringify(native.editorCaseIds)!==JSON.stringify(plugin.expectedEditorCaseIds))) throw new Error("Invalid production Jint/editor evidence");
+            result.completedCaseIds.push(`${plugin.artifact}/${fixture}`);
+            if(index===0) result.completedEditorCaseIds.push(...native.editorCaseIds);
+          }
+          if(!code) result.completedScenarioIds=unit.expectedScenarioIds;
+        } finally {if(getProcessRunnerState().cleanupComplete) staged.release();}
+      } else {
+        code=await runGate(unit.id);
+        if(!code&&policy.integrationScenarios?.[unit.id]) {
+          const finite=finiteResults.findLast(item=>({execution:"H-E01",config:"H-E02",control:"H-E03",schedule:"H-E04"}[item.group])===policy.integrationScenarios[unit.id]);
+          if(!finite||finite.exitCode) throw new Error("Missing finite production scenario evidence");
+          const native=JSON.parse(fs.readFileSync(finite.evidence));
+          if(native.status!=="PASS"||native.cleanup!=="complete"||native.scenarioId!==policy.integrationScenarios[unit.id]) throw new Error("Failed finite scenario");
+          fs.copyFileSync(finite.evidence,path.join(runRoot,"finite-scenario.json"));result.completedScenarioIds=[native.scenarioId];
+        }
+        if(unit.id==="host.partner-contract") {
+          const partner=stageWorkspace(batchContext.partnerRoot,process.env.NEXUS_TEST_ARTIFACT_ROOT,invocationBudget,"Plugins",{dotnetRequired:false});
+          batchContext.partnerSource=partner.source;batchContext.partnerFingerprint=partner.sourceFingerprint;partner.release();
+        }
+      }
+      result.exitCode=code;result.status=code?"FAIL":"PASS";
+
+    } catch(error) {result.exitCode=error.exitCode??1;result.status="FAIL";result.failure=error.message;primary ||=result.exitCode;console.error(error.message);}
+    finally {
+      if(fs.existsSync(path.join(runRoot,"runtime/.nxp/test-run-marker.json"))) {
+        const remaining=invocationBudget.remainingMs({cleanup:true});
+        const cleanup=remaining>1000?await runProcess(process.execPath,[path.join(projectRoot,"tests/support/cleanup-runtime.mjs"),runRoot,runId],{
+          env:process.env,timeoutMs:Math.min(8000,remaining-1000),timeoutCleanupMs:1000}):6;
+        if(cleanup) {result.exitCode ||=6;result.status="FAIL";primary ||=6;}
+      }
+    }
+    try {
+      const receipt=path.join(runRoot,"unit-receipt.json");
+      fs.writeFileSync(receipt,JSON.stringify({unitId:unit.id,provides:unit.provides,exitCode:result.exitCode,status:result.status,source:workspace.source,
+        elapsedMs:invocationBudget.elapsedMs,type:"typed gate execution receipt"},null,2));
+      const destination=path.join(batchParentRoot,"evidence",unit.id.replaceAll(/[.:]/g,"-"));
+      const copy=(source,target)=>{
+        fs.mkdirSync(target,{recursive:true});
+        for(const entry of fs.readdirSync(source,{withFileTypes:true})) {
+          const from=path.join(source,entry.name),to=path.join(target,entry.name);
+          if(entry.isSymbolicLink()) throw new Error("Linked native output");
+          if(entry.isDirectory()&&!["test-host","architecture-bin","architecture-obj","runtime","wwwroot","plugins"].includes(entry.name)) copy(from,to);
+          else if(entry.isFile()&&/\.(json|trx|tap|log|txt)$/.test(entry.name)) {
+            fs.copyFileSync(from,to);result.rawEvidence.push(path.relative(batchParentRoot,to).replaceAll("\\","/"));
+          }
+        }
+      };copy(runRoot,destination);
+
+    } catch(error) { result.exitCode ||= 4; result.status="FAIL"; result.failure ||= error.message; primary ||= result.exitCode; }
+    primary ||= result.exitCode;
+  }
+  runId=batchParentId;runRoot=batchParentRoot;
+  return primary;
 }
 
 function verifyManifest(executable, expectedLevel) {
@@ -194,7 +322,7 @@ async function runSystemSuite(suite) {
     exitFile: path.join(runRoot, suite.runtimeName, ".nxp", "test-host.exit"),
   });
   console.error(`\n-- System Smoke ${suite.file} (port=${webPort}) --`);
-  return run(process.execPath, ["--test", "--test-concurrency=1", suite.file], { env, timeoutMs: 15 * 60 * 1000 });
+  return run(process.execPath, ["--test", "--test-concurrency=1", ...(batchContext?["--test-reporter=tap",`--test-reporter-destination=${path.join(runRoot,"runtime-native.tap")}`]:[]), suite.file], { env, timeoutMs: 15 * 60 * 1000 });
 }
 
 async function runSystemSmoke() {
@@ -335,13 +463,15 @@ async function runGate(id) {
     return code || publishTestHost();
   }
   if (id === "host.ci-policy") {
-    let code = await run(process.execPath, ["--test", "tests/scope-plan.test.mjs", "tests/support/budget.test.mjs", "tests/support/test-runtime.test.mjs"]);
+    let code = await run(process.execPath, ["--test", "tests/scope-plan.test.mjs", "tests/core-plan.test.mjs", "tests/batch-plan.test.mjs", "tests/support/budget.test.mjs", "tests/support/test-runtime.test.mjs"]);
     if (code) return code;
     return run(pythonCommand, ["-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py", "-v"]);
   }
   if (id === "host.docs") {
     const required = ["README.md", "docs/user/README.md", "docs/user/README.en.md"];
     if (required.some(name => !fs.existsSync(path.join(executionRoot, name)))) return 4;
+    const checked=await run(process.execPath,["tools/check-doc-links.mjs"]);
+    if(checked) return checked;
     fs.writeFileSync(path.join(runRoot, "docs-manifest.json"), JSON.stringify({ files: required,
       source: workspace.source }, null, 2));
     return 0;
@@ -428,7 +558,8 @@ let gateId = null;
 resetProcessRunnerState();
 try {
   const selected = commands[command.toLowerCase()];
-  if (command === "list" && process.argv.length === 4 && process.argv[3] === "--json") {
+  if(command==="batch") {exitCode=await runBatch();}
+  else if (command === "list" && process.argv.length === 4 && process.argv[3] === "--json") {
     console.log(JSON.stringify({ budgetMs: policy.invocationBudgetMs, groups: Object.fromEntries(
       Object.entries(policy.groups).map(([name, group]) => [name, {
         scenarioIds: group.scenarioIds, caseCount: group.caseIds.length, boundaries: group.boundaries,
@@ -480,8 +611,9 @@ try {
   } else if (workspace) {
     workspace.release();
   }
-  if (invocationBudget && invocationBudget.elapsedMs > policy.qualificationMs) exitCode ||= 5;
+  if (invocationBudget && invocationBudget.elapsedMs+setupElapsedMs > policy.qualificationMs) exitCode ||= 5;
   if (invocationBudget?.remainingMs({ cleanup: true }) === 0) exitCode ||= 5;
+  if(batchContext) saveBatch(batchContext,batchParentRoot,workspace,batchResults,exitCode,invocationBudget.elapsedMs,getProcessRunnerState());
   const storeEvidence = path.join(runRoot, "store-evidence.json");
   if (command === "diagnostic" && fs.existsSync(storeEvidence)) {
     const evidence = JSON.parse(fs.readFileSync(storeEvidence, "utf8"));

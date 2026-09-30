@@ -1,0 +1,210 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Nexus scope plan v2",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schemaVersion",
+    "repository",
+    "baseSha",
+    "headSha",
+    "mergeBase",
+    "testedSha",
+    "dirty",
+    "sourceFingerprint",
+    "partnerSha",
+    "runId",
+    "attempt",
+    "prNumber",
+    "controlManifest",
+    "policyDigest",
+    "selected",
+    "notApplicable",
+    "units",
+    "requiredObligations",
+    "control",
+    "batches",
+    "estimatedTotalJobs",
+    "capacityStatus"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 2
+    },
+    "repository": {
+      "enum": [
+        "Host",
+        "Plugins"
+      ]
+    },
+    "dirty": {
+      "type": "boolean"
+    },
+    "sourceFingerprint": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "policyDigest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "control": {
+      "$ref": "#/$defs/batch"
+    },
+    "batches": {
+      "type": "array",
+      "maxItems": 5,
+      "items": {
+        "$ref": "#/$defs/batch"
+      }
+    },
+    "units": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/unit"
+      }
+    },
+    "requiredObligations": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string"
+      }
+    },
+    "estimatedTotalJobs": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 10
+    },
+    "capacityStatus": {
+      "enum": [
+        "PLANNED",
+        "CAPACITY_EXCEEDED"
+      ]
+    },
+    "baseSha": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{40}$"
+    },
+    "headSha": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{40}$"
+    },
+    "mergeBase": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{40}$"
+    },
+    "testedSha": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{40}$"
+    }
+  },
+  "$defs": {
+    "unit": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "id",
+        "kind",
+        "provides",
+        "expectedCaseIds",
+        "expectedMethodIds",
+        "expectedScenarioIds",
+        "expectedEditorCaseIds",
+        "preparations",
+        "prepareKey",
+        "estimatedMs"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "enum": [
+            "gate",
+            "backend",
+            "frontend",
+            "plugin",
+            "partner-jint"
+          ]
+        },
+        "provides": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        },
+        "expectedCaseIds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        },
+        "expectedMethodIds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        },
+        "expectedScenarioIds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        },
+        "expectedEditorCaseIds": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        },
+        "preparations": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        },
+        "prepareKey": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "estimatedMs": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "batch": {
+      "type": "object",
+      "required": [
+        "id",
+        "units",
+        "estimatedMs"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^(control|batch-0[1-5])$"
+        },
+        "units": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/unit"
+          }
+        },
+        "estimatedMs": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}
