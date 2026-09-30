@@ -28,7 +28,7 @@ Setup 使用本实例事务互斥体，将已核验的新 EXE 复制为独立 wo
 
 已发布 v0.16.8 的 worker 只交换 EXE 和 `wwwroot/`。v0.16.9 首次启动收尾会在已提交的同版本 journal 和 staging 存在时，仅对缺失的 `README.md` 创建文件；若用户目录已有 README，则保留，绝不覆盖未知修改。安装器同路径升级只接收本 Windows 用户已登记且身份匹配的安装目录，应用文件先按冻结 SHA256 写入 `.nxp-update/staging/`，再调用现有 `apply-update` worker；不明便携目录必须走内置更新或手动替换指导。
 
-候选构建对同一 production staging 生成 ZIP 和 Setup；`candidate.json` 固定列出两份资产、纯 SHA 侧文件和两份构建元数据。publisher 从原成功 run 下载服务端指定 artifact，核对来源、tree、依赖与编译器锁、四项分发资产的字节，再发布并远端逐项回读；不从发行页按 latest 重新取包。当前未授权创建 tag 或发布，源码中的链路不表示已有 v0.16.9 候选。
+候选构建对同一 production staging 生成 ZIP 和 Setup；`candidate.json` 固定列出两份资产、纯 SHA 侧文件和两份构建元数据。publisher 从原成功 run 下载服务端指定 artifact，核对来源、tree、依赖与编译器锁、四项分发资产的字节，再发布并远端逐项回读；不从发行页按 latest 重新取包。
 
 启动恢复发现未完成的 apply journal 且 immutable backup 包含宿主 exe 时，当前启动实例不会直接覆盖自己的映像；它会拉起独立 recovery worker，等待当前实例释放单实例互斥体后还原 backup、写入 `RollbackConfirmed` 并重拉宿主，旧版本启动收尾再删除 backup 与 journal。回滚失败时现场继续保留并由下一次启动重试。
 
