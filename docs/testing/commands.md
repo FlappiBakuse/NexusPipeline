@@ -88,3 +88,14 @@ python -m unittest discover -s tools/tests -p test_pe_manifest.py
 使用 `NexusTestHost=true` 时先 `dotnet build tools/NexusPipeline.TaskProtocolTests -p:NexusTestHost=true`，再运行实际输出 `bin/test-host/NexusPipeline.TaskProtocolTests/Debug/net8.0-windows/NexusPipeline.TaskProtocolTests.dll` 并传上述参数。全部命令应在外部隔离副本中运行；该工具报告仅证明选中的真实 Jint/发现/归并/配置事务，不表示上游真实设备已经验证。
 
 批次内部报告使用 schemaVersion 2，包含精确预期义务、原生 TRX/Vitest/TAP/场景文件及其 hash。Required 从固定源码重新推导计划，拒绝缺失、重复、skip、错 attempt、错 partner/policy、路径逃逸或规范化与原生报告不一致。完整资格上限为每物理 job 150 秒（含 checkout、工具/依赖准备、上传和 post-action），合计最多十个 job：scope + 可选 control + 五批 + Required + begin + finalize。Required 自身和 finalize 收尾仍须用完成后的只读服务端记录验收。
+
+### 同 SHA 完整重跑
+
+首次 CI 由 `requested` 事件登记一次可信 begin。完整重跑不产生该事件，须由已审核 `main` 显式登记新的 attempt；新 Required 只接受本次 PR/head/run/attempt 身份，未登记时失败。先重跑整个生产者，读取新的 attempt，再执行：
+
+```text
+gh run rerun <producer-run-id> --repo FlappiBakuse/NexusPipeline
+gh workflow run final-budget.yml --repo FlappiBakuse/NexusPipeline --ref main -f run_id=<producer-run-id> -f attempt=<新的attempt> -f phase=begin
+```
+
+不要只重跑失败 job 来替代完整资格。CI 完成后自动触发 finalize；检查成功后仍须读取生产者与两个控制器的完整服务端作业记录，包括 post-action。
