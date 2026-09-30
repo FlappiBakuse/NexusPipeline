@@ -58,6 +58,7 @@ export function statusLabel(value?: string) {
   if (value === "cancelled") return t("common.cancelled");
   if (value === "skipped") return t("common.skipped");
   if (value === "failed") return `✕ ${t("common.failed")}`;
+  if (value === "unverified") return t("history.status.unverified");
   return value || t("common.unknown");
 }
 

@@ -41,3 +41,5 @@
 
 <a id="9-发布流程"></a>
 - `#9-发布流程` → [发布流程](development/release.md#发布流程)
+
+仓库根目录的 `global.json` 固定 .NET 8 SDK 补丁带，允许同一带内的最新补丁。先在仓库内执行 `dotnet --version`，安装匹配的 SDK；只有其他主版本或特征带不满足此输入。生产与隔离 Test Host 继续使用 .NET 8。

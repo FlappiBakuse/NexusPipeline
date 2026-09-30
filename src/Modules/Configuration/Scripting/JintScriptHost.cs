@@ -88,6 +88,11 @@ internal sealed class JintScriptHost
     {
         var host = new JintScriptHost(new Engine(options =>
         {
+            // Public scripts receive independent JS array snapshots, without CLR write-through.
+            options.Interop.ArrayConversion = ArrayConversionMode.Copy;
+            options.Interop.CacheRecentObjectWrappers = false;
+            options.Constraints.StackOverflowGuard = true;
+            options.LimitRecursion(128);
             options.TimeoutInterval(timeout);
             if (maxMemoryBytes is long memory) options.LimitMemory(memory);
             if (maxStatements is int limit)

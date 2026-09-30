@@ -7,6 +7,7 @@ import NxpScrollArea from "../../../ui/primitives/NxpScrollArea.vue";
 import NxpDismissibleNotice from "../../../ui/composites/NxpDismissibleNotice.vue";
 import TaskPlanItem from "./TaskPlanItem.vue";
 import { resolveTaskText } from "../utils/taskText";
+import { taskDiagnosticLabel } from "../utils/taskLabels";
 import type { TaskConfigCheck, TaskDefinition, TaskPlan, TaskReport } from "../utils/taskTypes";
 const props = defineProps<{
   plan?: TaskPlan;
@@ -154,7 +155,7 @@ function configActionLabel(kind: string) {
       <ul v-if="diagnostics.length" class="task-plan-notes" :aria-label="t('tasks.plan_notes')">
         <li v-for="(item, index) in diagnostics" :key="index">
           <span v-if="diagnosticOwnerName(item.taskId)">{{ diagnosticOwnerName(item.taskId) }} · </span>
-          {{ item.reasonText ? resolveTaskText(item.reasonText, report?.displaySnapshot || plan.displaySnapshot, getLocale(), item.message) : item.message }}
+          {{ taskDiagnosticLabel(item, report?.displaySnapshot || plan.displaySnapshot) }}
         </li>
       </ul>
       <p v-if="report?.summary?.recovered && layout !== 'steps'" class="task-notice">{{ t('tasks.recovered') }}</p>

@@ -1,0 +1,352 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Nexus batch-report v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "scope",
+    "batchId",
+    "identity",
+    "policyDigest",
+    "planDigest",
+    "status",
+    "exitCode",
+    "timing",
+    "cleanupComplete",
+    "units",
+    "artifacts"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 2
+    },
+    "scope": {
+      "const": "LOCAL_BATCH_RESULT"
+    },
+    "batchId": {
+      "type": "string",
+      "pattern": "^(batch-0[1-5]|control)$"
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "repository",
+        "prNumber",
+        "baseSha",
+        "headSha",
+        "testedSha",
+        "runId",
+        "attempt",
+        "partnerSha",
+        "workingTreeDirty",
+        "sourceFingerprint",
+        "partnerFingerprint",
+        "toolchainFingerprint"
+      ],
+      "properties": {
+        "repository": {
+          "type": "string",
+          "enum": [
+            "FlappiBakuse/NexusPipeline",
+            "FlappiBakuse/NexusPipeline-Plugins"
+          ]
+        },
+        "prNumber": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "baseSha": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "headSha": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "testedSha": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "runId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "attempt": {
+          "type": [
+            "string",
+            "integer",
+            "null"
+          ]
+        },
+        "partnerSha": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9a-f]{40}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "workingTreeDirty": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "sourceFingerprint": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "partnerFingerprint": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "toolchainFingerprint": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "policyDigest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "planDigest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "status": {
+      "enum": [
+        "PASS",
+        "FAIL",
+        "BLOCKED",
+        "CANCELLED"
+      ]
+    },
+    "exitCode": {
+      "type": "integer"
+    },
+    "timing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "qualificationMs",
+        "hardTimeoutMs",
+        "processElapsedMs",
+        "completeJobMs"
+      ],
+      "properties": {
+        "qualificationMs": {
+          "const": 150000
+        },
+        "hardTimeoutMs": {
+          "const": 180000
+        },
+        "processElapsedMs": {
+          "type": "number",
+          "minimum": 0
+        },
+        "completeJobMs": {
+          "type": "null"
+        },
+        "preparationElapsedMs": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "cleanupComplete": {
+      "type": "boolean"
+    },
+    "units": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "id",
+          "providedObligations",
+          "completedCaseIds",
+          "completedScenarioIds",
+          "completedEditorCaseIds",
+          "status",
+          "exitCode",
+          "rawEvidence",
+          "real",
+          "substituted"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "providedObligations": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "uniqueItems": true
+          },
+          "completedCaseIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "uniqueItems": true
+          },
+          "completedScenarioIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "uniqueItems": true
+          },
+          "completedEditorCaseIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "uniqueItems": true
+          },
+          "status": {
+            "enum": [
+              "PASS",
+              "FAIL",
+              "BLOCKED",
+              "NOT_RUN",
+              "CANCELLED"
+            ]
+          },
+          "exitCode": {
+            "type": "integer"
+          },
+          "rawEvidence": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "uniqueItems": true
+          },
+          "real": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "uniqueItems": true
+          },
+          "substituted": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "uniqueItems": true
+          },
+          "completedMethodIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "uniqueItems": true
+          }
+        }
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "sha256",
+          "sizeBytes"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "qualification": {
+      "enum": [
+        "LOCAL_DIAGNOSTIC",
+        "CI_PRODUCER_PENDING_AUDIT"
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "PASS"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "exitCode": {
+            "const": 0
+          },
+          "cleanupComplete": {
+            "const": true
+          },
+          "timing": {
+            "properties": {
+              "processElapsedMs": {
+                "maximum": 150000
+              }
+            }
+          },
+          "units": {
+            "minItems": 1,
+            "items": {
+              "properties": {
+                "status": {
+                  "const": "PASS"
+                },
+                "exitCode": {
+                  "const": 0
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

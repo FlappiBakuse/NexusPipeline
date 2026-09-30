@@ -2,6 +2,20 @@
 
 本仓库所有重要变更均按版本记录于此。格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，版本使用 `major.minor.patch`、`-beta.N` 或 `-rc.N` 的受限格式；GitHub Release 分类遵循宿主项目发布策略：`major=0` 或带 `-beta.N` / `-rc.N` 后缀的版本为 Pre-release，`major>=1` 且无后缀的版本为正式 Release。
 
+## v0.16.13（未发布）
+
+### 任务计划与历史
+
+- 配置修复预览反馈统一使用 toast，按错误或提示选择颜色。
+- 历史运行记录的 unverified 显示为“未核验”，补齐官方任务计划的判定限制与提示翻译。
+
+### 验证与依赖
+
+- 按逻辑义务与准备依赖分配最多五个核心批次，复用同输入构建并绑定原生报告、源码与策略身份；范围未知或容量不足时保守阻断。
+- 可信 main 预算控制器登记 run/attempt，审计完整物理作业，拒绝旧结果污染并支持幂等收尾。
+- Jint 更新至 4.16.4，显式保持 CLR 数组复制语义并限制深递归；YamlDotNet 更新至 18.1.0，保留配置局部补丁的原字节契约。
+- 更新保留的 Python、artifact 与 publisher token Action，维持现役权限与候选完整性边界。
+
 ## v0.16.12（Pre-release）
 
 发布日期：2026-09-30。

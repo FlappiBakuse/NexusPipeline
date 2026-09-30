@@ -122,7 +122,10 @@ def upsert(repository, sha, check_name, existing, body):
         route, method = f"/repos/{repository}/check-runs", "POST"
         body["head_sha"] = sha
     result = write_api(route, body, method)
-    if result.get("head_sha") != sha or result.get("name") != check_name or existing and result.get("id") != existing["id"]:
+    if (result.get("head_sha") != sha or result.get("name") != check_name
+            or existing and result.get("id") != existing["id"]
+            or result.get("status") != body["status"]
+            or body["status"] == "in_progress" and result.get("conclusion") is not None):
         raise ValueError("Published check identity mismatch")
     return result["html_url"]
 
@@ -206,7 +209,8 @@ def main():
         if not is_current(repository, run, pull):
             print("SUPERSEDED: no check update")
             return
-        print(upsert(repository, sha, args.check_name, existing, {
+        # Completed checks retain their conclusion on PATCH; a new attempt needs a new pending check.
+        print(upsert(repository, sha, args.check_name, None, {
             "status": "in_progress", "external_id": external,
             "details_url": f"https://github.com/{repository}/actions/runs/{args.run_id}/attempts/{args.attempt}",
             "output": {"title": "Complete CI job budget", "summary": "Trusted begin registered; final audit pending."}}))

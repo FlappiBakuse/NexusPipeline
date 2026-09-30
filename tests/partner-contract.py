@@ -11,9 +11,15 @@ def check(host: Path, plugins: Path):
         raise ValueError("Host bridge or fixed Plugins checkout is missing")
     violations = []
     artifacts = []
+    policy = json.loads((plugins / "tests/policy.json").read_text(encoding="utf-8"))["plugins"]
+    if not policy or len({name.casefold() for name in policy}) != len(policy):
+        raise ValueError("Invalid registered Plugins inventory")
     for manifest in sorted((plugins / "plugins").glob("*/*/plugin.json")):
         data = json.loads(manifest.read_text(encoding="utf-8"))
         artifact = data["artifactName"]
+        if (artifact not in policy or policy[artifact]["root"] != manifest.parent.relative_to(plugins).as_posix()
+                or policy[artifact]["kind"] != data["kind"]):
+            raise ValueError("Plugin manifest differs from registered inventory")
         artifacts.append(artifact)
         if data["kind"] == "data-specialized" and data.get("frontend") is not None:
             violations.append({"artifact": artifact, "path": str(manifest),
@@ -35,7 +41,8 @@ def check(host: Path, plugins: Path):
                     violations.append({"artifact": artifact,
                                        "path": str(source.relative_to(plugins)).replace("\\", "/"),
                                        "reason": "plugin imports private Host source"})
-    if len(artifacts) != 13 or len(set(artifacts)) != 13:
+    if (set(artifacts) != set(policy) or len(artifacts) != len(policy)
+            or len({name.casefold() for name in artifacts}) != len(artifacts)):
         raise ValueError("Fixed Plugins inventory is incomplete")
     return {"schemaVersion": 1, "status": "FAIL" if violations else "PASS",
             "hostPublicBridge": str(public), "artifacts": artifacts, "violations": violations}

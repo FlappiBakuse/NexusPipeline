@@ -2,8 +2,9 @@ import { spawnSync } from "node:child_process";
 import { findAvailablePort } from "../support/test-runtime.mjs";
 import { runtime, assert, fs, path, json, target, settled, report } from "./finite-common.mjs";
 const handoffs = [], protocol = [];
-let cliRun, mcpRun;
+let cliRun, mcpRun, operation = "boot";
 function cli(args) {
+  operation = `CLI ${args[0]}`;
   const result = spawnSync(runtime.runtimeExe, [...args,"--json"], { cwd: runtime.runtimeDir, env: process.env,
     encoding: "utf8", timeout: 5000, windowsHide: true });
   assert.equal(result.status, 0, result.stdout + result.stderr);
@@ -26,11 +27,13 @@ try {
     UpdateCheckEnabled: false, McpEnabled: true, McpPort: mcpPort }));
   runtime.startRuntime(["service"]); await runtime.waitForService(null, 5000);
   assert.equal(cli(["status"]).service, "NexusPipeline");
+  assert.equal(await runtime.waitFor(async () => (await json("GET", "api/status")).ready === true, 5000, 50), true, "MCP listener did not become ready");
   const owned = await target("control-target"); await runtime.createUserBinding(owned.script.id, "control-user");
   cliRun = cli(["run", "script", owned.script.id, "--detach"]);
   assert.equal((await settled(cliRun.runId)).records[0].status, "success");
   let requestId = 0;
   const rpc = async (method, params) => {
+    operation = `MCP ${method}`;
     const id = ++requestId;
     const response = await fetch(`http://127.0.0.1:${mcpPort}/mcp`, { method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream", "MCP-Protocol-Version": "2025-03-26" },
@@ -66,6 +69,9 @@ try {
   const receipts = fs.readFileSync(process.env.NEXUS_TEST_HTTP_PLAN + ".receipts.jsonl", "utf8").trim().split("\n").map(JSON.parse);
   assert.deepEqual(receipts.map(item => item.id).sort(), ["bad-hash","catalog","catalog-update","install","update"].sort());
   assert.ok(receipts.every(item => item.matched));
+} catch (error) {
+  console.error(operation, error, runtime.runtimeDiagnostic());
+  throw error;
 } finally { await runtime.stopRuntime(); }
 report("H-E03", { cliRun, mcpRun, protocol, handoffs,
   real: ["CLI service client", "MCP HTTP protocol", "store install/update/hash/managed loading", "restart handoff"],

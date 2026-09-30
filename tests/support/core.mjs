@@ -41,6 +41,7 @@ export async function runCore({ group, policy, policyBytes, workspace, runRoot, 
     if (backend) {
       await step("构建并验证执行与配置规则", "dotnet", [
         "test", "tests/NexusPipeline.Tests/NexusPipeline.Tests.csproj", "-p:NexusTestHost=true",
+        ...(group === "backend.batch" ? ["-c", "Release"] : []),
         "-p:UseSharedCompilation=false", "--disable-build-servers", "--nologo",
         "--filter", selected.filter, "--logger", "trx;LogFileName=native.trx", "--results-directory", directory,
       ]);

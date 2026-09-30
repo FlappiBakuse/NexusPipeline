@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref, watch } from "vue";
-import { api } from "../../../platform/api";
+import { api, isAbortError, type ApiError } from "../../../platform/api";
 import { t } from "../../../platform/i18n";
 import NxpButton from "../../../ui/primitives/NxpButton.vue";
 import NxpCollapsibleCard from "../../../ui/composites/NxpCollapsibleCard.vue";
@@ -14,12 +14,11 @@ const loading = ref(false);
 const expanded = ref(false);
 type RepairPreview = { available: boolean; plugin: string; userId: string; scriptId: string; field: string; oldValue: string; proposedValue: string; impact: string; token: string };
 const repair = ref<RepairPreview | null>(null);
-const repairError = ref("");
 const repairBusy = ref(false);
 function toggle() { expanded.value = !expanded.value; if (expanded.value && !result.value && !loading.value) void load(); }
 let generation = 0;
 let controller: AbortController | null = null;
-watch(() => [props.userId, props.scriptId, props.revision], () => { generation++; controller?.abort(); result.value = undefined; repair.value = null; repairError.value = ""; loading.value = false; if (expanded.value) void load(); });
+watch(() => [props.userId, props.scriptId, props.revision], () => { generation++; controller?.abort(); result.value = undefined; repair.value = null; loading.value = false; if (expanded.value) void load(); });
 async function load() {
   const own = ++generation; loading.value = true;
   controller?.abort(); controller = new AbortController();
@@ -37,15 +36,20 @@ function handleConfigAction(kind: string) {
   emit("action", kind);
 }
 function repairPath() { return `/api/users/${encodeURIComponent(props.userId)}/bindings/${encodeURIComponent(props.scriptId)}/config-repair`; }
+function notifyRepairResult(reason: unknown) {
+  if (isAbortError(reason)) return;
+  const kind = (reason as ApiError | null)?.code === "config_repair_none" ? "info" : "error";
+  toast(reason instanceof Error ? reason.message : String(reason), kind);
+}
 async function previewRepair() {
-  repair.value = null; repairError.value = ""; repairBusy.value = true;
+  repair.value = null; repairBusy.value = true;
   try { repair.value = await api<RepairPreview>("GET", repairPath()); }
-  catch (reason) { repairError.value = reason instanceof Error ? reason.message : String(reason); }
+  catch (reason) { notifyRepairResult(reason); }
   finally { repairBusy.value = false; }
 }
 async function applyRepair() {
   if (!repair.value?.token) return;
-  repairBusy.value = true; repairError.value = "";
+  repairBusy.value = true;
   try {
     await api("POST", repairPath(), { token: repair.value.token });
     repair.value = null;
@@ -53,7 +57,7 @@ async function applyRepair() {
     await load();
   } catch (reason) {
     repair.value = null;
-    repairError.value = reason instanceof Error ? reason.message : String(reason);
+    notifyRepairResult(reason);
   } finally { repairBusy.value = false; }
 }
 onBeforeUnmount(() => { generation++; controller?.abort(); });
@@ -70,7 +74,6 @@ onBeforeUnmount(() => { generation++; controller?.abort(); });
         <p>{{ repair.impact }}</p>
         <NxpButton type="button" :disabled="repairBusy" @click="applyRepair">{{ t('tasks.repair_apply') }}</NxpButton>
       </div>
-      <p v-if="repairError" role="status">{{ repairError }}</p>
       <footer v-if="result" class="task-plan-actions">
         <NxpButton class="ghost" type="button" :disabled="loading || repairBusy" @click="previewRepair">{{ t('tasks.repair_preview') }}</NxpButton>
         <NxpButton class="ghost" type="button" :disabled="loading" @click="load">{{ t('tasks.refresh') }}</NxpButton>

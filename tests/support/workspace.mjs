@@ -3,7 +3,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { sha256 } from "./report.mjs";
 
-export function stageWorkspace(sourceRoot, artifactRoot, budget, directoryName = "Host") {
+export function stageWorkspace(sourceRoot, artifactRoot, budget, directoryName = "Host", {dotnetRequired=true} = {}) {
   if (!["Host", "Plugins"].includes(directoryName)) throw new Error("Unknown staging repository");
   const started = budget.elapsedMs;
   const git = (...args) => {
@@ -26,9 +26,11 @@ export function stageWorkspace(sourceRoot, artifactRoot, budget, directoryName =
   if (!entries.length) throw new Error("Empty source checkout");
   const sourceFingerprint = sha256(entries.map(item => `${item.relative}\0${sha256(item.bytes)}`).join("\n"));
   budget.check();
-  const dotnet = execFileSync("dotnet", ["--version"], {
+  const dotnet = dotnetRequired ? execFileSync("dotnet", ["--version"], {
+    env: {...process.env, DOTNET_CLI_HOME: process.env.DOTNET_CLI_HOME || path.join(artifactRoot,"cache/dotnet"),
+      DOTNET_CLI_TELEMETRY_OPTOUT:"1", DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE:"true", DOTNET_NOLOGO:"1"},
     encoding: "utf8", windowsHide: true, timeout: Math.max(1, Math.floor(budget.remainingMs())),
-  }).trim();
+  }).trim() : null;
   const fingerprint = sha256(`${sourceFingerprint}\0${process.version}\0${process.platform}\0${process.arch}\0${dotnet}`);
   const destination = path.join(artifactRoot, "cache", fingerprint.slice(0, 16), directoryName);
   const cacheHit = fs.existsSync(destination);
@@ -54,7 +56,7 @@ export function stageWorkspace(sourceRoot, artifactRoot, budget, directoryName =
     if (!fs.existsSync(target) || !fs.readFileSync(target).equals(bytes)) fs.writeFileSync(target, bytes);
   }
   const dirty = Boolean(git("status", "--porcelain").trim());
-  return { directory: destination, fingerprint, cacheHit, preparationMs: budget.elapsedMs - started,
+  return { directory: destination, fingerprint, sourceFingerprint, cacheHit, preparationMs: budget.elapsedMs - started,
     toolchain: { node: process.version, dotnet },
     release() {
       if (fs.readFileSync(leasePath, "utf8") !== leaseBytes) throw new Error("Staging ownership changed");

@@ -1,7 +1,9 @@
+import {controlManifest as readControlManifest,sourceFingerprint} from "./control-inputs.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { coreUnits, allocateUnits } from "./core-plan.mjs";
 
 const SHA = /^[0-9a-f]{40}$/;
 const normalize = value => value.replaceAll("\\", "/");
@@ -66,7 +68,7 @@ export function collectChanges(root, { base, head = "HEAD", includeWorkingTree =
     }
   }
   return { baseSha, headSha, mergeBase, testedSha: fullSha(root, "HEAD"),
-    dirty: includeWorkingTree && changes.length > parseNameStatus(git(root, ["diff", "--name-status", "-z", "--find-renames", baseSha, headSha, "--"])).length,
+    dirty: Boolean(git(root,["status","--porcelain"]).toString("utf8").trim()),
     changes };
 }
 
@@ -84,11 +86,19 @@ export function planForChanges(root, changes, registry, policy) {
   const names = owner === "plugins" ? allPluginNames(policy) : [];
   const classifyHost = (name, status) => {
     const reason = `${status} ${name}`;
+    if (name.startsWith("tests/support/") || name === "tests/batch-runner.mjs") {
+      fullCore(`execution adapter: ${reason}`); return;
+    }
+    if (name === "src/NexusPipeline.csproj" || name.startsWith("src/NexusPipeline.Plugin.Abstractions/")
+        || name.includes("JintScriptHost") || name.includes("TaskConfigDocument")) {
+      host("partner-contract", reason);
+      if (name === "src/NexusPipeline.csproj" || name.includes("JintScriptHost")) host("partner-jint", reason);
+    }
     if (/^docs\/.*\.(md|png|jpg|svg|webp)$/i.test(name)) { host("docs", reason); return; }
     if (/^(README(?:\.en)?\.md|LICENSE(?:\.md)?|NOTICE(?:\.md)?)$/i.test(name)) {
       host("docs", reason); host("release-contract", reason); return;
     }
-    if (/^(tests\/(?:scope-plan|scope-cli|selection-cases|ci-scope|gate-required|test_gate_required|policy|gates|run|ci-gate|audit-jobs|test_audit_jobs|final-budget|test_final_budget)|\.github\/workflows\/(?:ci|final-budget)\.yml)/.test(name)) {
+    if (/^(tests\/(?:core-plan|batch-plan|scope-plan|scope-cli|selection-cases|ci-scope|gate-required|test_gate_required|policy|gates|run|ci-gate|audit-jobs|test_audit_jobs|final-budget|test_final_budget)|\.github\/workflows\/(?:ci|final-budget)\.yml)/.test(name)) {
       host("ci-policy", reason); return;
     }
     if (/^(tools\/installer|tools\/host_installer|tools\/installer-languages)/.test(name)) {
@@ -124,79 +134,38 @@ export function planForChanges(root, changes, registry, policy) {
       };
       let target = domains[domain];
       if (name.startsWith("src/ControlPlane/") || name.includes(".ControlPlane.")) target = ["control"];
-      if (!target) { target = ["execution", "configuration", "settings-notifications", "plugins", "updates-restart", "control", "scheduling"]; host("ci-policy", `unregistered owner: ${reason}`); }
+      if (!target) { fullCore(`unregistered owner: ${reason}`); return; }
       for (const gate of target) host(`backend.${gate}`, reason);
       if (domain === "updates" || /src\/Host\/(?:StartupPipeline|HostInstance)/.test(name)) host("integration.restart-update", reason);
       if (domain === "plugins") host("integration.store", reason);
       return;
     }
-    if (/\.(csproj|props|targets|sln|json|yml|yaml|mjs|js|ts|vue|py)$/i.test(name)) {
-      host("ci-policy", `unknown input: ${reason}`);
-      for (const gate of ["backend.execution", "backend.configuration", "backend.settings-notifications", "backend.plugins", "backend.updates-restart", "backend.control", "backend.scheduling", "frontend.typecheck", "frontend.state", "frontend.build", "architecture.backend", "architecture.frontend"])
-        host(gate, `unknown input: ${reason}`);
+    if (!/\.(md|png|jpg|svg|webp)$/i.test(name)) {
+      fullCore(`unknown shared input: ${reason}`);
       return;
     }
     host("docs", reason);
   };
-  const classifyPlugins = (name, status) => {
-    const reason = `${status} ${name}`;
-    if (/^(catalog\.json|\.release-state\.json|packages\/)/.test(name)) { add("plugins.release-contract", reason); return; }
-    if (/^(tools\/repository|tools\/.*release|\.github\/workflows\/(?:stable|develop|release))/.test(name)) {
-      add("plugins.release-contract", reason); add("plugins.ci-policy", reason); return;
+  const fullCore = reason => {
+    for (const gate of registry.gates) {
+      if (["scope", "aggregate", "release"].includes(gate.kind)) continue;
+      if (gate.kind === "matrix-template") {
+        for (const artifact of names) {
+          const kind = policy.plugins[artifact].kind;
+          const dimension = gate.id.split(".").at(-1);
+          const manifestFile = path.join(root, policy.plugins[artifact].root, "plugin.json");
+          const manifest = fs.existsSync(manifestFile) ? JSON.parse(fs.readFileSync(manifestFile,"utf8")) : null;
+          if (kind === "data-specialized" ? ["contract","package","adapter"].includes(dimension)
+            : (dimension !== "adapter" || artifact === "MaaFrameworkDriver") && (dimension !== "frontend" || manifest?.frontend))
+            add(`${gate.id}:${artifact}`, reason);
+        }
+      } else add(gate.id,reason);
     }
-    if (/^(tests\/(?:scope-plan|scope-cli|selection|ci-scope|gate-runner|gate-required|policy|gates|run|ci-gate|audit-jobs|test_audit_jobs|final-budget|test_final_budget|inputs\.lock)|\.github\/workflows\/(?:ci|final-budget)\.yml)/.test(name)) {
-      add("plugins.ci-policy", reason); if (name === "tests/inputs.lock.json") add("plugins.inventory", reason); return;
-    }
-    if (name.startsWith("tests/architecture-check") || name === "tests/test_architecture_check.py") {
-      add("plugins.inventory", reason); return;
-    }
-    if (name === "host.lock.json") {
-      add("plugins.inventory", reason);
-      for (const artifact of names) plugin("contract", artifact, reason);
-      return;
-    }
-    if (/^(docs\/.*\.(md|png|jpg|svg|webp)|README\.md|CONTRIBUTING\.md|CHANGELOG\.md)$/i.test(name)) {
-      add("plugins.docs", reason); return;
-    }
-    const artifact = names.find(item => name === policy.plugins[item].root || name.startsWith(policy.plugins[item].root + "/"));
-    if (artifact) {
-      const rootName = policy.plugins[artifact].root;
-      const relative = name.slice(rootName.length + 1);
-      const kind = policy.plugins[artifact].kind;
-      const manifestPath = path.join(root, rootName, "plugin.json");
-      const manifest = fs.existsSync(manifestPath) ? JSON.parse(fs.readFileSync(manifestPath, "utf8")) : null;
-      if (relative === "plugin.json" || status === "D" && name === rootName) {
-        add("plugins.inventory", reason); add("plugins.release-contract", reason);
-        for (const dimension of ["contract", "package", "adapter", "component", "frontend", "capability"])
-          if (kind === "data-specialized" ? !["component", "frontend", "capability"].includes(dimension)
-            : dimension !== "adapter" || artifact === "MaaFrameworkDriver")
-            if (dimension !== "frontend" || manifest?.frontend) plugin(dimension, artifact, reason);
-      } else if (/\.md$/i.test(relative)) {
-        add("plugins.docs", reason); plugin("package", artifact, reason);
-      } else if (relative === "store.json" || relative.startsWith("changelog")) {
-        plugin("contract", artifact, reason); plugin("package", artifact, reason);
-      } else if (kind === "data-specialized") {
-        plugin("contract", artifact, reason); plugin("adapter", artifact, reason);
-      } else if (relative.startsWith("frontend/")) {
-        plugin("frontend", artifact, reason); plugin("capability", artifact, reason);
-      } else {
-        plugin("contract", artifact, reason); plugin("component", artifact, reason); plugin("capability", artifact, reason);
-      }
-      return;
-    }
-    if (/\.(cs|ts|js|json|yml|yaml|mjs|vue|csproj|py)$/i.test(name)) {
-      add("plugins.ci-policy", `unknown input: ${reason}`);
-      for (const item of names) {
-        plugin("contract", item, `unknown input: ${reason}`);
-        plugin(policy.plugins[item].kind === "data-specialized" ? "adapter" : "component", item, `unknown input: ${reason}`);
-      }
-      return;
-    }
-    add("plugins.docs", reason);
   };
+  if (!changes.length) fullCore("empty diff: conservative complete core");
   for (const change of changes) {
     for (const name of [change.old, change.path].filter(Boolean))
-      (owner === "host" ? classifyHost : classifyPlugins)(normalize(name), change.status);
+      classifyHost(normalize(name), change.status);
   }
   add(`${owner}.scope`, "always"); add(`${owner}.required`, "always");
   const declared = new Set(registry.gates.filter(gate => !gate.id.includes("${artifact}")).map(gate => gate.id));
@@ -212,7 +181,12 @@ export function createScopePlan(root, options = {}) {
   const policy = JSON.parse(fs.readFileSync(path.join(root, "tests/policy.json"), "utf8"));
   const identity = collectChanges(root, options);
   const routing = planForChanges(root, identity.changes, registry, policy);
-  return { schemaVersion: 1, repository: registry.repository, policyDigest: digest, digestFormat: "utf8-lf-v1",
+  const controlManifest=readControlManifest(root);
+  const batchIdentity = {...identity, partnerSha:options.partnerSha ?? null, controlManifest};
+  const partnerPolicy = options.partnerPolicy ?? (options.partnerRoot ? JSON.parse(fs.readFileSync(path.join(options.partnerRoot,"tests/policy.json"))) : null);
+  const partnerPolicyDigest = partnerPolicy ? hash(JSON.stringify(partnerPolicy)) : null;
+  const allocation = allocateUnits(coreUnits(routing.selected,registry,policy,partnerPolicy),{...batchIdentity,partnerPolicyDigest},policy.ciBatchPolicy);
+  return { schemaVersion: 2, repository: registry.repository, policyDigest: hash(JSON.stringify(controlManifest)), digestFormat: "utf8-lf-v1",
     ...identity, partnerSha: options.partnerSha ?? null, runId: options.runId ?? null, attempt: options.attempt ?? null,
-    ...routing };
+    prNumber: options.prNumber ?? null, sourceFingerprint:sourceFingerprint(root), controlManifest, partnerPolicySnapshot:partnerPolicy, partnerPolicyDigest, ...routing, ...allocation };
 }

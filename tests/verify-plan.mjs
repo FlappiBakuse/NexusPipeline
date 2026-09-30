@@ -1,0 +1,11 @@
+import fs from "node:fs";
+import path from "node:path";
+import {loadBatch} from "./batch-runner.mjs";
+const root=path.resolve(import.meta.dirname,"..");
+const [file,partner]=process.argv.slice(2);
+const plan=JSON.parse(fs.readFileSync(file));
+const batch=plan.control?.units?.length?"control":plan.batches?.[0]?.id;
+if(!batch) throw new Error("Empty plan has no typed assertions");
+const partnerFlag=plan.repository==="Host"?"--partner-root":"--host-root";
+const checked=loadBatch(root,["--plan",file,"--batch",batch,...(partner?[partnerFlag,partner]:[])]);
+console.log(JSON.stringify(checked.plan));

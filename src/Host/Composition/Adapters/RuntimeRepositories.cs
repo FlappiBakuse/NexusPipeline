@@ -186,18 +186,6 @@ internal sealed class RuntimeUserMutationState : IUserMutationState
     }
 }
 
-internal sealed class RuntimeSettingsProvider : ISettingsProvider
-{
-    private readonly Func<AppSettings> _current;
-
-    public RuntimeSettingsProvider(Func<AppSettings> current)
-    {
-        _current = current;
-    }
-
-    public AppSettings Current => _current();
-}
-
 /// <summary>
 /// 运行天数写入器：调度器每日首次 tick 时把 RunDays &gt; 0 的绑定减 1，
 /// 减至 0 的绑定不再参与运行（Participates = false）。写入在数据锁与持久化路径内完成。

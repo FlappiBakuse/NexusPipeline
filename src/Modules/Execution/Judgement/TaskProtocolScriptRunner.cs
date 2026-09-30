@@ -36,6 +36,8 @@ internal static class TaskProtocolScriptRunner
         { throw new TimeoutException("task_protocol_timeout"); }
         catch (Jint.Runtime.StatementsCountOverflowException)
         { throw new InvalidDataException("resource_limit: task protocol statement budget exceeded"); }
+        catch (Jint.Runtime.RecursionDepthOverflowException)
+        { throw new InvalidDataException("resource_limit: task protocol recursion budget exceeded"); }
     }
 
     // Resource absence is a catchable JS error; CLR objects and local paths never cross the boundary.
