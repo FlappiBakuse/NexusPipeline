@@ -184,14 +184,14 @@ def main():
     controller_sha = os.environ["GITHUB_SHA"]
     if (str(controller.get("id")) != os.environ["GITHUB_RUN_ID"] or controller.get("path") != ".github/workflows/final-budget.yml"
             or controller.get("head_sha") != controller_sha or controller.get("head_branch") != "main"
-            or controller.get("event") not in (["workflow_run", "workflow_dispatch"] if args.phase == "finalize" else ["workflow_run"])
+            or controller.get("event") not in ["workflow_run", "workflow_dispatch"]
             or controller.get("repository",{}).get("full_name") != repository):
         raise ValueError("Unexpected trusted controller")
     suite = audit_jobs.api(f"/repos/{repository}/check-suites/{controller['check_suite_id']}")
     app_id = suite["app"]["id"]
     existing = current_check(repository, sha, args.check_name, app_id, pull["number"])
     if args.phase == "begin":
-        # Actions can return queued while later jobs wait after the trusted start event.
+        # A trusted requested event registers the attempt before its runner jobs start.
         if run.get("status") not in ["queued", "in_progress", "completed"]:
             raise ValueError("Producer has not started")
         if existing:
@@ -220,7 +220,7 @@ def main():
     begin = audit_jobs.api(f"/repos/{repository}/actions/runs/{identity['beginRun']}/attempts/{identity['beginAttempt']}")
     if (begin.get("id") != identity["beginRun"] or begin.get("run_attempt") != identity["beginAttempt"]
             or begin.get("path") != ".github/workflows/final-budget.yml" or begin.get("head_sha") != identity["controllerSha"]
-            or begin.get("event") != "workflow_run" or begin.get("head_branch") != "main"
+            or begin.get("event") not in ["workflow_run", "workflow_dispatch"] or begin.get("head_branch") != "main"
             or begin.get("repository", {}).get("full_name") != repository or begin.get("conclusion") != "success"):
         raise ValueError("Trusted begin did not complete successfully")
     begin_report = audit_jobs.audit(audit_jobs.completed_jobs(repository, identity["beginRun"], identity["beginAttempt"]), identity["beginRun"], identity["beginAttempt"])
