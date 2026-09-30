@@ -8,6 +8,21 @@ from pathlib import Path
 import urllib.request
 
 
+NAMES = json.loads(Path(__file__).with_name("ci-names.json").read_text(encoding="utf-8"))
+
+
+def job_name(prefix, key):
+    if prefix not in ("Host", "Plugins"):
+        raise ValueError("Unknown CI repository prefix")
+    return prefix + " / " + NAMES[key]
+
+
+def batch_index(name, prefix):
+    pattern = re.escape(job_name(prefix, "batch")) + r" (0[1-5]) · (.+)"
+    match = re.fullmatch(pattern, name)
+    return int(match[1]) if match and re.search(r"[\u4e00-\u9fff]", match[2]) else None
+
+
 def api(route):
     request = urllib.request.Request(os.environ["GITHUB_API_URL"] + route, headers={
         "Authorization": "Bearer " + os.environ["GH_TOKEN"],
@@ -56,9 +71,12 @@ def physical_jobs(repository, run, jobs, check_name, app_id):
     for job in jobs:
         if str(job.get("run_id")) != str(run["id"]) or str(job.get("run_attempt")) != str(run["run_attempt"]):
             raise ValueError("Foreign Actions record")
-        optional_names = {prefix+" / Control": prefix+" / Control" for prefix in ["Host", "Plugins"]}
+        optional_names = {job_name(prefix, "control"): job_name(prefix, "control") for prefix in ["Host", "Plugins"]}
         for prefix in ["Host", "Plugins"]:
-            canonical = prefix+" / Batches (not selected)"
+            optional_names[prefix+" / Control"] = prefix+" / Control"
+            legacy = prefix+" / Batches (not selected)"
+            optional_names.update({legacy: legacy, "matrix.name || '"+legacy+"'": legacy})
+            canonical = job_name(prefix, "unselected")
             optional_names.update({canonical: canonical, "matrix.name || '"+canonical+"'": canonical})
         # Labels can be selectors on a skipped job without an assigned runner.
         if (job.get("status") == "completed" and job.get("conclusion") == "skipped"
@@ -128,7 +146,7 @@ def main():
             or run.get("path") != ".github/workflows/ci.yml"):
         raise ValueError("Unexpected producer identity")
     suite = api(f"/repos/{repository}/check-suites/{run['check_suite_id']}")
-    name = "Plugins / Final Budget" if repository.endswith("/NexusPipeline-Plugins") else "Host / Final Budget"
+    name = job_name("Plugins" if repository.endswith("/NexusPipeline-Plugins") else "Host", "finalBudget")
     physical, checks = physical_jobs(repository, run, completed_jobs(repository, options.run_id, options.attempt), name, suite["app"]["id"])
     jobs = audit(physical, options.run_id, options.attempt)
     report = {"schemaVersion": 1, "scope": "ACTIONS_COMPLETE_GATE", "runId": options.run_id,

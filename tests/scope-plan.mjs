@@ -98,7 +98,7 @@ export function planForChanges(root, changes, registry, policy) {
     if (/^(README(?:\.en)?\.md|LICENSE(?:\.md)?|NOTICE(?:\.md)?)$/i.test(name)) {
       host("docs", reason); host("release-contract", reason); return;
     }
-    if (/^(tests\/(?:core-plan|batch-plan|scope-plan|scope-cli|selection-cases|ci-scope|gate-required|test_gate_required|policy|gates|run|ci-gate|audit-jobs|test_audit_jobs|final-budget|test_final_budget)|\.github\/workflows\/(?:ci|final-budget)\.yml)/.test(name)) {
+    if (/^(tests\/(?:core-plan|batch-plan|scope-plan|scope-cli|selection-cases|ci-scope|ci-names|batch-required|test_batch_required|gate-required|test_gate_required|policy|gates|run|ci-gate|audit-jobs|test_audit_jobs|final-budget|test_final_budget)|\.github\/workflows\/(?:ci|final-budget)\.yml)/.test(name)) {
       host("ci-policy", reason); return;
     }
     if (/^(tools\/installer|tools\/host_installer|tools\/installer-languages)/.test(name)) {

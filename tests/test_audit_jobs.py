@@ -37,10 +37,10 @@ class AuditJobsTests(unittest.TestCase):
     def test_skipped_matrix_selector_is_not_an_allocated_runner(self):
         run={"id":12,"run_attempt":2,"head_sha":"a"*40}
         for prefix in ["Host", "Plugins"]:
-            skipped={**job(2), "name":"matrix.name || '"+prefix+" / Batches (not selected)'",
+            skipped={**job(2), "name":"matrix.name || '"+prefix+" / 验证批次（未选中）'",
                      "conclusion":"skipped", "labels":["windows-2025"], "steps":[], "runner_id":None}
             physical,_=audit_jobs.physical_jobs("owner/repo",run,[skipped],"Final Budget",17)
-            self.assertEqual(physical[0]["name"],prefix+" / Batches (not selected)")
+            self.assertEqual(physical[0]["name"],prefix+" / 验证批次（未选中）")
             self.assertTrue(physical[0]["runnerlessSkipped"])
             for change in [{"runner_id":8}, {"steps":[{}]}, {"conclusion":"failure"}, {"name":"unknown"}]:
                 physical,_=audit_jobs.physical_jobs("owner/repo",run,[{**skipped,**change}],"Final Budget",17)

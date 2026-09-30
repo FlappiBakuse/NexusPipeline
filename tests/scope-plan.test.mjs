@@ -12,6 +12,11 @@ const policy = JSON.parse(fs.readFileSync(path.join(root, "tests/policy.json"), 
 const ids = changes => planForChanges(root, changes, registry, policy).selected.map(item => item.id);
 const change = name => [{ status: "M", path: name }];
 
+test("producer naming and report matching inputs select the CI policy owner", () => {
+  for (const file of ["tests/ci-names.json", "tests/ci-names.mjs", "tests/batch-required.py", "tests/test_batch_required.py"])
+    assert.deepEqual(ids(change(file)), ["host.ci-policy", "host.required", "host.scope"]);
+});
+
 test("host scope keeps documentation, installer, backend and frontend owners separate", () => {
   const docs = ids(change("docs/user/README.en.md"));
   assert.deepEqual(docs, ["host.docs", "host.required", "host.scope"]);
