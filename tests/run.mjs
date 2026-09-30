@@ -358,7 +358,11 @@ async function runFinite(selectedGroup) {
   executionRoot = workspace.directory;
   frontendDir = path.join(executionRoot, "frontend");
   e2eDir = path.join(executionRoot, "tests/e2e");
-  for (const prepare of [buildFrontendBundle, publishTestHost, () => ensureNpm(e2eDir)]) {
+  const browserRequired = !selectedGroup || selectedGroup === "execution";
+  const preparation = browserRequired
+    ? [buildFrontendBundle, publishTestHost, () => ensureNpm(e2eDir)]
+    : [() => publishTestHost({ withFrontend: false })];
+  for (const prepare of preparation) {
     const code = await prepare(); if (code) return code;
   }
   if (!selectedGroup || selectedGroup === "control") {
