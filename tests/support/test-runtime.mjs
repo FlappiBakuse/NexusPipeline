@@ -382,6 +382,9 @@ export async function stopSpawnedService({ child, exitFile, pidFilePath, markerP
     registerHandoffProcess(markerPath, pid, { identityReader });
     const inspector = pid === marker.pid ? inspectProcessOwnership : inspectHandoffProcessOwnership;
     const status = inspector(markerPath, pid, { identityReader, aliveReader });
+    // A process being reaped can remain enumerable after its identity disappears.
+    // Wait for definite absence without sending a signal to an unknown identity.
+    if (allowReusedPid && status === OWNERSHIP.UNKNOWN && await exitWaiter(pid, 1000, 50)) continue;
     if (allowReusedPid && status === OWNERSHIP.NOT_OWNED) { reusedPids.add(pid); continue; }
     if (status !== OWNERSHIP.OWNED && status !== OWNERSHIP.EXITED) throw new Error(`拒绝发送退出信号：PID=${pid}，ownership=${status}`);
   }
@@ -409,6 +412,7 @@ export async function stopSpawnedService({ child, exitFile, pidFilePath, markerP
     const inspector = pid === marker.pid ? inspectProcessOwnership : inspectHandoffProcessOwnership;
     const status = inspector(markerPath, pid, { identityReader, aliveReader });
     if (status === OWNERSHIP.EXITED) continue;
+    if (allowReusedPid && status === OWNERSHIP.UNKNOWN && await exitWaiter(pid, 1000, 50)) continue;
     if (allowReusedPid && status === OWNERSHIP.NOT_OWNED) { reusedPids.add(pid); continue; }
     if (status !== OWNERSHIP.OWNED) {
       throw new Error(`拒绝清理未通过运行 marker 身份核验的进程：PID=${pid}，ownership=${status}`);

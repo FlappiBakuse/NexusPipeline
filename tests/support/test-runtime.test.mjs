@@ -5,6 +5,24 @@ import os from "node:os";
 import path from "node:path";
 import { stopSpawnedService } from "./test-runtime.mjs";
 
+test("post-run cleanup requires confirmed exit when OS identity is unavailable", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "nxp-exit-settlement-"));
+  const markerPath = path.join(root, "marker.json"), pidFilePath = path.join(root, "service.pid");
+  fs.writeFileSync(markerPath, JSON.stringify({ schemaVersion: 1, nonce: "test", pid: 424242,
+    executablePath: process.execPath, processStartTimeUtc: "original" }));
+  let alive = true, terminated = false;
+  const options = { child: null, markerPath, pidFilePath, exitFile: path.join(root, "exit"),
+    allowReusedPid: true, aliveReader: () => alive, identityReader: () => null,
+    terminator: () => { terminated = true; return true; } };
+  try {
+    await stopSpawnedService({ ...options, exitWaiter: async () => { alive = false; return true; } });
+    assert.equal(terminated, false);
+    alive = true;
+    await assert.rejects(stopSpawnedService({ ...options, exitWaiter: async () => false }), /UNKNOWN/);
+    assert.equal(terminated, false);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
 
 test("post-run cleanup ignores a PID now owned by another process", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "nxp-reused-pid-"));
