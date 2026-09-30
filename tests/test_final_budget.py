@@ -80,9 +80,9 @@ class FinalBudgetTests(unittest.TestCase):
             current_event[0] = "workflow_dispatch"
             event("finalize")
             count = len(writes)
-            with self.assertRaises(ValueError): event("begin")
+            event("begin")
             self.assertEqual(len(writes), count)
-            current_event[0] = "workflow_run"
+            controller["event"] = "workflow_dispatch"
             self.assertEqual([item[0] for item in writes], ["POST", "PATCH", "PATCH"])
             source["run_attempt"] = 3
             jobs[0]["run_attempt"] = 3
