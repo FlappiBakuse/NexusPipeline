@@ -3,7 +3,7 @@ name: Host Final Budget
 on:
   workflow_run:
     workflows: [Host CI]
-    types: [completed]
+    types: [in_progress, completed]
   workflow_dispatch:
     inputs:
       run_id:
@@ -19,6 +19,10 @@ permissions:
   actions: read
   checks: write
   contents: read
+
+concurrency:
+  group: host-final-budget-controller
+  cancel-in-progress: false
 
 jobs:
   audit:
@@ -40,4 +44,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RUN_ID: ${{ github.event.workflow_run.id || inputs.run_id }}
           ATTEMPT: ${{ github.event.workflow_run.run_attempt || inputs.attempt }}
-        run: python tests/final-budget.py --run-id "$RUN_ID" --attempt "$ATTEMPT" --required-name 'Host / Required' --check-name 'Host / Final Budget'
+          PHASE: ${{ github.event.action == 'in_progress' && 'begin' || 'finalize' }}
+        run: python tests/final-budget.py --phase "$PHASE" --run-id "$RUN_ID" --attempt "$ATTEMPT" --required-name 'Host / Required' --check-name 'Host / Final Budget'

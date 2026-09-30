@@ -1,4 +1,5 @@
 import importlib.util
+import os
 from pathlib import Path
 import unittest
 from unittest.mock import patch
@@ -16,6 +17,28 @@ def job(index, end="2026-09-29T00:02:30Z"):
 
 
 class AuditJobsTests(unittest.TestCase):
+    @patch.dict(os.environ, {"GITHUB_API_URL": "https://api.github.com"})
+    def test_synthetic_records_require_service_identity_and_physical_failures_remain(self):
+        real = {**job(1), "name": "Final Budget", "runner_id": 8, "labels": ["windows"], "steps": [{}], "conclusion": "failure"}
+        synthetic = {**job(2), "runner_id": None, "labels": [], "steps": [],
+                     "check_run_url": "https://api.github.com/repos/owner/repo/check-runs/2"}
+        check = {"id": 2, "head_sha": "a" * 40, "app": {"id": 17}, "name": "Final Budget", "external_id": "",
+                 "output": {"title": "Complete CI job budget", "summary": "Run 12, attempt 1: old result"}}
+        with patch.object(audit_jobs, "api", return_value=check):
+            physical, checks = audit_jobs.physical_jobs("owner/repo", {"id": 12, "run_attempt": 2, "head_sha": "a" * 40}, [real, synthetic], "Final Budget", 17)
+        self.assertEqual(physical, [real])
+        self.assertEqual(checks, [check])
+        self.assertEqual(audit_jobs.audit(physical, 12, 2)[0]["status"], "FAIL")
+        for field, value in [("id", 3), ("head_sha", "b" * 40), ("app", {"id": 18}), ("name", "unknown")]:
+            with patch.object(audit_jobs, "api", return_value={**check, field: value}):
+                with self.assertRaises(ValueError):
+                    audit_jobs.physical_jobs("owner/repo", {"id": 12, "run_attempt": 2, "head_sha": "a" * 40}, [real, synthetic], "Final Budget", 17)
+
+    def test_empty_duplicate_and_naive_times_fail(self):
+        for jobs in [[], [job(1), job(1)], [{**job(1), "started_at": "2026-09-29T00:00:00"}]]:
+            with self.assertRaises(ValueError):
+                audit_jobs.audit(jobs, 12, 2)
+
     def test_qualification_boundary_includes_full_job(self):
         self.assertEqual(audit_jobs.audit([job(1)], 12, 2)[0]["status"], "PASS")
         self.assertEqual(audit_jobs.audit([job(1, "2026-09-29T00:02:30.001Z")], 12, 2)[0]["status"], "FAIL")
