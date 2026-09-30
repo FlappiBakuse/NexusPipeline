@@ -91,6 +91,8 @@ python -m unittest discover -s tools/tests -p test_pe_manifest.py
 
 批次内部报告使用 schemaVersion 2，包含精确预期义务、原生 TRX/Vitest/TAP/场景文件及其 hash。Required 从固定源码重新推导计划，拒绝缺失、重复、skip、错 attempt、错 partner/policy、路径逃逸或规范化与原生报告不一致。完整资格上限为每物理 job 150 秒（含 checkout、工具/依赖准备、上传和 post-action），合计最多十个 job：scope + 可选 control + 五批 + Required + begin + finalize。Required 自身和 finalize 收尾仍须用完成后的只读服务端记录验收。
 
+Required 只等待仍在排队或运行中的可信 main begin 登记，最多 100 秒，并受自身 130 秒工作截止约束；登记身份错误或已完成失败立即拒绝。API 中带 runner 选择标签、但从未分配 runner 且没有 steps 的已知可选 skipped job 不计为物理作业；已分配 runner、实际 steps 和未知作业继续严格审计。
+
 ### 同 SHA 完整重跑
 
 首次 CI 由 `requested` 事件登记一次可信 begin。完整重跑不产生该事件，须由已审核 `main` 显式登记新的 attempt；新 Required 只接受本次 PR/head/run/attempt 身份，未登记时失败。先重跑整个生产者，读取新的 attempt，再执行：
