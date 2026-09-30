@@ -27,6 +27,8 @@ export function stageWorkspace(sourceRoot, artifactRoot, budget, directoryName =
   const sourceFingerprint = sha256(entries.map(item => `${item.relative}\0${sha256(item.bytes)}`).join("\n"));
   budget.check();
   const dotnet = dotnetRequired ? execFileSync("dotnet", ["--version"], {
+    env: {...process.env, DOTNET_CLI_HOME: process.env.DOTNET_CLI_HOME || path.join(artifactRoot,"cache/dotnet"),
+      DOTNET_CLI_TELEMETRY_OPTOUT:"1", DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE:"true", DOTNET_NOLOGO:"1"},
     encoding: "utf8", windowsHide: true, timeout: Math.max(1, Math.floor(budget.remainingMs())),
   }).trim() : null;
   const fingerprint = sha256(`${sourceFingerprint}\0${process.version}\0${process.platform}\0${process.arch}\0${dotnet}`);
