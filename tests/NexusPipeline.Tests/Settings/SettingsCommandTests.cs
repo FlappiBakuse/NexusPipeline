@@ -1,14 +1,66 @@
 using System.Text.Json.Nodes;
 using NexusPipeline.Modules.Settings;
 using NexusPipeline.Modules.Settings.Contracts;
+using NexusPipeline.Modules.Settings.Persistence;
 using NexusPipeline.Modules.Settings.UseCases;
 using NexusPipeline.Shared.Results;
+using NexusPipeline.Platform.Storage;
 using Xunit;
 
 namespace NexusPipeline.Tests.Settings;
 
 public sealed class SettingsCommandTests
 {
+    [Fact]
+    public void DurableSaveFailureDoesNotPublishSettingsOrNotify()
+    {
+        Directory.CreateDirectory(AppPaths.ConfigDir);
+        byte[]? originalBytes = File.Exists(AppPaths.ConfigPath) ? File.ReadAllBytes(AppPaths.ConfigPath) : null;
+        if (originalBytes is not null) File.Delete(AppPaths.ConfigPath);
+        Directory.CreateDirectory(AppPaths.ConfigPath);
+        try
+        {
+            var state = new SettingsState(new AppSettings());
+            var effects = new TestEffects();
+            var command = new SettingsCommands(state, new AllowMutation(), effects);
+            AppSettings original = state.Current;
+            var result = command.Update(new JsonObject { ["historyRetentionDays"] = 9 });
+            Assert.False(result.Success);
+            Assert.Equal(OperationErrorKind.Internal, result.ErrorKind);
+            Assert.Same(original, state.Current);
+            Assert.Equal(7, state.Current.HistoryRetentionDays);
+            Assert.Equal(0, effects.Calls);
+        }
+        finally
+        {
+            Directory.Delete(AppPaths.ConfigPath);
+            if (originalBytes is not null) File.WriteAllBytes(AppPaths.ConfigPath, originalBytes);
+        }
+    }
+
+    [Fact]
+    public void DurableSavePublishesOneStateAndNotifiesOnce()
+    {
+        Directory.CreateDirectory(AppPaths.ConfigDir);
+        byte[]? originalBytes = File.Exists(AppPaths.ConfigPath) ? File.ReadAllBytes(AppPaths.ConfigPath) : null;
+        try
+        {
+            var state = new SettingsState(new AppSettings());
+            ISettingsProvider reader = state;
+            var effects = new TestEffects();
+            var command = new SettingsCommands(state, new AllowMutation(), effects);
+            Assert.True(command.Update(new JsonObject { ["historyRetentionDays"] = 9 }).Success);
+            Assert.Equal(9, reader.Current.HistoryRetentionDays);
+            Assert.Equal(9, NexusPipeline.Modules.Settings.Persistence.AppSettingsStore.Load(ConfigLoadMode.ReadOnly).HistoryRetentionDays);
+            Assert.Equal(1, effects.Calls);
+        }
+        finally
+        {
+            if (originalBytes is not null) File.WriteAllBytes(AppPaths.ConfigPath, originalBytes);
+            else File.Delete(AppPaths.ConfigPath);
+        }
+    }
+
     [Fact]
     public void FileOnlyAndRetiredNotificationFieldsRejectWholePatch()
     {
