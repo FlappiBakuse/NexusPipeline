@@ -35,3 +35,15 @@ test("all applicable obligations have exactly one predeclared native provider", 
 test("unregistered obligations fail before execution", () => {
   assert.throws(() => coreUnits([{id:"unknown"}], registry, policy));
 });
+
+test("finite subsets retain exactly their selected independent scenarios", () => {
+  for (const groups of [["config"], ["control", "execution"], ["config", "control", "execution"]]) {
+    const selected = groups.map(group => ({ id: `host.integration.${group}` }));
+    const [unit] = coreUnits(selected, registry, policy);
+    assert.equal(unit.kind, "finite");
+    assert.deepEqual(unit.groups, [...groups].sort());
+    assert.deepEqual(unit.provides, selected.map(item => item.id).sort());
+    assert.deepEqual(unit.expectedScenarioIds, selected.map(item => policy.integrationScenarios[item.id]).sort());
+    assert.equal(unit.preparations.includes("host.browser"), groups.includes("execution"));
+  }
+});

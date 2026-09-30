@@ -487,13 +487,15 @@
       "host.runtime.test-build": 35000,
       "host.jint.test-build": 25000,
       "plugins.source-validation": 2000,
-      "maa.native": 20000
+      "maa.native": 20000,
+      "host.browser": 5000
     },
     "unitMs": {
       "host.architecture.backend": 95000,
       "host.architecture.frontend": 5000,
       "host.frontend": 20000,
-      "host.partner-jint": 45000
+      "host.partner-jint": 45000,
+      "host.finite": 70000
     }
   },
   "integrationScenarios": {

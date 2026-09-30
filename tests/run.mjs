@@ -72,6 +72,7 @@ async function run(command, args, options = {}) {
         npm_config_cache: process.env.npm_config_cache || path.join(root, "cache", "npm"),
         DOTNET_CLI_HOME: process.env.DOTNET_CLI_HOME || path.join(root, "cache", "dotnet"),
         DOTNET_GENERATE_ASPNET_CERTIFICATE: "false", DOTNET_CLI_USE_MSBUILD_SERVER: "0",
+        DOTNET_CLI_TELEMETRY_OPTOUT: "1", DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE: "true", DOTNET_NOLOGO: "1",
         PYTHONDONTWRITEBYTECODE: "1", PYTHONUTF8: "1" };
     }
   }
@@ -205,6 +206,17 @@ async function runBatch() {
           result.completedCaseIds=summary.scope.completedCaseIds;result.completedScenarioIds=summary.scope.completedScenarioIds;
         } else {code=await ensureNpm(frontendDir);if(!code) code=await run(npmCommand,["run","typecheck"],{cwd:frontendDir});}
         if(!code&&unit.provides.includes("host.frontend.build")) code=await buildFrontendBundle({typechecked:true});
+      } else if(unit.kind==="finite") {
+        code = await runFinite(unit.groups);
+        for (const group of unit.groups) {
+          const native = finiteResults.findLast(item => item.group === group);
+          if (code || !native || native.exitCode) throw Object.assign(new Error("Missing finite production scenario evidence"), {exitCode:code || 4});
+          const value = JSON.parse(fs.readFileSync(native.evidence));
+          const scenario = policy.integrationScenarios[`host.integration.${group}`];
+          if (value.scenarioId !== scenario || value.status !== "PASS" || value.cleanup !== "complete") throw new Error("Failed finite scenario");
+          fs.copyFileSync(native.evidence,path.join(runRoot,`finite-${scenario}.json`));
+          result.completedScenarioIds.push(scenario);
+        }
       } else if(unit.kind==="partner-jint") {
         const partner=batchContext.partnerRoot;
         const staged=stageWorkspace(partner,process.env.NEXUS_TEST_ARTIFACT_ROOT,invocationBudget,"Plugins");
@@ -351,6 +363,12 @@ async function runIntegration() {
   return runSystemSmoke();
 }
 
+async function prepareTestHostUi() {
+  const codes = await Promise.all([buildFrontendBundle(), publishTestHost({ withFrontend: false })]);
+  if (codes.some(code => code)) return codes.find(code => code);
+  return publishTestHost({ withFrontend: true });
+}
+
 const finiteGroups = ["schedule", "execution", "config", "control"];
 const finiteResults = [];
 async function runFinite(selectedGroup) {
@@ -358,19 +376,21 @@ async function runFinite(selectedGroup) {
   executionRoot = workspace.directory;
   frontendDir = path.join(executionRoot, "frontend");
   e2eDir = path.join(executionRoot, "tests/e2e");
-  const browserRequired = !selectedGroup || selectedGroup === "execution";
-  const preparation = browserRequired
-    ? [buildFrontendBundle, publishTestHost, () => ensureNpm(e2eDir)]
-    : [() => publishTestHost({ withFrontend: false })];
-  for (const prepare of preparation) {
-    const code = await prepare(); if (code) return code;
+  const selected = selectedGroup ? (Array.isArray(selectedGroup) ? selectedGroup : [selectedGroup]) : [...finiteGroups];
+  if (!selected.length || new Set(selected).size !== selected.length || selected.some(group => !finiteGroups.includes(group))) throw new Error("Unknown or duplicate finite group");
+  const browserRequired = selected.includes("execution");
+  if (browserRequired) {
+    const codes = await Promise.all([prepareTestHostUi(), ensureNpm(e2eDir)]);
+    if (codes.some(code => code)) return codes.find(code => code);
+  } else {
+    const code = await publishTestHost({ withFrontend: false }); if (code) return code;
   }
-  if (!selectedGroup || selectedGroup === "control") {
+  if (selected.includes("control")) {
     const code = await run("dotnet", ["build", "tests/fixtures/NexusPipeline.TestPlugin/NexusPipeline.TestPlugin.csproj",
       "-c", "Release", "-p:NexusTestHost=true", "-p:UseSharedCompilation=false", "--disable-build-servers", "--nologo"]);
     if (code) return code;
   }
-  const queue = selectedGroup ? [selectedGroup] : [...finiteGroups];
+  const queue = [...selected];
   let code = 0;
   await Promise.all(Array.from({ length: Math.min(2, queue.length) }, async () => {
     while (queue.length && !code) {
@@ -463,9 +483,8 @@ async function runGate(id) {
   }
   if (id === "host.frontend.build") return buildFrontendBundle();
   if (id === "host.build.test-host") {
-    const withFrontend = !batchContext || batchContext.batch.units.some(unit => unit.id === "host.integration.execution");
-    const code = withFrontend ? await buildFrontendBundle() : 0;
-    return code || publishTestHost({ withFrontend });
+    const withFrontend = !batchContext || batchContext.batch.units.some(unit => unit.id === "host.integration.execution" || unit.kind === "finite" && unit.groups.includes("execution"));
+    return withFrontend ? prepareTestHostUi() : publishTestHost({ withFrontend: false });
   }
   if (id === "host.ci-policy") {
     let code = await run(process.execPath, ["--test", "tests/scope-plan.test.mjs", "tests/core-plan.test.mjs", "tests/batch-plan.test.mjs", "tests/support/budget.test.mjs", "tests/support/test-runtime.test.mjs"]);

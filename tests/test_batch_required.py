@@ -47,6 +47,34 @@ class BatchRequiredTests(unittest.TestCase):
     def test_complete_typed_control_passes(self):
         self.assertEqual(self.check()["status"],"PASS")
 
+    def test_finite_union_requires_every_native_scenario_and_observation(self):
+        scenarios = ["H-E01", "H-E02", "H-E03"]
+        expected = {"id":"host.finite", "kind":"finite", "provides":["execution", "config", "control"],
+                    "expectedCaseIds":[], "expectedScenarioIds":scenarios, "expectedEditorCaseIds":[], "expectedMethodIds":[]}
+        actual = {"status":"PASS", "exitCode":0, "providedObligations":expected["provides"],
+                  "completedScenarioIds":scenarios, "completedCaseIds":[], "completedMethodIds":[], "completedEditorCaseIds":[],
+                  "rawEvidence":[f"finite-{scenario}.json" for scenario in scenarios]}
+        originals = {scenario:{"scenarioId":scenario, "status":"PASS", "cleanup":"complete"} for scenario in scenarios}
+        originals["H-E01"].update(runs=list(range(12)), queries=64)
+        originals["H-E02"]["recovery"]={"recovered":True, "idempotentRestart":True}
+        files = {name:self.root/name for name in actual["rawEvidence"]}
+        for scenario,value in originals.items(): self.write(f"finite-{scenario}.json", value)
+        required.validate_unit(expected, actual, files, self.root)
+        for scenario in scenarios:
+            name=f"finite-{scenario}.json"
+            for change in [{"status":"FAIL"}, {"cleanup":"incomplete"}, {"scenarioId":"foreign"}]:
+                self.write(name, {**originals[scenario], **change})
+                with self.subTest(scenario=scenario, change=change),self.assertRaises(ValueError):
+                    required.validate_unit(expected, actual, files, self.root)
+            self.write(name, originals[scenario])
+            with self.subTest(missing=scenario),self.assertRaises(ValueError):
+                required.validate_unit(expected, {**actual, "rawEvidence":[item for item in actual["rawEvidence"] if item!=name]}, files, self.root)
+        for scenario,change in [("H-E01", {"queries":63}), ("H-E01", {"runs":list(range(11))}),
+                                ("H-E02", {"recovery":{"recovered":True, "idempotentRestart":False}})]:
+            self.write(f"finite-{scenario}.json", {**originals[scenario], **change})
+            with self.subTest(observation=change),self.assertRaises(ValueError):required.validate_unit(expected, actual, files, self.root)
+            self.write(f"finite-{scenario}.json", originals[scenario])
+
     def test_foreign_identities_dirty_diagnostic_and_cleanup_fail(self):
         original=copy.deepcopy(self.report)
         for key in ["repository","prNumber","baseSha","headSha","mergeBaseSha","testedSha","runId","attempt","partnerSha","sourceFingerprint"]:

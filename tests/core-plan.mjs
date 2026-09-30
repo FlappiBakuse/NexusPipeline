@@ -64,6 +64,12 @@ export function coreUnits(selected, registry, policy, partnerPolicy = null) {
       } else if (dimension === "package" && plugin.kind === "managed-code") {
         item.preparations.push(`plugin.production-package:${artifact}`);
       }
+    } else if (["host.integration.config", "host.integration.control", "host.integration.execution"].includes(id)) {
+      const item = unit("host.finite", "finite", id);
+      item.groups.push(id.split(".").at(-1));
+      item.expectedScenarioIds.push(policy.integrationScenarios[id]);
+      item.preparations.push("host.runtime.test-build");
+      if (id === "host.integration.execution") item.preparations.push("host.frontend.dependencies", "host.browser");
     } else if (id === "host.partner-jint") {
       const item = unit(id, "partner-jint", id, {partnerPlugins:[]});
       item.preparations.push("host.jint.test-build");
@@ -92,6 +98,7 @@ export function coreUnits(selected, registry, policy, partnerPolicy = null) {
       input: "same source/partner/policy/toolchain/build mode within one batch",
       obligations: item.provides, raw: item.kind === "backend" ? "TRX union of policy case IDs"
         : item.kind === "frontend" ? "Vitest policy cases plus typecheck/build receipts"
+        : item.kind === "finite" ? "independently owned runtime and native evidence for every selected scenario"
         : "one TRX discovery/instance set, build receipts and per-plugin capability/trajectory evidence",
     } : null;
   }

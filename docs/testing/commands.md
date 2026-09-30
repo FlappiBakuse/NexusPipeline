@@ -26,6 +26,8 @@ node tests/run.mjs gate --id host.ci-policy
 
 `daily` 使用两个独立 Host 槽位，先启动真实分钟调度，另一槽运行执行和配置，空闲槽接续控制面；共享准备、四组工作及清理合计 180 秒。支持 `--group execution|config|control|schedule` 进行明确的单组诊断。每组保留 `evidence.json`，父级 `daily-evidence.json` 只有全部预期组及清理通过才成功。
 
+批次中的 execution、config、control 按实际选中集合共享 Test Host 构建和两个运行槽位，每组使用独立进程、端口、数据和运行身份。分钟调度单独分配；不需要浏览器的批次只准备 API Test Host。Required 逐份核对 `finite-H-E01.json`、`finite-H-E02.json`、`finite-H-E03.json` 中对应选中场景的原生结果与清理证据。
+
 | 场景 | 真实证明 | 外部替代 |
 |---|---|---|
 | H-E01 execution | 浏览器选择队列并运行，6 脚本、3 队列、4 账号，12 次请求、4 次取消、64 次读取，进程退出和历史归属 | 拥有的外部目标程序 |

@@ -104,6 +104,15 @@ def validate_unit(expected, actual, files, base):
         native = native_report("trx" if expected["kind"] == "backend" else "vitest", one("native.trx" if expected["kind"] == "backend" else "native.json"))
         require(exact(native["caseIds"], expected["expectedCaseIds"]) and exact(actual["completedCaseIds"], native["caseIds"]), "Missing native policy instances")
         require(load(one("native-counts.json")) == native, "Normalized native differs from original")
+    elif expected["kind"] == "finite":
+        for scenario_id in expected["expectedScenarioIds"]:
+            scenario = load(one(f"finite-{scenario_id}.json"))
+            require(scenario["scenarioId"] == scenario_id and scenario["status"] == "PASS" and scenario["cleanup"] == "complete", "Missing finite scenario native evidence")
+            if scenario_id == "H-E01":
+                require(len(scenario["runs"]) == 12 and scenario["queries"] == 64, "Missing finite execution observations")
+            elif scenario_id == "H-E02":
+                require(scenario["recovery"]["recovered"] and scenario["recovery"]["idempotentRestart"], "Missing configuration recovery")
+        require(exact(actual["completedScenarioIds"],expected["expectedScenarioIds"]), "Missing finite scenario IDs")
     elif expected["kind"] == "plugin" and expected.get("expectedMethodIds"):
         discovery = load(one("discovery.json"))
         methods = expected["expectedMethodIds"]
