@@ -491,12 +491,12 @@ async function runGate(id) {
     let code = await run("dotnet", ["build", project, "-c", "Release", `-p:BaseOutputPath=${output}`,
       `-p:BaseIntermediateOutputPath=${intermediate}`, "-p:UseSharedCompilation=false", "--disable-build-servers", "--nologo"]);
     if (code) return code;
-    code = await run("dotnet", ["build", "src/NexusPipeline.csproj", "-c", "Release", "-r", "win-x64",
-      "-p:NexusTestHost=true", "-p:UseSharedCompilation=false", "--disable-build-servers", "--nologo"]);
-    if (code) return code;
-    code = await run("dotnet", ["build", "src/NexusPipeline.csproj", "-c", "Release", "-r", "win-x64",
-      "-p:UseSharedCompilation=false", "--disable-build-servers", "--nologo"]);
-    if (code) return code;
+    // Roslyn compiles both modes; restore prepares their separate reference graphs.
+    for (const testHost of [true, false]) {
+      code = await run("dotnet", ["restore", "src/NexusPipeline.csproj", "-r", "win-x64",
+        `-p:NexusTestHost=${testHost}`, "--nologo"]);
+      if (code) return code;
+    }
     const checker = path.join(output, "Release", "net8.0", "NexusPipeline.Architecture.dll");
     code = await run("dotnet", [checker, executionRoot, "--report", path.join(runRoot, "architecture-backend.json")]);
     if (code) return code;

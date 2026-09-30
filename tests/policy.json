@@ -482,14 +482,19 @@
     "fixedJobs": 5,
     "preparationMs": {
       "source": 500,
-      "host.backend.test-build": 20000,
-      "host.frontend.dependencies": 5000,
-      "host.runtime.test-build": 25000,
-      "host.jint.test-build": 12000,
+      "host.backend.test-build": 35000,
+      "host.frontend.dependencies": 15000,
+      "host.runtime.test-build": 35000,
+      "host.jint.test-build": 25000,
       "plugins.source-validation": 2000,
       "maa.native": 20000
     },
-    "unitMs": {}
+    "unitMs": {
+      "host.architecture.backend": 65000,
+      "host.architecture.frontend": 5000,
+      "host.frontend": 20000,
+      "host.partner-jint": 45000
+    }
   },
   "integrationScenarios": {
     "host.integration.execution": "H-E01",
