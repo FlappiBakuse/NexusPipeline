@@ -73,9 +73,6 @@ def physical_jobs(repository, run, jobs, check_name, app_id):
             raise ValueError("Foreign Actions record")
         optional_names = {job_name(prefix, "control"): job_name(prefix, "control") for prefix in ["Host", "Plugins"]}
         for prefix in ["Host", "Plugins"]:
-            optional_names[prefix+" / Control"] = prefix+" / Control"
-            legacy = prefix+" / Batches (not selected)"
-            optional_names.update({legacy: legacy, "matrix.name || '"+legacy+"'": legacy})
             canonical = job_name(prefix, "unselected")
             optional_names.update({canonical: canonical, "matrix.name || '"+canonical+"'": canonical})
         # Labels can be selectors on a skipped job without an assigned runner.

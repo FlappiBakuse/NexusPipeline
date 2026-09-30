@@ -24,7 +24,7 @@ NexusPipeline（枢链）是 Windows 本地自动化脚本管家：.NET 8/C# Win
 ## 2. 操作授权、版本和数据
 
 - 代码实施授权与 commit、push、tag、PR、合并、规则修改、实际发布授权分别判断。用户未授权的远端或版本操作不得执行。可以完成不依赖远端写入的实现和本地验证。
-- 日常开发目标为 `develop`；`main` 源码必须经 PR、`Host / 必需汇总` 与 `Host / Final Budget` 成功和 squash 合并。Host 没有生成物直推 `main` 例外。禁止普通直推/force push `main`。
+- 日常开发目标为 `develop`；`main` 源码必须经 PR、`Host / 必需汇总` 与 `Host / 完整预算` 成功和 squash 合并。Host 没有生成物直推 `main` 例外。禁止普通直推/force push `main`。
 - 正式版本号仅按用户指示修改；未指定版本不阻止普通修复、架构或工具工作。指定版本后同步相关元数据。`major=0` 或含 `-beta.N`/`-rc.N` 的发行标记为 Pre-release。预览插件通道与 Host 产品 Pre-release 是不同概念。
 - 修改前保存当前 HEAD、diff 和将修改文件的外部备份。备份必须包含未提交字节；只记录 tag 不足以保全工作树。未经针对性授权不使用 `reset --hard`、`clean -fd`、自动 stash 或覆盖恢复。已授权的版本化本地备份 tag 不推送远端。
 - `config/`、`data/`、`history/`、`logs/`、`.nxp/`、插件用户数据、更新/配置恢复现场属于用户或运行态。测试使用新建隔离目录；不得对用户现有实例、进程、端口或文件做“测试清理”。读日志先脱敏。
@@ -53,7 +53,7 @@ HTTP 只处理路由、认证、参数、用例调用和响应映射；图标、
 
 核心验证入口为 `node tests/run.mjs ci --group backend`、`ci --group frontend`；`smoke` 并行运行这两组，共享从命令开始的 180 秒预算。测试只在原字节隔离副本中构建，输出及依赖缓存使用外部测试目录。`tests/policy.json` 固定选择与预期用例；原生 TRX／Vitest JSON、场景和用例集合、计数、源码指纹、预算和清理都必须匹配，零用例、意外 skip、缺报告、取消和超时不得成功。普通测试不自动运行全仓语法扫描、文档链接或全部工具自测；这些按改动显式运行。
 
-`daily` 在两个独立 Host 槽位中运行执行、配置恢复、控制面和真实分钟调度四组 E2E，共享 180 秒父预算；预期场景不得缺失。`integration` 保留 UI/System Smoke 诊断，其中受控 API 响应不得冒称真实业务。`release` 单独执行生产 requireAdministrator 构建与清单校验。CI 以 scope、可选 control、最多五个 Windows batch 和 Required 执行逻辑义务；加上可信 main 的 begin/finalize 控制器，每 attempt 最多十个物理 job，每个完整 job 不超过 150 秒。Required 汇总核验报告和 Actions 完整前序 job 时长；Final Budget 继续审计 Required 和控制器，最终收尾须用服务端记录复核；本地通过不代表远端验收或发布完成。准确命令见 `docs/testing/commands.md`。
+`daily` 在两个独立 Host 槽位中运行执行、配置恢复、控制面和真实分钟调度四组 E2E，共享 180 秒父预算；预期场景不得缺失。`integration` 保留 UI/System Smoke 诊断，其中受控 API 响应不得冒称真实业务。`release` 单独执行生产 requireAdministrator 构建与清单校验。CI 以 scope、可选 control、最多五个 Windows batch 和 必需汇总 执行逻辑义务；加上可信 main 的 begin/finalize 控制器，每 attempt 最多十个物理 job，每个完整 job 不超过 150 秒。必需汇总 汇总核验报告和 Actions 完整前序 job 时长；完整预算 继续审计 必需汇总 和控制器，最终收尾须用服务端记录复核；本地通过不代表远端验收或发布完成。准确命令见 `docs/testing/commands.md`。
 
 生产/Test Host 构建的输出和中间目录分离；两者共享同一业务源实现，禁止将测试 EXE 发布给用户。功能测试统一使用 `NexusTestHost=true`、asInvoker 的隔离 Test Host，每次运行使用独立端口与独立 runtime 目录，运行数据、PID 与退出标记只写入已登记外部测试根的 `runs/<runId>/`，不读写用户实例的进程、端口或数据。托管层使用受控进程/模拟器 fixture，操作系统授权边界通过平台适配器契约验证，不冒称普通权限已执行了系统级操作。
 

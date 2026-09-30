@@ -26,7 +26,7 @@ node tests/run.mjs gate --id host.ci-policy
 
 `daily` 使用两个独立 Host 槽位，先启动真实分钟调度，另一槽运行执行和配置，空闲槽接续控制面；共享准备、四组工作及清理合计 180 秒。支持 `--group execution|config|control|schedule` 进行明确的单组诊断。每组保留 `evidence.json`，父级 `daily-evidence.json` 只有全部预期组及清理通过才成功。
 
-批次中的 execution、config、control 按实际选中集合共享 Test Host 构建和两个运行槽位，每组使用独立进程、端口、数据和运行身份。分钟调度单独分配；不需要浏览器的批次只准备 API Test Host。Required 逐份核对 `finite-H-E01.json`、`finite-H-E02.json`、`finite-H-E03.json` 中对应选中场景的原生结果与清理证据。
+批次中的 execution、config、control 按实际选中集合共享 Test Host 构建和两个运行槽位，每组使用独立进程、端口、数据和运行身份。分钟调度单独分配；不需要浏览器的批次只准备 API Test Host。必需汇总 逐份核对 `finite-H-E01.json`、`finite-H-E02.json`、`finite-H-E03.json` 中对应选中场景的原生结果与清理证据。
 
 | 场景 | 真实证明 | 外部替代 |
 |---|---|---|
@@ -57,7 +57,7 @@ node tests/run.mjs gate --id host.ci-policy
 
 ## 质量门禁顺序
 
-`.github/workflows/ci.yml` 先生成含 source/partner/policy/control manifest 的完整 base/head 范围计划，再执行可选 control 与最多五个 Windows batch。`Host / Required` 核验本次计划、报告、原生计数、清理与 Actions API 返回的完整前序 job 时长；每个 job 硬限制三分钟。完成后还须执行只读 `python tests/audit-jobs.py --run-id <ID> --attempt <N>`，检查包括 Required 在内的完整 job 时长。可信 `main` 的 begin 控制器先登记同 PR/head/producer run/attempt 身份并清除旧成功，finalize 在 CI 完成后审计所有物理 job，写入 `Host / Final Budget` 检查；该检查须与 `Host / Required` 一同绑定到 main 规则。回写检查不存在或失败时不得合并。
+`.github/workflows/ci.yml` 先生成含 source/partner/policy/control manifest 的完整 base/head 范围计划，再执行可选 control 与最多五个 Windows batch。`Host / 必需汇总` 核验本次计划、报告、原生计数、清理与 Actions API 返回的完整前序 job 时长；每个 job 硬限制三分钟。完成后还须执行只读 `python tests/audit-jobs.py --run-id <ID> --attempt <N>`，检查包括 必需汇总 在内的完整 job 时长。可信 `main` 的 begin 控制器先登记同 PR/head/producer run/attempt 身份并清除旧成功，finalize 在 CI 完成后审计所有物理 job，写入 `Host / 完整预算` 检查；该检查须与 `Host / 必需汇总` 一同绑定到 main 规则。回写检查不存在或失败时不得合并。
 
 工具自测与文档检查按改动显式运行，例如：
 
@@ -89,13 +89,13 @@ python -m unittest discover -s tools/tests -p test_pe_manifest.py
 
 使用 `NexusTestHost=true` 时先 `dotnet build tools/NexusPipeline.TaskProtocolTests -p:NexusTestHost=true`，再运行实际输出 `bin/test-host/NexusPipeline.TaskProtocolTests/Debug/net8.0-windows/NexusPipeline.TaskProtocolTests.dll` 并传上述参数。全部命令应在外部隔离副本中运行；该工具报告仅证明选中的真实 Jint/发现/归并/配置事务，不表示上游真实设备已经验证。
 
-批次内部报告使用 schemaVersion 2，包含精确预期义务、原生 TRX/Vitest/TAP/场景文件及其 hash。Required 从固定源码重新推导计划，拒绝缺失、重复、skip、错 attempt、错 partner/policy、路径逃逸或规范化与原生报告不一致。完整资格上限为每物理 job 150 秒（含 checkout、工具/依赖准备、上传和 post-action），合计最多十个 job：scope + 可选 control + 五批 + Required + begin + finalize。Required 自身和 finalize 收尾仍须用完成后的只读服务端记录验收。
+批次内部报告使用 schemaVersion 2，包含精确预期义务、原生 TRX/Vitest/TAP/场景文件及其 hash。必需汇总 从固定源码重新推导计划，拒绝缺失、重复、skip、错 attempt、错 partner/policy、路径逃逸或规范化与原生报告不一致。完整资格上限为每物理 job 150 秒（含 checkout、工具/依赖准备、上传和 post-action），合计最多十个 job：scope + 可选 control + 五批 + 必需汇总 + begin + finalize。必需汇总 自身和 finalize 收尾仍须用完成后的只读服务端记录验收。
 
-Required 只等待仍在排队或运行中的可信 main begin 登记，最多 100 秒，并受自身 130 秒工作截止约束；登记身份错误或已完成失败立即拒绝。API 中带 runner 选择标签、但从未分配 runner 且没有 steps 的已知可选 skipped job 不计为物理作业；已分配 runner、实际 steps 和未知作业继续严格审计。
+必需汇总 只等待仍在排队或运行中的可信 main begin 登记，最多 100 秒，并受自身 130 秒工作截止约束；登记身份错误或已完成失败立即拒绝。API 中带 runner 选择标签、但从未分配 runner 且没有 steps 的已知可选 skipped job 不计为物理作业；已分配 runner、实际 steps 和未知作业继续严格审计。
 
 ### 同 SHA 完整重跑
 
-首次 CI 由 `requested` 事件登记一次可信 begin。完整重跑不产生该事件，须由已审核 `main` 显式登记新的 attempt；新 Required 只接受本次 PR/head/run/attempt 身份，未登记时失败。先重跑整个生产者，读取新的 attempt，再执行：
+首次 CI 由 `requested` 事件登记一次可信 begin。完整重跑不产生该事件，须由已审核 `main` 显式登记新的 attempt；新 必需汇总 只接受本次 PR/head/run/attempt 身份，未登记时失败。先重跑整个生产者，读取新的 attempt，再执行：
 
 ```text
 gh run rerun <producer-run-id> --repo FlappiBakuse/NexusPipeline

@@ -1,6 +1,6 @@
 # 项目状态（Status）
 
-**更新日期**：2026-09-30｜**发布模式**：`major=0` 或带 `-beta.N` / `-rc.N` 后缀的版本为 Pre-release；`major>=1` 且无后缀的版本为正式 Release。日常开发分支为 `develop`；源码进入 `main` 必须经过 PR、`Host / Required`、`Host / Final Budget` 检查与 squash merge。
+**更新日期**：2026-09-30｜**发布模式**：`major=0` 或带 `-beta.N` / `-rc.N` 后缀的版本为 Pre-release；`major>=1` 且无后缀的版本为正式 Release。日常开发分支为 `develop`；源码进入 `main` 必须经过 PR、`Host / 必需汇总`、`Host / 完整预算` 检查与 squash merge。
 
 > 本文件记录尚未完成的开发计划、活跃技术验证和当前未解决问题。已完成版本以 [CHANGELOG.md](../CHANGELOG.md)、代码和测试结果为准。版本号只在用户明确指定时修改；开发检查点保存在仓库外，不以 Git 标签代替文件备份。
 

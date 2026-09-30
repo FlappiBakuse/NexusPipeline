@@ -1,7 +1,7 @@
 {
   "control": "控制检查",
   "required": "必需汇总",
-  "finalBudget": "Final Budget",
+  "finalBudget": "完整预算",
   "unselected": "验证批次（未选中）",
   "batch": "验证批次"
 }
