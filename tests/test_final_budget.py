@@ -37,6 +37,7 @@ class FinalBudgetTests(unittest.TestCase):
     def test_begin_finalize_rerun_late_and_duplicate_events(self):
         source = run()
         source["run_number"] = 5
+        source["status"] = "queued"
         source["pull_requests"][0]["number"] = 7
         checks, writes = [], []
         current_event = ["workflow_run"]
@@ -58,8 +59,11 @@ class FinalBudgetTests(unittest.TestCase):
                 return copy.deepcopy(source)
             raise AssertionError(route)
         def write(route, body, method):
+            if body["status"] == "in_progress":
+                self.assertNotIn("conclusion", body)
             writes.append((method, copy.deepcopy(body)))
             result = {**(checks[0] if checks else {}), **body, "id": 77, "head_sha": SHA, "app": {"id": 17}, "html_url": "fixture"}
+            if body["status"] == "in_progress": result["conclusion"] = None
             checks[:] = [result]
             return copy.deepcopy(result)
         def event(phase, attempt=2):
@@ -70,6 +74,7 @@ class FinalBudgetTests(unittest.TestCase):
             self.assertEqual(checks[0]["status"], "in_progress")
             event("begin")
             self.assertEqual(len(writes), 1)
+            source["status"] = "completed"
             event("finalize")
             self.assertEqual(checks[0]["conclusion"], "success")
             current_event[0] = "workflow_dispatch"

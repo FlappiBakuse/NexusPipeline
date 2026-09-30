@@ -191,7 +191,8 @@ def main():
     app_id = suite["app"]["id"]
     existing = current_check(repository, sha, args.check_name, app_id, pull["number"])
     if args.phase == "begin":
-        if run.get("status") not in ["in_progress", "completed"]:
+        # Actions can return queued while later jobs wait after the trusted start event.
+        if run.get("status") not in ["queued", "in_progress", "completed"]:
             raise ValueError("Producer has not started")
         if existing:
             try:
@@ -206,7 +207,7 @@ def main():
             print("SUPERSEDED: no check update")
             return
         print(upsert(repository, sha, args.check_name, existing, {
-            "status": "in_progress", "conclusion": None, "external_id": external,
+            "status": "in_progress", "external_id": external,
             "details_url": f"https://github.com/{repository}/actions/runs/{args.run_id}/attempts/{args.attempt}",
             "output": {"title": "Complete CI job budget", "summary": "Trusted begin registered; final audit pending."}}))
         return
