@@ -36,7 +36,7 @@ release/
 重构建前若提示 exe 被占用，确认没有正在运行的服务进程后执行：
 
 ```cmd
-taskkill /IM nexus-pipeline.exe /T /F
+# 先核对该实例的安装目录、运行目录和 PID，再停止该确权实例。
 ```
 
 需要指定参数时可使用等价的 .NET 发布命令：
@@ -66,7 +66,7 @@ dotnet publish src\NexusPipeline.csproj -c Release -r win-x64 --self-contained f
 
 测试分层与归属见[测试索引](../testing/README.md)和[测试政策](../testing/policy.md)，三个入口命令、隔离 Test Host 与运行输出见[测试命令](../testing/commands.md)。统一入口为 `node tests\run.mjs smoke`、`integration` 或 `release`：本地改动先跑 `smoke`；涉及进程、端口、解释器、模拟器、插件或更新事务时再跑 `integration`。
 
-PR 的唯一自动门禁是 `Host / Required` 单作业（`windows-latest`、超时 20 分钟），检出后安装 .NET 8 与 Node 24 并执行 `node tests/run.mjs smoke`；它不按 diff 选择范围、不条件准备工具链。合并后的候选任务另行运行 `integration` 与生产包构建。
+PR 范围计划映射逻辑义务到可选 control 与最多五个 Windows batch，按准备依赖选择工具链；Required 汇总原生证据，可信 main 的 Final Budget 审计完整 attempt。两项 required 检查均须成功。所有物理 job 三分钟硬停止，正式完整时长上限 150 秒，实际远端启用状态见 [STATUS](../STATUS.md)。合并后的发行工作流独立构建、验收生产候选。
 
 
 

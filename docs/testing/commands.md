@@ -14,14 +14,15 @@ node tests/run.mjs daily --group schedule
 node tests/run.mjs diagnostic --group store
 node tests/run.mjs integration
 node tests/run.mjs release
-node tests/run.mjs plan --base <完整基线SHA> --include-working-tree
+node tests/run.mjs plan --base <完整基线SHA> --include-working-tree --partner-root <固定Plugins检出> --output <外部scope.json>
+node tests/run.mjs batch --plan <外部scope.json> --batch <control或batch-01至batch-05> --partner-root <同一Plugins检出>
 node tests/run.mjs gate --id host.backend.updates-restart
 node tests/run.mjs gate --id host.ci-policy
 ```
 
 `ci` 必须指定一个已知分组。backend 选择真实后端规则、文件事务、执行与调度窄测试；frontend 运行类型检查及核心状态、用户配置请求与公开桥接测试。`tests/policy.json` 中的预期用例与实际原生报告严格匹配。新增或更名选中用例时同步清单，不能删除失败用例以绕过验证。
 
-正式 PR 门禁以 `plan` 选择的独立 `gate --id` 为准；每个 gate 单独计时，完整本地资格线为 150 秒，硬停止线为 180 秒。`smoke` 与两条 `ci` 是本地聚合诊断入口，使用同一核心执行器并共享 180 秒父预算，最后 10 秒预留收尾。输入识别、隔离复制、必要增量构建、依赖准备、测试、报告和清理均计入预算。失败保留原退出码；超时返回 5，清理失败返回 6，主动取消返回 130。报告不完整返回 4。未知命令或参数返回 2。
+正式 PR 门禁由 `plan` 把逻辑 gate 义务转换为执行单元，再分配到可选 control 和最多五个 batch；容量不足报告 CAPACITY_EXCEEDED，不缩减义务。`gate --id` 保留为显式诊断。batch 从首次受控步骤继承父截止，工作窗口 130 秒、硬截止 180 秒，最后 50 秒用于清理及证据收尾；准备与子命令不重置预算。本地过程加准备耗时上限 150 秒，只证明本地预算。`smoke` 与两条 `ci` 是本地聚合诊断入口，使用同一核心执行器并共享 180 秒父预算，最后 10 秒预留收尾。输入识别、隔离复制、必要增量构建、依赖准备、测试、报告和清理均计入预算。失败保留原退出码；超时返回 5，清理失败返回 6，主动取消返回 130。报告不完整返回 4。未知命令或参数返回 2。
 
 `daily` 使用两个独立 Host 槽位，先启动真实分钟调度，另一槽运行执行和配置，空闲槽接续控制面；共享准备、四组工作及清理合计 180 秒。支持 `--group execution|config|control|schedule` 进行明确的单组诊断。每组保留 `evidence.json`，父级 `daily-evidence.json` 只有全部预期组及清理通过才成功。
 
@@ -54,7 +55,7 @@ node tests/run.mjs gate --id host.ci-policy
 
 ## 质量门禁顺序
 
-`.github/workflows/ci.yml` 先生成完整 base/head 范围计划，再并行运行选中 gate。`Host / Required` 核验本次计划、报告、原生计数、清理与 Actions API 返回的完整前序 job 时长；每个 job 硬限制三分钟。完成后还须执行只读 `python tests/audit-jobs.py --run-id <ID> --attempt <N>`，检查包括 Required 在内的完整 job 时长。`Host Final Budget` 在 CI 完成后从受信 `main` 控制器审计所有 job，写入 `Host / Final Budget` 检查；该检查须与 `Host / Required` 一同绑定到 main 规则。回写检查不存在或失败时不得合并。
+`.github/workflows/ci.yml` 先生成含 source/partner/policy/control manifest 的完整 base/head 范围计划，再执行可选 control 与最多五个 Windows batch。`Host / Required` 核验本次计划、报告、原生计数、清理与 Actions API 返回的完整前序 job 时长；每个 job 硬限制三分钟。完成后还须执行只读 `python tests/audit-jobs.py --run-id <ID> --attempt <N>`，检查包括 Required 在内的完整 job 时长。可信 `main` 的 begin 控制器先登记同 PR/head/producer run/attempt 身份并清除旧成功，finalize 在 CI 完成后审计所有物理 job，写入 `Host / Final Budget` 检查；该检查须与 `Host / Required` 一同绑定到 main 规则。回写检查不存在或失败时不得合并。
 
 工具自测与文档检查按改动显式运行，例如：
 
@@ -85,3 +86,5 @@ python -m unittest discover -s tools/tests -p test_pe_manifest.py
 `tools/NexusPipeline.TaskProtocolTests` 支持 `--plugin-root <Plugins> --plugin <已知专项> --report <新报告路径>`，可附加 `--scenario <fixture文件名去掉.json>`。未知插件、重复参数、空选择和已有报告路径均失败；不通过删除生产数据选择场景。
 
 使用 `NexusTestHost=true` 时先 `dotnet build tools/NexusPipeline.TaskProtocolTests -p:NexusTestHost=true`，再运行实际输出 `bin/test-host/NexusPipeline.TaskProtocolTests/Debug/net8.0-windows/NexusPipeline.TaskProtocolTests.dll` 并传上述参数。全部命令应在外部隔离副本中运行；该工具报告仅证明选中的真实 Jint/发现/归并/配置事务，不表示上游真实设备已经验证。
+
+批次内部报告使用 schemaVersion 2，包含精确预期义务、原生 TRX/Vitest/TAP/场景文件及其 hash。Required 从固定源码重新推导计划，拒绝缺失、重复、skip、错 attempt、错 partner/policy、路径逃逸或规范化与原生报告不一致。完整资格上限为每物理 job 150 秒（含 checkout、工具/依赖准备、上传和 post-action），合计最多十个 job：scope + 可选 control + 五批 + Required + begin + finalize。Required 自身和 finalize 收尾仍须用完成后的只读服务端记录验收。

@@ -4,9 +4,9 @@
 
 ### 版本与发布权
 
-- 版本 tag、Release 与发布资产由项目维护者负责；未经明确授权，不执行 commit、push、tag、Pull Request 或 Release（按项目规约创建的本地开发备份 tag 除外）。
+- 版本 tag、Release 与发布资产由项目维护者负责；未经明确授权，不执行 commit、push、tag、Pull Request 或 Release。
 - 版本号变更对应已确认的版本开发计划；用户指定新版本并开始开发后，立即同步项目版本配置。
-- 架构重构、新功能和破坏性版本开工前创建本地开发基线备份 tag；备份 tag 只保留在本地，不推送到 origin。
+- 开发前保存仓库外 HEAD、diff 与原字节检查点；标签操作另需明确授权。
 - 不得提交运行产物、用户配置、日志、密钥；配置与用户数据永不进入版本库。
 
 ### 分支策略
@@ -14,8 +14,7 @@
 | 参与者或阶段 | 提交路径 |
 |---|---|
 | 外部贡献者 | fork 或工作分支 → Pull Request |
-| v1.0.0 之前的项目维护者 | 按当前主分支策略直接 push `main`，提交前先同步远端，禁止 force push |
-| v1.0.0 起的项目维护者 | 工作分支 → Pull Request；CI 全绿后 squash 合入 `main`，禁止直接 push 或 force push |
+| 项目维护者 | 本地 `develop` → Pull Request；`Host / Required` 与 `Host / Final Budget` 成功后 squash 合入 `main`，禁止普通直推或 force push |
 
 如需开分支，使用 `feat/`、`fix/`、`docs/`、`refactor/`、`test/` 或 `chore/` 前缀。Release 分类遵循[发布专题](release.md)的宿主项目发布策略。
 

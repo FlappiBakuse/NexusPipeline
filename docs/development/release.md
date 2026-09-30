@@ -9,7 +9,7 @@
 - 采用受限 Nexus 版本 `X.Y.Z`、`X.Y.Z-beta.N` 或 `X.Y.Z-rc.N`，tag 为对应版本前加 `v`；版本比较遵循 `beta < rc < stable`。`fix`、`perf` 和文档/工程治理的补丁性变更使用 PATCH，`feat` 使用 MINOR，带 `!` 或 `BREAKING CHANGE` 的变更按项目当前阶段升级。
 - GitHub Release 分类按宿主项目发布策略执行：`major=0` 的所有版本均为 Pre-release；`major>=1` 时，带 `-beta.N` 或 `-rc.N` 后缀的版本为 Pre-release；`major>=1` 且无预发布后缀的版本为正式 Release。
 - 用户指定新版本并开始开发后，立即同步 `src/NexusPipeline.csproj` 的 `<Version>` 和版本展示所需配置；发布流程不重复 bump。
-- 版本开发期间的本地 `backup/vX.Y.Z-*` 还原点只存在本地，不推送到 origin。
+- 开发检查点保存仓库外原字节、HEAD 和 diff；标签另需授权。
 
 ### 发布前置
 
@@ -23,7 +23,7 @@
 
 以下步骤需要维护者明确授权：
 
-当前阶段的新候选路径在受保护 `main` 每次 push 后运行 Host Release 的 `candidate` job；也可从 `main` 显式选择 `operation=candidate` 和受保护 main 历史中的 `source_ref` 手动重建已过期候选。candidate 不需要 tag：它用固定源码构建隔离 Test Host，完成 UI、系统与独立真实计时检查，再用同一 production staging 生成 ZIP 和 Setup。Inno Setup 6.7.3 的下载包与编译器分别验固定 SHA256；两种分发物及各自纯 SHA 侧文件进入同一 `host-candidate-<runId>-<attempt>`，候选清单还记录 ZIP/Setup 构建元数据。失败报告使用独立 diagnostics artifact；候选不会创建或移动 tag，也不会自行发布。
+受保护 `main` 的 Host Release 工作流按固定 source plan 依序执行 frontend、bundled、host、package-verify、installer 与 candidate 汇总作业；也可从 `main` 显式选择 `operation=candidate` 和受保护 main 历史中的 `source_ref` 手动重建已过期候选。candidate 不需要 tag：它用固定源码构建隔离 Test Host，完成 UI、系统与独立真实计时检查，再用同一 production staging 生成 ZIP 和 Setup。Inno Setup 6.7.3 的下载包与编译器分别验固定 SHA256；两种分发物及各自纯 SHA 侧文件进入同一 `host-candidate-<runId>-<attempt>`，候选清单还记录 ZIP/Setup 构建元数据。失败报告使用独立 diagnostics artifact；候选不会创建或移动 tag，也不会自行发布。
 
 已有 tag 指向候选源码且候选 job 真正成功时，发布者可从 `main` 手动执行同包恢复：
 
@@ -68,7 +68,7 @@ Setup 在 Inno 写入 ARP 与原生 `unins*.exe/.dat/.msg` 之前保存当前用
 
 登记检查点调用的是 Setup 内嵌、只接受 `installer-state metadata-*` 命令的 asInvoker 辅助程序；它操作当前用户的登记与安装器目录。正式 Host 保持 `requireAdministrator`，独立更新 worker 仍由 `runas` 启动。worker 的授权请求被拒后，补偿不再发出第二次提权请求。辅助程序不进入 ZIP 的四项应用载荷。
 
-0.16.9001/0.16.9002 是隔离 Windows VM 跨版本实验夹具，仅供旧原生卸载器验证，不是公开历史版本；正式候选只接受产品 0.16.9 干净配对源码。未获源码提交授权时，可保存当前脏源指纹与本地 ZIP/Setup 诊断摘要，但不能称为正式候选通过。
+0.16.9001/0.16.9002 是隔离 Windows VM 跨版本实验夹具，仅供旧原生卸载器验证，不是公开历史版本；正式候选只接受本次已确认版本的干净配对源码。未获源码提交授权时，可保存当前脏源指纹与本地 ZIP/Setup 诊断摘要，但不能称为正式候选通过。
 
 交互卸载先选择保留或删除此实例的数据，默认保留；该选择和最终卸载确认都可以取消，确认之前不会删除文件。最终确认后再次核对归属、运行状态，由既有 helper 持有单实例锁执行删除；恢复现场或归属核对失败使卸载中止并保留登记。静默卸载始终保留数据。
 
@@ -136,4 +136,4 @@ SHA256：见附件对应版本的 `.sha256` 校验文件
 - 确认远端 Release 资产上传成功、下载复核和 SHA256 校验全部通过；
 - 完成确认后，清理项目内本次发布的 zip、`.sha256`、Release Notes 临时文件和打包暂存目录；
 - 清理仅针对当前项目内已核对的精确路径，不删除源码、测试、插件、用户运行数据或后续开发所需目录；
-- 备份 tag 只保留最近三个版本的现存里程碑，删除旧 tag 前先核对保留清单和删除清单。
+- 仓库外原字节检查点和失败证据按实际发布闭环及目录归属处理；标签删除另需授权。
