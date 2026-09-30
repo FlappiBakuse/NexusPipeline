@@ -244,7 +244,7 @@ def trusted_begin(audit, final, repository, plan, producer):
     require((registration["pr"],registration["run"],registration["attempt"]) == (plan["prNumber"],int(plan["runId"]),int(plan["attempt"])), "Old begin registration")
     begin = audit.api(f"/repos/{repository}/actions/runs/{registration['beginRun']}/attempts/{registration['beginAttempt']}")
     require(begin.get("id") == registration["beginRun"] and begin.get("run_attempt") == registration["beginAttempt"]
-            and begin.get("event") == "workflow_run" and begin.get("path") == ".github/workflows/final-budget.yml"
+            and begin.get("event") in ["workflow_run", "workflow_dispatch"] and begin.get("path") == ".github/workflows/final-budget.yml"
             and begin.get("head_branch") == "main"
             and begin.get("head_sha") == registration["controllerSha"] and begin.get("repository",{}).get("full_name") == repository
             and begin.get("status") == "completed" and begin.get("conclusion") == "success", "Failed/foreign begin controller")

@@ -124,6 +124,19 @@ class BatchRequiredTests(unittest.TestCase):
         final.current_check.return_value={};final.registration.return_value={"pr":7,"run":12,"attempt":1}
         with self.assertRaises(ValueError):required.trusted_begin(audit,final,"owner/repo",self.plan,{"check_suite_id":1})
 
+    def test_trusted_main_manual_begin_and_foreign_events(self):
+        audit=mock.Mock();final=mock.Mock()
+        identity={"pr":self.plan["prNumber"],"run":int(self.plan["runId"]),"attempt":int(self.plan["attempt"]),"beginRun":22,"beginAttempt":1,"controllerSha":"b"*40}
+        final.current_check.return_value={"id":77};final.registration.return_value=identity
+        begin={"id":22,"run_attempt":1,"event":"workflow_dispatch","path":".github/workflows/final-budget.yml","head_branch":"main","head_sha":"b"*40,"repository":{"full_name":"owner/repo"},"status":"completed","conclusion":"success"}
+        audit.completed_jobs.return_value=[{}];audit.audit.return_value=[{"status":"PASS"}]
+        def check(value):
+            audit.api.side_effect=[{"app":{"id":15368}},value]
+            return required.trusted_begin(audit,final,"owner/repo",self.plan,{"check_suite_id":1})
+        self.assertEqual(check(begin),15368)
+        for field,value in [("event","push"),("head_branch","develop"),("head_sha","c"*40),("conclusion","failure")]:
+            with self.subTest(field=field),self.assertRaises(ValueError):check({**begin,field:value})
+
     def test_observation_fixture_identity_survives_case_sorting_and_missing_fails(self):
         expected={"id":"plugins.runtime:Fixture","kind":"plugin","artifact":"Fixture","provides":["adapter"],"expectedCaseIds":["a-case","z-observe"],"observationFixtureId":"z-observe","expectedEditorCaseIds":[],"expectedScenarioIds":[],"expectedMethodIds":[]}
         actual={"status":"PASS","exitCode":0,"providedObligations":["adapter"],"completedCaseIds":["a-case","z-observe"],"completedScenarioIds":[],"completedMethodIds":[],"completedEditorCaseIds":[],"rawEvidence":["a-case.json","z-observe.json"]}

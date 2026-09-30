@@ -62,8 +62,10 @@ class FinalBudgetTests(unittest.TestCase):
             if body["status"] == "in_progress":
                 self.assertNotIn("conclusion", body)
             writes.append((method, copy.deepcopy(body)))
-            result = {**(checks[0] if checks else {}), **body, "id": 77, "head_sha": SHA, "app": {"id": 17}, "html_url": "fixture"}
-            if body["status"] == "in_progress": result["conclusion"] = None
+            result = {**(checks[0] if method == "PATCH" and checks else {}), **body, "id": (checks[0]["id"] if method == "PATCH" else 77 + len(writes)), "head_sha": SHA, "app": {"id": 17}, "html_url": "fixture"}
+            if body["status"] == "in_progress":
+                if method == "POST": result["conclusion"] = None
+                elif result.get("conclusion") is not None: result["status"] = "completed"
             checks[:] = [result]
             return copy.deepcopy(result)
         def event(phase, attempt=2):
@@ -87,6 +89,7 @@ class FinalBudgetTests(unittest.TestCase):
             source["run_attempt"] = 3
             jobs[0]["run_attempt"] = 3
             event("begin", 3)
+            self.assertEqual(writes[-1][0], "POST")
             self.assertEqual(checks[0]["status"], "in_progress")
             self.assertIsNone(checks[0]["conclusion"])
             count = len(writes)
