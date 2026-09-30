@@ -4,6 +4,9 @@ import copy
 import sys
 from pathlib import Path
 import unittest
+import subprocess
+import json
+import tempfile
 from unittest.mock import patch
 
 
@@ -106,11 +109,34 @@ class FinalBudgetTests(unittest.TestCase):
 
     @patch.dict(os.environ,{"GITHUB_API_URL":"https://api.github.com"})
     def test_new_batch_graph_rejects_sixth_hidden_or_missing_scope(self):
-        jobs=[job(1,"Host / Required"),job(2,"Host / 范围判定"),job(3,"Host / Control")]
-        self.assertTrue(final_budget.evaluate(run(),jobs,REPOSITORY,12,2,"Host / Required")[2])
+        jobs=[job(1,"Host / 必需汇总"),job(2,"Host / 范围判定"),job(3,"Host / 控制检查")]
+        self.assertTrue(final_budget.evaluate(run(),jobs,REPOSITORY,12,2,"Host / 必需汇总")[2])
         for extra in [[job(9,"hidden")],[job(10,"Host / batch-06")], [job(index+20,f"Host / batch-{index:02d}") for index in range(1,7)]]:
-            with self.assertRaises(ValueError): final_budget.evaluate(run(),jobs+extra,REPOSITORY,12,2,"Host / Required")
-        with self.assertRaises(ValueError): final_budget.evaluate(run(),[jobs[0],jobs[2]],REPOSITORY,12,2,"Host / Required")
+            with self.assertRaises(ValueError): final_budget.evaluate(run(),jobs+extra,REPOSITORY,12,2,"Host / 必需汇总")
+        with self.assertRaises(ValueError): final_budget.evaluate(run(),[jobs[0],jobs[2]],REPOSITORY,12,2,"Host / 必需汇总")
+
+    @patch.dict(os.environ, {"GITHUB_API_URL": "https://api.github.com"})
+    def test_producer_names_round_trip_through_complete_budget_audit(self):
+        root = Path(__file__).parent
+        registry = json.loads((root / "gates.json").read_text(encoding="utf-8"))
+        prefix = registry["repository"]
+        plan = {"repository": prefix, "control": {"units": []}, "batches": [
+            {"id": "batch-01", "units": [{"provides": [prefix.lower()+".docs"]}]}]}
+        with tempfile.TemporaryDirectory(prefix="ci-names-") as directory:
+            file = Path(directory) / "scope.json"
+            file.write_text(json.dumps(plan), encoding="utf-8")
+            names = json.loads(subprocess.check_output(["node", str(root/"ci-names.mjs"), str(file)]))
+            jobs = [job(index+1, name) for index, name in enumerate(names)]
+            self.assertTrue(final_budget.evaluate(run(), jobs, REPOSITORY, 12, 2, names[-1])[2])
+            for invalid in [prefix+" / batch-01", prefix+" / 验证批次 06 · 文档", prefix+" / 验证批次 02 · 文档"]:
+                with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                    final_budget.evaluate(run(), [jobs[0], {**jobs[1], "name": invalid}, jobs[2]], REPOSITORY, 12, 2, names[-1])
+            with self.assertRaises(ValueError):
+                final_budget.evaluate(run(), jobs+[job(20, prefix+" / 验证批次 01 · 门禁策略")], REPOSITORY, 12, 2, names[-1])
+            plan["batches"][0]["units"][0]["provides"] = ["unknown.obligation"]
+            file.write_text(json.dumps(plan), encoding="utf-8")
+            rejected = subprocess.run(["node", str(root/"ci-names.mjs"), str(file)], capture_output=True)
+            self.assertNotEqual(rejected.returncode, 0)
 
     @patch.dict(os.environ,{"GITHUB_API_URL":"https://api.github.com"})
     def test_old_head_or_older_run_is_superseded(self):

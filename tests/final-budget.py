@@ -50,21 +50,33 @@ def evaluate(run, jobs, repository, run_id, attempt, required_name):
     if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha) or pulls[0].get("head", {}).get("sha") != sha:
         raise ValueError("Pull request head mismatch")
     report = audit_jobs.audit(jobs, run_id, attempt)
+    if required_name.endswith(" / Required"):
+        localized = required_name.removesuffix(" / Required") + " / 必需汇总"
+        if any(item["name"] == localized for item in report):
+            required_name = localized
     required = [item for item in report if item["name"] == required_name]
     if len(required) != 1:
         raise ValueError("Missing or duplicate Required job")
     passed = (run.get("conclusion") == "success"
               and required[0]["status"] == "PASS"
               and all(item["status"] != "FAIL" for item in report))
-    prefix = required_name.removesuffix(" / Required")
-    if any(item["name"] == prefix+" / Control" or item["name"].startswith(prefix+" / batch-")
-           or item["name"] == prefix+" / Batches (not selected)" for item in report):
+    prefix = required_name.rsplit(" / ", 1)[0]
+    if prefix in ("Host", "Plugins"):
+        legacy = required_name.endswith(" / Required")
+        control = prefix+" / Control" if legacy else audit_jobs.job_name(prefix, "control")
+        unselected = prefix+" / Batches (not selected)" if legacy else audit_jobs.job_name(prefix, "unselected")
+        def index(name):
+            if not legacy:
+                return audit_jobs.batch_index(name, prefix)
+            match = re.fullmatch(re.escape(prefix)+r" / batch-(0[1-5])", name)
+            return int(match[1]) if match else None
         names = {item["name"] for item in report}
-        batches = sorted(name for name in names if name.startswith(prefix+" / batch-"))
-        permitted = {prefix+" / 范围判定",prefix+" / Control",required_name,prefix+" / Batches (not selected)",*batches}
+        batches = sorted(index(name) for name in names if index(name) is not None)
+        permitted = {prefix+" / 范围判定", control, required_name, unselected}
+        permitted.update(name for name in names if index(name) is not None)
         physical_count = sum(not job.get("runnerlessSkipped") for job in jobs)
         if (not names <= permitted or prefix+" / 范围判定" not in names
-                or batches != [prefix+f" / batch-{index:02d}" for index in range(1,len(batches)+1)]
+                or batches != list(range(1, len(batches)+1))
                 or len(batches) > 5 or physical_count+2 > 10):
             raise ValueError("Unexpected or oversized physical batch producer graph")
     return sha, report, passed
@@ -142,15 +154,15 @@ def require_complete_attempt(repository, run, jobs, check_name, app_id):
 
 def publish(repository, sha, check_name, run_id, attempt, report, passed, existing=None, external_id=None):
     failing = [item for item in report if item["status"] == "FAIL"]
-    summary = (f"Run {run_id}, attempt {attempt}: {len(report)} completed jobs; "
-               f"{len(failing)} failed the complete 150000 ms budget or Actions result.\n\n")
+    summary = (f"运行 {run_id}，第 {attempt} 次：{len(report)} 个已完成任务；"
+               f"{len(failing)} 个任务未通过完整 150000 ms 预算或运行结果核验。\n\n")
     summary += "\n".join(f"- {item['name']}: {item['status']} "
                          f"({item['elapsedMs']} ms)" for item in failing[:30])
     body = {
         "status": "completed",
         "conclusion": "success" if passed else "failure",
         "details_url": f"https://github.com/{repository}/actions/runs/{run_id}/attempts/{attempt}",
-        "output": {"title": "Complete CI job budget", "summary": summary},
+        "output": {"title": "完整任务预算核验", "summary": summary},
     }
     if external_id:
         body["external_id"] = external_id
@@ -213,7 +225,7 @@ def main():
         print(upsert(repository, sha, args.check_name, None, {
             "status": "in_progress", "external_id": external,
             "details_url": f"https://github.com/{repository}/actions/runs/{args.run_id}/attempts/{args.attempt}",
-            "output": {"title": "Complete CI job budget", "summary": "Trusted begin registered; final audit pending."}}))
+            "output": {"title": "完整任务预算核验", "summary": "可信预算登记已完成，等待最终复核。"}}))
         return
     if not existing:
         raise ValueError("Missing trusted begin registration")

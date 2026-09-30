@@ -2,7 +2,7 @@ name: Host Final Budget
 
 on:
   workflow_run:
-    workflows: [Host CI]
+    workflows: [Host CI, Host 持续集成]
     types: [requested, completed]
   workflow_dispatch:
     inputs:
