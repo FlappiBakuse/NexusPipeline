@@ -34,6 +34,18 @@ class AuditJobsTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     audit_jobs.physical_jobs("owner/repo", {"id": 12, "run_attempt": 2, "head_sha": "a" * 40}, [real, synthetic], "Final Budget", 17)
 
+    def test_skipped_matrix_selector_is_not_an_allocated_runner(self):
+        run={"id":12,"run_attempt":2,"head_sha":"a"*40}
+        for prefix in ["Host", "Plugins"]:
+            skipped={**job(2), "name":"matrix.name || '"+prefix+" / Batches (not selected)'",
+                     "conclusion":"skipped", "labels":["windows-2025"], "steps":[], "runner_id":None}
+            physical,_=audit_jobs.physical_jobs("owner/repo",run,[skipped],"Final Budget",17)
+            self.assertEqual(physical[0]["name"],prefix+" / Batches (not selected)")
+            self.assertTrue(physical[0]["runnerlessSkipped"])
+            for change in [{"runner_id":8}, {"steps":[{}]}, {"conclusion":"failure"}, {"name":"unknown"}]:
+                physical,_=audit_jobs.physical_jobs("owner/repo",run,[{**skipped,**change}],"Final Budget",17)
+                self.assertNotIn("runnerlessSkipped",physical[0])
+
     def test_empty_duplicate_and_naive_times_fail(self):
         for jobs in [[], [job(1), job(1)], [{**job(1), "started_at": "2026-09-29T00:00:00"}]]:
             with self.assertRaises(ValueError):
