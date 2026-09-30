@@ -3,7 +3,7 @@ name: Host Final Budget
 on:
   workflow_run:
     workflows: [Host CI]
-    types: [in_progress, completed]
+    types: [requested, completed]
   workflow_dispatch:
     inputs:
       run_id:
@@ -14,6 +14,12 @@ on:
         description: Completed attempt
         required: true
         type: string
+      phase:
+        description: Register a complete rerun attempt or finalize its completed producer
+        required: true
+        default: finalize
+        type: choice
+        options: [begin, finalize]
 
 permissions:
   actions: read
@@ -44,5 +50,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RUN_ID: ${{ github.event.workflow_run.id || inputs.run_id }}
           ATTEMPT: ${{ github.event.workflow_run.run_attempt || inputs.attempt }}
-          PHASE: ${{ github.event.action == 'in_progress' && 'begin' || 'finalize' }}
+          PHASE: ${{ github.event.action == 'requested' && 'begin' || inputs.phase || 'finalize' }}
         run: python tests/final-budget.py --phase "$PHASE" --run-id "$RUN_ID" --attempt "$ATTEMPT" --required-name 'Host / Required' --check-name 'Host / Final Budget'
