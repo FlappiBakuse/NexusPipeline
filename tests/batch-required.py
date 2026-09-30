@@ -245,21 +245,40 @@ def validate_bundle(plan, plan_file, report_files, official=True):
     return {"status":"PASS","qualification":"ACTIONS_PREDECESSORS" if official else "LOCAL_VERIFIED","batchCount":len(batches)}
 
 
+class BeginPending(ValueError):
+    pass
+
+
 def trusted_begin(audit, final, repository, plan, producer):
     suite = audit.api(f"/repos/{repository}/check-suites/{producer['check_suite_id']}")
     check = final.current_check(repository,plan["headSha"],plan["repository"]+" / Final Budget",suite["app"]["id"],plan["prNumber"])
-    require(check is not None, "Missing trusted begin registration")
+    if check is None: raise BeginPending("Missing trusted begin registration")
     registration = final.registration(check)
-    require((registration["pr"],registration["run"],registration["attempt"]) == (plan["prNumber"],int(plan["runId"]),int(plan["attempt"])), "Old begin registration")
+    require(registration["pr"] == plan["prNumber"], "Foreign begin PR")
+    if (registration["run"],registration["attempt"]) != (int(plan["runId"]),int(plan["attempt"])):
+        raise BeginPending("Old begin registration")
     begin = audit.api(f"/repos/{repository}/actions/runs/{registration['beginRun']}/attempts/{registration['beginAttempt']}")
     require(begin.get("id") == registration["beginRun"] and begin.get("run_attempt") == registration["beginAttempt"]
             and begin.get("event") in ["workflow_run", "workflow_dispatch"] and begin.get("path") == ".github/workflows/final-budget.yml"
             and begin.get("head_branch") == "main"
-            and begin.get("head_sha") == registration["controllerSha"] and begin.get("repository",{}).get("full_name") == repository
-            and begin.get("status") == "completed" and begin.get("conclusion") == "success", "Failed/foreign begin controller")
+            and begin.get("head_sha") == registration["controllerSha"] and begin.get("repository",{}).get("full_name") == repository, "Foreign begin controller")
+    if begin.get("status") in ["queued", "in_progress", "waiting", "pending"]: raise BeginPending("Begin controller not completed")
+    require(begin.get("status") == "completed" and begin.get("conclusion") == "success", "Failed begin controller")
     jobs = audit.completed_jobs(repository,registration["beginRun"],registration["beginAttempt"])
     require(len(jobs) == 1 and all(item["status"] == "PASS" for item in audit.audit(jobs,registration["beginRun"],registration["beginAttempt"])), "Begin complete job budget failed")
     return suite["app"]["id"]
+
+
+def wait_for_trusted_begin(audit, final, repository, plan, producer, *, deadline, clock=time.monotonic, sleeper=time.sleep):
+    while clock() < deadline:
+        try:
+            return trusted_begin(audit, final, repository, plan, producer)
+        except BeginPending as error:
+            remaining = deadline-clock()
+            if remaining <= 0: break
+            print(str(error)+"; waiting for trusted main", flush=True)
+            sleeper(min(3,remaining))
+    raise ValueError("Trusted begin did not complete within Required work budget")
 
 
 def main():
@@ -286,7 +305,11 @@ def main():
     require(producer.get("id") == int(plan["runId"]) and producer.get("run_attempt") == int(plan["attempt"])
             and producer.get("head_sha") == plan["headSha"] and producer.get("event") == "pull_request"
             and producer.get("path") == ".github/workflows/ci.yml" and producer.get("repository",{}).get("full_name") == repository,"Foreign producer")
-    app_id = trusted_begin(audit,final,repository,plan,producer)
+    started = float(os.environ["NEXUS_TEST_JOB_STARTED_AT_MS"])/1000
+    elapsed = time.time()-started
+    require(0 <= elapsed < 130, "Required work budget exhausted/invalid start")
+    deadline = time.monotonic()+min(100,130-elapsed)
+    app_id = wait_for_trusted_begin(audit,final,repository,plan,producer,deadline=deadline)
     jobs,_ = audit.physical_jobs(repository,producer,audit.completed_jobs(repository,int(plan["runId"]),int(plan["attempt"])),plan["repository"]+" / Final Budget",app_id)
     names = [plan["repository"]+" / 范围判定",*([plan["repository"]+" / Control"] if plan["control"]["units"] else []),*[plan["repository"]+" / "+batch["id"] for batch in plan["batches"]]]
     skipped = [job for job in jobs if job.get("runnerlessSkipped")]

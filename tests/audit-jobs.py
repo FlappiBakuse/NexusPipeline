@@ -56,12 +56,17 @@ def physical_jobs(repository, run, jobs, check_name, app_id):
     for job in jobs:
         if str(job.get("run_id")) != str(run["id"]) or str(job.get("run_attempt")) != str(run["run_attempt"]):
             raise ValueError("Foreign Actions record")
+        optional_names = {prefix+" / Control": prefix+" / Control" for prefix in ["Host", "Plugins"]}
+        for prefix in ["Host", "Plugins"]:
+            canonical = prefix+" / Batches (not selected)"
+            optional_names.update({canonical: canonical, "matrix.name || '"+canonical+"'": canonical})
+        # Labels can be selectors on a skipped job without an assigned runner.
+        if (job.get("status") == "completed" and job.get("conclusion") == "skipped"
+                and not job.get("runner_id") and not job.get("steps") and job.get("name") in optional_names):
+            physical.append({**job, "name": optional_names[job["name"]], "runnerlessSkipped": True})
+            continue
         if job.get("labels") or job.get("runner_id") or job.get("steps"):
             physical.append(job)
-            continue
-        if job.get("status") == "completed" and job.get("conclusion") == "skipped" and job.get("name") in {
-                "Host / Control", "Plugins / Control", "Host / Batches (not selected)", "Plugins / Batches (not selected)"}:
-            physical.append({**job, "runnerlessSkipped": True})
             continue
         check = api(f"/repos/{repository}/check-runs/{job['id']}")
         external = check.get("external_id") or ""

@@ -145,6 +145,22 @@ class BatchRequiredTests(unittest.TestCase):
             trx(outcome,total)
             with self.assertRaises(ValueError):required.native_report("trx",file)
 
+    def test_pending_begin_wait_is_bounded_and_foreign_failure_is_immediate(self):
+        clock={"now":0}
+        def sleep(seconds):clock["now"]+=seconds
+        args=(None,None,"owner/repo",self.plan,{})
+        with mock.patch.object(required,"trusted_begin",side_effect=[required.BeginPending("queued"),15368]):
+            self.assertEqual(required.wait_for_trusted_begin(*args,deadline=5,clock=lambda:clock["now"],sleeper=sleep),15368)
+        self.assertEqual(clock["now"],3)
+        clock["now"]=0
+        with mock.patch.object(required,"trusted_begin",side_effect=required.BeginPending("queued")),self.assertRaises(ValueError):
+            required.wait_for_trusted_begin(*args,deadline=5,clock=lambda:clock["now"],sleeper=sleep)
+        self.assertEqual(clock["now"],5)
+        clock["now"]=0
+        with mock.patch.object(required,"trusted_begin",side_effect=ValueError("foreign")),self.assertRaisesRegex(ValueError,"foreign"):
+            required.wait_for_trusted_begin(*args,deadline=5,clock=lambda:clock["now"],sleeper=sleep)
+        self.assertEqual(clock["now"],0)
+
     def test_missing_or_old_trusted_begin_fails(self):
         audit=mock.Mock();audit.api.return_value={"app":{"id":15368}}
         final=mock.Mock();final.current_check.return_value=None
