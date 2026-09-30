@@ -463,8 +463,9 @@ async function runGate(id) {
   }
   if (id === "host.frontend.build") return buildFrontendBundle();
   if (id === "host.build.test-host") {
-    const code = await buildFrontendBundle();
-    return code || publishTestHost();
+    const withFrontend = !batchContext || batchContext.batch.units.some(unit => unit.id === "host.integration.execution");
+    const code = withFrontend ? await buildFrontendBundle() : 0;
+    return code || publishTestHost({ withFrontend });
   }
   if (id === "host.ci-policy") {
     let code = await run(process.execPath, ["--test", "tests/scope-plan.test.mjs", "tests/core-plan.test.mjs", "tests/batch-plan.test.mjs", "tests/support/budget.test.mjs", "tests/support/test-runtime.test.mjs"]);

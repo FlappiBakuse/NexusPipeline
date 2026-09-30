@@ -117,7 +117,7 @@ export function allocateUnits(units, identity, limits = {}) {
   const cost = items => items.reduce((sum, item) => sum + item.estimatedMs, 0)
     + unique(items.flatMap(item => item.preparations)).reduce((sum, name) => sum + prepareCost(name), 0);
   const unplaced = [];
-  for (const unit of enriched.filter(unit => !unit.control).sort((a,b) => b.estimatedMs - a.estimatedMs || a.id.localeCompare(b.id, "en"))) {
+  for (const unit of enriched.filter(unit => !unit.control).sort((a,b) => cost([b]) - cost([a]) || a.id.localeCompare(b.id, "en"))) {
     if (!Number.isSafeInteger(unit.estimatedMs) || unit.estimatedMs <= 0) throw new Error("Missing positive unit cost");
     const fits = batches.filter(batch => cost([...batch.units, unit]) <= workMs)
       .sort((a,b) => (cost([...a.units,unit])-a.estimatedMs) - (cost([...b.units,unit])-b.estimatedMs) || a.id.localeCompare(b.id,"en"));

@@ -490,7 +490,7 @@
       "maa.native": 20000
     },
     "unitMs": {
-      "host.architecture.backend": 65000,
+      "host.architecture.backend": 95000,
       "host.architecture.frontend": 5000,
       "host.frontend": 20000,
       "host.partner-jint": 45000
