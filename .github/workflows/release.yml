@@ -1,4 +1,4 @@
-name: Host Release
+name: Host 发布
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       operation:
-        description: Read-only candidate build or publish an existing candidate
+        description: 构建只读候选或发布已有候选
         required: true
         default: candidate
         type: choice
@@ -14,20 +14,20 @@ on:
           - candidate
           - publish-only
       source_ref:
-        description: Main-reachable source commit/ref for candidate mode
+        description: 候选模式使用的 main 可达源码提交或引用
         required: false
         default: main
         type: string
       tag:
-        description: Existing approved release tag (publish-only only)
+        description: 已批准的现有发行标签（仅发布模式）
         required: false
         type: string
       candidate_run_id:
-        description: Original successful Host candidate run ID for publish-only recovery
+        description: 仅发布恢复使用的原始成功宿主候选运行 ID
         required: false
         type: string
       candidate_artifact_id:
-        description: Artifact ID if the original run has more than one successful candidate
+        description: 原始运行包含多个成功候选时使用的产物 ID
         required: false
         type: string
 
@@ -105,11 +105,11 @@ jobs:
           ref: ${{ needs.source-plan.outputs.source_sha }}
           path: NexusPipeline
           persist-credentials: false
-      - name: 准备Node工具链
+      - name: 准备 Node 工具链
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: "24"
-      - name: 准备Python工具链
+      - name: 准备 Python 工具链
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: "3.13"
@@ -150,7 +150,7 @@ jobs:
           ref: ${{ needs.source-plan.outputs.partner_sha }}
           path: NexusPipeline-Plugins
           persist-credentials: false
-      - name: 准备Python工具链
+      - name: 准备 Python 工具链
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: "3.13"
@@ -188,15 +188,15 @@ jobs:
           ref: ${{ needs.source-plan.outputs.source_sha }}
           path: NexusPipeline
           persist-credentials: false
-      - name: 准备Node工具链
+      - name: 准备 Node 工具链
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: "24"
-      - name: 准备.NET工具链
+      - name: 准备 .NET 工具链
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
         with:
           dotnet-version: "8.0.424"
-      - name: 准备Python工具链
+      - name: 准备 Python 工具链
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: "3.13"
@@ -246,7 +246,7 @@ jobs:
           ref: ${{ needs.source-plan.outputs.source_sha }}
           path: NexusPipeline
           persist-credentials: false
-      - name: 准备Python工具链
+      - name: 准备 Python 工具链
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: "3.13"
@@ -282,7 +282,7 @@ jobs:
           ref: ${{ needs.source-plan.outputs.source_sha }}
           path: NexusPipeline
           persist-credentials: false
-      - name: 准备Python工具链
+      - name: 准备 Python 工具链
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: "3.13"
@@ -341,7 +341,7 @@ jobs:
           ref: ${{ needs.source-plan.outputs.source_sha }}
           path: NexusPipeline
           persist-credentials: false
-      - name: 准备Python工具链
+      - name: 准备 Python 工具链
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: "3.13"
@@ -391,11 +391,11 @@ jobs:
           path: NexusPipeline
           fetch-depth: 0
           persist-credentials: false
-      - name: 准备Python工具链
+      - name: 准备 Python 工具链
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: "3.13"
-      - name: Resolve original successful producer and artifact
+      - name: 定位原始成功构建与候选产物
         id: source
         working-directory: NexusPipeline
         shell: pwsh
@@ -411,7 +411,7 @@ jobs:
           if ($env:CANDIDATE_ARTIFACT_ID) { $arguments += @('--artifact-id', $env:CANDIDATE_ARTIFACT_ID) }
           python tools/host_candidate_source.py @arguments
           if ($LASTEXITCODE -ne 0) { throw 'Original candidate source was not verifiable' }
-      - name: Download original artifact and verify bytes
+      - name: 下载原始候选并核验字节
         working-directory: NexusPipeline
         shell: pwsh
         env:
@@ -425,7 +425,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Candidate artifact download failed' }
           python tools/host_release.py extract-candidate --artifact-zip '.generated/host-candidate-artifact.zip' --expected-digest $env:ARTIFACT_DIGEST --output '.generated/host-candidate'
           if ($LASTEXITCODE -ne 0) { throw 'Candidate artifact failed server digest or path validation' }
-      - name: Inspect original candidate identity before source checkout
+      - name: 核验原始候选来源
         id: candidate
         working-directory: NexusPipeline
         shell: pwsh
@@ -443,7 +443,7 @@ jobs:
           path: NexusPipeline-Source
           fetch-depth: 0
           persist-credentials: false
-      - name: Verify tag, source tree, producer and production package
+      - name: 核验标签、源码、构建与生产包
         working-directory: NexusPipeline
         shell: pwsh
         env:
@@ -455,7 +455,7 @@ jobs:
         run: |
           python tools/host_release.py validate-candidate --root ../NexusPipeline-Source --output '.generated/host-candidate' --tag $env:RELEASE_TAG --expected-source-sha $env:SOURCE_SHA --workflow-sha $env:WORKFLOW_SHA --run-id $env:ORIGINAL_RUN_ID --run-attempt $env:ORIGINAL_ATTEMPT
           if ($LASTEXITCODE -ne 0) { throw 'Original candidate failed independent validation' }
-      - name: Create release publisher App token
+      - name: 创建发布 App 令牌
         id: publisher-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         with:
@@ -464,7 +464,7 @@ jobs:
           owner: FlappiBakuse
           repositories: NexusPipeline
           permission-contents: write
-      - name: Publish immutable package without rebuilding
+      - name: 发布已核验的不可变原包
         shell: bash
         env:
           GH_TOKEN: ${{ steps.publisher-token.outputs.token }}

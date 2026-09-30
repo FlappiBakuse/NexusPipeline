@@ -12,6 +12,17 @@ required=importlib.util.module_from_spec(spec);spec.loader.exec_module(required)
 
 
 class BatchRequiredTests(unittest.TestCase):
+    def test_complete_graph_rejects_renamed_or_missing_batch_evidence(self):
+        audit = required.module(Path(__file__).with_name("audit-jobs.py"), "audit_names")
+        names = ["Host / 范围判定", "Host / 验证批次 01 · 文档", "Host / 必需汇总"]
+        plan = {"repository": "Host", "control": {"units": []}, "batches": [{}]}
+        jobs = [{"name": name} for name in names]
+        optional = {"name": "Host / 控制检查", "runnerlessSkipped": True}
+        required.validate_job_names(audit, plan, jobs+[optional], names)
+        for altered in [jobs[:-1], jobs+[jobs[1]], [jobs[0], {"name": "Host / 验证批次 01 · 门禁策略"}, jobs[2]], jobs+[{"name": "Host / Control", "runnerlessSkipped": True}]]:
+            with self.subTest(altered=altered), self.assertRaises(ValueError):
+                required.validate_job_names(audit, plan, altered, names)
+
     def setUp(self):
         self.temporary=tempfile.TemporaryDirectory(prefix="batch-required-");self.addCleanup(self.temporary.cleanup)
         self.root=Path(self.temporary.name)
