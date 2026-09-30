@@ -118,7 +118,7 @@ jobs:
         shell: pwsh
         run: python ../NexusPipeline-Control/tools/host_release.py build-frontend --root . --source-sha '${{ needs.source-plan.outputs.source_sha }}' --output .generated/frontend-phase
       - name: 上传前端阶段产物
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: host-frontend-${{ github.run_id }}-${{ github.run_attempt }}
           path: NexusPipeline/.generated/frontend-phase/
@@ -163,7 +163,7 @@ jobs:
           --partner-sha '${{ needs.source-plan.outputs.partner_sha }}'
           --plugins-root ../NexusPipeline-Plugins --output .generated/bundled-phase
       - name: 上传预装插件阶段产物
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: host-bundled-${{ github.run_id }}-${{ github.run_attempt }}
           path: NexusPipeline/.generated/bundled-phase/
@@ -221,7 +221,7 @@ jobs:
           --bundled-phase .generated/bundled-phase
           --output .generated/host-phase
       - name: 上传生产宿主阶段产物
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: host-production-${{ github.run_id }}-${{ github.run_attempt }}
           path: NexusPipeline/.generated/host-phase/
@@ -316,7 +316,7 @@ jobs:
           --compiler ../inno-tool/compiler/ISCC.exe
           --output .generated/installer-phase
       - name: 上传安装器阶段产物
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: host-installer-${{ github.run_id }}-${{ github.run_attempt }}
           path: NexusPipeline/.generated/installer-phase/
@@ -367,7 +367,7 @@ jobs:
           --host-phase .generated/host-phase --installer-phase .generated/installer-phase
           --output .generated/candidate/${{ github.run_id }}-${{ github.run_attempt }}
       - name: 上传原始候选
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: host-candidate-${{ github.run_id }}-${{ github.run_attempt }}
           path: NexusPipeline/.generated/candidate/${{ github.run_id }}-${{ github.run_attempt }}/

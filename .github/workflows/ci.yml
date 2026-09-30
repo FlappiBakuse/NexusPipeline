@@ -43,7 +43,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: node tests/ci-scope.mjs
       - name: 保存范围计划
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: scope
           path: ${{ runner.temp }}/scope.json
@@ -94,7 +94,7 @@ jobs:
         run: node tests/run.mjs gate --id '${{ matrix.id }}'
       - name: 保存原生报告与门禁结果
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: host-gate-${{ matrix.key }}
           path: ${{ runner.temp }}/NexusPipeline.Tests/runs/${{ env.NEXUS_TEST_RUN_ID }}
