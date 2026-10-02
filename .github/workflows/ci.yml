@@ -81,7 +81,7 @@ jobs:
         with:
           python-version: "3.13"
       - name: 下载范围计划
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: scope-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/scope
@@ -144,7 +144,7 @@ jobs:
         with:
           dotnet-version: "8.0.x"
       - name: 下载范围计划
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: scope-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/scope
@@ -194,7 +194,7 @@ jobs:
         with:
           node-version: "24"
       - name: 下载本次全部验证报告
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           path: ${{ runner.temp }}/reports
       - name: 核验门禁报告与完整任务预算
