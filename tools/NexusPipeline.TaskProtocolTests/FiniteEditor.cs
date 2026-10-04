@@ -8,6 +8,12 @@ internal static class FiniteEditor
     internal static async Task<string[]> RunAsync(string root, string artifact)
     {
         if (artifact is not ("BetterGI" or "ZenlessZoneZeroOneDragon" or "MaaStellaSora")) return [];
+        string plugin = Path.Combine(root, "plugins", "specialized", artifact);
+        var manifest = JsonNode.Parse(File.ReadAllText(Path.Combine(plugin, "plugin.json")))!;
+        string? entry = manifest["configEditor"]?.GetValue<string>();
+        if (artifact == "MaaStellaSora" && manifest["taskProtocol"]?["version"]?.GetValue<string>() == "0.1.0"
+            && entry is null) return [];
+        if (string.IsNullOrWhiteSpace(entry)) throw new InvalidDataException("Declared editor is required");
         string temporary = Path.Combine(Path.GetTempPath(), "nxp-finite-editor-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(temporary);
         bool passed = false;
@@ -19,8 +25,9 @@ internal static class FiniteEditor
             string input = artifact == "BetterGI" ? "NexusPipeline" : "01";
             string location = Path.Combine(temporary, file);
             File.WriteAllText(location, original);
-            string plugin = Path.Combine(root, "plugins", "specialized", artifact);
-            string editor = Path.Combine(plugin, "data", "editor.js");
+            string editor = Path.GetFullPath(Path.Combine(plugin, entry));
+            if (!editor.StartsWith(plugin + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("Editor path escapes plugin");
             var descriptor = new ConfigEditorDescriptor(artifact, plugin, editor, File.ReadAllText(editor));
             var extras = new[] { new ConfigValidationExtraSnapshot(location, temporary) { SingleFilePath = location, AllowWrite = true } };
             async Task ExecuteAsync()

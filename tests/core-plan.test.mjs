@@ -36,6 +36,16 @@ test("unregistered obligations fail before execution", () => {
   assert.throws(() => coreUnits([{id:"unknown"}], registry, policy));
 });
 
+test("partner editor evidence follows the fixed plugin policy", () => {
+  const plugin = { kind: "data-specialized", fixtureIds: ["daily"], realScenario: "P-S-MaaStellaSora" };
+  const plan = entry => coreUnits([{ id: "host.partner-jint" }], registry, policy,
+    { plugins: { MaaStellaSora: entry } })[0];
+  assert.deepEqual(plan(plugin).expectedEditorCaseIds, []);
+  const cases = ["MaaStellaSora.editor-select-and-preserve", "MaaStellaSora.editor-repeat"];
+  assert.deepEqual(plan({ ...plugin, editorCaseIds: cases }).expectedEditorCaseIds, [...cases].sort());
+  assert.throws(() => plan({ ...plugin, editorCaseIds: ["invented"] }));
+});
+
 test("finite subsets retain exactly their selected independent scenarios", () => {
   for (const groups of [["config"], ["control", "execution"], ["config", "control", "execution"]]) {
     const selected = groups.map(group => ({ id: `host.integration.${group}` }));
