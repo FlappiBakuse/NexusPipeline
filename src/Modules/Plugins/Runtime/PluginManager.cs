@@ -188,6 +188,9 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
         _emulatorSupport.Snapshot(IsRuntimeEnabled);
 
     /// <summary>调用数据化专项插件按根目录推导配置快照；代码插件只有声明能力，不直接暴露宿主领域模型。</summary>
+    public string ConfigurationRevision(string pluginName) =>
+        (_capabilities.Get<IProfileResolver>(ResolveLoadedPluginName(pluginName), IsRuntimeEnabled) as DataSpecializedPlugin)?.ConfigurationRevision ?? "";
+
     public ScriptProfile? ResolveProfile(string pluginName, string rootPath, IReadOnlyDictionary<string, string>? inputs = null)
     {
         if (string.IsNullOrWhiteSpace(pluginName) || string.IsNullOrWhiteSpace(rootPath))

@@ -33,6 +33,16 @@ if (selectedMode)
 }
 if (!selectedMode && args.Length == 4)
 {
+    if (args[2] == "--config-repair")
+    {
+        ConfigRepairProbe.Run(root, Path.GetFullPath(args[3]));
+        return;
+    }
+    if (args[2] == "--daily-protocol")
+    {
+        await DailyProtocolProbe.RunAsync(root, Path.GetFullPath(args[3]));
+        return;
+    }
     if (args[2] == "--runtime-installations")
     {
         await RuntimeInstallationProbe.RunAsync(root, Path.GetFullPath(args[3]));
@@ -69,6 +79,8 @@ if (files.Length == 0) throw new InvalidDataException("Zero task protocol fixtur
 var artifacts = new HashSet<string>();
 var phaseChecked = new HashSet<string>();
 int passed = 0;
+var failures = new List<object>();
+var completedCaseIds = new List<string>();
 foreach (string file in files)
 {
     var fixture = JsonNode.Parse(File.ReadAllText(file))!.AsObject();
@@ -125,15 +137,38 @@ foreach (string file in files)
         if (fixture["executionContext"] is JsonObject launch)
             context = context with
             {
+                LogSource = new(launch["logSourceKind"]?.GetValue<string>() ?? context.LogSource.Kind,
+                    launch["logSourceAvailable"]?.GetValue<bool>() ?? context.LogSource.Available),
                 Mode = launch["mode"]?.GetValue<string>() ?? context.Mode,
                 LaunchOwner = launch["launchOwner"]?.GetValue<string>() ?? context.LaunchOwner,
                 GameTarget = new("executable", launch["gameTarget"]?.GetValue<string>(), null,
                     launch["ready"]?.GetValue<bool>()),
                 RuntimeActivity = launch["runtimeActivity"]?.GetValue<string>(),
+                ConfigInputName = launch["configInputName"]?.GetValue<string>(),
+                ConfigInputValue = launch["configInputValue"]?.GetValue<string>(),
             };
+        if (fixture["admissionError"] is { } admissionError)
+        {
+            string expectedError = admissionError.GetValue<string>();
+            Check(!string.IsNullOrWhiteSpace(expectedError), "negative admission requires an explicit error");
+            bool rejected = false;
+            var originalBytes = Directory.GetFiles(temporary).ToDictionary(path => path, File.ReadAllBytes);
+            try
+            {
+                await TaskDiscoveryService.DiscoverAsync(protocol, view, manifest["name"]?.GetValue<string>() ?? artifact,
+                    manifest["version"]!.GetValue<string>(), "fixture-user", "fixture-script", "zh-CN", true, default, context);
+            }
+            catch (InvalidDataException ex) when (ex.Message.Contains(expectedError, StringComparison.Ordinal)) { rejected = true; }
+            Check(rejected, "expected admission rejection: " + expectedError);
+            foreach (var original in originalBytes) Check(File.ReadAllBytes(original.Key).AsSpan().SequenceEqual(original.Value), "admission preserves configuration bytes");
+            if (!example) artifacts.Add(artifact);
+            passed++; completedCaseIds.Add(Path.GetFileNameWithoutExtension(file));
+            Console.WriteLine("PASS admission " + Path.GetFileName(file));
+            continue;
+        }
         var plan = await TaskDiscoveryService.DiscoverAsync(protocol, view, manifest["name"]?.GetValue<string>() ?? artifact,
             manifest["version"]!.GetValue<string>(), "fixture-user", "fixture-script", "zh-CN", true, default, context);
-        Check(plan.Coverage == fixture["coverage"]!.GetValue<string>(), "discovery coverage");
+        Check(plan.Coverage == fixture["coverage"]!.GetValue<string>(), $"discovery coverage: expected {fixture["coverage"]}, actual {plan.Coverage}");
         if (fixture["configChecks"] is JsonArray expectedChecks)
             foreach (var expected in expectedChecks)
             {
@@ -163,7 +198,7 @@ foreach (string file in files)
                     changedView.AddResource(entry["id"]!.GetValue<string>(), path, entry["format"]!.GetValue<string>(), sha256: entry["sha256"]?.GetValue<string>());
                 }
                 var changedPlan = await TaskDiscoveryService.DiscoverAsync(protocol, changedView, manifest["name"]!.GetValue<string>(),
-                    manifest["version"]!.GetValue<string>(), "fixture-user", "fixture-script", "zh-CN", true, default);
+                    manifest["version"]!.GetValue<string>(), "fixture-user", "fixture-script", "zh-CN", true, default, context);
                 Check((changedPlan.BehaviorSignature == plan.BehaviorSignature) == variant["sameBehavior"]!.GetValue<bool>(), "template-only behavior projection");
             }
         foreach (var item in fixture["tasks"]!.AsObject())
@@ -259,7 +294,8 @@ foreach (string file in files)
             foreach (var expected in fixture["results"]!.AsObject())
             {
                 string id = plan.Tasks.Single(t => t.SourceKey == expected.Key).Id;
-                Check(reducer.Results.Single(t => t.TaskId == id).Status == expected.Value!.GetValue<string>(), "result " + expected.Key);
+                string actual = reducer.Results.Single(t => t.TaskId == id).Status;
+                Check(actual == expected.Value!.GetValue<string>(), $"result {expected.Key}: expected {expected.Value}, actual {actual}");
             }
             if (fixture["incidents"] is JsonArray expectedIncidents)
             {
@@ -279,14 +315,32 @@ foreach (string file in files)
             var retry = await TaskProtocolScriptRunner.ExecuteAsync<JsonObject>(protocol.RetryScript,
                 new { protocolVersion = protocol.Version, phase = "retry", originalPlan = plan, attemptsUsed = 1, maxAttempts = 2,
                     taskStates = reducer.Results.ToDictionary(r => r.TaskId, r => r.Status), cancelled = lifecycle == "cancelled", budgetExhausted = false,
-                    configResources = view.ConfigResources }, view.ReadConfig, view.ReadResource, false, default);
+                    configResources = view.ConfigResources, executionContext = context }, view.ReadConfig, view.ReadResource, false, default);
             var safe = reducer.SelectRetry(2, lifecycle == "cancelled", false);
-            Check(retry["decision"]!.GetValue<string>() == safe.Decision, "retry decision");
-            if (safe.Decision == "selective")
+            string decision = retry["decision"]!.GetValue<string>();
+            if (decision == "native_resume")
+            {
+                Check(protocol.Version == "0.2.0" && safe.Decision == "selective", "native retry qualification");
+                Check(plan.Tasks.Where(t => t.Enabled).All(t => t.RetryPolicy?.Mode == "native_resume"), "native retry declaration");
+                Check(retry["filePatches"]!.AsArray().Count == 0, "native retry preserves configuration");
+                Check(retry["launchScopeTaskIds"]!.AsArray().Select(n => n!.GetValue<string>()).SequenceEqual(selected), "native full launch scope");
+                Check(retry["targetTaskIds"]!.AsArray().Select(n => n!.GetValue<string>()).Order().SequenceEqual(reducer.RetryTargets.Order()), "native failed targets");
+                view.VerifyUnchanged();
+            }
+            else Check(decision == safe.Decision, "retry decision");
+            if (decision == "selective")
             {
                 Check(retry["includedTaskIds"]!.AsArray().Select(n => n!.GetValue<string>()).SequenceEqual(safe.IncludedTaskIds), "retry scope");
                 var before = view.ConfigResources.ToDictionary(r => r.Id, r => view.Snapshot(r.Id));
                 transaction.Apply(view, TaskProtocolJson.Read<TaskConfigPatch[]>(retry["filePatches"]!.ToJsonString()));
+                if (fixture["retryDocuments"] is JsonObject expectedDocuments)
+                    foreach (var (resourceId, expectedDocument) in expectedDocuments)
+                    {
+                        var snapshot = before[resourceId];
+                        Check(JsonNode.DeepEquals(expectedDocument,
+                            new TaskConfigDocument(File.ReadAllBytes(snapshot.Path), snapshot.Format).Document),
+                            "retry document preserves unrelated controller/account/option fields: " + resourceId);
+                    }
                 transaction.Restore();
                 foreach (var snapshot in before.Values) Check(JsonNode.DeepEquals(
                     new TaskConfigDocument(File.ReadAllBytes(snapshot.Path), snapshot.Format).Document,
@@ -297,14 +351,18 @@ foreach (string file in files)
         }
         if (!example) artifacts.Add(artifact);
         passed++;
+        completedCaseIds.Add(Path.GetFileNameWithoutExtension(file));
         Console.WriteLine("PASS " + Path.GetFileName(file));
     }
-    catch (Exception ex) { throw new InvalidDataException(Path.GetFileName(file) + ": " + ex.Message, ex); }
-    finally { Directory.Delete(temporary, true); }
+    catch (Exception ex)
+    {
+        failures.Add(new { caseId = Path.GetFileNameWithoutExtension(file), error = ex.ToString(), evidenceDirectory = temporary });
+        Console.Error.WriteLine("FAIL " + Path.GetFileName(file) + ": " + ex.Message + "; evidence retained: " + temporary);
+    }
 }
-if (!artifacts.SetEquals(selectedMode ? [selectedArtifact!] : supportedArtifacts))
+if (failures.Count == 0 && !artifacts.SetEquals(selectedMode ? [selectedArtifact!] : supportedArtifacts))
     throw new InvalidDataException("Selected production adapters did not all execute");
-Console.WriteLine($"Task protocol: {passed} passed, 0 skipped; {artifacts.Count} production adapters through Host Jint/reducer/config journal.");
+Console.WriteLine($"Task protocol: {passed} passed, {failures.Count} failed, 0 skipped; {artifacts.Count} production adapters through Host Jint/reducer/config journal.");
 string[] editorCaseIds = observeCount == 12 ? await FiniteEditor.RunAsync(root, selectedArtifact!) : [];
 if (reportPath is not null)
 {
@@ -313,12 +371,13 @@ if (reportPath is not null)
     {
         schemaVersion = 1, evidenceType = "actual", artifact = selectedArtifact,
         expectedCaseIds = files.Select(Path.GetFileNameWithoutExtension).ToArray(),
-        completedCaseIds = files.Select(Path.GetFileNameWithoutExtension).ToArray(),
-        passed, failed = 0, skipped = 0, observeCount, isolatedRunChecked = observeCount != 0, editorCaseIds,
+        completedCaseIds,
+        passed, failed = failures.Count, failures, skipped = 0, observeCount, isolatedRunChecked = observeCount != 0, editorCaseIds,
         real = new[] { "production Jint", "discovery", "reducer", "configuration journal" },
         substituted = new[] { "repository synthetic configuration and log fixtures" },
     }));
 }
+if (failures.Count != 0) Environment.ExitCode = 1;
 static void Check(bool condition, string message) { if (!condition) throw new InvalidDataException(message); }
 
 // Explicit, read-only replay of external script-instance exports. No history JSON is trusted as a verdict.

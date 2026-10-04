@@ -40,6 +40,11 @@ internal sealed class ConfigSwapRecovery
     {
         ConfigStoreTransactionRecovery.Recover(scriptId, userName);
         ConfigSessionMark? mark = ConfigSessionMark.TryRead(scriptId, userName);
+        if (mark?.Migration is not null)
+        {
+            ConfigMigrationTransaction.Resume(mark, _commitPendingInput);
+            return;
+        }
         if (mark?.SessionPhase == "provider_run")
         {
             if (mark.ProviderWorkersStopped == true) { ConfigSessionMark.Clear(scriptId, userName); return; }
@@ -256,7 +261,7 @@ internal sealed class ConfigSwapRecovery
                     // 脚本生成物）仍需 DoRestore 清理（恢复编辑前状态，如重启后编辑会话恢复用例）；其余会话
                     // cache 空 = 现场已还原，仅清标记（此前一律 DoRestore，对 Missing 再执行会按「会话产物」
                     // 删除 config 位置当前文件，含崩溃后用户新写入的配置——窄窗口误删）。
-                    if (mark.NeedsFreshRestore
+                    if (mark.Migration is not null || mark.NeedsFreshRestore
                         || mark.ExtraConfigPaths.Count > 0
                         || mark.EditIsolationPaths.Count > 0
                         || string.Equals(mark.SessionPhase, "edit-commit-pending", StringComparison.Ordinal)
@@ -395,6 +400,11 @@ internal sealed class ConfigSwapRecovery
         Logger.Info($"[恢复] 上次会话中断，还原脚本 {scriptId} 用户 {userName} 的配置。");
         try
         {
+            if (mark.Migration is not null)
+            {
+                ConfigMigrationTransaction.Resume(mark, _commitPendingInput);
+                return true;
+            }
             DoRestore(scriptId, userName!, mark);
             Audit.Log(Audit.System, "启动恢复配置交换", $"脚本 {scriptId} / 用户 {userName}（{mark.ConfigPath}）");
             return true;

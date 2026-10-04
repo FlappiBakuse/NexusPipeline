@@ -5,22 +5,53 @@
       "id": "user.guide",
       "path": "user/README.md",
       "summary": "安装、依赖、取消、日志、结果、配置修复、升级与卸载",
-      "topics": ["用户指南", "安装", "取消", "日志", "升级", "卸载"],
-      "aliases": ["FAQ", "常见问题", "使用指南"],
-      "codePaths": ["README.md", "frontend/public/help/runtime-prerequisites.html"],
-      "testDomains": ["governanceDomains.docs-links-contracts"],
-      "authorityFor": ["user-operations"],
+      "topics": [
+        "用户指南",
+        "安装",
+        "取消",
+        "日志",
+        "升级",
+        "卸载"
+      ],
+      "aliases": [
+        "FAQ",
+        "常见问题",
+        "使用指南"
+      ],
+      "codePaths": [
+        "README.md",
+        "frontend/public/help/runtime-prerequisites.html"
+      ],
+      "testDomains": [
+        "governanceDomains.docs-links-contracts"
+      ],
+      "authorityFor": [
+        "user-operations"
+      ],
       "status": "current"
     },
     {
       "id": "user.guide.en",
       "path": "user/README.en.md",
       "summary": "English entry for installation, unverified outcomes, repair and data retention",
-      "topics": ["English guide", "installation", "unverified", "upgrade"],
-      "aliases": ["user guide English"],
-      "codePaths": ["README.md"],
-      "testDomains": ["governanceDomains.docs-links-contracts"],
-      "authorityFor": ["user-operations-english"],
+      "topics": [
+        "English guide",
+        "installation",
+        "unverified",
+        "upgrade"
+      ],
+      "aliases": [
+        "user guide English"
+      ],
+      "codePaths": [
+        "README.md"
+      ],
+      "testDomains": [
+        "governanceDomains.docs-links-contracts"
+      ],
+      "authorityFor": [
+        "user-operations-english"
+      ],
       "status": "current"
     },
     {
@@ -113,7 +144,8 @@
         "配置",
         "编辑",
         "交换",
-        "快照"
+        "快照",
+        "配置契约迁移"
       ],
       "aliases": [
         "配置编辑",
@@ -122,7 +154,13 @@
       ],
       "codePaths": [
         "src/Modules/Configuration",
-        "src/Modules/Configuration/Exchange/ConfigSwapPrimitives.cs"
+        "src/Modules/Configuration/Exchange/ConfigSwapPrimitives.cs",
+        "src/Modules/Configuration/Snapshots/ConfigurationRevisionReset.cs",
+        "src/Modules/Configuration/Snapshots/ConfigMigrationTransaction.cs",
+        "tests/NexusPipeline.Tests/Configuration/ConfigContractMigrationTests.cs",
+        "src/Modules/Configuration/Editing/ConfigRepairPolicy.cs",
+        "tests/NexusPipeline.Tests/Configuration/ConfigRepairTests.cs",
+        "tools/NexusPipeline.TaskProtocolTests/ConfigRepairProbe.cs"
       ],
       "testDomains": [
         "hostAreas.config",
@@ -469,11 +507,29 @@
       "id": "plugin-api.execution-provider",
       "path": "reference/plugin-api/execution-provider.md",
       "summary": "独立执行 provider、冻结计划、worker IPC、启动目标与结构化结果",
-      "topics": ["provider", "worker", "IPC", "执行扩展"],
-      "aliases": ["Maa worker", "Plugin API 1.9"],
-      "codePaths": ["src/NexusPipeline.Plugin.Abstractions/ExecutionProviderApi.cs", "src/Modules/Execution/ProviderWorkerPort.cs", "src/Modules/Plugins/Runtime/PluginExecutionProviderRegistry.cs"],
-      "testDomains": ["hostAreas.execution", "hostAreas.plugins", "systemGroups.maa"],
-      "authorityFor": ["execution-provider-contract"],
+      "topics": [
+        "provider",
+        "worker",
+        "IPC",
+        "执行扩展"
+      ],
+      "aliases": [
+        "Maa worker",
+        "Plugin API 1.9"
+      ],
+      "codePaths": [
+        "src/NexusPipeline.Plugin.Abstractions/ExecutionProviderApi.cs",
+        "src/Modules/Execution/ProviderWorkerPort.cs",
+        "src/Modules/Plugins/Runtime/PluginExecutionProviderRegistry.cs"
+      ],
+      "testDomains": [
+        "hostAreas.execution",
+        "hostAreas.plugins",
+        "systemGroups.maa"
+      ],
+      "authorityFor": [
+        "execution-provider-contract"
+      ],
       "status": "current"
     },
     {

@@ -21,7 +21,20 @@ internal sealed record TaskDefinition
     public required string[] Dependencies { get; init; }
     public required string Detection { get; init; }
     public string? ConfigRef { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CompletionPolicy { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? WorkflowRole { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public TaskObservationContract? ObservationContract { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public TaskRetryPolicy? RetryPolicy { get; init; }
 }
+
+internal sealed record TaskObservationRule(string Id, string Kind);
+internal sealed record TaskObservationContract(string RuleSetId, string[] Sources, TaskObservationRule[] Rules);
+internal sealed record TaskRetryPolicy(string Mode, bool ResourceConsumption, string[] LimitRefs);
+internal sealed record HostFailureEvidence(string Kind, string AttemptId, string HostEventId, string[] TaskIds);
 
 internal sealed record TaskDiagnostic(string Code, string Message, string? TaskId = null)
 {
@@ -53,6 +66,8 @@ internal sealed record TaskPlan(string ProtocolVersion, string PlanId, string Or
 {
     public string BehaviorSignature { get; init; } = "";
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SemanticsVersion { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public TaskDisplaySnapshot? DisplaySnapshot { get; init; }
     public TaskSelectionField[] SelectionFields { get; init; } = [];
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -74,6 +89,8 @@ internal sealed record TaskObservation
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string[]? StructuredEvidenceRefs { get; init; }
     public string? SkipKind { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? FactKind { get; init; }
 }
 
 internal sealed record TaskObservationBatch

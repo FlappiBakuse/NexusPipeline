@@ -47,6 +47,9 @@ internal sealed class DataSpecializedProfileResolver
             return null;
         }
         JsonNode resolve = parsed;
+        string configContractId = resolve["configContractId"]?.ToString() ?? "";
+        if (configContractId.Length > 96 || configContractId.Any(c => !char.IsAsciiLetterOrDigit(c) && c is not ('.' or '-' or '_')))
+            return null;
         string outputEncoding = resolve["outputEncoding"]?.ToString() ?? "";
         if (outputEncoding.Length > 0 && outputEncoding is not ("utf-8" or "windows-936" or "system-default"))
         {
@@ -83,6 +86,8 @@ internal sealed class DataSpecializedProfileResolver
         string mainExeTemplate = paths["mainExe"]?.ToString() ?? "";
         string argsTemplate = paths["args"]?.ToString() ?? "";
         string configPathTemplate = paths["configPath"]?.ToString() ?? "";
+        string selectionTemplate = resolve["configSelectionPath"]?.ToString() ?? configPathTemplate;
+        bool strictSelection = resolve["configSelectionPath"] is not null;
         string logPathTemplate = paths["logPath"]?.ToString() ?? "";
         List<string> extraTemplates = new();
         if (paths["extraConfigPaths"] is JsonArray extraList)
@@ -120,21 +125,21 @@ internal sealed class DataSpecializedProfileResolver
                 requireTemplates.Add(file);
             }
         }
-        if (!DataSpecializedResolveParser.ValidateTemplatePlaceholders(requireTemplates.Concat(new[] { mainExeTemplate, argsTemplate, configPathTemplate, logPathTemplate }).Concat(extraTemplates).ToArray(), out string? templateError, out HashSet<string> referencedInputs))
+        if (!DataSpecializedResolveParser.ValidateTemplatePlaceholders(requireTemplates.Concat(new[] { mainExeTemplate, argsTemplate, configPathTemplate, logPathTemplate, selectionTemplate }).Concat(extraTemplates).ToArray(), out string? templateError, out HashSet<string> referencedInputs))
         {
             Logger.Warn($"[插件] resolve.json 模板占位符无效（{templateError}），推导失败：{_plugin.Name}");
             return null;
         }
         // 配置目录内只有一个配置文件时自动绑定该文件：输入未提供或指向的目标不存在时，以唯一候选覆盖输入值，
         // args/configPath 等模板统一生效（配置改名后自动跟随）；零个或多个候选不猜测，交由复用编辑启动时处理。
-        IReadOnlyDictionary<string, string>? effectiveInputs = _plugin.AdoptSingleConfigCandidate(
-            configPathTemplate,
+        IReadOnlyDictionary<string, string>? effectiveInputs = strictSelection ? inputs : _plugin.AdoptSingleConfigCandidate(
+            selectionTemplate,
             rootPath,
             inputDeclarations,
             inputs,
             referencedInputs) ?? inputs;
         ConfigInputCandidateSet? unresolvedCandidates = _plugin.DetectUnresolvedConfigCandidates(
-            configPathTemplate,
+            selectionTemplate,
             rootPath,
             inputDeclarations,
             inputs,
@@ -173,6 +178,11 @@ internal sealed class DataSpecializedProfileResolver
         }
         var profile = new ScriptProfile
         {
+            RequireExclusiveProcess = resolve["requireExclusiveProcess"]?.GetValue<bool>() == true,
+            ConfigContractId = _plugin.ConfigurationRevision.Length > 0 ? _plugin.ConfigurationRevision : configContractId,
+            RequiredConfigRelativePath = strictSelection ? Path.GetRelativePath(
+                DataSpecializedResolveParser.ResolvePath(DataSpecializedResolveParser.SubstituteInputs(configPathTemplate, inputValues), rootPath, bindings),
+                DataSpecializedResolveParser.ResolvePath(DataSpecializedResolveParser.SubstituteInputs(selectionTemplate, inputValues), rootPath, bindings)) : "",
             RootProcessRole = rootRole,
             OutputEncoding = outputEncoding,
             MainExe = DataSpecializedResolveParser.ResolvePath(DataSpecializedResolveParser.SubstituteInputs(mainExeTemplate, inputValues), rootPath, bindings),
@@ -187,7 +197,7 @@ internal sealed class DataSpecializedProfileResolver
             PluginName = _plugin.Name,
             PluginVersion = _plugin.Version,
             ConfigInputName = DataSpecializedResolveParser.TryLocateConfigInputTemplate(
-                configPathTemplate,
+                selectionTemplate,
                 out string resolvedInputName,
                 out _,
                 out _,
@@ -195,7 +205,7 @@ internal sealed class DataSpecializedProfileResolver
                 ? resolvedInputName
                 : "",
             ConfigInputValue = DataSpecializedResolveParser.TryLocateConfigInputTemplate(
-                configPathTemplate,
+                selectionTemplate,
                 out string resolvedValueInputName,
                 out _,
                 out _,

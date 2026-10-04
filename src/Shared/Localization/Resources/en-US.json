@@ -586,5 +586,6 @@
   "tray.title": "NexusPipeline",
   "user.name_invalid": "The user name is required and contains invalid characters",
   "validation.invalid_json": "The request body is invalid",
-  "validation.invalid_request": "The request is invalid"
+  "validation.invalid_request": "The request is invalid",
+  "run.configuration_setup_required": "The plugin has a breaking configuration change. Set up and save the script instance again, then save this user’s configuration."
 }

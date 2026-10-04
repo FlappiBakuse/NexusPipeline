@@ -146,3 +146,16 @@ if api:
 - 现有专项实现参考：`maaend/data/judge.js`（array 型，`instances[id=...].tasks`）、`bettergi/data/judge.js`（map 型，`TaskEnabledList`）、`baah/data/judge.js`（boolArray 型，平行数组 `TASK_ONOFF`）。
 
 插件机器标识参与脚本实例、配置、密钥、作用域和用户偏好隔离；artifactName 参与源码、安装和发行文件系统路径。发布后应保持两者稳定；变更身份时按新插件重新配置用户绑定和插件设置。
+
+
+### 配置契约与单实例约束
+
+`resolve.json` 可声明 `configContractId`（至多96个 ASCII 字母、数字、点、下划线、横线）和 `requireExclusiveProcess: true`。它们进入冻结 profile 与配置会话。绑定选择使用实际枚举的稳定实例 ID；严格输入路径推导出的实例文件必须在权威快照存在。契约变化默认阻断交换。maas 的旧 MXU 快照在 Host 启动恢复后原字节归档并清空绑定，用户重新设置 MFA 实例；不执行字段适配。旧包未声明字段时保持旧语义。字段是 Host 0.16.14 的实际能力，新包须声明相应 minHostVersion。
+
+## 破坏性配置修订
+
+数据化专项 manifest 可声明 `configurationRevision`，为 1–96 个 ASCII 字母、数字、点、下划线或连字符组成的稳定标识，要求 Host 0.16.14。仅当启动器、配置形态或必须重填的内容发生破坏性变化时更新；普通插件版本升级保持同一标识，后续发行不得删除声明绕过门禁。此标识作为当前配置契约，优先于 resolve 的 `configContractId`。
+
+Host 比较脚本已确认修订和插件当前修订，显示“需重新设置”并阻止启动。用户有效保存脚本设置才确认当前修订；用户快照也必须重新保存后才能运行。Host 的通用启动恢复流程原字节归档旧契约快照并清空该用户配置输入，不执行跨框架字段映射，不修改原生配置。每代备份及旧 journal 保留；取消编辑不确认用户快照。
+
+MaaStellaSora 声明 `"configurationRevision":"mfa-avalonia.instances.v1"`；该行为由上述通用契约驱动，不以插件 ID 硬编码。

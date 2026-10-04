@@ -8,6 +8,8 @@ internal static class TaskNotificationFormatter
 {
     internal static IReadOnlyList<string> Format(JsonObject report, string? historyId = null)
     {
+        bool daily = report["schemaVersion"]?.GetValue<int>() == 2
+            && report["semanticsVersion"]?.GetValue<string>() == "daily-flow-v1";
         TaskDisplaySnapshot? display = null;
         if ((report["displaySnapshot"] ?? report["originalPlan"]?["displaySnapshot"]) is JsonObject frozen)
             try { display = TaskProtocolJson.Read<TaskDisplaySnapshot>(frozen.ToJsonString()); }
@@ -76,7 +78,11 @@ internal static class TaskNotificationFormatter
                         : status == "partial" ? Status(child.Key) is "failed" or "partial" : true)))
                 .Select(p => Name(p.Value) + (status is not ("succeeded" or "skipped") && results.GetValueOrDefault(p.Key) is { } item
                     && Reason(item) is { Length: > 0 } reason ? "（" + Compact(reason, 72) + "）" : ""));
-            Category(key, label, names, mandatory);
+            if (daily)
+                names = tasks.Where(p => p.Value["parentId"] is null && Status(p.Key) == status).Select(p => Name(p.Value));
+            Category(daily ? "daily_" + key : key,
+                daily ? status switch { "succeeded" => "完成任务", "partial" => "部分完成任务", "failed" => "失败任务", _ => label } : label,
+                names, mandatory);
         }
         var incidents = (report["incidents"] as JsonArray ?? []).OfType<JsonObject>()
             .Where(e => e["incident"] is JsonObject)
@@ -84,14 +90,17 @@ internal static class TaskNotificationFormatter
             .Select(group => group.Last()["incident"]!.AsObject()).ToArray();
         string Incident(JsonObject item) => (item["taskId"]?.GetValue<string>() is { } id && allTasks.TryGetValue(id, out var task)
             ? Name(task) : Text("unattributed", "未归属异常")) + "：" + Compact(Reason(item), 72);
-        Category("incidents", "未恢复异常", incidents.Where(i => i["resolution"]?.GetValue<string>() != "recovered").Select(Incident));
-        Category("incident_recovered", "已恢复异常", incidents.Where(i => i["resolution"]?.GetValue<string>() == "recovered").Select(Incident));
+        if (!daily)
+        {
+            Category("incidents", "未恢复异常", incidents.Where(i => i["resolution"]?.GetValue<string>() != "recovered").Select(Incident));
+            Category("incident_recovered", "已恢复异常", incidents.Where(i => i["resolution"]?.GetValue<string>() == "recovered").Select(Incident));
+        }
         if (report["summary"]?["counts"] is JsonObject counts)
             lines.Add(HostLocalization.TranslateNamed("notification.tasks.progress", "业务完成：{completed}/{total}",
-                new Dictionary<string, object?> { ["completed"] = (counts["succeeded"]?.GetValue<int>() ?? 0) + (counts["skipped"]?.GetValue<int>() ?? 0),
+                new Dictionary<string, object?> { ["completed"] = (counts["succeeded"]?.GetValue<int>() ?? 0) + (daily ? 0 : (counts["skipped"]?.GetValue<int>() ?? 0)),
                     ["total"] = counts["total"]?.GetValue<int>() ?? 0 }));
         if (report["lifecycleOutcome"]?.GetValue<string>() is "failed" or "interrupted") lines.Add(Text("lifecycle", "实例运行异常"));
-        if (report["summary"]?["recovered"]?.GetValue<bool>() == true) lines.Add(Text("recovered", "重试恢复情况：已恢复成功"));
+        if (!daily && report["summary"]?["recovered"]?.GetValue<bool>() == true) lines.Add(Text("recovered", "重试恢复情况：已恢复成功"));
         if ((report["diagnostics"] as JsonArray ?? []).Any(d => d?["code"]?.GetValue<string>() == "recovery_conflict"))
             lines.Add(Text("recovery", "配置恢复告警：保留现场，未同步临时选择"));
         if ((historyId ?? report["runId"]?.GetValue<string>()) is { Length: > 0 } recordId)

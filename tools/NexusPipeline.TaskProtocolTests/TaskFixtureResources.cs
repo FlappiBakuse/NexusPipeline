@@ -15,9 +15,11 @@ internal static class TaskFixtureResources
                 if (!resourcePath.StartsWith(allowed, StringComparison.OrdinalIgnoreCase) || Path.GetExtension(resourcePath) != ".json")
                     throw new InvalidDataException("Fixture resource set path");
                 var shared = JsonNode.Parse(File.ReadAllText(resourcePath))!.AsObject();
-                if (shared["provenance"]?.GetValue<string>() != "synthetic_integrity_mechanics_not_upstream_source")
+                if (shared["provenance"]?.GetValue<string>() is not ("synthetic_integrity_mechanics_not_upstream_source" or "pinned_upstream_source_with_synthetic_extras"))
                     throw new InvalidDataException("Fixture resource set provenance");
-                fixtureResources.AddRange(shared["resources"]!.AsArray().Select(r => r!));
+                foreach (var resource in shared["resources"]!.AsArray())
+                    if (!fixtureResources.Any(r => r["id"]!.GetValue<string>() == resource!["id"]!.GetValue<string>()))
+                        fixtureResources.Add(resource!);
             }
         return fixtureResources;
     }

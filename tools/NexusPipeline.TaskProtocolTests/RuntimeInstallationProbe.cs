@@ -32,14 +32,28 @@ internal static class RuntimeInstallationProbe
                     if (name != Path.GetFileName(name)) throw new InvalidDataException("Fixture config path");
                     File.WriteAllText(Path.Combine(temporary, name), entry["text"]!.GetValue<string>());
                 }
+                if (row["configSnapshot"] is { } snapshot)
+                {
+                    string source = Path.GetFullPath(snapshot.GetValue<string>());
+                    foreach (string file in Directory.EnumerateFiles(source, "*.json", SearchOption.TopDirectoryOnly))
+                    {
+                        TaskConfigView.ValidatePath(file);
+                        File.Copy(file, Path.Combine(temporary, Path.GetFileName(file)), true);
+                    }
+                }
                 var view = TaskConfigViewFactory.Capture(temporary, row["root"]!.GetValue<string>(), [], protocol.ReadResources);
                 var plan = await TaskDiscoveryService.DiscoverAsync(protocol, view, manifest["name"]!.GetValue<string>(),
-                    manifest["version"]!.GetValue<string>(), "synthetic-user", "installation-probe", "zh-CN", true, default);
+                    manifest["version"]!.GetValue<string>(), "synthetic-user", "installation-probe", "zh-CN", true, default,
+                    scriptRoot: row["root"]!.GetValue<string>());
                 var distribution = plan.ConfigAssessment!.Checks.Single(c => c.RuleId == "okscript.distribution");
                 string expected = row["expectedEvaluation"]!.GetValue<string>();
                 if (distribution.Evaluation != expected) throw new InvalidDataException("Unexpected distribution assessment: " + row["id"]);
+                var daily = plan.ConfigAssessment.Checks.Single(c => c.RuleId == "okscript.single_daily");
+                if (row["expectedDailyEvaluation"] is { } dailyExpected && daily.Evaluation != dailyExpected.GetValue<string>())
+                    throw new InvalidDataException("Unexpected daily assessment: " + row["id"]);
                 results.Add(new JsonObject { ["id"] = row["id"]!.DeepClone(), ["evaluation"] = distribution.Evaluation,
-                    ["executionEffect"] = distribution.ExecutionEffect, ["coverage"] = plan.Coverage, ["status"] = "PASS" });
+                    ["executionEffect"] = distribution.ExecutionEffect, ["coverage"] = plan.Coverage,
+                    ["singleDailyEvaluation"] = daily.Evaluation, ["singleDailyEffect"] = daily.ExecutionEffect, ["status"] = "PASS" });
                 passed = true;
                 Console.WriteLine("PASS installation " + row["id"]);
             }
@@ -48,6 +62,6 @@ internal static class RuntimeInstallationProbe
         if (results.Count == 0) throw new InvalidDataException("Zero installation cases");
         string output = matrix["output"]!.GetValue<string>();
         if (File.Exists(output)) throw new IOException("Refusing to overwrite existing report");
-        File.WriteAllText(output, new JsonObject { ["scope"] = "Read-only official installation bytes with synthetic account config; no upstream code executed", ["results"] = results }.ToJsonString());
+        File.WriteAllText(output, new JsonObject { ["scope"] = "Read-only installation bytes; synthetic configuration or explicitly supplied isolated snapshot; no upstream code executed", ["results"] = results }.ToJsonString());
     }
 }

@@ -12,7 +12,7 @@ public sealed record RunOutcomeDimensions(
     private static readonly HashSet<string> EngineStatuses = new(StringComparer.Ordinal)
         { "not_started", "running", "succeeded", "failed", "cancelled", "unknown" };
     private static readonly HashSet<string> BusinessVerifications = new(StringComparer.Ordinal)
-        { "verified_succeeded", "verified_failed", "satisfied", "inapplicable", "unverified" };
+        { "verified_succeeded", "verified_failed", "satisfied", "inapplicable", "unverified", "partial", "cancelled", "blocked", "pending" };
     private static readonly HashSet<string> ExecutionOutcomes = new(StringComparer.Ordinal)
         { "not_started", "running", "completed", "failed", "cancelled" };
     private static readonly HashSet<string> RecoveryOutcomes = new(StringComparer.Ordinal)

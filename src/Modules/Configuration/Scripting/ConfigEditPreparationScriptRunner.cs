@@ -17,7 +17,8 @@ internal static class ConfigEditPreparationScriptRunner
         ConfigSessionMark mark,
         string mode,
         string configInputName = "",
-        string configInputValue = "")
+        string configInputValue = "",
+        string trigger = "config-edit-preparation")
     {
         string temporaryRoot = Path.Combine(
             Path.GetTempPath(),
@@ -52,7 +53,7 @@ internal static class ConfigEditPreparationScriptRunner
                     script,
                     user,
                     temporaryRoot,
-                    "config-edit-preparation",
+                    trigger,
                     extras,
                     allowMainWrites: false,
                     allowExtraWrites: true,

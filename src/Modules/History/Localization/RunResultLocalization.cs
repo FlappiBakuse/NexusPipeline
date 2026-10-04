@@ -19,6 +19,7 @@ internal static class RunResultLocalization
             "run.daily_cap" => HostLocalization.TranslateNamed("run.daily_cap", fallback, args, locale),
             "run.user_unavailable" => HostLocalization.TranslateNamed("run.user_unavailable", fallback, args, locale),
             "run.config_selection_required" => HostLocalization.TranslateNamed("run.config_selection_required", fallback, args, locale),
+            "run.configuration_setup_required" => HostLocalization.TranslateNamed("run.configuration_setup_required", fallback, args, locale),
             "run.user_config_load_failed" => HostLocalization.TranslateNamed("run.user_config_load_failed", fallback, args, locale),
             "run.retry_prepare_failed" => HostLocalization.TranslateNamed("run.retry_prepare_failed", fallback, args, locale),
             "run.max_attempts" => HostLocalization.TranslateNamed("run.max_attempts", fallback, args, locale),

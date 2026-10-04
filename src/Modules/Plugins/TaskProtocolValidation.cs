@@ -3,11 +3,11 @@ using NexusPipeline.Modules.Plugins.Contracts;
 
 namespace NexusPipeline.Modules.Plugins;
 
-internal static class TaskProtocolValidation
+internal static partial class TaskProtocolValidation
 {
     internal static void Discovery(TaskDiscovery discovery)
     {
-        Require(discovery.ProtocolVersion == "0.1.0" && discovery.Type == "discovery", "discovery envelope");
+        Require((discovery.ProtocolVersion is "0.1.0" or "0.2.0") && discovery.Type == "discovery", "discovery envelope");
         Require(discovery.Coverage is "complete" or "partial" or "unsupported", "coverage");
         Require(discovery.Tasks is { Length: <= 1024 }, "task count");
         Diagnostics(discovery.Diagnostics, discovery.ProtocolVersion);
@@ -60,6 +60,7 @@ internal static class TaskProtocolValidation
             if (task.ParentId is not null) Text(task.ParentId);
             if (task.ConfigRef is not null) Text(task.ConfigRef);
             Require(!task.CountsAsUnit || task.ParentId is null, "child cannot count twice");
+            DailyTask(task, discovery.ProtocolVersion);
         }
         foreach (var task in tasks.Values)
         {
@@ -82,7 +83,7 @@ internal static class TaskProtocolValidation
         IReadOnlySet<string> declaredConfigIds,
         IReadOnlySet<string> declaredResourceIds)
     {
-        Require(protocol.Version == "0.1.0", "unsupported task protocol");
+        Require(protocol.Version is "0.1.0" or "0.2.0", "unsupported task protocol");
         TaskConfigAssessment? assessment = discovery.ConfigAssessment;
         Require(assessment is not null, "config assessment required");
         if (assessment is null) throw new InvalidDataException("protocol_error: config assessment required");
@@ -238,7 +239,7 @@ internal static class TaskProtocolValidation
         IReadOnlySet<string> selected, IReadOnlySet<(string, int, long)> evidence,
         IReadOnlySet<string>? structuredEvidence = null)
     {
-        Require(batch.ProtocolVersion == "0.1.0" && batch.Type == "observation" && batch.RunId == runId && batch.AttemptId == attemptId, "observation identity");
+        Require((batch.ProtocolVersion is "0.1.0" or "0.2.0") && batch.Type == "observation" && batch.RunId == runId && batch.AttemptId == attemptId, "observation identity");
         Require(batch.Observations is { Length: <= 2048 }, "observation count");
         Require(batch.RunBoundary is "open" or "ended" or "aborted" or "unknown", "boundary");
         Require(structuredEvidence is null ? batch.StructuredEvidenceVersion is null : batch.StructuredEvidenceVersion == 1,
@@ -257,6 +258,7 @@ internal static class TaskProtocolValidation
             Require(observation.ExecutionOrdinal > 0, "execution ordinal");
             Require(observation.Status is "running" or "succeeded" or "failed" or "skipped" or "blocked" or "unknown", "observation status");
             Require(observation.Status != "skipped" || observation.SkipKind is "satisfied" or "inapplicable", "skip kind");
+            DailyObservation(observation, batch.ProtocolVersion);
             bool structured = StructuredEvidence(observation.StructuredEvidenceRefs, structuredEvidence);
             Evidence(observation.Evidence, evidence, observation.Status is not "unknown" && !structured);
         }

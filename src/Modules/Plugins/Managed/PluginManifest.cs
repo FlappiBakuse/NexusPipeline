@@ -32,6 +32,8 @@ internal sealed class PluginManifest
 
     public string EntryType { get; private init; } = "";
 
+    public string ConfigurationRevision { get; private init; } = "";
+
     public string ResolvePath { get; private init; } = "";
 
     public string JudgeScriptPath { get; private init; } = "";
@@ -140,6 +142,15 @@ internal sealed class PluginManifest
                 }
             }
 
+            string configurationRevision = root["configurationRevision"]?.GetValue<string>() ?? "";
+            if (root.ContainsKey("configurationRevision") && (kind != "data-specialized"
+                || configurationRevision.Length is < 1 or > 96
+                || !configurationRevision.All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '_' or '-')
+                || PluginRepositoryCatalog.CompareVersions(minHostVersion, "0.16.14") < 0))
+            {
+                error = "configurationRevision 必须是专项插件的稳定配置修订标识";
+                return false;
+            }
             if (!TaskProtocolManifest.TryValidate(root, out error)) return false;
 
             var result = new PluginManifest
@@ -156,6 +167,7 @@ internal sealed class PluginManifest
                 ApiVersion = root["apiVersion"]?.ToString()?.Trim() ?? "",
                 EntryAssembly = root["entryAssembly"]?.ToString()?.Trim() ?? "",
                 EntryType = root["entryType"]?.ToString()?.Trim() ?? "",
+                ConfigurationRevision = configurationRevision,
                 ResolvePath = root["resolve"]?.ToString()?.Trim() ?? "",
                 JudgeScriptPath = root["judgeScript"]?.ToString()?.Trim() ?? "",
                 ConfigEditorPath = configEditorPath,

@@ -97,8 +97,11 @@ internal static class ExtraConfigStoreTransaction
         string storePath,
         ConfigStoreDiffPlan plan,
         string? expectedSample,
-        Action<string, string>? writeAtomic = null)
+        Action<string, string>? writeAtomic = null,
+        string? sourcePath = null,
+        Action? validateCurrent = null)
     {
+        validateCurrent?.Invoke();
         Action<string, string> writer = writeAtomic
             ?? ((target, content) => JsonUtil.WriteAtomic(target, content));
         if (!plan.HasChanges)
@@ -137,14 +140,15 @@ internal static class ExtraConfigStoreTransaction
         try
         {
             Directory.CreateDirectory(stage);
-            ConfigSwapPrimitives.CopyAs(sitePath, stage, PathKind.Dir);
+            ConfigSwapPrimitives.CopyAs(sourcePath ?? sitePath, stage, PathKind.Dir);
             if (expectedSample is not null
-                && !string.Equals(expectedSample, ConfigSwapSession.SampleConfig(sitePath), StringComparison.Ordinal))
+                && !string.Equals(expectedSample, ConfigSwapSession.SampleConfig(sourcePath ?? sitePath), StringComparison.Ordinal))
             {
                 throw new IOException("附加配置在事务暂存期间发生变化，保留旧快照");
             }
 
             // manifest 必须先于 store 移动写入，强杀后可判断旧快照是否已经移入 backup。
+            validateCurrent?.Invoke();
             writer(manifestPath, JsonSerializer.Serialize(manifest, JsonOpts.Indented));
             manifestWritten = true;
             if (manifest.HadStore)
@@ -181,6 +185,16 @@ internal static class ExtraConfigStoreTransaction
                 }
             }
             throw;
+        }
+        finally
+        {
+            string parent = Path.GetDirectoryName(transactionDir)!;
+            try
+            {
+                if (Directory.Exists(parent) && !Directory.EnumerateFileSystemEntries(parent).Any())
+                    Directory.Delete(parent);
+            }
+            catch (IOException) { /* Another owned transaction may have entered the same parent. */ }
         }
     }
 

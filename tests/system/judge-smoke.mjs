@@ -117,6 +117,16 @@ test("专项协议真实进程：选择重试、原选择恢复、最终计数�
     assert.equal(preview.readOnly, true, JSON.stringify(preview));
     assert.equal(preview.stale, false);
     assert.deepEqual(fs.readFileSync(store), before);
+    finalConfig.tasks[0].enabled = false;
+    fs.writeFileSync(store, JSON.stringify(finalConfig));
+    for (let check = 0; check < 2; check++) {
+      const refreshedResponse = await api("GET", `/api/users/${user.id}/bindings/${script.id}/task-plan`);
+      assert.equal(refreshedResponse.status, 200);
+      const refreshed = await refreshedResponse.json();
+      assert.notEqual(refreshed.plan.signature, preview.plan.signature);
+      assert.equal(refreshed.stale, false);
+      assert.equal(refreshed.plan.tasks.find(task => task.id === "a").enabled, false);
+    }
     const summary = await (await api("GET", "/api/users/task-summaries")).json();
     assert.equal(summary.find(u => u.userId === user.id).recordId, record.id);
     const detail = await (await api("GET", `/api/history/detail?id=${record.id}&metadata=true`)).json();

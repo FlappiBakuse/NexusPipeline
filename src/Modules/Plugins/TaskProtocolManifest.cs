@@ -17,9 +17,9 @@ internal static class TaskProtocolManifest
             if (manifest["taskProtocol"] is not JsonObject protocol)
                 throw new InvalidDataException("taskProtocol must be an object");
             string? version = protocol["version"]?.GetValue<string>();
-            if (version is not ("0.1.0" or "0.1.1"))
+            if (version is not ("0.1.0" or "0.1.1" or "0.2.0"))
                 throw new InvalidDataException("unsupported taskProtocol.version");
-            if (version == "0.1.1")
+            if (version is "0.1.1" or "0.2.0")
                 Fields(protocol, "version", "discoverScript", "retryScript", "readResources", "localization", "configRules", "environmentChecks", "repairRules");
             else
                 Fields(protocol, "version", "discoverScript", "retryScript", "readResources", "localization", "configRules", "environmentChecks");
@@ -28,11 +28,12 @@ internal static class TaskProtocolManifest
                 throw new InvalidDataException("taskProtocol 0.1.0 cannot declare configValidator");
             ValidateConfigRules(protocol["configRules"]);
             ValidateEnvironmentChecks(protocol["environmentChecks"]);
-            if (version == "0.1.1") ValidateRepairRules(protocol["repairRules"], protocol["configRules"]);
+            if (version == "0.1.1") ValidateLegacyRepairRules(protocol["repairRules"], protocol["configRules"]);
+            if (version == "0.2.0") ValidateRepairRules(protocol["repairRules"], protocol["configRules"]);
             if (!PluginRepositoryCatalog.TryParseVersion(manifest["minHostVersion"]?.GetValue<string>() ?? "", out var minimum)
-                || !PluginRepositoryCatalog.TryParseVersion(version == "0.1.1" ? "0.16.9" : "0.16.8", out var required)
+                || !PluginRepositoryCatalog.TryParseVersion(version == "0.2.0" ? "0.16.14" : version == "0.1.1" ? "0.16.9" : "0.16.8", out var required)
                 || minimum.CompareTo(required) < 0)
-                throw new InvalidDataException("taskProtocol requires minHostVersion >= 0.16.8");
+                throw new InvalidDataException("taskProtocol minHostVersion is below the negotiated protocol minimum");
             foreach (string field in new[] { "discoverScript", "retryScript" }) ScriptPath(protocol[field]?.GetValue<string>());
             ScriptPath(manifest["judgeScript"]?.GetValue<string>());
             if (protocol["readResources"] is not JsonArray resources || resources.Count > 128)
@@ -45,7 +46,7 @@ internal static class TaskProtocolManifest
                 if (resource.ContainsKey("sha256")) resourceFields.Add("sha256");
                 if (resource.ContainsKey("operationalFields"))
                 {
-                    if (version != "0.1.1" || resource["source"]?.GetValue<string>() != "root"
+                    if (version is not ("0.1.1" or "0.2.0") || resource["source"]?.GetValue<string>() != "root"
                         || resource["format"]?.GetValue<string>() != "json"
                         || resource["operationalFields"] is not JsonObject operational
                         || operational.Count is 0 or > 2)
@@ -126,7 +127,7 @@ internal static class TaskProtocolManifest
             frozen = new("", "", localization["defaultLocale"]!.GetValue<string>(), hash, messages);
         }
         // 0.1.1 extends the package declaration only; the phase wire envelope remains 0.1.0.
-        return new("0.1.0", Read(protocol["discoverScript"]!.GetValue<string>()),
+        return new(protocol["version"]!.GetValue<string>() == "0.2.0" ? "0.2.0" : "0.1.0", Read(protocol["discoverScript"]!.GetValue<string>()),
             Read(manifest["judgeScript"]!.GetValue<string>()), Read(protocol["retryScript"]!.GetValue<string>()),
             ((JsonArray)protocol["readResources"]!).Select(r => new TaskReadResource(
                 r!["id"]!.GetValue<string>(), r["source"]!.GetValue<string>(), r["path"]!.GetValue<string>(),
@@ -144,7 +145,7 @@ internal static class TaskProtocolManifest
         };
     }
 
-    private static void ValidateRepairRules(JsonNode? value, JsonNode? configRules)
+    private static void ValidateLegacyRepairRules(JsonNode? value, JsonNode? configRules)
     {
         if (value is not JsonArray rules || rules.Count > 8)
             throw new InvalidDataException("taskProtocol.repairRules must contain at most 8 rules");
@@ -182,13 +183,65 @@ internal static class TaskProtocolManifest
         }
     }
 
+    private static void ValidateRepairRules(JsonNode? value, JsonNode? configRules)
+    {
+        if (value is not JsonArray rules || rules.Count > 8)
+            throw new InvalidDataException("taskProtocol.repairRules must contain at most 8 rules");
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        var declared = ((JsonArray)configRules!).Select(r => r!["id"]!.GetValue<string>()).ToHashSet(StringComparer.Ordinal);
+        foreach (JsonNode? node in rules)
+        {
+            if (node is not JsonObject rule) throw new InvalidDataException("invalid repair rule");
+            var fields = new List<string> { "id", "ruleId", "resourceId", "selector", "source", "format", "kind", "fromValues", "toValue", "preconditions", "explanation" };
+            if (rule.ContainsKey("skipWhen")) fields.Add("skipWhen");
+            Fields(rule, fields.ToArray());
+            string id = rule["id"]?.GetValue<string>() ?? "";
+            if (!System.Text.RegularExpressions.Regex.IsMatch(id, "^[A-Za-z0-9_.:-]{1,160}$") || !ids.Add(id)
+                || !declared.Contains(rule["ruleId"]?.GetValue<string>() ?? ""))
+                throw new InvalidDataException("repair rule id or diagnostic rule invalid");
+            string resource = rule["resourceId"]?.GetValue<string>() ?? "";
+            if (!(resource == "config:$main" || resource == "extra:0"
+                || System.Text.RegularExpressions.Regex.IsMatch(resource, @"^config:[A-Za-z0-9_.{}/-]+$"))
+                || resource.Contains("..") || resource.Contains('\\')
+                || rule["source"]?.GetValue<string>() != "user_snapshot"
+                || rule["format"]?.GetValue<string>() is not ("json" or "yaml")
+                || rule["kind"]?.GetValue<string>() is not ("replace_enum" or "normalize_enum" or "bind_game_path" or "mxu_tasks" or "mxu_preactions" or "mfa_tasks" or "enable_boolean")
+                || rule["selector"] is not JsonArray { Count: > 0 and <= 8 } selector
+                || selector.Any(n => n is not JsonValue v || !v.TryGetValue<string>(out string? text) || string.IsNullOrWhiteSpace(text))
+                || rule["toValue"]?.GetValue<string>() is not { Length: <= 512 })
+                throw new InvalidDataException("invalid repair scope");
+            if (rule["kind"]?.GetValue<string>() is "mxu_tasks" or "mxu_preactions" or "mfa_tasks"
+                && (rule["format"]!.GetValue<string>() != "json"
+                    || selector.ToJsonString() != (rule["kind"]!.GetValue<string>() == "mfa_tasks" ? "[\"TaskItems\"]" : "[\"instances\"]")))
+                throw new InvalidDataException("invalid framework repair scope");
+            if (rule["preconditions"] is not JsonObject preconditions || preconditions.Count != 3
+                || preconditions["snapshotKind"]?.GetValue<string>() is not ("file" or "any")
+                || preconditions["exclusiveResource"]?.GetValue<bool>() != true
+                || preconditions["noExtraConfig"] is not JsonValue noExtra || !noExtra.TryGetValue<bool>(out _))
+                throw new InvalidDataException("repair preconditions invalid");
+            if (rule.ContainsKey("skipWhen") && (rule["skipWhen"] is not JsonObject skip || skip.Count != 2 || skip["selector"] is not JsonArray { Count: 1 } condition
+                || condition[0] is not JsonValue key || !key.TryGetValue<string>(out _) || skip["equals"] is not JsonValue flag || !flag.TryGetValue<bool>(out _)))
+                throw new InvalidDataException("invalid repair skip condition");
+            if (rule["fromValues"] is not JsonArray { Count: <= 32 } values
+                || values.Any(v => v is not JsonValue scalar || !scalar.TryGetValue<string>(out string? text) || text.Length > 64)
+                || values.Select(v => v!.GetValue<string>()).Distinct(StringComparer.Ordinal).Count() != values.Count)
+                throw new InvalidDataException("repair source values invalid");
+            if (rule["explanation"]?.GetValue<string>() is not { Length: > 0 and <= 512 })
+                throw new InvalidDataException("repair explanation invalid");
+        }
+    }
+
     private static TaskConfigRepairDescriptor[] ReadRepairRules(JsonObject protocol) =>
         protocol["repairRules"] is not JsonArray rules ? [] : rules.Select(node =>
             new TaskConfigRepairDescriptor(node!["id"]!.GetValue<string>(), node["ruleId"]!.GetValue<string>(),
                 node["resourceId"]!.GetValue<string>(), node["selector"]!.DeepClone().AsArray(),
                 node["source"]!.GetValue<string>(), node["format"]!.GetValue<string>(),
                 ((JsonArray)node["fromValues"]!).Select(v => v!.GetValue<string>()).ToArray(),
-                node["toValue"]!.GetValue<string>(), node["explanation"]!.GetValue<string>())).ToArray();
+                node["toValue"]!.GetValue<string>(), node["explanation"]!.GetValue<string>())
+            { Kind = node["kind"]!.GetValue<string>(), SkipWhen = node["skipWhen"]?.DeepClone().AsObject(),
+                SnapshotKind = node["preconditions"]!["snapshotKind"]!.GetValue<string>(),
+                NoExtraConfig = node["preconditions"]!["noExtraConfig"]!.GetValue<bool>(),
+                Legacy = protocol["version"]!.GetValue<string>() == "0.1.1" }).ToArray();
 
     private static void ValidateLocalization(JsonNode? value, bool nestedDirectory)
     {

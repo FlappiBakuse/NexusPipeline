@@ -44,6 +44,8 @@ internal sealed class ScriptSpecResolver
     public ResolvedScriptSpec Resolve(ScriptInstance declaration, IReadOnlyDictionary<string, string>? inputOverrides = null, string userId = "")
     {
         ScriptInstance script = declaration.Clone();
+        string revision = _capabilities.ConfigurationRevision(script.PluginType);
+        script.RequiresReconfiguration = revision.Length > 0 && script.ConfigurationRevision != revision;
         if (!string.IsNullOrWhiteSpace(script.ExecutionProviderId))
             return ResolveProvider(script, userId);
         if (!string.IsNullOrWhiteSpace(script.ExecutionProviderConfigId))
@@ -107,11 +109,14 @@ internal sealed class ScriptSpecResolver
             profile.PluginVersion ?? "",
             judge,
             ComputeProfileHash(script, profile.PluginName ?? "", profile.PluginVersion ?? "", judge,
-                profile.RootProcessRole.ToString(), profile.OutputEncoding),
+                profile.RootProcessRole.ToString(), profile.OutputEncoding + ":" + profile.RequireExclusiveProcess + ":" + profile.ConfigContractId + ":" + profile.RequiredConfigRelativePath),
             ConfigEditor: profile.ConfigEditor)
         {
             RootProcessRole = profile.RootProcessRole,
             OutputEncoding = profile.OutputEncoding,
+            RequireExclusiveProcess = profile.RequireExclusiveProcess,
+            ConfigContractId = profile.ConfigContractId,
+            RequiredConfigRelativePath = profile.RequiredConfigRelativePath,
             TaskProtocol = profile.TaskProtocol,
             ExtraConfigPaths = profile.ExtraConfigPaths,
             ConfigInputCandidates = profile.ConfigInputCandidates,

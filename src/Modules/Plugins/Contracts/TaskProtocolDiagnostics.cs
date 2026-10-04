@@ -6,10 +6,17 @@ namespace NexusPipeline.Modules.Plugins.Contracts;
 /// <summary>Manifest-owned configuration rule declaration for taskProtocol 0.1.0.</summary>
 internal sealed record TaskConfigRuleDescriptor(string RuleId, bool Required, string Criticality);
 
-/// <summary>Frozen, declarative repair of a single main-config enum value.</summary>
+/// <summary>Frozen, declarative repair limited to a saved user resource.</summary>
 internal sealed record TaskConfigRepairDescriptor(string Id, string RuleId, string ResourceId,
     JsonArray Selector, string Source, string Format, string[] FromValues, string ToValue,
-    string Explanation);
+    string Explanation)
+{
+    public string Kind { get; init; } = "replace_enum";
+    public JsonObject? SkipWhen { get; init; }
+    public string SnapshotKind { get; init; } = "any";
+    public bool NoExtraConfig { get; init; }
+    public bool Legacy { get; init; }
+}
 
 /// <summary>Manifest-owned, non-arbitrary environment target declaration.</summary>
 internal sealed record TaskEnvironmentCheckDescriptor(
@@ -42,6 +49,8 @@ internal sealed record TaskExecutionContext(
 {
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? RuntimeActivity { get; init; }
+    public string? ConfigInputName { get; init; }
+    public string? ConfigInputValue { get; init; }
 
     internal static TaskExecutionContext Unknown(string userId, string scriptInstanceId, string trigger) => new(
         userId,

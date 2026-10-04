@@ -8,6 +8,10 @@ using NexusPipeline.Modules.Users.UseCases;
 using NexusPipeline.Platform.Windows;
 using NexusPipeline.Shared.Logging;
 using NexusPipeline.Modules.Configuration.Recovery;
+using NexusPipeline.Modules.Configuration.Snapshots;
+using NexusPipeline.Modules.Users.Persistence;
+using NexusPipeline.Modules.Plugins.DataSpecialized;
+using NexusPipeline.Platform.Storage;
 
 namespace NexusPipeline.Host.Initialization;
 
@@ -43,10 +47,33 @@ internal static class HostedRuntimeInitializer
                         mark.UserId,
                         mark.ScriptId,
                         mark.PendingConfigInput.Name,
-                        mark.PendingConfigInput.Value).Succeeded);
+                        mark.PendingConfigInput.Value,
+                        mark.PendingConfigInput.ExpectedBindingHash,
+                        mark.PendingConfigInput.PreviousValue).Succeeded);
             ConfigWorkDirMaintenance.SweepRuntimeStaging();
             ConfigRecoveryService.RecoverInterrupted(runtime.EntityState.SnapshotUsers());
-            runtime.History.RecoverInterruptedTasks();
+            var configurationUpdates = Directory.Exists(AppPaths.PluginsDir)
+                ? Directory.EnumerateDirectories(AppPaths.PluginsDir).Select(DataSpecializedPlugin.Load)
+                    .Where(plugin => plugin?.ConfigurationRevision.Length > 0).ToDictionary(plugin => plugin!.Name, plugin => plugin!)
+                : new Dictionary<string, DataSpecializedPlugin>();
+            runtime.EntityState.Mutate(state =>
+            {
+                bool changed = false;
+                foreach (var script in state.Scripts)
+                {
+                    if (!configurationUpdates.TryGetValue(script.PluginType, out var plugin)) continue;
+                    foreach (var user in state.Users)
+                    foreach (var binding in user.Bindings.Where(binding => binding.ScriptInstanceId == script.Id))
+                    {
+                        if (!ConfigurationRevisionReset.Apply(script.Id, user.Id, plugin.Name, plugin.ConfigurationRevision)) continue;
+                        binding.ConfigInputs.Clear();
+                        changed = true;
+                        Logger.Warn($"插件「{plugin.Name}」包含破坏性配置更新：旧配置已原字节归档，请重新设置。");
+                    }
+                }
+                if (changed) UserDefinitionStore.SaveUsers(state.Users);
+            });
+            runtime.History.RecoverInterruptedTasks(NexusPipeline.Modules.Execution.Judgement.TaskRunReducer.InterruptDailyReport);
             WindowsScheduledTaskRegistration.Sync(runtime.Settings.AutoStart);
             return true;
         }

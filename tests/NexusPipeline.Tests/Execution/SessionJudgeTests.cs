@@ -1,4 +1,5 @@
 using Xunit;
+using NexusPipeline.Modules.Execution;
 using NexusPipeline.Modules.Execution.Judgement;
 using NexusPipeline.Modules.Scripts;
 
@@ -126,5 +127,41 @@ public class SessionJudgeTests
         Assert.False(none.IsConfigured);
         Assert.False(none.ScriptMode);
         Assert.Equal(SessionJudge.LineHit.None, none.HandleLine("任意日志"));
+    }
+
+    [Fact]
+    public async Task TaskObservationHandoffPublishesCurrentBusinessOutcomeAndKeepsLegacyMarker()
+    {
+        var script = MakeScript(s => { s.JudgeScriptEnabled = true; s.JudgeScript = "x"; });
+        var judge = new SessionJudge(script);
+        var statuses = new List<string>();
+        string reason = "tasks.partial";
+        bool observedFinal = false;
+        await using var workers = new RuntimeWorkers("attempt", 1, CancellationToken.None, "测试", "脚本", judge,
+            statuses.Add, generation => new JudgeSnapshot("attempt", 1, generation, "", DateTime.Now, script,
+                null, "", "{}", []), _ => { }, _ => { }, taskObserver: (final, _) =>
+            {
+                observedFinal |= final;
+                return Task.FromResult(new JudgeScriptResult { Status = "partial", Reason = reason });
+            });
+        async Task Consume()
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            while (!await workers.ConsumeJudgeResultAsync()) await Task.Delay(1, timeout.Token);
+        }
+        Assert.True(workers.QueueJudge(false)); await Consume();
+        Assert.Equal("专项任务部分完成，等待脚本退出...", statuses.Single());
+        Assert.True(judge.IsMarker);
+        reason = "tasks.completed";
+        Assert.True(workers.QueueJudge(false)); await Consume();
+        Assert.Equal("已启用任务均已满足，等待脚本退出...", statuses.Last());
+        Assert.DoesNotContain(statuses, status => status.Contains("判断脚本"));
+        Assert.True(workers.QueueJudge(false)); await Consume();
+        Assert.Equal(2, statuses.Count);
+        reason = "tasks.failed";
+        workers.RequestFinalJudge(); await Consume();
+        Assert.Equal("专项任务存在失败，等待脚本退出...", statuses.Last());
+        Assert.True(observedFinal);
+        Assert.True(workers.FinalJudgeCompleted);
     }
 }

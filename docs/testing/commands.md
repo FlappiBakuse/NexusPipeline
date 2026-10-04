@@ -2,6 +2,8 @@
 
 ## 默认命令
 
+配置破坏性修订诊断：在已登记的外部测试根中设置 `NEXUS_TEST_MODE=test-host`、`NEXUS_TEST_HOST_DIR` 为现役 runner 构建的 asInvoker Host、新的 `NEXUS_TEST_RUN_ID` 和独立 `NEXUS_FINITE_RESULT`，执行 `node tests/system/config-revision.mjs`。它通过现役 runtime-helper 验证启动归档、实际 HTTP 候选信封、脚本设置确认及重启保全；使用合成插件与账号，不执行原生自动化程序。该诊断不替代核心 smoke 或完整 daily。
+
 以下命令均在仓库根目录执行：
 
 ```text
