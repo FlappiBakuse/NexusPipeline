@@ -113,3 +113,19 @@ gh workflow run final-budget.yml --repo FlappiBakuse/NexusPipeline --ref main -f
 项目维护的工作流、任务与步骤使用中文职责名称，保留 Host、Plugins、工具与插件的专有名称。`tests/ci-names.json` 登记“控制检查”“必需汇总”“完整预算”和未选中批次的名称；`tests/ci-names.mjs` 从逻辑门禁注册表生成批次标题。标题列出前三项职责和总数，运行摘要列出该批次完整门禁清单。内部 batch ID、artifact 名称与 run/attempt 身份保持稳定。
 
 必需汇总按同一命名入口核验 Actions 实际任务集合，完整预算复核批次编号、任务总数、完整耗时及可信登记。显示名称改变时，可信 main 控制器的触发名称、任务匹配与分支保护绑定须同步；名称或身份不一致时失败，不放宽检查。GitHub 自动生成的启动、收尾步骤由平台提供。
+
+## 双仓候选配对
+
+默认输入使用固定的已合入源码：Host 在一次 scope 中解析 Plugins main，Plugins 使用 `tests/inputs.lock.json` 中已经属于 Host main 历史的提交。API 或源码路径需要两仓同时修改时，可在两个正式 PR 描述中登记同一份 `nexus-ci-pair` JSON 代码块。配对只替换测试来源，现有义务、必需检查与预算保持不变。
+
+从已审核的控制器 checkout 运行只读命令，参数依次为 Host 和 Plugins 的实际 PR 编号：
+
+```text
+python tests/ci_inputs.py --create-pair <Host_PR编号> <Plugins_PR编号>
+```
+
+命令查询已经存在的 base/head、PR merge commit/tree、策略和输入锁摘要、main 控制器身份，输出待登记的源对象。将完整输出置于双方描述的 `nexus-ci-pair` 代码块中；不要手填未来 SHA 或 run ID。生成输出不代表已获资格，控制器会重新核验实际服务端状态。生成与验证共用 Python 的递归键排序、紧凑 UTF-8 JSON 和 SHA256，源摘要排除自身字段，运行绑定另含真实 run/attempt。
+
+配对要求双方 PR 属于官方仓库、面向 main 且保持打开。scope、实际 checkout、报告和可信 main 的 begin/finalize 必须引用同一 pair；缺少登记、摘要不同、对端变更或部分重跑均不能通过。正式 producer 仍是 `pull_request` 的 `ci.yml`，包含正文 edited 事件，普通正文编辑也运行正常义务。默认模式不接受任意对端覆盖环境变量。
+
+两边描述同步后，两边都须完成新的完整运行。另一仓提交不会自动撤销本仓旧绿勾；合并前必须只读复核双方当前 base/head/merge tree、pairDigest 和最新完整 attempt 均一致且检查成功。两个 finalize 独立完成，不互相等待。Host 合入后，将 Plugins 默认测试锁改为真实已合入 Host SHA，移除配对块并重新执行完整默认 CI，再按现役流程合并与发行。源码合入、插件稳定字节和最终 Host 预装候选分别验证。

@@ -1,4 +1,5 @@
 import {controlManifest as readControlManifest,sourceFingerprint} from "./control-inputs.mjs";
+import {validatePairCheckout} from "./ci-inputs.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import {execFileSync} from "node:child_process";
@@ -28,12 +29,13 @@ export function loadBatch(root,args) {
   const actualManifest=readControlManifest(root);
   if(digest(actualManifest)!==digest(plan.controlManifest)||hash(JSON.stringify(actualManifest))!==plan.policyDigest) throw new Error("Control input fingerprint differs from plan");
   const partnerRoot=options["--partner-root"] ? path.resolve(options["--partner-root"]) : process.env.NEXUS_PARTNER_ROOT;
+  validatePairCheckout(root,file,plan,partnerRoot);
   const partnerPolicy=partnerRoot ? JSON.parse(fs.readFileSync(path.join(partnerRoot,"tests/policy.json"))) : plan.partnerPolicySnapshot ?? null;
   if(plan.partnerPolicyDigest!== (partnerPolicy?hash(JSON.stringify(partnerPolicy)):null)) throw new Error("Partner policy differs from plan");
   const routing=planForChanges(root,plan.changes,registry,policy);
   if(!same(routing.selected.map(item=>item.id),plan.selected.map(item=>item.id))) throw new Error("Selected obligations differ from semantic plan");
   const identity={baseSha:plan.baseSha,headSha:plan.headSha,mergeBase:plan.mergeBase,testedSha:plan.testedSha,dirty:plan.dirty,changes:plan.changes,
-    partnerSha:plan.partnerSha,controlManifest:plan.controlManifest,partnerPolicyDigest:plan.partnerPolicyDigest};
+    partnerSha:plan.partnerSha,...(plan.inputPair ? {inputPair:plan.inputPair} : {}),controlManifest:plan.controlManifest,partnerPolicyDigest:plan.partnerPolicyDigest};
   const expected=allocateUnits(coreUnits(plan.selected,registry,policy,partnerPolicy),identity,policy.ciBatchPolicy);
   if(expected.units.some(unit=>unit.kind==="partner-jint"&&!unit.expectedCaseIds.length)) throw new Error("Missing predeclared partner Jint cases");
   for(const field of ["units","batches","control","requiredObligations","capacityStatus","estimatedTotalJobs"])
@@ -45,7 +47,7 @@ export function loadBatch(root,args) {
   if(process.env.CI) {
     if(plan.diagnosticSelection) throw new Error("Diagnostic selection cannot qualify Actions");
     if(plan.dirty||String(plan.runId)!==process.env.GITHUB_RUN_ID||String(plan.attempt)!==process.env.GITHUB_RUN_ATTEMPT) throw new Error("CI run/attempt/clean identity mismatch");
-    const current=createScopePlan(root,{base:plan.baseSha,head:plan.headSha,partnerSha:plan.partnerSha,partnerRoot});
+    const current=createScopePlan(root,{base:plan.baseSha,head:plan.headSha,inputPair:plan.inputPair,partnerSha:plan.partnerSha,partnerRoot});
     if(digest(current.changes)!==digest(plan.changes)) throw new Error("CI source diff differs from plan");
   }
   const batch=options["--batch"]==="control"?plan.control:plan.batches.find(item=>item.id===options["--batch"]);
@@ -72,7 +74,7 @@ export function saveBatch(context,runRoot,workspace,units,exitCode,elapsedMs,cle
   const report={schemaVersion:2,scope:"LOCAL_BATCH_RESULT",qualification:process.env.CI?"CI_PRODUCER_PENDING_AUDIT":"LOCAL_DIAGNOSTIC",
     batchId:context.batch.id,identity:{repository:"FlappiBakuse/NexusPipeline",prNumber:context.plan.prNumber,baseSha:context.plan.baseSha,
       headSha:context.plan.headSha,mergeBaseSha:context.plan.mergeBase,testedSha:context.plan.testedSha,runId:context.plan.runId,attempt:context.plan.attempt,
-      partnerSha:context.plan.partnerSha,partner:context.partnerSource??null,partnerFingerprint:context.partnerFingerprint??null,source:workspace?.source??null,sourceFingerprint:workspace?.sourceFingerprint??null,
+      inputMode:context.plan.inputMode??"default",inputPair:context.plan.inputPair??null,partnerSha:context.plan.partnerSha,partner:context.partnerSource??null,partnerFingerprint:context.partnerFingerprint??null,source:workspace?.source??null,sourceFingerprint:workspace?.sourceFingerprint??null,
       workingTreeDirty:workspace?.source.workingTreeDirty??null,toolchain:{...workspace?.toolchain,platform:process.platform,arch:process.arch,rid:"win-x64",buildModes:["production","test-host"]},
       toolchainFingerprint:hash(JSON.stringify({...workspace?.toolchain,platform:process.platform,arch:process.arch,rid:"win-x64",buildModes:["production","test-host"]}))},policyDigest:context.plan.policyDigest,planDigest:context.planDigest,
     status:exitCode?"FAIL":"PASS",exitCode,timing:{qualificationMs:150000,hardTimeoutMs:180000,processElapsedMs:elapsedMs,preparationElapsedMs:context.setupElapsedMs??0,completeJobMs:null},

@@ -36,7 +36,23 @@ For Win32, explicitly select the matching window. For ADB, specify the exact cli
 
 ## Upgrading, uninstalling, and recovery
 
-Exit the application and back up the entire instance directory before upgrading. Include at least `config/`, `data/`, `history/`, `logs/`, `plugins/`, and `.nxp/`. The built-in updater preserves user directories. The older v0.16.8 worker only replaced the EXE and `wwwroot/`; the first v0.16.9 startup supplied `README.md` from the staged package only if it was missing. For a manual upgrade, replace only `nexus-pipeline.exe`, `wwwroot/`, and `README.md`; do not overwrite your `plugins/`. The installer cannot take over an unknown older directory in place.
+Exit the application and back up the entire instance before upgrading: program files, plugins, `config/`, `data/`, `history/`, `logs/`, `.nxp/`, and any `user-assets/`, `.nxp-update/` or `.nxp-backup/` directories. The program backup on the Update page does not replace this complete backup.
+
+### Install breaking versions in a new directory
+
+v0.16.15 switches to .NET 10 and Plugin API 2.0 and removes support for older data formats. Install it manually in a new empty directory and configure it again. v0.17.0 also requires a separate manual upgrade; reaching v0.16.15 does not permit automatic updates across the next barrier. Download only assets actually available in the official Releases.
+
+1. Finish or cancel tasks, close configuration editing, and exit the application, old browser pages, CLI processes and MCP connections. Resolve pending recovery with the original version first; preserve journals, backups and other recovery files.
+2. Back up the complete old instance and retain its original directory. Do not copy the old directory into the new installation or extract a portable package over it.
+3. Install the target release in a new empty directory. v0.16.15 requires Windows 11 x64, .NET 10 Desktop Runtime and ASP.NET Core Runtime. Follow the target package's prerequisites; users do not need the SDK, Node or npm.
+4. Use official plugins compatible with the target Host. Recreate scripts, users, queues and affected settings manually, including credentials. Do not copy old plugin directories. Keep the original game and script directories in place and select them explicitly in the new instance.
+5. Verify tasks, configuration switching and notifications before switching startup settings. Disable the old instance's startup setting in that instance. Run the instances one at a time; do not let both operate on the same game configuration or task.
+
+The new version does not convert, import, move or delete affected old configuration, appearance or history files, and provides no migration tool. View old history with the old version from a complete backup. To roll back, use the complete old instance; do not point old binaries at new data.
+
+Ordinary updates using the same formats and crossing no barrier can still use the built-in updater. If such an update is performed manually, replace only `nexus-pipeline.exe`, `wwwroot/` and `README.md`, preserving user directories and existing `plugins/`. The installer cannot take over an unknown directory.
+
+### Uninstalling and recovery
 
 Uninstalling preserves user data by default. It removes the fixed directories confirmed to belong to this instance only if you explicitly select deletion of this instance's user data before uninstalling. Deletion is refused if a link or unresolved recovery state is found; unknown files and external game or script paths remain. Shared .NET runtimes are not removed. After an uninstall that preserved data, the same user may reinstall at the original path and explicitly confirm reuse of that data. The installer does not claim other data merely because of the directory name. If installation, updating, or uninstallation reports a pending recovery journal, backup, file lock, or remaining files, preserve the state and follow the [recovery guide](../architecture/recovery.md).
 
@@ -48,7 +64,7 @@ An installer may report “installation incomplete” (exit code 12) after writi
 
 **Why does a newer official release have only restricted mode?** Advanced decisions require evidence for that release's configuration and log contract. If basic startup can be confirmed, it can still run, but outcomes remain unverified.
 
-**Why does the installer reject an old directory?** It accepts only an empty directory or an instance registered to the current Windows user, protecting unknown portable installations and user data. Use the built-in updater or the manual steps above for an older portable instance.
+**Why does the installer reject an old directory?** It accepts only directories allowed by that version's installation rules, protecting unknown portable installations and user data. A breaking upgrade requires a new empty directory. For ordinary updates using the same formats, follow the instructions above.
 
 **Why can't I apply a configuration repair?** Check the switch and preview token, whether the file has changed, and whether a run or configuration transaction is occupying it. Then preview again.
 

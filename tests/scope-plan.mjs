@@ -98,7 +98,7 @@ export function planForChanges(root, changes, registry, policy) {
     if (/^(README(?:\.en)?\.md|LICENSE(?:\.md)?|NOTICE(?:\.md)?)$/i.test(name)) {
       host("docs", reason); host("release-contract", reason); return;
     }
-    if (/^(tests\/(?:core-plan|batch-plan|scope-plan|scope-cli|selection-cases|ci-scope|ci-names|batch-required|test_batch_required|gate-required|test_gate_required|policy|gates|run|ci-gate|audit-jobs|test_audit_jobs|final-budget|test_final_budget)|\.github\/workflows\/(?:ci|final-budget)\.yml)/.test(name)) {
+    if (/^(tests\/(?:ci-inputs|ci_inputs|test_ci_inputs|core-plan|batch-plan|scope-plan|scope-cli|selection-cases|ci-scope|ci-names|batch-required|test_batch_required|gate-required|test_gate_required|policy|gates|run|ci-gate|audit-jobs|test_audit_jobs|final-budget|test_final_budget)|\.github\/workflows\/(?:ci|final-budget)\.yml)/.test(name)) {
       host("ci-policy", reason); return;
     }
     if (/^(tools\/installer|tools\/host_installer|tools\/installer-languages)/.test(name)) {
@@ -182,11 +182,11 @@ export function createScopePlan(root, options = {}) {
   const identity = collectChanges(root, options);
   const routing = planForChanges(root, identity.changes, registry, policy);
   const controlManifest=readControlManifest(root);
-  const batchIdentity = {...identity, partnerSha:options.partnerSha ?? null, controlManifest};
+  const batchIdentity = {...identity, partnerSha:options.partnerSha ?? null, ...(options.inputPair ? {inputPair:options.inputPair} : {}), controlManifest};
   const partnerPolicy = options.partnerPolicy ?? (options.partnerRoot ? JSON.parse(fs.readFileSync(path.join(options.partnerRoot,"tests/policy.json"))) : null);
   const partnerPolicyDigest = partnerPolicy ? hash(JSON.stringify(partnerPolicy)) : null;
   const allocation = allocateUnits(coreUnits(routing.selected,registry,policy,partnerPolicy),{...batchIdentity,partnerPolicyDigest},policy.ciBatchPolicy);
   return { schemaVersion: 2, repository: registry.repository, policyDigest: hash(JSON.stringify(controlManifest)), digestFormat: "utf8-lf-v1",
     ...identity, partnerSha: options.partnerSha ?? null, runId: options.runId ?? null, attempt: options.attempt ?? null,
-    prNumber: options.prNumber ?? null, sourceFingerprint:sourceFingerprint(root), controlManifest, partnerPolicySnapshot:partnerPolicy, partnerPolicyDigest, ...routing, ...allocation };
+    inputMode: options.inputPair ? "paired" : "default", inputPair: options.inputPair ?? null, prNumber: options.prNumber ?? null, sourceFingerprint:sourceFingerprint(root), controlManifest, partnerPolicySnapshot:partnerPolicy, partnerPolicyDigest, ...routing, ...allocation };
 }
