@@ -34,6 +34,7 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
         Version = manifest.Version;
         MinHostVersion = manifest.MinHostVersion;
         Localization = manifest.Localization;
+        ConfigurationRevision = manifest.ConfigurationRevision;
         TaskProtocol = TaskProtocolManifest.Freeze((JsonObject)JsonNode.Parse(File.ReadAllText(Path.Combine(pluginDir, "plugin.json")))!, pluginDir);
         _resolvePath = manifest.ResolvePath;
         _judgeScriptPath = manifest.JudgeScriptPath;
@@ -78,6 +79,7 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
     public IReadOnlySet<string> CapabilityKeys => _capabilityKeys;
 
     internal TaskProtocolDescriptor? TaskProtocol { get; }
+    internal string ConfigurationRevision { get; }
 
     internal string _resolvePath = "";
 

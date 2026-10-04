@@ -31,6 +31,7 @@ internal sealed class ConfigRunSession
     private bool _processCleanupConfirmed = true;
     private bool _finalizationCompleted;
     private readonly bool _providerSession;
+    private readonly string? _exclusiveExecutable;
     private string? _finalizationError;
     internal Func<string?>? RestoreTaskSelections { get; set; }
     internal int OriginAttempt { get; set; }
@@ -53,6 +54,7 @@ internal sealed class ConfigRunSession
         _originExecutionId = originExecutionId;
         _originRecordId = originRecordId;
         _providerSession = resolvedSpec?.ProviderPlan is not null;
+        _exclusiveExecutable = resolvedSpec?.RequireExclusiveProcess == true ? resolvedSpec.Script.MainExe : null;
     }
 
     public bool IsPrepared { get; private set; }
@@ -68,6 +70,12 @@ internal sealed class ConfigRunSession
     public bool Prepare(out string? error)
     {
         error = null;
+        if (_exclusiveExecutable is not null
+            && NexusPipeline.Platform.Processes.RuntimeImageActivityProbe.ObserveExecutable(_exclusiveExecutable) != "inactive")
+        {
+            error = "同一安装目录存在运行中或无法确认归属的程序，请关闭后重试；配置尚未交换。";
+            return false;
+        }
         if (_providerSession)
         {
             if (string.IsNullOrWhiteSpace(_userKey) || _metadata is null) { error = "provider requires a Host user binding"; return false; }
@@ -75,7 +83,7 @@ internal sealed class ConfigRunSession
             { error = "provider recovery journal already exists"; return false; }
             new ConfigSessionMark { ScriptId = _scriptId, UserId = _userKey, SessionPhase = "provider_run",
                 ConfigPath = _metadata.WritableRoot, ConfigKind = "dir", WorkingDirectory = _metadata.WorkingDirectory,
-                WritableRoot = _metadata.WritableRoot, ProfileHash = _metadata.ProfileHash,
+                WritableRoot = _metadata.WritableRoot, ProfileHash = _metadata.ProfileHash, ConfigContractId = _metadata.ConfigContractId,
                 PluginName = _metadata.PluginName, PluginVersion = _metadata.PluginVersion,
                 OriginExecutionId = _originExecutionId, ProviderWorkersStopped = false }.Write();
             IsPrepared = true; return true;
@@ -94,7 +102,8 @@ internal sealed class ConfigRunSession
             spec.Script,
             spec.ProfileHash,
             spec.PluginVersion,
-            spec.ExtraConfigPaths);
+            spec.ExtraConfigPaths) with { RejectImplicitRebind = spec.RequireExclusiveProcess, ConfigContractId = spec.ConfigContractId,
+                RequiredConfigRelativePath = spec.RequiredConfigRelativePath };
     }
 
     public string? PrepareForRetry()

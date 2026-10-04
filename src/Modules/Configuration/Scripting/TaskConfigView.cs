@@ -82,10 +82,13 @@ internal sealed class TaskConfigView
         if (_entries.Count >= 256 || _entries.ContainsKey(id)) throw new InvalidDataException("resource_limit: duplicate/excess resource");
         ValidatePath(path);
         var info = new FileInfo(path);
-        if (!info.Exists || info.Length > 2 * 1024 * 1024) throw new InvalidDataException("config_unavailable: missing/oversize resource");
+        // Public interface imports can contain large option catalogs; writable user documents stay bounded separately.
+        int limit = (!writable && format == "text" ? 8 : 2) * 1024 * 1024;
+        if (!info.Exists) throw new InvalidDataException("config_unavailable: missing resource");
+        if (info.Length > limit) throw new InvalidDataException("resource_limit: oversized resource");
         TaskConfigMetrics.Count(4);
         byte[] bytes = File.ReadAllBytes(path);
-        if (bytes.Length > 2 * 1024 * 1024) throw new InvalidDataException("resource_limit: resource changed while reading");
+        if (bytes.Length > limit) throw new InvalidDataException("resource_limit: resource changed while reading");
         if (_entries.Values.Sum(e => (long)e.Bytes.Length) + bytes.Length > 32 * 1024 * 1024)
             throw new InvalidDataException("resource_limit: aggregate configuration exceeds 32 MiB");
         string fullPath = Path.GetFullPath(path);

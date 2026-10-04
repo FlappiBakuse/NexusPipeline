@@ -7,6 +7,24 @@ internal static class RuntimeImageActivityProbe
 {
     internal readonly record struct ImageObservation(bool Complete, IReadOnlyList<string> Images);
 
+    internal static string ObserveExecutable(string executable,
+        Func<string, ImageObservation>? observeImages = null)
+    {
+        try
+        {
+            string expected = Path.GetFullPath(executable);
+            if (!File.Exists(expected)) return "unknown";
+            for (string? path = expected; path is not null; path = Path.GetDirectoryName(path))
+                if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0) return "unknown";
+            ImageObservation observation = (observeImages ?? CaptureImages)(Path.GetFileNameWithoutExtension(expected));
+            if (!observation.Complete) return "unknown";
+            return observation.Images.Any(image => string.Equals(Path.GetFullPath(image), expected,
+                StringComparison.OrdinalIgnoreCase)) ? "active" : "inactive";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException
+            or InvalidOperationException or System.ComponentModel.Win32Exception) { return "unknown"; }
+    }
+
     internal static string Observe(string runtimeRoot,
         Func<string, ImageObservation>? observeImages = null)
     {

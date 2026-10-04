@@ -6,6 +6,8 @@ namespace NexusPipeline.Modules.Plugins.Contracts;
 /// <summary>插件能力解析端口，校验与配置编辑流程只依赖能力，不依赖 PluginManager。</summary>
 internal interface IPluginCapabilityResolver
 {
+    string ConfigurationRevision(string pluginName) => "";
+
     bool SupportsEmulator(string pluginName);
 
     /// <summary>查询插件声明的通用能力。</summary>

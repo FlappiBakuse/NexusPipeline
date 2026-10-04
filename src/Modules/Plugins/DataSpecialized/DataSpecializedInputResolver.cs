@@ -130,7 +130,8 @@ internal sealed class DataSpecializedInputResolver
                 }
             }
         }
-        string configTemplate = resolve["paths"]?["configPath"]?.ToString() ?? "";
+        string configTemplate = resolve["configSelectionPath"]?.ToString()
+            ?? resolve["paths"]?["configPath"]?.ToString() ?? "";
         if (!DataSpecializedResolveParser.TryLocateConfigInputTemplate(configTemplate, out string inputName, out string relativeDir, out string namePrefix, out string staticTail))
         {
             return false;

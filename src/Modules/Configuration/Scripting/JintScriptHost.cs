@@ -7,6 +7,7 @@ internal enum JintScriptHostProfile
 {
     Judge,
     ConfigValidation,
+    ConfigRepair,
     TaskProtocol,
 }
 
@@ -110,9 +111,10 @@ internal sealed class JintScriptHost
 
     internal void Execute(string code, JintScriptHostProfile profile)
     {
-        _boundedOutput = profile == JintScriptHostProfile.TaskProtocol;
+        _boundedOutput = profile is JintScriptHostProfile.TaskProtocol or JintScriptHostProfile.ConfigRepair;
         _engine.Execute(profile switch
         {
+            JintScriptHostProfile.ConfigRepair => "const nexus = Object.freeze({ input: JSON.parse(__NEXUS_INPUT__), readConfig: id => JSON.parse(__nexusReadRepairConfig(id)), proposeRepair: value => __nexusLog(JSON.stringify(value)) });",
             JintScriptHostProfile.Judge => JudgeGlue,
             JintScriptHostProfile.TaskProtocol => TaskProtocolGlue,
             _ => ConfigValidationGlue,

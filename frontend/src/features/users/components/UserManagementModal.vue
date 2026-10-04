@@ -39,6 +39,7 @@ import { POST_FINAL_MARKER, PRE_ONLY_MARKER, encodePrePost, splitPrePost } from 
 
 const props = defineProps<{
   user: User;
+  configurationRevision?: number;
   scripts: Script[];
   plugins: Plugin[];
   users: User[];
@@ -53,7 +54,7 @@ const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 
 const draft = ref<User>(clone({ ...props.user, bindings: props.user.bindings || [] }));
 const planRevision = ref(0);
-watch(() => [props.scripts, props.plugins], () => { planRevision.value++; }, { deep: true });
+watch(() => props.configurationRevision, () => { planRevision.value++; });
 const expandedBindingId = ref<string | null>(null);
 const bindingEditMode = ref(false);
 const addBindingOpen = ref(false);
@@ -293,8 +294,8 @@ async function paintBindingSlots() {
     });
   }
 }
-async function refresh() {
-  planRevision.value++;
+async function refresh(reloadPlan = true) {
+  if (reloadPlan) planRevision.value++;
   try {
     draft.value = clone((await getUser(props.user.id)) as User);
     await paintBindingSlots();
@@ -333,15 +334,6 @@ function openConfigEdit(binding: Binding) {
       pluginStatus?.plugin ?? undefined,
     ).allowFreshConfig,
   });
-}
-
-function handleTaskPlanAction(kind: string, binding: Binding) {
-  if (kind === "open_binding_editor") {
-    openConfigEdit(binding);
-  }
-  // open_script_settings is already represented by the expanded binding
-  // section. It remains a declared no-write action, but needs no extra
-  // navigation from this modal.
 }
 
 async function save() {
@@ -509,6 +501,7 @@ onMounted(() => {
                 <NxpEntityIcon class="um-binding-ico" :id="binding.scriptInstanceId" /><span class="um-binding-copy"
                   ><strong class="um-binding-name">{{ bindingName(binding) }}</strong
                   ><span class="um-binding-badges"
+                    ><NxpBadge v-if="props.scripts.find(script => script.id === binding.scriptInstanceId)?.requiresReconfiguration" tone="warn">{{ t("scripts.requires_reconfiguration") }}</NxpBadge
                     ><NxpBadge v-if="bindingPluginStatus(binding)?.missing" tone="bad">{{ t("common.plugin.unknown") }}</NxpBadge
                     ><NxpBadge v-else-if="bindingPluginStatus(binding)?.specialized && !bindingPluginStatus(binding)?.available" tone="warn">{{ t("common.plugin.unavailable_badge") }}</NxpBadge
                     ><NxpBadge :tone="bindingEnabled(binding) ? 'ok' : 'muted'">{{ bindingEnabled(binding) ? t("users.enabled_badge") : t("common.disabled") }}</NxpBadge
@@ -527,7 +520,7 @@ onMounted(() => {
                   <NxpButton class="um-edit-config" type="button" :class="{ 'is-unavailable': Boolean(bindingStatus(binding)) }" @click.stop="openConfigEdit(binding)">
                     <span class="um-edit-config-copy"><strong>{{ t("users.edit_configuration") }}</strong><span class="muted">{{ t("users.binding.config_open_help") }}</span></span><span class="um-edit-config-arrow" aria-hidden="true"><NxpIcon name="chevronRight" /></span>
                   </NxpButton>
-                  <TaskPlanPreview v-if="bindingPluginStatus(binding)?.specialized" :user-id="draft.id" :script-id="binding.scriptInstanceId" :revision="planRevision" @action="handleTaskPlanAction($event, binding)" />
+                  <TaskPlanPreview v-if="bindingPluginStatus(binding)?.specialized" :user-id="draft.id" :script-id="binding.scriptInstanceId" :revision="planRevision" />
                   <section class="um-binding-option-section">
                     <div class="section-heading">
                       <div>

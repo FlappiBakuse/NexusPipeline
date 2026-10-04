@@ -59,6 +59,8 @@ internal sealed class ScriptCommands
                 return Validation<ScriptInstance>("script_name_required", "脚本名称不能为空");
             }
 
+            candidate.ConfigurationRevision = _pluginCapabilities.ConfigurationRevision(candidate.PluginType);
+            candidate.RequiresReconfiguration = false;
             NormalizePaths(candidate);
             // 候选脚本在解析判断脚本资产前必须拥有最终实例 ID；新建请求中的空 ID 不能参与文件名生成。
             candidate.Id = Guid.NewGuid().ToString("N");
@@ -164,6 +166,8 @@ internal sealed class ScriptCommands
 
             candidate.Id = existing.Id;
             candidate.Index = existing.Index;
+            candidate.ConfigurationRevision = _pluginCapabilities.ConfigurationRevision(candidate.PluginType);
+            candidate.RequiresReconfiguration = false;
             NormalizePaths(candidate);
             ResolvedScriptSpec? resolvedCandidate = ResolveCandidate(candidate, out string? pluginError);
             if (pluginError is not null || resolvedCandidate is null)

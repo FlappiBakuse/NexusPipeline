@@ -64,10 +64,13 @@ internal sealed class TaskQueryProjection(UserQueries users, ScriptQueries scrip
         try
         {
             var spec = resolver.Resolve(script, binding.ConfigInputs);
+            if (spec.Script.RequiresReconfiguration) return new { error = "migration_required" };
             if (spec.TaskProtocol is null) return new { error = "unsupported_schema" };
             string store = ConfigPaths.StoreDir(scriptId, userId);
             // A file snapshot is stored under its original basename; directory snapshots keep relative paths.
             var metadata = ConfigStoreMetadata.Load(scriptId, userId);
+            if (metadata is not null && metadata.ConfigContractId != spec.ConfigContractId)
+                return new { error = "migration_required" };
             if (metadata is null || metadata.ConfigLocatorHash != ConfigStoreMetadata.HashLocator(spec.Script.ConfigPath)
                 || metadata.ConfigKind is not ("file" or "dir")) return new { error = "config_unavailable" };
             string config = metadata.ConfigKind == "file" ? Path.Combine(store, Path.GetFileName(spec.Script.ConfigPath)) : store;
@@ -94,8 +97,7 @@ internal sealed class TaskQueryProjection(UserQueries users, ScriptQueries scrip
                 executionContext: context,
                 scriptRoot: spec.Script.RootPath,
                 scriptExecutable: spec.Script.MainExe).ConfigureAwait(false);
-            var last = history.LatestTasks().SingleOrDefault(r => r.UserId == userId && r.ScriptInstanceId == scriptId);
-            return new { plan, stale = last?.Signature is { } signature && signature != plan.Signature,
+            return new { plan, stale = false,
                 queueContext = new { kind = queueContext.QueueId is null ? "standalone" : "queue",
                     queueId = queueContext.QueueId,
                     hasFollowingWork = queueContext.HasFollowingWork },

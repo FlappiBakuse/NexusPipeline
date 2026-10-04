@@ -35,7 +35,7 @@ internal sealed record ConfigEditCompleted(bool Success, ConfigValidationResult 
 /// 配置编辑生命周期应用命令。
 /// Web、CLI 和交互菜单只负责协议适配；配置交换、进程控制、租约与会话门禁统一在常驻服务内执行。
 /// </summary>
-internal sealed class ConfigEditCommands
+internal sealed partial class ConfigEditCommands
 {
     private readonly IConfigEditAdmission _admission;
     private readonly IScriptRepository _scripts;
@@ -70,15 +70,19 @@ internal sealed class ConfigEditCommands
     }
 
     private sealed record RepairCandidate(ConfigEditTarget Target, ConfigStoreMetadata Metadata,
-        string StoreFile, byte[] Before, byte[] After, ConfigRepairProposal Proposal);
+        string StoreRoot, string StoreFile, string? ExtraSite, byte[] Before, byte[] After, ConfigRepairProposal Proposal);
 
     public OperationResult<ConfigRepairProposal> PreviewRepair(string scriptId, string userId)
     {
+        OperationResult<ConfigRepairProposal> Unavailable(string reason) => OperationResult<ConfigRepairProposal>.Ok(
+            new(false, reason, "", userId, scriptId, "", null, null, "", null));
         if (_settingsProvider?.Current.AllowConfigRepair != true)
-            return Validation<ConfigRepairProposal>("配置修复开关已关闭", "config_repair_disabled");
+            return Unavailable("config_repair_disabled");
         try
         {
             OperationResult<RepairCandidate> candidate = ReadRepairCandidate(scriptId, userId);
+            if (candidate.Error?.Code is "config_repair_unavailable" or "config_repair_none")
+                return Unavailable(candidate.Error.Code);
             return candidate.Succeeded
                 ? OperationResult<ConfigRepairProposal>.Ok(candidate.Value!.Proposal)
                 : OperationResult<ConfigRepairProposal>.Failure(candidate.Error!);
@@ -101,6 +105,7 @@ internal sealed class ConfigEditCommands
         bool gateBusy = false;
         string? editConflict = null;
         string? scratch = null;
+        bool repairCommitted = false;
         try
         {
             bool changed = _admission.TryExecuteLeaseMutation(target.Script.Id, target.UserKey, () =>
@@ -127,33 +132,63 @@ internal sealed class ConfigEditCommands
                 || SystemActions.IsExeRunning(ResolveLaunchTargetExe(candidate.Target.Script)))
                 return Conflict<ConfigRepairProposal>("resource_busy", "脚本程序正在运行，请退出后重试");
             // Source is a private work copy. The existing store transaction owns the only durable mutation.
-            scratch = Path.Combine(ConfigPaths.WorkDir(scriptId, candidate.Target.UserKey),
-                "repair-" + Guid.NewGuid().ToString("N"));
+            scratch = Path.Combine(ConfigPaths.UserDir(scriptId, candidate.Target.UserKey),
+                "repair-backups", Guid.NewGuid().ToString("N"), "work");
             Directory.CreateDirectory(scratch);
-            string sourceFile = Path.Combine(scratch, Path.GetFileName(candidate.StoreFile));
+            string workCopy = Path.Combine(scratch, "snapshot");
+            CopyRepairSnapshot(candidate.StoreRoot, workCopy);
+            string sourceFile = Path.Combine(workCopy, Path.GetRelativePath(candidate.StoreRoot, candidate.StoreFile));
             File.WriteAllBytes(sourceFile, candidate.After);
             var mark = new ConfigSessionMark
             {
                 ScriptId = scriptId, UserId = candidate.Target.UserKey,
-                ConfigPath = candidate.Target.Script.ConfigPath, ConfigKind = "file",
+                ConfigPath = candidate.Target.Script.ConfigPath, ConfigKind = candidate.Metadata.ConfigKind,
                 PluginName = candidate.Metadata.PluginName, PluginVersion = candidate.Metadata.PluginVersion,
-                ProfileHash = candidate.Metadata.ProfileHash,
+                ProfileHash = candidate.Metadata.ProfileHash, ConfigContractId = candidate.Metadata.ConfigContractId,
             };
+            void ValidateCurrent()
+            {
+                if (_settingsProvider?.Current.AllowConfigRepair != true) throw new ConfigRepairDisabledException();
+                var latest = ReadRepairCandidate(scriptId, userId, duringCommit: true);
+                if (!latest.Succeeded || latest.Value!.Proposal.Token != token)
+                    throw new IOException("配置修复预览已过期，原快照保持不变");
+            }
             void Commit()
             {
-                if (_settingsProvider?.Current.AllowConfigRepair != true)
-                    throw new ConfigRepairDisabledException();
-                ConfigStoreTransaction.Apply(scriptId, candidate.Target.UserKey, sourceFile,
-                    new HashSet<string>(StringComparer.OrdinalIgnoreCase), null, null, mark,
-                    preserveExistingMetadata: true, expectedStoreFile: candidate.StoreFile,
-                    expectedStoreBytes: candidate.Before);
+                ValidateCurrent();
+                string backup = Path.GetDirectoryName(scratch)!;
+                Directory.CreateDirectory(backup);
+                File.WriteAllBytes(Path.Combine(backup, "original"), candidate.Before);
+                File.Copy(ConfigPaths.StoreMetadataPath(scriptId, candidate.Target.UserKey), Path.Combine(backup, "store-meta.json"));
+                File.WriteAllText(Path.Combine(backup, "repair.json"), System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    scriptId, userId = candidate.Target.UserKey, resource = candidate.Proposal.Field,
+                    storeFile = candidate.StoreFile, plugin = candidate.Target.Script.PluginType,
+                    pluginVersion = candidate.Target.Spec!.PluginVersion,
+                    beforeSha256 = Convert.ToHexString(SHA256.HashData(candidate.Before)),
+                    afterSha256 = Convert.ToHexString(SHA256.HashData(candidate.After)),
+                }));
+                if (candidate.ExtraSite is not null)
+                {
+                    var diff = ConfigStoreDiff.Build(workCopy, candidate.StoreRoot, new HashSet<string>(), null);
+                    ExtraConfigStoreTransaction.Apply(scriptId, candidate.Target.UserKey, candidate.ExtraSite,
+                        candidate.StoreRoot, diff, ConfigSwapSession.SampleConfig(workCopy), sourcePath: workCopy,
+                        validateCurrent: ValidateCurrent);
+                }
+                else
+                    ConfigStoreTransaction.Apply(scriptId, candidate.Target.UserKey,
+                        candidate.Metadata.ConfigKind == "file" ? sourceFile : workCopy,
+                        new HashSet<string>(StringComparer.OrdinalIgnoreCase), null, null, mark,
+                        preserveExistingMetadata: true, expectedStoreFile: candidate.StoreFile,
+                        expectedStoreBytes: candidate.Before, validateCurrent: ValidateCurrent);
             }
             if (_settingsProvider is SettingsState state)
             {
                 lock (state.MutationLock) Commit();
             }
             else Commit();
-            Audit.Log(source, "应用配置修复", $"{candidate.Target.Script.Name} / {candidate.Target.User.UserName}：after_finish");
+            Audit.Log(source, "应用配置修复", $"{candidate.Target.Script.Name} / {candidate.Target.User.UserName}：{candidate.Proposal.Field}");
+            repairCommitted = true;
             return OperationResult<ConfigRepairProposal>.Ok(candidate.Proposal with { Token = null });
         }
         catch (ConfigRepairDisabledException) { return Validation<ConfigRepairProposal>("配置修复开关已关闭", "config_repair_disabled"); }
@@ -162,15 +197,13 @@ internal sealed class ConfigEditCommands
         catch (Exception ex) { return Internal<ConfigRepairProposal>(ex); }
         finally
         {
-            if (scratch is not null)
+            if (repairCommitted && scratch is not null)
             {
                 try
                 {
-                    string file = Path.Combine(scratch, Path.GetFileName(target.Script.ConfigPath));
-                    if (File.Exists(file)) File.Delete(file);
-                    if (Directory.Exists(scratch) && !Directory.EnumerateFileSystemEntries(scratch).Any()) Directory.Delete(scratch);
+                    Directory.Delete(scratch, true);
                 }
-                catch (IOException) { /* preserve recovery evidence */ }
+                catch (IOException) { /* Retain owned scratch if cleanup cannot finish. */ }
             }
             if (editLeaseHeld) _admission.EndEditSession(target.Script.Id, target.UserKey);
             if (gateHeld) gate!.Release();
@@ -178,45 +211,115 @@ internal sealed class ConfigEditCommands
         }
     }
 
-    private OperationResult<RepairCandidate> ReadRepairCandidate(string scriptId, string userId)
+    private OperationResult<RepairCandidate> ReadRepairCandidate(string scriptId, string userId, bool duringCommit = false)
     {
         OperationResult<ConfigEditTarget> resolved = ResolveTarget(scriptId, userId);
         if (!resolved.Succeeded) return OperationResult<RepairCandidate>.Failure(resolved.Error!);
         ConfigEditTarget target = resolved.Value!;
-        if (target.Script.PluginType != "march7th" || target.Spec?.TaskProtocol?.RepairRules
-                .SingleOrDefault(rule => rule.Id == "queue_finish_action") is not { } repairRule
-            || target.Spec.ExtraConfigPaths.Count > 0 || !Path.IsPathFullyQualified(target.Script.ConfigPath)
-            || !string.Equals(Path.GetFileName(target.Script.ConfigPath), "config.yaml", StringComparison.OrdinalIgnoreCase)
-            || !string.Equals(Path.GetDirectoryName(Path.GetFullPath(target.Script.ConfigPath)),
-                Path.GetDirectoryName(Path.GetFullPath(target.Script.MainExe)), StringComparison.OrdinalIgnoreCase))
-            return Validation<RepairCandidate>("当前插件版本或配置范围不支持自动修复，请手动编辑", "config_repair_unavailable");
-        if (PluginAvailability.GetUnavailableReason(target.Script, _pluginAvailability) is not null)
-            return Validation<RepairCandidate>("当前插件不可用，请先核对安装状态", "config_repair_unavailable");
+        if (target.Spec?.TaskProtocol?.RepairRules is not { Length: > 0 } rules || target.Script.RequiresReconfiguration
+            || PluginAvailability.GetUnavailableReason(target.Script, _pluginAvailability) is not null)
+            return Validation<RepairCandidate>("当前插件未声明可用修复", "config_repair_unavailable");
         string store = ConfigPaths.StoreDir(scriptId, target.UserKey);
-        string storeFile = Path.Combine(store, Path.GetFileName(target.Script.ConfigPath));
-        if (Directory.Exists(store)) TaskConfigView.ValidatePath(store);
-        if (!Directory.Exists(store) || !File.Exists(storeFile)
-            || Directory.EnumerateFileSystemEntries(store).Count() != 1
-            || Directory.Exists(ConfigPaths.StoreTransactionDir(scriptId, target.UserKey))
-            || File.Exists(ConfigPaths.StoreTransactionBlockedPath(scriptId, target.UserKey)))
-            return Validation<RepairCandidate>("用户快照不可用或存在未完成事务，请手动核查", "config_repair_unavailable");
-        TaskConfigView.ValidatePath(storeFile);
+        if (!Directory.Exists(store) || !duringCommit && Directory.Exists(ConfigPaths.StoreTransactionDir(scriptId, target.UserKey))
+            || File.Exists(ConfigPaths.StoreTransactionBlockedPath(scriptId, target.UserKey))
+            || !duringCommit && ExtraConfigStoreTransaction.HasAnyResidue(scriptId, target.UserKey)
+            || ConfigSessionMark.TryRead(scriptId, target.UserKey) is not null)
+            return Validation<RepairCandidate>("用户快照不可用或存在未完成事务", "config_repair_unavailable");
         ConfigStoreMetadata? metadata = ConfigStoreMetadata.Load(scriptId, target.UserKey);
-        if (metadata is null || metadata.ConfigKind != "file" || metadata.PluginName != "march7th"
-            || metadata.PluginVersion != target.Spec.PluginVersion
-            || metadata.ProfileHash != target.Spec.ProfileHash
+        if (metadata is null || metadata.ConfigKind is not ("file" or "dir")
+            || metadata.PluginName != target.Script.PluginType || metadata.ConfigContractId != target.Spec.ConfigContractId
             || metadata.ConfigLocatorHash != ConfigStoreMetadata.HashLocator(target.Script.ConfigPath))
-            return Validation<RepairCandidate>("配置快照归属或版本已变化，请手动核查", "config_repair_unavailable");
-        var info = new FileInfo(storeFile);
-        if (info.Length > 2 * 1024 * 1024)
-            return Validation<RepairCandidate>("配置快照超过自动修复上限", "config_repair_unavailable");
-        byte[] before = File.ReadAllBytes(storeFile);
-        ConfigRepairProposal? proposal = ConfigRepairPolicy.TryPropose(repairRule, target.Script.PluginType,
-            target.Spec.PluginVersion, target.UserKey, scriptId, target.Spec.ProfileHash,
-            metadata.ConfigLocatorHash, metadata.Generation, before, out byte[]? after);
-        if (proposal is null || after is null)
-            return Validation<RepairCandidate>("没有可安全自动修复的已知系统动作", "config_repair_none");
-        return OperationResult<RepairCandidate>.Ok(new(target, metadata, storeFile, before, after, proposal));
+            return Validation<RepairCandidate>("配置快照归属已变化", "config_repair_unavailable");
+        string fingerprint = ConfigMigrationTransaction.Fingerprint(store)
+            + ConfigMigrationTransaction.Fingerprint(ConfigPaths.StoreMetadataPath(scriptId, target.UserKey));
+        foreach (string extra in target.Spec.ExtraConfigPaths)
+            fingerprint += ConfigMigrationTransaction.Fingerprint(ConfigPaths.StoreExtraDir(scriptId, target.UserKey, extra));
+        var context = new ConfigRepairContext(target.Script.GameExe, target.Script.GameArgs,
+            !string.Equals(target.Script.GameMode, "emulator", StringComparison.OrdinalIgnoreCase), target.Spec.ConfigInputValue);
+        string identity = target.Spec.ProfileHash + fingerprint + System.Text.Json.JsonSerializer.Serialize(context) + target.Spec.ConfigEditor?.Script;
+        foreach (var rule in rules)
+        {
+            if (rule.SnapshotKind == "file" && metadata.ConfigKind != "file"
+                || rule.NoExtraConfig && target.Spec.ExtraConfigPaths.Count != 0) continue;
+            string root = store, relative = rule.ResourceId, extraSite = "";
+            if (relative == "extra:0")
+            {
+                if (target.Spec.ExtraConfigPaths.Count == 0) continue;
+                extraSite = target.Spec.ExtraConfigPaths[0];
+                root = ConfigPaths.StoreExtraDir(scriptId, target.UserKey, extraSite);
+                relative = Path.GetFileName(extraSite);
+            }
+            else if (relative == "config:$main")
+            {
+                if (metadata.ConfigKind != "file") continue;
+                relative = Path.GetFileName(target.Script.ConfigPath);
+            }
+            else
+            {
+                if (!relative.StartsWith("config:", StringComparison.Ordinal)) continue;
+                relative = relative[7..];
+                if (relative.Contains("{instance}", StringComparison.Ordinal))
+                {
+                    if (!System.Text.RegularExpressions.Regex.IsMatch(target.Spec.ConfigInputValue, "^[A-Za-z0-9_-]+$")) continue;
+                    relative = relative.Replace("{instance}", target.Spec.ConfigInputValue, StringComparison.Ordinal);
+                }
+            }
+            string file = Path.GetFullPath(Path.Combine(root, relative));
+            if (!file.StartsWith(Path.GetFullPath(root) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("配置修复资源超出用户快照");
+            if (!File.Exists(file)) continue;
+            TaskConfigView.ValidatePath(file);
+            if (new FileInfo(file).Length > 2 * 1024 * 1024) continue;
+            byte[] before = File.ReadAllBytes(file);
+            ConfigRepairProposal? proposal = ConfigRepairPolicy.Propose(rule, target.Script.PluginType,
+                target.Spec.PluginVersion, target.UserKey, scriptId, identity, metadata.ConfigLocatorHash,
+                metadata.Generation, before, context, out byte[]? after, target.Spec.ConfigEditor,
+                id => ReadRepairResource(id, store, target.Spec, scriptId, target.UserKey));
+            if (proposal is null || after is null) continue;
+            proposal = proposal with { Token = ConfigRepairPolicy.Token(target.Script.PluginType, target.Spec.PluginVersion,
+                target.UserKey, scriptId, identity, metadata.ConfigLocatorHash, metadata.Generation, before, rule) };
+            return OperationResult<RepairCandidate>.Ok(new(target, metadata, root, file,
+                extraSite.Length == 0 ? null : extraSite, before, after, proposal));
+        }
+        return Validation<RepairCandidate>("没有需要修复的已声明配置项", "config_repair_none");
+    }
+
+    private static System.Text.Json.Nodes.JsonNode? ReadRepairResource(string id, string store,
+        ResolvedScriptSpec spec, string scriptId, string userKey)
+    {
+        string root = store, relative;
+        if (id == "extra:0" && spec.ExtraConfigPaths.Count > 0)
+        {
+            string site = spec.ExtraConfigPaths[0];
+            root = ConfigPaths.StoreExtraDir(scriptId, userKey, site);
+            relative = Path.GetFileName(site);
+        }
+        else if (id.StartsWith("config:", StringComparison.Ordinal)) relative = id[7..];
+        else throw new InvalidDataException("配置修复读取未授权资源");
+        string file = Path.GetFullPath(Path.Combine(root, relative));
+        if (!file.StartsWith(Path.GetFullPath(root) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("配置修复读取超出当前用户快照");
+        if (!File.Exists(file)) return null;
+        TaskConfigView.ValidatePath(file);
+        if (new FileInfo(file).Length > 2 * 1024 * 1024) throw new InvalidDataException("配置修复读取超出大小限制");
+        string format = Path.GetExtension(file).ToLowerInvariant() switch
+        {
+            ".json" => "json", ".yml" or ".yaml" => "yaml",
+            _ => throw new InvalidDataException("配置修复读取不支持的格式"),
+        };
+        return new TaskConfigDocument(File.ReadAllBytes(file), format).Document;
+    }
+
+    private static void CopyRepairSnapshot(string source, string destination)
+    {
+        Directory.CreateDirectory(destination);
+        foreach (string file in Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories))
+        {
+            TaskConfigView.ValidatePath(file);
+            string target = Path.Combine(destination, Path.GetRelativePath(source, file));
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            File.Copy(file, target);
+        }
     }
 
     private sealed class ConfigRepairDisabledException : Exception { }
@@ -317,16 +420,18 @@ internal sealed class ConfigEditCommands
         }
         if (editMode != "fresh"
             && target.Spec is { } specForCandidates
-            && specForCandidates.ConfigInputCandidates.Count >= 2)
+            && (specForCandidates.ConfigInputCandidates.Count >= 2
+                || specForCandidates.RequiredConfigRelativePath.Length > 0 && specForCandidates.ConfigInputValue.Length == 0))
         {
             // configPath 模板的绑定输入未定且存在多个候选（含目录型 configPath——残缺时解析为存在的
             // 目录，直接准备会把整个目录采用为用户快照）：先让用户选定接管目标，仅选中项进入快照。
             return OperationResult<ConfigEditStarted>.Failure(
                 new OperationError(
                     "config_input_mismatch",
-                    "当前脚本目录存在多个配置，请先选择要接管的配置",
+                    "请先选择要接管的原生配置实例",
                     OperationErrorKind.Validation,
-                    specForCandidates.ConfigInputCandidates.ToList(),
+                    (_capabilities.GetMissingConfigCandidateSet(target.Script.PluginType, target.Script.RootPath, null)?.Values
+                        ?? specForCandidates.ConfigInputCandidates).ToList(),
                     specForCandidates.ConfigInputName));
         }
         if (editMode == "reuse" && PathKindUtil.KindOf(target.Script.ConfigPath) == PathKind.Missing)
@@ -359,7 +464,7 @@ internal sealed class ConfigEditCommands
             target.Script,
             target.Spec?.ProfileHash ?? "",
             target.Spec?.PluginVersion ?? "",
-            target.Spec?.ExtraConfigPaths);
+            target.Spec?.ExtraConfigPaths) with { RejectImplicitRebind = target.Spec?.RequireExclusiveProcess == true, ConfigContractId = target.Spec?.ConfigContractId ?? "" };
         ConfigEditPreparationOptions? preparationOptions = null;
         bool isolateCandidates = target.Spec?.ConfigEdit?.IsolateSiblingCandidates == true;
         if (editMode == "reuse"
@@ -484,7 +589,9 @@ internal sealed class ConfigEditCommands
                 return Validation<ConfigEditStarted>("脚本主程序路径错误或不是可执行文件");
             }
 
-            if (SystemActions.IsExeRunning(target.Script.MainExe)
+            if ((target.Spec?.RequireExclusiveProcess == true
+                    && RuntimeImageActivityProbe.ObserveExecutable(target.Script.MainExe) != "inactive")
+                || SystemActions.IsExeRunning(target.Script.MainExe)
                 || SystemActions.IsExeRunning(ResolveLaunchTargetExe(target.Script)))
             {
                 return Conflict<ConfigEditStarted>(
@@ -819,6 +926,17 @@ internal sealed class ConfigEditCommands
                 return Conflict<ConfigEditCompleted>(
                     "resource_busy",
                     "脚本程序无法完全退出（可能持续自重启），请先在托盘退出脚本后重试");
+            }
+
+            if (action == "done" && session.Spec?.TaskProtocol?.Version == "0.2.0"
+                && session.Spec.ConfigEditor is ConfigEditorDescriptor commitEditor)
+            {
+                var commitMark = session.Mark ?? throw new InvalidOperationException("配置编辑会话标记缺失");
+                var result = ConfigEditPreparationScriptRunner.Execute(commitEditor, session.Script, session.User,
+                    commitMark, editMode, session.Spec.ConfigInputName, session.Spec.ConfigInputValue,
+                    trigger: "config-edit-commit");
+                if (!string.IsNullOrWhiteSpace(result.Error))
+                    return Validation<ConfigEditCompleted>("execution_failed", "配置编辑提交脚本失败：" + result.Error);
             }
 
             Stopwatch swapTimer = Stopwatch.StartNew();

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using NexusPipeline.Modules.Configuration.Exchange;
+using NexusPipeline.Modules.Configuration.Snapshots;
 using NexusPipeline.Modules.Scripts;
 using NexusPipeline.Platform.Processes;
 using NexusPipeline.Platform.Storage;
@@ -20,6 +21,9 @@ internal sealed record ConfigSessionRuntimeMetadata(
 {
     public string OriginExecutionId { get; init; } = "";
     public string WritableRoot { get; init; } = "";
+    public bool RejectImplicitRebind { get; init; }
+    public string ConfigContractId { get; init; } = "";
+    public string RequiredConfigRelativePath { get; init; } = "";
     /// <summary>已解析并冻结的附加配置路径；启动恢复不重新加载插件 profile。</summary>
     public IReadOnlyList<ConfigSessionExtraPath> ExtraConfigPaths { get; init; } = Array.Empty<ConfigSessionExtraPath>();
 }
@@ -59,7 +63,11 @@ internal sealed class ConfigEditPendingInput
 
     public string Value { get; set; } = "";
 
-    public ConfigEditPendingInput Clone() => new() { Name = Name, Value = Value };
+    public string? ExpectedBindingHash { get; set; }
+    public string? PreviousValue { get; set; }
+
+    public ConfigEditPendingInput Clone() => new() { Name = Name, Value = Value,
+        ExpectedBindingHash = ExpectedBindingHash, PreviousValue = PreviousValue };
 }
 
 /// <summary>编辑准备阶段的隔离候选与待提交输入。</summary>
@@ -107,6 +115,8 @@ internal sealed class ConfigSessionMark
 
     public string ConfigKind { get; set; } = "";
 
+    public string ConfigContractId { get; set; } = "";
+
     public string WorkingDirectory { get; set; } = "";
 
     public string LaunchExe { get; set; } = "";
@@ -137,6 +147,7 @@ internal sealed class ConfigSessionMark
 
     /// <summary>主快照提交后等待写入用户绑定的输入值。</summary>
     public ConfigEditPendingInput? PendingConfigInput { get; set; }
+    public ConfigMigrationJournal? Migration { get; set; }
 
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public ConfigSessionRecoveryIsolation? RecoveryIsolation { get; set; }
@@ -182,6 +193,8 @@ internal sealed class ConfigSessionMark
             .Append(nameof(OriginExecutionId))
             .Append(nameof(WritableRoot))
             .Append(nameof(ProviderWorkersStopped))
+            .Append(nameof(ConfigContractId))
+            .Append(nameof(Migration))
             .ToHashSet(StringComparer.Ordinal);
 
     public static string MarkFile(string scriptId, string userId)
@@ -319,7 +332,10 @@ internal sealed class ConfigSessionMark
         !string.IsNullOrWhiteSpace(ScriptId)
         && !string.IsNullOrWhiteSpace(UserId)
         && !string.IsNullOrWhiteSpace(ConfigPath)
+        && ConfigContractId is { Length: <= 96 }
+        && ConfigContractId.All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '_' or '-')
         && SessionPhase is "run" or "edit" or "edit-commit-pending" or "provider_run"
+            or "migration-prepared" or "migration-target-committed" or "migration-binding-committed"
         && (ConfigKind is "missing" or "file" or "dir")
         && (EditMode is "normal" or "fresh" or "reuse")
         && ExtraConfigPaths is not null
@@ -327,6 +343,10 @@ internal sealed class ConfigSessionMark
         && EditIsolationPaths is not null
         && EditIsolationPaths.All(IsValidIsolationPath)
         && (PendingConfigInput is null || IsValidPendingInput(PendingConfigInput))
+        && (Migration is null ? !SessionPhase.StartsWith("migration-", StringComparison.Ordinal)
+            : SessionPhase.StartsWith("migration-", StringComparison.Ordinal) && PendingConfigInput is not null
+                && Guid.TryParseExact(Migration.ArchiveId, "N", out _) && Migration.ArchiveFingerprint is { Length: 64 }
+                && Migration.ArchiveFingerprint.All(Uri.IsHexDigit))
         && (RecoveryIsolation is null || RecoveryIsolation.IsValid())
         && (WritableRoot.Length == 0 || Path.IsPathFullyQualified(WritableRoot))
         && (SessionPhase != "provider_run" || ProviderWorkersStopped is not null && Path.IsPathFullyQualified(WritableRoot));
@@ -353,6 +373,8 @@ internal sealed class ConfigSessionMark
             && !string.IsNullOrWhiteSpace(input.Value)
             && input.Name.Length <= 128
             && input.Value.Length <= 512
+            && (input.ExpectedBindingHash is null || input.ExpectedBindingHash.Length == 64 && input.ExpectedBindingHash.All(Uri.IsHexDigit))
+            && (input.PreviousValue is null || input.PreviousValue.Length <= 512 && !input.PreviousValue.Any(char.IsControl))
             && char.IsLetter(input.Name[0])
             && input.Name.All(character => char.IsLetterOrDigit(character) || character == '_');
     }

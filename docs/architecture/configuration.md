@@ -103,3 +103,30 @@ flowchart LR
 4. 同步失败仅告警，**不阻断**收尾还原；未写入 commit 标记的事务下次启动按 manifest 回滚，已写入 commit 标记的事务补写下一代元数据后清理；manifest/commit 损坏时保留 store 与隔离现场并阻断继续写入，等待人工核查。
 
 **与既有机制的关系**：收尾顺序固定为「自动更新同步 → 插队还原（swap-backup → config）→ 配置交换还原（original → config）」——同步读的是脚本最终态，插队/交换还原在同步之后把 config 还原为运行前现场；store 则保留同步后的「启停还原 + 计数延续」内容供下次运行。
+
+
+## 框架变更后的重新配置
+
+专项插件在 manifest 中声明 `configurationRevision` 标识破坏性配置变化。此标识独立于插件版本，普通升级保持不变。脚本声明保存已确认的修订；当前修订不同则在脚本实例显示“需重新设置”，执行协调器在启动进程之前阻断。用户有效保存脚本设置后确认当前修订，尚未保存本用户快照仍禁止运行。
+
+常驻 Host 启动完成未结束会话恢复后，按插件声明归档契约不同的用户快照：整个用户目录原字节移至 `.nxp/config-resets/<scriptId>/<userId>-<GUID>`，备份 users.json，清除该用户的配置输入。操作不依赖插件名称、启动器名称或旧配置文件名。连续修订保留各代归档及 journal；归属不符、未恢复事务、并发字节变化和归档校验失败均保留现场并阻断。原生安装目录和历史记录不受影响。
+
+持久重置 journal 允许在归档与保存绑定之间中断后继续。新快照建立前禁止自动采用原生目录运行，用户通过“编辑配置”重新选择稳定 MFA 实例并保存。脚本实例可以先创建，用户级实例选择留在配置编辑阶段；不会按当前页面绑定。用户选择首次“复用配置”后，只有一个候选时自动提交该稳定 ID；多个候选由用户选择，候选变化拒绝后不无限重试，绑定仍仅在保存成功时提交。配置预览只显示启用任务，不显示待执行状态；“重新检查”统一刷新发现与准入。
+
+`ConfigurationRevisionReset` 管当前重置行为，`ConfigMigrationTransaction` 仅恢复已有旧 journal，不提供新的跨框架迁移入口。配置编辑及重试继续使用原有 CAS、journal 和账号隔离机制。
+
+验证入口为 `ConfigurationRevisionTests`、`LegacyMxuResetTests`、`ConfigContractMigrationTests` 和 TaskProtocolTests account-isolation；真实游戏运行与原生进程交接不由这些隔离测试推定。
+
+## 配置检查交互与资源范围
+
+配置编辑弹窗由 App 持有，在网页启动后读取 Host 活跃会话，任何路由重新打开网页都会恢复锁定弹窗；恢复不重复启动原生程序，也不重新交换配置。关闭网页不提交或取消 Host 事务，用户仍须完成或取消。配置编辑成功后发出事务完成事件，用户管理弹窗据此刷新一次当前展开的任务计划。候选实例使用统一 HTTP 错误信封 `args.inputName` / `args.candidates`；空候选仍可定位到需在原生软件保存实例的说明。检查卡片仅展示双语原因和设置位置，不展示机器规则 ID、内部字段路径或重复操作按钮。
+
+修复预览返回 `available:false` 表示禁用、无声明或没有可修复值；前端只显示有效入口。修复由 `ConfigRepairPolicy` 实现有限枚举、游戏路径和原生任务列表补丁，`ConfigEditCommands` 负责账号隔离、主/附加快照、备份、租约与提交前 CAS。完整边界见 [任务协议](../reference/plugin-api/task-protocol.md#配置修复)。
+
+用户 JSON/YAML 单文件保持 2 MiB；公共只读 text 定义允许 8 MiB，以覆盖 PI 大型选项表。总量仍为 32 MiB / 256 个资源，输出和脚本执行预算不变。文件超限返回资源范围错误，不误报为未保存配置。
+
+任务计划预览每次重新读取快照并生成新的检查结果；与历史运行的任务签名不同，不代表本次检查过期。页面闲置不按时间标记过期；配置或绑定变化后刷新，运行前仍重新准入。
+
+MaaStellaSora 通过插件 configEditor 在配置编辑准备阶段设置已交换 appsettings.json 的一次性 NoAutoStart 标志，避免打开 MFA 编辑界面触发自动运行；其他字段保留，现役编辑事务负责取消与原字节恢复。正常执行不调用此编辑准备脚本。0.2.0 编辑会话完成时，在进程确认退出后、提交快照前调用冻结 editor 的 config-edit-commit 阶段，仍只允许附加工作副本写入；失败保留会话，取消不调用。MFA 提交源码清除一次性 NoAutoStart，避免提前关闭编辑器遗留禁止启动标志，实例启动路径与操作保持用户设置。
+
+0.2.0 修复策略由当前冻结的 configEditor 以 config-repair 调用返回 selector/value；该调用仅提供 input、当前用户快照只读 readConfig 与 proposeRepair，不开放文件、进程或网络。Host 校验字段和 MXU 当前实例归属，绑定 editor 内容到令牌并使用现役 CAS、备份和 journal。BAAH 的附加软件快照可将缺失/false 的 SAVE_LOG_TO_FILE 修复为 true。0.1.1 的既有有限枚举处理保持兼容。

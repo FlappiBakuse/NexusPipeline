@@ -141,16 +141,23 @@ internal sealed class TaskConfigDocument
     internal JsonNode? ReadSelection(JsonArray selector) => Clone(Select(selector).Value);
 
     internal byte[] Patch(IReadOnlyList<TaskConfigOperation> operations, IReadOnlySet<string> allowedSelectors)
+        => PatchCore(operations, allowedSelectors, false);
+
+    internal byte[] PatchRepair(IReadOnlyList<TaskConfigOperation> operations)
+        => PatchCore(operations, operations.Select(o => o.Selector.ToJsonString()).ToHashSet(StringComparer.Ordinal), true);
+
+    private byte[] PatchCore(IReadOnlyList<TaskConfigOperation> operations, IReadOnlySet<string> allowedSelectors, bool repair)
     {
+        if (repair && operations.Any(o => o.Purpose != "repair")) throw new InvalidDataException("repair purpose required");
         if (operations.Count is 0 or > 2048) throw new InvalidDataException("resource_limit: patch operations");
         var edits = new List<(int Start, int End, string Value)>();
         foreach (var operation in operations)
         {
             if (operation.Purpose is not ("selection" or "cursor" or "repair") || !allowedSelectors.Contains(operation.Selector.ToJsonString()))
                 throw new InvalidDataException("patch field was not authorized by original discovery");
-            Node selected = Select(operation.Selector);
+            Node selected = repair && operation.Selector.Count == 0 && Format == "json" ? _root : Select(operation.Selector);
             if (!JsonNode.DeepEquals(selected.Value, operation.Expected)) throw new InvalidDataException("configuration_conflict: expected value");
-            if (!AllowedValue(operation.Value) || !AllowedValue(operation.Expected)) throw new InvalidDataException("patch value must be boolean/string or a flat list");
+            if (!(repair && Format == "json") && (!AllowedValue(operation.Value) || !AllowedValue(operation.Expected))) throw new InvalidDataException("patch value must be boolean/string or a flat list");
             // Block YAML sequences include indentation/newlines in their span; changing these
             // cannot be proven local with this codec. Individual scalar leaves remain supported.
             string original = _text[selected.Start..selected.End];
@@ -168,6 +175,7 @@ internal sealed class TaskConfigDocument
         JsonNode? expected = Document;
         foreach (var operation in operations)
         {
+            if (repair && operation.Selector.Count == 0) { expected = Clone(operation.Value); continue; }
             Node originalNode = Select(operation.Selector);
             ReplaceByPath(_root, originalNode, expected, operation.Value);
         }

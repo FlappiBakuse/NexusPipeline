@@ -6,6 +6,7 @@ using NexusPipeline.Modules.Configuration.Recovery;
 using NexusPipeline.Modules.Configuration.Scripting;
 using NexusPipeline.Modules.Configuration.Snapshots;
 using NexusPipeline.Modules.Execution.Judgement;
+using NexusPipeline.Modules.Execution.Targets;
 using NexusPipeline.Modules.Plugins;
 using NexusPipeline.Modules.Plugins.Contracts;
 using NexusPipeline.Platform.Storage;
@@ -17,7 +18,7 @@ internal static class AccountIsolationProbe
     internal static async Task RunAsync(string plugins, string output)
     {
         string[] fixtures = ["bettergi-safe-retry", "march7th-completed-reward", "baah-reward-safe-retry",
-            "zzz-safe-retry", "maaend-callbacks", "maastellasora-callbacks",
+            "daily-zzz-safe-retry", "maaend-callbacks", "mfa-daily-flow",
             "r2-oknte-exclusive-order", "r2-okww-farm-tacet"];
         var results = new JsonArray();
         ConfigSwapSession.ConfigureRecovery(_ => null, () => []);
@@ -52,7 +53,12 @@ internal static class AccountIsolationProbe
                         return view;
                     }
                     Task<TaskPlan> Discover(string user) => TaskDiscoveryService.DiscoverAsync(protocol, View(site),
-                        manifest["name"]!.GetValue<string>(), manifest["version"]!.GetValue<string>(), user, script, "zh-CN", false, default);
+                        manifest["name"]!.GetValue<string>(), manifest["version"]!.GetValue<string>(), user, script, "zh-CN", false, default,
+                        executionContext: TaskExecutionContext.Unknown(user, script, "pre_launch") with
+                        {
+                            ConfigInputName = fixture["executionContext"]?["configInputName"]?.GetValue<string>(),
+                            ConfigInputValue = fixture["executionContext"]?["configInputValue"]?.GetValue<string>()
+                        });
                     // Seed independent snapshots through the same implicit-adoption path as production.
                     var seedA = new ConfigRunSession(script, "A", site, false);
                     Require(seedA.Prepare(out var errorA), errorA ?? "seed A");
@@ -101,7 +107,8 @@ internal static class AccountIsolationProbe
                             var retry = await TaskProtocolScriptRunner.ExecuteAsync<JsonObject>(protocol.RetryScript,
                                 new { protocolVersion = protocol.Version, phase = "retry", originalPlan = plan,
                                     attemptsUsed = 1, maxAttempts = 2, cancelled = mode == "cancelled", budgetExhausted = false,
-                                    taskStates = plan.Tasks.ToDictionary(t => t.Id, t => t.Enabled ? "failed" : "disabled"), configResources = view.ConfigResources },
+                                    taskStates = plan.Tasks.ToDictionary(t => t.Id, t => t.Enabled ? "failed" : "disabled"), configResources = view.ConfigResources,
+                                    executionContext = fixture["executionContext"] },
                                 view.ReadConfig, view.ReadResource, false, default);
                             retryDecision = retry["decision"]!.GetValue<string>();
                             if (mode == "cancelled") Require(retryDecision == "stop", "cancelled run cannot restart");
@@ -112,7 +119,14 @@ internal static class AccountIsolationProbe
                                 Require(session.PrepareForRetry() is null, "retry preparation");
                                 Require(Same(beforeRetry, Snapshot(site)), "retry keeps active selective configuration");
                             }
-                            else Require(retryDecision == "stop", "explicit safe retry decision");
+                            else if (retryDecision == "native_resume")
+                            {
+                                Require(retry["filePatches"]!.AsArray().Count == 0, "native continuation never patches selection or progress");
+                                var beforeResume = Snapshot(site);
+                                Require(session.PrepareForRetry() is null, "native retry preparation");
+                                Require(Same(beforeResume, Snapshot(site)), "native continuation preserves original account bytes");
+                            }
+                            else Require(retryDecision == "stop", "explicit retry decision");
                         }
                         File.WriteAllText(Path.Combine(site, "business-counter.json"), user == "A" ? "{\"count\":11}" : "{\"count\":22}");
                         if (mode is "unconfirmed-cleanup-recovery" or "interrupted-retry")

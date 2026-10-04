@@ -33,6 +33,8 @@ internal sealed class RuntimeWorkers : IAsyncDisposable
     private bool _finalJudgeQueuePending;
     private bool _finalJudgeCompleted;
     private bool _autoScreenshotCaptured;
+    private readonly bool _usesTaskObserver;
+    private string? _taskStatus;
 
     /// <summary>最终判定是否已完成（结果由宿主经 AttemptTerminator.TryApplyFinalDecision 应用）。</summary>
     public bool FinalJudgeCompleted => _finalJudgeCompleted;
@@ -63,6 +65,7 @@ internal sealed class RuntimeWorkers : IAsyncDisposable
         _replaceRequested = replaceRequested;
         _captureScreenshot = captureScreenshot;
         _http = http;
+        _usesTaskObserver = taskObserver is not null;
         _judgeWorker = new SingleFlightWorker<JudgeSnapshot, JudgeWorkerResult>(async (snapshot, workerToken) =>
         {
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(workerToken, _operationToken);
@@ -170,7 +173,25 @@ internal sealed class RuntimeWorkers : IAsyncDisposable
                     Logger.Info($"[{_modeText}运行] 脚本「{_scriptName}」判断脚本请求替换配置（{replace.Count} 个文件），收尾后应用并重试。");
                 },
                 judgeResult.NotifyScreenshotId);
-            if (outcome == SessionJudge.JudgeOutcome.Success)
+            if (_usesTaskObserver && judgeResult.Status == "partial")
+            {
+                // 专项返回 partial 是结束观察的交接信号，业务结果由归并器独立维护。
+                string status = judgeResult.Reason switch
+                {
+                    "tasks.completed" or "tasks.all_satisfied" => "已启用任务均已满足，等待脚本退出...",
+                    "tasks.partial" or "tasks.partial_failure" => "专项任务部分完成，等待脚本退出...",
+                    "tasks.failed" or "tasks.all_failed" => "专项任务存在失败，等待脚本退出...",
+                    _ => "专项任务日志已结束，等待脚本退出...",
+                };
+                if (_taskStatus != status)
+                {
+                    _taskStatus = status;
+                    _statusChanged?.Invoke(status);
+                    Logger.Info($"[{_modeText}运行] 脚本「{_scriptName}」{status}");
+                }
+                await CaptureAutoScreenshotAsync("task-ended").ConfigureAwait(false);
+            }
+            else if (outcome == SessionJudge.JudgeOutcome.Success)
             {
                 _statusChanged?.Invoke("判断脚本判定成功，等待脚本退出...");
                 Logger.Info($"[{_modeText}运行] 脚本「{_scriptName}」判断脚本判定成功：{judgeResult.Reason}");

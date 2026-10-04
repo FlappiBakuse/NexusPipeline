@@ -69,7 +69,8 @@ internal static class ConfigStoreTransaction
         Action<string, string>? writeAtomic = null,
         bool preserveExistingMetadata = false,
         string? expectedStoreFile = null,
-        byte[]? expectedStoreBytes = null)
+        byte[]? expectedStoreBytes = null,
+        Action? validateCurrent = null)
     {
         Action<string, string> writer = writeAtomic
             ?? ((target, content) => JsonUtil.WriteAtomic(target, content));
@@ -84,6 +85,7 @@ internal static class ConfigStoreTransaction
             throw new IOException("配置修复预览已过期，保留旧快照");
         }
 
+        validateCurrent?.Invoke();
         ConfigStoreDiffPlan plan = ConfigStoreDiff.Build(configPath, store, swapFiles, descriptor);
         ConfigStoreMetadata? previousMetadata = LoadPreviousMetadata(scriptId, userKey);
         if (preserveExistingMetadata && previousMetadata is null)
@@ -178,6 +180,7 @@ internal static class ConfigStoreTransaction
                 throw new IOException("配置修复预览已过期，保留旧快照");
             }
 
+            validateCurrent?.Invoke();
             writer(
                 ConfigPaths.StoreTransactionManifestPath(scriptId, userKey),
                 JsonSerializer.Serialize(manifest, JsonOpts.Indented));

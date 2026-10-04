@@ -9,6 +9,10 @@ export interface TaskDefinition {
   id: string; name: string; parentId: string | null; role: string; enabled: boolean;
   detection: string; retryRisk: string; order: number; countsAsUnit?: boolean;
   nameText?: TaskTextRef;
+  completionPolicy?: 'flow' | 'authoritative';
+  workflowRole?: 'daily' | 'technical' | 'manual_only';
+  observationContract?: { ruleSetId: string; sources: string[]; rules: Array<{ id: string; kind: string }> };
+  retryPolicy?: { mode: 'native_resume' | 'selective_config'; resourceConsumption: boolean; limitRefs: string[] };
 }
 export interface TaskDiagnostic { code: string; message: string; taskId?: string | null; reasonText?: TaskTextRef }
 export interface TaskConfigCheck {
@@ -23,6 +27,8 @@ export interface TaskReadiness {
   assessmentId: string; configRevision: string; contextFingerprint: string;
 }
 export interface TaskPlan {
+  protocolVersion?: string;
+  semanticsVersion?: string;
   tasks: TaskDefinition[]; coverage: string; pluginVersion: string; generatedAt: string;
   diagnostics: TaskDiagnostic[];
   displaySnapshot?: TaskDisplaySnapshot;
@@ -34,9 +40,12 @@ export interface TaskResult {
   reasonText?: TaskTextRef;
   engineStatus?: string;
   structuredEvidenceRefs?: string[];
+  hostEvidenceRefs?: string[];
   evidence: Array<{ sourceId: string; epoch: number; sequence: number; ruleId: string }>;
 }
 export interface TaskReport {
+  semanticsVersion?: string;
+  hostEvidence?: Array<{ kind: string; attemptId: string; hostEventId: string; taskIds: string[] }>;
   engineStatus?: string;
   businessVerification?: string;
   structuredEvidenceVersion?: number;

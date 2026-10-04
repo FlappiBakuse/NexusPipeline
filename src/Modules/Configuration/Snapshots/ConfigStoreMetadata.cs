@@ -35,6 +35,8 @@ internal sealed class ConfigStoreMetadata
 
     public string ConfigKind { get; set; } = "missing";
 
+    public string ConfigContractId { get; set; } = "";
+
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 
     private static readonly JsonSerializerOptions CurrentOptions = new()
@@ -56,7 +58,7 @@ internal sealed class ConfigStoreMetadata
     ];
 
     private static readonly HashSet<string> AllowedProperties =
-        RequiredProperties.ToHashSet(StringComparer.Ordinal);
+        RequiredProperties.Append(nameof(ConfigContractId)).ToHashSet(StringComparer.Ordinal);
 
     public static ConfigStoreMetadata For(
         string configPath,
@@ -69,6 +71,7 @@ internal sealed class ConfigStoreMetadata
             PluginName = runtime?.PluginName ?? "",
             PluginVersion = runtime?.PluginVersion ?? "",
             ProfileHash = runtime?.ProfileHash ?? "",
+            ConfigContractId = runtime?.ConfigContractId ?? "",
             ConfigLocatorHash = HashLocator(configPath),
             ConfigKind = PathKindUtil.Text(kind),
             UpdatedAt = DateTimeOffset.UtcNow,
@@ -130,6 +133,8 @@ internal sealed class ConfigStoreMetadata
         ConfigStoreMetadata? metadata = JsonSerializer.Deserialize<ConfigStoreMetadata>(json, CurrentOptions);
         if (metadata is null
             || metadata.SchemaVersion != CurrentSchemaVersion
+            || metadata.ConfigContractId is not { Length: <= 96 }
+            || !metadata.ConfigContractId.All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '_' or '-')
             || metadata.ConfigKind is not ("missing" or "file" or "dir"))
         {
             throw new InvalidDataException($"配置快照元数据版本或字段无效：{path}");
@@ -146,7 +151,7 @@ internal sealed class ConfigStoreMetadata
             mark.ProfileHash,
             mark.PluginName,
             mark.PluginVersion,
-            mark.ConfigKind));
+            mark.ConfigKind) { ConfigContractId = mark.ConfigContractId });
         if (existing is not null)
         {
             expected.Generation = existing.Generation;
@@ -177,6 +182,7 @@ internal sealed class ConfigStoreMetadata
             PluginName = source.PluginName,
             PluginVersion = source.PluginVersion,
             ProfileHash = source.ProfileHash,
+            ConfigContractId = source.ConfigContractId,
             ConfigLocatorHash = source.ConfigLocatorHash,
             ConfigKind = source.ConfigKind,
             UpdatedAt = source.UpdatedAt,
@@ -186,7 +192,8 @@ internal sealed class ConfigStoreMetadata
     public bool Matches(ConfigStoreMetadata expected)
     {
         return string.Equals(ConfigLocatorHash, expected.ConfigLocatorHash, StringComparison.OrdinalIgnoreCase)
-            && string.Equals(ConfigKind, expected.ConfigKind, StringComparison.OrdinalIgnoreCase);
+            && string.Equals(ConfigKind, expected.ConfigKind, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(ConfigContractId, expected.ConfigContractId, StringComparison.Ordinal);
     }
 
     public static string HashLocator(string configPath)

@@ -14,7 +14,7 @@ internal sealed record TaskDisplaySnapshot(string PluginId, string PluginVersion
     internal static void ValidateReference(JsonObject? reference, string version)
     {
         if (reference is null) return;
-        TaskProtocolValidation.Require(version == "0.1.0", "unsupported task protocol text reference");
+        TaskProtocolValidation.Require(version is "0.1.0" or "0.2.0", "unsupported task protocol text reference");
         string? kind = reference["kind"]?.GetValue<string>();
         if (kind == "literal")
         {

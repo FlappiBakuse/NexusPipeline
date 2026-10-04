@@ -38,7 +38,7 @@ internal partial class RunHistoryService : ITaskHistoryCheckpoints
     }
 
     // Called only after the resident host has acquired its single-instance mutex.
-    internal void RecoverInterruptedTasks()
+    internal void RecoverInterruptedTasks(Action<JsonObject>? recoverDailyReport = null)
     {
         lock (Sync)
         {
@@ -71,11 +71,14 @@ internal partial class RunHistoryService : ITaskHistoryCheckpoints
                                 if (node is JsonObject result && result["status"]?.GetValue<string>() is "pending" or "running")
                                 { result["status"] = "unknown"; result["reasonCode"] = "tasks.interrupted"; }
                         }
-                        Interrupt(report["finalTaskResults"] as JsonArray);
+                        bool daily = report["schemaVersion"]?.GetValue<int>() == 2
+                            && report["semanticsVersion"]?.GetValue<string>() == "daily-flow-v1";
+                        if (daily) (recoverDailyReport ?? throw new InvalidDataException("Daily report recovery is unavailable"))(report);
+                        else Interrupt(report["finalTaskResults"] as JsonArray);
                         foreach (var attempt in report["attemptReports"]?.AsArray() ?? [])
                             if (attempt?["lifecycleOutcome"]?.GetValue<string>() == "running")
                             { attempt["lifecycleOutcome"] = "interrupted"; Interrupt(attempt["taskResults"] as JsonArray); }
-                        if (report["summary"] is JsonObject summary)
+                        if (!daily && report["summary"] is JsonObject summary)
                         {
                             summary["tone"] = "bad"; summary["outcome"] = "interrupted";
                             if (summary["counts"] is JsonObject counts)

@@ -11,6 +11,9 @@ namespace NexusPipeline.Modules.Users.UseCases;
 
 internal sealed partial class UserCommands
 {
+    internal static string BindingFingerprint(UserScriptBinding binding) => Convert.ToHexString(
+        System.Security.Cryptography.SHA256.HashData(System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(binding)));
+
     public OperationResult<bool> ReorderBindings(
         string userId,
         IReadOnlyList<string>? ids,
@@ -339,7 +342,9 @@ internal sealed partial class UserCommands
         string userId,
         string scriptId,
         string name,
-        string value)
+        string value,
+        string? expectedBindingHash = null,
+        string? previousValue = null)
     {
         if (string.IsNullOrWhiteSpace(name)
             || string.IsNullOrWhiteSpace(value)
@@ -366,6 +371,18 @@ internal sealed partial class UserCommands
                     {
                         error = "用户绑定不存在";
                         return;
+                    }
+                    if (expectedBindingHash is not null && BindingFingerprint(binding) != expectedBindingHash)
+                    {
+                        var prior = binding.Clone();
+                        bool alreadyCommitted = prior.ConfigInputs.TryGetValue(name, out string? currentValue) && currentValue == value;
+                        if (previousValue is null) prior.ConfigInputs.Remove(name);
+                        else prior.ConfigInputs[name] = previousValue;
+                        if (!alreadyCommitted || BindingFingerprint(prior) != expectedBindingHash)
+                        {
+                            error = "配置迁移预览后绑定已变化，已保留恢复现场";
+                            return;
+                        }
                     }
                     Dictionary<string, string> oldInputs = new(binding.ConfigInputs, StringComparer.OrdinalIgnoreCase);
                     binding.ConfigInputs[name] = value;

@@ -199,7 +199,11 @@ internal sealed class ExecutionCoordinator : RunSession
             new TaskEffectiveLaunch(script.Id, script.LaunchGame, null, null, null),
             new TaskLogSourceContext(
                 ShouldPublishConsoleData(script.LogPath) ? "stdout" : "file",
-                true));
+                true))
+        {
+            ConfigInputName = resolvedSpec?.ConfigInputName,
+            ConfigInputValue = resolvedSpec?.ConfigInputValue,
+        };
     }
 
     /// <summary>按本次实际解析出的有效判定配置决定是否需要最近 PC 帧缓存。</summary>
@@ -252,6 +256,15 @@ internal sealed class ExecutionCoordinator : RunSession
             };
             return record;
         }
+        if (_script.RequiresReconfiguration || (_script.ConfigurationRevision.Length > 0
+            && (user is null || !NexusPipeline.Modules.Configuration.Snapshots.ConfigSnapshotService.HasSnapshot(_script.Id, user.UserId))))
+        {
+            record.Status = "failed";
+            record.EndTime = DateTime.Now;
+            record.ResultDetail = "插件包含破坏性配置更新，请重新设置并保存脚本实例";
+            record.ResultCode = "run.configuration_setup_required";
+            return record;
+        }
         if (_resolvedUser?.Spec is { Succeeded: false } userSpec)
         {
             // 按用户绑定输入解析的专项快照失败（如绑定的配置文件已被改名或删除）：只影响该用户，
@@ -262,7 +275,8 @@ internal sealed class ExecutionCoordinator : RunSession
             record.ResultCode = "run.spec_failed";
             return record;
         }
-        if (_resolvedSpec is { ConfigInputCandidates.Count: >= 2 })
+        if (_resolvedSpec is { ConfigInputCandidates.Count: >= 2 }
+            || _resolvedSpec is { RequiredConfigRelativePath.Length: > 0, ConfigInputValue.Length: 0 })
         {
             // 接管的配置文件/实例目录尚未选定：目录型 configPath 在未定时会解析为存在的目录，
             // 继续运行会把整个目录采用为用户快照，必须先在编辑配置中选择。

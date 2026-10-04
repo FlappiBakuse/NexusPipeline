@@ -17,6 +17,7 @@ interface ScriptCardScript {
   id: string;
   name: string;
   pluginType?: string;
+  requiresReconfiguration?: boolean;
   launchGame?: boolean;
   gameMode?: string;
   judgeScriptEnabled?: boolean;
@@ -72,6 +73,7 @@ const emit = defineEmits<{
           <span class="scroll-text"><span class="scroll-inner">{{ script.name }}</span></span>
         </NxpButton>
         <div class="meta-line script-meta">
+          <NxpBadge v-if="script.requiresReconfiguration" tone="warn">{{ translate("scripts.requires_reconfiguration") }}</NxpBadge>
           <NxpBadge :tone="script.pluginType && unavailableMessage ? 'bad' : 'muted'" :data-testid="script.pluginType ? 'script-card-plugin-badge' : undefined">{{ script.pluginType ? unavailableMessage ? translate("common.plugin.unknown") : translate("scripts.specialized_badge", { name: pluginLabel }) : translate("scripts.general_script") }}</NxpBadge>
           <NxpBadge v-if="script.launchGame" tone="muted" data-testid="script-card-game-mode-badge">{{ script.gameMode === "emulator" ? translate("scripts.android_emulator") : translate("scripts.pc_client") }}</NxpBadge>
           <NxpBadge v-if="script.judgeScriptEnabled && script.judgeScript" tone="muted" data-testid="script-card-judge-badge">{{ translate("scripts.judge_script") }}</NxpBadge>

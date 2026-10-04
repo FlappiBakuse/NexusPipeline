@@ -1,6 +1,14 @@
 import { getLocale, t } from "../../../platform/i18n";
 import { resolveTaskText } from "./taskText";
-import type { TaskDiagnostic, TaskDisplaySnapshot } from "./taskTypes";
+import type { TaskDiagnostic, TaskDisplaySnapshot, TaskReport } from "./taskTypes";
+
+export function dailyTaskReport(report?: TaskReport): boolean {
+  return report?.schemaVersion === 2 && report.semanticsVersion === 'daily-flow-v1';
+}
+
+export function taskStatusLabel(status: string, report?: TaskReport): string {
+  return t(`tasks.${dailyTaskReport(report) ? 'daily_status' : 'status'}.${status}`, {}, t(`tasks.status.${status}`));
+}
 
 // Older frozen plans contain these official messages without localization references.
 const diagnosticKeys = new Map<string, string>([

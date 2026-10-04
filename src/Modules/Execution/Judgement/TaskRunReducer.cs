@@ -10,6 +10,10 @@ internal sealed record TaskEffectiveResult(string TaskId, string Status, string 
     public System.Text.Json.Nodes.JsonObject? ReasonText { get; init; }
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public string[]? StructuredEvidenceRefs { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string[]? HostEvidenceRefs { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? OwnStatus { get; init; }
 }
 internal sealed record TaskSummary(string Tone, string Outcome, Dictionary<string, int> Counts, bool Recovered);
 internal sealed record TaskRetrySelection(string Decision, string ReasonCode, string[] IncludedTaskIds,
@@ -17,7 +21,7 @@ internal sealed record TaskRetrySelection(string Decision, string ReasonCode, st
 internal sealed record TaskIncidentEvent(string AttemptId, TaskIncident Incident);
 
 /// <summary>One run, one owner. Every accepted fact belongs to a host-generated attempt/log identity.</summary>
-internal sealed class TaskRunReducer
+internal sealed partial class TaskRunReducer
 {
     private readonly TaskPlan _plan;
     private readonly Dictionary<string, TaskDefinition> _tasks;
@@ -32,6 +36,7 @@ internal sealed class TaskRunReducer
     private string _attemptId = "";
     private int _attemptNumber;
     private bool _hadFailure;
+    private bool Daily => _plan.ProtocolVersion == "0.2.0";
     internal string RunId { get; }
     internal string RunBoundary { get; private set; } = "unknown";
     internal long Revision { get; private set; }
@@ -42,6 +47,7 @@ internal sealed class TaskRunReducer
         TaskProtocolValidation.Discovery(new TaskDiscovery { ProtocolVersion = plan.ProtocolVersion, Type = "discovery",
             Coverage = plan.Coverage, Tasks = plan.Tasks, Diagnostics = plan.Diagnostics,
             ConfigAssessment = plan.ConfigAssessment });
+        TaskProtocolValidation.Require(plan.ProtocolVersion != "0.2.0" || plan.SemanticsVersion == "daily-flow-v1", "daily semantics version");
         _tasks = _plan.Tasks.ToDictionary(t => t.Id, StringComparer.Ordinal);
         RunId = runId;
         foreach (var task in _tasks.Values.Where(t => t.Enabled)) _effective[task.Id] = new(task.Id, "pending", "tasks.not_started", "", 0, []);
@@ -51,9 +57,9 @@ internal sealed class TaskRunReducer
     internal TaskEffectiveResult[] AcceptedResults => TaskProtocolJson.Copy(_effective.Values.ToArray());
     internal TaskIncidentEvent[] IncidentHistory => TaskProtocolJson.Copy(_incidentHistory.ToArray());
     internal TaskEffectiveResult[] Results => TaskProtocolJson.Copy(_effective.Values.Select(r =>
-        r with { Status = ReducedStatus(r.TaskId) }).ToArray());
+        r with { Status = ReducedStatus(r.TaskId), OwnStatus = Daily ? r.Status : null }).ToArray());
 
-    internal void BeginAttempt(string id, int number, IEnumerable<string> selected)
+    internal void BeginAttempt(string id, int number, IEnumerable<string> selected, bool preserveCompleted = false)
     {
         var list = selected.ToArray();
         TaskProtocolValidation.Require(!string.IsNullOrWhiteSpace(id) && id != _attemptId && number > _attemptNumber, "attempt order");
@@ -61,7 +67,9 @@ internal sealed class TaskRunReducer
             && list.All(key => _tasks.TryGetValue(key, out var t) && (t.Enabled || t.Role == "technical")), "attempt selection");
         _selected = list.ToHashSet(StringComparer.Ordinal);
         _attemptId = id; _attemptNumber = number; _accepted.Clear(); _incidents.Clear(); _incidentReplays.Clear(); _evidence.Clear(); RunBoundary = "unknown";
-        foreach (string key in _selected) _effective[key] = new(key, "pending", "tasks.awaiting_evidence", id, 0, []);
+        foreach (string key in _selected)
+            if (!Daily || !preserveCompleted)
+                _effective[key] = new(key, "pending", "tasks.awaiting_evidence", id, 0, []);
         Revision++;
     }
 
@@ -79,6 +87,8 @@ internal sealed class TaskRunReducer
         TaskProtocolValidation.Require(batch.ProtocolVersion == _plan.ProtocolVersion, "negotiated observation version");
         TaskProtocolValidation.Require(available.Count <= 262144 && _accepted.Count + batch.Observations.Count(o => !_accepted.ContainsKey(o.Id)) <= 65536,
             "resource_limit: attempt evidence ledger");
+        if (Daily) foreach (var observation in batch.Observations)
+            TaskProtocolValidation.DailyAuthority(_tasks[observation.TaskId], observation);
         // Entire batch is validated before mutation. Invalid replays never acknowledge a cursor.
         foreach (var observation in batch.Observations)
             if (_accepted.TryGetValue(observation.Id, out var previous))
@@ -113,6 +123,7 @@ internal sealed class TaskRunReducer
         {
             if (!_accepted.TryAdd(observation.Id, TaskProtocolJson.Write(observation))) continue;
             var old = _effective[observation.TaskId];
+            if (Daily) { AcceptDaily(observation, old); continue; }
             if (observation.ExecutionOrdinal < old.ExecutionOrdinal) continue;
             bool terminal = old.Status is not ("pending" or "running");
             if (observation.ExecutionOrdinal == old.ExecutionOrdinal && terminal)
@@ -144,14 +155,16 @@ internal sealed class TaskRunReducer
         _incidentBytes += addedBytes;
         if (batch.RunBoundary is "ended" or "aborted") RunBoundary = batch.RunBoundary;
         else if (RunBoundary is not ("ended" or "aborted")) RunBoundary = batch.RunBoundary;
+        if (Daily && logs.HasGap) RecordHostFailure("log_gap");
         if (logs.HasGap)
             foreach (var key in _selected.Where(key => _effective[key].Status is "pending" or "running").ToArray())
-                _effective[key] = _effective[key] with { Status = "unknown", ReasonCode = "logs.gap", ReasonText = null };
+                _effective[key] = _effective[key] with { Status = Daily ? "failed" : "unknown", ReasonCode = "logs.gap", ReasonText = null };
         Revision++;
     }
 
     internal void FinishAttempt(string lifecycle)
     {
+        if (Daily) { FinishDaily(lifecycle); return; }
         foreach (string key in _selected)
         {
             var state = _effective[key];
@@ -164,6 +177,7 @@ internal sealed class TaskRunReducer
 
     private string ReducedStatus(string id)
     {
+        if (Daily) return ReducedDailyStatus(id);
         string own = _effective.TryGetValue(id, out var result) ? result.Status : "unknown";
         var children = _tasks.Values.Where(t => t.Enabled && t.ParentId == id && t.RequiredForParent).ToArray();
         if (children.Length == 0) return own;
@@ -181,6 +195,7 @@ internal sealed class TaskRunReducer
             .ToDictionary(s => s, _ => 0, StringComparer.Ordinal);
         foreach (var task in _tasks.Values.Where(t => t.Enabled && t.ParentId is null && t.Role == "business" && t.CountsAsUnit))
         { counts["total"]++; counts[ReducedStatus(task.Id)]++; }
+        if (Daily) return SummarizeDaily(counts);
         (string tone, string outcome) = lifecycle is "failed" or "interrupted" ? ("bad", "lifecycle_failed")
             : counts["total"] > 0 && counts["failed"] == counts["total"] ? ("bad", "all_failed")
             : counts["failed"] + counts["partial"] > 0 ? ("warn", "partial_failure")
@@ -196,7 +211,8 @@ internal sealed class TaskRunReducer
         static TaskRetrySelection Stop(string code) => new("stop", code, [], [], []);
         if (cancelled) return Stop("retry.cancelled");
         if (budgetExhausted || _attemptNumber >= maximumAttempts) return Stop("retry.budget_exhausted");
-        var candidates = _effective.Values.Where(r => r.Status is "failed" or "blocked").Select(r => r.TaskId).ToArray();
+        var candidates = _effective.Values.Where(r => (Daily ? ReducedStatus(r.TaskId) : r.Status) is "failed" or "blocked")
+            .Where(r => !Daily || !ProtectedByPartial(r.TaskId)).Select(r => r.TaskId).ToArray();
         if (candidates.Length == 0) return Stop("retry.no_verified_candidate");
         var selected = new HashSet<string>(StringComparer.Ordinal);
         var prerequisites = new HashSet<string>(StringComparer.Ordinal);
@@ -223,7 +239,7 @@ internal sealed class TaskRunReducer
             } while (changed);
             // Evaluate each failed identity independently. A separate unsafe failure must
             // not veto a safe retry, but its shared unit/dependencies still must pass.
-            if (unitSelection.Any(key => !_tasks.TryGetValue(key, out var task) || task.RetryRisk != "safe"
+            if (unitSelection.Any(key => !_tasks.TryGetValue(key, out var task) || (Daily ? !DailyRetryAllowed(key) : task.RetryRisk != "safe")
                 || (!task.Enabled && task.Role == "business"))) continue;
             selected.UnionWith(unitSelection);
             prerequisites.UnionWith(unitPrerequisites);

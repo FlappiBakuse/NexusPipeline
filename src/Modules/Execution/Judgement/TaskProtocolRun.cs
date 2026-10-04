@@ -30,6 +30,8 @@ internal sealed class TaskProtocolRun
     private string _attemptId = "";
     private int _attemptNumber;
     private bool _protocolFailed;
+    private bool _nativeResume;
+    private bool Daily => _protocol.Version == "0.2.0";
     private bool _runtimeIdentityChanged;
     private bool _restrictedRuntime;
     private string _engineStatus = "not_started";
@@ -63,7 +65,8 @@ internal sealed class TaskProtocolRun
         TaskExecutionContext? executionContext = null)
     {
         _spec = spec; _protocol = spec.TaskProtocol! with { Localization = spec.TaskProtocol!.Localization is { } texts ? TaskProtocolJson.Copy(texts) : null }; _runId = runId; _userId = userId;
-        _executionContext = executionContext;
+        _executionContext = (executionContext ?? TaskExecutionContext.Unknown(userId, spec.Script.Id, "pre_launch"))
+            with { ConfigInputName = spec.ConfigInputName, ConfigInputValue = spec.ConfigInputValue };
         _journalDirectory = journalDirectory ?? Path.Combine(ConfigPaths.WorkDir(spec.Script.Id, userId), "task-selection");
     }
 
@@ -140,7 +143,7 @@ internal sealed class TaskProtocolRun
         _attemptNumber = number;
         lock (_gate)
         {
-            _logs = new(); _cursorState = null; _terminationReason = "none"; _lifecycle = "running"; _reducer.BeginAttempt(_attemptId, number, _selected);
+            _logs = new(); _cursorState = null; _terminationReason = "none"; _lifecycle = "running"; _reducer.BeginAttempt(_attemptId, number, _selected, _nativeResume);
         }
         Publish();
     }
@@ -206,7 +209,7 @@ internal sealed class TaskProtocolRun
                     || observation.Diagnostics.Length > 0)
                     Publish();
                 if (!more && (_reducer!.RunBoundary is "ended" or "aborted" || final))
-                    return new JudgeScriptResult { Status = "partial", Reason = "tasks.observation_complete" };
+                    return new JudgeScriptResult { Status = "partial", Reason = "tasks." + _reducer.Summarize("running").Outcome };
             }
             } while (final && more);
             return new JudgeScriptResult();
@@ -216,6 +219,7 @@ internal sealed class TaskProtocolRun
             lock (_gate)
             {
                 _protocolFailed = true;
+                _reducer?.RecordHostFailure("observer_error");
                 if (_diagnostics.Count < 128) _diagnostics.Add(new("protocol_error", "Task observation rejected; no cursor was acknowledged."));
             }
             return new JudgeScriptResult { JudgeError = "protocol_error: " + ex.GetType().Name };
@@ -226,7 +230,8 @@ internal sealed class TaskProtocolRun
     {
         try
         {
-            if (_restrictedRuntime) _view?.VerifyRestrictedRuntimeUnchanged(_protocol.ReadResources);
+            if (_restrictedRuntime || Daily && _protocol.ReadResources.Any(r => r.Id == "runtime-app"))
+                _view?.VerifyRestrictedRuntimeUnchanged(_protocol.ReadResources);
             else _view?.VerifyPinnedResourcesUnchanged();
             return !_runtimeIdentityChanged;
         }
@@ -288,12 +293,14 @@ internal sealed class TaskProtocolRun
             Publish();
             RunAttemptResult outcome = processResult.Status == "cancelled" || processResult.IsFatal ? processResult
                 : _runtimeIdentityChanged ? RunAttemptResult.Failed("Runtime identity changed", "tasks.runtime_identity_changed")
+                : Daily && _lifecycle == "failed" ? RunAttemptResult.Failed("tasks.execution_failed", "tasks.execution_failed")
                 : summary.Tone == "bad" ? RunAttemptResult.Failed(summary.Outcome, "tasks." + summary.Outcome)
                 : summary.Tone == "ok" && summary.Counts["succeeded"] > 0
                     ? RunAttemptResult.Success("tasks.all_satisfied", "tasks.all_satisfied")
                 : summary.Outcome == "no_tasks" || summary.Tone == "ok"
                     ? new RunAttemptResult { Status = "skipped", Reason = "tasks.no_execution_required", ReasonCode = "tasks.no_execution_required" }
                 : summary.Tone == "warn" ? RunAttemptResult.Partial(summary.Outcome, "tasks.partial_failure")
+                : Daily ? new RunAttemptResult { Status = "blocked", Reason = "tasks.incomplete", ReasonCode = "tasks.incomplete" }
                 : new RunAttemptResult { Status = "unverified", Reason = "流程已结束 · 有未核验项", ReasonCode = "tasks.unverified", IsFatal = true };
             _lastCompletedAttemptResult = outcome;
             return outcome;
@@ -304,6 +311,8 @@ internal sealed class TaskProtocolRun
         string[] IncludedTaskIds, string[] PrerequisiteTaskIds, string[] ExpandedUnitIds, TaskConfigPatch[] FilePatches)
     {
         public JsonObject? ReasonText { get; init; }
+        public string[]? TargetTaskIds { get; init; }
+        public string[]? LaunchScopeTaskIds { get; init; }
     }
 
     internal async Task<bool> PrepareRetryAsync(int maximum, bool cancelled, bool budgetExpired, CancellationToken token)
@@ -315,20 +324,52 @@ internal sealed class TaskProtocolRun
         }
         TaskRetrySelection safe;
         lock (_gate) safe = _reducer!.SelectRetry(maximum, cancelled, budgetExpired);
-        if (_protocolFailed || safe.Decision == "stop") { SaveRetry(safe); return false; }
+        if (_protocolFailed) { SaveRetry(new("stop", "retry.protocol_unusable", [], [], [])); return false; }
+        if (safe.Decision == "stop") { SaveRetry(safe); return false; }
         var view = Capture();
         var proposed = await TaskProtocolScriptRunner.ExecuteAsync<RetryOutput>(_protocol.RetryScript,
             new { protocolVersion = _protocol.Version, phase = "retry", runId = _runId, attemptId = _attemptId,
                 originalPlan = _reducer!.OriginalPlan, taskStates = _reducer.Results.ToDictionary(r => r.TaskId, r => r.Status),
                 attemptsUsed = _attemptNumber, maxAttempts = maximum, cancelled, budgetExhausted = budgetExpired,
-                configResources = view.ConfigResources }, view.ReadConfig, view.ReadResource, false, token).ConfigureAwait(false);
+                configResources = view.ConfigResources, executionContext = _executionContext }, view.ReadConfig, view.ReadResource, false, token).ConfigureAwait(false);
         if (proposed.ProtocolVersion != _protocol.Version || proposed.Type != "retry") throw new InvalidDataException("protocol_error: retry envelope");
         TaskDisplaySnapshot.ValidateReference(proposed.ReasonText, _protocol.Version);
+        if (!Daily && (proposed.TargetTaskIds is not null || proposed.LaunchScopeTaskIds is not null))
+            throw new InvalidDataException("protocol_error: daily retry requires 0.2.0");
         if (proposed.Decision == "stop")
         {
-            if (proposed.IncludedTaskIds.Length + proposed.PrerequisiteTaskIds.Length + proposed.ExpandedUnitIds.Length + proposed.FilePatches.Length != 0)
+            if (proposed.IncludedTaskIds.Length + proposed.PrerequisiteTaskIds.Length + proposed.ExpandedUnitIds.Length + proposed.FilePatches.Length
+                + (proposed.TargetTaskIds?.Length ?? 0) + (proposed.LaunchScopeTaskIds?.Length ?? 0) != 0)
                 throw new InvalidDataException("protocol_error: stop includes actions");
             SaveRetry(new("stop", proposed.ReasonCode, [], [], []), proposed.ReasonText); return false;
+        }
+        if (Daily)
+        {
+            string[] targets = _reducer.RetryTargets;
+            if (proposed.TargetTaskIds is null || proposed.LaunchScopeTaskIds is null
+                || !proposed.TargetTaskIds.Order(StringComparer.Ordinal).SequenceEqual(targets.Where(safe.IncludedTaskIds.Contains).Order(StringComparer.Ordinal))
+                || !proposed.LaunchScopeTaskIds.SequenceEqual(proposed.IncludedTaskIds))
+                throw new InvalidDataException("protocol_error: retry target/launch scope");
+            if (proposed.Decision == "native_resume")
+            {
+                var originalPlan = _reducer.OriginalPlan;
+                string[] launch = originalPlan.Tasks.Where(t => t.Enabled).Select(t => t.Id).ToArray();
+                if (proposed.FilePatches.Length != 0 || proposed.PrerequisiteTaskIds.Length != 0 || proposed.ExpandedUnitIds.Length != 0
+                    || !proposed.IncludedTaskIds.SequenceEqual(launch)
+                    || originalPlan.Tasks.Where(t => t.Enabled).Any(t => t.RetryPolicy?.Mode != "native_resume")
+                    || !_reducer.CanResume(launch))
+                    throw new InvalidDataException("protocol_error: native resume scope");
+                var resumed = await TaskDiscoveryService.DiscoverAsync(_protocol, view, _spec.Script.PluginType, _spec.PluginVersion,
+                    _userId, _spec.Script.Id, "zh-CN", false, token, _executionContext, _spec.Script.RootPath, _spec.Script.MainExe).ConfigureAwait(false);
+                if (!SameTasks(resumed, originalPlan) || resumed.CurrentReadiness?.State == "blocked")
+                    throw new InvalidDataException("configuration_conflict: native resume behavior changed");
+                token.ThrowIfCancellationRequested();
+                _nativeResume = true; _expectedRetryPlan = resumed; _selected = launch;
+                SaveRetry(new("native_resume", proposed.ReasonCode, launch, [], []), proposed.ReasonText);
+                return true;
+            }
+            if (_reducer.OriginalPlan.Tasks.Where(t => safe.IncludedTaskIds.Contains(t.Id)).Any(t => t.RetryPolicy?.Mode != "selective_config"))
+                throw new InvalidDataException("protocol_error: selection mode not authorized");
         }
         if (proposed.Decision != "selective" || !proposed.IncludedTaskIds.SequenceEqual(safe.IncludedTaskIds)
             || !proposed.PrerequisiteTaskIds.Order().SequenceEqual(safe.PrerequisiteTaskIds.Order())
@@ -363,6 +404,12 @@ internal sealed class TaskProtocolRun
         if (_attempts.Count == 0) return;
         _attempts[^1]["retryDecision"] = JsonNode.Parse(TaskProtocolJson.Write(new
         { selection.Decision, selection.ReasonCode, selection.IncludedTaskIds, selection.ExpandedUnitIds }));
+        if (Daily)
+        {
+            _attempts[^1]["retryDecision"]!["targetTaskIds"] = JsonNode.Parse(TaskProtocolJson.Write(
+                selection.Decision == "stop" ? [] : _reducer!.RetryTargets.Where(selection.IncludedTaskIds.Contains).ToArray()));
+            _attempts[^1]["retryDecision"]!["launchScopeTaskIds"] = JsonNode.Parse(TaskProtocolJson.Write(selection.IncludedTaskIds));
+        }
         if (reasonText is not null) _attempts[^1]["retryDecision"]!["reasonText"] = reasonText.DeepClone();
         Publish();
     }
@@ -378,7 +425,7 @@ internal sealed class TaskProtocolRun
     }
 
     private static JsonArray ResultsJson(IEnumerable<TaskEffectiveResult> results) => (JsonArray)JsonNode.Parse(TaskProtocolJson.Write(
-        results.Select(r => new { r.TaskId, r.Status, r.ReasonCode, r.ReasonText, r.LastAttemptId, r.Evidence })))!;
+        results.Select(r => new { r.TaskId, r.Status, r.OwnStatus, r.ReasonCode, r.ReasonText, r.LastAttemptId, r.ExecutionOrdinal, r.Evidence, r.HostEvidenceRefs })))!;
 
     /// <summary>
     /// A task report is an immutable historical snapshot once the run is no
@@ -401,7 +448,7 @@ internal sealed class TaskProtocolRun
             {
                 var admissionOnly = new JsonObject
                 {
-                    ["schemaVersion"] = 1,
+                    ["schemaVersion"] = Daily ? 2 : 1,
                     ["runId"] = _runId,
                     ["pluginId"] = _spec.Script.PluginType,
                     ["revision"] = _revision,
@@ -422,6 +469,7 @@ internal sealed class TaskProtocolRun
                         ["configAssessment"] = JsonNode.Parse(TaskProtocolJson.Write(blocked.Assessment)),
                     },
                 };
+                if (Daily) admissionOnly["semanticsVersion"] = "daily-flow-v1";
                 return admissionOnly;
             }
             if (_reducer is null) return null;
@@ -435,7 +483,7 @@ internal sealed class TaskProtocolRun
             });
             var report = new JsonObject
             {
-                ["schemaVersion"] = 1, ["runId"] = _runId, ["pluginId"] = _spec.Script.PluginType,
+                ["schemaVersion"] = Daily ? 2 : 1, ["runId"] = _runId, ["pluginId"] = _spec.Script.PluginType,
                 ["revision"] = _revision, ["userId"] = _userId, ["scriptInstanceId"] = _spec.Script.Id,
                 ["originalPlan"] = JsonNode.Parse(TaskProtocolJson.Write(
                     _lifecycle == "running" ? _reducer.OriginalPlan : HistoricalPlan(_reducer.OriginalPlan))),
@@ -449,6 +497,11 @@ internal sealed class TaskProtocolRun
                 ["evidenceLines"] = JsonNode.Parse(TaskProtocolJson.Write(_evidenceLines.Select(p => new
                 { attemptId = p.Key.Attempt, sourceId = p.Key.Source, epoch = p.Key.Epoch, sequence = p.Key.Sequence, text = p.Value }))),
             };
+            if (Daily)
+            {
+                report["semanticsVersion"] = "daily-flow-v1";
+                report["hostEvidence"] = JsonNode.Parse(TaskProtocolJson.Write(_reducer.HostFailures));
+            }
             // Include retry-admission diagnostics before freezing the localized
             // display snapshot so newly introduced reasonText references are
             // resolvable in the final report as well.

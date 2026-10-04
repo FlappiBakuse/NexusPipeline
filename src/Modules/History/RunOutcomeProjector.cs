@@ -44,6 +44,15 @@ internal static class RunOutcomeProjector
             else if (total > 0 && skipped == total) business = "satisfied";
             else if (total == 0) business = "inapplicable";
         }
+        if (report?["schemaVersion"]?.GetValue<int>() == 2
+            && report["semanticsVersion"]?.GetValue<string>() == "daily-flow-v1")
+            business = report["summary"]?["outcome"]?.GetValue<string>() switch
+            {
+                "failed" => "verified_failed", "partial" => "partial",
+                "completed" => counts is not null && Count(counts, "succeeded") > 0 ? "verified_succeeded" : "satisfied",
+                "no_tasks" => "inapplicable", "cancelled" => "cancelled", "blocked" => "blocked",
+                _ => "pending",
+            };
         // Authenticated engine events are not independent business verification.
         if (report?["businessVerification"]?.GetValue<string>() == "unverified") business = "unverified";
         string recovery = recoveryFailed ? "quarantined" : configPrepared ? "restored" : "not_required";

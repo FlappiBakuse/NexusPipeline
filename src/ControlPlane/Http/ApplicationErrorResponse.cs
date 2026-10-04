@@ -19,7 +19,7 @@ internal static class ApplicationErrorResponse
             _ => 400,
         };
         var args = new Dictionary<string, object?>();
-        if (error.Candidates is { Count: > 0 })
+        if (error.Candidates is not null)
         {
             args["candidates"] = error.Candidates;
         }

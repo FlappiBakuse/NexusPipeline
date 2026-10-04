@@ -586,5 +586,6 @@
   "tray.title": "NexusPipeline 枢链",
   "user.name_invalid": "用户名不能为空且不能包含非法字符",
   "validation.invalid_json": "请求体不是有效 JSON",
-  "validation.invalid_request": "请求格式无效"
+  "validation.invalid_request": "请求格式无效",
+  "run.configuration_setup_required": "插件包含破坏性配置更新，请重新设置并保存脚本实例，再保存此用户的配置。"
 }

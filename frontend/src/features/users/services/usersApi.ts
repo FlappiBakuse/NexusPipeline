@@ -8,11 +8,11 @@ export interface UserBadgePayload {
   badges?: Array<{ pluginName?: string; id?: string; label?: string; tone?: string; title?: string }>;
 }
 
-export function listUsers(): Promise<any> {
-  return api("GET", "/api/users");
+export function listUsers(signal?: AbortSignal): Promise<any> {
+  return api("GET", "/api/users", undefined, signal);
 }
-export function listScripts(): Promise<any> {
-  return api("GET", "/api/scripts");
+export function listScripts(signal?: AbortSignal): Promise<any> {
+  return api("GET", "/api/scripts", undefined, signal);
 }
 export function getStatus(): Promise<any> {
   return api("GET", "/api/status");
@@ -131,13 +131,15 @@ export function editConfig(
   userId: string,
   scriptInstanceId: string,
   payload: Record<string, unknown>,
+  signal?: AbortSignal,
 ): Promise<unknown> {
   return api(
     "POST",
     `/api/users/${encodeURIComponent(userId)}/bindings/${encodeURIComponent(scriptInstanceId)}/edit-config`,
     payload,
+    signal,
   );
 }
-export function listEditSessions(): Promise<any> {
-  return api("GET", "/api/scripts/edit-sessions");
+export function listEditSessions(signal?: AbortSignal): Promise<any> {
+  return api("GET", "/api/scripts/edit-sessions", undefined, signal);
 }

@@ -15,6 +15,7 @@ internal sealed class ScriptStorage
 {
     private static readonly HashSet<string> SpecializedDerivedProperties = new(StringComparer.OrdinalIgnoreCase)
     {
+        "RequiresReconfiguration",
         "MainExe",
         "Args",
         "ConfigPath",
@@ -235,6 +236,7 @@ internal sealed class ScriptStorage
 
     private static void ClearSpecializedDerivedFields(ScriptInstance script)
     {
+        script.RequiresReconfiguration = false;
         script.MainExe = "";
         script.Args = "";
         script.ConfigPath = "";

@@ -31,6 +31,8 @@ export function resultDetail(record: Record<string, any>): string {
       return fallback;
     case "run.config_selection_required":
       return t("common.configuration.multiple_select");
+    case "run.configuration_setup_required":
+      return t("scripts.configuration_setup_required");
     case "run.user_config_load_failed":
       return t("common.error.user_config_load", { reason });
     case "run.retry_prepare_failed":

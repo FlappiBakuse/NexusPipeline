@@ -8,6 +8,9 @@ internal sealed class ScriptProfile
 {
     public ProcessRole RootProcessRole { get; set; } = ProcessRole.AutomationWorker;
     public string OutputEncoding { get; set; } = "";
+    public bool RequireExclusiveProcess { get; set; }
+    public string ConfigContractId { get; set; } = "";
+    public string RequiredConfigRelativePath { get; set; } = "";
     public TaskProtocolDescriptor? TaskProtocol { get; set; }
 
     public string MainExe { get; set; } = "";

@@ -21,6 +21,9 @@ public class ScriptInstance
     /// <summary>专用插件用户输入值（resolve.json inputs 声明的 name → 用户填写值；通用脚本恒为空）。键大小写以声明为准。</summary>
     public Dictionary<string, string> PluginInputs { get; set; } = new();
 
+    public string ConfigurationRevision { get; set; } = "";
+    public bool RequiresReconfiguration { get; set; }
+
     public string RootPath { get; set; } = "";
 
     public string MainExe { get; set; } = "";

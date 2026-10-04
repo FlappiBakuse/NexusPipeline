@@ -1,15 +1,18 @@
 <script setup lang="ts">
+import { onBeforeUnmount, onMounted } from "vue";
 import { t } from "../../../platform/i18n";
 import { toast } from "../../../platform/toast";
 import NxpButton from "../../../ui/primitives/NxpButton.vue";
 import NxpModal from "../../../ui/primitives/NxpModal.vue";
-import { editConfig, getEditConfigStatus, listEditSessions } from "../services/usersApi";
+import { editConfig, getEditConfigStatus, listEditSessions, listUsers, listScripts } from "../services/usersApi";
 import { useConfigEditFlow } from "../composables/useConfigEditFlow";
 
 /** 配置编辑事务的唯一 owner：首次编辑入口（choose/candidate）、锁定编辑弹窗、
  *  done/cancel 与刷新后会话恢复都在此收敛；事务状态机在 useConfigEditFlow 中实现。 */
 
 const emit = defineEmits<{ changed: [userId: string] }>();
+const controller = new AbortController();
+let disposed = false;
 
 function createRequesterWindowToken() {
   const cryptoApi = globalThis.crypto;
@@ -33,9 +36,9 @@ function waitForRequesterTitlePaint() {
 
 const flow = useConfigEditFlow({
   getStatus: (userId, scriptId) => getEditConfigStatus(userId, scriptId) as Promise<{ hasSnapshot?: boolean } | null>,
-  start: (userId, scriptId, request) => editConfig(userId, scriptId, request),
-  finish: (userId, scriptId, action) => editConfig(userId, scriptId, { action }) as Promise<{ validation?: { toasts?: Array<{ message?: string; kind?: string }> } } | null>,
-  listSessions: () => listEditSessions(),
+  start: (userId, scriptId, request) => editConfig(userId, scriptId, request, controller.signal),
+  finish: (userId, scriptId, action) => editConfig(userId, scriptId, { action }, controller.signal) as Promise<{ validation?: { toasts?: Array<{ message?: string; kind?: string }> } } | null>,
+  listSessions: () => listEditSessions(controller.signal),
   createRequesterWindowToken,
   waitForRequesterTitlePaint,
   getDocumentTitle: () => document.title,
@@ -45,10 +48,21 @@ const flow = useConfigEditFlow({
     else toast(message);
   },
   translate: (key, args) => t(key, args),
-  onTransactionChanged: (userId) => emit("changed", userId),
+  onTransactionChanged: (userId) => { emit("changed", userId); void restoreActiveSession(); },
 });
 
 const { configEdit, configChooser, configCandidates, finishingAction, isOpen } = flow;
+
+async function restoreActiveSession() {
+  try {
+    const [users, scripts] = await Promise.all([listUsers(controller.signal), listScripts(controller.signal)]);
+    await flow.restoreExisting(users, scripts, () => !disposed && !isOpen.value);
+  } catch {
+    // Host 会话仍持有事务；读取失败不发起第二次编辑或自动取消。
+  }
+}
+onMounted(() => { void restoreActiveSession(); });
+onBeforeUnmount(() => { disposed = true; controller.abort(); });
 
 defineExpose({
   open: flow.open,

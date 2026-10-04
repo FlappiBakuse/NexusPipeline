@@ -35,6 +35,8 @@ internal sealed class TaskProtocolConfigAssessmentAdapter(
         string scriptId = spec.Script.Id;
         string userId = user.UserId;
         ConfigStoreMetadata? metadata = ConfigStoreMetadata.Load(scriptId, userId);
+        if (metadata is not null && metadata.ConfigContractId != spec.ConfigContractId)
+            throw new InvalidDataException("config_unavailable: 配置契约已变化，请重新设置配置");
         if (metadata is null
             || metadata.ConfigLocatorHash != ConfigStoreMetadata.HashLocator(spec.Script.ConfigPath)
             || metadata.ConfigKind is not ("file" or "dir"))

@@ -75,8 +75,10 @@ export function coreUnits(selected, registry, policy, partnerPolicy = null) {
       item.preparations.push("host.jint.test-build");
       if (partnerPolicy) for (const [artifact, plugin] of Object.entries(partnerPolicy.plugins).sort()) {
         if (plugin.kind !== "data-specialized") continue;
-        const expectedEditorCaseIds = ["BetterGI","ZenlessZoneZeroOneDragon"].includes(artifact)
+        const expectedEditorCaseIds = ["BetterGI","ZenlessZoneZeroOneDragon", ...(plugin.editorCaseIds?.length ? [artifact] : [])].includes(artifact)
           ? [`${artifact}.editor-select-and-preserve`,`${artifact}.editor-repeat`] : [];
+        if (plugin.editorCaseIds && JSON.stringify(plugin.editorCaseIds) !== JSON.stringify(expectedEditorCaseIds))
+          throw new Error(`Invalid partner editor cases: ${artifact}`);
         item.partnerPlugins.push({artifact,fixtureIds:plugin.fixtureIds,expectedEditorCaseIds,scenarioId:plugin.realScenario,observeCount:12,isolatedRunRequired:true});
         item.expectedCaseIds.push(...plugin.fixtureIds.map(fixture=>`${artifact}/${fixture}`));
         item.expectedEditorCaseIds.push(...expectedEditorCaseIds);

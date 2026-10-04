@@ -47,6 +47,7 @@ export interface User {
 }
 
 export interface Script {
+  requiresReconfiguration?: boolean;
   executionProviderId?: string;
   executionProviderConfigId?: string;
   rootPath?: string;

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, provide, ref, watch } from "vue";
 import { RouterView, useRoute } from "vue-router";
 import { useShellStore } from "../stores/shell";
 import BootLoadingState from "./BootLoadingState.vue";
@@ -19,6 +19,15 @@ import NxpIcon from "../ui/primitives/NxpIcon.vue";
 import NxpScrollArea from "../ui/primitives/NxpScrollArea.vue";
 import NxpEmptyState from "../ui/primitives/NxpEmptyState.vue";
 
+import ConfigEditFlow from "../features/users/components/ConfigEditFlow.vue";
+import { configEditContextKey } from "../features/users/composables/configEditContext";
+
+const configFlow = ref<InstanceType<typeof ConfigEditFlow> | null>(null);
+const configEditCompletion = ref<{ userId: string; revision: number } | null>(null);
+provide(configEditContextKey, { flow: configFlow, completed: configEditCompletion });
+function configurationChanged(userId: string) {
+  configEditCompletion.value = { userId, revision: (configEditCompletion.value?.revision || 0) + 1 };
+}
 const route = useRoute();
 const shell = useShellStore();
 const isMobile = ref(false);
@@ -175,5 +184,6 @@ function openNav() {
     :title="t('shell.boot.error_details')"
     :description="shell.bootError"
   />
+  <ConfigEditFlow v-if="shell.booted" ref="configFlow" @changed="configurationChanged" />
   <TokenPrompt :open="shell.tokenPromptOpen" @close="shell.tokenPromptOpen = false" />
 </template>

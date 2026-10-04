@@ -58,6 +58,21 @@ public sealed class TaskConfigDocumentTests
     }
 
     [Fact]
+    public void LargePublicDefinitionsDoNotExpandWritableConfigurationLimits()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "resource-limit-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        string file = Path.Combine(root, "interface.json");
+        File.WriteAllText(file, "{\"task\":[]}" + new string(' ', 2207014));
+        var view = new TaskConfigView();
+        view.AddResource("interface", file, "text");
+        Assert.Contains("interface", view.DeclaredResourceIds);
+        Assert.Throws<InvalidDataException>(() => view.AddConfig("config:test.json", file, "json"));
+        File.WriteAllBytes(file, new byte[8 * 1024 * 1024 + 1]);
+        Assert.Throws<InvalidDataException>(() => view.AddResource("oversize", file, "text"));
+    }
+
+    [Fact]
     public void GuardsAuthorizationExpectedAndOverlappingOperationsFailWithoutMutation()
     {
         byte[] bytes = Encoding.UTF8.GetBytes("{\"tasks\":[{\"id\":\"a\",\"enabled\":false}],\"other\":true}");
