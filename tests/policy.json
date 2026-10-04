@@ -422,6 +422,7 @@
       ],
       "filter": "FullyQualifiedName~NexusPipeline.Tests.Updates.",
       "caseIds": [
+        "NexusPipeline.Tests.Updates.UpdatePolicyTests.BreakingVersions_RequireSeparateBarriersAndPreserveOrdinaryUpdates",
         "NexusPipeline.Tests.Updates.UpdateServiceTests.Apply_DeferIsAllowedWhenImmediateGateIsBusy",
         "NexusPipeline.Tests.Updates.UpdateServiceTests.Apply_DeferWritesTaskWithoutSpawningOrExiting",
         "NexusPipeline.Tests.Updates.UpdateServiceTests.Apply_GateBlocksWhenBusy",
