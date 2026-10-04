@@ -202,6 +202,9 @@ def validate_bundle(plan, plan_file, report_files, official=True):
         for key, expected_value in {"repository":repo,"prNumber":plan["prNumber"],"baseSha":plan["baseSha"],"headSha":plan["headSha"],
                 "mergeBaseSha":plan["mergeBase"],"testedSha":plan["testedSha"],"runId":plan["runId"],"attempt":plan["attempt"],"partnerSha":plan["partnerSha"]}.items():
             require(identity.get(key) == expected_value, "Foreign batch identity: "+key)
+        require(plan.get("inputMode", "default") == ("paired" if plan.get("inputPair") else "default")
+                and identity.get("inputMode", "default") == plan.get("inputMode", "default"), "Foreign input mode")
+        require(identity.get("inputPair") == plan.get("inputPair"), "Foreign pair in batch report")
         source = identity["source"]
         require(source and source["commitSha"] == plan["testedSha"] and (not official or source["workingTreeDirty"] is False), "Foreign/dirty source")
         require(identity["sourceFingerprint"] == plan["sourceFingerprint"] and re.fullmatch(r"[0-9a-f]{64}",identity["sourceFingerprint"]), "Source fingerprint mismatch")
@@ -266,6 +269,10 @@ def trusted_begin(audit, final, repository, plan, producer):
     check = final.current_check(repository,plan["headSha"],audit.job_name(plan["repository"], "finalBudget"),suite["app"]["id"],plan["prNumber"])
     if check is None: raise BeginPending("Missing trusted begin registration")
     registration = final.registration(check)
+    pair = final.ci_inputs.resolve(repository, plan["prNumber"], head=plan["headSha"], base=plan["baseSha"], tested=plan["testedSha"], read=audit.api)
+    require(pair == plan.get("inputPair"), "Scope pair differs from current PR pair")
+    binding = final.ci_inputs.binding(pair, repository, int(plan["runId"]), int(plan["attempt"]), registration["controllerSha"]) if pair else None
+    require(registration["pairDigest"] == (pair["pairDigest"] if pair else None) and registration["bindingDigest"] == binding, "Pair lacks matching trusted begin")
     require(registration["pr"] == plan["prNumber"], "Foreign begin PR")
     if (registration["run"],registration["attempt"]) != (int(plan["runId"]),int(plan["attempt"])):
         raise BeginPending("Old begin registration")

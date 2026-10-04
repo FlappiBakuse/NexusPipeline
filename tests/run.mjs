@@ -268,7 +268,7 @@ async function runBatch() {
     try {
       const receipt=path.join(runRoot,"unit-receipt.json");
       fs.writeFileSync(receipt,JSON.stringify({unitId:unit.id,provides:unit.provides,exitCode:result.exitCode,status:result.status,source:workspace.source,
-        elapsedMs:invocationBudget.elapsedMs,type:"typed gate execution receipt"},null,2));
+        elapsedMs:invocationBudget.elapsedMs,inputPair:batchContext.plan.inputPair??null,type:"typed gate execution receipt"},null,2));
       const destination=path.join(batchParentRoot,"evidence",unit.id.replaceAll(/[.:]/g,"-"));
       const copy=(source,target)=>{
         fs.mkdirSync(target,{recursive:true});

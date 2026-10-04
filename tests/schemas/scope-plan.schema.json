@@ -97,6 +97,18 @@
     "testedSha": {
       "type": "string",
       "pattern": "^[a-f0-9]{40}$"
+    },
+    "inputMode": {
+      "enum": [
+        "default",
+        "paired"
+      ]
+    },
+    "inputPair": {
+      "type": [
+        "object",
+        "null"
+      ]
     }
   },
   "$defs": {

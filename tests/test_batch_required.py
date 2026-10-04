@@ -181,7 +181,8 @@ class BatchRequiredTests(unittest.TestCase):
 
     def test_trusted_main_manual_begin_and_foreign_events(self):
         audit=mock.Mock();final=mock.Mock()
-        identity={"pr":self.plan["prNumber"],"run":int(self.plan["runId"]),"attempt":int(self.plan["attempt"]),"beginRun":22,"beginAttempt":1,"controllerSha":"b"*40}
+        final.ci_inputs.resolve.return_value=None
+        identity={"pr":self.plan["prNumber"],"run":int(self.plan["runId"]),"attempt":int(self.plan["attempt"]),"beginRun":22,"beginAttempt":1,"controllerSha":"b"*40,"pairDigest":None,"bindingDigest":None}
         final.current_check.return_value={"id":77};final.registration.return_value=identity
         begin={"id":22,"run_attempt":1,"event":"workflow_dispatch","path":".github/workflows/final-budget.yml","head_branch":"main","head_sha":"b"*40,"repository":{"full_name":"owner/repo"},"status":"completed","conclusion":"success"}
         audit.completed_jobs.return_value=[{}];audit.audit.return_value=[{"status":"PASS"}]

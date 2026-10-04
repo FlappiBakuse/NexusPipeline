@@ -13,6 +13,9 @@ AUDIT_PATH = Path(__file__).with_name("audit-jobs.py")
 SPEC = importlib.util.spec_from_file_location("audit_jobs", AUDIT_PATH)
 audit_jobs = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(audit_jobs)
+INPUT_SPEC = importlib.util.spec_from_file_location("ci_inputs", Path(__file__).with_name("ci_inputs.py"))
+ci_inputs = importlib.util.module_from_spec(INPUT_SPEC)
+INPUT_SPEC.loader.exec_module(ci_inputs)
 
 
 def resolve_pulls(run, repository):
@@ -82,17 +85,21 @@ def write_api(route, body, method):
 
 def registration(check):
     value = check.get("external_id", "").split(":")
-    if len(value) != 7 or value[0] != "nxp-budget-v2" or not all(v.isdigit() and int(v) > 0 for v in value[1:6]) or not re.fullmatch(r"[a-f0-9]{40}", value[6]):
+    if (not (len(value) == 7 and value[0] == "nxp-budget-v2" or len(value) == 9 and value[0] == "nxp-budget-v3"
+             and all(re.fullmatch(r"[a-f0-9]{64}", part) for part in value[7:]))
+            or not all(v.isdigit() and int(v) > 0 for v in value[1:6]) or not re.fullmatch(r"[a-f0-9]{40}", value[6])):
         raise ValueError("Missing trusted begin registration")
-    return dict(zip(["pr", "run", "attempt", "beginRun", "beginAttempt", "controllerSha"],
-                    [*map(int, value[1:6]), value[6]]))
+    return {**dict(zip(["pr", "run", "attempt", "beginRun", "beginAttempt", "controllerSha"],
+                    [*map(int, value[1:6]), value[6]])),
+            "pairDigest": value[7] if len(value) == 9 else None,
+            "bindingDigest": value[8] if len(value) == 9 else None}
 
 
 def current_check(repository, sha, check_name, app_id, pr):
     checks = audit_jobs.paged(f"/repos/{repository}/commits/{sha}/check-runs?filter=all", "check_runs")
     owned = [check for check in checks if check.get("name") == check_name and check.get("head_sha") == sha
              and check.get("app", {}).get("id") == app_id
-             and (check.get("external_id", "").startswith(f"nxp-budget-v2:{pr}:")
+             and (check.get("external_id", "").startswith((f"nxp-budget-v2:{pr}:", f"nxp-budget-v3:{pr}:"))
                   or not check.get("external_id") and check.get("output", {}).get("title") == "Complete CI job budget")]
     return max(owned, key=lambda check: check["id"], default=None)
 
@@ -193,6 +200,8 @@ def main():
     suite = audit_jobs.api(f"/repos/{repository}/check-suites/{controller['check_suite_id']}")
     app_id = suite["app"]["id"]
     existing = current_check(repository, sha, args.check_name, app_id, pull["number"])
+    pair = ci_inputs.resolve(repository, pull["number"], head=sha, read=audit_jobs.api)
+    pair_binding = ci_inputs.binding(pair, repository, args.run_id, args.attempt, controller_sha) if pair else None
     if args.phase == "begin":
         # A trusted requested event registers the attempt before its runner jobs start.
         if run.get("status") not in ["queued", "in_progress", "completed"]:
@@ -201,11 +210,15 @@ def main():
             try:
                 old = registration(existing)
                 if (old["run"], old["attempt"]) == (args.run_id, args.attempt):
+                    if old["pairDigest"] != (pair["pairDigest"] if pair else None) or old["bindingDigest"] != pair_binding:
+                        raise RuntimeError("Pair changed within a registered attempt")
                     print("IDEMPOTENT: begin already registered")
                     return
             except ValueError:
                 pass
         external = f"nxp-budget-v2:{pull['number']}:{args.run_id}:{args.attempt}:{controller['id']}:{controller['run_attempt']}:{controller_sha}"
+        if pair:
+            external = external.replace("nxp-budget-v2:", "nxp-budget-v3:", 1) + ":" + pair["pairDigest"] + ":" + pair_binding
         if not is_current(repository, run, pull):
             print("SUPERSEDED: no check update")
             return
@@ -218,6 +231,8 @@ def main():
     if not existing:
         raise ValueError("Missing trusted begin registration")
     identity = registration(existing)
+    if identity["pairDigest"] != (pair["pairDigest"] if pair else None) or identity["bindingDigest"] != pair_binding:
+        raise ValueError("Final pair differs from trusted begin")
     if (identity["run"], identity["attempt"]) != (args.run_id, args.attempt):
         print("SUPERSEDED: no check update")
         return
@@ -236,6 +251,8 @@ def main():
     if not is_current(repository, run, pull):
         print("SUPERSEDED: no check update")
         return
+    if ci_inputs.resolve(repository, pull["number"], head=sha, read=audit_jobs.api) != pair:
+        raise ValueError("Pair changed during final audit")
     current = current_check(repository, sha, args.check_name, app_id, pull["number"])
     if not current or current["id"] != existing["id"] or current.get("external_id") != existing.get("external_id"):
         raise ValueError("Trusted check changed during audit")

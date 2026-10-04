@@ -90,7 +90,7 @@ def physical_jobs(repository, run, jobs, check_name, app_id):
         if (check.get("id") != job["id"] or check.get("head_sha") != run["head_sha"]
                 or check.get("app", {}).get("id") != app_id or check.get("name") != check_name
                 or job.get("check_run_url") != os.environ["GITHUB_API_URL"] + f"/repos/{repository}/check-runs/{job['id']}"
-                or not (re.fullmatch(r"nxp-budget-v2:(?:[1-9]\d*:){5}[a-f0-9]{40}",external) or legacy)):
+                or not ((re.fullmatch(r"nxp-budget-v2:(?:[1-9]\d*:){5}[a-f0-9]{40}",external) or re.fullmatch(r"nxp-budget-v3:(?:[1-9]\d*:){5}[a-f0-9]{40}:[a-f0-9]{64}:[a-f0-9]{64}",external)) or legacy)):
             raise ValueError("Unclassified runnerless Actions record")
         synthetic.append(check)
     if not physical:
