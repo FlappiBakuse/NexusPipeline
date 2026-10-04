@@ -1,20 +1,18 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import { getLocale, t } from "../../../platform/i18n";
 import NxpBadge from "../../../ui/primitives/NxpBadge.vue";
-import NxpButton from "../../../ui/primitives/NxpButton.vue";
 import NxpScrollArea from "../../../ui/primitives/NxpScrollArea.vue";
 import NxpDismissibleNotice from "../../../ui/composites/NxpDismissibleNotice.vue";
 import TaskPlanItem from "./TaskPlanItem.vue";
 import { resolveTaskText } from "../utils/taskText";
-import { taskDiagnosticLabel } from "../utils/taskLabels";
+import { taskDiagnosticLabel, dailyTaskReport, taskStatusLabel } from "../utils/taskLabels";
 import type { TaskConfigCheck, TaskDefinition, TaskPlan, TaskReport } from "../utils/taskTypes";
 const props = defineProps<{
   plan?: TaskPlan;
   report?: TaskReport;
   layout?: "cards" | "steps";
   stale?: boolean;
-  configAction?: (kind: string, check: TaskConfigCheck) => void;
 }>();
 const plan = computed(() => props.report?.originalPlan || props.plan);
 const tasks = computed(() => (plan.value?.tasks || []).filter(task => task.enabled).slice().sort((a, b) => a.order - b.order));
@@ -35,7 +33,7 @@ const businessTasks = computed(() => tasks.value.filter(task => !task.parentId &
 // Frozen Host summary is authoritative. Older reports without total use the same business predicate.
 const businessTotal = computed(() => props.report?.summary?.counts.total ?? businessTasks.value.length);
 const finished = computed(() => props.report?.summary?.counts.total !== undefined
-  ? (props.report?.summary?.counts.succeeded || 0) + (props.report?.summary?.counts.skipped || 0)
+  ? (props.report?.summary?.counts.succeeded || 0) + (dailyTaskReport(props.report) ? 0 : (props.report?.summary?.counts.skipped || 0))
   : businessTasks.value.filter(task => ['succeeded', 'skipped'].includes(status(task.id))).length);
 const unverified = computed(() => props.report?.summary?.counts.unknown || 0);
 const activeAssessment = computed(() => props.report?.admissionBlocked?.configAssessment || plan.value?.configAssessment);
@@ -43,26 +41,12 @@ const activeReadiness = computed(() => props.report?.admissionBlocked?.readiness
 const configChecks = computed(() => (activeAssessment.value?.checks || []).filter(check =>
   check.evaluation !== 'satisfied' && check.evaluation !== 'not_applicable'));
 const readiness = activeReadiness;
-// Metadata sampled by discovery is a point-in-time observation, never a
-// permanent launch guarantee. Expiry only changes presentation, not history.
-const readinessExpired = ref(false);
-let readinessTimer: ReturnType<typeof setTimeout> | undefined;
-watch(activeReadiness, value => {
-  clearTimeout(readinessTimer);
-  readinessTimer = undefined;
-  const checkedAt = Date.parse(value?.checkedAt || "");
-  const remaining = checkedAt + 60_000 - Date.now();
-  readinessExpired.value = Boolean(value) && (!Number.isFinite(remaining) || remaining <= 0);
-  if (value && !value.stale && remaining > 0)
-    readinessTimer = setTimeout(() => { readinessExpired.value = true; }, Math.min(remaining, 60_000));
-}, { immediate: true });
-onBeforeUnmount(() => clearTimeout(readinessTimer));
-const readinessStale = computed(() => props.stale || readiness.value?.stale || readinessExpired.value);
+const readinessStale = computed(() => props.stale || readiness.value?.stale);
 const unattributed = computed(() => {
   const latest = new Map<string, NonNullable<TaskReport['incidents']>[number]>();
   for (const event of props.report?.incidents || [])
     if (event.incident.taskId === null) latest.set(event.attemptId + ':' + event.incident.id, event);
-  return [...latest.values()];
+  return dailyTaskReport(props.report) ? [] : [...latest.values()];
 });
 function taskName(task: TaskDefinition) {
   return task.nameText ? resolveTaskText(task.nameText, props.report?.displaySnapshot || plan.value?.displaySnapshot, getLocale(), task.name) : task.name;
@@ -97,22 +81,12 @@ function readinessTone(value?: string) { return value === 'ready' ? 'ok' : value
 function readinessLabel(value?: string) { return t(`tasks.readiness.${value || 'unknown'}`); }
 function configCheckText(check: TaskConfigCheck) {
   return check.reasonText
-    ? resolveTaskText(check.reasonText, props.report?.displaySnapshot || plan.value?.displaySnapshot, getLocale(), check.ruleId)
-    : check.ruleId;
+    ? resolveTaskText(check.reasonText, props.report?.displaySnapshot || plan.value?.displaySnapshot, getLocale(), t('tasks.config.setting.default'))
+    : t('tasks.config.setting.default');
 }
 function configCheckLabel(check: TaskConfigCheck) { return t(`tasks.config.evaluation.${check.evaluation}`); }
-function configLocationText(location: Record<string, unknown>) {
-  const source = typeof location.source === "string" ? location.source : "unknown";
-  if (source === "context") return `context:${String(location.field || "")}`;
-  if (source === "environment") return `environment:${String(location.inspectionId || "")}`;
-  const resource = String(location.resourceId || "");
-  const selector = Array.isArray(location.selector)
-    ? location.selector.map(item => typeof item === "string" ? item : JSON.stringify(item)).join(" > ")
-    : "";
-  return `${source}:${resource}${selector ? ` · ${selector}` : ""}`;
-}
-function configActionLabel(kind: string) {
-  return t(`tasks.config.action.${kind}`, {}, kind);
+function configSettingHint(check: TaskConfigCheck) {
+  return t(`tasks.config.setting.${check.ruleId}`, {}, t('tasks.config.setting.default'));
 }
 </script>
 <template>
@@ -131,7 +105,7 @@ function configActionLabel(kind: string) {
         <strong>{{ t('tasks.admission_blocked') }}</strong>
         <span>{{ t('tasks.admission_blocked_help') }}</span>
       </div>
-      <section v-if="activeAssessment" class="task-config-assessment" :aria-label="t('tasks.config.title')">
+      <section v-if="!report && activeAssessment" class="task-config-assessment" :aria-label="t('tasks.config.title')">
         <header class="task-config-header">
           <strong>{{ t('tasks.config.title') }}</strong>
           <NxpBadge :tone="readinessStale ? 'muted' : readinessTone(readiness?.state)">{{ readinessLabel(readiness?.state) }}</NxpBadge>
@@ -143,23 +117,11 @@ function configActionLabel(kind: string) {
               <span>{{ configCheckText(check) }}</span>
               <NxpBadge :tone="check.executionEffect === 'block' ? 'bad' : check.executionEffect === 'warn' ? 'warn' : 'muted'">{{ configCheckLabel(check) }}</NxpBadge>
             </div>
-            <small>{{ check.ruleId }}</small>
-            <small v-for="(location, index) in check.locations" :key="`${check.ruleId}:location:${index}`" class="task-config-location">{{ configLocationText(location) }}</small>
-            <div v-if="configAction && check.actions.length" class="task-config-actions">
-              <NxpButton v-for="action in check.actions" :key="action.kind" class="ghost" type="button" @click="configAction(action.kind, check)">{{ configActionLabel(action.kind) }}</NxpButton>
-            </div>
+            <small class="task-config-location">{{ configSettingHint(check) }}</small>
           </li>
         </ul>
         <p v-else class="task-config-meta">{{ t('tasks.config.clear') }}</p>
       </section>
-      <ul v-if="diagnostics.length" class="task-plan-notes" :aria-label="t('tasks.plan_notes')">
-        <li v-for="(item, index) in diagnostics" :key="index">
-          <span v-if="diagnosticOwnerName(item.taskId)">{{ diagnosticOwnerName(item.taskId) }} · </span>
-          {{ taskDiagnosticLabel(item, report?.displaySnapshot || plan.displaySnapshot) }}
-        </li>
-      </ul>
-      <p v-if="report?.summary?.recovered && layout !== 'steps'" class="task-notice">{{ t('tasks.recovered') }}</p>
-      <p v-if="report && unverified && report.lifecycleOutcome === 'completed'" class="task-footnote">{{ t('tasks.outcome.unverified_count', { count: unverified }) }}</p>
       <p v-if="!tasks.length" class="muted">{{ t('tasks.empty') }}</p>
       <div v-if="layout !== 'steps'" class="task-list">
         <TaskPlanItem v-for="task in roots" :key="task.id" :task="task" :tasks="plan.tasks" :report="report" :display-snapshot="report?.displaySnapshot || plan.displaySnapshot" :focus-task-id="focusTaskId" />
@@ -169,7 +131,7 @@ function configActionLabel(kind: string) {
           <li v-for="(task, index) in businessTasks" :key="task.id" :data-task-id="task.id" class="task-step">
             <span class="task-marker" :data-status="status(task.id)" aria-hidden="true">{{ index + 1 }}</span>
             <span class="task-step-name" :title="taskName(task)">{{ taskName(task) }}</span>
-            <NxpBadge class="task-step-status" :tone="tone(status(task.id))">{{ t(`tasks.status.${status(task.id)}`) }}</NxpBadge>
+            <NxpBadge class="task-step-status" :tone="tone(status(task.id))">{{ taskStatusLabel(status(task.id), report) }}</NxpBadge>
           </li>
         </ol>
       </NxpScrollArea>
@@ -185,12 +147,20 @@ function configActionLabel(kind: string) {
           </figure>
         </div>
       </div>
+      <p v-if="!dailyTaskReport(report) && report?.summary?.recovered && layout !== 'steps'" class="task-notice">{{ t('tasks.recovered') }}</p>
+      <p v-if="report && unverified && report.lifecycleOutcome === 'completed'" class="task-footnote">{{ t('tasks.outcome.unverified_count', { count: unverified }) }}</p>
+      <ul v-if="diagnostics.length" class="task-plan-notes" :aria-label="t('tasks.plan_notes')">
+        <li v-for="(item, index) in diagnostics" :key="index">
+          <span v-if="diagnosticOwnerName(item.taskId)">{{ diagnosticOwnerName(item.taskId) }} · </span>
+          {{ taskDiagnosticLabel(item, report?.displaySnapshot || plan.displaySnapshot) }}
+        </li>
+      </ul>
     </template>
   </section>
 </template>
 <style scoped>
-.task-report { min-width: 0; overflow-wrap: anywhere; }
-.task-admission-blocked, .task-config-assessment { margin: 0 0 12px; padding: 12px; border: 1px solid var(--nx-color-border); border-radius: var(--nx-radius-md); background: var(--content-card-soft); }
+.task-report { display: grid; gap: 8px; min-width: 0; overflow-wrap: anywhere; }
+.task-admission-blocked, .task-config-assessment { margin: 0; padding: 12px; border: 1px solid var(--nx-color-border); border-radius: var(--radius-lg, var(--nx-radius-lg)); background: var(--content-card-soft); }
 .task-admission-blocked { display: grid; gap: 4px; color: var(--bad); }
 .task-admission-blocked span { color: var(--nx-color-muted); font-size: 12px; }
 .task-config-header, .task-config-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
@@ -202,23 +172,22 @@ function configActionLabel(kind: string) {
 .task-config-list small, .task-config-meta { color: var(--nx-color-muted); font-size: 12px; }
 .task-config-list small { display: block; margin-top: 3px; }
 .task-config-location { overflow-wrap: anywhere; font-family: var(--nx-font-mono, ui-monospace, monospace); }
-.task-config-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .task-config-meta { margin: 8px 0 0; }
-.task-plan-notes { margin: 0 0 12px; padding-inline-start: 20px; font-size: 12px; line-height: 1.6; color: var(--nx-color-muted); overflow-wrap: anywhere; }
+.task-plan-notes { margin: 0; padding-inline-start: 20px; font-size: 12px; line-height: 1.6; color: var(--nx-color-muted); overflow-wrap: anywhere; }
 .task-footnote figure { margin: 8px 0; }
 .task-footnote pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
 .task-warning-copy { margin: 0; } .task-warning-copy + .task-warning-copy { margin-top: 6px; }
-.task-report-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 0 12px; flex-wrap: wrap; }
+.task-report-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 h3 { margin: 0; font-size: 14px; } .task-report-header p { margin: 5px 0 0; color: var(--nx-color-muted); font-size: 12px; }
 .task-list { display: grid; gap: 8px; }
 .task-marker { flex: 0 0 28px; height: 28px; display: grid; place-items: center; border-radius: 50%; background: var(--muted-soft); color: var(--nx-color-muted); font-size: 12px; font-weight: 700; }
 .task-marker[data-status="succeeded"], .task-marker[data-status="skipped"] { background: var(--ok-soft); color: var(--ok); }
 .task-marker[data-status="failed"] { background: var(--bad-soft); color: var(--bad); }
 .task-marker[data-status="running"] { background: var(--accent-soft); color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
-.task-footnote, .task-notice { font-size: 12px; line-height: 1.6; color: var(--nx-color-muted); margin: 12px 0 0; }
+.task-footnote, .task-notice { font-size: 12px; line-height: 1.6; color: var(--nx-color-muted); margin: 0; }
 .task-notice { color: var(--ok); }
 .task-steps { display: flex; margin: 0; padding: 4px 0 12px; gap: 16px; list-style: none; }
-.task-step { box-sizing: border-box; flex: 0 0 200px; width: 200px; height: 88px; min-width: 0; position: relative; display: grid; grid-template-columns: 28px minmax(0, 1fr); grid-template-rows: 28px 24px; align-content: center; align-items: center; gap: 6px 10px; padding: 12px; border: 1px solid var(--nx-color-border); border-radius: var(--nx-radius-sm); background: var(--content-card-soft); }
+.task-step { box-sizing: border-box; flex: 0 0 200px; width: 200px; height: 88px; min-width: 0; position: relative; display: grid; grid-template-columns: 28px minmax(0, 1fr); grid-template-rows: 28px 24px; align-content: center; align-items: center; gap: 6px 10px; padding: 12px; border: 1px solid var(--nx-color-border); border-radius: var(--radius-lg, var(--nx-radius-lg)); background: var(--content-card-soft); }
 .task-step:not(:last-child)::after { content: ''; position: absolute; top: 43px; left: 100%; width: 17px; border-top: 2px solid var(--nx-color-border); }
 .task-step-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; }
 .task-step-status { grid-column: 2; justify-self: start; max-width: 100%; box-sizing: border-box; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

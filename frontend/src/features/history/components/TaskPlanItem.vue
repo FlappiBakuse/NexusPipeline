@@ -3,6 +3,7 @@ import { computed, ref, watch } from "vue";
 import { getLocale, t } from "../../../platform/i18n";
 import NxpCollapsibleCard from "../../../ui/composites/NxpCollapsibleCard.vue";
 import NxpBadge from "../../../ui/primitives/NxpBadge.vue";
+import { dailyTaskReport, taskStatusLabel } from "../utils/taskLabels";
 import { resolveTaskText } from "../utils/taskText";
 import type { TaskDefinition, TaskReport, TaskResult, TaskDisplaySnapshot, TaskTextRef } from "../utils/taskTypes";
 
@@ -31,7 +32,7 @@ function incidents(attemptId: string) {
   const latest = new Map<string, NonNullable<TaskReport['incidents']>[number]['incident']>();
   for (const event of props.report?.incidents || [])
     if (event.attemptId === attemptId && event.incident.taskId === props.task.id) latest.set(event.incident.id, event.incident);
-  return [...latest.values()];
+  return dailyTaskReport(props.report) ? [] : [...latest.values()];
 }
 function evidenceText(attemptId: string, evidence: TaskResult['evidence'][number]) {
   return props.report?.evidenceLines?.find(line => line.attemptId === attemptId && line.sourceId === evidence.sourceId && line.epoch === evidence.epoch && line.sequence === evidence.sequence)?.text || t('tasks.evidence_unavailable');
@@ -48,7 +49,7 @@ watch(() => props.focusTaskId, id => {
 
 <template>
   <NxpCollapsibleCard class="task-card" :title="name" :expanded="expanded" :surface="depth % 2 === 0 ? 'secondary' : 'default'" :data-task-id="task.id" @toggle="expanded = $event">
-    <template #actions><NxpBadge :tone="engineStatus === 'failed' ? 'bad' : tone">{{ engineLabel || t(`tasks.status.${status}`) }}</NxpBadge></template>
+    <template v-if="report" #actions><NxpBadge :tone="engineStatus === 'failed' ? 'bad' : tone">{{ engineLabel || taskStatusLabel(status, report) }}</NxpBadge></template>
     <div v-if="children.length" class="task-plan-children">
       <TaskPlanItem v-for="child in children" :key="child.id" :task="child" :tasks="tasks" :report="report" :display-snapshot="displaySnapshot" :focus-task-id="focusTaskId" :depth="depth + 1" :ancestors="[...ancestors, task.id]" />
     </div>
@@ -61,7 +62,11 @@ watch(() => props.focusTaskId, id => {
       <strong>{{ t('tasks.attempt', { number: attempt.number }) }}</strong>
       <p v-if="!attempt.selectedTaskIds.includes(task.id)" class="muted">{{ t('tasks.not_retried') }}</p>
       <template v-for="result in attempt.taskResults.filter(result => result.taskId === task.id)" :key="result.taskId">
-        <p>{{ t(`tasks.status.${result.status}`) }} · {{ reason(result.reasonCode, result.reasonText) }}</p>
+        <p>{{ taskStatusLabel(result.status, report) }} · {{ reason(result.reasonCode, result.reasonText) }}</p>
+        <figure v-for="id in result.hostEvidenceRefs || []" :key="id" class="task-evidence">
+          <figcaption>{{ t('tasks.host_evidence') }}</figcaption>
+          <pre>{{ reason('tasks.' + report?.hostEvidence?.find(item => item.hostEventId === id)?.kind) }}</pre>
+        </figure>
         <figure v-for="id in result.structuredEvidenceRefs || []" :key="id" class="task-evidence">
           <figcaption>{{ getLocale().startsWith('zh') ? '结构化引擎证据' : 'Structured engine evidence' }}</figcaption>
           <pre>{{ JSON.stringify(report?.structuredEvidence?.find(item => item.id === id), null, 2) }}</pre>
@@ -87,12 +92,12 @@ watch(() => props.focusTaskId, id => {
 .task-card { --nx-collapsible-header-height: 57.6px; --nx-collapsible-header-padding: 12.8px; --nx-collapsible-body-padding: 16px; }
 .task-attempt { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--nx-color-border); font-size: 12px; }
 .task-attempt p { line-height: 1.6; }
-.task-evidence { margin: 8px 0 0; padding: 10px; border: 1px solid var(--nx-color-border); border-radius: var(--nx-radius-sm); background: var(--content-card); }
+.task-evidence { margin: 8px 0 0; padding: 10px; border: 1px solid var(--nx-color-border); border-radius: var(--radius-lg, var(--nx-radius-lg)); background: var(--content-card); }
 .task-evidence.is-light { background: var(--content-card-soft); }
 figcaption { color: var(--nx-color-muted); overflow-wrap: anywhere; }
 pre { margin: 8px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.6; }
-.task-plan-children { display: grid; gap: 10px; }
-.task-plan-facts { display: flex; flex-wrap: wrap; gap: 12px 24px; margin: 0; padding: 12px; border: 1px solid var(--nx-color-border); border-radius: var(--nx-radius-md); background: var(--content-card); font-size: 12px; }
+.task-plan-children { display: grid; gap: 8px; }
+.task-plan-facts { display: flex; flex-wrap: wrap; gap: 12px 24px; margin: 0; padding: 12px; border: 1px solid var(--nx-color-border); border-radius: var(--radius-lg, var(--nx-radius-lg)); background: var(--content-card); font-size: 12px; }
 .task-plan-facts.is-light { background: var(--content-card-soft); }
 dt { color: var(--nx-color-muted); } dd { margin: 5px 0 0; }
 </style>

@@ -59,5 +59,8 @@ onBeforeUnmount(() => { disposed = true; controller?.abort(); stream?.close(); s
 </script>
 <template>
   <p v-if="error" role="status">{{ t('tasks.title') }}: {{ error }}</p>
-  <TaskReportPanel v-if="currentReport" :key="currentReport.runId" :report="currentReport" layout="steps" />
+  <TaskReportPanel v-if="currentReport" :key="currentReport.runId" class="live-task-report" :report="currentReport" layout="steps" />
 </template>
+<style scoped>
+.live-task-report { margin-top: 16px; }
+</style>

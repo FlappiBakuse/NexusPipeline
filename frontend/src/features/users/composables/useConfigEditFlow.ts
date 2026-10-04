@@ -77,9 +77,10 @@ function isAbortError(reason: unknown) {
 }
 
 function configEditErrorData(reason: unknown) {
-  const value = reason as { code?: string; data?: { inputName?: string; candidates?: unknown[] } } | null;
-  return value?.code === "config_input_mismatch" && Array.isArray(value.data?.candidates)
-    ? { inputName: String(value.data?.inputName || ""), candidates: value.data.candidates.map(item => String(item || "")).filter(Boolean) }
+  const value = reason as { code?: string; data?: { args?: { inputName?: string; candidates?: unknown[] } } } | null;
+  const args = value?.data?.args;
+  return value?.code === "config_input_mismatch" && Array.isArray(args?.candidates)
+    ? { inputName: String(args.inputName || ""), candidates: args.candidates.map(item => String(item || "")).filter(Boolean) }
     : null;
 }
 
@@ -113,6 +114,10 @@ export function useConfigEditFlow(adapters: ConfigEditFlowAdapters) {
           return;
         }
         configChooser.value = null;
+        if (candidateData.candidates.length === 1 && !inputOverride && item.mode === "reuse") {
+          await startSession(item, { name: candidateData.inputName, value: candidateData.candidates[0] });
+          return;
+        }
         configCandidates.value = {
           userId: item.userId,
           scriptId: item.scriptId,

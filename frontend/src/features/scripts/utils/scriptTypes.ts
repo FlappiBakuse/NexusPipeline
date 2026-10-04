@@ -125,7 +125,7 @@ export function scriptDraftFrom(script: Script | null, plugin = ""): ScriptDraft
     gameExe: value.gameExe || "",
     gameArgs: value.gameArgs || "",
     gameWaitSeconds: value.gameWaitSeconds ?? 30,
-    forceCloseGame: value.forceCloseGame ?? Boolean(value.pluginType),
+    forceCloseGame: value.forceCloseGame ?? Boolean(value.pluginType || (plugin && !plugin.startsWith('provider:'))),
     maxAttempts: value.maxAttempts ?? 3,
     logStallTimeoutMinutes: value.logStallTimeoutMinutes ?? 5,
     totalTimeoutMinutes: value.totalTimeoutMinutes ?? 120,

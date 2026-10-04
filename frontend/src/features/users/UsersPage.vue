@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { api, isAbortError } from "../../platform/api";
 import { openEventStream, type EventStreamHandle } from "../../platform/events";
 import type { TaskUserSummary } from "../history/utils/taskTypes";
@@ -15,7 +15,7 @@ import NxpPageHeader from "../../ui/composites/NxpPageHeader.vue";
 import NxpTextInput from "../../ui/primitives/NxpTextInput.vue";
 import NxpSortableList from "../../ui/composites/NxpSortableList.vue";
 import GlobalUserCard from "./GlobalUserCard.vue";
-import ConfigEditFlow from "./components/ConfigEditFlow.vue";
+import { configEditContextKey } from "./composables/configEditContext";
 import GlobalManagementModal from "./components/GlobalManagementModal.vue";
 import UserManagementModal from "./components/UserManagementModal.vue";
 import { useCountdownRefresh } from "./composables/useCountdownRefresh";
@@ -35,15 +35,16 @@ const newUserName = ref("");
 const globalUserId = ref("");
 const globalUserName = ref("");
 const managedUserId = ref("");
+const configurationRevision = ref(0);
 const managedUser = ref<User | null>(null);
 const deleteTarget = ref<User | null>(null);
 const deleteName = ref("");
 const root = ref<HTMLElement | null>(null);
-const configFlow = ref<InstanceType<typeof ConfigEditFlow> | null>(null);
+const configContext = inject(configEditContextKey);
+const configFlow = configContext?.flow;
 const userManager = ref<InstanceType<typeof UserManagementModal> | null>(null);
 let disposed = false;
 let countdownTimer: ReturnType<typeof setInterval> | null = null;
-let restoreAttempted = false;
 let taskStream: EventStreamHandle | null = null;
 let taskRefresh: ReturnType<typeof setTimeout> | null = null;
 let taskController: AbortController | null = null;
@@ -157,25 +158,11 @@ async function load() {
   } finally {
     if (!disposed) loading.value = false;
   }
-  if (!disposed && !error.value) void restoreEditSessionCard();
 }
 
-function modalOpen() {
-  return Boolean(
-    newUserOpen.value ||
-      globalUserId.value ||
-      managedUserId.value ||
-      deleteTarget.value ||
-      configFlow.value?.isOpen,
-  );
-}
-
-/** 刷新或服务重启后，把用户带回仍在进行的锁定配置编辑事务。恢复失败保持页面可用。 */
-async function restoreEditSessionCard() {
-  if (restoreAttempted || modalOpen()) return;
-  restoreAttempted = true;
-  await configFlow.value?.restoreExisting(users.value, scripts.value, () => !disposed && !modalOpen());
-}
+watch(() => configContext?.completed.value, completion => {
+  if (completion) void refreshUserDraft(completion.userId);
+});
 
 function openNewUser() {
   newUserName.value = "";
@@ -235,12 +222,13 @@ function closeUserManagement() {
 }
 
 async function handleOpenConfig(details: { userId: string; scriptId: string; userName: string; scriptName: string; freshAvailable: boolean }) {
-  await configFlow.value?.open(details, details.freshAvailable);
+  await configFlow?.value?.open(details, details.freshAvailable);
 }
 
 async function refreshUserDraft(userId: string) {
+  configurationRevision.value++;
   await load();
-  if (managedUserId.value === userId) await userManager.value?.refresh();
+  if (managedUserId.value === userId) await userManager.value?.refresh(false);
 }
 
 /** 列表卡片头像上传：选择图片后写入用户并对齐用户管理与列表两边草稿。 */
@@ -427,6 +415,7 @@ onBeforeUnmount(() => {
       v-if="managedUser"
       ref="userManager"
       :user="managedUser"
+      :configuration-revision="configurationRevision"
       :scripts="scripts"
       :plugins="plugins"
       :users="users"
@@ -434,7 +423,6 @@ onBeforeUnmount(() => {
       @saved="load"
       @open-config="handleOpenConfig"
     />
-    <ConfigEditFlow ref="configFlow" @changed="refreshUserDraft" />
     <NxpModal
       :open="Boolean(deleteTarget)"
       :title="t('users.delete_user')"
