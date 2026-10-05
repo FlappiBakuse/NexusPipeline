@@ -204,6 +204,7 @@ async function runBatch() {
         result.completedCaseIds=summary.scope.completedCaseIds;result.completedScenarioIds=summary.scope.completedScenarioIds;
         result.real=summary.boundaries.real;result.substituted=summary.boundaries.substituted;
       } else if(unit.kind==="frontend") {
+        const preparations=await Promise.allSettled([(async()=>{
         const state=unit.provides.includes("host.frontend.state");
         if(state) {
           code=await runSelectedCore("frontend");
@@ -211,6 +212,14 @@ async function runBatch() {
           result.completedCaseIds=summary.scope.completedCaseIds;result.completedScenarioIds=summary.scope.completedScenarioIds;
         } else {code=await ensureNpm(frontendDir);if(!code) code=await run(npmCommand,["run","typecheck"],{cwd:frontendDir});}
         if(!code&&unit.provides.includes("host.frontend.build")) code=await buildFrontendBundle({typechecked:true});
+        })(), (async()=>{
+          if(batchContext.batch.units.some(item=>["host.integration.restart-update","host.integration.store"].includes(item.id)))
+            return publishTestHost({withFrontend:false});
+          return 0;
+        })()]);
+        const failure=preparations.find(outcome=>outcome.status==="rejected");
+        if(failure) throw failure.reason;
+        code ||= preparations[1].value;
       } else if(unit.kind==="finite") {
         code = await runFinite(unit.groups);
         for (const group of unit.groups) {
