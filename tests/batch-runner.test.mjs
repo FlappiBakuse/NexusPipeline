@@ -30,6 +30,7 @@ test("workflow exposes one bounded matrix and keeps control free of dotnet setup
   const control=workflow.slice(workflow.indexOf("  control:"),workflow.indexOf("  batches:"));
   assert.ok(!control.includes("setup-dotnet"));
   assert.ok(workflow.includes("needs: [scope, control, batches]"));
+  assert.equal([...workflow.matchAll(/^          include-hidden-files: true$/gm)].length,2);
   const policy=JSON.parse(fs.readFileSync(path.join(root,"tests/policy.json")));
   assert.equal(policy.ciBatchPolicy.maxBatches,5);assert.equal(policy.ciBatchPolicy.workMs,130000);
 });
