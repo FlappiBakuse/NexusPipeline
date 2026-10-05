@@ -128,4 +128,6 @@ python tests/ci_inputs.py --create-pair <Host_PR编号> <Plugins_PR编号>
 
 配对要求双方 PR 属于官方仓库、面向 main 且保持打开。scope、实际 checkout、报告和可信 main 的 begin/finalize 必须引用同一 pair；缺少登记、摘要不同、对端变更或部分重跑均不能通过。正式 producer 仍是 `pull_request` 的 `ci.yml`，包含正文 edited 事件，普通正文编辑也运行正常义务。默认模式不接受任意对端覆盖环境变量。
 
+配对登记须先于同一 head 的首个 producer。维护者可在准备两端引用与正文期间短暂暂停 `ci.yml` 调度，登记后立即恢复工作流，并通过 `ready_for_review` 事件启动两端首次完整运行。准备期间必需检查规则保持生效，尚未验证的新 head 不具备合并资格；不得删除早先失败记录或以局部重跑代替完整验证。
+
 两边描述同步后，两边都须完成新的完整运行。另一仓提交不会自动撤销本仓旧绿勾；合并前必须只读复核双方当前 base/head/merge tree、pairDigest 和最新完整 attempt 均一致且检查成功。两个 finalize 独立完成，不互相等待。Host 合入后，将 Plugins 默认测试锁改为真实已合入 Host SHA，移除配对块并重新执行完整默认 CI，再按现役流程合并与发行。源码合入、插件稳定字节和最终 Host 预装候选分别验证。
