@@ -130,7 +130,7 @@ public class SessionJudgeTests
     }
 
     [Fact]
-    public async Task TaskObservationHandoffPublishesCurrentBusinessOutcomeAndKeepsLegacyMarker()
+    public async Task TaskObservationHandoffPublishesCurrentBusinessOutcomeAndKeepsCompletionMarker()
     {
         var script = MakeScript(s => { s.JudgeScriptEnabled = true; s.JudgeScript = "x"; });
         var judge = new SessionJudge(script);

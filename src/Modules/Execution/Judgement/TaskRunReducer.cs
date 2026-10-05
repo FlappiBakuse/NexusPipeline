@@ -21,6 +21,8 @@ internal sealed record TaskRetrySelection(string Decision, string ReasonCode, st
 internal sealed record TaskIncidentEvent(string AttemptId, TaskIncident Incident);
 
 /// <summary>One run, one owner. Every accepted fact belongs to a host-generated attempt/log identity.</summary>
+internal enum TaskReductionMode { DailyFlow, ProviderExecution }
+
 internal sealed partial class TaskRunReducer
 {
     private readonly TaskPlan _plan;
@@ -36,18 +38,31 @@ internal sealed partial class TaskRunReducer
     private string _attemptId = "";
     private int _attemptNumber;
     private bool _hadFailure;
-    private bool Daily => _plan.ProtocolVersion == "0.2.0";
+    private readonly TaskReductionMode _mode;
+    private bool Daily => _mode == TaskReductionMode.DailyFlow;
     internal string RunId { get; }
     internal string RunBoundary { get; private set; } = "unknown";
     internal long Revision { get; private set; }
 
-    internal TaskRunReducer(string runId, TaskPlan plan)
+    internal static TaskRunReducer CreateDaily(string runId, TaskPlan plan)
     {
-        _plan = TaskProtocolJson.Copy(plan);
+        TaskProtocolValidation.Require(plan.ProtocolVersion == "0.2.0" && plan.SemanticsVersion == "daily-flow-v1", "daily semantics version");
         TaskProtocolValidation.Discovery(new TaskDiscovery { ProtocolVersion = plan.ProtocolVersion, Type = "discovery",
             Coverage = plan.Coverage, Tasks = plan.Tasks, Diagnostics = plan.Diagnostics,
             ConfigAssessment = plan.ConfigAssessment });
-        TaskProtocolValidation.Require(plan.ProtocolVersion != "0.2.0" || plan.SemanticsVersion == "daily-flow-v1", "daily semantics version");
+        return new(runId, plan, TaskReductionMode.DailyFlow);
+    }
+
+    internal static TaskRunReducer CreateProvider(string runId, TaskPlan plan)
+    {
+        TaskProtocolValidation.ProviderPlan(plan);
+        return new(runId, plan, TaskReductionMode.ProviderExecution);
+    }
+
+    private TaskRunReducer(string runId, TaskPlan plan, TaskReductionMode mode)
+    {
+        _plan = TaskProtocolJson.Copy(plan);
+        _mode = mode;
         _tasks = _plan.Tasks.ToDictionary(t => t.Id, StringComparer.Ordinal);
         RunId = runId;
         foreach (var task in _tasks.Values.Where(t => t.Enabled)) _effective[task.Id] = new(task.Id, "pending", "tasks.not_started", "", 0, []);
@@ -74,17 +89,31 @@ internal sealed partial class TaskRunReducer
     }
 
     internal void Accept(TaskObservationBatch batch, TaskLogBatch logs)
-        => AcceptCore(batch, logs, null);
+    {
+        TaskProtocolValidation.Require(Daily, "daily reducer required");
+        var available = AvailableEvidence(logs);
+        TaskProtocolValidation.Observation(batch, RunId, _attemptId, _selected, available);
+        AcceptCore(new(batch.Observations, batch.RunBoundary, batch.BoundaryEvidence,
+            batch.BoundaryStructuredEvidenceRefs, batch.Incidents), logs, available);
+    }
 
-    internal void AcceptStructured(TaskObservationBatch batch, IReadOnlySet<string> authenticatedEvidence)
-        => AcceptCore(batch, new([], false), authenticatedEvidence);
+    internal void AcceptProviderFacts(ProviderExecutionFacts facts, IReadOnlySet<string> authenticatedEvidence)
+    {
+        TaskProtocolValidation.Require(_mode == TaskReductionMode.ProviderExecution, "provider reducer required");
+        TaskProtocolValidation.ProviderFacts(facts, RunId, _attemptId, _selected, authenticatedEvidence);
+        AcceptCore(new(facts.Observations, facts.RunBoundary, [], facts.BoundaryEvidenceRefs, null),
+            new([], false), new());
+    }
 
-    private void AcceptCore(TaskObservationBatch batch, TaskLogBatch logs, IReadOnlySet<string>? structuredEvidence)
+    private HashSet<(string, int, long)> AvailableEvidence(TaskLogBatch logs)
     {
         var available = new HashSet<(string, int, long)>(_evidence);
         foreach (var line in logs.Records) available.Add((line.SourceId, line.Epoch, line.Sequence));
-        TaskProtocolValidation.Observation(batch, RunId, _attemptId, _selected, available, structuredEvidence);
-        TaskProtocolValidation.Require(batch.ProtocolVersion == _plan.ProtocolVersion, "negotiated observation version");
+        return available;
+    }
+
+    private void AcceptCore(TaskReductionFacts batch, TaskLogBatch logs, HashSet<(string, int, long)> available)
+    {
         TaskProtocolValidation.Require(available.Count <= 262144 && _accepted.Count + batch.Observations.Count(o => !_accepted.ContainsKey(o.Id)) <= 65536,
             "resource_limit: attempt evidence ledger");
         if (Daily) foreach (var observation in batch.Observations)

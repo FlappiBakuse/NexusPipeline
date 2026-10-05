@@ -17,21 +17,17 @@ internal static class TaskProtocolManifest
             if (manifest["taskProtocol"] is not JsonObject protocol)
                 throw new InvalidDataException("taskProtocol must be an object");
             string? version = protocol["version"]?.GetValue<string>();
-            if (version is not ("0.1.0" or "0.1.1" or "0.2.0"))
+            if (version != "0.2.0")
                 throw new InvalidDataException("unsupported taskProtocol.version");
-            if (version is "0.1.1" or "0.2.0")
-                Fields(protocol, "version", "discoverScript", "retryScript", "readResources", "localization", "configRules", "environmentChecks", "repairRules");
-            else
-                Fields(protocol, "version", "discoverScript", "retryScript", "readResources", "localization", "configRules", "environmentChecks");
+            Fields(protocol, "version", "discoverScript", "retryScript", "readResources", "localization", "configRules", "environmentChecks", "repairRules");
             ValidateLocalization(protocol["localization"], true);
             if (manifest.ContainsKey("configValidator"))
-                throw new InvalidDataException("taskProtocol 0.1.0 cannot declare configValidator");
+                throw new InvalidDataException("taskProtocol cannot declare configValidator");
             ValidateConfigRules(protocol["configRules"]);
             ValidateEnvironmentChecks(protocol["environmentChecks"]);
-            if (version == "0.1.1") ValidateLegacyRepairRules(protocol["repairRules"], protocol["configRules"]);
-            if (version == "0.2.0") ValidateRepairRules(protocol["repairRules"], protocol["configRules"]);
+            ValidateRepairRules(protocol["repairRules"], protocol["configRules"]);
             if (!PluginRepositoryCatalog.TryParseVersion(manifest["minHostVersion"]?.GetValue<string>() ?? "", out var minimum)
-                || !PluginRepositoryCatalog.TryParseVersion(version == "0.2.0" ? "0.16.14" : version == "0.1.1" ? "0.16.9" : "0.16.8", out var required)
+                || !PluginRepositoryCatalog.TryParseVersion("0.16.15", out var required)
                 || minimum.CompareTo(required) < 0)
                 throw new InvalidDataException("taskProtocol minHostVersion is below the negotiated protocol minimum");
             foreach (string field in new[] { "discoverScript", "retryScript" }) ScriptPath(protocol[field]?.GetValue<string>());
@@ -46,7 +42,7 @@ internal static class TaskProtocolManifest
                 if (resource.ContainsKey("sha256")) resourceFields.Add("sha256");
                 if (resource.ContainsKey("operationalFields"))
                 {
-                    if (version is not ("0.1.1" or "0.2.0") || resource["source"]?.GetValue<string>() != "root"
+                    if (resource["source"]?.GetValue<string>() != "root"
                         || resource["format"]?.GetValue<string>() != "json"
                         || resource["operationalFields"] is not JsonObject operational
                         || operational.Count is 0 or > 2)
@@ -126,8 +122,7 @@ internal static class TaskProtocolManifest
                 TaskProtocolJson.Write(new { defaultLocale = localization["defaultLocale"]!.GetValue<string>(), messages })))).ToLowerInvariant();
             frozen = new("", "", localization["defaultLocale"]!.GetValue<string>(), hash, messages);
         }
-        // 0.1.1 extends the package declaration only; the phase wire envelope remains 0.1.0.
-        return new(protocol["version"]!.GetValue<string>() == "0.2.0" ? "0.2.0" : "0.1.0", Read(protocol["discoverScript"]!.GetValue<string>()),
+        return new("0.2.0", Read(protocol["discoverScript"]!.GetValue<string>()),
             Read(manifest["judgeScript"]!.GetValue<string>()), Read(protocol["retryScript"]!.GetValue<string>()),
             ((JsonArray)protocol["readResources"]!).Select(r => new TaskReadResource(
                 r!["id"]!.GetValue<string>(), r["source"]!.GetValue<string>(), r["path"]!.GetValue<string>(),
@@ -143,44 +138,6 @@ internal static class TaskProtocolManifest
             EnvironmentChecks = ReadEnvironmentChecks(protocol),
             RepairRules = ReadRepairRules(protocol),
         };
-    }
-
-    private static void ValidateLegacyRepairRules(JsonNode? value, JsonNode? configRules)
-    {
-        if (value is not JsonArray rules || rules.Count > 8)
-            throw new InvalidDataException("taskProtocol.repairRules must contain at most 8 rules");
-        var ids = new HashSet<string>(StringComparer.Ordinal);
-        var declared = ((JsonArray)configRules!).Select(r => r!["id"]!.GetValue<string>()).ToHashSet(StringComparer.Ordinal);
-        foreach (JsonNode? node in rules)
-        {
-            if (node is not JsonObject rule) throw new InvalidDataException("invalid repair rule");
-            Fields(rule, "id", "ruleId", "resourceId", "selector", "source", "format", "kind", "fromValues", "toValue", "preconditions", "explanation");
-            string id = rule["id"]?.GetValue<string>() ?? "";
-            if (!System.Text.RegularExpressions.Regex.IsMatch(id, "^[A-Za-z0-9_.:-]{1,160}$") || !ids.Add(id)
-                || !declared.Contains(rule["ruleId"]?.GetValue<string>() ?? ""))
-                throw new InvalidDataException("repair rule id or diagnostic rule invalid");
-            if (rule["resourceId"]?.GetValue<string>() != "config:config.yaml"
-                || rule["selector"] is not JsonArray { Count: 1 } selector
-                || selector[0] is not JsonValue property || !property.TryGetValue<string>(out string? field)
-                || field != "after_finish" || rule["source"]?.GetValue<string>() != "user_snapshot"
-                || rule["format"]?.GetValue<string>() != "yaml"
-                || rule["kind"]?.GetValue<string>() != "replace_enum"
-                || rule["toValue"]?.GetValue<string>() != "None")
-                throw new InvalidDataException("repair rule exceeds supported finish-action scope");
-            if (rule["preconditions"] is not JsonObject preconditions
-                || preconditions.Count != 3
-                || preconditions["snapshotKind"]?.GetValue<string>() != "file"
-                || preconditions["exclusiveResource"]?.GetValue<bool>() != true
-                || preconditions["noExtraConfig"]?.GetValue<bool>() != true)
-                throw new InvalidDataException("repair preconditions invalid");
-            if (rule["fromValues"] is not JsonArray { Count: > 0 and <= 16 } values
-                || values.Any(v => v is not JsonValue scalar || !scalar.TryGetValue<string>(out string? s)
-                    || s.Length is 0 or > 64 || s == "None")
-                || values.Select(v => v!.GetValue<string>()).Distinct(StringComparer.Ordinal).Count() != values.Count)
-                throw new InvalidDataException("repair source values invalid");
-            if (rule["explanation"]?.GetValue<string>() is not { Length: > 0 and <= 512 })
-                throw new InvalidDataException("repair explanation invalid");
-        }
     }
 
     private static void ValidateRepairRules(JsonNode? value, JsonNode? configRules)
@@ -240,8 +197,7 @@ internal static class TaskProtocolManifest
                 node["toValue"]!.GetValue<string>(), node["explanation"]!.GetValue<string>())
             { Kind = node["kind"]!.GetValue<string>(), SkipWhen = node["skipWhen"]?.DeepClone().AsObject(),
                 SnapshotKind = node["preconditions"]!["snapshotKind"]!.GetValue<string>(),
-                NoExtraConfig = node["preconditions"]!["noExtraConfig"]!.GetValue<bool>(),
-                Legacy = protocol["version"]!.GetValue<string>() == "0.1.1" }).ToArray();
+                NoExtraConfig = node["preconditions"]!["noExtraConfig"]!.GetValue<bool>() }).ToArray();
 
     private static void ValidateLocalization(JsonNode? value, bool nestedDirectory)
     {

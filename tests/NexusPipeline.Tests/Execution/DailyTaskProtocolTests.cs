@@ -34,7 +34,7 @@ public class DailyTaskProtocolTests
 
     private static TaskRunReducer Reducer(params TaskDefinition[] tasks)
     {
-        var reducer = new TaskRunReducer("run", new("0.2.0", "plan", "run", "fixture", "1", DateTimeOffset.UtcNow,
+        var reducer = TaskRunReducer.CreateDaily("run", new("0.2.0", "plan", "run", "fixture", "1", DateTimeOffset.UtcNow,
             "signature", "complete", tasks, []) { SemanticsVersion = "daily-flow-v1" });
         reducer.BeginAttempt("attempt", 1, tasks.Select(t => t.Id));
         return reducer;
@@ -144,7 +144,39 @@ public class DailyTaskProtocolTests
     }
 
     [Fact]
-    public void GapCannotBeOverwrittenByGenericEndAndLegacyPolicyIsUnchanged()
+    public void ProviderFactsAndDailyWireCannotCrossReductionModes()
+    {
+        var task = Task("task") with { CompletionPolicy = null, WorkflowRole = null, ObservationContract = null, RetryPolicy = null };
+        var plan = new TaskPlan("provider-execution-v1", "plan", "provider", "fixture", "1", DateTimeOffset.UtcNow,
+            "signature", "complete", [task], []) { SemanticsVersion = "provider-execution-v1" };
+        var provider = TaskRunReducer.CreateProvider("run", plan);
+        provider.BeginAttempt("attempt", 1, ["task"]);
+        var facts = new ProviderExecutionFacts("run", "attempt", [new()
+        {
+            Id = "event", TaskId = "task", ExecutionOrdinal = 1, Status = "running",
+            ReasonCode = "provider.engine_running", Evidence = [], StructuredEvidenceRefs = ["authenticated"],
+        }], "open", null);
+        Assert.Throws<InvalidDataException>(() => provider.AcceptProviderFacts(facts, new HashSet<string>()));
+        Assert.Equal("pending", provider.Results.Single().Status);
+        Assert.Throws<InvalidDataException>(() => provider.AcceptProviderFacts(facts with { AttemptId = "other" }, new HashSet<string> { "authenticated" }));
+        provider.AcceptProviderFacts(facts, new HashSet<string> { "authenticated" });
+        Assert.Equal("running", provider.Results.Single().Status);
+        Assert.Throws<InvalidDataException>(() => Observe(provider, "task", "succeeded", "flow_ended", "end", 1));
+        var daily = Reducer(Task("task"));
+        Assert.Throws<InvalidDataException>(() => daily.AcceptProviderFacts(facts, new HashSet<string> { "authenticated" }));
+        foreach (string version in new[] { "0.1.0", "0.1.1", "provider-execution-v1" })
+            Assert.Throws<InvalidDataException>(() => daily.Accept(new()
+            {
+                ProtocolVersion = version, Type = "observation", RunId = "run", AttemptId = "attempt",
+                Observations = [], RunBoundary = "open", BoundaryEvidence = [], Diagnostics = [],
+            }, new([], false)));
+        Assert.Throws<InvalidDataException>(() => TaskRunReducer.CreateDaily("run", plan));
+        Assert.Throws<InvalidDataException>(() => TaskRunReducer.CreateProvider("run", daily.OriginalPlan));
+        Assert.Equal("pending", daily.Results.Single().Status);
+    }
+
+    [Fact]
+    public void GapCannotBeOverwrittenAndOldProtocolCannotEnterDailyReducer()
     {
         var reducer = Reducer(Task("task"));
         Observe(reducer, "task", "running", "scope_started", "start", 1);
@@ -152,10 +184,8 @@ public class DailyTaskProtocolTests
         Observe(reducer, "task", "succeeded", "flow_ended", "end", 2);
         Assert.Equal("failed", reducer.Results.Single().Status);
         var legacy = Task("task") with { CompletionPolicy = null, WorkflowRole = null, ObservationContract = null, RetryPolicy = null };
-        var old = new TaskRunReducer("run", new("0.1.0", "plan", "run", "fixture", "1", DateTimeOffset.UtcNow,
-            "signature", "complete", [legacy], []));
-        old.BeginAttempt("attempt", 1, ["task"]);
-        old.FinishAttempt("completed");
-        Assert.Equal("unknown", old.Results.Single().Status);
+        Assert.Throws<InvalidDataException>(() => TaskRunReducer.CreateDaily("run",
+            new("0.1.0", "plan", "run", "fixture", "1", DateTimeOffset.UtcNow,
+                "signature", "complete", [legacy], [])));
     }
 }

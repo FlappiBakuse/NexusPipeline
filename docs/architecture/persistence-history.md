@@ -35,12 +35,11 @@
 │   └── staging/          可重建暂存区（上传/校验临时文件，启动时整体清扫）
 └── state/
     ├── scheduler-state.json
-    ├── appearance-migration.json   旧外观数据搬迁标记
     ├── update-policy-cache.json     经验证的更新策略响应缓存
     └── plugins/          catalog-cache.json、ownership.json、pending.json、staging/、backup/
 ```
 
-`service.pid` 与 `web.port` 是可重建的 ephemeral runtime metadata；服务正常退出时清理。`runtime/staging/` 同属 ephemeral：仅承载单次请求内的上传/校验临时文件，启动时无条件清扫残留。`scheduler-state.json` 保存定时 occurrence、重试状态、冻结队列计划及恢复所需快照，属于 internal durable runtime state，不按缓存处理；`appearance-migration.json` 记录一次性旧外观数据搬迁的完成状态，只在搬迁成功后写入；插件安装事务的 `staging/` 与 `backup/` 需要跨重启存活，因此位于 `state/` 而非 `runtime/`。
+`service.pid` 与 `web.port` 是可重建的 ephemeral runtime metadata；服务正常退出时清理。`runtime/staging/` 同属 ephemeral：仅承载单次请求内的上传/校验临时文件，启动时无条件清扫残留。`scheduler-state.json` 保存定时 occurrence、重试状态、冻结队列计划及恢复所需快照，属于 internal durable runtime state，不按缓存处理；插件安装事务的 `staging/` 与 `backup/` 需要跨重启存活，因此位于 `state/` 而非 `runtime/`。
 
 `RuntimeStateLayout` 在服务启动时创建当前目录；CLI 端口发现读取 `.nxp/runtime/web.port`，找不到时按设置端口范围探测。
 

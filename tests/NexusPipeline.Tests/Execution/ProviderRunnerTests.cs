@@ -80,6 +80,9 @@ public sealed class ProviderRunnerTests : IClassFixture<HostTestScope>
             }
             Assert.Single(execution.SnapshotRecords());
             Assert.NotNull(record.TaskReport);
+            Assert.Equal(1, record.TaskReport["schemaVersion"]!.GetValue<int>());
+            Assert.Equal("provider-execution-v1", record.TaskReport["semanticsVersion"]!.GetValue<string>());
+            Assert.Equal("provider-execution-v1", record.TaskReport["originalPlan"]!["protocolVersion"]!.GetValue<string>());
             Assert.Equal("done", execution.Status);
         }
         finally { Directory.Delete(root, true); }

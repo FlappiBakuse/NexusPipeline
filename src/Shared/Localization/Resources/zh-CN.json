@@ -37,6 +37,7 @@
   "api.error.history_invalid_status": "状态筛选值无效",
   "api.error.history_invalid_user_key": "用户标识格式无效",
   "api.error.history_not_found": "记录不存在",
+  "api.error.unsupported_history_index": "不支持的历史索引已保留。请在新安装目录重新配置，并用完整备份的旧版查看旧历史。",
   "api.error.history_paging_invalid": "limit 必须在 1 到 200 之间，offset 不能小于 0",
   "api.error.history_range_required": "日期范围必须同时提供起止日期",
   "api.error.history_range_reversed": "结束日期不能早于开始日期",
@@ -587,5 +588,6 @@
   "user.name_invalid": "用户名不能为空且不能包含非法字符",
   "validation.invalid_json": "请求体不是有效 JSON",
   "validation.invalid_request": "请求格式无效",
-  "run.configuration_setup_required": "插件包含破坏性配置更新，请重新设置并保存脚本实例，再保存此用户的配置。"
+  "run.configuration_setup_required": "插件包含破坏性配置更新，请重新设置并保存脚本实例，再保存此用户的配置。",
+  "cli.transport.other_generation": "[错误] 另一安装代际的 NexusPipeline 正在运行。请先关闭旧程序和连接，再启动当前代际。"
 }

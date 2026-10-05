@@ -14,7 +14,7 @@ public class RunAttempt
 
     public bool OutputIncomplete { get; set; }
 
-    /// <summary>稳定的结果语义 key；Reason 保留当前展示文本并兼容既有历史文件。</summary>
+    /// <summary>稳定的结果语义 key；Reason 保存本次展示文本。</summary>
     public string ReasonCode { get; set; } = "";
 
     /// <summary>结果语义参数；只保存稳定标识或数字，不保存翻译后的文案。</summary>
@@ -51,11 +51,13 @@ public class RunHistoryScreenshot
 
 public class RunRecord
 {
-    /// <summary>可选的四层事实；旧历史缺省时不合成已核验成功。</summary>
+    public int SchemaVersion { get; set; } = 1;
+
+    /// <summary>可选的四层事实；缺省时不合成已核验成功。</summary>
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public RunOutcomeDimensions? Outcomes { get; set; }
 
-    /// <summary>Versioned immutable task facts; absent for legacy runs. Contains no raw configuration.</summary>
+    /// <summary>Versioned immutable task facts; absent for ordinary scripts. Contains no raw configuration.</summary>
     public System.Text.Json.Nodes.JsonObject? TaskReport { get; set; }
 
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
@@ -96,7 +98,7 @@ public class RunRecord
 
     public string ResultDetail { get; set; } = "";
 
-    /// <summary>稳定的运行结果语义 key；旧记录缺少该字段时由客户端回退 ResultDetail。</summary>
+    /// <summary>稳定的运行结果语义 key，供展示层本地化当前结果。</summary>
     public string ResultCode { get; set; } = "";
 
     /// <summary>运行结果语义参数，供不同语言的展示层重新组织文案。</summary>

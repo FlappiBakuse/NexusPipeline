@@ -12,14 +12,8 @@ internal static partial class TaskProtocolValidation
         ["not_executed"] = "blocked",
     };
 
-    private static void DailyTask(TaskDefinition task, string version)
+    private static void DailyTask(TaskDefinition task)
     {
-        if (version != "0.2.0")
-        {
-            Require(task.CompletionPolicy is null && task.WorkflowRole is null
-                && task.ObservationContract is null && task.RetryPolicy is null, "daily policy requires 0.2.0");
-            return;
-        }
         Require(task.CompletionPolicy is "flow" or "authoritative", "completion policy");
         Require(task.WorkflowRole is "daily" or "technical" or "manual_only", "workflow role");
         Require(task.WorkflowRole != "manual_only" || !task.Enabled && !task.CountsAsUnit, "manual task scope");
@@ -48,13 +42,8 @@ internal static partial class TaskProtocolValidation
         foreach (string reference in retry.LimitRefs) Text(reference);
     }
 
-    private static void DailyObservation(TaskObservation observation, string version)
+    private static void DailyObservation(TaskObservation observation)
     {
-        if (version != "0.2.0")
-        {
-            Require(observation.FactKind is null, "daily fact requires 0.2.0");
-            return;
-        }
         Require(observation.FactKind is not null
             && DailyFacts.TryGetValue(observation.FactKind, out string? status)
             && status == observation.Status, "daily fact/status");

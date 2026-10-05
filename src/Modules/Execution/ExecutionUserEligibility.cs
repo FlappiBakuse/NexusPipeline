@@ -10,9 +10,4 @@ internal static class ExecutionUserEligibility
         int maximum = user.Binding.MaxSuccessfulRunsPerDay;
         return maximum > 0 && successfulRunsToday >= maximum;
     }
-
-    public static string DailySuccessCapReason(int successfulRunsToday, int maximum)
-    {
-        return $"当天已成功运行 {successfulRunsToday}/{maximum} 次，达到最多成功运行次数";
-    }
 }

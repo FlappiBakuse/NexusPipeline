@@ -104,6 +104,7 @@ internal static class ApiHistoryHandler
             Audit.Log(Audit.Web, "查询历史记录", $"{groups.Count} 个日期（{rangeLabel}）");
             await HttpHelper.WriteJsonAsync(context, new
             {
+                formatStatus = history.FormatStatus,
                 dates = groups.Select(group => new { date = group.Key, count = group.Count() }).ToList(),
             }).ConfigureAwait(false);
             return;
@@ -128,6 +129,7 @@ internal static class ApiHistoryHandler
             {
                 date = day.ToString("yyyy-MM-dd"),
                 users,
+                formatStatus = history.FormatStatus,
             }).ConfigureAwait(false);
             return;
         }
@@ -218,6 +220,7 @@ internal static class ApiHistoryHandler
                 date = day.ToString("yyyy-MM-dd"),
                 userKey,
                 historyDir = AppPaths.HistoryDir,
+                formatStatus = history.FormatStatus,
                 records = dayRecords
                     .OrderBy(record => record.StartTime)
                     .Select(record =>
@@ -258,7 +261,7 @@ internal static class ApiHistoryHandler
             int offset = int.TryParse(context.Request.QueryString["offset"], out int o) ? Math.Max(0, o) : 0;
             int limit = int.TryParse(context.Request.QueryString["limit"], out int l) ? Math.Max(1, l) : 20;
             Audit.Log(Audit.Web, "查询历史记录", $"{recordViews.Count} 条（{historyRangeLabel}，分页 offset={offset} limit={limit}）");
-            await HttpHelper.WriteJsonAsync(context, new { total = recordViews.Count, records = recordViews.Skip(offset).Take(limit).ToList() }).ConfigureAwait(false);
+            await HttpHelper.WriteJsonAsync(context, new { formatStatus = history.FormatStatus, total = recordViews.Count, records = recordViews.Skip(offset).Take(limit).ToList() }).ConfigureAwait(false);
             return;
         }
         Audit.Log(Audit.Web, "查询历史记录", $"{recordViews.Count} 条（{historyRangeLabel}）");

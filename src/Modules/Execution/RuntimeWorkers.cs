@@ -116,8 +116,6 @@ internal sealed class RuntimeWorkers : IAsyncDisposable
         return true;
     }
 
-    public bool ConsumeJudgeResult() => ConsumeJudgeResultAsync().GetAwaiter().GetResult();
-
     public async Task<bool> ConsumeJudgeResultAsync()
     {
         if (!_judgeWorker.TryTakeCompleted(out JudgeWorkerResult completed, out Exception? error))

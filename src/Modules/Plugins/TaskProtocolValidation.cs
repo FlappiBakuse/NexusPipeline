@@ -7,7 +7,7 @@ internal static partial class TaskProtocolValidation
 {
     internal static void Discovery(TaskDiscovery discovery)
     {
-        Require((discovery.ProtocolVersion is "0.1.0" or "0.2.0") && discovery.Type == "discovery", "discovery envelope");
+        Require(discovery.ProtocolVersion == "0.2.0" && discovery.Type == "discovery", "discovery envelope");
         Require(discovery.Coverage is "complete" or "partial" or "unsupported", "coverage");
         Require(discovery.Tasks is { Length: <= 1024 }, "task count");
         Diagnostics(discovery.Diagnostics, discovery.ProtocolVersion);
@@ -45,12 +45,26 @@ internal static partial class TaskProtocolValidation
             }
             Require(fields.Add(field.ResourceId + "\n" + field.Selector.ToJsonString()), "duplicate selection field");
         }
+        TaskGraph(discovery.Tasks, true);
+    }
+
+    internal static void ProviderPlan(TaskPlan plan)
+    {
+        Require(plan.ProtocolVersion == "provider-execution-v1" && plan.SemanticsVersion == "provider-execution-v1"
+            && plan.Origin == "provider" && plan.Coverage == "complete", "provider plan identity");
+        Require(plan.Tasks is { Length: <= 1024 }, "task count");
+        Diagnostics(plan.Diagnostics, "0.2.0");
+        TaskGraph(plan.Tasks, false);
+    }
+
+    private static void TaskGraph(TaskDefinition[] definitions, bool daily)
+    {
         var tasks = new Dictionary<string, TaskDefinition>(StringComparer.Ordinal);
-        foreach (var task in discovery.Tasks)
+        foreach (var task in definitions)
         {
             Require(task is not null, "null task");
             Text(task.Id); Text(task.Name); Text(task.SourceKey); Text(task.RetryUnitId);
-            TaskDisplaySnapshot.ValidateReference(task.NameText, discovery.ProtocolVersion);
+            TaskDisplaySnapshot.ValidateReference(task.NameText, "0.2.0");
             Require(tasks.TryAdd(task.Id, task), "duplicate task identity");
             Require(task.Role is "business" or "technical" or "cleanup", "role");
             Require(task.RetryRisk is "safe" or "conditional" or "unsafe" or "unknown", "risk");
@@ -60,7 +74,9 @@ internal static partial class TaskProtocolValidation
             if (task.ParentId is not null) Text(task.ParentId);
             if (task.ConfigRef is not null) Text(task.ConfigRef);
             Require(!task.CountsAsUnit || task.ParentId is null, "child cannot count twice");
-            DailyTask(task, discovery.ProtocolVersion);
+            if (daily) DailyTask(task);
+            else Require(task.CompletionPolicy is null && task.WorkflowRole is null
+                && task.ObservationContract is null && task.RetryPolicy is null, "provider task policy");
         }
         foreach (var task in tasks.Values)
         {
@@ -83,7 +99,7 @@ internal static partial class TaskProtocolValidation
         IReadOnlySet<string> declaredConfigIds,
         IReadOnlySet<string> declaredResourceIds)
     {
-        Require(protocol.Version is "0.1.0" or "0.2.0", "unsupported task protocol");
+        Require(protocol.Version == "0.2.0", "unsupported task protocol");
         TaskConfigAssessment? assessment = discovery.ConfigAssessment;
         Require(assessment is not null, "config assessment required");
         if (assessment is null) throw new InvalidDataException("protocol_error: config assessment required");
@@ -239,26 +255,42 @@ internal static partial class TaskProtocolValidation
         IReadOnlySet<string> selected, IReadOnlySet<(string, int, long)> evidence,
         IReadOnlySet<string>? structuredEvidence = null)
     {
-        Require((batch.ProtocolVersion is "0.1.0" or "0.2.0") && batch.Type == "observation" && batch.RunId == runId && batch.AttemptId == attemptId, "observation identity");
-        Require(batch.Observations is { Length: <= 2048 }, "observation count");
-        Require(batch.RunBoundary is "open" or "ended" or "aborted" or "unknown", "boundary");
-        Require(structuredEvidence is null ? batch.StructuredEvidenceVersion is null : batch.StructuredEvidenceVersion == 1,
-            "structured evidence must be authenticated by Host");
-        bool structuredBoundary = StructuredEvidence(batch.BoundaryStructuredEvidenceRefs, structuredEvidence);
-        Evidence(batch.BoundaryEvidence, evidence, batch.RunBoundary is "ended" or "aborted" && !structuredBoundary);
+        Require(batch.ProtocolVersion == "0.2.0" && batch.Type == "observation"
+            && batch.RunId == runId && batch.AttemptId == attemptId, "observation identity");
+        Require(structuredEvidence is null && batch.StructuredEvidenceVersion is null, "external structured evidence");
         Diagnostics(batch.Diagnostics, batch.ProtocolVersion);
         Require(batch.CursorState is null || System.Text.Encoding.UTF8.GetByteCount(batch.CursorState.ToJsonString()) <= 64 * 1024, "adapter cursor limit");
+        ReductionFacts(new(batch.Observations, batch.RunBoundary, batch.BoundaryEvidence,
+            batch.BoundaryStructuredEvidenceRefs, batch.Incidents), selected, evidence, null, true);
+    }
+
+    internal static void ProviderFacts(ProviderExecutionFacts facts, string runId, string attemptId,
+        IReadOnlySet<string> selected, IReadOnlySet<string> authenticatedEvidence)
+    {
+        Require(facts.RunId == runId && facts.AttemptId == attemptId, "provider fact identity");
+        ReductionFacts(new(facts.Observations, facts.RunBoundary, [], facts.BoundaryEvidenceRefs, null),
+            selected, new HashSet<(string, int, long)>(), authenticatedEvidence, false);
+    }
+
+    private static void ReductionFacts(TaskReductionFacts batch, IReadOnlySet<string> selected,
+        IReadOnlySet<(string, int, long)> evidence, IReadOnlySet<string>? structuredEvidence, bool daily)
+    {
+        Require(batch.Observations is { Length: <= 2048 }, "observation count");
+        Require(batch.RunBoundary is "open" or "ended" or "aborted" or "unknown", "boundary");
+        bool structuredBoundary = StructuredEvidence(batch.BoundaryStructuredEvidenceRefs, structuredEvidence);
+        Evidence(batch.BoundaryEvidence, evidence, batch.RunBoundary is "ended" or "aborted" && !structuredBoundary);
         var ids = new HashSet<string>(StringComparer.Ordinal);
         foreach (var observation in batch.Observations)
         {
             Require(observation is not null, "null observation");
             Text(observation.Id); Text(observation.TaskId); Text(observation.ReasonCode);
-            TaskDisplaySnapshot.ValidateReference(observation.ReasonText, batch.ProtocolVersion);
+            TaskDisplaySnapshot.ValidateReference(observation.ReasonText, "0.2.0");
             Require(ids.Add(observation.Id) && selected.Contains(observation.TaskId), "observation task/id");
             Require(observation.ExecutionOrdinal > 0, "execution ordinal");
             Require(observation.Status is "running" or "succeeded" or "failed" or "skipped" or "blocked" or "unknown", "observation status");
             Require(observation.Status != "skipped" || observation.SkipKind is "satisfied" or "inapplicable", "skip kind");
-            DailyObservation(observation, batch.ProtocolVersion);
+            if (daily) DailyObservation(observation);
+            else Require(observation.FactKind is null, "provider fact kind");
             bool structured = StructuredEvidence(observation.StructuredEvidenceRefs, structuredEvidence);
             Evidence(observation.Evidence, evidence, observation.Status is not "unknown" && !structured);
         }
@@ -275,7 +307,7 @@ internal static partial class TaskProtocolValidation
                 Require(incident.Kind != "unattributed_error" || incident.TaskId is null, "unattributed incident task");
                 Require(incident.Resolution is "open" or "recovered" or "terminal", "incident resolution");
                 Require(events.Add(incident.Id + "\n" + incident.Resolution), "duplicate incident event");
-                TaskDisplaySnapshot.ValidateReference(incident.ReasonText, batch.ProtocolVersion);
+                TaskDisplaySnapshot.ValidateReference(incident.ReasonText, "0.2.0");
                 Evidence(incident.Evidence, evidence, true);
             }
         }

@@ -93,7 +93,6 @@ internal sealed class Bootstrap
         {
             _pluginAutoUpdateService.OnStartupInstallRecoveryCompleted();
         }
-        AppearanceLegacyMigration.ApplyOnce();
         _runtime.Plugins.LoadAll();
         _runtime.History.Cleanup(_runtime.Settings.HistoryRetentionDays);
         _runtime.Scheduler.Start();

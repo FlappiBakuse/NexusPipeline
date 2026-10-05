@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 
 namespace NexusPipeline.Modules.Plugins.Contracts;
 
-/// <summary>Manifest-owned configuration rule declaration for taskProtocol 0.1.0.</summary>
+/// <summary>Manifest-owned configuration rule declaration for taskProtocol 0.2.0.</summary>
 internal sealed record TaskConfigRuleDescriptor(string RuleId, bool Required, string Criticality);
 
 /// <summary>Frozen, declarative repair limited to a saved user resource.</summary>
@@ -15,7 +15,6 @@ internal sealed record TaskConfigRepairDescriptor(string Id, string RuleId, stri
     public JsonObject? SkipWhen { get; init; }
     public string SnapshotKind { get; init; } = "any";
     public bool NoExtraConfig { get; init; }
-    public bool Legacy { get; init; }
 }
 
 /// <summary>Manifest-owned, non-arbitrary environment target declaration.</summary>
