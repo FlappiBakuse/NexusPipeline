@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import net from "node:net";
+import http from "node:http";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import {
@@ -83,6 +84,21 @@ export async function fetchWithTimeout(url, options = {}, timeoutMs = 5000) {
   } finally {
     clearTimeout(timer);
   }
+}
+
+export function probeHttpStatus(url, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    // Cold fetch initialization must not consume the readiness deadline; the
+    // probe also bounds draining the body, not just receiving its headers.
+    const request = http.get(url, { agent: false }, response => {
+      response.on("error", reject);
+      response.on("end", () => resolve(response.statusCode));
+      response.resume();
+    });
+    const timer = setTimeout(() => request.destroy(new Error(`HTTP 请求超时（${timeoutMs}ms）：${url}`)), timeoutMs);
+    request.on("error", reject);
+    request.on("close", () => clearTimeout(timer));
+  });
 }
 
 function assertSafeTree(source, root) {
