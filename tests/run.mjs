@@ -66,6 +66,8 @@ function step(label) {
 }
 
 async function run(command, args, options = {}) {
+  const {logRoot = runRoot, ...processOptions} = options;
+  options = processOptions;
   let env = options.env ?? process.env;
   if (process.env.NEXUS_TEST_ARTIFACT_ROOT) {
     const root = process.env.NEXUS_TEST_ARTIFACT_ROOT;
@@ -82,7 +84,7 @@ async function run(command, args, options = {}) {
     }
   }
   if(batchContext) {
-    const log=path.join(runRoot,"commands.log");fs.mkdirSync(runRoot,{recursive:true});
+    const log=path.join(logRoot,"commands.log");fs.mkdirSync(logRoot,{recursive:true});
     fs.appendFileSync(log,JSON.stringify([command,...args])+"\n");
     const onOutput=options.onOutput;
     options={...options,onOutput:text=>{fs.appendFileSync(log,text);onOutput?.(text);}};
@@ -185,7 +187,7 @@ async function runBatch() {
   workspace=stageWorkspace(projectRoot,process.env.NEXUS_TEST_ARTIFACT_ROOT,invocationBudget,"Host",{
     dotnetRequired:batchContext.batch.units.some(unit=>unit.kind==="backend"||unit.kind==="partner-jint"||unit.preparations.some(name=>name.includes("test-build"))||unit.id==="host.architecture.backend")});
   executionRoot=workspace.directory;frontendDir=path.join(executionRoot,"frontend");e2eDir=path.join(executionRoot,"tests/e2e");
-  let primary=0;
+  let primary=0, storeOutcome=null;
   for(const unit of batchContext.batch.units) {
     const result={id:unit.id,providedObligations:unit.provides,completedCaseIds:[],completedMethodIds:[],completedScenarioIds:[],completedEditorCaseIds:[],
       status:"NOT_RUN",exitCode:4,rawEvidence:[],real:[],substituted:[]};
@@ -262,7 +264,22 @@ async function runBatch() {
           if(!code) result.completedScenarioIds=unit.expectedScenarioIds;
         } finally {if(getProcessRunnerState().cleanupComplete) staged.release();}
       } else {
-        code=await runGate(unit.id);
+        if (unit.id === "host.integration.restart-update"
+          && batchContext.batch.units.some(item => item.id === "host.integration.store")) {
+          const prepared = await publishTestHost({withFrontend:false});
+          if (prepared) throw Object.assign(new Error("Test Host preparation failed"), {exitCode:prepared});
+          const storeRunId = `${batchParentId}-host-integration-store`;
+          const storeRunRoot = resolveTestRunRoot(projectRoot, storeRunId);
+          fs.mkdirSync(storeRunRoot, {recursive:true});
+          const outcomes = await Promise.allSettled([runGate(unit.id),
+            runStoreDiagnostic({ownedRunId:storeRunId, ownedRunRoot:storeRunRoot})]);
+          storeOutcome = outcomes[1];
+          if (outcomes[0].status === "rejected") throw outcomes[0].reason;
+          code = outcomes[0].value;
+        } else if (unit.id === "host.integration.store" && storeOutcome) {
+          if (storeOutcome.status === "rejected") throw storeOutcome.reason;
+          code = storeOutcome.value;
+        } else code=await runGate(unit.id);
         if(!code&&policy.integrationScenarios?.[unit.id]) {
           const finite=finiteResults.findLast(item=>({execution:"H-E01",config:"H-E02",control:"H-E03",schedule:"H-E04"}[item.group])===policy.integrationScenarios[unit.id]);
           if(!finite||finite.exitCode) throw new Error("Missing finite production scenario evidence");
@@ -451,34 +468,35 @@ async function runFinite(selectedGroup) {
   return code;
 }
 
-async function runStoreDiagnostic() {
+async function runStoreDiagnostic({ownedRunId=runId, ownedRunRoot=runRoot}={}) {
   workspace ??= stageWorkspace(projectRoot, process.env.NEXUS_TEST_ARTIFACT_ROOT, invocationBudget);
   executionRoot = workspace.directory;
   frontendDir = path.join(executionRoot, "frontend");
   let code = await publishTestHost({ withFrontend: false });
   if (code !== 0) return code;
   code = await run("dotnet", ["build", "tests/fixtures/NexusPipeline.TestPlugin/NexusPipeline.TestPlugin.csproj",
-    "-c", "Release", "-p:NexusTestHost=true", "-p:UseSharedCompilation=false", "--disable-build-servers", "--nologo"]);
+    "-c", "Release", "-p:NexusTestHost=true", "-p:UseSharedCompilation=false", "--disable-build-servers", "--nologo"], {logRoot:ownedRunRoot});
   if (code !== 0) return code;
-  const plan = path.join(runRoot, "http-plan.json");
+  const plan = path.join(ownedRunRoot, "http-plan.json");
   code = await run(pythonCommand, ["tests/system/store-fixture.py",
-    path.join(executionRoot, "bin/test-host/NexusPipeline.TestPlugin/Release/net10.0/NexusPipeline.TestPlugin.dll"), plan, runId]);
+    path.join(executionRoot, "bin/test-host/NexusPipeline.TestPlugin/Release/net10.0/NexusPipeline.TestPlugin.dll"), plan, ownedRunId], {logRoot:ownedRunRoot});
   if (code !== 0) return code;
   const env = testHostEnvironment({ runtimeName: "runtime", webPort: await findAvailablePort(),
-    exitFile: path.join(runRoot, "runtime", ".nxp", "test-host.exit") });
+    exitFile: path.join(ownedRunRoot, "runtime", ".nxp", "test-host.exit") });
+  env.NEXUS_TEST_RUN_ID = ownedRunId;
   env.NEXUS_TEST_HTTP_PLAN = plan;
-  const report = path.join(runRoot, "store-native.tap");
+  const report = path.join(ownedRunRoot, "store-native.tap");
   code = await run(process.execPath, ["--test", "--test-concurrency=1", "--test-reporter=tap",
-    `--test-reporter-destination=${report}`, "tests/system/store-core.mjs"], { env });
+    `--test-reporter-destination=${report}`, "tests/system/store-core.mjs"], { env, logRoot:ownedRunRoot });
   if (code === 0) {
     const native = fs.readFileSync(report, "utf8");
     for (const [counter, count] of Object.entries({ tests: 1, pass: 1, fail: 0, cancelled: 0, skipped: 0, todo: 0 })) {
       if (!new RegExp(`^# ${counter} ${count}\\r?$`, "m").test(native)) return 4;
     }
   }
-  fs.writeFileSync(path.join(runRoot, "store-evidence.json"), JSON.stringify({
+  fs.writeFileSync(path.join(ownedRunRoot, "store-evidence.json"), JSON.stringify({
     evidenceType: "actual", scope: "diagnostic store installation lifecycle; partial H-C09",
-    runId, source: workspace.source, exitCode: code, elapsedMs: invocationBudget.elapsedMs,
+    runId:ownedRunId, source: workspace.source, exitCode: code, elapsedMs: invocationBudget.elapsedMs,
     boundaries: { real: ["Host HTTP API", "catalog and package policy", "SHA256", "ZIP", "installation transaction",
       "managed plugin loading", "restart handoff", "uninstall"], substituted: ["external HTTPS responses", "synthetic fixture plugin"] },
     rawReport: report,
