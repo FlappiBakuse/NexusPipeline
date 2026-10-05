@@ -78,6 +78,7 @@ internal sealed class ManagedPluginRuntime
             {
                 throw new FileNotFoundException("找不到插件 entryAssembly", entryPath);
             }
+            ManagedPluginContract.Validate(pluginDirectory, _descriptor.Manifest);
             _loadContext = new PluginLoadContext(entryPath);
             Assembly assembly = _loadContext.LoadEntryAssembly(entryPath);
             Type type = assembly.GetType(_descriptor.Manifest.EntryType, throwOnError: true, ignoreCase: false)

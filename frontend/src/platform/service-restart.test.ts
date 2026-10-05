@@ -1,3 +1,4 @@
+import { CONTROL_SERVICE_NAME } from "./service-identity";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   applyRestartNavigation,
@@ -18,7 +19,7 @@ const handoff: ServiceRestartHandoff = { newPort: 58001, handoffId: "handoff-1",
 
 function statusPayload(overrides: Record<string, unknown> = {}) {
   return {
-    service: "NexusPipeline",
+    service: CONTROL_SERVICE_NAME,
     controlApiVersion: "1",
     instanceId: "instance-new",
     restartHandoffId: handoff.handoffId,

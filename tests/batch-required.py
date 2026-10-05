@@ -88,6 +88,17 @@ def native_report(kind, file):
     return {"caseIds": cases, "passed": len(cases), "failed": 0, "skipped": 0}
 
 
+def validate_unittest_report(value, suite):
+    require(value.get("schemaVersion") == 1 and value.get("suite") == suite and value.get("status") == "PASS", "Foreign/failed Python native report")
+    counts = value.get("counts", {})
+    names = {"testsRun", "failures", "errors", "skipped", "unexpectedSuccesses", "expectedFailures"}
+    require(set(counts) == names and all(type(counts[name]) is int for name in names)
+            and counts["testsRun"] > 0 and all(counts[name] == 0 for name in names - {"testsRun"}), "Zero/failed/skipped Python native cases")
+    cases = value.get("caseIds")
+    require(isinstance(cases, list) and all(isinstance(case, str) and case for case in cases)
+            and len(cases) == len(set(cases)) == counts["testsRun"], "Missing/duplicate Python native identities")
+
+
 def validate_unit(expected, actual, files, base):
     require(actual["status"] == "PASS" and actual["exitCode"] == 0, "Unit did not pass")
     require(exact(actual["providedObligations"], expected["provides"]), "Obligation provider mismatch")
@@ -148,6 +159,9 @@ def validate_unit(expected, actual, files, base):
         receipt = load(one("unit-receipt.json"))
         require(receipt["unitId"] == expected["id"] and receipt["status"] == "PASS" and receipt["exitCode"] == 0
                 and exact(receipt["provides"],expected["provides"]), "Typed assertion receipt mismatch")
+        python_suite = {"host.ci-policy": "ci", "host.release-contract": "release", "host.installer-localization": "installer"}.get(expected["id"])
+        if python_suite:
+            validate_unittest_report(load(one("python-" + python_suite + ".json")), python_suite)
         architecture_name={"plugins.inventory":"architecture.json","host.architecture.backend":"architecture-backend.json",
                            "host.architecture.frontend":"architecture-frontend.json","host.partner-contract":"partner-contract.json"}.get(expected["id"])
         if architecture_name:
@@ -169,6 +183,11 @@ def validate_unit(expected, actual, files, base):
             for name in ["fail","cancelled","skipped","todo"]:
                 require(re.search(r"^# "+name+r" 0\r?$",native,re.M),"Failed/skipped TAP counters")
             require(re.search(r"^# tests [1-9]\d*\r?$",native,re.M),"Zero TAP tests")
+            if expected["id"] == "host.integration.restart-update":
+                require(re.search(r"^# tests 9\r?$", native, re.M), "Missing update transaction cases")
+                for case in ["current update worker commits only after actual services are ready and preserves user files",
+                             "failed policy proof aborts only its exited worker and cannot repeat the apply loop"]:
+                    require(re.search(r"^ok \d+ - " + re.escape(case) + r"\r?$", native, re.M), "Missing native update transaction: " + case)
         if expected["id"].startswith("plugins.plugin.package:"):
             built = load(one("package-report.json"))
             package = safe_file(one("package-report.json").parent, "package/"+built["fileName"])

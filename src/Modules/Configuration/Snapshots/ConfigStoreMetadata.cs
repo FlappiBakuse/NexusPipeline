@@ -161,17 +161,6 @@ internal sealed class ConfigStoreMetadata
         return expected;
     }
 
-    public static void SaveFromMark(string scriptId, string userKey, ConfigSessionMark mark)
-    {
-        string path = ConfigPaths.StoreMetadataPath(scriptId, userKey);
-        ConfigStoreMetadata? existing = Load(scriptId, userKey);
-        if (existing is null && File.Exists(path))
-        {
-            throw new IOException($"配置快照元数据损坏，已保留现场：{path}");
-        }
-        Save(scriptId, userKey, FromMark(mark, existing));
-    }
-
     public static ConfigStoreMetadata Clone(ConfigStoreMetadata source)
     {
         return new ConfigStoreMetadata

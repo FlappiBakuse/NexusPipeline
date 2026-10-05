@@ -86,7 +86,7 @@ test("专项协议真实进程：选择重试、原选择恢复、最终计数�
   const worker = path.join(fixture.dir, "task-worker.mjs");
   fs.writeFileSync(worker, `import fs from 'node:fs';
     const file=${JSON.stringify(configPath)};const config=JSON.parse(fs.readFileSync(file,'utf8'));config.counter++;
-    for(const task of config.tasks.filter(t=>t.enabled)) console.log('TASK '+task.id+' '+(task.id==='b'&&config.counter===1?'FAIL':'OK'));
+    for(const task of config.tasks.filter(t=>t.enabled)) { console.log('TASK '+task.id+' START');console.log('TASK '+task.id+' '+(task.id==='b'&&config.counter===1?'FAIL':'OK')); }
     fs.writeFileSync(file,JSON.stringify(config));`);
   writeBatch(fixture, [`"${process.execPath}" "${worker}"`]);
   const response = await api("POST", "/api/scripts", { name: `Task protocol ${Date.now()}`, pluginType: "task-protocol-fixture",
@@ -102,7 +102,10 @@ test("专项协议真实进程：选择重试、原选择恢复、最终计数�
     const record = await waitForHistory(script.id);
     assert.ok(record, "Task run persisted");
     assert.equal(record.status, "success", JSON.stringify(record));
-    assert.equal(record.taskReport.summary.recovered, true);
+    assert.equal(record.taskReport.schemaVersion, 2);
+    assert.equal(record.taskReport.semanticsVersion, 'daily-flow-v1');
+    assert.equal(record.taskReport.summary.recovered, false);
+    assert.equal(record.taskReport.summary.counts.succeeded, 2);
     assert.equal(record.taskReport.attemptReports.length, 2);
     assert.deepEqual(record.taskReport.attemptReports[1].selectedTaskIds, ["b"]);
     assert.ok(record.taskReport.finalTaskResults.every(t => t.status === "succeeded"));
@@ -142,12 +145,12 @@ test("真实 Python Judge 解释器边界", { skip: enabled && pythonAvailable ?
   );
 });
 
-test("专项协议运行边界：脚本保持打开时完成监控，未确认任务保持未知", { skip }, async () => {
+test("专项协议运行边界：脚本保持打开时完成监控，缺日志任务报告失败", { skip }, async () => {
   const fixture = makeFixture("task-boundary");
   fixture.exe = path.join(fixture.dir, "task-run.bat");
   fs.writeFileSync(path.join(fixture.cfg, "config.json"), JSON.stringify({tasks:[{id:"a",enabled:true},{id:"b",enabled:true}]}));
   const worker = path.join(fixture.dir, "task-worker.mjs");
-  fs.writeFileSync(worker, "console.log('TASK a OK');console.log('RUN END');setInterval(()=>{},1000);");
+  fs.writeFileSync(worker, "console.log('TASK a START');console.log('TASK a OK');console.log('RUN END');setInterval(()=>{},1000);");
   writeBatch(fixture, [`"${process.execPath}" "${worker}"`]);
   const response = await api("POST", "/api/scripts", {name:`Task boundary ${Date.now()}`,pluginType:"task-protocol-fixture",
     rootPath:fixture.dir,gameExe:"C:\\Windows\\System32\\PING.EXE",maxAttempts:1,totalTimeoutMinutes:10,logStallTimeoutMinutes:5});
@@ -159,12 +162,15 @@ test("专项协议运行边界：脚本保持打开时完成监控，未确认�
     assert.equal(started.status,200,await started.clone().text());
     assert.equal(await waitNoRunning(60000),true,"Explicit boundary completes a live process without waiting for stall");
     const record=await waitForHistory(script.id);
-    assert.equal(record.status,"unverified",JSON.stringify(record));
-    assert.equal(record.resultCode,"tasks.unverified");
-    assert.equal(record.outcomes.businessVerification,"unverified");
+    assert.equal(record.status,"failed",JSON.stringify(record));
+    assert.equal(record.resultCode,"tasks.failed");
+    assert.equal(record.outcomes.businessVerification,"verified_failed");
     const results=record.taskReport.finalTaskResults;
     assert.equal(results.find(t=>t.taskId==='a').status,'succeeded');
-    assert.equal(results.find(t=>t.taskId==='b').status,'unknown');
+    const missing=results.find(t=>t.taskId==='b');
+    assert.equal(missing.status,'failed');
+    assert.equal(missing.reasonCode,'tasks.missing_logs');
+    assert.ok(record.taskReport.hostEvidence.some(e=>e.kind==='missing_logs'&&e.taskIds.includes('b')));
     assert.equal(record.taskReport.attemptReports[0].lifecycleOutcome,'completed');
   } finally { await deleteScript(script.id); }
 });

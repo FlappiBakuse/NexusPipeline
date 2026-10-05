@@ -3,7 +3,25 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { stopSpawnedService } from "./test-runtime.mjs";
+import http from "node:http";
+import { probeHttpStatus, stopSpawnedService } from "./test-runtime.mjs";
+
+test("HTTP readiness drains responses and bounds an unfinished body", async () => {
+  const server = http.createServer((request, response) => {
+    response.writeHead(503);
+    response.write("starting");
+    if (request.url === "/complete") response.end();
+  });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const url = `http://127.0.0.1:${server.address().port}`;
+  try {
+    assert.equal(await probeHttpStatus(url + "/complete", 1000), 503);
+    await assert.rejects(probeHttpStatus(url + "/unfinished", 50), /HTTP 请求超时/);
+  } finally {
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+  }
+});
 
 test("post-run cleanup requires confirmed exit when OS identity is unavailable", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "nxp-exit-settlement-"));

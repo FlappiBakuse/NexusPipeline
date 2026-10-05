@@ -93,20 +93,6 @@ internal sealed class PluginUserGlobalSettingsService
         return OperationResult<IReadOnlyList<PluginUserGlobalSettingsView>>.Ok(result);
     }
 
-    public async Task<OperationResult<PluginUserGlobalSettingsView>> ReadOneAsync(
-        string userId,
-        string pluginName,
-        string contributionId,
-        CancellationToken cancellationToken = default)
-    {
-        if (!TryGetRegistration(pluginName, contributionId, out PluginUserGlobalManagementRegistration? registration)
-            || registration is null)
-        {
-            return NotFound<PluginUserGlobalSettingsView>();
-        }
-        return await ReadRegistrationAsync(registration, userId, cancellationToken).ConfigureAwait(false);
-    }
-
     public async Task<OperationResult<bool>> SaveAsync(
         string userId,
         string pluginName,

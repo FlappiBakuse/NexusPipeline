@@ -26,11 +26,16 @@ let executionRoot = projectRoot;
 let frontendDir = path.join(projectRoot, "frontend");
 let e2eDir = path.join(projectRoot, "tests", "e2e");
 let runId = process.env.NEXUS_TEST_RUN_ID?.trim() || `run-${Date.now()}-${process.pid}`;
-if (["batch", "ci", "smoke", "daily", "integration", "diagnostic", "gate"].includes(process.argv[2]?.toLowerCase())
-    && !process.env.NEXUS_TEST_ARTIFACT_ROOT) {
-  const base = path.join(process.env.RUNNER_TEMP || os.tmpdir(), "NexusPipeline.Tests");
+if (["batch", "ci", "smoke", "daily", "integration", "diagnostic", "gate", "release"].includes(process.argv[2]?.toLowerCase())) {
+  const configured = process.env.NEXUS_TEST_ARTIFACT_ROOT;
+  if (configured && !path.isAbsolute(configured)) throw new Error("NEXUS_TEST_ARTIFACT_ROOT must be absolute");
+  const base = path.resolve(configured || path.join(process.env.RUNNER_TEMP || os.tmpdir(), "NexusPipeline.Tests"));
   if (!fs.existsSync(base)) {
-    fs.mkdirSync(base);
+    for (let current = path.dirname(base); ; current = path.dirname(current)) {
+      if (fs.existsSync(current) && fs.lstatSync(current).isSymbolicLink()) throw new Error("Linked test artifact root");
+      if (path.dirname(current) === current) break;
+    }
+    fs.mkdirSync(base, { recursive: true });
     fs.writeFileSync(path.join(base, ".nxp-test-artifact-root.json"), JSON.stringify({
       schemaVersion: 1, owner: "NexusPipeline.Tests", directory: base,
     }), { flag: "wx" });
@@ -61,8 +66,10 @@ function step(label) {
 }
 
 async function run(command, args, options = {}) {
+  const {logRoot = runRoot, ...processOptions} = options;
+  options = processOptions;
   let env = options.env ?? process.env;
-  if (invocationBudget) {
+  if (process.env.NEXUS_TEST_ARTIFACT_ROOT) {
     const root = process.env.NEXUS_TEST_ARTIFACT_ROOT;
     if (root) {
       const temporary = path.join(root, "tmp");
@@ -77,7 +84,7 @@ async function run(command, args, options = {}) {
     }
   }
   if(batchContext) {
-    const log=path.join(runRoot,"commands.log");fs.mkdirSync(runRoot,{recursive:true});
+    const log=path.join(logRoot,"commands.log");fs.mkdirSync(logRoot,{recursive:true});
     fs.appendFileSync(log,JSON.stringify([command,...args])+"\n");
     const onOutput=options.onOutput;
     options={...options,onOutput:text=>{fs.appendFileSync(log,text);onOutput?.(text);}};
@@ -180,7 +187,7 @@ async function runBatch() {
   workspace=stageWorkspace(projectRoot,process.env.NEXUS_TEST_ARTIFACT_ROOT,invocationBudget,"Host",{
     dotnetRequired:batchContext.batch.units.some(unit=>unit.kind==="backend"||unit.kind==="partner-jint"||unit.preparations.some(name=>name.includes("test-build"))||unit.id==="host.architecture.backend")});
   executionRoot=workspace.directory;frontendDir=path.join(executionRoot,"frontend");e2eDir=path.join(executionRoot,"tests/e2e");
-  let primary=0;
+  let primary=0, storeOutcome=null;
   for(const unit of batchContext.batch.units) {
     const result={id:unit.id,providedObligations:unit.provides,completedCaseIds:[],completedMethodIds:[],completedScenarioIds:[],completedEditorCaseIds:[],
       status:"NOT_RUN",exitCode:4,rawEvidence:[],real:[],substituted:[]};
@@ -199,6 +206,7 @@ async function runBatch() {
         result.completedCaseIds=summary.scope.completedCaseIds;result.completedScenarioIds=summary.scope.completedScenarioIds;
         result.real=summary.boundaries.real;result.substituted=summary.boundaries.substituted;
       } else if(unit.kind==="frontend") {
+        const preparations=await Promise.allSettled([(async()=>{
         const state=unit.provides.includes("host.frontend.state");
         if(state) {
           code=await runSelectedCore("frontend");
@@ -206,6 +214,14 @@ async function runBatch() {
           result.completedCaseIds=summary.scope.completedCaseIds;result.completedScenarioIds=summary.scope.completedScenarioIds;
         } else {code=await ensureNpm(frontendDir);if(!code) code=await run(npmCommand,["run","typecheck"],{cwd:frontendDir});}
         if(!code&&unit.provides.includes("host.frontend.build")) code=await buildFrontendBundle({typechecked:true});
+        })(), (async()=>{
+          if(batchContext.batch.units.some(item=>["host.integration.restart-update","host.integration.store"].includes(item.id)))
+            return publishTestHost({withFrontend:false});
+          return 0;
+        })()]);
+        const failure=preparations.find(outcome=>outcome.status==="rejected");
+        if(failure) throw failure.reason;
+        code ||= preparations[1].value;
       } else if(unit.kind==="finite") {
         code = await runFinite(unit.groups);
         for (const group of unit.groups) {
@@ -223,25 +239,47 @@ async function runBatch() {
         batchContext.partnerSource=staged.source;batchContext.partnerFingerprint=staged.sourceFingerprint;
         try {
           code=await run("dotnet",["build","tools/NexusPipeline.TaskProtocolTests","-c","Release","-p:NexusTestHost=true","-p:UseSharedCompilation=false","--disable-build-servers","--nologo"]);
-          for(const plugin of unit.partnerPlugins) for(const [index,fixture] of plugin.fixtureIds.entries()) {
-            if(code) break;
+          const trajectories=unit.partnerPlugins.flatMap(plugin=>plugin.fixtureIds.map((fixture,index)=>({plugin,fixture,index})));
+          let next=0;
+          const outcomes=await Promise.allSettled(Array.from({length:2},async()=>{
+          while(next<trajectories.length) {
+            if(code) return;
+            const {plugin,fixture,index}=trajectories[next++];
             invocationBudget.check();
             const report=path.join(runRoot,`${plugin.artifact}-${fixture}.json`);
-            const args=[path.join(executionRoot,"bin/test-host/NexusPipeline.TaskProtocolTests/Release/net8.0-windows/NexusPipeline.TaskProtocolTests.dll"),"--plugin-root",staged.directory,
+            const args=[path.join(executionRoot,"bin/test-host/NexusPipeline.TaskProtocolTests/Release/net10.0-windows/NexusPipeline.TaskProtocolTests.dll"),"--plugin-root",staged.directory,
               "--plugin",plugin.artifact,"--scenario",fixture,"--report",report];
             if(index===0) args.push("--observe-count","12");
-            code=await run("dotnet",args);
-            if(code) break;
+            const exitCode=await run("dotnet",args);
+            if(exitCode) {code ||=exitCode;return;}
             const native=JSON.parse(fs.readFileSync(report));
             if(native.artifact!==plugin.artifact||native.passed!==1||native.failed||native.skipped||JSON.stringify(native.completedCaseIds)!==JSON.stringify([fixture])
               ||index===0&&(native.observeCount!==12||!native.isolatedRunChecked||JSON.stringify(native.editorCaseIds)!==JSON.stringify(plugin.expectedEditorCaseIds))) throw new Error("Invalid production Jint/editor evidence");
             result.completedCaseIds.push(`${plugin.artifact}/${fixture}`);
             if(index===0) result.completedEditorCaseIds.push(...native.editorCaseIds);
           }
+          }));
+          const failure=outcomes.find(outcome=>outcome.status==="rejected");
+          if(failure) throw failure.reason;
           if(!code) result.completedScenarioIds=unit.expectedScenarioIds;
         } finally {if(getProcessRunnerState().cleanupComplete) staged.release();}
       } else {
-        code=await runGate(unit.id);
+        if (unit.id === "host.integration.restart-update"
+          && batchContext.batch.units.some(item => item.id === "host.integration.store")) {
+          const prepared = await publishTestHost({withFrontend:false});
+          if (prepared) throw Object.assign(new Error("Test Host preparation failed"), {exitCode:prepared});
+          const storeRunId = `${batchParentId}-host-integration-store`;
+          const storeRunRoot = resolveTestRunRoot(projectRoot, storeRunId);
+          fs.mkdirSync(storeRunRoot, {recursive:true});
+          const outcomes = await Promise.allSettled([runGate(unit.id),
+            runStoreDiagnostic({ownedRunId:storeRunId, ownedRunRoot:storeRunRoot})]);
+          storeOutcome = outcomes[1];
+          if (outcomes[0].status === "rejected") throw outcomes[0].reason;
+          code = outcomes[0].value;
+        } else if (unit.id === "host.integration.store" && storeOutcome) {
+          if (storeOutcome.status === "rejected") throw storeOutcome.reason;
+          code = storeOutcome.value;
+        } else code=await runGate(unit.id);
         if(!code&&policy.integrationScenarios?.[unit.id]) {
           const finite=finiteResults.findLast(item=>({execution:"H-E01",config:"H-E02",control:"H-E03",schedule:"H-E04"}[item.group])===policy.integrationScenarios[unit.id]);
           if(!finite||finite.exitCode) throw new Error("Missing finite production scenario evidence");
@@ -334,13 +372,13 @@ async function runSystemSuite(suite) {
     exitFile: path.join(runRoot, suite.runtimeName, ".nxp", "test-host.exit"),
   });
   console.error(`\n-- System Smoke ${suite.file} (port=${webPort}) --`);
-  return run(process.execPath, ["--test", "--test-concurrency=1", ...(batchContext?["--test-reporter=tap",`--test-reporter-destination=${path.join(runRoot,"runtime-native.tap")}`]:[]), suite.file], { env, timeoutMs: 15 * 60 * 1000 });
+  return run(process.execPath, ["--test", "--test-concurrency=1", ...(batchContext?["--test-reporter=tap",`--test-reporter-destination=${path.join(runRoot,"runtime-native.tap")}`]:[]), ...(suite.files || [suite.file])], { env, timeoutMs: 15 * 60 * 1000 });
 }
 
 async function runSystemSmoke() {
   step("System Smoke");
   for (const suite of [
-    { file: "tests/system/runtime-smoke.mjs", runtimeName: "runtime" },
+    { file: "tests/system/runtime-smoke.mjs", files: ["tests/system/runtime-smoke.mjs", "tests/system/update-transaction.mjs"], runtimeName: "runtime" },
     { file: "tests/system/judge-smoke.mjs", runtimeName: "judge-runtime" },
   ]) {
     const code = await runSystemSuite(suite);
@@ -407,7 +445,7 @@ async function runFinite(selectedGroup) {
       if (group === "control") {
         const plan = path.join(childRoot, "http-plan.json");
         const prepared = await run(pythonCommand, ["tests/system/store-fixture.py",
-          path.join(executionRoot, "bin/test-host/NexusPipeline.TestPlugin/Release/net8.0/NexusPipeline.TestPlugin.dll"), plan, childId, "--upgrade"]);
+          path.join(executionRoot, "bin/test-host/NexusPipeline.TestPlugin/Release/net10.0/NexusPipeline.TestPlugin.dll"), plan, childId, "--upgrade"]);
         if (prepared) { code = prepared; break; }
         env.NEXUS_TEST_HTTP_PLAN = plan;
       }
@@ -430,34 +468,35 @@ async function runFinite(selectedGroup) {
   return code;
 }
 
-async function runStoreDiagnostic() {
+async function runStoreDiagnostic({ownedRunId=runId, ownedRunRoot=runRoot}={}) {
   workspace ??= stageWorkspace(projectRoot, process.env.NEXUS_TEST_ARTIFACT_ROOT, invocationBudget);
   executionRoot = workspace.directory;
   frontendDir = path.join(executionRoot, "frontend");
   let code = await publishTestHost({ withFrontend: false });
   if (code !== 0) return code;
   code = await run("dotnet", ["build", "tests/fixtures/NexusPipeline.TestPlugin/NexusPipeline.TestPlugin.csproj",
-    "-c", "Release", "-p:NexusTestHost=true", "-p:UseSharedCompilation=false", "--disable-build-servers", "--nologo"]);
+    "-c", "Release", "-p:NexusTestHost=true", "-p:UseSharedCompilation=false", "--disable-build-servers", "--nologo"], {logRoot:ownedRunRoot});
   if (code !== 0) return code;
-  const plan = path.join(runRoot, "http-plan.json");
+  const plan = path.join(ownedRunRoot, "http-plan.json");
   code = await run(pythonCommand, ["tests/system/store-fixture.py",
-    path.join(executionRoot, "bin/test-host/NexusPipeline.TestPlugin/Release/net8.0/NexusPipeline.TestPlugin.dll"), plan, runId]);
+    path.join(executionRoot, "bin/test-host/NexusPipeline.TestPlugin/Release/net10.0/NexusPipeline.TestPlugin.dll"), plan, ownedRunId], {logRoot:ownedRunRoot});
   if (code !== 0) return code;
   const env = testHostEnvironment({ runtimeName: "runtime", webPort: await findAvailablePort(),
-    exitFile: path.join(runRoot, "runtime", ".nxp", "test-host.exit") });
+    exitFile: path.join(ownedRunRoot, "runtime", ".nxp", "test-host.exit") });
+  env.NEXUS_TEST_RUN_ID = ownedRunId;
   env.NEXUS_TEST_HTTP_PLAN = plan;
-  const report = path.join(runRoot, "store-native.tap");
+  const report = path.join(ownedRunRoot, "store-native.tap");
   code = await run(process.execPath, ["--test", "--test-concurrency=1", "--test-reporter=tap",
-    `--test-reporter-destination=${report}`, "tests/system/store-core.mjs"], { env });
+    `--test-reporter-destination=${report}`, "tests/system/store-core.mjs"], { env, logRoot:ownedRunRoot });
   if (code === 0) {
     const native = fs.readFileSync(report, "utf8");
     for (const [counter, count] of Object.entries({ tests: 1, pass: 1, fail: 0, cancelled: 0, skipped: 0, todo: 0 })) {
       if (!new RegExp(`^# ${counter} ${count}\\r?$`, "m").test(native)) return 4;
     }
   }
-  fs.writeFileSync(path.join(runRoot, "store-evidence.json"), JSON.stringify({
+  fs.writeFileSync(path.join(ownedRunRoot, "store-evidence.json"), JSON.stringify({
     evidenceType: "actual", scope: "diagnostic store installation lifecycle; partial H-C09",
-    runId, source: workspace.source, exitCode: code, elapsedMs: invocationBudget.elapsedMs,
+    runId:ownedRunId, source: workspace.source, exitCode: code, elapsedMs: invocationBudget.elapsedMs,
     boundaries: { real: ["Host HTTP API", "catalog and package policy", "SHA256", "ZIP", "installation transaction",
       "managed plugin loading", "restart handoff", "uninstall"], substituted: ["external HTTPS responses", "synthetic fixture plugin"] },
     rawReport: report,
@@ -489,7 +528,7 @@ async function runGate(id) {
   if (id === "host.ci-policy") {
     let code = await run(process.execPath, ["--test", "tests/scope-plan.test.mjs", "tests/core-plan.test.mjs", "tests/batch-plan.test.mjs", "tests/support/budget.test.mjs", "tests/support/test-runtime.test.mjs"]);
     if (code) return code;
-    return run(pythonCommand, ["-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py", "-v"]);
+    return run(pythonCommand, ["tests/support/unittest-runner.py", "--suite", "ci", "--report", path.join(runRoot, "python-ci.json")]);
   }
   if (id === "host.docs") {
     const required = ["README.md", "docs/user/README.md", "docs/user/README.en.md"];
@@ -501,9 +540,9 @@ async function runGate(id) {
     return 0;
   }
   if (id === "host.release-contract")
-    return run(pythonCommand, ["-m", "unittest", "tools.tests.test_host_release", "-v"]);
+    return run(pythonCommand, ["tests/support/unittest-runner.py", "--suite", "release", "--report", path.join(runRoot, "python-release.json")]);
   if (id === "host.installer-localization")
-    return run(pythonCommand, ["-m", "unittest", "tools.tests.test_host_installer", "-v"]);
+    return run(pythonCommand, ["tests/support/unittest-runner.py", "--suite", "installer", "--report", path.join(runRoot, "python-installer.json")]);
   if (id === "host.architecture.backend") {
     const project = "tools/NexusPipeline.Architecture/NexusPipeline.Architecture.csproj";
     const output = path.join(runRoot, "architecture-bin") + path.sep;
@@ -517,7 +556,7 @@ async function runGate(id) {
         `-p:NexusTestHost=${testHost}`, "--nologo"]);
       if (code) return code;
     }
-    const checker = path.join(output, "Release", "net8.0", "NexusPipeline.Architecture.dll");
+    const checker = path.join(output, "Release", "net10.0", "NexusPipeline.Architecture.dll");
     code = await run("dotnet", [checker, executionRoot, "--report", path.join(runRoot, "architecture-backend.json")]);
     if (code) return code;
     return run(pythonCommand, ["tests/architecture-fixture.py", checker]);
@@ -533,7 +572,7 @@ async function runGate(id) {
   if (id === "host.integration.store") return runStoreDiagnostic();
   if (id === "host.integration.restart-update") {
     const code = await publishTestHost({ withFrontend: false });
-    return code || runSystemSuite({ file: "tests/system/runtime-smoke.mjs", runtimeName: "runtime" });
+    return code || runSystemSuite({ file: "tests/system/runtime-smoke.mjs", files: ["tests/system/runtime-smoke.mjs", "tests/system/update-transaction.mjs"], runtimeName: "runtime" });
   }
   const finite = {
     "host.integration.execution": "execution", "host.integration.config": "config",
@@ -549,21 +588,27 @@ async function runGate(id) {
   throw new Error(`Gate has no execution contract: ${id}`);
 }
 
-/** 生产构建只发布程序自有文件，release/ 下的用户运行数据保持原样。 */
 async function runRelease() {
   step("生产构建");
+  workspace = stageWorkspace(projectRoot, process.env.NEXUS_TEST_ARTIFACT_ROOT,
+    new Budget("生产构建准备", 20 * 60 * 1000));
+  executionRoot = workspace.directory;
+  frontendDir = path.join(executionRoot, "frontend");
   let code = await buildFrontendBundle();
   if (code !== 0) return code;
-  const releaseDir = path.join(projectRoot, "release");
+  const releaseDir = path.join(runRoot, "production");
+  if (fs.existsSync(releaseDir)) throw new Error("Production output already exists");
   fs.mkdirSync(releaseDir, { recursive: true });
-  fs.rmSync(path.join(releaseDir, "wwwroot"), { recursive: true, force: true, maxRetries: 120, retryDelay: 250 });
   code = await run("dotnet", [
     "publish", "src\\NexusPipeline.csproj", "-c", "Release", "-r", "win-x64", "--self-contained", "false",
-    "-p:PublishSingleFile=true", "-p:DebugType=none", "-p:DebugSymbols=false", "-o", releaseDir, "--nologo",
+    "-p:PublishSingleFile=true", "-p:DebugType=none", "-p:DebugSymbols=false", "-p:NexusTestHost=false",
+    "-p:UseSharedCompilation=false", "--disable-build-servers", "-o", releaseDir, "--nologo",
   ], { timeoutMs: 20 * 60 * 1000 });
   if (code !== 0) return code;
   fs.cpSync(path.join(frontendDir, "dist"), path.join(releaseDir, "wwwroot"), { recursive: true });
   fs.mkdirSync(path.join(releaseDir, "plugins"), { recursive: true });
+  fs.copyFileSync(path.join(executionRoot, "README.md"), path.join(releaseDir, "README.md"));
+  console.error(`[生产构建] ${releaseDir}`);
   return verifyManifest(path.join(releaseDir, "nexus-pipeline.exe"), "requireAdministrator");
 }
 

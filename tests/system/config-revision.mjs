@@ -23,7 +23,7 @@ try {
   fs.writeFileSync(path.join(site, "config", "instances", "default.json"), original);
   fs.writeFileSync(path.join(plugin, "plugin.json"), JSON.stringify({ schemaVersion: 2,
     name: "revision-fixture", artifactName: "RevisionFixture", displayName: "Revision fixture",
-    version: "0.1.0", minHostVersion: "0.16.14", kind: "data-specialized", configurationRevision: revision,
+    version: "0.1.0", minHostVersion: "0.16.15", kind: "data-specialized", configurationRevision: revision,
     capabilities: ["no-fresh-config"], resolve: "data/resolve.json", judgeScript: "data/judge.js" }));
   fs.writeFileSync(path.join(plugin, "data", "judge.js"), "console.log(JSON.stringify({status:'running'}));");
   fs.writeFileSync(path.join(plugin, "data", "resolve.json"), JSON.stringify({
@@ -52,13 +52,11 @@ try {
   await runtime.waitForService(null, 5000);
   let scripts = await json("GET", "api/scripts");
   assert.equal(scripts.find(s => s.id === scriptId).requiresReconfiguration, true);
-  assert.equal(fs.existsSync(store), false);
+  assert.equal(fs.readFileSync(path.join(store, "legacy.json"), "utf8"), oldBytes);
   const journalPath = path.join(runtime.runtimeDir, ".nxp", "config-resets", scriptId, userId + ".json");
-  const journal = JSON.parse(fs.readFileSync(journalPath, "utf8").replace(/^\uFEFF/, ""));
-  const archived = path.join(path.dirname(journalPath), userId + "-" + journal.ArchiveId, "store", "legacy.json");
-  assert.equal(fs.readFileSync(archived, "utf8"), oldBytes);
+  assert.equal(fs.existsSync(journalPath), false);
   const status = await json("GET", `api/users/${userId}/bindings/${scriptId}/edit-config`);
-  assert.equal(status.hasSnapshot, false);
+  assert.equal(status.hasSnapshot, true);
   const mismatch = await json("POST", `api/users/${userId}/bindings/${scriptId}/edit-config`, { action: "start", mode: "reuse" }, 400);
   assert.equal(mismatch.code, "config_input_mismatch");
   assert.equal(mismatch.args.inputName, "instance");
@@ -71,10 +69,10 @@ try {
   await runtime.stopRuntime();
   runtime.startRuntime(["service"]);
   await runtime.waitForService(null, 5000);
-  assert.equal(fs.existsSync(store), false);
-  assert.equal(fs.readFileSync(archived, "utf8"), oldBytes);
+  assert.equal(fs.readFileSync(path.join(store, "legacy.json"), "utf8"), oldBytes);
+  assert.equal(fs.existsSync(journalPath), false);
   await runtime.stopRuntime();
-  report("configuration-revision", { resetRecovered: true, candidateEnvelope: "args", serverAcknowledgement: true });
+  report("configuration-revision", { oldSnapshotPreserved: true, candidateEnvelope: "args", serverAcknowledgement: true });
 } finally {
   await runtime.stopRuntime();
 }

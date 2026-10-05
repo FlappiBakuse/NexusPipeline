@@ -1,12 +1,8 @@
 # Managed Plugin API
 
-## managed-code C# 插件（Plugin API v1.9）
+当前 managed 插件精确声明 Plugin API `2.0`，最低 Host `0.16.15`，并以 .NET 10 编译。SDK 包和程序集版本为 `2.0.0`。宿主在激活前检查目标框架、SDK 引用与清单；旧 API、未来 minor、旧运行时程序集和包内复制的宿主 SDK 均拒绝加载。
 
-代码插件必须在独立项目中引用 `src/NexusPipeline.Plugin.Abstractions/`，宿主不会向插件公开 `IServiceProvider`、`AppSettings`、`ScriptInstance` 或 `RunRecord`。插件由 `AssemblyLoadContext` 隔离加载，入口程序集从 manifest 声明，禁用或 API 不兼容时不会加载程序集。
-
-宿主当前 API 版本为 `1.9`：主版本必须相同，插件 minor 版本必须小于或等于宿主 minor 版本，因此 `1.0` 至 `1.9` 插件可加载，`2.0` 插件会被拒绝。既有插件仍按自身声明的 API minor 加载；使用模拟器 provider 的插件至少需要 `1.7`，使用通知收件人覆盖的插件需要 `1.8`，使用独立执行 provider 的插件需要 `1.9`。
-
-`IPluginHostContextV1_9.ExecutionProviders` 的冻结计划、配置门禁、worker 与事件协议见 [执行 provider](execution-provider.md)。新插件须声明相应 API 与最低 Host，旧插件不需要修改 minor。
+`IPluginHostContext` 直接暴露全部现役端口。插件通过这些明确端口工作，不检查旧接口继承链。`ExecutionProviders` 的冻结计划、配置门禁、worker 与事件协议见[执行 provider](execution-provider.md)。Frontend API 独立维持 `1.5`。
 
 ```text
 plugins/GameCheckIn/
@@ -23,7 +19,8 @@ plugins/GameCheckIn/
   "description": "提供通用的用户级扩展设置",
   "version": "0.1.0",
   "kind": "managed-code",
-  "apiVersion": "1.8",
+  "apiVersion": "2.0",
+  "minHostVersion": "0.16.15",
   "entryAssembly": "CheckInPlugin.dll",
   "entryType": "CheckInPlugin.EntryPoint",
   "capabilities": ["background-jobs", "ui-contributions", "frontend-module"],
@@ -37,13 +34,13 @@ plugins/GameCheckIn/
 
 入口类型实现 `INexusPlugin` 的 `InitializeAsync`、`StartAsync`、`StopAsync` 生命周期；`IPluginHostContext` 提供插件日志、JSON 配置、DPAPI 密钥、宿主通知和后台任务调度。后台任务通过 `IPluginJobScheduler.Register` 注册，插件停止时统一取消，单任务异常不会穿透宿主。
 
-实现 v1.1 能力的插件应在初始化时检查 `context is IPluginHostContextV1_1`；需要用户列表徽章的 v1.2 插件应检查 `context is IPluginHostContextV1_2`；需要 v1.3 扩展端口的插件应检查 `context is IPluginHostContextV1_3`；需要本地化端口的插件应检查 `context is IPluginHostContextV1_4`；需要 v1.6 资产端口的插件应检查 `context is IPluginHostContextV1_6`；需要 v1.7 模拟器支持端口的插件应检查 `context is IPluginHostContextV1_7`；需要 v1.8 通知收件人覆盖的插件应检查 `context is IPluginHostContextV1_8`，不满足时清晰拒绝初始化。v1.1 附加端口如下：
+现役端口：
 
 - `IPluginUserDataStore`：按用户读写 JSON 配置与 DPAPI 密钥。配置路径为 `config/plugins/<机器 ID>/users/<用户 ID>.json`，密钥路径为同目录下的 `<用户 ID>.secrets.json`。删除全局用户时宿主会清理该用户在所有插件中的用户文件；插件禁用或初始化失败不影响清理。物理安装目录使用 artifactName，不参与这些逻辑命名空间。
 - `IPluginUserGlobalManagementRegistry`：注册声明式用户全局设置贡献。字段类型仅允许 `text`、`textarea`、`secret`、`switch`、`select`、`multi-select`、`status`；密钥读取只返回 `{configured:true|false}`，保存密钥必须使用 `{action:"keep"}`、`{action:"set",value:"..."}` 或 `{action:"clear"}`。
 - `IPluginExecutionEventService`：订阅 `UserRunStarting`。事件只包含用户、脚本实例、队列、运行模式和开始时间等稳定标识；宿主异步调用处理器，处理器异常只记录警告，不能阻塞或改变执行。
 - `IPluginHttpClientFactory`：创建遵循宿主代理设置的外网 `HttpClient`，插件无法读取 `AppSettings`。
-- `IPluginUserListBadgeRegistry`（v1.2）：注册按用户返回单个聚合徽章的轻量读取处理器。返回 `null` 表示该用户不显示徽章；处理器应只读取本地插件状态，不执行网络请求。
+- `IPluginUserListBadgeRegistry`：注册按用户返回单个聚合徽章的轻量读取处理器。返回 `null` 表示该用户不显示徽章；处理器应只读取本地插件状态，不执行网络请求。
 
 宿主通用设置接口为 `GET /api/plugin-contributions/user-global/{userId}` 与 `PUT /api/plugin-contributions/user-global/{userId}/{pluginName}/{contributionId}`。插件未启用或贡献不存在返回 `404 contribution_not_found`，贡献处理器异常返回 `500 plugin_error`。
 
@@ -53,9 +50,9 @@ GameCheckIn v0.3.1 使用插件自有的独立任务、任务级平台凭据和�
 
 
 
-### v1.3 通用扩展端口
+### 通用扩展端口
 
-`IPluginHostContextV1_3` 在 v1.2 基础上增加 `Ui`、`ScopedData`、`WebApi` 和 `History`。这些端口只使用稳定的字符串、JSON DTO 和取消令牌，不暴露宿主 DI 容器、领域模型或 `HttpListenerContext`。
+`IPluginHostContext` 提供 `Ui`、`ScopedData`、`WebApi` 和 `History`。这些端口只使用稳定的字符串、JSON DTO 和取消令牌，不暴露宿主 DI 容器、领域模型或 `HttpListenerContext`。
 
 #### 声明式 UI
 
@@ -74,7 +71,7 @@ settings.sections               settings.cards
 shell.nav
 ```
 
-每个贡献包含稳定 `id`、`slot`、`kind`、标题、说明、排序值和可选字段。字段类型包括 `text`、`textarea`、`secret`、`switch`、`select`、`multi-select`、`status`，以及 v1.3 的 `number`、`color`、`range`、`url`。上下文使用 `PluginUiContext(Slot, Mode, PrimaryId, SecondaryId)`；例如脚本编辑器可用 `PrimaryId` 表示脚本实例，用户绑定设置可同时传入用户和脚本 ID。
+每个贡献包含稳定 `id`、`slot`、`kind`、标题、说明、排序值和可选字段。字段类型包括 `text`、`textarea`、`secret`、`switch`、`select`、`multi-select`、`status`，以及 `number`、`color`、`range`、`url`。上下文使用 `PluginUiContext(Slot, Mode, PrimaryId, SecondaryId)`；例如脚本编辑器可用 `PrimaryId` 表示脚本实例，用户绑定设置可同时传入用户和脚本 ID。
 
 宿主按公开元素渲染声明式字段，插件无需自带控件：`text`/`url`/`secret`/`status` → `nxp-text-input`，`textarea` → `nxp-text-area`，`number` → `nxp-number-input`，`range` → `nxp-range`，`color` → `nxp-color-picker`，`switch` → `nxp-switch`，`select` 与 `multi-select` → `nxp-select`。字段的 `min`、`max`、`step`、`options`、`placeholder`、`maxLength`、`readOnly` 与 `required` 映射到对应公开属性；保存载荷沿用字段类型语义：`switch` 为布尔、`multi-select` 为字符串数组、`number` 与 `range` 为数值、`secret` 为 `{action:"keep"|"set"|"clear"}`。
 
@@ -104,9 +101,9 @@ shell.nav
 
 
 
-### v1.5 插件本地化
+### 插件本地化
 
-`IPluginHostContextV1_4.I18n` 提供插件自有资源查表、占位符替换和按当前请求语言进行的日期/时间/数字格式化。宿主只传入规范化的 `zh-CN` 或 `en-US` 请求语言，插件资源缺失时回退到 `defaultLocale`，再回退到调用方提供的 `fallback`。插件本地化资源不会复用宿主词典，也不会改变机器 ID、配置键或持久化结构。
+`IPluginHostContext.I18n` 提供插件自有资源查表、占位符替换和按当前请求语言进行的日期/时间/数字格式化。宿主只传入规范化的 `zh-CN` 或 `en-US` 请求语言，插件资源缺失时回退到 `defaultLocale`，再回退到调用方提供的 `fallback`。插件本地化资源不会复用宿主词典，也不会改变机器 ID、配置键或持久化结构。
 
 managed-code 插件可以在 `plugin.json` 声明：
 
@@ -124,9 +121,9 @@ managed-code 插件可以在 `plugin.json` 声明：
 
 
 
-### v1.6 二进制资产存储
+### 二进制资产存储
 
-`IPluginHostContextV1_6.Assets` 提供按插件命名空间与逻辑 scope 隔离的二进制资产存储。宿主负责路径逃逸防护、原子写入和宿主级绝对上限；资产的业务配额、去重策略与语义由插件自行决定。
+`IPluginHostContext.Assets` 提供按插件命名空间与逻辑 scope 隔离的二进制资产存储。宿主负责路径逃逸防护、原子写入和宿主级绝对上限；资产的业务配额、去重策略与语义由插件自行决定。
 
 ```csharp
 ValueTask<PluginAssetInfo> WriteAsync(string scope, string extension, Stream content, CancellationToken cancellationToken = default);
@@ -145,7 +142,7 @@ ValueTask<IReadOnlyList<PluginAssetInfo>> ListAsync(string scope, CancellationTo
 
 
 
-### v1.6 二进制 Web API 传输
+### 二进制 Web API 传输
 
 插件 Web API 的请求与响应在 JSON 之外支持二进制传输。
 
@@ -157,9 +154,9 @@ ValueTask<IReadOnlyList<PluginAssetInfo>> ListAsync(string scope, CancellationTo
 
 
 
-### v1.7 模拟器支持扩展
+### 模拟器支持扩展
 
-`IPluginHostContextV1_7.EmulatorSupport` 允许 managed-code 插件注册模拟器识别 provider。注册只在该插件运行期间有效，插件停止或初始化失败时会撤销；provider 的 `Id` 使用小写 kebab-case，`Priority` 决定稳定探测顺序。
+`IPluginHostContext.EmulatorSupport` 允许 managed-code 插件注册模拟器识别 provider。注册只在该插件运行期间有效，插件停止或初始化失败时会撤销；provider 的 `Id` 使用小写 kebab-case，`Priority` 决定稳定探测顺序。
 
 provider 的 `ProbeAsync(adbEndpoint, cancellationToken, timeoutSeconds)` 返回 `NotApplicable`、`Matched(driver)` 或 `Error(message)`。无匹配时宿主继续现有 Generic ADB 路径；任何已加载 provider 明确报告错误、多个 provider 同时匹配或探测超时都会使目标识别失败，不能把已证明的错误降级为 Generic。目标选定后，宿主在本次运行中冻结并复用同一驱动完成 `EnsureReadyAsync`、`StartAppAsync`、`GetForegroundPackageAsync`、`CaptureScreenAsync`、`StopAppAsync` 和 `ShutdownAsync`；每次调用都受宿主超时与取消边界约束。截图驱动返回不超过 16 MiB 的 PNG 字节。
 
@@ -167,41 +164,6 @@ Generic ADB 与 MuMuManager 保留在宿主。雷电、夜神和 BlueStacks 的�
 
 
 
-### v1.8 通知收件人覆盖
+### 通知收件人覆盖
 
-`IPluginHostContextV1_8` 在 v1.7 基础上标记通知收件人覆盖能力。插件调用 `IPluginNotificationService.SendAsync` 时，可以在 `PluginNotification.SmtpTo` 提供可选 SMTP 收件人；空值或空白值继承宿主全局 SMTP 收件人。SMTP 服务器、发件人、凭据与渠道开关仍由宿主管理，Webhook 继续使用宿主全局配置。
-
-
-
-### 旧外观数据搬迁
-
-宿主启动时执行一次性格式搬迁：读取旧外观配置、`user-assets/appearance/wallpapers/` 目录与旧轮换游标，把资产导入旧配置记录的原提供方插件命名空间（资产 scope 为 `wallpapers`），再把搬迁载荷原子写入该插件的 `legacy-appearance-import` 作用域数据。成功后写入标记 `.nxp/state/appearance-migration.json`；任一步失败都不写标记，下一次启动按同一入口重试。旧文件由宿主保留，插件是这些旧数据的唯一消费者。
-
-搬迁载荷结构如下，其中 `id`、`order`、`selectedId` 与 `currentId` 已经是新的资产 Id：
-
-```json
-{
-  "schemaVersion": 1,
-  "migratedAt": "2026-09-12T00:00:00.0000000+00:00",
-  "settings": {
-    "selectedId": "<资产 Id>",
-    "order": ["<资产 Id>"],
-    "rotation": { "mode": "off|timer|startup", "intervalMinutes": 30, "epochUnixMs": 0 },
-    "effects": { "blurPx": 0, "dimPercent": 20, "surfaceTransparencyPercent": 0, "applyTransparencyToSecondarySurfaces": true },
-    "providerEnabled": false,
-    "currentId": "<资产 Id，可选>"
-  },
-  "assets": [
-    {
-      "id": "<资产 Id>",
-      "extension": "png",
-      "originalName": "wallpaper.png",
-      "mimeType": "image/png",
-      "sizeBytes": 102400,
-      "palette": { "--accent": "#62a0ff" }
-    }
-  ]
-}
-```
-
-搬迁载荷中的 `currentId` 仅在旧轮换游标存在时出现，代表旧实现记录的当前壁纸，是否沿用由插件决定。插件应在初始化时消费该作用域记录，导入完成后删除该记录。
+`IPluginHostContext.Notifications` 提供通知收件人覆盖能力。插件调用 `IPluginNotificationService.SendAsync` 时，可以在 `PluginNotification.SmtpTo` 提供可选 SMTP 收件人；空值或空白值继承宿主全局 SMTP 收件人。SMTP 服务器、发件人、凭据与渠道开关仍由宿主管理，Webhook 继续使用宿主全局配置。

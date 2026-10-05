@@ -1,3 +1,4 @@
+import { CONTROL_SERVICE_NAME } from "./service-identity";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import { useShellStore } from "../stores/shell";
@@ -16,7 +17,7 @@ let releaseGuard: (() => void) | null = null;
 
 function identity(instanceId: string, ready = true) {
   return {
-    service: "NexusPipeline",
+    service: CONTROL_SERVICE_NAME,
     controlApiVersion: "1",
     instanceId,
     restartHandoffId: instanceId === newInstance ? handoffId : "",

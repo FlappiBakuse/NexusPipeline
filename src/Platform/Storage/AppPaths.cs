@@ -33,12 +33,6 @@ internal static class AppPaths
 
     public static readonly string UserAssetsDir = Path.Combine(AppRoot, "user-assets");
 
-    /// <summary>旧宿主外观配置路径；仅由一次性格式搬迁读取，搬迁完成后不再有生产写入方。</summary>
-    public static readonly string AppearanceConfigPath = Path.Combine(ConfigDir, "appearance.json");
-
-    /// <summary>旧宿主壁纸资产目录；仅由一次性格式搬迁读取。</summary>
-    public static readonly string AppearanceAssetsDir = Path.Combine(UserAssetsDir, "appearance", "wallpapers");
-
     /// <summary>NexusPipeline 内部运行时目录；普通运行状态集中放置于此，避免散落在安装根目录。</summary>
     public static readonly string InternalDir = Path.Combine(AppRoot, ".nxp");
 
@@ -62,9 +56,6 @@ internal static class AppPaths
     public static readonly string PluginStagingDir = Path.Combine(PluginStateDir, "staging");
 
     public static readonly string PluginBackupDir = Path.Combine(PluginStateDir, "backup");
-
-    /// <summary>旧宿主外观轮换状态路径；仅由一次性格式搬迁读取。</summary>
-    public static readonly string AppearanceRuntimePath = Path.Combine(StateDir, "appearance-runtime.json");
 
     /// <summary>可重建的进程内暂存区（上传/校验临时文件），启动时整体清扫。</summary>
     public static readonly string RuntimeStagingDir = Path.Combine(RuntimeDir, "staging");
@@ -100,7 +91,4 @@ internal static class AppPaths
     public static string UpdatePackageZipName(string version) => $"NexusPipeline-v{version}-win-x64.zip";
 
     public static string UpdatePackageShaName(string version) => UpdatePackageZipName(version) + ".sha256";
-
-    /// <summary>staging 目录：解压+校验后的新版本文件（宿主按 version 建子目录）。</summary>
-    public static string UpdateStagingDir(string version) => Path.Combine(UpdateDir, "staging", version);
 }

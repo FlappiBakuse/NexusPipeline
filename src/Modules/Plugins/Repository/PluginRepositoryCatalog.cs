@@ -170,7 +170,7 @@ internal static class PluginRepositoryCatalog
                         }
                     }
                 }
-                string minHostVersion = item["minHostVersion"]?.ToString()?.Trim() ?? "0.0.0";
+                string minHostVersion = item["minHostVersion"]?.ToString()?.Trim() ?? "";
                 if (!TryParseVersion(minHostVersion, out _))
                 {
                     error = $"插件 {name} 的 minHostVersion 无效：{minHostVersion}";
@@ -632,6 +632,8 @@ internal static class PluginRepositoryCatalog
 
     public static PluginCompatibilityResult EvaluateCompatibility(PluginCatalogEntry entry, string hostVersion)
     {
+        if (TryParseVersion(entry.MinHostVersion, out _) && CompareVersions(entry.MinHostVersion, "0.16.15") < 0)
+            return new PluginCompatibilityResult(false, "plugin_contract_obsolete", "插件最低宿主声明必须至少为 0.16.15，请安装当前契约的插件包");
         if (!TryParseVersion(hostVersion, out NexusVersion host)
             || !TryParseVersion(entry.MinHostVersion, out NexusVersion minimum))
         {
@@ -656,7 +658,7 @@ internal static class PluginRepositoryCatalog
                     "invalid_version",
                     $"插件声明的 Plugin API 版本无效：{entry.ApiVersion}");
             }
-            if (apiMajor != PluginApiVersion.Major || apiMinor > PluginApiVersion.Minor)
+            if (apiMajor != PluginApiVersion.Major || apiMinor != PluginApiVersion.Minor)
             {
                 return new PluginCompatibilityResult(
                     false,
@@ -676,6 +678,11 @@ internal static class PluginRepositoryCatalog
 
     public static bool IsHostVersionCompatible(string minimumVersion, string hostVersion, out string reason)
     {
+        if (TryParseVersion(minimumVersion, out _) && CompareVersions(minimumVersion, "0.16.15") < 0)
+        {
+            reason = "插件最低宿主声明必须至少为 0.16.15，请安装当前契约的插件包";
+            return false;
+        }
         if (!TryParseVersion(hostVersion, out NexusVersion host)
             || !TryParseVersion(minimumVersion, out NexusVersion minimum))
         {

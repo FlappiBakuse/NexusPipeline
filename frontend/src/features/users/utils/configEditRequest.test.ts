@@ -10,10 +10,9 @@ describe("buildConfigEditRequest", () => {
       configInputName: "configPath",
       configInputValue: "profiles/user.json",
     });
-    expect(buildConfigEditRequest("normal", null, "a1b2c3d4e5f6")).toEqual({
+    expect(buildConfigEditRequest("normal")).toEqual({
       action: "start",
       mode: "normal",
-      requesterWindowToken: "a1b2c3d4e5f6",
     });
   });
 });

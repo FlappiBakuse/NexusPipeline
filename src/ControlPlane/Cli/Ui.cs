@@ -116,41 +116,4 @@ internal static class Ui
         {
         }
     }
-
-    /// <summary>带默认值/取消的文本编辑：Esc=取消（返回 null），回车空=保持当前值。</summary>
-    public static string? PromptText(string label, string current)
-    {
-        string currentText = string.IsNullOrWhiteSpace(current)
-            ? CliText.Get("value.empty", "空")
-            : current;
-        (EditResult result, string value) = PromptEdit(CliText.Get(
-            "prompt.edit",
-            "{label}（当前：{current}，回车=不变，Esc=取消）：",
-            ("label", label),
-            ("current", currentText)));
-        if (result == EditResult.Clear)
-        {
-            return null;
-        }
-        return result == EditResult.Keep ? current : value.Trim();
-    }
-
-    public static string DayDesc(List<int> days)
-    {
-        if (days.Count == 7)
-        {
-            return CliText.Get("day.every", "每天");
-        }
-        string[] names =
-        {
-            CliText.Get("day.sun", "周日"),
-            CliText.Get("day.mon", "周一"),
-            CliText.Get("day.tue", "周二"),
-            CliText.Get("day.wed", "周三"),
-            CliText.Get("day.thu", "周四"),
-            CliText.Get("day.fri", "周五"),
-            CliText.Get("day.sat", "周六"),
-        };
-        return string.Join("/", days.OrderBy(day => day).Select(day => names[day]));
-    }
 }

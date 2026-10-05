@@ -1097,7 +1097,7 @@
   "tasks.incident.terminal": "已确认未完成",
   "tasks.incident.title": "问题事件",
   "tasks.incident.unattributed": "以下问题缺少唯一任务归属，不据此推断整项任务失败。",
-  "tasks.legacy": "旧记录没有任务明细，无法判定任务完成情况",
+  "tasks.plan_unavailable": "本次运行没有可用的任务明细",
   "tasks.not_retried": "本尝试未重跑",
   "tasks.outcome.empty": "没有启用的业务任务",
   "tasks.outcome.failed": "任务运行失败",
@@ -1153,7 +1153,6 @@
   "tasks.status.unknown": "无法判定",
   "tasks.summary.bad": "运行失败",
   "tasks.summary.latest": "已运行 · 部分结果待确认",
-  "tasks.summary.legacy_unknown": "旧记录无任务明细",
   "tasks.summary.muted": "结果待确认",
   "tasks.summary.no_bindings": "未配置专项任务",
   "tasks.summary.not_run": "尚未运行",
@@ -1295,6 +1294,11 @@
   "tasks.daily_status.skipped": "正常跳过",
   "tasks.daily_status.blocked": "未执行",
   "tasks.daily_status.cancelled": "已取消",
+  "tasks.reason.tasks.execution_failed": "任务流程运行失败",
+  "tasks.reason.tasks.no_execution_required": "无需执行，已正常跳过",
+  "tasks.reason.tasks.runtime_identity_changed": "运行环境发生变化，已停止本次任务",
+  "tasks.reason.tasks.failed": "任务运行失败",
+  "tasks.reason.tasks.admission_blocked": "运行条件未满足，已阻止执行",
   "tasks.reason.tasks.missing_terminal": "任务开始后缺少结束证据",
   "tasks.reason.tasks.missing_logs": "缺少本次任务日志",
   "tasks.reason.tasks.log_gap": "任务日志不连续",
@@ -1330,5 +1334,7 @@
   "tasks.error.migration_required": "插件配置已发生破坏性更新，请重新设置脚本实例并编辑此用户的配置。",
   "scripts.configuration_setup_required": "插件包含破坏性配置更新，请重新设置并保存脚本实例，再保存此用户的配置。",
   "tasks.config.setting.mfa.launch_owner": "MFA → 添加任务 → 特殊任务 → 自定义程序；放在日常任务前，设置程序路径，不等待退出。",
-  "tasks.config.setting.mfa.finish_action": "MFA → 启动设置 → 任务后动作。"
+  "tasks.config.setting.mfa.finish_action": "MFA → 启动设置 → 任务后动作。",
+  "tasks.unsupported_report": "不支持此历史格式；请使用完整备份的旧版查看。",
+  "history.unsupported_records": "已保留并跳过 {count} 个旧版或不支持的历史文件；请使用完整备份的旧版查看。"
 }

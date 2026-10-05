@@ -1,4 +1,5 @@
 import { api, isAbortError } from "./api";
+import { CONTROL_SERVICE_NAME } from "./service-identity";
 import {
   applyRestartNavigation,
   requestServiceRestart,
@@ -64,7 +65,7 @@ function readPending(): SavedRecovery | null {
 }
 
 function validIdentity(value: HostIdentity | null): value is HostIdentity {
-  return value?.service === "NexusPipeline"
+  return value?.service === CONTROL_SERVICE_NAME
     && Boolean(value.controlApiVersion && value.instanceId && value.version)
     && Number.isInteger(value.actualPort) && value.actualPort > 0 && value.actualPort <= 65535;
 }
@@ -219,7 +220,7 @@ export async function continueServiceRecovery(): Promise<void> {
       return;
     }
     const identity: HostIdentity = {
-      service: "NexusPipeline",
+      service: CONTROL_SERVICE_NAME,
       controlApiVersion: result.controlApiVersion || "",
       instanceId: result.instanceId,
       restartHandoffId: result.restartHandoffId,

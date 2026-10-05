@@ -22,9 +22,16 @@ internal sealed class TaskQueryProjection(UserQueries users, ScriptQueries scrip
 {
     public object Summaries()
     {
+        try { return BuildSummaries(); }
+        catch (InvalidDataException ex) { throw new TaskQueryUnavailableException(ex); }
+    }
+
+    private object BuildSummaries()
+    {
         var latest = history.LatestTasks().ToDictionary(r => (r.UserId, r.ScriptInstanceId));
         var admissions = history.LatestAdmissions().ToDictionary(r => (r.UserId, r.ScriptInstanceId));
-        var active = execution.Active.SelectMany(e => e.SnapshotTaskReports()).Where(r => r["lifecycleOutcome"]?.GetValue<string>() == "running")
+        var active = execution.Active.SelectMany(e => e.SnapshotTaskReports()).Where(r => RunRecordFormat.IsCurrentReport(r)
+                && r["lifecycleOutcome"]?.GetValue<string>() == "running")
             .GroupBy(r => r["userId"]?.GetValue<string>() ?? "").ToDictionary(g => g.Key, g => g.Count());
         var specialized = scripts.ListEffective().Where(s => !string.IsNullOrWhiteSpace(s.PluginType)).Select(s => s.Id).ToHashSet(StringComparer.Ordinal);
         return users.List().Select(user =>
@@ -39,7 +46,7 @@ internal sealed class TaskQueryProjection(UserQueries users, ScriptQueries scrip
                     ?? (result.Status == "failed" ? "bad" : result.Status == "partial" ? "warn" : "muted");
                 return new { binding.ScriptInstanceId, tone, recordId = result?.Deleted == false ? result.RecordId : null,
                     endTime = result?.EndTime,
-                    reason = result is null ? "not_run" : result.Deleted ? "record_deleted" : result.Tone is null ? "legacy_unknown" : "latest",
+                    reason = result is null ? "not_run" : result.Deleted ? "record_deleted" : result.Tone is null ? "no_task_report" : "latest",
                     admissionRecordId = admissionCurrent ? admission!.RecordId : null,
                     admissionEndTime = admissionCurrent ? (DateTime?)admission!.EndTime : null,
                     admissionState = admissionCurrent ? admission!.State : null,

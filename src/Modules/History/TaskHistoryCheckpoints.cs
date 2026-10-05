@@ -21,9 +21,18 @@ internal partial class RunHistoryService : ITaskHistoryCheckpoints
         if (record.TaskReport is null) return;
         lock (Sync)
         {
+            RunRecordFormat.Validate(record);
+            EnsureTaskIndex();
+            string target = CheckpointPath(record.Id);
+            if (File.Exists(target))
+            {
+                RequireOwnedPath(target);
+                RunRecordFormat.Require(SameRecordIdentity(record, RunRecordFormat.Read(File.ReadAllText(target))));
+            }
             string json = JsonSerializer.Serialize(record.Clone(), JsonOpts.Indented);
             if (System.Text.Encoding.UTF8.GetByteCount(json) > 16 * 1024 * 1024) throw new InvalidDataException("task checkpoint exceeds limit");
             Directory.CreateDirectory(CheckpointDirectory);
+            RequireOwnedPath(CheckpointDirectory);
             JsonUtil.WriteAtomic(CheckpointPath(record.Id), json);
             if (record.EndTime is not null)
             {
@@ -32,9 +41,18 @@ internal partial class RunHistoryService : ITaskHistoryCheckpoints
         }
     }
 
-    private void CompleteTaskCheckpoint(string id)
+    private void CompleteTaskCheckpoint(RunRecord record)
     {
-        if (Guid.TryParseExact(id, "N", out _) && File.Exists(CheckpointPath(id))) File.Delete(CheckpointPath(id));
+        string path = CheckpointPath(record.Id);
+        if (!File.Exists(path)) return;
+        try
+        {
+            RequireOwnedPath(path);
+            var checkpoint = RunRecordFormat.Read(File.ReadAllText(path));
+            RunRecordFormat.Require(checkpoint.TaskReport is not null && SameRecordIdentity(record, checkpoint));
+            File.Delete(path);
+        }
+        catch (Exception ex) { Logger.Warn($"[历史恢复] 保留无法确权的检查点：{ex.Message}"); }
     }
 
     // Called only after the resident host has acquired its single-instance mutex.
@@ -43,20 +61,20 @@ internal partial class RunHistoryService : ITaskHistoryCheckpoints
         lock (Sync)
         {
             if (!Directory.Exists(CheckpointDirectory)) return;
+            RequireOwnedPath(CheckpointDirectory);
             foreach (string path in Directory.EnumerateFiles(CheckpointDirectory, "*.json"))
             {
                 try
                 {
                     if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0 || new FileInfo(path).Length > 16 * 1024 * 1024)
                         throw new InvalidDataException("invalid task checkpoint file");
-                    var record = JsonSerializer.Deserialize<RunRecord>(File.ReadAllText(path), JsonOpts.Default)
-                        ?? throw new InvalidDataException("invalid task checkpoint");
+                    var record = RunRecordFormat.Read(File.ReadAllText(path));
                     if (!string.Equals(CheckpointPath(record.Id), path, StringComparison.OrdinalIgnoreCase)
                         || record.TaskReport is not {} report || report["runId"]?.GetValue<string>() != record.Id)
                         throw new InvalidDataException("task checkpoint identity mismatch");
                     EnsureTaskIndex();
                     if (_recordIndex!.TryGetValue(record.Id, out var prior) && RecordExists(prior))
-                    { CompleteTaskCheckpoint(record.Id); continue; }
+                    { CompleteTaskCheckpoint(record); continue; }
                     if (record.EndTime is null)
                     {
                         record.EndTime = DateTime.Now;
@@ -71,8 +89,7 @@ internal partial class RunHistoryService : ITaskHistoryCheckpoints
                                 if (node is JsonObject result && result["status"]?.GetValue<string>() is "pending" or "running")
                                 { result["status"] = "unknown"; result["reasonCode"] = "tasks.interrupted"; }
                         }
-                        bool daily = report["schemaVersion"]?.GetValue<int>() == 2
-                            && report["semanticsVersion"]?.GetValue<string>() == "daily-flow-v1";
+                        bool daily = RunRecordFormat.ReportSemantics(report) == TaskReportSemantics.DailyFlow;
                         if (daily) (recoverDailyReport ?? throw new InvalidDataException("Daily report recovery is unavailable"))(report);
                         else Interrupt(report["finalTaskResults"] as JsonArray);
                         foreach (var attempt in report["attemptReports"]?.AsArray() ?? [])

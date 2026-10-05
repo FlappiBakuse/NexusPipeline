@@ -40,8 +40,8 @@ internal sealed class ProviderTaskProjection
             Enabled = true, Order = task.Order, CountsAsUnit = true, RequiredForParent = false,
             RetryUnitId = task.Id, RetryRisk = "unknown", Dependencies = [], Detection = "supported",
         }).ToArray();
-        _reducer = new(record, new TaskPlan("0.1.0", plan.PlanId, "provider", provider,
-            version, DateTimeOffset.Now, plan.AuthorizationFingerprint, "complete", tasks, []));
+        _reducer = TaskRunReducer.CreateProvider(record, new TaskPlan("provider-execution-v1", plan.PlanId, "provider", provider,
+            version, DateTimeOffset.Now, plan.AuthorizationFingerprint, "complete", tasks, []) { SemanticsVersion = "provider-execution-v1" });
         _reducer.BeginAttempt(_attempt, number, tasks.Select(task => task.Id));
     }
 
@@ -117,14 +117,10 @@ internal sealed class ProviderTaskProjection
             Status = item.Status == "running" ? "running" : "unknown",
             ReasonCode = "provider.engine_" + item.Status, Evidence = [], StructuredEvidenceRefs = [evidenceId],
         } : null;
-        _reducer.AcceptStructured(new TaskObservationBatch
-        {
-            ProtocolVersion = "0.1.0", Type = "observation", RunId = _record, AttemptId = _attempt,
-            Observations = observation is null ? [] : [observation],
-            RunBoundary = item.Kind == "completed" ? "ended" : item.Kind == "fault" ? "aborted" : "unknown",
-            BoundaryEvidence = [], StructuredEvidenceVersion = 1,
-            BoundaryStructuredEvidenceRefs = item.Kind is "completed" or "fault" ? [evidenceId] : null, Diagnostics = [],
-        }, _evidenceIds);
+        _reducer.AcceptProviderFacts(new(_record, _attempt,
+            observation is null ? [] : [observation],
+            item.Kind == "completed" ? "ended" : item.Kind == "fault" ? "aborted" : "unknown",
+            item.Kind is "completed" or "fault" ? [evidenceId] : null), _evidenceIds);
         return true;
     }
 
@@ -145,7 +141,7 @@ internal sealed class ProviderTaskProjection
 
     internal JsonObject Snapshot() => new()
     {
-        ["schemaVersion"] = 1, ["runId"] = _record, ["pluginId"] = _provider,
+        ["schemaVersion"] = 1, ["semanticsVersion"] = "provider-execution-v1", ["runId"] = _record, ["pluginId"] = _provider,
         ["revision"] = _reducer.Revision, ["userId"] = _user, ["scriptInstanceId"] = _script,
         ["originalPlan"] = JsonNode.Parse(TaskProtocolJson.Write(_reducer.OriginalPlan)),
         ["lifecycleOutcome"] = _lifecycle, ["engineStatus"] = _engine,

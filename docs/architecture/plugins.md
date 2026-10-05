@@ -20,9 +20,7 @@
 
 插件配置、密钥和作用域 JSON 解析失败时保留 `.corrupt-<timestamp>-<guid>` 现场，再以空值继续运行；后续写入不会覆盖原始损坏文件。managed-code 生命周期初始化、启动和停止均有 20 秒截止时间；用户运行事件在插件作用域中跟踪，并在清理时执行有界排空。
 
-宿主启动时对旧外观数据执行一次性格式搬迁：读取 `config/appearance.json`、`user-assets/appearance/wallpapers/` 与 `.nxp/state/appearance-runtime.json`，把壁纸资产导入旧配置记录的原提供方插件命名空间（资产 scope 为 `wallpapers`），再把搬迁载荷原子写入该插件的 `legacy-appearance-import` 作用域数据；成功后写标记 `.nxp/state/appearance-migration.json`，任一步失败都不写标记并在下次启动重试，旧文件保留。搬迁只做格式转换，载荷结构、字段语义与消费约定见 [Plugin API 参考](../reference/plugin-api/managed.md) 的「旧外观数据搬迁」。
-
-managed-code 插件可以通过当前 Plugin API v1.8 注册用户列表徽章、通用 UI 贡献、作用域数据、二进制资产、插件 Web API、历史展示、插件自有本地化资源、模拟器支持 provider 和 SMTP 收件人覆盖。宿主通过 `GET /api/plugin-contributions/user-list-badges` 一次读取全部用户的聚合展示数据，按插件贡献提供的顺序投影并校验；用户列表不理解具体插件业务，单个处理器异常也不会阻断其他用户或插件的徽章读取。插件徽章读取应使用本地状态，不能在列表请求中执行网络签到。Frontend API 1.5 插件以 `web/` 下的构建后 ES module/CSS 扩展页面；只有精确版本匹配的插件会加载前端资源。宿主只提供通用资产存储、二进制 Web API 与通用外观表面（主题、token、背景表面与外观变更事件），壁纸配置、配额、校验、去重、轮换与配色属于插件业务；运行预览服务由宿主按活动执行目标提供，前端通过 sidecar slot 展示，插件词典通过 `host.i18n` 按请求语言读取。
+managed-code 插件可以通过当前 Plugin API 2.0 注册用户列表徽章、通用 UI 贡献、作用域数据、二进制资产、插件 Web API、历史展示、插件自有本地化资源、模拟器支持 provider 和 SMTP 收件人覆盖。宿主通过 `GET /api/plugin-contributions/user-list-badges` 一次读取全部用户的聚合展示数据，按插件贡献提供的顺序投影并校验；用户列表不理解具体插件业务，单个处理器异常也不会阻断其他用户或插件的徽章读取。插件徽章读取应使用本地状态，不能在列表请求中执行网络签到。Frontend API 1.5 插件以 `web/` 下的构建后 ES module/CSS 扩展页面；只有精确版本匹配的插件会加载前端资源。宿主只提供通用资产存储、二进制 Web API 与通用外观表面（主题、token、背景表面与外观变更事件），壁纸配置、配额、校验、去重、轮换与配色属于插件业务；运行预览服务由宿主按活动执行目标提供，前端通过 sidecar slot 展示，插件词典通过 `host.i18n` 按请求语言读取。
 
 
 
@@ -38,7 +36,7 @@ managed-code 插件可以通过当前 Plugin API v1.8 注册用户列表徽章�
 - `.nxp/state/plugins/ownership.json` 记录由官方商店安装的版本、SHA 和 artifactName；`catalog-cache.json` 与 `catalog-cache.meta.json` 共同构成可验证的离线展示缓存。更新器只交换宿主 exe 与 `wwwroot/`，运行时 `plugins/` 保持原目录。
 - Web 端点为 `GET /api/plugins/store`、`POST /api/plugins/store/refresh` 和 `POST /api/plugins/store/{name}/{install|update|uninstall}`；启用、禁用与商店操作成功响应统一返回 `restartRequired`，前端据此提示重启生效。
 - managed-code 用户级设置端点为 `GET /api/plugin-contributions/user-global/{userId}` 与 `PUT /api/plugin-contributions/user-global/{userId}/{pluginName}/{contributionId}`；用户列表徽章使用单次聚合端点 `GET /api/plugin-contributions/user-list-badges`，宿主负责异常隔离、白名单校验和 HTML 展示数据投影。
-- v1.3 通用 UI 贡献使用 `POST /api/plugin-contributions/ui/query`、`PUT /api/plugin-contributions/ui/{plugin}/{contribution}` 和 `POST /api/plugin-contributions/ui/{plugin}/{contribution}/action/{action}`；插件 Web API 使用 `GET|POST|PUT|PATCH|DELETE /api/plugin-api/{plugin}/<route>`。v1.5 插件本地化使用 manifest 的 `localization` 资源和 `PluginLocalizedText` 引用；v1.6 增加通用二进制资产端口与二进制 Web API 传输；v1.7 增加 managed-code 模拟器支持 provider 注册端口；v1.8 为插件通知增加可选 SMTP 收件人覆盖，留空时使用宿主全局收件人。
+- Plugin API 2.0 提供通用 UI 贡献、插件 Web API、本地化、二进制资产、模拟器 provider 和通知收件人覆盖。UI 使用 `/api/plugin-contributions/ui/`，插件 Web API 使用 `/api/plugin-api/<plugin>/<route>`；SMTP 收件人留空时采用宿主全局设置。
 - `GET /api/plugin-runtime/frontend` 只发布已启用、运行态有效、版本兼容且资源清单有效的前端模块；公开静态资源限定在插件 `web/` 目录，并仅支持 GET/HEAD 与白名单 MIME。
 
 宿主外部网络出口：`OutboundHttpClientProvider` 按每次请求读取当前 `AppSettings`，统一供插件 catalog/包下载、宿主更新和 Webhook 使用。代理模式为 `none`、`system`、`http`；自定义代理的密码通过 `SecretStore` DPAPI 存储，API/UI 只返回占位符。SMTP、Control API、MCP 以及插件子进程不经过该出口；loopback 目标始终禁用代理。
@@ -47,25 +45,27 @@ managed-code 插件可以通过当前 Plugin API v1.8 注册用户列表徽章�
 
 | 类别 | 形态 | 职责 | 启用语义 |
 |---|---|---|---|
-| managed-code 插件 | 独立项目 + `NexusPipeline.Plugin.Abstractions` API v1.8 + manifest | 通过通用用户数据、声明式设置、作用域数据、二进制资产、历史展示、插件 Web API、用户列表徽章、用户运行事件、HTTP、通知、本地化、可选模拟器 provider 和 SMTP 收件人覆盖实现插件能力 | 默认禁用；启用后重启加载，API 不兼容或初始化失败会进入对应运行态 |
+| managed-code 插件 | 独立项目 + `NexusPipeline.Plugin.Abstractions` API 2.0 + manifest | 通过通用用户数据、声明式设置、作用域数据、二进制资产、历史展示、插件 Web API、用户列表徽章、用户运行事件、HTTP、通知、本地化、可选模拟器 provider 和 SMTP 收件人覆盖实现插件能力 | 默认禁用；启用后重启加载，API 不兼容或初始化失败会进入对应运行态 |
 | 数据化专项插件 | `plugins/<ArtifactName>/plugin.json + data/`（`DataSpecializedPlugin` 扫描注册） | 接管专项脚本实例配置：`Resolve(rootPath, inputs)` 按 `data/resolve.json` 推导主程序/参数/配置/日志/判断脚本，`inputs` 为实例保存的用户输入值（`{input:名称}` 内联替换）；`logPath` 可为空 = 判定日志走进程 stdout | 默认启用；偏好以机器 ID 为 key 写入 `AppSettings.PluginPreferences`，重启后应用 |
 
-> **通知通道**：宿主脚本与队列的 Webhook/SMTP 通知由 `NotificationDispatcher` 发送；managed-code 插件可通过 `IPluginNotificationService` 提交 `PluginNotification` DTO，沿用宿主全局渠道配置。Plugin API v1.8 允许通知按需覆盖 SMTP 收件人；SMTP 服务器、身份与 Webhook 配置仍由宿主管理。GameCheckIn v0.3.1 的任务级通知通过宿主全局渠道发送，空白 SMTP 收件人继承全局收件人。
+> **通知通道**：宿主脚本与队列的 Webhook/SMTP 通知由 `NotificationDispatcher` 发送；managed-code 插件可通过 `IPluginNotificationService` 提交 `PluginNotification` DTO，沿用宿主全局渠道配置。Plugin API 2.0 允许通知按需覆盖 SMTP 收件人；SMTP 服务器、身份与 Webhook 配置仍由宿主管理。GameCheckIn v0.3.1 的任务级通知通过宿主全局渠道发送，空白 SMTP 收件人继承全局收件人。
 
 Capability 扩展约束：
 
-- 数据插件 capability 通过 key 登记；managed-code 插件只通过 API v1.8 服务端口工作，宿主不把后台任务 capability 当作专项脚本选择器。
-- 数据化插件可在 `plugin.json` 增加 `capabilities: ["..."]`；未知 key 由宿主登记但不自动赋予业务语义。`emulator` 只声明专项脚本可选择安卓模拟器启动；managed-code 驱动插件通过 `IPluginHostContextV1_7.EmulatorSupport` 注册 provider。
+- 数据插件 capability 通过 key 登记；managed-code 插件只通过 API 2.0 服务端口工作，宿主不把后台任务 capability 当作专项脚本选择器。
+- 数据化插件可在 `plugin.json` 增加 `capabilities: ["..."]`；未知 key 由宿主登记但不自动赋予业务语义。`emulator` 只声明专项脚本可选择安卓模拟器启动；managed-code 驱动插件通过 `IPluginHostContext.EmulatorSupport` 注册 provider。
 - `PluginSummary` 负责 manifest 与本地展示元数据；`PluginManagementView` 负责跨控制面共享的运行态、展示元数据、商店归属和 pending 事务字段，Web、MCP 与状态接口从同一投影读取。
-- Plugin API v1.8 继续提供显式 `IPluginHostContext` / `IPluginHostContextV1_1` / `IPluginHostContextV1_2` / `IPluginHostContextV1_3` / `IPluginHostContextV1_4` / `IPluginHostContextV1_6` / `IPluginHostContextV1_7` / `IPluginHostContextV1_8` 服务端口；插件全局配置、插件级密钥、按用户配置/密钥、实体作用域数据和二进制资产分层存储于 `config/plugins/`，managed-code 插件停止时后台任务、UI/Web API/历史贡献、用户设置贡献、用户列表徽章、事件订阅与模拟器 provider 注册统一取消。本地化资源随插件目录校验并按请求语言投影。
+- Plugin API 2.0 继续提供显式 `IPluginHostContext` / `IPluginHostContext` / `IPluginHostContext` / `IPluginHostContext` / `IPluginHostContext` / `IPluginHostContext` / `IPluginHostContext` / `IPluginHostContext` 服务端口；插件全局配置、插件级密钥、按用户配置/密钥、实体作用域数据和二进制资产分层存储于 `config/plugins/`，managed-code 插件停止时后台任务、UI/Web API/历史贡献、用户设置贡献、用户列表徽章、事件订阅与模拟器 provider 注册统一取消。本地化资源随插件目录校验并按请求语言投影。
 
 执行预览属于宿主控制的能力。插件需在 manifest 中声明 `execution-preview-client`，同时满足已启用且存在前端模块，才能通过 `ExecutionPreviewService` 获取预览；具体截图实现仍由宿主持有，插件身份负责能力声明与准入。
 
 编写插件：插件的 manifest、`resolve.json`、判断脚本和配置还原描述组成独立契约。详细字段、示例、路径模板、判断脚本输入输出、配置还原 DSL 与部署约束统一维护在[插件 API 索引](../reference/plugin-api/README.md)；本节只说明宿主模块边界和代码定位。
 
-- managed-code 插件实现独立 API 项目的 `INexusPlugin` 生命周期，并按需使用 `IPluginHostContextV1_8`；v1.7 继承 v1.6 的通用用户数据、声明式 UI、作用域数据、二进制资产、历史展示、插件 Web API、用户全局管理、用户列表徽章、用户运行事件、HTTP、日志、通知、任务和本地化端口，并新增模拟器 provider 注册；v1.8 增加 `PluginNotification.SmtpTo` 收件人覆盖。
+- managed-code 插件实现 SDK 的 `INexusPlugin` 生命周期，通过唯一 `IPluginHostContext` 使用全部现役端口；入口编译为 .NET 10，SDK 程序集版本为 2.0.0。
 - 需要前端的插件在 manifest 中声明 `frontend-module` 与 Frontend API `1.5`，入口位于 `web/` 并导出 `activate(host)`；入口由插件的 Vue/TypeScript/Vite 构建链生成，需要前端本地化时增加 `localization` 与 `i18n/` 词典，启用且精确匹配后由宿主加载，版本和声明变化继续经过 manifest、路径和资源校验。
 - 数据化专项插件由 `plugins/<ArtifactName>/plugin.json + data/` 描述，`DataSpecializedPlugin` 负责发现和注册；`name` 继续作为脚本实例和运行时逻辑身份。脚本实例持久化 `PluginType + RootPath` 等稳定声明，宿主在 API、准入、配置编辑和运行时解析当前 profile，并将当次操作的有效结果冻结到执行计划或会话标记。
 - 通知、模拟器和执行准入属于宿主能力；插件通过明确 capability 或公开 API 端口接入，不直接访问宿主组合根、领域模型或 Web 层。
 
 数据化专项 profile 的输入候选响应携带实际 `inputName`，宿主前端按响应消费输入契约；`self-managed-pc-launch` 的启动开关、参数和等待时间保留在用户设置中，仅由运行时计划决定 PC 模式下的宿主启动行为。
+
+插件 pending 与 ownership 持久状态仅接收 schema 3，显式记录 channel、sourceCommit 和安装意图；stable 的 sourceCommit 可为空，develop 必须是完整 SHA。旧状态不接管、不转换，读取或恢复失败保持原文件和 staging 字节，并阻断相应写入。

@@ -2,13 +2,13 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net8.0-windows</TargetFramework>
+    <TargetFramework>net10.0-windows</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <UseWindowsForms>true</UseWindowsForms>
     <AssemblyName>nexus-pipeline</AssemblyName>
     <RootNamespace>NexusPipeline</RootNamespace>
-    <Version>0.16.14</Version>
+    <Version>0.16.15</Version>
     <InvariantGlobalization>false</InvariantGlobalization>
     <NoWarn>CA1416</NoWarn>
     <ApplicationIcon>NexusPipeline.ico</ApplicationIcon>
@@ -55,8 +55,6 @@
     <PackageReference Include="YamlDotNet" Version="18.1.0" />
     <PackageReference Include="MailKit" Version="4.17.0" />
     <PackageReference Include="ModelContextProtocol.AspNetCore" Version="2.2.0" />
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.1" />
-    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
   </ItemGroup>
 
   <ItemGroup>

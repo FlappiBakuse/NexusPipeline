@@ -190,34 +190,6 @@ internal static class HostLocalization
     }
 
     /// <summary>
-    /// 旧 CLI 调用的兼容回退；新增 CLI 文案必须经由 cli.* 稳定 key 进入 TranslateNamed。
-    /// 未迁移的旧调用在英文环境下也不会泄漏中文源文案。
-    /// </summary>
-    public static string TranslateCli(string code, string fallback, string? locale = null)
-    {
-        string normalized = LocaleCatalog.Normalize(locale ?? LocaleContext.Current);
-        string translated = TranslateLegacy(fallback, normalized);
-        if (normalized == LocaleCatalog.DefaultLocale || !ContainsCjk(translated))
-        {
-            return translated;
-        }
-        return code switch
-        {
-            "invalid_arguments" => "Invalid command-line arguments",
-            "not_found" => "Not found",
-            "ambiguous_target" => "Multiple matching objects found",
-            "service_unavailable" => "The NexusPipeline service is unavailable",
-            "timeout" => "The operation timed out",
-            "cancelled" => "Cancelled",
-            "execution_failed" => "Execution failed",
-            "internal_error" => "The operation failed",
-            "progress" => "Progress update",
-            "diagnostic" => "Diagnostic information",
-            _ => "The operation failed",
-        };
-    }
-
-    /// <summary>
     /// 在宿主日志输出边界按 HostLocale 投影宿主生成的固定文字。
     /// 动态值仍由调用方拼接并保留原样；脚本、游戏和插件自行产生的日志内容不由这里翻译。
     /// </summary>
@@ -275,28 +247,6 @@ internal static class HostLocalization
             "Host log event {code} contains untranslated host text",
             new Dictionary<string, object?> { ["code"] = fingerprint },
             normalized);
-    }
-
-    public static string TranslateLegacy(
-        string fallback,
-        string? locale = null,
-        IReadOnlyList<object?>? args = null)
-    {
-        string key = fallback switch
-        {
-            "需要访问令牌（请求头 Authorization: Bearer <token>）" => "auth.required",
-            "未找到" => "http.not_found",
-            "请求方法不支持" => "http.method_not_allowed",
-            "脚本名称不能为空" => "script.name_required",
-            "用户名不能为空且不能包含非法字符" => "user.name_invalid",
-            "缺少记录 ID" => "history.id_required",
-            "记录不存在" => "history.not_found",
-            "插件设置格式不正确" => "plugin.settings_invalid",
-            "插件设置贡献不存在或插件未启用" => "plugin.contribution_not_found",
-            "插件 UI 贡献不存在或插件未启用" => "plugin.ui_not_found",
-            _ => "",
-        };
-        return Translate(key, fallback, locale, args);
     }
 
     public static string FormatNumber(double value, string? locale = null)

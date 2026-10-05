@@ -21,40 +21,60 @@ internal partial class RunHistoryService
     private string TaskAdmissionIndexPath => Path.Combine(_historyDir, ".task-admission-latest.json");
     private static string BindingKey(string user, string script) => JsonSerializer.Serialize(new[] { user, script });
 
+    private string? _indexIdentity;
+    private string IndexIdentity() => string.Join("\n", new[] { TaskIndexPath, TaskAdmissionIndexPath }.Select(path =>
+        File.Exists(path) ? Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(path))) : "absent"));
+
+    private Dictionary<string, T> ReadTaskIndex<T>(string path)
+    {
+        if (!File.Exists(path))
+        {
+            if (Directory.Exists(path)) throw new InvalidDataException("unsupported_history_index");
+            return new(StringComparer.Ordinal);
+        }
+        RequireOwnedPath(path);
+        using var document = RunRecordFormat.CurrentDocument(File.ReadAllText(path));
+        var root = document.RootElement;
+        RunRecordFormat.Require(root.EnumerateObject().Count() == 2 && root.TryGetProperty("Entries", out var entries)
+            && entries.ValueKind == JsonValueKind.Object);
+        var result = JsonSerializer.Deserialize<Dictionary<string, T>>(root.GetProperty("Entries"), new JsonSerializerOptions
+        { UnmappedMemberHandling = System.Text.Json.Serialization.JsonUnmappedMemberHandling.Disallow })
+            ?? throw new InvalidDataException("unsupported_history_index");
+        foreach (var (key, item) in result)
+        {
+            (string user, string script, string id) = item switch
+            {
+                LatestTaskHistory actual => (actual.UserId, actual.ScriptInstanceId, actual.RecordId),
+                LatestTaskAdmissionHistory admission => (admission.UserId, admission.ScriptInstanceId, admission.RecordId),
+                _ => throw new InvalidDataException("unsupported_history_index"),
+            };
+            RunRecordFormat.Require(!string.IsNullOrWhiteSpace(user) && !string.IsNullOrWhiteSpace(script)
+                && Guid.TryParseExact(id, "N", out _) && key == BindingKey(user, script));
+        }
+        return result;
+    }
+
     private void EnsureTaskIndex()
     {
-        if (_recordIndex is not null) return;
-        if (File.Exists(TaskIndexPath))
+        try
         {
-            // Do not silently rebuild a corrupt tombstone index from older successful records.
-            _latestTaskIndex = JsonSerializer.Deserialize<Dictionary<string, LatestTaskHistory>>(File.ReadAllText(TaskIndexPath), JsonOpts.Default)
-                ?? throw new InvalidDataException("history task index is invalid");
+            if (Directory.Exists(_historyDir)) RunRecordFormat.Require(!IsLink(_historyDir));
+            string identity = IndexIdentity();
+            if (_recordIndex is not null && identity == _indexIdentity) return;
+            var actual = ReadTaskIndex<LatestTaskHistory>(TaskIndexPath);
+            var admissions = ReadTaskIndex<LatestTaskAdmissionHistory>(TaskAdmissionIndexPath);
+            _latestTaskIndex = actual;
+            _latestTaskAdmissionIndex = admissions;
+            _indexIdentity = identity;
+            _recordIndex = new(StringComparer.Ordinal);
+            foreach (var record in ReadAllCurrentRecords()) IndexTaskRecord(record);
+            SaveTaskIndex();
         }
-        if (File.Exists(TaskAdmissionIndexPath))
+        catch (Exception ex) when (ex is JsonException or InvalidDataException or IOException)
         {
-            _latestTaskAdmissionIndex = JsonSerializer.Deserialize<Dictionary<string, LatestTaskAdmissionHistory>>(
-                    File.ReadAllText(TaskAdmissionIndexPath), JsonOpts.Default)
-                ?? throw new InvalidDataException("history task admission index is invalid");
+            _recordIndex = null;
+            throw new InvalidDataException("unsupported_history_index: 索引已保留；请在新目录重新配置，旧历史可用完整备份的旧版查看。", ex);
         }
-        _recordIndex = new(StringComparer.Ordinal);
-        if (!Directory.Exists(_historyDir)) return;
-        var records = new List<RunRecord>();
-        foreach (string path in Directory.EnumerateDirectories(_historyDir))
-            if (DateTime.TryParseExact(Path.GetFileName(path), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date))
-                records.AddRange(ReadDayRecords(date));
-        foreach (var record in records) _recordIndex[record.Id] = record.Clone();
-        // Classify old entries before comparing timestamps. Otherwise a newer
-        // admission in the old actual index hides the real run during this scan.
-        // Deleted entries remain tombstones: removing one could resurrect an
-        // older run the user already deleted.
-        foreach (var (key, latest) in _latestTaskIndex.ToArray())
-            if (_recordIndex.TryGetValue(latest.RecordId, out RunRecord? record) && IsAdmissionOnlyRecord(record))
-            {
-                if (!latest.Deleted) _latestTaskIndex.Remove(key);
-                IndexTaskAdmissionRecord(record);
-            }
-        foreach (var record in records) IndexTaskRecord(record);
-        SaveTaskIndex();
     }
 
     private void IndexTaskRecord(RunRecord record)
@@ -103,16 +123,20 @@ internal partial class RunHistoryService
         try
         {
             string day = Path.Combine(_historyDir, record.StartTime.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
-            return File.Exists(ResolveWithin(ResolveWithin(day, record.HistoryDirectory), record.LogFile));
+            string path = ResolveWithin(ResolveWithin(day, record.HistoryDirectory), record.LogFile);
+            RequireOwnedPath(path);
+            return SameRecordIdentity(record, RunRecordFormat.Read(File.ReadAllText(path)));
         }
         catch (Exception) { return false; }
     }
 
     private void SaveTaskIndex()
     {
+        if (IndexIdentity() != _indexIdentity) throw new InvalidDataException("history_index_changed");
         Directory.CreateDirectory(_historyDir);
-        JsonUtil.WriteAtomic(TaskIndexPath, JsonSerializer.Serialize(_latestTaskIndex, JsonOpts.Indented));
-        JsonUtil.WriteAtomic(TaskAdmissionIndexPath, JsonSerializer.Serialize(_latestTaskAdmissionIndex, JsonOpts.Indented));
+        JsonUtil.WriteAtomic(TaskIndexPath, JsonSerializer.Serialize(new { SchemaVersion = 1, Entries = _latestTaskIndex }, JsonOpts.Indented));
+        JsonUtil.WriteAtomic(TaskAdmissionIndexPath, JsonSerializer.Serialize(new { SchemaVersion = 1, Entries = _latestTaskAdmissionIndex }, JsonOpts.Indented));
+        _indexIdentity = IndexIdentity();
     }
 
     internal IReadOnlyList<LatestTaskHistory> LatestTasks()

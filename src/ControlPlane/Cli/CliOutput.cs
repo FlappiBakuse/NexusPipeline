@@ -67,27 +67,29 @@ internal static class CliOutput
         return exitCode;
     }
 
-    public static void WriteDiagnostic(string message)
+    public static void WriteDiagnostic(string key, string fallback, params (string Name, object? Value)[] values)
     {
+        string message = CliText.Get(key, fallback, values);
         if (MachineMode)
         {
-            Console.Error.WriteLine(HostLocalization.TranslateCli("diagnostic", message, LocaleCatalog.HostLocale));
+            Console.Error.WriteLine(message);
         }
         else
         {
-            Console.WriteLine(HostLocalization.TranslateCli("diagnostic", message, LocaleCatalog.HostLocale));
+            Console.WriteLine(message);
         }
     }
 
-    public static void WriteProgress(string message)
+    public static void WriteProgress(string key, string fallback, params (string Name, object? Value)[] values)
     {
+        string message = CliText.Get(key, fallback, values);
         if (MachineMode)
         {
-            Console.Error.WriteLine(HostLocalization.TranslateCli("progress", message, LocaleCatalog.HostLocale));
+            Console.Error.WriteLine(message);
         }
         else
         {
-            Console.WriteLine(HostLocalization.TranslateCli("progress", message, LocaleCatalog.HostLocale));
+            Console.WriteLine(message);
         }
     }
 }

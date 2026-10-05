@@ -12,15 +12,13 @@
   color: var(--muted);
 }
 
-.app-page-enter-active,
-.app-page-leave-active {
-  transition: opacity var(--nx-motion-duration-page) var(--nx-motion-ease), transform var(--nx-motion-duration-page) var(--nx-motion-ease);
+.app-page {
+  animation: app-page-enter var(--nx-motion-duration-page) var(--nx-motion-ease);
 }
 
-.app-page-enter-from,
-.app-page-leave-to {
-  opacity: 0;
-  transform: translateY(5px);
+@keyframes app-page-enter {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .app-card-enter-active,

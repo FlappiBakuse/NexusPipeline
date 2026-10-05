@@ -14,7 +14,7 @@ internal sealed record TaskDisplaySnapshot(string PluginId, string PluginVersion
     internal static void ValidateReference(JsonObject? reference, string version)
     {
         if (reference is null) return;
-        TaskProtocolValidation.Require(version is "0.1.0" or "0.2.0", "unsupported task protocol text reference");
+        TaskProtocolValidation.Require(version == "0.2.0", "unsupported task protocol text reference");
         string? kind = reference["kind"]?.GetValue<string>();
         if (kind == "literal")
         {
@@ -53,9 +53,7 @@ internal sealed record TaskDisplaySnapshot(string PluginId, string PluginVersion
         if (reference is null) return fallback;
         try
         {
-            // Frozen historical TextRef syntax is identical to the first public
-            // protocol; keep old reports readable without accepting old plugins.
-            ValidateReference(reference, "0.1.0");
+            ValidateReference(reference, "0.2.0");
             if (reference["kind"]!.GetValue<string>() == "literal") return reference["value"]!.GetValue<string>();
             var args = (JsonObject)reference["args"]!;
             string key = reference["key"]!.GetValue<string>();

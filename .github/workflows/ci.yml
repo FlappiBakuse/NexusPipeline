@@ -99,6 +99,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: host-${{ github.run_id }}-${{ github.run_attempt }}-control
+          include-hidden-files: true
           path: |
             ${{ runner.temp }}/NexusPipeline.Tests/runs/${{ env.NEXUS_TEST_RUN_ID }}/batch-report.json
             ${{ runner.temp }}/NexusPipeline.Tests/runs/${{ env.NEXUS_TEST_RUN_ID }}/commands.log
@@ -146,7 +147,7 @@ jobs:
         if: matrix.dotnetRequired
         uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
         with:
-          dotnet-version: "8.0.x"
+          global-json-file: Host/global.json
       - name: 下载范围计划
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
@@ -164,6 +165,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: host-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.id }}
+          include-hidden-files: true
           path: |
             ${{ runner.temp }}/NexusPipeline.Tests/runs/${{ env.NEXUS_TEST_RUN_ID }}/batch-report.json
             ${{ runner.temp }}/NexusPipeline.Tests/runs/${{ env.NEXUS_TEST_RUN_ID }}/commands.log

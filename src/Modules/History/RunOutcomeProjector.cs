@@ -2,12 +2,13 @@ using System.Text.Json.Nodes;
 
 namespace NexusPipeline.Modules.History;
 
-/// <summary>Projects new run facts without rewriting or inferring verification for old history.</summary>
+/// <summary>Projects current run facts without inferring business verification from engine success.</summary>
 internal static class RunOutcomeProjector
 {
     internal static RunOutcomeDimensions Project(RunRecord record, bool configPrepared, bool recoveryFailed)
     {
         JsonObject? report = record.TaskReport;
+        var semantics = report is null ? (TaskReportSemantics?)null : RunRecordFormat.ReportSemantics(report);
         string engine = report?["engineStatus"]?.GetValue<string>() ?? record.Status switch
         {
             "success" => "succeeded",
@@ -33,20 +34,8 @@ internal static class RunOutcomeProjector
         };
         string business = "unverified";
         JsonObject? counts = report?["summary"]?["counts"] as JsonObject;
-        if (counts is not null)
-        {
-            int total = Count(counts, "total");
-            int succeeded = Count(counts, "succeeded");
-            int failed = Count(counts, "failed") + Count(counts, "partial");
-            int skipped = Count(counts, "skipped");
-            if (failed > 0) business = "verified_failed";
-            else if (total > 0 && succeeded == total) business = "verified_succeeded";
-            else if (total > 0 && skipped == total) business = "satisfied";
-            else if (total == 0) business = "inapplicable";
-        }
-        if (report?["schemaVersion"]?.GetValue<int>() == 2
-            && report["semanticsVersion"]?.GetValue<string>() == "daily-flow-v1")
-            business = report["summary"]?["outcome"]?.GetValue<string>() switch
+        if (semantics == TaskReportSemantics.DailyFlow)
+            business = report!["summary"]?["outcome"]?.GetValue<string>() switch
             {
                 "failed" => "verified_failed", "partial" => "partial",
                 "completed" => counts is not null && Count(counts, "succeeded") > 0 ? "verified_succeeded" : "satisfied",
@@ -54,7 +43,7 @@ internal static class RunOutcomeProjector
                 _ => "pending",
             };
         // Authenticated engine events are not independent business verification.
-        if (report?["businessVerification"]?.GetValue<string>() == "unverified") business = "unverified";
+        if (semantics == TaskReportSemantics.ProviderExecution) business = "unverified";
         string recovery = recoveryFailed ? "quarantined" : configPrepared ? "restored" : "not_required";
         return new(engine, business, execution, recovery);
     }

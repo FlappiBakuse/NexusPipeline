@@ -130,21 +130,6 @@ internal sealed class SchedulerRetryQueue
         }
     }
 
-    internal bool SetPlanIfCurrent(ScheduledOccurrence occurrence, QueueExecutionPlan plan)
-    {
-        lock (_sync)
-        {
-            if (!_pending.TryGetValue(occurrence.Key, out ScheduledOccurrence? current)
-                || !ReferenceEquals(current, occurrence))
-            {
-                return false;
-            }
-            occurrence.Plan = plan;
-            occurrence.QueueName = plan.Queue.Name;
-            return true;
-        }
-    }
-
     internal bool ScheduleRetry(ScheduledOccurrence occurrence, string reason)
     {
         lock (_sync)

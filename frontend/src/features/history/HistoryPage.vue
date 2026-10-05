@@ -35,6 +35,8 @@ const historyDir = ref("");
 const statusFilter = ref<HistoryStatus | "">("");
 const loading = ref(true);
 const error = ref("");
+const unsupportedCount = ref(0);
+type FormatStatus = { unsupportedCount?: number };
 const detail = ref<HistoryRecord | null>(null);
 const historyRoot = ref<HTMLElement | null>(null);
 const mobile = ref(false);
@@ -74,8 +76,9 @@ async function loadDates() {
   loading.value = true;
   error.value = "";
   try {
-    const data = (await api("GET", `/api/history/dates?from=${encodeURIComponent(from.value)}&to=${encodeURIComponent(to.value)}${historyStatusQuery()}`)) as { dates?: HistoryDate[] };
+    const data = (await api("GET", `/api/history/dates?from=${encodeURIComponent(from.value)}&to=${encodeURIComponent(to.value)}${historyStatusQuery()}`)) as { dates?: HistoryDate[]; formatStatus?: FormatStatus };
     if (id !== requestId) return;
+    unsupportedCount.value = data.formatStatus?.unsupportedCount || 0;
     dates.value = Array.isArray(data?.dates) ? data.dates : [];
     const valid = new Set(dates.value.map(item => item.date));
     for (const value of expanded.value) {
@@ -106,8 +109,9 @@ async function loadDates() {
 async function loadUsers(date: string, id = requestId) {
   if (!date || !expanded.value.has(date)) return;
   try {
-    const data = (await api("GET", `/api/history/users?date=${encodeURIComponent(date)}${historyStatusQuery()}`)) as { users?: HistoryUser[] };
+    const data = (await api("GET", `/api/history/users?date=${encodeURIComponent(date)}${historyStatusQuery()}`)) as { users?: HistoryUser[]; formatStatus?: FormatStatus };
     if (id !== requestId || !expanded.value.has(date)) return;
+    unsupportedCount.value = data.formatStatus?.unsupportedCount || 0;
     usersByDate.value.set(date, Array.isArray(data?.users) ? data.users : []);
   } catch (reason) {
     if (id !== requestId || isAbortError(reason)) return;
@@ -121,8 +125,9 @@ async function loadRecords() {
   await disposeListSlots();
   records.value = [];
   try {
-    const data = (await api("GET", `/api/history?date=${encodeURIComponent(selectedDate.value)}&userKey=${encodeURIComponent(selectedUserKey.value)}${historyStatusQuery()}`)) as { historyDir?: string; records?: HistoryRecord[] };
+    const data = (await api("GET", `/api/history?date=${encodeURIComponent(selectedDate.value)}&userKey=${encodeURIComponent(selectedUserKey.value)}${historyStatusQuery()}`)) as { historyDir?: string; records?: HistoryRecord[]; formatStatus?: FormatStatus };
     if (id !== requestId) return;
+    unsupportedCount.value = data.formatStatus?.unsupportedCount || 0;
     historyDir.value = data?.historyDir || "";
     records.value = Array.isArray(data?.records) ? data.records : [];
     await paintListSlots();
@@ -266,6 +271,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
+  <p v-if="unsupportedCount" role="status">{{ t("history.unsupported_records", { count: unsupportedCount }) }}</p>
   <main id="view" ref="historyRoot" class="view-root history-page" data-testid="main-view">
     <NxpPageHeader
       :eyebrow="t('shell.history')"

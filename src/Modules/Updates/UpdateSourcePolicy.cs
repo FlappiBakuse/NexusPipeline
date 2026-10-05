@@ -43,31 +43,6 @@ internal sealed class UpdateSourcePolicy
 
     public string? ValidateAssetUri(Uri uri) => _asset.ValidateUri(uri);
 
-    public string? ValidatePolicyUri(Uri uri)
-    {
-        string? genericError = _policy.ValidateUri(uri);
-        if (genericError is not null)
-        {
-            return genericError;
-        }
-        if (!string.IsNullOrEmpty(uri.UserInfo)
-            || !string.IsNullOrEmpty(uri.Query)
-            || !string.IsNullOrEmpty(uri.Fragment))
-        {
-            return _isDefaultSource
-                ? "默认更新策略地址不受信任"
-                : "自定义更新策略必须与更新源同源且不带附加参数";
-        }
-        if (_isDefaultSource
-            && (EffectivePort(uri) != 443
-                || !string.Equals(uri.Host, UpdateRemoteResourceRules.DefaultPolicyHost, StringComparison.OrdinalIgnoreCase)
-                || !string.Equals(uri.AbsolutePath, UpdateRemoteResourceRules.DefaultPolicyPath, StringComparison.Ordinal)))
-        {
-            return "默认更新策略地址必须指向官方仓库 main/update-policy.json";
-        }
-        return null;
-    }
-
     public string? ValidateRedirectDestination(Uri uri, UpdateResourceKind resourceKind)
         => PolicyFor(resourceKind).ValidateRedirectDestination(uri);
 
@@ -101,13 +76,4 @@ internal sealed class UpdateSourcePolicy
             UpdateResourceKind.ReleaseAsset => _asset,
             _ => throw new ArgumentOutOfRangeException(nameof(resourceKind), resourceKind, null),
         };
-
-    private static int EffectivePort(Uri uri)
-    {
-        if (uri.Port > 0)
-        {
-            return uri.Port;
-        }
-        return string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) ? 443 : 80;
-    }
 }

@@ -15,8 +15,8 @@ internal sealed class ProviderWorkerFixture : IDisposable
             Path.Combine(repository, "bin", "test-host") + Path.DirectorySeparatorChar,
             StringComparison.OrdinalIgnoreCase);
         string source = testHost
-            ? Path.Combine(repository, "bin", "test-host", "NexusPipeline.TestProviderWorker", configuration, "net8.0-windows")
-            : Path.Combine(repository, "tests", "fixtures", "NexusPipeline.TestProviderWorker", "bin", configuration, "net8.0-windows");
+            ? Path.Combine(repository, "bin", "test-host", "NexusPipeline.TestProviderWorker", configuration, "net10.0-windows")
+            : Path.Combine(repository, "tests", "fixtures", "NexusPipeline.TestProviderWorker", "bin", configuration, "net10.0-windows");
         foreach (string file in Directory.EnumerateFiles(source))
         {
             File.Copy(file, Path.Combine(Root, Path.GetFileName(file)));

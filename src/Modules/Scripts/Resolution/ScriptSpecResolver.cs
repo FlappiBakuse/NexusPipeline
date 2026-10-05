@@ -168,7 +168,7 @@ internal sealed class ScriptSpecResolver
         var judge = new ResolvedJudgeScript(false, "javascript", "provider", "", Hash(""));
         try
         {
-            // This resolver is a synchronous legacy port. Run the provider's read-only
+            // This resolver is synchronous. Run the provider's read-only
             // preparation off the caller's UI context; never start a worker here.
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
             var request = new NexusPipeline.Plugin.Abstractions.PluginProviderPrepareRequest(
@@ -209,11 +209,6 @@ internal sealed class ScriptSpecResolver
         if (source is not null)
         {
             script.JudgeScript = source;
-            script.JudgeScriptLanguage = language;
-        }
-        else if (!string.IsNullOrWhiteSpace(script.JudgeScript))
-        {
-            // 兼容未经过仓储的 API/测试对象；正式加载路径优先使用独立资产文件。
             script.JudgeScriptLanguage = language;
         }
         else if (script.JudgeScriptEnabled)

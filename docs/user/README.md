@@ -12,7 +12,7 @@
 
 新配置默认在服务启动时打开管理页面；`autoOpenBrowser: false` 可关闭此行为。轻量模式只能在停止宿主后编辑 `config/settings.json` 中的 `"lightweightMode": true` 并重启启用；轻量模式保留本机 Control API，但不提供 Web UI。网页设置页的「高级设置」卡片可单独保存「允许逐次配置修复」，每次修复仍需明确预览和应用。
 
-程序需要 .NET Desktop Runtime 8 x64 和 ASP.NET Core Runtime 8 x64。安装器在缺少依赖时会逐项询问并从固定微软地址下载校验后的包。便携版保留 .NET 的缺运行时提示，两个准确下载按钮见可离线打开的 [`wwwroot/help/runtime-prerequisites.html`](../../frontend/public/help/runtime-prerequisites.html)。安装 .NET 依赖可能需要系统授权；取消后可重新运行安装器。
+程序需要 .NET Desktop Runtime 10 x64 和 ASP.NET Core Runtime 10 x64。安装器在缺少依赖时会逐项询问并从固定微软地址下载校验后的包。便携版保留 .NET 的缺运行时提示，两个准确下载按钮见可离线打开的 [`wwwroot/help/runtime-prerequisites.html`](../../frontend/public/help/runtime-prerequisites.html)。安装 .NET 依赖可能需要系统授权；取消后可重新运行安装器。
 
 ## 运行、取消和日志
 

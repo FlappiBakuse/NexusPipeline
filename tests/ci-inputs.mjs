@@ -8,6 +8,13 @@ const python = process.platform === "win32" ? "python" : "python3";
 const git = (root, ...args) => execFileSync("git", ["-C", root, ...args], {encoding:"utf8", windowsHide:true, timeout:8000}).trim();
 const fileDigest = file => createHash("sha256").update(fs.readFileSync(file,"utf8").replaceAll("\r\n","\n")).digest("hex");
 
+export function defaultPartner(root) {
+  const input = JSON.parse(fs.readFileSync(path.join(root, "plugins.lock.json"), "utf8"));
+  if (Object.keys(input).sort().join(",") !== "ref,repository,schemaVersion" || input.schemaVersion !== 1
+      || input.repository !== repositories[1] || input.ref !== "main") throw new Error("Invalid default Plugins input");
+  return input;
+}
+
 export function resolvePair(root, repository, identity) {
   return JSON.parse(execFileSync(python, [path.join(root,"tests/ci_inputs.py"),
     "--repository",repository,"--pr",String(identity.prNumber),"--base",identity.base,"--head",identity.head,

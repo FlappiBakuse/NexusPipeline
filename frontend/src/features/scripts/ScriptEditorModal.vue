@@ -77,7 +77,7 @@ const currentPlugin = computed(() =>
   ),
 );
 const currentSpecializedCapabilities = computed(() =>
-  projectSpecializedCapabilities(currentPlugin.value?.capabilities, currentPlugin.value),
+  projectSpecializedCapabilities(currentPlugin.value?.capabilities),
 );
 const emulatorAllowed = computed(() => !draft.pluginType || currentSpecializedCapabilities.value.supportsEmulator);
 const selfManagedPc = computed(

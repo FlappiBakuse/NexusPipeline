@@ -4,7 +4,7 @@
 
 ## 1. 项目与开工入口
 
-NexusPipeline（枢链）是 Windows 本地自动化脚本管家：.NET 8/C# WinForms 托盘、HttpListener 服务、CLI/MCP 控制面，以及构建为静态文件的 Vue 3/TypeScript 前端。最终用户不需要 Node/npm。官方插件仓库为 `FlappiBakuse/NexusPipeline-Plugins`；两个仓库版本独立。单仓库开发不要求特定父目录名称。
+NexusPipeline（枢链）是 Windows 本地自动化脚本管家：.NET 10/C# WinForms 托盘、HttpListener 服务、CLI/MCP 控制面，以及构建为静态文件的 Vue 3/TypeScript 前端。最终用户不需要 Node/npm。官方插件仓库为 `FlappiBakuse/NexusPipeline-Plugins`；两个仓库版本独立。单仓库开发不要求特定父目录名称。
 
 开始修改前，在本仓库运行 `git status --short --branch`、`git rev-parse HEAD`，确认用户未提交内容。读取下面与任务有关的最小文档集合；根据 `docs/architecture/README.md` 与 `docs/map.json` 定位专题和责任，再读对应代码和测试。
 
@@ -12,8 +12,8 @@ NexusPipeline（枢链）是 Windows 本地自动化脚本管家：.NET 8/C# Win
 |---|---|
 | 用户行为、安装、管理员运行原因 | `README.md` |
 | 模块、约束与代码定位 | `docs/architecture/README.md`、`docs/map.json` |
-| 环境、构建、发布 | `docs/DEVELOPMENT.md` |
-| 测试政策与完整命令 | `docs/TESTING.md` → `docs/testing/commands.md` |
+| 环境、构建、发布 | `docs/development/README.md` |
+| 测试政策与完整命令 | `docs/testing/README.md` → `docs/testing/commands.md` |
 | Web/CLI/MCP 的能力与状态 | `docs/CONTROL_PLANE.md` |
 | Plugin SDK、manifest、Frontend API | `docs/reference/plugin-api/README.md` |
 | 当前未完成问题 | `docs/STATUS.md` |
@@ -82,3 +82,5 @@ README 描述当前产品，架构文档描述现役结构，TESTING 描述实�
 保留低层工具和测试，不长期保留迁移债务豁免。修改公开能力同步控制面表、相应测试与官方插件作者文档。
 
 交付时逐项列明改动、已运行命令/退出码、未运行范围及原因；本地测试通过不等于远端发布已启用，上传候选包不等于发布成功。正式完成前，在无父目录文档、无实施资料包的新 checkout 中验证导航、构建、测试和文档。
+
+正式支持与验收范围为 Windows 11 x64，现役 Plugin API 精确为 2.0，Frontend API 为 1.5，自有 .NET 工程使用 .NET 10。1.0.0 前仍持续清理无调用的旧 Nexus 协议、别名、工具入口和自动迁移，不保留兼容 wrapper；外部上游最新稳定及前两版适配独立维护。旧配置、外观、历史及未知恢复现场原字节保留；破坏性版本在新目录安装、人工重新配置，独立升级屏障须先于资产公开生效。

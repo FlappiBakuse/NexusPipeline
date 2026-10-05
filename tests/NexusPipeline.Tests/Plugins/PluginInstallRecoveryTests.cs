@@ -61,7 +61,7 @@ public sealed class PluginInstallRecoveryTests
     }
 
     [Fact]
-    public void ApplyPending_OldJournalDoesNotRequestActivation()
+    public void ApplyPending_CurrentInstallWithoutActivationIntent()
     {
         string root = NewTempDir();
         try
@@ -321,7 +321,7 @@ public sealed class PluginInstallRecoveryTests
     }
 
     [Fact]
-    public void ReadOwnership_AcceptsLegacyStableRecordWithoutProvenanceFields()
+    public void ReadOwnership_RejectsOldRecordAndPreservesBytes()
     {
         string root = NewTempDir();
         try
@@ -332,10 +332,15 @@ public sealed class PluginInstallRecoveryTests
                 ownership,
                 "{\"SchemaVersion\":2,\"Plugins\":[{\"Name\":\"bettergi\",\"ArtifactName\":\"BetterGI\",\"Version\":\"0.1.0\",\"Kind\":\"data-specialized\",\"ApiVersion\":\"1.0\",\"Sha256\":\"\",\"InstalledAt\":\"2026-09-19T00:00:00+00:00\"}]}");
 
-            PluginOwnership owner = Assert.Single(PluginInstallRecovery.ReadOwnership(ownership).Values);
-
-            Assert.Equal("stable", owner.Channel);
-            Assert.Equal("", owner.SourceCommit);
+            byte[] original = File.ReadAllBytes(ownership);
+            Assert.Empty(PluginInstallRecovery.ReadOwnership(ownership));
+            Assert.Equal(original, File.ReadAllBytes(ownership));
+            var upgraded = JsonNode.Parse(original)!.AsObject();
+            upgraded["SchemaVersion"] = PluginInstallRecovery.CurrentStateSchema;
+            File.WriteAllText(ownership, upgraded.ToJsonString());
+            byte[] missingProvenance = File.ReadAllBytes(ownership);
+            Assert.Empty(PluginInstallRecovery.ReadOwnership(ownership));
+            Assert.Equal(missingProvenance, File.ReadAllBytes(ownership));
         }
         finally
         {
@@ -344,7 +349,7 @@ public sealed class PluginInstallRecoveryTests
     }
 
     [Fact]
-    public void ReadPending_AcceptsLegacyStableOperationWithoutProvenanceFields()
+    public void ReadPending_RejectsOldOperationAndPreservesAllFiles()
     {
         string root = NewTempDir();
         try
@@ -376,10 +381,24 @@ public sealed class PluginInstallRecoveryTests
                     },
                 }));
 
-            PluginPendingOperation operation = Assert.Single(PluginInstallRecovery.ReadPending(pending));
-
-            Assert.Equal("stable", operation.Channel);
-            Assert.Equal("", operation.SourceCommit);
+            string plugins = Path.Combine(root, "plugins"), staging = Path.GetDirectoryName(stagedPath)!;
+            string backup = Path.Combine(root, "state", "backup"), ownership = Path.Combine(root, "state", "ownership.json");
+            Directory.CreateDirectory(stagedPath);
+            File.WriteAllBytes(Path.Combine(stagedPath, "witness.txt"), "preserve-stage"u8.ToArray());
+            foreach (int schema in new[] { 2, PluginInstallRecovery.CurrentStateSchema })
+            {
+                var document = JsonNode.Parse(File.ReadAllBytes(pending))!.AsObject();
+                document["SchemaVersion"] = schema;
+                File.WriteAllText(pending, document.ToJsonString());
+                byte[] original = File.ReadAllBytes(pending);
+                Assert.Throws<InvalidDataException>(() => PluginInstallRecovery.ReadPending(pending));
+                Assert.False(PluginInstallRecovery.ApplyPending(plugins, pending, ownership, staging, backup));
+                Assert.Equal(original, File.ReadAllBytes(pending));
+                Assert.Equal("preserve-stage"u8.ToArray(), File.ReadAllBytes(Path.Combine(stagedPath, "witness.txt")));
+                Assert.False(Directory.Exists(plugins));
+                Assert.False(Directory.Exists(backup));
+                Assert.False(File.Exists(ownership));
+            }
         }
         finally
         {
@@ -588,7 +607,7 @@ public sealed class PluginInstallRecoveryTests
     {
         PluginOwnershipState state = new()
         {
-            SchemaVersion = 2,
+            SchemaVersion = PluginInstallRecovery.CurrentStateSchema,
             Plugins = owners.ToList(),
         };
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);

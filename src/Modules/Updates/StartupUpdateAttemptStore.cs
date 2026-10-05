@@ -65,11 +65,6 @@ internal sealed class StartupUpdateAttemptStore
         return false;
     }
 
-    internal static void ClearPersisted()
-    {
-        new StartupUpdateAttemptStore().Clear();
-    }
-
     private StartupUpdateAttempt? Read()
     {
         if (!File.Exists(_path))

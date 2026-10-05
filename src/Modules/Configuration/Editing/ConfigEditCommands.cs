@@ -230,10 +230,10 @@ internal sealed partial class ConfigEditCommands
             || metadata.PluginName != target.Script.PluginType || metadata.ConfigContractId != target.Spec.ConfigContractId
             || metadata.ConfigLocatorHash != ConfigStoreMetadata.HashLocator(target.Script.ConfigPath))
             return Validation<RepairCandidate>("配置快照归属已变化", "config_repair_unavailable");
-        string fingerprint = ConfigMigrationTransaction.Fingerprint(store)
-            + ConfigMigrationTransaction.Fingerprint(ConfigPaths.StoreMetadataPath(scriptId, target.UserKey));
+        string fingerprint = ConfigSnapshotFingerprint.Fingerprint(store)
+            + ConfigSnapshotFingerprint.Fingerprint(ConfigPaths.StoreMetadataPath(scriptId, target.UserKey));
         foreach (string extra in target.Spec.ExtraConfigPaths)
-            fingerprint += ConfigMigrationTransaction.Fingerprint(ConfigPaths.StoreExtraDir(scriptId, target.UserKey, extra));
+            fingerprint += ConfigSnapshotFingerprint.Fingerprint(ConfigPaths.StoreExtraDir(scriptId, target.UserKey, extra));
         var context = new ConfigRepairContext(target.Script.GameExe, target.Script.GameArgs,
             !string.Equals(target.Script.GameMode, "emulator", StringComparison.OrdinalIgnoreCase), target.Spec.ConfigInputValue);
         string identity = target.Spec.ProfileHash + fingerprint + System.Text.Json.JsonSerializer.Serialize(context) + target.Spec.ConfigEditor?.Script;
@@ -329,8 +329,7 @@ internal sealed partial class ConfigEditCommands
         string userReference,
         string mode = "normal",
         string source = Audit.Web,
-        IReadOnlyDictionary<string, string>? inputOverrides = null,
-        string? requesterWindowToken = null)
+        IReadOnlyDictionary<string, string>? inputOverrides = null)
     {
         OperationResult<ConfigEditTarget> targetResult = ResolveTarget(scriptId, userReference);
         if (!targetResult.Succeeded)
@@ -470,7 +469,7 @@ internal sealed partial class ConfigEditCommands
         if (editMode == "reuse"
             && (target.Spec?.ConfigInputCandidatePaths.Count ?? 0) < 2)
         {
-            // 单候选 reuse 保持旧版原位编辑；只有多候选 reuse 才需要把选中项复制成工作副本。
+            // 单候选 reuse 在目标目录原位编辑；只有多候选 reuse 才需要把选中项复制成工作副本。
             isolateCandidates = false;
         }
         if (pendingInput is null
@@ -495,9 +494,6 @@ internal sealed partial class ConfigEditCommands
                 pendingInput);
         }
 
-        // Web UI 在请求期间临时把 token 放入浏览器标题；只捕获匹配 token 的本机顶层窗口，
-        // 找不到时编辑流程继续按普通配置编辑执行。
-        SystemActions.RequesterWindowIdentity? requesterWindow = SystemActions.CaptureRequesterWindow(requesterWindowToken);
         ScriptConfigGate.Lease? gate = ScriptConfigGate.Get(target.Script.Id);
         bool gateAcquired = false;
         bool gateBusy = false;
@@ -717,9 +713,6 @@ internal sealed partial class ConfigEditCommands
                 Process = process,
                 ProcessIdentity = startedIdentity,
                 ProcessOwnership = sessionOwnership,
-                WindowPlacementCancellation = requesterWindow is null || startedIdentity is null
-                    ? null
-                    : new CancellationTokenSource(),
                 Mark = editMark,
                 Spec = target.Spec,
                 ConfigGate = gate,
@@ -727,31 +720,6 @@ internal sealed partial class ConfigEditCommands
             gate = null;
             gateAcquired = false;
             pendingSession = session;
-            if (requesterWindow is not null
-                && startedIdentity is not null
-                && session.WindowPlacementCancellation is not null)
-            {
-                // 先创建并持有窗口后置任务，再把会话公开给 Complete；避免极短编辑窗口在任务赋值前完成收尾。
-                session.WindowPlacementTask = SystemActions.LowerRequesterWindowAsync(
-                    requesterWindow.Value,
-                    startedIdentity.Value,
-                    session.WindowPlacementCancellation.Token);
-                EventHandler processExited = (_, _) => session.CancelWindowPlacement();
-                session.ProcessExitedHandler = processExited;
-                try
-                {
-                    process.Exited += processExited;
-                    process.EnableRaisingEvents = true;
-                    if (process.HasExited)
-                    {
-                        session.CancelWindowPlacement();
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Logger.Debug($"[配置编辑] 注册进程退出通知失败，将由身份轮询结束窗口后置任务：{ex.Message}");
-                }
-            }
             ConfigEditSessionRegistry.EditSessions[target.Script.Id] = session;
             pendingSession = null;
             startedOwnership = null;
@@ -770,7 +738,6 @@ internal sealed partial class ConfigEditCommands
                             target.Script.Id,
                             out EditSession? registered))
                     {
-                        registered.CancelWindowPlacement();
                         if (registered.Process is not null)
                         {
                             SystemActions.KillEditProcess(
@@ -796,7 +763,6 @@ internal sealed partial class ConfigEditCommands
                     }
                     else if (startedProcess is not null)
                     {
-                        pendingSession?.CancelWindowPlacement();
                         SystemActions.KillEditProcess(
                             startedOwnership,
                             startedIdentity,
@@ -905,7 +871,6 @@ internal sealed partial class ConfigEditCommands
                     "配置文件不存在（可能已在目标软件中被改名或删除）。可在目标软件中恢复原文件名后重试保存，或取消本次编辑，再在脚本实例中更新配置名设置");
             }
 
-            session.CancelWindowPlacement();
             string launchExe = ResolveLaunchTargetExe(session.Script);
             Stopwatch cleanupTimer = Stopwatch.StartNew();
             bool processClean = session.Process is not null
@@ -1011,7 +976,7 @@ internal sealed partial class ConfigEditCommands
         ResolvedScriptUser user,
         ResolvedScriptSpec? spec)
     {
-        if (spec?.TaskProtocol?.Version == "0.1.0" && _taskProtocolAssessment is not null)
+        if (spec?.TaskProtocol?.Version == "0.2.0" && _taskProtocolAssessment is not null)
         {
             try
             {

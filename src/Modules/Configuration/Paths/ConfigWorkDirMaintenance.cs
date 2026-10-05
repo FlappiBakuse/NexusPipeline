@@ -28,7 +28,8 @@ internal static class ConfigWorkDirMaintenance
                     continue;
                 }
                 bool hasSessionMark = File.Exists(Path.Combine(userDir, ".session"))
-                    || File.Exists(Path.Combine(userDir, ".session.bak"));
+                    || File.Exists(Path.Combine(userDir, ".session.bak"))
+                    || UnsupportedConfigState.Exists(Path.GetFileName(scriptDir), Path.GetFileName(userDir));
                 SweepOne(userDir, hasSessionMark);
             }
         }
@@ -46,7 +47,8 @@ internal static class ConfigWorkDirMaintenance
             : ConfigPaths.UserDir(scriptId, userKey);
         bool hasSessionMark = !string.IsNullOrWhiteSpace(userKey)
             && (File.Exists(ConfigSessionMark.MarkFile(scriptId, userKey))
-                || File.Exists(ConfigSessionMark.BackupMarkFile(scriptId, userKey)));
+                || File.Exists(ConfigSessionMark.BackupMarkFile(scriptId, userKey))
+                || UnsupportedConfigState.Exists(scriptId, userKey));
         SweepOne(ownerDir, hasSessionMark);
     }
 

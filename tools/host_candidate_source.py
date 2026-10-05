@@ -22,12 +22,9 @@ from typing import Any
 
 REPOSITORY = "FlappiBakuse/NexusPipeline"
 WORKFLOW_PATH = ".github/workflows/release.yml"
-LEGACY_JOB_NAME = "Build and validate Host candidate"
-LEGACY_CONTROL_SHAS = {"e6ff62b0f7ae32d83c0452229744f3ee55823657"}
-NEW_JOB_NAME = "Host / 候选校验"
-NEW_REQUIRED_JOBS = (
+REQUIRED_JOBS = (
     "Host / 候选输入", "Host / 生产前端", "Host / 预装插件", "Host / 生产宿主",
-    "Host / 包校验", "Host / 安装器构建", NEW_JOB_NAME,
+    "Host / 包校验", "Host / 安装器构建", "Host / 候选校验",
 )
 
 
@@ -51,18 +48,17 @@ def full_sha(value: Any, label: str) -> str:
     return value
 
 
-def completed_job(entries: list[dict[str, Any]], name: str, *, qualified: bool) -> None:
+def completed_job(entries: list[dict[str, Any]], name: str) -> None:
     matches = [job for job in entries if job.get("name") == name]
     require(len(matches) == 1 and matches[0].get("conclusion") == "success"
             and matches[0].get("status") == "completed", f"原 attempt {name} job 未真实成功")
-    if qualified:
-        try:
-            started = datetime.fromisoformat(matches[0]["started_at"].replace("Z", "+00:00"))
-            completed = datetime.fromisoformat(matches[0]["completed_at"].replace("Z", "+00:00"))
-            elapsed = (completed - started).total_seconds()
-        except (KeyError, AttributeError, TypeError, ValueError) as exc:
-            raise CandidateSourceError(f"{name} 缺少完整服务端时间") from exc
-        require(0 <= elapsed <= 150, f"{name} 完整耗时超过 150 秒")
+    try:
+        started = datetime.fromisoformat(matches[0]["started_at"].replace("Z", "+00:00"))
+        completed = datetime.fromisoformat(matches[0]["completed_at"].replace("Z", "+00:00"))
+        elapsed = (completed - started).total_seconds()
+    except (KeyError, AttributeError, TypeError, ValueError) as exc:
+        raise CandidateSourceError(f"{name} 缺少完整服务端时间") from exc
+    require(0 <= elapsed <= 150, f"{name} 完整耗时超过 150 秒")
 
 
 def list_attempt_jobs(fetch: Callable[[str], dict[str, Any]], prefix: str, run_id: int, attempt: int) -> list[dict[str, Any]]:
@@ -136,15 +132,9 @@ def resolve_candidate(
             "candidate artifact 缺少服务端 SHA256")
     entries = list_attempt_jobs(fetch, prefix, candidate_run_id, attempt)
     names = {job.get("name") for job in entries}
-    if NEW_JOB_NAME in names:
-        require(LEGACY_JOB_NAME not in names, "candidate producer schema 混用")
-        for name in NEW_REQUIRED_JOBS:
-            completed_job(entries, name, qualified=True)
-        producer_schema = "staged-v2"
-    else:
-        require(controller_sha in LEGACY_CONTROL_SHAS, "legacy candidate controller 未在受控来源范围")
-        completed_job(entries, LEGACY_JOB_NAME, qualified=False)
-        producer_schema = "legacy-v1"
+    require("Build and validate Host candidate" not in names, "candidate producer schema 已退役")
+    for name in REQUIRED_JOBS:
+        completed_job(entries, name)
     return {
         "sourceSha": controller_sha,
         "workflowSha": controller_sha,
@@ -152,8 +142,8 @@ def resolve_candidate(
         "runAttempt": attempt,
         "artifactId": artifact["id"],
         "artifactDigest": digest,
-        "producerSchema": producer_schema,
-        "budgetQualified": producer_schema == "staged-v2",
+        "producerSchema": "staged-v2",
+        "budgetQualified": True,
     }
 
 

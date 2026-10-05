@@ -47,7 +47,7 @@ internal static class TaskDiscoveryService
         return new(protocol.Version, Guid.NewGuid().ToString("N"), preview ? "preview" : "run", pluginId,
             pluginVersion, DateTimeOffset.UtcNow, signature, result.Coverage,
             TaskProtocolJson.Copy(result.Tasks), TaskProtocolJson.Copy(result.Diagnostics))
-        { SemanticsVersion = protocol.Version == "0.2.0" ? "daily-flow-v1" : null,
+        { SemanticsVersion = "daily-flow-v1",
             SelectionFields = TaskProtocolJson.Copy(result.SelectionFields),
             DisplaySnapshot = protocol.Localization is { } texts ? (texts with { PluginId = pluginId, PluginVersion = pluginVersion })
                 .Select(result.Tasks.Select(t => t.NameText)

@@ -108,7 +108,7 @@ class HostReleaseTests(unittest.TestCase):
             output.mkdir()
             tools_dir = root / 'tools'
             tools_dir.mkdir()
-            dependency = {'framework': 'Microsoft.WindowsDesktop.App', 'version': '8.0.31',
+            dependency = {'framework': 'Microsoft.WindowsDesktop.App', 'version': '10.0.12',
                           'rid': 'win-x64', 'url': 'https://builds.dotnet.microsoft.com/dotnet/one.exe',
                           'sha256': 'a' * 64}
             other = {**dependency, 'framework': 'Microsoft.AspNetCore.App'}

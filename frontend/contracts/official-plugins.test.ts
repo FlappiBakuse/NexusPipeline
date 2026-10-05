@@ -1,8 +1,10 @@
+// @ts-expect-error Cross-repository JavaScript fixture resolved by Vitest.
+import { activationCleanup } from "@official-plugins/tests/frontend/contract.mjs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { registerNexusElements } from "../src/ui/register";
 
 // @ts-expect-error Cross-repository JavaScript fixture resolved by Vitest.
-import * as fixture from "@official-plugins/tools/Test-FrontendPlugins.mjs";
+import * as fixture from "@official-plugins/tests/frontend/support/mock-host.mjs";
 const modules = {
   // @ts-expect-error Built official plugin ESM.
   CustomWallpaper: () => import("@official-plugins/plugins/general/CustomWallpaper/web/main.js"),
@@ -34,7 +36,7 @@ describe("official plugin modules with registered host elements", () => {
       static revokeObjectURL(url: string) { urls.delete(url); }
     });
     const host = fixture.createMockHost(artifact, registrations, metrics, state);
-    const cleanup = fixture.activationCleanup(await module.activate(host));
+    const cleanup = activationCleanup(await module.activate(host));
     const renderCleanups: (() => unknown)[] = [];
     try {
       if (artifact === "GameCheckIn") {

@@ -118,7 +118,7 @@ internal static class ApplicationHost
                     StartupPipeline.RunService(runtime);
                     return 0;
                 case "manage":
-                    MainMenu.Show();
+                    NexusPipeline.ControlPlane.Cli.ControlMenu.Show();
                     return 0;
                 case "status":
                 case "help":
@@ -134,7 +134,7 @@ internal static class ApplicationHost
                         ReadRestartWebOnly(args),
                         ReadRestartKeepWebOnlyAlive(args));
                 case "apply-update":
-                    return RunUpdateApplyCli(args.Skip(1).ToArray());
+                    return RunUpdateApplyCli(args.Skip(1).ToArray(), runtime.UpdateService);
                 case "installer-update":
                     return RunInstallerUpdateCli(runtime, args.Skip(1).ToArray());
                 case "recover-update":
@@ -190,7 +190,7 @@ internal static class ApplicationHost
     }
 
     /// <summary>更新工作进程入口，仅由宿主更新流程拉起。</summary>
-    private static int RunUpdateApplyCli(string[] args)
+    private static int RunUpdateApplyCli(string[] args, UpdateService updates)
     {
         string? staged = null;
         bool webOnly = false;
@@ -215,7 +215,7 @@ internal static class ApplicationHost
         }
         try
         {
-            return UpdateApply.RunApplyWorker(staged, webOnly, StartupPipeline.SingleInstanceMutexName);
+            return UpdateApply.RunApplyWorker(staged, updates.VerifyApplyTarget, webOnly, StartupPipeline.SingleInstanceMutexName);
         }
         catch (Exception ex)
         {

@@ -160,11 +160,11 @@ internal static partial class CliCommandRouter
             if (currentStatus.Length > 0 && currentStatus != lastStatus)
             {
                 lastStatus = currentStatus;
-                CliOutput.WriteProgress(CliText.Get(
+                CliOutput.WriteProgress(
                     "progress.run_status",
                     "运行 {runId}：{status}",
                     ("runId", runId),
-                    ("status", currentStatus)));
+                    ("status", currentStatus));
             }
             if (!status.Equals("running", StringComparison.OrdinalIgnoreCase))
             {

@@ -31,7 +31,12 @@ if (selectedMode)
     reportPath = Path.GetFullPath(reportPath);
     if (File.Exists(reportPath)) throw new IOException("Report already exists; use a new run path");
 }
-if (!selectedMode && args.Length == 4)
+if (!selectedMode && args.Length == 4 && args[2] == "--report")
+{
+    reportPath = Path.GetFullPath(args[3]);
+    if (File.Exists(reportPath)) throw new IOException("Report already exists; use a new run path");
+}
+else if (!selectedMode && args.Length == 4)
 {
     if (args[2] == "--config-repair")
     {
@@ -58,17 +63,12 @@ if (!selectedMode && args.Length == 4)
         await PluginHistoryProbe.RunAsync(Path.Combine(root, "examples", args[3]));
         return;
     }
-    if (args[2] == "--bridge-replay")
-    {
-        await BridgeReplay.RunAsync(root, Path.GetFullPath(args[3]));
-        return;
-    }
     if (args[2] != "--replay-manifest") throw new ArgumentException("Expected --replay-manifest");
     await ReplayAsync(root, Path.GetFullPath(args[3]));
     return;
 }
-string fixtures = Path.Combine(root, "tools", "task-protocol", "fixtures");
-var files = Directory.GetFiles(fixtures, "*.json").Order(StringComparer.Ordinal).ToArray();
+string fixtures = Path.Combine(root, "tests", "fixtures", "task-protocol");
+var files = TaskFixtures.Index(fixtures).Values.OrderBy(Path.GetFileNameWithoutExtension, StringComparer.Ordinal).ToArray();
 if (selectedMode)
 {
     files = files.Where(file => JsonNode.Parse(File.ReadAllText(file))?["artifact"]?.GetValue<string>() == selectedArtifact).ToArray();
@@ -84,11 +84,17 @@ var completedCaseIds = new List<string>();
 foreach (string file in files)
 {
     var fixture = JsonNode.Parse(File.ReadAllText(file))!.AsObject();
-    var fixtureResources = TaskFixtureResources.Read(fixture, fixtures);
+    var fixtureResources = TaskFixtures.Read(fixture, fixtures);
     string artifact = fixture["artifact"]!.GetValue<string>();
     if (artifact.IndexOfAny(['/', '\\', ':']) >= 0) throw new InvalidDataException("Fixture artifact path");
     bool example = artifact == "TaskProtocolExample" || fixture["example"]?.GetValue<bool>() == true;
-    string plugin = example ? Path.Combine(root, "examples", artifact) : Path.Combine(root, "plugins", "specialized", artifact);
+    string preset = artifact switch
+    {
+        "TaskProtocolExample" => "json-id-array", "TaskProtocolJsonMap" => "json-map",
+        "TaskProtocolJsonParallelArray" => "json-parallel-array", "TaskProtocolYaml" => "yaml",
+        "TaskProtocolMxu" => "mxu", _ when !example => "", _ => throw new InvalidDataException("Unknown current example"),
+    };
+    string plugin = example ? Path.Combine(root, "examples", "task-protocol", preset) : Path.Combine(root, "plugins", "specialized", artifact);
     var manifest = JsonNode.Parse(File.ReadAllText(Path.Combine(plugin, "plugin.json")))!.AsObject();
     var protocol = TaskProtocolManifest.Freeze(manifest, plugin)!;
     if (phaseChecked.Add(artifact))
@@ -231,7 +237,7 @@ foreach (string file in files)
         if (plan.Coverage != "unsupported")
         {
             var transaction = TaskSelectionTransaction.Freeze(Path.Combine(temporary, "journal"), view, plan.SelectionFields);
-            var reducer = new TaskRunReducer("run", plan);
+            var reducer = TaskRunReducer.CreateDaily("run", plan);
             var selected = plan.Tasks.Where(t => t.Enabled).Select(t => t.Id).ToArray();
             reducer.BeginAttempt("attempt", 1, selected);
             JsonObject? cursor = null;
@@ -276,7 +282,7 @@ foreach (string file in files)
                     Check(TaskProtocolJson.Write(reducer.AcceptedResults) == accepted && reducer.RunBoundary == boundaryBeforeIdle,
                         "idle observation cannot fabricate or erase evidence");
                 }
-                var fresh = new TaskRunReducer("isolated-run", plan);
+                var fresh = TaskRunReducer.CreateDaily("isolated-run", plan);
                 fresh.BeginAttempt("isolated-attempt", 1, selected);
                 string initial = TaskProtocolJson.Write(fresh.AcceptedResults);
                 var empty = new TaskLogBatch([], false);
@@ -408,7 +414,7 @@ static async Task ReplayAsync(string root, string manifestPath)
             var report = new JsonObject { ["artifact"] = artifact, ["logSha256"] = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(path))).ToLowerInvariant(), ["coverage"] = plan.Coverage };
             if (plan.Coverage != "unsupported")
             {
-                var reducer = new TaskRunReducer("replay", plan);
+                var reducer = TaskRunReducer.CreateDaily("replay", plan);
                 var selected = plan.Tasks.Where(t => t.Enabled).Select(t => t.Id).ToArray();
                 reducer.BeginAttempt("attempt", 1, selected);
                 JsonObject? cursor = null;

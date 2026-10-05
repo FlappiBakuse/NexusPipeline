@@ -175,24 +175,6 @@ internal sealed class ExecutionValidator
         return totalTasks;
     }
 
-    public IReadOnlyList<string> EnabledUserNames(ScriptInstance script)
-    {
-        return _users.ResolveEnabledBindings(script).Select(user => user.UserName).ToList();
-    }
-
-    public string? QueueBlockedBy(DispatchQueue queue)
-    {
-        foreach (QueueTask task in queue.Tasks.OrderBy(task => task.Index))
-        {
-            ScriptInstance? script = _scripts.FindById(task.ScriptInstanceId);
-            if (IsScriptRunning(script))
-            {
-                return script!.Name;
-            }
-        }
-        return null;
-    }
-
     /// <summary>检查已经冻结的定时计划所引用的脚本进程，避免重试时回读并改变计划内容。</summary>
     public string? QueueBlockedByPlan(QueueExecutionPlan plan)
     {

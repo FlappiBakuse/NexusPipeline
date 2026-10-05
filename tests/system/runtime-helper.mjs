@@ -1,3 +1,4 @@
+import { controlServiceName } from "../../tools/installation-generation.mjs";
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
@@ -17,6 +18,7 @@ import {
   OWNERSHIP,
   ensureOwnedRuntimeDirectory,
   fetchWithTimeout,
+  probeHttpStatus,
   installEmulatorStubs,
   requireExecutionMode,
   readRunMarker,
@@ -190,11 +192,9 @@ export async function waitForService(url = null, timeoutMs = 30000) {
     try {
       const requestTimeoutMs = Math.min(3000, Math.max(1, deadline - Date.now()));
       const targetUrl = url ?? serviceUrl();
-      const response = await fetchWithTimeout(targetUrl + "api/status", {}, requestTimeoutMs);
-      // 消费响应体，避免 keep-alive 连接挂起未读完的数据（Node 24 undici 断言崩溃 / 宿主写响应失败）。
-      await response.arrayBuffer();
-      if (response.ok) return;
-      lastError = `HTTP ${response.status}`;
+      const status = await probeHttpStatus(targetUrl + "api/status", requestTimeoutMs);
+      if (status >= 200 && status < 300) return;
+      lastError = `HTTP ${status}`;
     } catch (error) {
       lastError = error.message;
     }
@@ -204,7 +204,7 @@ export async function waitForService(url = null, timeoutMs = 30000) {
   throw new Error(`System Smoke 服务未启动：${url}；尝试 ${attempts} 次；${lastError}\n${runtimeDiagnostic()}`);
 }
 
-const restartServiceName = "NexusPipeline";
+const restartServiceName = controlServiceName;
 const restartObservationLimit = 8;
 
 function normalizePort(value) {

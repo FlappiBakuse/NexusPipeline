@@ -3,23 +3,23 @@
   "dependencies": [
     {
       "framework": "Microsoft.WindowsDesktop.App",
-      "version": "8.0.31",
+      "version": "10.0.12",
       "rid": "win-x64",
-      "url": "https://builds.dotnet.microsoft.com/dotnet/WindowsDesktop/8.0.31/windowsdesktop-runtime-8.0.31-win-x64.exe",
-      "sizeBytes": 58715896,
-      "sha512": "605189223cf0a64bfb5453520b794d1d386a97c7e65e3944feaf9214db1a8b247f66c569265aef4204447baf5b5ff19559c323d887e1318f17deb28a5af0fa12",
-      "sha256": "c375dfd80a967405cfeff634912c1fccc56261ce3d9209ea473f60a21184d1cc",
-      "metadataUrl": "https://dotnetcli.blob.core.windows.net/dotnet/release-metadata/8.0/releases.json"
+      "url": "https://builds.dotnet.microsoft.com/dotnet/WindowsDesktop/10.0.12/windowsdesktop-runtime-10.0.12-win-x64.exe",
+      "sizeBytes": 60032984,
+      "sha512": "0b907e9312867172a4eb82f4b5ab3f7c2d25e27d8349546d77eeb5d5b8cbecab9ebebfed189b13e9669dc578d892756c548366da539d47b3ddac5efcb7ae72fe",
+      "sha256": "55a67d8476cde95a9cc43a95803b4f54446e7c9251ed22aa6421d4908174ae84",
+      "metadataUrl": "https://dotnetcli.blob.core.windows.net/dotnet/release-metadata/10.0/releases.json"
     },
     {
       "framework": "Microsoft.AspNetCore.App",
-      "version": "8.0.31",
+      "version": "10.0.12",
       "rid": "win-x64",
-      "url": "https://builds.dotnet.microsoft.com/dotnet/aspnetcore/Runtime/8.0.31/aspnetcore-runtime-8.0.31-win-x64.exe",
-      "sizeBytes": 10505248,
-      "sha512": "39c032419a5d6fc786280f7f69af9aebc137b1bc59c560a3cf7b7a4effa68b664f8e7325c941bad8a6134f7adb0f6b3fd2b6eb9376760070b0cc080873cc5a26",
-      "sha256": "6b9d183e26df9bd33bd50c2ce5e7bfacb44eb4d65b99553ec431b166d1e10b40",
-      "metadataUrl": "https://dotnetcli.blob.core.windows.net/dotnet/release-metadata/8.0/releases.json"
+      "url": "https://builds.dotnet.microsoft.com/dotnet/aspnetcore/Runtime/10.0.12/aspnetcore-runtime-10.0.12-win-x64.exe",
+      "sizeBytes": 11262864,
+      "sha512": "1bd1cf3cc23a05611bf266046281c7bfb6c3231a9690482ddc31ea74ede62eaded12517c362983976aa7e20c57108812dcd04f67884957b85a6829cd56ceaac5",
+      "sha256": "e5d20698ea8cdda55bcf8d6151d5b65097761506a1d8ed9af39910cfc956e5ad",
+      "metadataUrl": "https://dotnetcli.blob.core.windows.net/dotnet/release-metadata/10.0/releases.json"
     }
   ]
 }

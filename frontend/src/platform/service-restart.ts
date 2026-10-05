@@ -1,4 +1,5 @@
 import { api } from "./api";
+import { CONTROL_SERVICE_NAME } from "./service-identity";
 
 /**
  * 服务重启恢复协议。
@@ -42,7 +43,6 @@ export interface ServiceRecoveryOptions {
   probe?: (url: string, handoff: ServiceRestartHandoff, signal?: AbortSignal) => Promise<ServiceInstanceProbe | null>;
 }
 
-const SERVICE_NAME = "NexusPipeline";
 
 /** 请求宿主重启服务；返回新实例的候选端口、交接标识与旧实例标识。 */
 export async function requestServiceRestart(signal?: AbortSignal): Promise<ServiceRestartHandoff> {
@@ -79,7 +79,7 @@ export function restartProbeUrl(href: string, port: number): string {
 function statusPayload(value: unknown): ServiceInstanceProbe | null {
   const payload = value as { service?: unknown; controlApiVersion?: unknown; instanceId?: unknown; restartHandoffId?: unknown; actualPort?: unknown; ready?: unknown; version?: unknown; frontendBuildId?: unknown } | null;
   if (!payload || typeof payload !== "object") return null;
-  if (String(payload.service || "") !== SERVICE_NAME) return null;
+  if (String(payload.service || "") !== CONTROL_SERVICE_NAME) return null;
   if (!String(payload.controlApiVersion || "") || payload.ready !== true) return null;
   const instanceId = String(payload.instanceId || "");
   if (!instanceId) return null;

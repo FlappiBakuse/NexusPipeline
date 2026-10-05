@@ -20,7 +20,7 @@ test("empty or unknown inputs preserve the entire applicable core",()=>{
   }
 });
 test("docs only uses a lightweight control without core batches",()=>{
-  const selected=planForChanges(root,[{status:"M",path:"docs/TESTING.md"}],registry,policy).selected;
+  const selected=planForChanges(root,[{status:"M",path:"docs/testing/README.md"}],registry,policy).selected;
   const plan=allocateUnits(coreUnits(selected,registry,policy),{});
   assert.equal(plan.batches.length,0);
   assert.equal(plan.control.units.length,1);

@@ -424,23 +424,6 @@ internal sealed class RunningExecution
         }
     }
 
-    public void IncrementDoneTasks()
-    {
-        lock (_stateSync)
-        {
-            _doneTasks++;
-        }
-        NotifyStatusChanged();
-    }
-
-    public void AddRecord(RunRecord record)
-    {
-        lock (_stateSync)
-        {
-            Records.Add(record);
-        }
-    }
-
     public void AddRecordAndIncrement(RunRecord record)
     {
         lock (_stateSync)

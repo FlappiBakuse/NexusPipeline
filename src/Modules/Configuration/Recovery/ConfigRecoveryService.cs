@@ -119,7 +119,7 @@ internal sealed record ConfigRecoveryIsolationProjection(
         ConfigSessionRecoveryIsolation? isolation = mark.RecoveryIsolation;
         return new(isolation?.RecoveryId ?? "", mark.ScriptId, mark.UserId, mark.ConfigPath,
             mark.ExtraConfigPaths.Select(path => path.Path).ToArray(), mark.WorkingDirectory, mark.WritableRoot,
-            isolation?.CauseCode ?? "legacy-recovery-journal",
+            isolation?.CauseCode ?? "recovery-isolation-unavailable",
             isolation?.ScopeQuality ?? "unavailable",
             isolation?.MayContinueIndependent == true,
             mark.OriginExecutionId, isolation is not null);

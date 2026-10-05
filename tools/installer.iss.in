@@ -1,13 +1,14 @@
 ; Generated from this template and one frozen production payload by host_installer.py.
 [Setup]
-AppId=NexusPipeline.PerUser
+AppId=NexusPipeline.PerUser.@@GENERATION@@
 AppName=NexusPipeline
 AppVersion=@@VERSION@@
 AppPublisher=FlappiBakuse
-DefaultDirName={localappdata}\Programs\NexusPipeline
-DefaultGroupName=NexusPipeline
-UninstallFilesDir={localappdata}\NexusPipeline\installer
+DefaultDirName={localappdata}\NexusPipeline.Generations\@@GENERATION@@\app
+DefaultGroupName=NexusPipeline @@GENERATION@@
+UninstallFilesDir={localappdata}\NexusPipeline.Generations\@@GENERATION@@\installer
 PrivilegesRequired=lowest
+MinVersion=10.0.22000
 ArchitecturesAllowed=x64
 ArchitecturesInstallIn64BitMode=x64
 AllowUNCPath=no
@@ -38,8 +39,8 @@ Name: "zh_ui"; MessagesFile: "@@CHINESE_ISL@@,@@CHINESE_UI_ISL@@"
 Name: desktopicon; Description: "{cm:DesktopIcon}"; Flags: unchecked
 
 [Icons]
-Name: "{autoprograms}\NexusPipeline"; Filename: "{app}\nexus-pipeline.exe"
-Name: "{autodesktop}\NexusPipeline"; Filename: "{app}\nexus-pipeline.exe"; Tasks: desktopicon
+Name: "{autoprograms}\NexusPipeline @@GENERATION@@"; Filename: "{app}\nexus-pipeline.exe"
+Name: "{autodesktop}\NexusPipeline @@GENERATION@@"; Filename: "{app}\nexus-pipeline.exe"; Tasks: desktopicon
 
 [Files]
 @@FILES@@
@@ -149,7 +150,7 @@ var
   State: AnsiString;
 begin
   Result := '';
-  if HasLinkInPath(Path) or HasLinkInPath(ExpandConstant('{localappdata}\NexusPipeline\installer')) then Exit;
+  if HasLinkInPath(Path) or HasLinkInPath(ExpandConstant('{localappdata}\NexusPipeline.Generations\@@GENERATION@@\installer')) then Exit;
   Script := ExpandConstant('{tmp}\nxp-instance-check.ps1');
   ResultFile := ExpandConstant('{tmp}\nxp-instance-check.result');
   if FileExists(ResultFile) and not DeleteFile(ResultFile) then Exit;
@@ -158,8 +159,8 @@ begin
     '$ErrorActionPreference = ''Stop''' + #13#10 +
     'try {' + #13#10 +
     'Add-Type -AssemblyName System.Security' + #13#10 +
-    '$k = Get-ItemProperty -LiteralPath ''HKCU:\Software\NexusPipeline\Installer''' + #13#10 +
-    '$m = Join-Path $env:LOCALAPPDATA ''NexusPipeline\installer''' + #13#10 +
+    '$k = Get-ItemProperty -LiteralPath ''HKCU:\Software\NexusPipeline.Generations\@@GENERATION@@\Installer''' + #13#10 +
+    '$m = Join-Path $env:LOCALAPPDATA ''NexusPipeline.Generations\@@GENERATION@@\installer''' + #13#10 +
     '$s = [IO.File]::ReadAllText((Join-Path $m ''identity.protected''))' + #13#10 +
     '$h = [BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($s))).Replace(''-'','''').ToLowerInvariant()' + #13#10 +
     'if ($h -ne $k.IdentityDigest) { exit 1 }' + #13#10 +
@@ -190,18 +191,45 @@ begin
   Result := ProtectedInstanceState(Path, False) <> '';
 end;
 
+function RootsOverlap(const Left, Right: String): Boolean;
+var
+  A, B: String;
+begin
+  A := AddBackslash(ExpandFileName(Left));
+  B := AddBackslash(ExpandFileName(Right));
+  Result := (CompareText(Copy(A, 1, Length(B)), B) = 0) or
+    (CompareText(Copy(B, 1, Length(A)), A) = 0);
+end;
+
+function GenerationDestination(const Path: String): Boolean;
+var
+  OldRoot: String;
+begin
+  Result := False;
+  if RootsOverlap(Path, ExpandConstant('{localappdata}\NexusPipeline')) or
+     RootsOverlap(Path, ExpandConstant('{localappdata}\Programs\NexusPipeline')) or
+     RootsOverlap(Path, ExpandConstant('{localappdata}\NexusPipeline.Generations\@@GENERATION@@\installer')) then Exit;
+  if RegQueryStringValue(HKCU, 'Software\NexusPipeline\Installer', 'DataRoot', OldRoot) then
+    if RootsOverlap(Path, OldRoot) then Exit;
+  if RegQueryStringValue(HKCU, 'Software\NexusPipeline\Installer', 'AppDir', OldRoot) then
+    if RootsOverlap(Path, OldRoot) then Exit;
+  if RegQueryStringValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Uninstall\NexusPipeline.PerUser_is1', 'InstallLocation', OldRoot) then
+    if RootsOverlap(Path, OldRoot) then Exit;
+  Result := True;
+end;
+
 function ValidDestination(const Path: String): Boolean;
 var
   Drive, RegisteredRoot: String;
   HasRegisteredRoot: Boolean;
 begin
   Result := False;
-  if (Copy(Path, 1, 2) = '\\') or HasLinkInPath(Path) then Exit;
+  if (Copy(Path, 1, 2) = '\\') or HasLinkInPath(Path) or not GenerationDestination(Path) then Exit;
   Drive := ExtractFileDrive(Path);
   if (Length(Drive) <> 2) or (GetDriveTypeW(Drive + '\') <> 3) then Exit;
-  HasRegisteredRoot := RegQueryStringValue(HKCU, 'Software\NexusPipeline\Installer', 'DataRoot', RegisteredRoot);
+  HasRegisteredRoot := RegQueryStringValue(HKCU, 'Software\NexusPipeline.Generations\@@GENERATION@@\Installer', 'DataRoot', RegisteredRoot);
   if not HasRegisteredRoot then
-    HasRegisteredRoot := RegQueryStringValue(HKCU, 'Software\NexusPipeline\Installer', 'AppDir', RegisteredRoot);
+    HasRegisteredRoot := RegQueryStringValue(HKCU, 'Software\NexusPipeline.Generations\@@GENERATION@@\Installer', 'AppDir', RegisteredRoot);
   if HasRegisteredRoot then begin
     // Registration owns one per-user root, including retained data after uninstall.
     // Refuse before writing payload; Register must not be the first ownership check.
@@ -235,7 +263,7 @@ var
 begin
   Result := False;
   if not IsWin64 then Exit;
-  if not StrToVersion('8.0.0', Minimum) or not StrToVersion('9.0.0', Maximum) then Exit;
+  if not StrToVersion('10.0.12', Minimum) or not StrToVersion('10.1.0', Maximum) then Exit;
   Dotnet := ExpandConstant('{commonpf64}\dotnet\dotnet.exe');
   ExpectedPath := ExpandConstant('{commonpf64}\dotnet\shared\') + Framework;
   if not FileExists(Dotnet) or HasLinkInPath(Dotnet) then Exit;
@@ -363,11 +391,11 @@ begin
       Result := CustomMessage('ConcurrentSetup'); Exit;
     end;
   end;
-  Result := InstallFramework('Microsoft.WindowsDesktop.App', '.NET Desktop Runtime 8 x64',
-    '@@DESKTOP_URL@@', 'windowsdesktop-runtime-8.0.31-win-x64.exe', '@@DESKTOP_SHA256@@', NeedsRestart);
+  Result := InstallFramework('Microsoft.WindowsDesktop.App', '.NET Desktop Runtime 10 x64',
+    '@@DESKTOP_URL@@', 'windowsdesktop-runtime-10.0.12-win-x64.exe', '@@DESKTOP_SHA256@@', NeedsRestart);
   if Result <> '' then Exit;
-  Result := InstallFramework('Microsoft.AspNetCore.App', 'ASP.NET Core Runtime 8 x64',
-    '@@ASPNET_URL@@', 'aspnetcore-runtime-8.0.31-win-x64.exe', '@@ASPNET_SHA256@@', NeedsRestart);
+  Result := InstallFramework('Microsoft.AspNetCore.App', 'ASP.NET Core Runtime 10 x64',
+    '@@ASPNET_URL@@', 'aspnetcore-runtime-10.0.12-win-x64.exe', '@@ASPNET_SHA256@@', NeedsRestart);
   if Result <> '' then Exit;
   TransactionId := Copy(GetSHA256OfString(Path + GetDateTimeString('yyyymmddhhnnss', #0, #0) +
     IntToStr(Random(2147483647)) + IntToStr(Random(2147483647))), 1, 32);
@@ -441,7 +469,7 @@ begin
       DeleteFile(Helper);
       Exit;
     end;
-    ManagerDir := ExpandConstant('{localappdata}\NexusPipeline\installer');
+    ManagerDir := ExpandConstant('{localappdata}\NexusPipeline.Generations\@@GENERATION@@\installer');
     if not ForceDirectories(ManagerDir) then
       RaiseException(CustomMessage('OwnershipCreateFailed'));
     Manifest := ExpandConstant('{tmp}\nxp-payload-manifest.json');
@@ -499,7 +527,7 @@ begin
   if (ProtectedInstanceState(Path, True) <> 'active') or
      CheckForMutexes('NexusPipeline.SingleInstance') then
     RaiseException(CustomMessage('UninstallStateChanged'));
-  Helper := ExpandConstant('{localappdata}\NexusPipeline\installer\nexus-installer-helper.exe');
+  Helper := ExpandConstant('{localappdata}\NexusPipeline.Generations\@@GENERATION@@\installer\nexus-installer-helper.exe');
   Params := 'installer-state uninstall --root "' + Path + '" --delete-data ';
   if DeleteInstanceData then Params := Params + 'true' else Params := Params + 'false';
   if not ShellExec('runas', Helper, Params, Path, SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then

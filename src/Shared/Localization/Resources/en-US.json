@@ -37,6 +37,7 @@
   "api.error.history_invalid_status": "The history status filter is invalid",
   "api.error.history_invalid_user_key": "The history user key is invalid",
   "api.error.history_not_found": "The history was not found",
+  "api.error.unsupported_history_index": "The unsupported history index has been preserved. Configure a new installation directory and view old history with the backed-up old application.",
   "api.error.history_paging_invalid": "limit must be between 1 and 200, and offset cannot be negative",
   "api.error.history_range_required": "A history date range is required",
   "api.error.history_range_reversed": "The history date range is reversed",
@@ -587,5 +588,6 @@
   "user.name_invalid": "The user name is required and contains invalid characters",
   "validation.invalid_json": "The request body is invalid",
   "validation.invalid_request": "The request is invalid",
-  "run.configuration_setup_required": "The plugin has a breaking configuration change. Set up and save the script instance again, then save this user’s configuration."
+  "run.configuration_setup_required": "The plugin has a breaking configuration change. Set up and save the script instance again, then save this user’s configuration.",
+  "cli.transport.other_generation": "[Error] Another installation generation of NexusPipeline is running. Close that application and its connections before starting this generation."
 }

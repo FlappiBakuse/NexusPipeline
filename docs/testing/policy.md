@@ -11,11 +11,11 @@
 
 ### UI Smoke 配额
 
-当前浏览器验收保留 2 个用户工作流，硬上限 12 个：
+当前浏览器验收保留 3 个用户工作流，硬上限 12 个：
 
 ```text
 tests/e2e/tests/
-└── app.smoke.spec.mjs                 2
+└── app.smoke.spec.mjs                 3
 ```
 
 UI Smoke 断言用户可观察的结果和稳定业务状态，优先使用稳定的 `data-testid`、ARIA 状态和业务 ID；现有用例仍可读取 `data-action` 作为定位属性，但它不是运行时行为契约。业务行为不使用 CSS/class/style、精确像素、SVG 数量、装饰性文案、源码字符串、随机 DOM 层级或完整磁盘文件内容作为质量判断。低层已能稳定证明的每个字段、密钥、选项和 payload 不重复占用浏览器配额。

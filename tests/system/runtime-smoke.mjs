@@ -1,3 +1,4 @@
+import { controlServiceName } from "../../tools/installation-generation.mjs";
 import test, { after, before } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
@@ -106,7 +107,7 @@ test("当前隔离宿主启动并提供 status API", { skip }, async () => {
   const response = await fetchWithTimeout(serviceUrl() + "api/status");
   assert.equal(response.status, 200);
   const status = await response.json();
-  assert.equal(status.service, "NexusPipeline");
+  assert.equal(status.service, controlServiceName);
   assert.equal(status.controlApiVersion, 1);
   assert.match(status.version, /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-(?:beta|rc)\.(?:0|[1-9]\d*))?$/);
   assert.ok(status.actualPort >= 1024 && status.actualPort <= 65535);
@@ -258,7 +259,7 @@ test("重启接受后立即冻结旧服务的运行与配置写入准入", { ski
 
     const restarted = await waitForRestartedService(restartOptions);
     restartedConfirmed = true;
-    assert.equal(restarted.service, "NexusPipeline");
+    assert.equal(restarted.service, controlServiceName);
     assert.notEqual(restarted.instanceId, previousInstanceId, "重启后必须由新的进程实例提供服务");
     assert.equal(restarted.restartHandoffId, restartPayload.handoffId, "新实例必须携带本次重启的交接标识");
     const afterSettingsResponse = await api("GET", "/api/settings");

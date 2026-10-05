@@ -1,10 +1,10 @@
-# 执行 provider（Plugin API 1.9）
+# 执行 provider（Plugin API 2.0）
 
-这是独立 managed 插件接入现有执行生命周期的公共扩展。接口位于 `src/NexusPipeline.Plugin.Abstractions/ExecutionProviderApi.cs`。旧 Plugin API 和 [taskProtocol](task-protocol.md) 的日志证据格式保持兼容；provider 不创建第二套用户、队列、历史或恢复引擎。
+这是独立 managed 插件接入现有执行生命周期的公共扩展。接口位于 `src/NexusPipeline.Plugin.Abstractions/ExecutionProviderApi.cs`。provider 使用 API 2.0 和独立 worker IPC；报告为 schema 1 / provider-execution-v1，[taskProtocol](task-protocol.md) 日常报告为 schema 2 / daily-flow-v1。provider 使用现有用户、队列、历史和恢复引擎。
 
 ## 注册和计划
 
-插件声明 `apiVersion: "1.9"`、`minHostVersion: "0.16.9"`，初始化时检查 `IPluginHostContextV1_9`，通过 `ExecutionProviders.Register` 注册唯一 provider ID，停止时释放注册。只有当前启用插件可以注册；停用后配置与历史保留，新的执行报告 provider 不可用。
+插件声明 `apiVersion: "2.0"`、`minHostVersion: "0.16.15"`，初始化时检查 `IPluginHostContext`，通过 `ExecutionProviders.Register` 注册唯一 provider ID，停止时释放注册。只有当前启用插件可以注册；停用后配置与历史保留，新的执行报告 provider 不可用。
 
 `InspectAsync` 返回只读项目能力和公共 schema。`PrepareAsync` 返回冻结的 `PluginProviderPlan`：稳定 plan ID、配置 revision、授权指纹、资源、任务身份与顺序、私有执行数据。任务 ID 不等于翻译后的显示名称。Host 校验任务与资源预算、资源根和整份计划的 1 MiB 上限，随后使用原有准入和资源租约。
 
@@ -24,7 +24,7 @@ worker 先 handshake，Host 发 start，然后 worker 发 ready；握手与原�
 
 ## 结果与兼容
 
-引擎 `succeeded` 只表示上游引擎完成。无独立业务证据时，任务仍为 unknown，运行显示“流程已结束 · 有未核验项”。历史新增 `outcomes`，分别保存 `engineStatus`、`businessVerification`、`executionOutcome`、`recoveryOutcome`；旧历史缺字段时不推断已核验成功。
+引擎 `succeeded` 只表示上游引擎完成。无独立业务证据时，任务仍为 unknown，运行显示“流程已结束 · 有未核验项”。历史新增 `outcomes`，分别保存 `engineStatus`、`businessVerification`、`executionOutcome`、`recoveryOutcome`；当前合同允许 outcomes 缺省或为空时不推断已核验成功；旧格式历史不参与解析。
 
 provider 事实使用 `structuredEvidenceVersion: 1` 和受限 `structuredEvidence`，不伪造 stdout 行、source epoch 或日志位置。节点诊断不增加业务分母，也不把匿名 focus 当作任务终态。重试仍要求安全风险与依赖闭包证据；当前 Maa 首版不自动重跑 unknown 项。
 
@@ -32,4 +32,4 @@ provider 事实使用 `structuredEvidenceVersion: 1` 和受限 `structuredEviden
 
 Host xUnit 覆盖 registry、计划、worker、既有 runner、资源和 journal。真实 Jint 的生产适配器联调显式提供插件 checkout，见[插件 API 索引](README.md)与[测试命令](../../testing/commands.md)。
 
-框架和项目的使用范围在 [官方 Plugins 仓库](https://github.com/FlappiBakuse/NexusPipeline-Plugins) 的 `docs/MAAFRAMEWORK_DRIVER.md` 维护；本公共协议不复制项目解析规则。该指南随驱动源码交付，商店正式上架状态以实际发行记录为准。
+框架和项目的使用范围在 [官方 Plugins 仓库](https://github.com/FlappiBakuse/NexusPipeline-Plugins) 的 `docs/frameworks/MAAFRAMEWORK_DRIVER.md` 维护；本公共协议不复制项目解析规则。该指南随驱动源码交付，商店正式上架状态以实际发行记录为准。

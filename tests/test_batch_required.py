@@ -58,6 +58,28 @@ class BatchRequiredTests(unittest.TestCase):
     def test_complete_typed_control_passes(self):
         self.assertEqual(self.check()["status"],"PASS")
 
+    def test_python_gate_requires_native_positive_cases_without_skips(self):
+        native = {"schemaVersion":1, "suite":"release", "status":"PASS", "caseIds":["Release.test_current"],
+                  "counts":{"testsRun":1, "failures":0, "errors":0, "skipped":0, "unexpectedSuccesses":0, "expectedFailures":0}}
+        required.validate_unittest_report(native, "release")
+        for key,value in [("testsRun",0), ("testsRun",True), ("failures",1), ("errors",1), ("skipped",1),
+                          ("unexpectedSuccesses",1), ("expectedFailures",1)]:
+            changed = copy.deepcopy(native); changed["counts"][key] = value
+            with self.subTest(key=key), self.assertRaises(ValueError): required.validate_unittest_report(changed, "release")
+        for cases in [[], ["Release.test_current", "Release.test_current"], [""]]:
+            with self.subTest(cases=cases), self.assertRaises(ValueError):
+                required.validate_unittest_report({**native, "caseIds":cases}, "release")
+        with self.assertRaises(ValueError): required.validate_unittest_report(native, "ci")
+        unit = self.plan["control"]["units"][0]
+        unit["id"] = "host.release-contract"; unit["provides"] = [unit["id"]]
+        self.actual["id"] = unit["id"]; self.actual["providedObligations"] = unit["provides"]
+        self.write("unit-receipt.json", {"unitId":unit["id"], "provides":unit["provides"], "status":"PASS", "exitCode":0})
+        files = {name:self.root/name for name in self.actual["rawEvidence"]}
+        with self.assertRaises(ValueError): required.validate_unit(unit, self.actual, files, self.root)
+        self.write("python-release.json", native); self.actual["rawEvidence"].append("python-release.json")
+        files["python-release.json"] = self.root/"python-release.json"
+        required.validate_unit(unit, self.actual, files, self.root)
+
     def test_finite_union_requires_every_native_scenario_and_observation(self):
         scenarios = ["H-E01", "H-E02", "H-E03"]
         expected = {"id":"host.finite", "kind":"finite", "provides":["execution", "config", "control"],
@@ -134,9 +156,8 @@ class BatchRequiredTests(unittest.TestCase):
         value=mock.Mock(st_mode=0,st_file_attributes=0x400)
         with mock.patch.object(Path,"lstat",return_value=value),self.assertRaises(ValueError):required.unlinked(self.root)
 
-    @unittest.skipUnless(os.name == "nt", "Windows extended-length path boundary")
     def test_long_owned_path_preserves_containment_and_bytes(self):
-        relative = "evidence/" + "x" * 90 + "/" + "y" * 100 + ".json"
+        relative = "evidence/" + "x" * 90 + "/" + "z" * 90 + "/" + "y" * 100 + ".json"
         target = required.native_path(self.root / relative)
         target.parent.mkdir(parents=True)
         target.write_bytes(b'{"value":1}')
@@ -146,6 +167,8 @@ class BatchRequiredTests(unittest.TestCase):
             with self.assertRaises(ValueError): required.safe_file(self.root, "../outside.json")
         finally:
             target.unlink()
+            target.parent.rmdir()
+            target.parent.parent.rmdir()
 
     def test_native_trx_instances_skips_and_counter_disagreement_fail(self):
         file=self.root/"native.trx"

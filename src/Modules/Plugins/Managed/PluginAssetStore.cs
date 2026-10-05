@@ -30,7 +30,7 @@ internal sealed class PluginAssetStore : IPluginAssetStore
 
     public PluginAssetStore(string pluginName)
     {
-        _pluginName = PluginScopedDataStore.ValidateSegment(PluginNameCanonicalization.Canonicalize(pluginName), "插件名", 64);
+        _pluginName = PluginScopedDataStore.ValidateSegment(pluginName.Trim(), "插件名", 64);
         _root = Path.GetFullPath(Path.Combine(AppPaths.ConfigDir, "plugins", _pluginName, "assets"));
     }
 
@@ -176,23 +176,6 @@ internal sealed class PluginAssetStore : IPluginAssetStore
             return byTime != 0 ? byTime : string.CompareOrdinal(left.Id, right.Id);
         });
         return ValueTask.FromResult<IReadOnlyList<PluginAssetInfo>>(items);
-    }
-
-    /// <summary>宿主级格式搬迁入口：把宿主目录中的文件写入插件资产命名空间。</summary>
-    public async ValueTask<PluginAssetInfo> ImportAsync(
-        string scope,
-        string extension,
-        string sourcePath,
-        CancellationToken cancellationToken = default)
-    {
-        await using var source = new FileStream(
-            sourcePath,
-            FileMode.Open,
-            FileAccess.Read,
-            FileShare.Read,
-            64 * 1024,
-            FileOptions.Asynchronous | FileOptions.SequentialScan);
-        return await WriteAsync(scope, extension, source, cancellationToken).ConfigureAwait(false);
     }
 
     private void EnforceScopeLimits(string directory, long incomingBytes)

@@ -307,6 +307,7 @@ internal sealed class PluginPackageService
                 throw new PluginRepositoryException("manifest_invalid", "managed-code 插件 entryAssembly 不存在或路径非法");
             }
             ValidateFrontendFiles(pluginDir, manifest.Frontend);
+            Managed.ManagedPluginContract.Validate(pluginDir, manifest);
         }
         catch (PluginRepositoryException)
         {

@@ -1,3 +1,4 @@
+import { controlServiceName } from "../../tools/installation-generation.mjs";
 import { spawnSync } from "node:child_process";
 import { findAvailablePort } from "../support/test-runtime.mjs";
 import { runtime, assert, fs, path, json, target, settled, report } from "./finite-common.mjs";
@@ -26,7 +27,7 @@ try {
   fs.writeFileSync(settings, JSON.stringify({ ...JSON.parse(fs.readFileSync(settings)),
     UpdateCheckEnabled: false, McpEnabled: true, McpPort: mcpPort }));
   runtime.startRuntime(["service"]); await runtime.waitForService(null, 5000);
-  assert.equal(cli(["status"]).service, "NexusPipeline");
+  assert.equal(cli(["status"]).service, controlServiceName);
   assert.equal(await runtime.waitFor(async () => (await json("GET", "api/status")).ready === true, 5000, 50), true, "MCP listener did not become ready");
   const owned = await target("control-target"); await runtime.createUserBinding(owned.script.id, "control-user");
   cliRun = cli(["run", "script", owned.script.id, "--detach"]);
@@ -66,6 +67,12 @@ try {
   installed = (await json("GET", "api/plugins")).find(item => item.name === "store-fixture");
   assert.equal(installed.version, "0.1.1"); assert.equal(installed.runtimeEnabled, true);
   assert.equal((await json("GET", "api/history?days=1&limit=100")).records.length, 2);
+  const index = path.join(runtime.runtimeDir, "history", ".task-latest.json");
+  const oldIndex = Buffer.from('{"legacy-record":{"RecordId":"old"}}\r\n');
+  fs.writeFileSync(index, oldIndex);
+  const rejected = await json("GET", "api/users/task-summaries", undefined, 409);
+  assert.equal(rejected.code, "unsupported_history_index");
+  assert.deepEqual(fs.readFileSync(index), oldIndex);
   const receipts = fs.readFileSync(process.env.NEXUS_TEST_HTTP_PLAN + ".receipts.jsonl", "utf8").trim().split("\n").map(JSON.parse);
   assert.deepEqual(receipts.map(item => item.id).sort(), ["bad-hash","catalog","catalog-update","install","update"].sort());
   assert.ok(receipts.every(item => item.matched));

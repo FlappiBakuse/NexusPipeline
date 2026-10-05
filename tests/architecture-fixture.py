@@ -29,7 +29,7 @@ def main():
         root = Path(temporary).resolve()
         if artifact_root not in root.parents:
             raise ValueError("Fixture escaped external test root")
-        write(root, "src/NexusPipeline.csproj", """<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net8.0</TargetFramework><Nullable>enable</Nullable></PropertyGroup><PropertyGroup Condition=\"'$(NexusTestHost)' == 'true'\"><DefineConstants>$(DefineConstants);NEXUS_TEST_HOST</DefineConstants></PropertyGroup></Project>""")
+        write(root, "src/NexusPipeline.csproj", """<Project Sdk=\"Microsoft.NET.Sdk\"><PropertyGroup><TargetFramework>net10.0</TargetFramework><Nullable>enable</Nullable></PropertyGroup><PropertyGroup Condition=\"'$(NexusTestHost)' == 'true'\"><DefineConstants>$(DefineConstants);NEXUS_TEST_HOST</DefineConstants></PropertyGroup></Project>""")
         write(root, "src/Modules/A/A.cs", "using HostAlias = HostThing; public class A {\n#if !NEXUS_TEST_HOST\n public B? Other;\n#endif\n}\n")
         write(root, "src/Modules/B/B.cs", "public class B {\n#if NEXUS_TEST_HOST\n public A? Other;\n#endif\n}\n")
         write(root, "src/Host/HostThing.cs", "public class HostThing {}\n")

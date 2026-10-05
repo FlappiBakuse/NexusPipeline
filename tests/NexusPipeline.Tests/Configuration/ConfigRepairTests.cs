@@ -7,6 +7,7 @@ using NexusPipeline.Modules.Configuration.Paths;
 using NexusPipeline.Modules.Configuration.Recovery;
 using NexusPipeline.Modules.Configuration.Scripting;
 using NexusPipeline.Modules.Configuration.Snapshots;
+using NexusPipeline.Modules.Configuration.Validation;
 using NexusPipeline.Modules.Plugins.Contracts;
 using NexusPipeline.Modules.Plugins.DataSpecialized;
 using NexusPipeline.Modules.Scripts;
@@ -15,6 +16,7 @@ using NexusPipeline.Modules.Scripts.Resolution;
 using NexusPipeline.Modules.Settings;
 using NexusPipeline.Modules.Settings.Contracts;
 using NexusPipeline.Modules.Users;
+using NexusPipeline.Modules.Users.Contracts;
 using NexusPipeline.Tests.Support;
 using Xunit;
 
@@ -114,7 +116,7 @@ public sealed class ConfigRepairTests
     }
 
     [Fact]
-    public void CommandsRepairMainAndExtraSnapshotsWithBackupCasAndAccountIsolation()
+    public async Task CommandsRepairMainAndExtraSnapshotsWithBackupCasAndAccountIsolation()
     {
         string root = Path.Combine(Path.GetTempPath(), "nxp-repair-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
@@ -125,8 +127,9 @@ public sealed class ConfigRepairTests
         var a = new NexusUser { Name = "A", Bindings = [new() { ScriptInstanceId = declaration.Id }] };
         var b = new NexusUser { Name = "B", Bindings = [new() { ScriptInstanceId = declaration.Id }] };
         var settings = new Settings();
+        var assessment = new Assessment();
         var commands = new ConfigEditCommands(new Admission(), new Scripts(declaration), new Users(a, b), plugins,
-            plugins, resolver, null!, settingsProvider: settings);
+            plugins, resolver, null!, taskProtocolAssessment: assessment, settingsProvider: settings);
         foreach (var user in new[] { a, b })
         {
             string store = ConfigPaths.StoreDir(declaration.Id, user.Id); Directory.CreateDirectory(store);
@@ -138,6 +141,18 @@ public sealed class ConfigRepairTests
             string extra = ConfigPaths.StoreExtraDir(declaration.Id, user.Id, plugins.Profile.ExtraConfigPaths[0]); Directory.CreateDirectory(extra);
             File.WriteAllText(Path.Combine(extra, "one_dragon.yml"), "after_done: 关机\nkeep: yes\n");
         }
+        string beforeAssessment = ConfigSnapshotFingerprint.Fingerprint(ConfigPaths.StoreDir(declaration.Id, a.Id));
+        var resolvedUser = new ResolvedScriptUser(a.Id, a.Name, a.Bindings[0]);
+        var result = commands.RunConfigAssessment(declaration, resolvedUser, resolver.Resolve(declaration));
+        Assert.True(result.Ran);
+        Assert.Equal(a.Id, Assert.Single(result.Diagnostics).UserId);
+        Assert.Equal(new[] { (a.Id, "config-edit") }, assessment.Calls);
+        var saved = await new ScriptSaveValidation(resolver, new Users(a, b), assessment)
+            .RunForScriptAsync(declaration);
+        Assert.NotNull(saved);
+        Assert.Equal(new[] { a.Id, b.Id }, saved.Diagnostics.Select(diagnostic => diagnostic.UserId));
+        Assert.Equal(new[] { (a.Id, "config-edit"), (a.Id, "script-save"), (b.Id, "script-save") }, assessment.Calls);
+        Assert.Equal(beforeAssessment, ConfigSnapshotFingerprint.Fingerprint(ConfigPaths.StoreDir(declaration.Id, a.Id)));
         Assert.False(commands.PreviewRepair(declaration.Id, a.Id).Value!.Available);
         settings.Current.AllowConfigRepair = true;
         var preview = commands.PreviewRepair(declaration.Id, a.Id);
@@ -185,7 +200,7 @@ public sealed class ConfigRepairTests
         Assert.False(commands.PreviewRepair(declaration.Id, a.Id).Value!.Available);
         string stage = Path.Combine(root, "cas-stage"); Directory.CreateDirectory(stage);
         File.WriteAllText(Path.Combine(stage, "replacement.json"), "{}");
-        string beforeMain = ConfigMigrationTransaction.Fingerprint(main);
+        string beforeMain = ConfigSnapshotFingerprint.Fingerprint(main);
         int checks = 0;
         Assert.Throws<IOException>(() => ConfigStoreTransaction.Apply(declaration.Id, a.Id, stage,
             new HashSet<string>(), null, null, new ConfigSessionMark
@@ -197,10 +212,10 @@ public sealed class ConfigRepairTests
                 if (++checks == 2) throw new IOException("fixture: context changed during staging");
             }));
         Assert.Equal(2, checks);
-        Assert.Equal(beforeMain, ConfigMigrationTransaction.Fingerprint(main));
+        Assert.Equal(beforeMain, ConfigSnapshotFingerprint.Fingerprint(main));
         Assert.False(Directory.Exists(ConfigPaths.StoreTransactionDir(declaration.Id, a.Id)));
         string extraRoot = Path.GetDirectoryName(savedExtra)!;
-        string beforeExtra = ConfigMigrationTransaction.Fingerprint(extraRoot);
+        string beforeExtra = ConfigSnapshotFingerprint.Fingerprint(extraRoot);
         checks = 0;
         var diff = ConfigStoreDiff.Build(stage, extraRoot, new HashSet<string>(), null);
         Assert.Throws<IOException>(() => ExtraConfigStoreTransaction.Apply(declaration.Id, a.Id,
@@ -210,14 +225,36 @@ public sealed class ConfigRepairTests
                 if (++checks == 2) throw new IOException("fixture: account snapshot changed during staging");
             }));
         Assert.Equal(2, checks);
-        Assert.Equal(beforeExtra, ConfigMigrationTransaction.Fingerprint(extraRoot));
+        Assert.Equal(beforeExtra, ConfigSnapshotFingerprint.Fingerprint(extraRoot));
         Assert.Empty(Directory.EnumerateFileSystemEntries(ConfigPaths.WorkDir(declaration.Id, a.Id)));
     }
 
     private sealed class Scripts(ScriptInstance script) : IScriptRepository
     { public ScriptInstance? FindById(string id) => script.Id == id ? script : null; public IReadOnlyList<ScriptInstance> Snapshot() => [script]; }
-    private sealed class Users(params NexusUser[] users) : CurrentModelUserRepository(users);
+    private sealed class Users : CurrentModelUserRepository, IUserSnapshotReader
+    {
+        private readonly NexusUser[] _users;
+        internal Users(params NexusUser[] users) : base(users) => _users = users;
+        public NexusUser? FindById(string id) => _users.FirstOrDefault(user => user.Id == id);
+        public IReadOnlyList<NexusUser> Snapshot() => _users;
+    }
     private sealed class Settings : ISettingsProvider { public AppSettings Current { get; } = new(); }
+    private sealed class Assessment : ITaskProtocolConfigAssessmentPort
+    {
+        internal List<(string UserId, string Trigger)> Calls { get; } = [];
+        public Task<TaskPlan?> RunAsync(ResolvedScriptSpec spec, ResolvedScriptUser user, string trigger,
+            CancellationToken token = default)
+        {
+            Assert.Equal("0.2.0", spec.TaskProtocol!.Version);
+            Calls.Add((user.UserId, trigger));
+            return Task.FromResult<TaskPlan?>(new("0.2.0", "assessment", "fixture", "fixture", "1",
+                DateTimeOffset.UtcNow, "signature", "full", [], []));
+        }
+        public IReadOnlyList<ConfigValidationDiagnostic> ToDiagnostics(TaskPlan plan, ResolvedScriptUser user) =>
+            [new(user.Binding.ScriptInstanceId, user.UserId, user.UserName, "fixture.rule", "unsatisfied", "warning", "none", null, [], [])];
+        public ConfigValidationDiagnostic Error(ResolvedScriptSpec spec, ResolvedScriptUser user, string message) =>
+            throw new InvalidOperationException(message);
+    }
     private sealed class Admission : IConfigEditAdmission
     {
         public bool TryExecuteLeaseMutation(string id, string? user, Action mutation, out IReadOnlyList<ExecutionLeaseReference> leases, out string? code)

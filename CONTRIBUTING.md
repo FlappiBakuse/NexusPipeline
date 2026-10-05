@@ -1,6 +1,6 @@
 # 贡献指南（Contribution Guidelines）
 
-NexusPipeline（枢链）欢迎协作。开发环境与调试、协作与提交规范、发布流程统一维护在 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)；测试层级与完整命令见 [docs/TESTING.md](docs/TESTING.md)；控制面能力现状见 [docs/CONTROL_PLANE.md](docs/CONTROL_PLANE.md)；当前计划与已知问题见 [docs/STATUS.md](docs/STATUS.md)；安全问题遵循 [SECURITY.md](SECURITY.md)。
+NexusPipeline（枢链）欢迎协作。开发环境与调试、协作与提交规范、发布流程统一维护在 [docs/development/README.md](docs/development/README.md)；测试层级与完整命令见 [docs/testing/README.md](docs/testing/README.md)；控制面能力现状见 [docs/CONTROL_PLANE.md](docs/CONTROL_PLANE.md)；当前计划与已知问题见 [docs/STATUS.md](docs/STATUS.md)；安全问题遵循 [SECURITY.md](SECURITY.md)。
 
 要点速览：
 

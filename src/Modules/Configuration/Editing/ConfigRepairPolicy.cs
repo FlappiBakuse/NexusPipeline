@@ -17,55 +17,41 @@ internal static class ConfigRepairPolicy
         ConfigRepairContext context, out byte[]? patched, ConfigEditorDescriptor? editor = null, Func<string, JsonNode?>? readSnapshot = null)
     {
         patched = null;
-        if (rule.Legacy && (plugin != "march7th" || rule.Id != "queue_finish_action"
-            || rule.RuleId != "march7th.finish_action")) return null;
         var document = new TaskConfigDocument(bytes, rule.Format);
         var root = document.Document;
         if (root is not JsonObject obj) return null;
         JsonArray selector = (JsonArray)rule.Selector.DeepClone();
         JsonNode? next;
-        if (rule.Legacy)
+        if (editor is null) return null;
+        var host = JintScriptHost.Create(TimeSpan.FromSeconds(2), CancellationToken.None, 1_000_000, 32 * 1024 * 1024);
+        int reads = 0, readBytes = 0;
+        host.SetValue("__nexusReadRepairConfig", new Func<string, string>(id =>
         {
-            if (!TryRead(document, selector, out var old) || old is not JsonValue scalar
-                || !scalar.TryGetValue<string>(out string? value)
-                || value is not ("Loop" or "循环" or "Shutdown" or "关机" or "Sleep" or "睡眠"
-                    or "Hibernate" or "休眠" or "Restart" or "重启" or "Logoff" or "注销" or "TurnOffDisplay" or "关闭显示器")
-                || !rule.FromValues.Contains(value, StringComparer.Ordinal)) return null;
-            next = JsonValue.Create(rule.ToValue);
-        }
-        else
-        {
-            if (editor is null) return null;
-            var host = JintScriptHost.Create(TimeSpan.FromSeconds(2), CancellationToken.None, 1_000_000, 32 * 1024 * 1024);
-            int reads = 0, readBytes = 0;
-            host.SetValue("__nexusReadRepairConfig", new Func<string, string>(id =>
-            {
-                if (++reads > 32) throw new InvalidDataException("配置修复读取次数超限");
-                string json = readSnapshot?.Invoke(id)?.ToJsonString() ?? "null";
-                readBytes += Encoding.UTF8.GetByteCount(json);
-                if (readBytes > 8 * 1024 * 1024) throw new InvalidDataException("配置修复读取总量超限");
-                return json;
-            }));
-            host.SetInput(JsonSerializer.Serialize(new { trigger = "config-repair", document = root, rule,
-                context = new { context.Pc, GamePath = Path.IsPathFullyQualified(context.GamePath) ? context.GamePath : "", context.GameArguments, context.ConfigInputValue } },
-                new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
-            host.Execute(editor.Script, JintScriptHostProfile.ConfigRepair);
-            if (host.Outputs.Count != 1) throw new InvalidDataException("配置编辑脚本必须返回一个修复建议");
-            var result = JsonNode.Parse(host.Outputs[0]);
-            if (result is null) return null;
-            if (result is not JsonObject proposal || proposal.Count != 2 || proposal["selector"] is not JsonArray candidate
-                || !proposal.ContainsKey("value") || candidate.Count < selector.Count || candidate.Count > 16
-                || !selector.Select((part, i) => JsonNode.DeepEquals(part, candidate[i])).All(equal => equal))
-                throw new InvalidDataException("配置编辑脚本的修复超出声明范围");
-            bool mxuInstance = rule.Kind is "mxu_tasks" or "mxu_preactions";
-            if (mxuInstance && !JsonNode.DeepEquals(candidate,
-                new JsonArray("instances", new JsonObject { ["by"] = "id", ["value"] = obj["settings"]?["autoStartInstanceId"]?.DeepClone() }, rule.Kind == "mxu_tasks" ? "tasks" : "preActions")))
-                throw new InvalidDataException("配置编辑脚本试图修改非当前实例");
-            if (!mxuInstance && !JsonNode.DeepEquals(selector, candidate))
-                throw new InvalidDataException("配置编辑脚本的字段与声明不一致");
-            selector = (JsonArray)candidate.DeepClone();
-            next = proposal["value"]?.DeepClone();
-        }
+            if (++reads > 32) throw new InvalidDataException("配置修复读取次数超限");
+            string json = readSnapshot?.Invoke(id)?.ToJsonString() ?? "null";
+            readBytes += Encoding.UTF8.GetByteCount(json);
+            if (readBytes > 8 * 1024 * 1024) throw new InvalidDataException("配置修复读取总量超限");
+            return json;
+        }));
+        host.SetInput(JsonSerializer.Serialize(new { trigger = "config-repair", document = root, rule,
+            context = new { context.Pc, GamePath = Path.IsPathFullyQualified(context.GamePath) ? context.GamePath : "", context.GameArguments, context.ConfigInputValue } },
+            new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
+        host.Execute(editor.Script, JintScriptHostProfile.ConfigRepair);
+        if (host.Outputs.Count != 1) throw new InvalidDataException("配置编辑脚本必须返回一个修复建议");
+        var result = JsonNode.Parse(host.Outputs[0]);
+        if (result is null) return null;
+        if (result is not JsonObject proposal || proposal.Count != 2 || proposal["selector"] is not JsonArray candidate
+            || !proposal.ContainsKey("value") || candidate.Count < selector.Count || candidate.Count > 16
+            || !selector.Select((part, i) => JsonNode.DeepEquals(part, candidate[i])).All(equal => equal))
+            throw new InvalidDataException("配置编辑脚本的修复超出声明范围");
+        bool mxuInstance = rule.Kind is "mxu_tasks" or "mxu_preactions";
+        if (mxuInstance && !JsonNode.DeepEquals(candidate,
+            new JsonArray("instances", new JsonObject { ["by"] = "id", ["value"] = obj["settings"]?["autoStartInstanceId"]?.DeepClone() }, rule.Kind == "mxu_tasks" ? "tasks" : "preActions")))
+            throw new InvalidDataException("配置编辑脚本试图修改非当前实例");
+        if (!mxuInstance && !JsonNode.DeepEquals(selector, candidate))
+            throw new InvalidDataException("配置编辑脚本的字段与声明不一致");
+        selector = (JsonArray)candidate.DeepClone();
+        next = proposal["value"]?.DeepClone();
         bool exists = TryRead(document, selector, out var previous);
         if (JsonNode.DeepEquals(previous, next)) return null;
         if (exists)

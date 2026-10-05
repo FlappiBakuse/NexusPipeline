@@ -4,9 +4,9 @@
 [![CI](https://github.com/FlappiBakuse/NexusPipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/FlappiBakuse/NexusPipeline/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/FlappiBakuse/NexusPipeline?include_prereleases)](https://github.com/FlappiBakuse/NexusPipeline/releases)
 
-NexusPipeline 是一个运行在 Windows 上的本地游戏自动化脚本管家。它可以按计划启动脚本、监控日志、处理重试、隔离多账号配置，并在任务结束后发送通知或执行关机、休眠、重启等操作。
+NexusPipeline 是一个运行在 Windows 11 x64 上的本地游戏自动化脚本管家。它可以按计划启动脚本、监控日志、处理重试、隔离多账号配置，并在任务结束后发送通知或执行关机、休眠、重启等操作。
 
-程序常驻托盘，管理页面默认位于 `http://127.0.0.1:58731/`。配置、历史、日志和插件都保存在本机，不需要云平台或数据库。运行程序需要 .NET 8 Desktop Runtime、ASP.NET Core Runtime 8 和管理员权限。
+程序常驻托盘，管理页面默认位于 `http://127.0.0.1:58731/`。配置、历史、日志和插件都保存在本机，不需要云平台或数据库。运行程序需要 .NET 10 Desktop Runtime 与 ASP.NET Core Runtime 10.0.12 或后续 10.0 补丁，以及管理员权限。
 
 ## 主要功能
 
@@ -31,7 +31,7 @@ NexusPipeline 是一个运行在 Windows 上的本地游戏自动化脚本管家
 4. 浏览器打开 `http://127.0.0.1:58731/`，完成脚本、用户和队列设置。
 5. 需要开机运行时，在「设置」中开启开机自启动。
 
-便携版缺少运行时会显示 .NET 自带的提示。可直接打开包内的 `wwwroot/help/runtime-prerequisites.html`，或分别下载官方 [Desktop Runtime 8.0.31 x64](https://builds.dotnet.microsoft.com/dotnet/WindowsDesktop/8.0.31/windowsdesktop-runtime-8.0.31-win-x64.exe) 和 [ASP.NET Core Runtime 8.0.31 x64](https://builds.dotnet.microsoft.com/dotnet/aspnetcore/Runtime/8.0.31/aspnetcore-runtime-8.0.31-win-x64.exe)。安装器会检查两项依赖；便携版不会自动下载。
+便携版缺少运行时会显示 .NET 自带的提示。可直接打开包内的 `wwwroot/help/runtime-prerequisites.html`，或分别下载官方 [Desktop Runtime 10.0.12 x64](https://builds.dotnet.microsoft.com/dotnet/WindowsDesktop/10.0.12/windowsdesktop-runtime-10.0.12-win-x64.exe) 和 [ASP.NET Core Runtime 10.0.12 x64](https://builds.dotnet.microsoft.com/dotnet/aspnetcore/Runtime/10.0.12/aspnetcore-runtime-10.0.12-win-x64.exe)。安装器会检查两项依赖；便携版不会自动下载。
 
 ## 升级前备份（重要）
 
@@ -95,11 +95,11 @@ MCP 仅监听本机 loopback；运行队列若带有休眠、重启、关机或�
 | [docs/user/README.md](docs/user/README.md) | 用户安装、运行、结果、升级、卸载与 FAQ |
 | [docs/user/README.en.md](docs/user/README.en.md) | Key user limits in English |
 | [CHANGELOG.md](CHANGELOG.md) | 版本变更与升级注意事项 |
-| [docs/DESIGN.md](docs/DESIGN.md) | 运行流程、持久化和模块边界 |
+| [docs/architecture/README.md](docs/architecture/README.md) | 运行流程、持久化和模块边界 |
 | [docs/CONTROL_PLANE.md](docs/CONTROL_PLANE.md) | Web、CLI、MCP 能力入口 |
-| [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | 构建、调试、协作与发布 |
-| [docs/TESTING.md](docs/TESTING.md) | 测试层级与质量门禁 |
-| [docs/PLUGIN_API.md](docs/PLUGIN_API.md) | 插件开发接口 |
+| [docs/development/README.md](docs/development/README.md) | 构建、调试、协作与发布 |
+| [docs/testing/README.md](docs/testing/README.md) | 测试层级与质量门禁 |
+| [docs/reference/plugin-api/README.md](docs/reference/plugin-api/README.md) | 插件开发接口 |
 | [docs/STATUS.md](docs/STATUS.md) | 后续计划与已知问题 |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | 贡献指南 |
 | [SECURITY.md](SECURITY.md) | 安全问题报告 |

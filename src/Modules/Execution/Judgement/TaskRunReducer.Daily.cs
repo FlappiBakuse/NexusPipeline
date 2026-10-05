@@ -13,7 +13,7 @@ internal sealed partial class TaskRunReducer
     internal static void InterruptDailyReport(System.Text.Json.Nodes.JsonObject report)
     {
         var plan = TaskProtocolJson.Read<TaskPlan>(report["originalPlan"]!.ToJsonString());
-        var reducer = new TaskRunReducer(report["runId"]!.GetValue<string>(), plan);
+        var reducer = TaskRunReducer.CreateDaily(report["runId"]!.GetValue<string>(), plan);
         foreach (var result in TaskProtocolJson.Read<TaskEffectiveResult[]>(report["finalTaskResults"]!.ToJsonString()))
         {
             NexusPipeline.Modules.Plugins.TaskProtocolValidation.Require(reducer._effective.ContainsKey(result.TaskId), "checkpoint task identity");

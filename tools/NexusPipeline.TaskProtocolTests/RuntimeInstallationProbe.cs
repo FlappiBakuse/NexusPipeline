@@ -10,12 +10,13 @@ internal static class RuntimeInstallationProbe
     {
         var matrix = JsonNode.Parse(File.ReadAllText(matrixPath))!.AsObject();
         var results = new JsonArray();
+        var fixtureIndex = TaskFixtures.Index(Path.Combine(plugins, "tests", "fixtures", "task-protocol"));
         foreach (var row in matrix["cases"]!.AsArray())
         {
             string artifact = row!["artifact"]!.GetValue<string>();
             if (artifact is not ("OkWutheringWaves" or "OkNTE")) throw new InvalidDataException("Unsupported installation probe");
             string fixtureName = artifact == "OkNTE" ? "r2-oknte-default-empty.json" : "r2-okww-farm-tacet.json";
-            var fixture = JsonNode.Parse(File.ReadAllText(Path.Combine(plugins, "tools", "task-protocol", "fixtures", fixtureName)))!;
+            var fixture = JsonNode.Parse(File.ReadAllText(fixtureIndex[Path.GetFileNameWithoutExtension(fixtureName)]))!;
             string package = Path.Combine(plugins, "plugins", "specialized", artifact);
             var manifest = JsonNode.Parse(File.ReadAllText(Path.Combine(package, "plugin.json")))!.AsObject();
             var protocol = TaskProtocolManifest.Freeze(manifest, package)!;

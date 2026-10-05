@@ -2,7 +2,7 @@ export interface HistoryDate { date: string; count: number }
 export type HistoryStatus = "success" | "failed" | "partial" | "cancelled" | "skipped";
 export interface HistoryUser { userKey?: string; userId?: string; userName?: string; count?: number; successCount?: number; failedCount?: number; partialCount?: number; cancelledCount?: number; skippedCount?: number }
 export interface HistoryScreenshot { id?: string; imageUrl?: string; width?: number; height?: number; trigger?: string }
-export interface HistoryAttempt { number: number; status?: string; reason?: string; startTime?: string; endTime?: string; durationMs?: number | null; screenshots?: HistoryScreenshot[] }
+export interface HistoryAttempt { number: number; status?: string; reason?: string; reasonCode?: string; startTime?: string; endTime?: string; durationMs?: number | null; screenshots?: HistoryScreenshot[] }
 export interface HistoryLog { number?: number; logTotalLines?: number; logText?: string; logTail?: string; durationMs?: number | null; screenshots?: HistoryScreenshot[] }
 export interface HistoryPlugin { title?: string; id?: string; pluginName?: string; pluginDisplayName?: string; badges?: Array<{ label?: string; tone?: string; title?: string }>; fields?: Array<{ label?: string; value?: string }> }
 export interface HistoryRecord {
@@ -16,6 +16,7 @@ export interface HistoryRecord {
   durationMs?: number | null;
   status?: string;
   resultDetail?: string;
+  resultCode?: string;
   historyDirectory?: string;
   mode?: string;
   attempts?: number;

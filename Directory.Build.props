@@ -1,5 +1,23 @@
 <Project>
   <PropertyGroup>
+    <NexusInstallationGeneration>g01615</NexusInstallationGeneration>
+    <RuntimeFrameworkVersion>10.0.12</RuntimeFrameworkVersion>
+    <RollForward>LatestPatch</RollForward>
+  </PropertyGroup>
+  <Target Name="GenerateInstallationGeneration" BeforeTargets="CoreCompile" Condition="'$(MSBuildProjectName)' == 'NexusPipeline'">
+    <PropertyGroup>
+      <_GenerationSource>$(IntermediateOutputPath)InstallationGeneration.g.cs</_GenerationSource>
+    </PropertyGroup>
+    <WriteLinesToFile File="$(_GenerationSource)" Overwrite="true" WriteOnlyWhenDifferent="true"
+      Lines="namespace NexusPipeline.Platform.Storage { internal static class InstallationGeneration { internal const string Id = &quot;$(NexusInstallationGeneration)&quot;%3B } }" />
+    <ItemGroup>
+      <Compile Include="$(_GenerationSource)" />
+    </ItemGroup>
+  </Target>
+  <ItemGroup>
+    <FrameworkReference Update="Microsoft.NETCore.App;Microsoft.WindowsDesktop.App;Microsoft.AspNetCore.App" RuntimeFrameworkVersion="10.0.12" />
+  </ItemGroup>
+  <PropertyGroup>
     <!-- Keep every project from re-including another project's generated obj/bin files. -->
     <DefaultItemExcludes>$(DefaultItemExcludes);**/obj/**;**/bin/**</DefaultItemExcludes>
   </PropertyGroup>

@@ -34,7 +34,10 @@ internal sealed record HistorySummary(
     long TotalDurationMs,
     long? AverageDurationMs,
     double? SuccessRate,
-    IReadOnlyList<HistoryDailySummary> Daily);
+    IReadOnlyList<HistoryDailySummary> Daily)
+{
+    public object? FormatStatus { get; init; }
+}
 
 internal partial class RunHistoryService : IHistoryStore
 {
@@ -43,14 +46,10 @@ internal partial class RunHistoryService : IHistoryStore
     private static readonly object Sync = new();
 
     private readonly string _historyDir;
-    private readonly string _outputDir;
-    private readonly string _logDir;
 
-    public RunHistoryService(string? historyDir = null, string? outputDir = null, string? logDir = null)
+    public RunHistoryService(string? historyDir = null)
     {
         _historyDir = Path.GetFullPath(historyDir ?? AppPaths.HistoryDir);
-        _outputDir = Path.GetFullPath(outputDir ?? AppPaths.OutputDir);
-        _logDir = Path.GetFullPath(logDir ?? AppPaths.LogDir);
     }
 
     /// <summary>保存运行历史：每个运行拥有独立目录，JSON、Attempt 日志和截图一起提交。</summary>
@@ -72,12 +71,14 @@ internal partial class RunHistoryService : IHistoryStore
         {
             lock (Sync)
             {
+                RunRecordFormat.Validate(persisted);
                 EnsureTaskIndex();
                 string dateName = persisted.StartTime.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
                 string dayDir = Path.Combine(_historyDir, dateName);
                 string userDirName = SafeSegment(persisted.UserName, "未指定用户");
                 string userDir = Path.Combine(dayDir, userDirName);
                 Directory.CreateDirectory(userDir);
+                RequireOwnedPath(userDir);
 
                 string timeName = persisted.StartTime.ToString("HH-mm-ss", CultureInfo.InvariantCulture);
                 string scriptName = SafeSegment(persisted.ScriptName, "未命名脚本");
@@ -88,7 +89,7 @@ internal partial class RunHistoryService : IHistoryStore
                 Directory.CreateDirectory(temporaryDir);
 
                 persisted.HistoryDirectory = Path.Combine(userDirName, runDirName);
-                // 运行目录体现脚本名称，目录内文件继续使用时间主键，保持历史读取与导出兼容。
+                // JSON 与附件在目录重命名前一起完成，避免读到半写入记录。
                 persisted.LogFile = $"{timeName}.json";
 
                 IReadOnlyList<RunScreenshot> historyScreenshots = screenshots ?? Array.Empty<RunScreenshot>();
@@ -142,7 +143,7 @@ internal partial class RunHistoryService : IHistoryStore
                 temporaryDir = null;
                 IndexTaskRecord(persisted);
                 SaveTaskIndex();
-                CompleteTaskCheckpoint(persisted.Id);
+                CompleteTaskCheckpoint(persisted);
             }
             return new HistorySaveResult(persisted.Clone(), null);
         }
@@ -166,20 +167,20 @@ internal partial class RunHistoryService : IHistoryStore
     {
         var records = new List<RunRecord>();
         string dayDir = Path.Combine(_historyDir, date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
-        if (!Directory.Exists(dayDir))
+        if (!Directory.Exists(dayDir) || IsLink(dayDir))
         {
             return records;
         }
 
         foreach (string userDir in Directory.GetDirectories(dayDir))
         {
-            if (Path.GetFileName(userDir).StartsWith(".", StringComparison.Ordinal))
+            if (IsLink(userDir) || Path.GetFileName(userDir).StartsWith(".", StringComparison.Ordinal))
             {
                 continue;
             }
             foreach (string runDir in Directory.GetDirectories(userDir))
             {
-                if (Path.GetFileName(runDir).StartsWith(".", StringComparison.Ordinal))
+                if (IsLink(runDir) || Path.GetFileName(runDir).StartsWith(".", StringComparison.Ordinal))
                 {
                     continue;
                 }
@@ -187,24 +188,17 @@ internal partial class RunHistoryService : IHistoryStore
                 {
                     try
                     {
-                        RunRecord? record = JsonSerializer.Deserialize<RunRecord>(File.ReadAllText(file), JsonOpts.Default);
-                        if (record is null)
-                        {
-                            continue;
-                        }
-                        if (string.IsNullOrWhiteSpace(record.HistoryDirectory))
-                        {
-                            record.HistoryDirectory = Path.GetRelativePath(dayDir, runDir);
-                        }
-                        if (string.IsNullOrWhiteSpace(record.LogFile))
-                        {
-                            record.LogFile = Path.GetFileName(file);
-                        }
-                        record.AttemptDetails ??= new List<RunAttempt>();
+                        RequireOwnedPath(file);
+                        RunRecord record = RunRecordFormat.Read(File.ReadAllText(file));
+                        RunRecordFormat.Require(record.StartTime.Date == date.Date
+                            && record.HistoryDirectory == Path.GetRelativePath(dayDir, runDir)
+                            && record.LogFile == Path.GetFileName(file));
+                        _unsupportedHistory.Remove(file);
                         records.Add(record);
                     }
                     catch (Exception ex)
                     {
+                        _unsupportedHistory.Add(file);
                         Logger.Debug($"历史记录文件解析失败已跳过（{file}）：{ex.Message}");
                     }
                 }
@@ -338,7 +332,8 @@ internal partial class RunHistoryService : IHistoryStore
         string? userKey = null,
         string? status = null)
     {
-        return SummarizeRecords(Query(start, end, scriptId, queueId, userKey, status), start, end);
+        return SummarizeRecords(Query(start, end, scriptId, queueId, userKey, status), start, end)
+            with { FormatStatus = FormatStatus };
     }
 
     internal static HistorySummary SummarizeRecords(
@@ -527,8 +522,8 @@ internal partial class RunHistoryService : IHistoryStore
     {
         lock (Sync)
         {
-            EnsureTaskIndex();
-            if (_recordIndex!.TryGetValue(id, out var record) && RecordExists(record)) return record.Clone();
+            foreach (var record in ReadAllCurrentRecords())
+                if (record.Id == id) return record.Clone();
         }
         return null;
     }
@@ -571,61 +566,78 @@ internal partial class RunHistoryService : IHistoryStore
 
         lock (Sync)
         {
-            EnsureTaskIndex();
-            if (Directory.Exists(_historyDir))
+            try { EnsureTaskIndex(); }
+            catch (Exception ex) when (ex is InvalidDataException or JsonException or IOException)
+            { Logger.Warn($"[历史清理] 索引受限，保留全部文件：{ex.Message}"); return; }
+            foreach (RunRecord record in ReadAllCurrentRecords().Where(record => record.StartTime.Date < cutoff))
             {
-                foreach (string directory in Directory.GetDirectories(_historyDir))
+                try
                 {
-                    string name = Path.GetFileName(directory);
-                    if (DateTime.TryParseExact(name, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out DateTime dirDate)
-                        && dirDate < cutoff)
-                    {
-                        try
-                        {
-                            Directory.Delete(directory, recursive: true);
-                            removed++;
-                        }
-                        catch (Exception ex)
-                        {
-                            Logger.Warn($"[警告] 删除过期历史目录失败：{ex.Message}");
-                        }
-                    }
+                    string day = Path.Combine(_historyDir, record.StartTime.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+                    string run = ResolveWithin(day, record.HistoryDirectory);
+                    if (!OwnsRunDirectory(record, run)) continue;
+                    Directory.Delete(run, recursive: true);
+                    removed++;
+                    string user = Path.GetDirectoryName(run)!;
+                    if (!Directory.EnumerateFileSystemEntries(user).Any()) Directory.Delete(user);
+                    if (!Directory.EnumerateFileSystemEntries(day).Any()) Directory.Delete(day);
                 }
+                catch (Exception ex) { Logger.Warn($"[历史清理] 保留无法确权的运行目录：{ex.Message}"); }
             }
 
-            foreach (string directory in new[] { _outputDir, _logDir })
-            {
-                if (!Directory.Exists(directory))
-                {
-                    continue;
-                }
-                foreach (string file in Directory.GetFiles(directory))
-                {
-                    DateTime fileDate;
-                    try
-                    {
-                        fileDate = File.GetLastWriteTime(file).Date;
-                    }
-                    catch
-                    {
-                        continue;
-                    }
-                    if (fileDate < cutoff)
-                    {
-                        try
-                        {
-                            File.Delete(file);
-                            removed++;
-                        }
-                        catch
-                        {
-                        }
-                    }
-                }
-            }
         }
         Logger.Info($"清理完成，共删除 {removed} 个过期项。");
     }
+
+    private readonly HashSet<string> _unsupportedHistory = new(StringComparer.OrdinalIgnoreCase);
+    internal object FormatStatus => new
+    {
+        unsupportedCount = _unsupportedHistory.Count,
+        code = _unsupportedHistory.Count == 0 ? null : "unsupported_history_format",
+        message = _unsupportedHistory.Count == 0 ? null : "旧版或不支持的历史已保留且未读取；请使用完整备份的旧版查看。",
+    };
+
+    private IEnumerable<RunRecord> ReadAllCurrentRecords()
+    {
+        if (!Directory.Exists(_historyDir) || IsLink(_historyDir)) yield break;
+        foreach (string day in Directory.EnumerateDirectories(_historyDir))
+            if (DateTime.TryParseExact(Path.GetFileName(day), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date))
+                foreach (var record in ReadDayRecords(date)) yield return record;
+    }
+
+    private static bool IsLink(string path) => (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0;
+
+    private void RequireOwnedPath(string path)
+    {
+        string root = _historyDir.TrimEnd(Path.DirectorySeparatorChar);
+        RunRecordFormat.Require(Path.GetFullPath(path).StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase));
+        for (string? current = path; current is not null; current = Path.GetDirectoryName(current))
+        {
+            RunRecordFormat.Require(!IsLink(current));
+            if (string.Equals(current, root, StringComparison.OrdinalIgnoreCase)) return;
+        }
+        throw new InvalidDataException("history path identity mismatch");
+    }
+
+    private bool OwnsRunDirectory(RunRecord record, string run)
+    {
+        RequireOwnedPath(run);
+        if (Directory.EnumerateDirectories(run).Any()) return false;
+        var expected = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { record.LogFile };
+        foreach (var attempt in record.AttemptDetails)
+        {
+            if (!RunRecordFormat.FileName(attempt.LogFile) || !expected.Add(attempt.LogFile)) return false;
+            foreach (var screenshot in attempt.Screenshots)
+                if (!expected.Add(screenshot.FileName)) return false;
+        }
+        var files = Directory.GetFiles(run);
+        if (files.Any(IsLink) || !expected.SetEquals(files.Select(file => Path.GetFileName(file)))) return false;
+        var current = RunRecordFormat.Read(File.ReadAllText(Path.Combine(run, record.LogFile)));
+        return SameRecordIdentity(record, current);
+    }
+
+    private static bool SameRecordIdentity(RunRecord left, RunRecord right) => left.Id == right.Id
+        && left.StartTime == right.StartTime && left.UserId == right.UserId && left.ScriptInstanceId == right.ScriptInstanceId;
 
     private string? ReadRunFile(RunRecord record, string fileName)
     {
@@ -648,6 +660,7 @@ internal partial class RunHistoryService : IHistoryStore
             {
                 return null;
             }
+            RequireOwnedPath(target);
             return File.ReadAllBytes(target);
         }
         catch (Exception ex)

@@ -118,19 +118,6 @@ internal static class JsonUtil
         }
         return int.TryParse(node?.Str(), out int parsed) ? parsed : defaultValue;
     }
-
-    public static List<string> StringList(this JsonNode? node)
-    {
-        var result = new List<string>();
-        if (node is JsonArray array)
-        {
-            foreach (var item in array)
-            {
-                result.Add(item.Str());
-            }
-        }
-        return result;
-    }
 }
 
 internal static class JsonStore

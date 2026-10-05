@@ -58,7 +58,7 @@ README.md
 
 ### 安装器运行时依赖
 
-Setup 只认可标准 x64 安装路径下的 .NET 8 Desktop Runtime 和 ASP.NET Core Runtime；不以 SDK、PATH、x86 或其他主版本替代。每个缺失框架分别请求用户确认，再从 `tools/runtime-dependencies.json` 的固定微软 URL 下载，核验 SHA256 和微软有效数字签名后执行官方安装包。下载页显示进度并允许取消；取消或下载、摘要、签名错误阻止应用部署，用户可返回重试。静默安装缺依赖时退出并提示使用交互向导。
+Setup 只认可标准 x64 安装路径下的 .NET 10 Desktop Runtime 和 ASP.NET Core Runtime；不以 SDK、PATH、x86 或其他主版本替代。每个缺失框架分别请求用户确认，再从 `tools/runtime-dependencies.json` 的固定微软 URL 下载，核验 SHA256 和微软有效数字签名后执行官方安装包。下载页显示进度并允许取消；取消或下载、摘要、签名错误阻止应用部署，用户可返回重试。静默安装缺依赖时退出并提示使用交互向导。
 
 依赖安装退出码 0 后重新检测实际框架；3010 提示用户自行重启再运行 Setup，不强制重启，选择稍后重启时 Setup 返回 Inno 标准退出码 8，且不部署或登记应用；其他依赖失败使 Setup 返回 7。依赖包的退出码与 Setup 退出码分别记录。安装、升级与卸载不移除共享 .NET。实际 Windows 验收必须记录运行环境、依赖包摘要和签名、子进程退出码以及应用部署顺序；编译 Setup 不能代替该项验收。
 

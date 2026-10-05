@@ -7,8 +7,7 @@ namespace NexusPipeline.Platform.Windows;
 internal static class FirewallRule
 {
     // HttpListener 的入站连接由 Windows HTTP.sys 接收；端口规则不依赖防火墙将连接归属到用户态 exe。
-    // 保留旧版 "NexusPipeline Web" 程序规则，新规则使用独立名称以便平滑升级并可按实际端口更新。
-    private const string RuleName = "NexusPipeline Web TCP";
+    private const string RuleName = "NexusPipeline " + Storage.InstallationGeneration.Id + " Web TCP";
 
     /// <summary>确保实际 Web 端口存在 TCP 入站允许规则（幂等，支持端口漂移）。</summary>
     public static void EnsureAllowInbound(int port)
@@ -29,7 +28,7 @@ internal static class FirewallRule
             }
             if (code == 0)
             {
-                Logger.Info($"[防火墙] 已确保 NexusPipeline Web TCP 入站允许规则（端口 {port}，Private/Public）。");
+                Logger.Info($"[防火墙] 已确保 {RuleName} 入站允许规则（端口 {port}，Private/Public）。");
             }
             else
             {

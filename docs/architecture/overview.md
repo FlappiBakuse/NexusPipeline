@@ -4,13 +4,13 @@
 
 NexusPipeline 定位为**本地游戏自动化脚本管家**：一个常驻托盘的 Windows 服务，代替用户按计划启动/重试/关闭任意外部脚本（exe / bat / cmd 等），并管理多账号配置、判定脚本运行结果、推送通知。核心理念：
 
-- **本地优先、少外部依赖**：所有产品能力内置于单个 exe（.NET 8 WinForms 托盘 + HttpListener + 构建后的静态 Web UI）。Node/npm 只属于开发和发布环境，运行机器不需要前端构建环境；发布物为框架依赖的单文件，运行机器需安装 .NET 8 Desktop Runtime。
+- **本地优先、少外部依赖**：所有产品能力内置于单个 exe（.NET 10 WinForms 托盘 + HttpListener + 构建后的静态 Web UI）。Node/npm 只属于开发和发布环境，运行机器不需要前端构建环境；发布物为框架依赖的单文件，运行机器需安装 .NET 10 Desktop Runtime。
 - **直接接管脚本进程**：宿主以管理员身份创建进程、捕获输出、监控日志、强制清理进程树，脚本自身无需任何改造；bat 经 `cmd /d /s /c` 包装以规避 ShellExecute 弹窗陷阱。
 - **多用户配置隔离（配置交换）**：全局用户通过脚本绑定参与多个脚本实例；每个绑定各存一份配置快照，运行前把绑定快照交换到 configPath，运行后还原现场。数据保全序：**original（原配置）> config（运行时生效）> store（用户快照，可重建）**。
 - **判定交给用户**：运行结果由「完成判定」驱动——优先判断脚本（用户自写 JS/Python，专用插件判定由当前 profile 指向的插件脚本驱动），其次成功/失败关键字；判断脚本允许返回 `success / partial / failed`，其中 `partial` 只能由判断脚本主动产生，未配置任何判定时按「进程自行退出」判成功。判定输入为**本次尝试日志段**，跨尝试互不污染。
 - **日志是判定输入**：宿主可靠监控脚本**日志文件**，将新增日志提供给关键字判定和判断脚本；日志文本、退出码、尝试次数及重试本身不拥有覆盖最终业务状态的权力。日志监控对文件「重建/截断/追加」三种形态都必须可靠；同路径文件替换使用**文件身份（FileId）检测**，避免旧句柄继续指向已归档文件。
 - **失败可重试、崩溃可自愈**：每次尝试失败按 `MaxAttempts` 自动重试；判断脚本可返回 `replaceConfigs` 替换配置后再试；配置交换用 `.session` 标记 + swap-backup 双保险，宿主启动时或后台延迟自动还原。
-- **可扩展插件**：managed-code 插件通过独立 `NexusPipeline.Plugin.Abstractions` Plugin API v1.8 使用宿主通用用户数据、声明式 UI、作用域数据、二进制资产存储、历史展示、插件 Web API、用户列表徽章、用户运行事件、HTTP、日志、通知、调度、本地化、模拟器支持 provider 与 SMTP 收件人覆盖端口；启用且精确匹配的插件可通过独立 Frontend API 1.5 加载构建后的 ES module/CSS，扩展页面路由、导航、slot、通用外观表面、运行画面 sidecar 和插件词典，并通过 `nxp-*` Native Custom Elements 复用宿主公共控件；专项插件继续采用**数据化目录形态**（`plugin.json` + `data/` 推导配置与判断脚本），数据 capability 通过 `capabilities` key 登记。
+- **可扩展插件**：managed-code 插件通过独立 `NexusPipeline.Plugin.Abstractions` Plugin API 2.0 使用宿主通用用户数据、声明式 UI、作用域数据、二进制资产存储、历史展示、插件 Web API、用户列表徽章、用户运行事件、HTTP、日志、通知、调度、本地化、模拟器支持 provider 与 SMTP 收件人覆盖端口；启用且精确匹配的插件可通过独立 Frontend API 1.5 加载构建后的 ES module/CSS，扩展页面路由、导航、slot、通用外观表面、运行画面 sidecar 和插件词典，并通过 `nxp-*` Native Custom Elements 复用宿主公共控件；专项插件继续采用**数据化目录形态**（`plugin.json` + `data/` 推导配置与判断脚本），数据 capability 通过 `capabilities` key 登记。
 - **插件分发与运行解耦**：插件仓库以固定官方 `catalog.json` 提供版本和 SHA256，安装包在本地完成校验后以 pending 事务跨重启交换；宿主更新只替换宿主文件，用户插件目录持续保留。
 - **宿主网络出口可控**：外部 HTTP 请求统一经过可即时读取设置的网络出口，支持无代理、系统代理和自定义 HTTP/HTTPS 代理；本机控制面、MCP、SMTP 与插件子进程保持原有网络边界。
 
@@ -93,7 +93,7 @@ NexusPipeline/
 ├── src/Modules/         领域 owner：Settings/Plugins/Scripts/Users/Queues/Configuration/History/Notifications/Execution/Scheduling/Updates/Diagnostics
 ├── src/Platform/         Windows、存储、网络和外部系统适配
 ├── src/Shared/           共享结果、日志和基础原语（不承载业务规则）
-├── src/NexusPipeline.Plugin.Abstractions/  独立 public Plugin API v1.8（无宿主业务引用）
+├── src/NexusPipeline.Plugin.Abstractions/  独立 public Plugin API 2.0（无宿主业务引用）
 ├── frontend/           Vue/TypeScript/Vite 前端源码、路由、状态和 Nexus UI 组件
 │   ├── src/app/        App shell、启动编排、令牌提示和插件 route 生命周期
 │   ├── src/platform/   宿主平台服务（i18n、API、页面状态、外观、shell、工具提示等）
@@ -126,7 +126,7 @@ Host/Composition（唯一组合根）
 
 - **只有 `Host/Composition/HostCompositionRoot.cs` 创建、解析和释放 DI 容器**；业务模块和控制面不得反向定位组合根。
 - **ControlPlane 只做协议适配**，调用 Modules 的 query/command/typed port，不直接拥有业务存储或实体集合。
-- **Plugins 通过数据化 manifest 或独立 Plugin API v1.8 交互**；`NexusPipeline.Plugin.Abstractions` 不引用宿主业务模型，managed-code 插件由 collectible `AssemblyLoadContext` 隔离加载；跨模块的宿主内部 capability/profile 契约位于 `src/Modules/Plugins/Contracts`，数据化专项插件（`DataSpecializedPlugin`）仍为纯数据驱动。
+- **Plugins 通过数据化 manifest 或独立 Plugin API 2.0 交互**；`NexusPipeline.Plugin.Abstractions` 不引用宿主业务模型，managed-code 插件由 collectible `AssemblyLoadContext` 隔离加载；跨模块的宿主内部 capability/profile 契约位于 `src/Modules/Plugins/Contracts`，数据化专项插件（`DataSpecializedPlugin`）仍为纯数据驱动。
 - **Modules 之间的依赖必须显式且无环**；执行、调度、配置编辑和插件能力通过 contracts/typed ports 连接，实体内存所有权集中在 `Host/State/AutomationDefinitionState`。
 - **边界约束**：配置恢复通过构造注入的脚本查找与用户快照委托获取数据，不反向查找组合根；共享层不读取宿主容器或具体业务规则。
 
@@ -208,7 +208,7 @@ Host/Composition（唯一组合根）
 | `CliArguments` / `CliCommandRouter` | src/ControlPlane/Cli/ | noun/subcommand 参数解析和正式命令分派 |
 | `CliApiClient` / `CliTransport` | src/ControlPlane/Cli/ | CLI 到 owning service 的本机 HTTP 控制通道、身份握手、自动拉起、端口发现和按端点分层超时 |
 | `CliOutput` / `CliExitCodes` | src/ControlPlane/Cli/ | 人类输出、`--json` envelope、诊断流和稳定退出码 |
-| `ControlMenu` / `MainMenu` | src/ControlPlane/Cli/ | 交互菜单适配层；菜单查询与变更均复用正式 CLI/Control API |
+| `ControlMenu` | src/ControlPlane/Cli/ | 交互菜单适配层；菜单查询与变更均复用正式 CLI/Control API |
 | `PluginCapabilityRegistry` | src/Modules/Plugins/Runtime/PluginCapabilityRegistry.cs | capability 的类型化注册/查询与数据插件 key 注册；`LoadAll` 清空后重建，避免重复能力 |
 | `PluginManager` | src/Modules/Plugins/Runtime/PluginManager.cs + `Runtime/PluginDiscovery.cs` / `Runtime/ManagedPluginRuntime.cs` / `Runtime/PluginManagementSnapshotCache.cs` | 门面负责插件开关、能力查询和生命周期编排；`PluginDiscovery` 负责本地 manifest 扫描/启用偏好；`ManagedPluginRuntime` 负责 managed-code 加载、生命周期和卸载；`PluginManagementSnapshotCache` 负责摘要与控制面管理投影缓存 |
 | `PluginManagementView` | src/Modules/Plugins/Runtime/PluginManagementView.cs | 合并 manifest、运行态、展示元数据、商店归属和 pending 事务，供 Web、MCP、状态接口使用 |
@@ -223,7 +223,6 @@ Host/Composition（唯一组合根）
 | `PluginInstallRecovery` | src/Modules/Plugins/Repository/PluginInstallRecovery.cs | 启动时在 `PluginManager.LoadAll` 前应用 pending 事务，负责交换、归属记录和失败恢复 |
 | `DiagnosticsService` | src/Modules/Diagnostics/DiagnosticsService.cs | 汇总稳定诊断检查，生成脱敏支持包并执行大小与敏感信息边界校验 |
 | `JsonStore` | src/Platform/Storage/JsonStore.cs | 读取插件配置、密钥和作用域 JSON；解析损坏时保留原文件并记录恢复现场 |
-| `AppearanceLegacyMigration` | src/Modules/Plugins/Managed/AppearanceLegacyMigration.cs | 旧外观数据的一次性格式搬迁：资产导入原提供方插件的资产 scope，搬迁载荷写入作用域数据，成功标记落盘后可重试 |
 | `OutboundHttpClientProvider` | src/Platform/Networking/ProxyConfiguration.cs | 按最新设置创建外部 HTTP client；支持无代理/系统代理/自定义 HTTP(S) 代理，loopback 强制直连 |
 | `PluginContracts` | src/Modules/Plugins/Contracts/ | 数据插件的 `IPluginCapability`/profile 契约与 `ScriptProfile`；全部 internal；外部代码插件契约位于独立 Plugin API 项目 |
 | `Logger` | src/Shared/Logging/Logger.cs | 分级日志（DEBUG/INFO/WARN/ERROR/FATAL），显式阈值配置，阈值过滤与控制台着色 |
@@ -232,7 +231,7 @@ Host/Composition（唯一组合根）
 
 ### public / internal 约定
 
-- 主程序程序集仍只向自身暴露 `Program`（入口）与领域模型；外部代码插件只引用独立的 `NexusPipeline.Plugin.Abstractions` public API v1.8。宿主内部的 `IPluginCapability`/`ScriptProfile` 不属于外部插件契约，Plugin API 不暴露宿主 DI 或领域模型。
+- 主程序程序集仍只向自身暴露 `Program`（入口）与领域模型；外部代码插件只引用独立的 `NexusPipeline.Plugin.Abstractions` public API 2.0。宿主内部的 `IPluginCapability`/`ScriptProfile` 不属于外部插件契约，Plugin API 不暴露宿主 DI 或领域模型。
 - 其余全部 `internal`：新增类型默认 internal，除非它属于契约清单。
 
 
