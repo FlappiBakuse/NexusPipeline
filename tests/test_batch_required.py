@@ -156,9 +156,8 @@ class BatchRequiredTests(unittest.TestCase):
         value=mock.Mock(st_mode=0,st_file_attributes=0x400)
         with mock.patch.object(Path,"lstat",return_value=value),self.assertRaises(ValueError):required.unlinked(self.root)
 
-    @unittest.skipUnless(os.name == "nt", "Windows extended-length path boundary")
     def test_long_owned_path_preserves_containment_and_bytes(self):
-        relative = "evidence/" + "x" * 90 + "/" + "y" * 100 + ".json"
+        relative = "evidence/" + "x" * 90 + "/" + "z" * 90 + "/" + "y" * 100 + ".json"
         target = required.native_path(self.root / relative)
         target.parent.mkdir(parents=True)
         target.write_bytes(b'{"value":1}')
@@ -168,6 +167,8 @@ class BatchRequiredTests(unittest.TestCase):
             with self.assertRaises(ValueError): required.safe_file(self.root, "../outside.json")
         finally:
             target.unlink()
+            target.parent.rmdir()
+            target.parent.parent.rmdir()
 
     def test_native_trx_instances_skips_and_counter_disagreement_fail(self):
         file=self.root/"native.trx"
