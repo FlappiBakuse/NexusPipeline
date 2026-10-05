@@ -45,7 +45,6 @@ internal static class RuntimeInitializer
             return 2;
         }
 
-        UpdateApply.CleanupWorkerImages();
         // 先加载约束，再加载设置（Normalize 使用固定的历史保留天数上限）。
         Limits.Load();
         InitialSettings = AppSettingsStore.Load(ConfigLoadMode.ReadOnly);

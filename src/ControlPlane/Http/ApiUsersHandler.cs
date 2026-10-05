@@ -28,7 +28,9 @@ internal static class ApiUsersHandler
     {
         if (method == "GET" && seg.Length == 2 && seg[1] == "task-summaries")
         {
-            await HttpHelper.WriteJsonAsync(context, taskQueries.Summaries()).ConfigureAwait(false);
+            try { await HttpHelper.WriteJsonAsync(context, taskQueries.Summaries()).ConfigureAwait(false); }
+            catch (TaskQueryUnavailableException)
+            { await HttpHelper.ErrorAsync(context, "unsupported_history_index", 409).ConfigureAwait(false); }
             return;
         }
         if (method == "GET" && seg.Length == 5 && seg[2] == "bindings" && seg[4] == "task-plan")

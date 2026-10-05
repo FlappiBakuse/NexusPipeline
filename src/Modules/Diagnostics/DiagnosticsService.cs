@@ -555,18 +555,6 @@ internal sealed class DiagnosticsService
         }
     }
 
-    private IReadOnlyList<PluginManagementView> ReadPluginViews()
-    {
-        try
-        {
-            return _plugins.PluginManagementViews;
-        }
-        catch
-        {
-            return Array.Empty<PluginManagementView>();
-        }
-    }
-
     private static IReadOnlyList<PluginPendingOperation> ReadPending()
     {
         try

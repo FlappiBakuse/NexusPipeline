@@ -35,8 +35,6 @@ internal static class ConfigExchangeService
             ConfigSwapPrimitives.WithSwapLock(scriptId, () =>
             {
                 ConfigSwapSession.RecoverIfNeeded(scriptId, userName, configPath);
-                if (ConfigurationRevisionReset.RequiresSetup(scriptId, userName))
-                    throw new IOException("config_setup_required: 旧框架配置已备份清空，请先编辑配置并选择新的原生实例");
                 if (File.Exists(ConfigPaths.StoreTransactionBlockedPath(scriptId, userName)))
                 {
                     throw new IOException($"配置快照事务已被阻断，需人工核查后解除：{ConfigPaths.StoreTransactionBlockedPath(scriptId, userName)}");
@@ -50,7 +48,7 @@ internal static class ConfigExchangeService
                     string root = Path.GetFullPath(hasStore ? store : configPath).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
                     string selected = Path.GetFullPath(Path.Combine(root, metadata.RequiredConfigRelativePath));
                     if (!selected.StartsWith(root, StringComparison.OrdinalIgnoreCase) || !File.Exists(selected))
-                        throw new IOException("config_instance_missing: 绑定的原生实例文件不存在，配置尚未交换；请重新选择或显式迁移");
+                        throw new IOException("config_instance_missing: 绑定的原生实例文件不存在，配置尚未交换；请在新目录重新配置");
                     NexusPipeline.Modules.Configuration.Scripting.TaskConfigView.ValidatePath(selected);
                 }
                 ConfigStoreMetadata? existingMetadata = hasStore
@@ -65,7 +63,7 @@ internal static class ConfigExchangeService
                     && !existingMetadata.Matches(expectedMetadata))
                 {
                     if (metadata?.RejectImplicitRebind == true || existingMetadata.ConfigContractId != expectedMetadata.ConfigContractId)
-                        throw new IOException("migration_required: 配置定位发生变化，请重新设置配置；原快照已保留。");
+                        throw new IOException("unsupported_config_format: 配置合同不匹配，请在新目录重新配置；原快照已保留。");
                     if (currentConfigKind == PathKind.Missing)
                     {
                         throw new IOException($"配置路径已变更但新位置不存在：{configPath}；旧配置快照已保留，未自动复用");

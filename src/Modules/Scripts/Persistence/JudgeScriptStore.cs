@@ -85,21 +85,6 @@ internal sealed class JudgeScriptStore
         }
     }
 
-    /// <summary>把旧语言或已删除实例的源码移入隔离区，保留人工恢复机会。</summary>
-    public string? MoveToOrphaned(string scriptId, string language)
-    {
-        string source = GetPath(scriptId, language);
-        if (!File.Exists(source))
-        {
-            return null;
-        }
-        string orphanDir = Path.Combine(_root, "orphaned", $"{DateTime.Now:yyyyMMdd-HHmmssfff}-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(orphanDir);
-        string destination = Path.Combine(orphanDir, Path.GetFileName(source));
-        File.Move(source, destination);
-        return destination;
-    }
-
     /// <summary>
     /// 保存脚本清单成功后隔离目录根下没有被清单引用的源码文件。
     /// 启动加载阶段不会删除源码，避免误删用户判断脚本。

@@ -27,15 +27,6 @@ internal static class HostedRuntimeInitializer
             PluginInstallRecovery.SeedBundledForNewInstall(RuntimeInitializer.BundledPluginSeedEligible);
             runtime.ReloadSettings(ConfigLoadMode.Repair);
             runtime.ReloadData();
-            PluginNameMigration.Apply(
-                runtime.Settings,
-                runtime.EntityState.SnapshotScripts(),
-                runtime.ReplaceSettings,
-                scripts => runtime.EntityState.Mutate(state =>
-                {
-                    state.Scripts.Clear();
-                    state.Scripts.AddRange(scripts.Select(script => script.Clone()));
-                }));
             RuntimeDataReconciler.Reconcile(runtime);
 
             // 崩溃恢复仅常驻服务执行（manage/web/CLI 由运行时自愈 RecoverIfNeeded 兜底）。
@@ -52,27 +43,6 @@ internal static class HostedRuntimeInitializer
                         mark.PendingConfigInput.PreviousValue).Succeeded);
             ConfigWorkDirMaintenance.SweepRuntimeStaging();
             ConfigRecoveryService.RecoverInterrupted(runtime.EntityState.SnapshotUsers());
-            var configurationUpdates = Directory.Exists(AppPaths.PluginsDir)
-                ? Directory.EnumerateDirectories(AppPaths.PluginsDir).Select(DataSpecializedPlugin.Load)
-                    .Where(plugin => plugin?.ConfigurationRevision.Length > 0).ToDictionary(plugin => plugin!.Name, plugin => plugin!)
-                : new Dictionary<string, DataSpecializedPlugin>();
-            runtime.EntityState.Mutate(state =>
-            {
-                bool changed = false;
-                foreach (var script in state.Scripts)
-                {
-                    if (!configurationUpdates.TryGetValue(script.PluginType, out var plugin)) continue;
-                    foreach (var user in state.Users)
-                    foreach (var binding in user.Bindings.Where(binding => binding.ScriptInstanceId == script.Id))
-                    {
-                        if (!ConfigurationRevisionReset.Apply(script.Id, user.Id, plugin.Name, plugin.ConfigurationRevision)) continue;
-                        binding.ConfigInputs.Clear();
-                        changed = true;
-                        Logger.Warn($"插件「{plugin.Name}」包含破坏性配置更新：旧配置已原字节归档，请重新设置。");
-                    }
-                }
-                if (changed) UserDefinitionStore.SaveUsers(state.Users);
-            });
             runtime.History.RecoverInterruptedTasks(NexusPipeline.Modules.Execution.Judgement.TaskRunReducer.InterruptDailyReport);
             WindowsScheduledTaskRegistration.Sync(runtime.Settings.AutoStart);
             return true;

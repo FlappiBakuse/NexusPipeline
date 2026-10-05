@@ -147,7 +147,6 @@ internal sealed class ConfigSessionMark
 
     /// <summary>主快照提交后等待写入用户绑定的输入值。</summary>
     public ConfigEditPendingInput? PendingConfigInput { get; set; }
-    public ConfigMigrationJournal? Migration { get; set; }
 
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public ConfigSessionRecoveryIsolation? RecoveryIsolation { get; set; }
@@ -194,7 +193,6 @@ internal sealed class ConfigSessionMark
             .Append(nameof(WritableRoot))
             .Append(nameof(ProviderWorkersStopped))
             .Append(nameof(ConfigContractId))
-            .Append(nameof(Migration))
             .ToHashSet(StringComparer.Ordinal);
 
     public static string MarkFile(string scriptId, string userId)
@@ -262,6 +260,8 @@ internal sealed class ConfigSessionMark
 
     public void Write()
     {
+        if (HasUnsupportedFormat(ScriptId, UserId))
+            throw new IOException("unsupported_recovery_format");
         ValidateCurrent();
         Directory.CreateDirectory(Path.GetDirectoryName(MarkFile(ScriptId, UserId))!);
         string json = JsonSerializer.Serialize(this, Options);
@@ -272,6 +272,7 @@ internal sealed class ConfigSessionMark
 
     public static ConfigSessionMark? TryRead(string scriptId, string userId)
     {
+        if (HasUnsupportedFormat(scriptId, userId)) return null;
         string primary = MarkFile(scriptId, userId);
         string backup = BackupMarkFile(scriptId, userId);
         if (!File.Exists(primary) && !File.Exists(backup))
@@ -296,7 +297,7 @@ internal sealed class ConfigSessionMark
                     continue;
                 }
                 ConfigSessionMark? mark = JsonSerializer.Deserialize<ConfigSessionMark>(json, Options);
-                if (mark is null || !mark.IsValidCurrent())
+                if (mark is null || !mark.IsValidCurrent() || mark.ScriptId != scriptId || mark.UserId != userId)
                 {
                     Logger.Warn($"[警告] 配置会话标记字段无效，保留现场：{file}");
                     continue;
@@ -335,7 +336,6 @@ internal sealed class ConfigSessionMark
         && ConfigContractId is { Length: <= 96 }
         && ConfigContractId.All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '_' or '-')
         && SessionPhase is "run" or "edit" or "edit-commit-pending" or "provider_run"
-            or "migration-prepared" or "migration-target-committed" or "migration-binding-committed"
         && (ConfigKind is "missing" or "file" or "dir")
         && (EditMode is "normal" or "fresh" or "reuse")
         && ExtraConfigPaths is not null
@@ -343,11 +343,8 @@ internal sealed class ConfigSessionMark
         && EditIsolationPaths is not null
         && EditIsolationPaths.All(IsValidIsolationPath)
         && (PendingConfigInput is null || IsValidPendingInput(PendingConfigInput))
-        && (Migration is null ? !SessionPhase.StartsWith("migration-", StringComparison.Ordinal)
-            : SessionPhase.StartsWith("migration-", StringComparison.Ordinal) && PendingConfigInput is not null
-                && Guid.TryParseExact(Migration.ArchiveId, "N", out _) && Migration.ArchiveFingerprint is { Length: 64 }
-                && Migration.ArchiveFingerprint.All(Uri.IsHexDigit))
         && (RecoveryIsolation is null || RecoveryIsolation.IsValid())
+        && WritableRoot is not null
         && (WritableRoot.Length == 0 || Path.IsPathFullyQualified(WritableRoot))
         && (SessionPhase != "provider_run" || ProviderWorkersStopped is not null && Path.IsPathFullyQualified(WritableRoot));
 
@@ -396,6 +393,7 @@ internal sealed class ConfigSessionMark
         var properties = document.RootElement.EnumerateObject()
             .Select(property => property.Name)
             .ToHashSet(StringComparer.Ordinal);
+        if (properties.Count != document.RootElement.EnumerateObject().Count()) return false;
         if (RequiredProperties.Any(property => !properties.Contains(property)))
         {
             return false;
@@ -404,8 +402,30 @@ internal sealed class ConfigSessionMark
         return properties.All(AllowedProperties.Contains);
     }
 
+    internal static bool HasUnsupportedFormat(string scriptId, string userId)
+    {
+        foreach (string file in new[] { MarkFile(scriptId, userId), BackupMarkFile(scriptId, userId) })
+        {
+            if (Directory.Exists(file)) return true;
+            if (!File.Exists(file)) continue;
+            try
+            {
+                if ((File.GetAttributes(file) & FileAttributes.ReparsePoint) != 0) return true;
+                using JsonDocument document = JsonDocument.Parse(File.ReadAllText(file));
+                if (!IsCurrentDocument(document)) return true;
+                ConfigSessionMark? mark = JsonSerializer.Deserialize<ConfigSessionMark>(document.RootElement, Options);
+                if (mark is null || !mark.IsValidCurrent() || mark.ScriptId != scriptId || mark.UserId != userId) return true;
+            }
+            catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException or InvalidOperationException)
+            { return true; }
+        }
+        return false;
+    }
+
     public static void Clear(string scriptId, string userName)
     {
+        if (HasUnsupportedFormat(scriptId, userName))
+            throw new IOException("unsupported_recovery_format");
         // Keep the redundant committed stop proof if removing the primary fails.
         // Callers must retain recovery responsibility until both deletions succeed.
         File.Delete(MarkFile(scriptId, userName));

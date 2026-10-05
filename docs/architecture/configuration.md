@@ -63,7 +63,7 @@ flowchart LR
 
 数据化专项插件可声明 `configEdit` 与 `configEditor`。编辑器脚本在目标软件启动前执行，读取 `nexus.input.mode`、`configInputName`、`configInputValue` 和附加工作副本；主配置根保持受限只读，脚本异常或超时会使准备失败并触发回滚。
 
-编辑会话启动的可见进程绑定专属 Job Object，并保存启动时的 PID、StartTimeUtc 和映像身份。Web UI 启动编辑请求时临时在浏览器标题加入随机 token，宿主捕获包含该 token 的本机顶层窗口及其所有者身份；编辑程序出现首个可见 GUI 窗口后，宿主再次校验浏览器 HWND、所有者 PID、StartTimeUtc 和映像身份，并用 `SetWindowPos(HWND_BOTTOM)` 后置该浏览器窗口。窗口 token 缺失、身份变化或系统调用失败时，编辑流程继续执行。完成、取消、自然退出、启动异常、恢复扫描和服务关闭都会取消窗口后置任务并等待其结束；该行为不改变运行阶段的游戏窗口前置能力。编辑收尾优先使用 Job Object 加身份确认的快速清理路径；Job 不可用、进程脱离或检测到同名进程身份变化时，回退为按已捕获身份清理并保留稳定退出确认，不把其他用户打开的同名窗口纳入目标。
+编辑会话启动的可见进程绑定专属 Job Object，并保存启动时的 PID、StartTimeUtc 和映像身份。编辑配置仅启动目标软件；宿主不调整目标窗口或浏览器窗口的前后顺序，也不临时修改浏览器标题。编辑收尾优先使用 Job Object 加身份确认的快速清理路径；Job 不可用、进程脱离或检测到同名进程身份变化时，回退为按已捕获身份清理并保留稳定退出确认，不把其他用户打开的同名窗口纳入目标。
 
 配置路径的准备步骤按声明顺序执行；任一路径失败时，宿主逆序还原本次已准备路径并阻断运行，避免主配置在附加配置不完整时启动。运行前写入的会话标记同时覆盖主配置与附加配置现场。
 
@@ -109,13 +109,11 @@ flowchart LR
 
 专项插件在 manifest 中声明 `configurationRevision` 标识破坏性配置变化。此标识独立于插件版本，普通升级保持不变。脚本声明保存已确认的修订；当前修订不同则在脚本实例显示“需重新设置”，执行协调器在启动进程之前阻断。用户有效保存脚本设置后确认当前修订，尚未保存本用户快照仍禁止运行。
 
-常驻 Host 启动完成未结束会话恢复后，按插件声明归档契约不同的用户快照：整个用户目录原字节移至 `.nxp/config-resets/<scriptId>/<userId>-<GUID>`，备份 users.json，清除该用户的配置输入。操作不依赖插件名称、启动器名称或旧配置文件名。连续修订保留各代归档及 journal；归属不符、未恢复事务、并发字节变化和归档校验失败均保留现场并阻断。原生安装目录和历史记录不受影响。
+新快照建立前禁止自动采用原生目录运行，用户通过“编辑配置”选择稳定 MFA 实例并保存。脚本实例可以先创建，用户级实例选择留在配置编辑阶段；不会按当前页面绑定。用户选择首次“复用配置”后，只有一个候选时自动提交该稳定 ID；多个候选由用户选择，候选变化拒绝后不无限重试，绑定仍仅在保存成功时提交。配置预览只显示启用任务，不显示待执行状态；“重新检查”统一刷新发现与准入。
 
-持久重置 journal 允许在归档与保存绑定之间中断后继续。新快照建立前禁止自动采用原生目录运行，用户通过“编辑配置”重新选择稳定 MFA 实例并保存。脚本实例可以先创建，用户级实例选择留在配置编辑阶段；不会按当前页面绑定。用户选择首次“复用配置”后，只有一个候选时自动提交该稳定 ID；多个候选由用户选择，候选变化拒绝后不无限重试，绑定仍仅在保存成功时提交。配置预览只显示启用任务，不显示待执行状态；“重新检查”统一刷新发现与准入。
+配置契约变更要求人工重建；旧快照和旧恢复 journal 原字节保留并阻断相关写入，不提供自动迁移或版本重置。配置编辑及重试继续使用原有 CAS、journal 和账号隔离机制。
 
-`ConfigurationRevisionReset` 管当前重置行为，`ConfigMigrationTransaction` 仅恢复已有旧 journal，不提供新的跨框架迁移入口。配置编辑及重试继续使用原有 CAS、journal 和账号隔离机制。
-
-验证入口为 `ConfigurationRevisionTests`、`LegacyMxuResetTests`、`ConfigContractMigrationTests` 和 TaskProtocolTests account-isolation；真实游戏运行与原生进程交接不由这些隔离测试推定。
+验证入口为 `ConfigurationRevisionTests`、`ConfigContractTests`、`ConfigStoreMetadataTests`、`ConfigRecoveryIsolationTests` 和 TaskProtocolTests account-isolation；真实游戏运行与原生进程交接不由这些隔离测试推定。
 
 ## 配置检查交互与资源范围
 
@@ -129,4 +127,4 @@ flowchart LR
 
 MaaStellaSora 通过插件 configEditor 在配置编辑准备阶段设置已交换 appsettings.json 的一次性 NoAutoStart 标志，避免打开 MFA 编辑界面触发自动运行；其他字段保留，现役编辑事务负责取消与原字节恢复。正常执行不调用此编辑准备脚本。0.2.0 编辑会话完成时，在进程确认退出后、提交快照前调用冻结 editor 的 config-edit-commit 阶段，仍只允许附加工作副本写入；失败保留会话，取消不调用。MFA 提交源码清除一次性 NoAutoStart，避免提前关闭编辑器遗留禁止启动标志，实例启动路径与操作保持用户设置。
 
-0.2.0 修复策略由当前冻结的 configEditor 以 config-repair 调用返回 selector/value；该调用仅提供 input、当前用户快照只读 readConfig 与 proposeRepair，不开放文件、进程或网络。Host 校验字段和 MXU 当前实例归属，绑定 editor 内容到令牌并使用现役 CAS、备份和 journal。BAAH 的附加软件快照可将缺失/false 的 SAVE_LOG_TO_FILE 修复为 true。0.1.1 的既有有限枚举处理保持兼容。
+0.2.0 修复策略由当前冻结的 configEditor 以 config-repair 调用返回 selector/value；该调用仅提供 input、当前用户快照只读 readConfig 与 proposeRepair，不开放文件、进程或网络。Host 校验字段和 MXU 当前实例归属，绑定 editor 内容到令牌并使用现役 CAS、备份和 journal。BAAH 的附加软件快照可将缺失/false 的 SAVE_LOG_TO_FILE 修复为 true。

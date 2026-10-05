@@ -61,24 +61,6 @@ internal sealed partial class UserCommands
         }
     }
 
-    private static void DeleteAvatarFiles(string userId)
-    {
-        string dir = Path.Combine(AppPaths.UserAssetsDir, userId);
-        if (!Directory.Exists(dir))
-        {
-            return;
-        }
-        foreach (string file in Directory.GetFiles(dir, "avatar.*"))
-        {
-            try { File.Delete(file); } catch (Exception ex) { Logger.Warn($"[警告] 清理用户头像失败（{file}）：{ex.Message}"); }
-        }
-        try
-        {
-            if (!Directory.EnumerateFileSystemEntries(dir).Any()) Directory.Delete(dir);
-        }
-        catch { }
-    }
-
     private static bool HasMatchingMagic(string mime, byte[] data)
     {
         return mime switch

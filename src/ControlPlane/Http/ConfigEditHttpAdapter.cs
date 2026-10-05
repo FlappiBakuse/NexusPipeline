@@ -9,17 +9,7 @@ namespace NexusPipeline.ControlPlane.Http;
 /// <summary>配置编辑 HTTP 适配器：只负责请求解析与响应组装，业务流程由 Application 命令处理。</summary>
 internal static class ConfigEditHttpAdapter
 {
-    internal static Task HandleByUserIdAsync(
-        HttpListenerContext context,
-        string scriptId,
-        string userId,
-        string body,
-        ConfigEditCommands commands)
-    {
-        return HandleAsync(context, scriptId, userId, body, commands);
-    }
-
-    private static async Task HandleAsync(
+    internal static async Task HandleByUserIdAsync(
         HttpListenerContext context,
         string scriptId,
         string userReference,
@@ -35,7 +25,6 @@ internal static class ConfigEditHttpAdapter
         var parsed = HttpHelper.ParseBody(body);
         string action = parsed.Get("action").Str();
         string mode = parsed.Get("mode").Str();
-        string requesterWindowToken = parsed.Get("requesterWindowToken").Str().Trim();
         string inputName = parsed.Get("configInputName").Str().Trim();
         string inputValue = parsed.Get("configInputValue").Str();
         IReadOnlyDictionary<string, string>? inputOverrides = null;
@@ -54,8 +43,7 @@ internal static class ConfigEditHttpAdapter
                     scriptId,
                     userReference,
                     mode,
-                    inputOverrides: inputOverrides,
-                    requesterWindowToken: requesterWindowToken);
+                    inputOverrides: inputOverrides);
             if (!result.Succeeded)
             {
                 await ApplicationErrorResponse.WriteAsync(context, result.Error!).ConfigureAwait(false);
