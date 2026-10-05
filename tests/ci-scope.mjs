@@ -1,4 +1,4 @@
-import {resolvePair} from "./ci-inputs.mjs";
+import {resolvePair, defaultPartner} from "./ci-inputs.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import {batchName, obligationNames} from "./ci-names.mjs";
@@ -8,6 +8,7 @@ const base=process.env.PR_BASE_SHA,head=process.env.PR_HEAD_SHA;
 if(!/^[a-f0-9]{40}$/.test(base??"")||!/^[a-f0-9]{40}$/.test(head??"")||!process.env.SCOPE_RESULT||!process.env.GITHUB_OUTPUT||!/^\d+$/.test(process.env.PR_NUMBER??"")) throw new Error("Complete PR identity required");
 const identity={base,head,runId:process.env.GITHUB_RUN_ID,attempt:process.env.GITHUB_RUN_ATTEMPT,prNumber:Number(process.env.PR_NUMBER)};
 const inputPair=resolvePair(root,"FlappiBakuse/NexusPipeline",identity);
+const defaultInput = defaultPartner(root);
 identity.inputPair=inputPair;
 let plan=createScopePlan(root,{...identity,partnerSha:inputPair?.sources[1].testedSha});
 if(plan.selected.some(item=>["host.partner-contract","host.partner-jint"].includes(item.id))) {
@@ -18,7 +19,8 @@ if(plan.selected.some(item=>["host.partner-contract","host.partner-jint"].includ
     if(!response.ok) throw new Error(`Fixed partner read failed: ${response.status}`);
     return response.json();
   };
-  const ref=inputPair ? {object:{sha:inputPair.sources[1].testedSha}} : await read("/repos/FlappiBakuse/NexusPipeline-Plugins/git/ref/heads/main");
+  const ref=inputPair ? {object:{sha:inputPair.sources[1].testedSha}}
+    : await read(`/repos/${defaultInput.repository}/git/ref/heads/${defaultInput.ref}`);
   const sha=ref.object?.sha;if(!/^[a-f0-9]{40}$/.test(sha??"")) throw new Error("Invalid fixed Plugins commit");
   const blob=await read(`/repos/FlappiBakuse/NexusPipeline-Plugins/contents/tests/policy.json?ref=${sha}`);
   if(blob.encoding!=="base64"||blob.type!=="file") throw new Error("Invalid fixed partner policy");

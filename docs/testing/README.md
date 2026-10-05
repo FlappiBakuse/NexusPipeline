@@ -9,7 +9,7 @@
 | 核心 E2E | `tests/system/finite-*.mjs` | 是 | execution 使用 | 实际执行、配置交换/恢复、CLI/MCP/商店、分钟调度，两个 Host 槽位 |
 | 显式诊断 | System Smoke、UI Smoke | 是 | UI Smoke 使用 | 历史边界诊断；受控 UI API 响应不能冒称实际业务 |
 
-xUnit 通过 `InternalsVisibleTo` 访问宿主 internal 契约；文件与预期用例以现役策略和测试源码为准。托管层由 `node tests\run.mjs integration` 在同一次 asInvoker Test Host 发布后运行：UI Smoke 2 个用例（`app.smoke.spec.mjs`），System Smoke 11 个用例（`runtime-smoke.mjs` 7、`judge-smoke.mjs` 4）。两个 spec/system 入口之外的 `tests/system/runtime-helper.mjs` 与 `tests/system/task-protocol-fixture.mjs` 是共享夹具，不是独立套件。
+xUnit 通过 `InternalsVisibleTo` 访问宿主 internal 契约；文件与预期用例以现役策略和测试源码为准。托管层由 `node tests\run.mjs integration` 在同一次 asInvoker Test Host 发布后运行：UI Smoke 3 个用例（`app.smoke.spec.mjs`，覆盖正常导航、连续快速导航与手机抽屉），System Smoke 13 个用例（`runtime-smoke.mjs` 7、`update-transaction.mjs` 2、`judge-smoke.mjs` 4）。两个 spec/system 入口之外的 `tests/system/runtime-helper.mjs` 与 `tests/system/task-protocol-fixture.mjs` 是共享夹具，不是独立套件。
 
 核心入口为 `ci --group backend|frontend`，`smoke` 并行运行两组；具体选择和预期用例以 `tests/policy.json` 为准，数量由策略登记导出。`daily` 运行四条真实有限 E2E，具体规模见[命令与证明边界](commands.md)。未选历史文件保留作明确的按需诊断，不隐式追加运行。
 

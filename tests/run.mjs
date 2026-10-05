@@ -26,11 +26,16 @@ let executionRoot = projectRoot;
 let frontendDir = path.join(projectRoot, "frontend");
 let e2eDir = path.join(projectRoot, "tests", "e2e");
 let runId = process.env.NEXUS_TEST_RUN_ID?.trim() || `run-${Date.now()}-${process.pid}`;
-if (["batch", "ci", "smoke", "daily", "integration", "diagnostic", "gate"].includes(process.argv[2]?.toLowerCase())
-    && !process.env.NEXUS_TEST_ARTIFACT_ROOT) {
-  const base = path.join(process.env.RUNNER_TEMP || os.tmpdir(), "NexusPipeline.Tests");
+if (["batch", "ci", "smoke", "daily", "integration", "diagnostic", "gate", "release"].includes(process.argv[2]?.toLowerCase())) {
+  const configured = process.env.NEXUS_TEST_ARTIFACT_ROOT;
+  if (configured && !path.isAbsolute(configured)) throw new Error("NEXUS_TEST_ARTIFACT_ROOT must be absolute");
+  const base = path.resolve(configured || path.join(process.env.RUNNER_TEMP || os.tmpdir(), "NexusPipeline.Tests"));
   if (!fs.existsSync(base)) {
-    fs.mkdirSync(base);
+    for (let current = path.dirname(base); ; current = path.dirname(current)) {
+      if (fs.existsSync(current) && fs.lstatSync(current).isSymbolicLink()) throw new Error("Linked test artifact root");
+      if (path.dirname(current) === current) break;
+    }
+    fs.mkdirSync(base, { recursive: true });
     fs.writeFileSync(path.join(base, ".nxp-test-artifact-root.json"), JSON.stringify({
       schemaVersion: 1, owner: "NexusPipeline.Tests", directory: base,
     }), { flag: "wx" });
@@ -62,7 +67,7 @@ function step(label) {
 
 async function run(command, args, options = {}) {
   let env = options.env ?? process.env;
-  if (invocationBudget) {
+  if (process.env.NEXUS_TEST_ARTIFACT_ROOT) {
     const root = process.env.NEXUS_TEST_ARTIFACT_ROOT;
     if (root) {
       const temporary = path.join(root, "tmp");
@@ -227,7 +232,7 @@ async function runBatch() {
             if(code) break;
             invocationBudget.check();
             const report=path.join(runRoot,`${plugin.artifact}-${fixture}.json`);
-            const args=[path.join(executionRoot,"bin/test-host/NexusPipeline.TaskProtocolTests/Release/net8.0-windows/NexusPipeline.TaskProtocolTests.dll"),"--plugin-root",staged.directory,
+            const args=[path.join(executionRoot,"bin/test-host/NexusPipeline.TaskProtocolTests/Release/net10.0-windows/NexusPipeline.TaskProtocolTests.dll"),"--plugin-root",staged.directory,
               "--plugin",plugin.artifact,"--scenario",fixture,"--report",report];
             if(index===0) args.push("--observe-count","12");
             code=await run("dotnet",args);
@@ -334,13 +339,13 @@ async function runSystemSuite(suite) {
     exitFile: path.join(runRoot, suite.runtimeName, ".nxp", "test-host.exit"),
   });
   console.error(`\n-- System Smoke ${suite.file} (port=${webPort}) --`);
-  return run(process.execPath, ["--test", "--test-concurrency=1", ...(batchContext?["--test-reporter=tap",`--test-reporter-destination=${path.join(runRoot,"runtime-native.tap")}`]:[]), suite.file], { env, timeoutMs: 15 * 60 * 1000 });
+  return run(process.execPath, ["--test", "--test-concurrency=1", ...(batchContext?["--test-reporter=tap",`--test-reporter-destination=${path.join(runRoot,"runtime-native.tap")}`]:[]), ...(suite.files || [suite.file])], { env, timeoutMs: 15 * 60 * 1000 });
 }
 
 async function runSystemSmoke() {
   step("System Smoke");
   for (const suite of [
-    { file: "tests/system/runtime-smoke.mjs", runtimeName: "runtime" },
+    { file: "tests/system/runtime-smoke.mjs", files: ["tests/system/runtime-smoke.mjs", "tests/system/update-transaction.mjs"], runtimeName: "runtime" },
     { file: "tests/system/judge-smoke.mjs", runtimeName: "judge-runtime" },
   ]) {
     const code = await runSystemSuite(suite);
@@ -407,7 +412,7 @@ async function runFinite(selectedGroup) {
       if (group === "control") {
         const plan = path.join(childRoot, "http-plan.json");
         const prepared = await run(pythonCommand, ["tests/system/store-fixture.py",
-          path.join(executionRoot, "bin/test-host/NexusPipeline.TestPlugin/Release/net8.0/NexusPipeline.TestPlugin.dll"), plan, childId, "--upgrade"]);
+          path.join(executionRoot, "bin/test-host/NexusPipeline.TestPlugin/Release/net10.0/NexusPipeline.TestPlugin.dll"), plan, childId, "--upgrade"]);
         if (prepared) { code = prepared; break; }
         env.NEXUS_TEST_HTTP_PLAN = plan;
       }
@@ -441,7 +446,7 @@ async function runStoreDiagnostic() {
   if (code !== 0) return code;
   const plan = path.join(runRoot, "http-plan.json");
   code = await run(pythonCommand, ["tests/system/store-fixture.py",
-    path.join(executionRoot, "bin/test-host/NexusPipeline.TestPlugin/Release/net8.0/NexusPipeline.TestPlugin.dll"), plan, runId]);
+    path.join(executionRoot, "bin/test-host/NexusPipeline.TestPlugin/Release/net10.0/NexusPipeline.TestPlugin.dll"), plan, runId]);
   if (code !== 0) return code;
   const env = testHostEnvironment({ runtimeName: "runtime", webPort: await findAvailablePort(),
     exitFile: path.join(runRoot, "runtime", ".nxp", "test-host.exit") });
@@ -489,7 +494,7 @@ async function runGate(id) {
   if (id === "host.ci-policy") {
     let code = await run(process.execPath, ["--test", "tests/scope-plan.test.mjs", "tests/core-plan.test.mjs", "tests/batch-plan.test.mjs", "tests/support/budget.test.mjs", "tests/support/test-runtime.test.mjs"]);
     if (code) return code;
-    return run(pythonCommand, ["-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py", "-v"]);
+    return run(pythonCommand, ["tests/support/unittest-runner.py", "--suite", "ci", "--report", path.join(runRoot, "python-ci.json")]);
   }
   if (id === "host.docs") {
     const required = ["README.md", "docs/user/README.md", "docs/user/README.en.md"];
@@ -501,9 +506,9 @@ async function runGate(id) {
     return 0;
   }
   if (id === "host.release-contract")
-    return run(pythonCommand, ["-m", "unittest", "tools.tests.test_host_release", "-v"]);
+    return run(pythonCommand, ["tests/support/unittest-runner.py", "--suite", "release", "--report", path.join(runRoot, "python-release.json")]);
   if (id === "host.installer-localization")
-    return run(pythonCommand, ["-m", "unittest", "tools.tests.test_host_installer", "-v"]);
+    return run(pythonCommand, ["tests/support/unittest-runner.py", "--suite", "installer", "--report", path.join(runRoot, "python-installer.json")]);
   if (id === "host.architecture.backend") {
     const project = "tools/NexusPipeline.Architecture/NexusPipeline.Architecture.csproj";
     const output = path.join(runRoot, "architecture-bin") + path.sep;
@@ -517,7 +522,7 @@ async function runGate(id) {
         `-p:NexusTestHost=${testHost}`, "--nologo"]);
       if (code) return code;
     }
-    const checker = path.join(output, "Release", "net8.0", "NexusPipeline.Architecture.dll");
+    const checker = path.join(output, "Release", "net10.0", "NexusPipeline.Architecture.dll");
     code = await run("dotnet", [checker, executionRoot, "--report", path.join(runRoot, "architecture-backend.json")]);
     if (code) return code;
     return run(pythonCommand, ["tests/architecture-fixture.py", checker]);
@@ -533,7 +538,7 @@ async function runGate(id) {
   if (id === "host.integration.store") return runStoreDiagnostic();
   if (id === "host.integration.restart-update") {
     const code = await publishTestHost({ withFrontend: false });
-    return code || runSystemSuite({ file: "tests/system/runtime-smoke.mjs", runtimeName: "runtime" });
+    return code || runSystemSuite({ file: "tests/system/runtime-smoke.mjs", files: ["tests/system/runtime-smoke.mjs", "tests/system/update-transaction.mjs"], runtimeName: "runtime" });
   }
   const finite = {
     "host.integration.execution": "execution", "host.integration.config": "config",
@@ -549,21 +554,27 @@ async function runGate(id) {
   throw new Error(`Gate has no execution contract: ${id}`);
 }
 
-/** 生产构建只发布程序自有文件，release/ 下的用户运行数据保持原样。 */
 async function runRelease() {
   step("生产构建");
+  workspace = stageWorkspace(projectRoot, process.env.NEXUS_TEST_ARTIFACT_ROOT,
+    new Budget("生产构建准备", 20 * 60 * 1000));
+  executionRoot = workspace.directory;
+  frontendDir = path.join(executionRoot, "frontend");
   let code = await buildFrontendBundle();
   if (code !== 0) return code;
-  const releaseDir = path.join(projectRoot, "release");
+  const releaseDir = path.join(runRoot, "production");
+  if (fs.existsSync(releaseDir)) throw new Error("Production output already exists");
   fs.mkdirSync(releaseDir, { recursive: true });
-  fs.rmSync(path.join(releaseDir, "wwwroot"), { recursive: true, force: true, maxRetries: 120, retryDelay: 250 });
   code = await run("dotnet", [
     "publish", "src\\NexusPipeline.csproj", "-c", "Release", "-r", "win-x64", "--self-contained", "false",
-    "-p:PublishSingleFile=true", "-p:DebugType=none", "-p:DebugSymbols=false", "-o", releaseDir, "--nologo",
+    "-p:PublishSingleFile=true", "-p:DebugType=none", "-p:DebugSymbols=false", "-p:NexusTestHost=false",
+    "-p:UseSharedCompilation=false", "--disable-build-servers", "-o", releaseDir, "--nologo",
   ], { timeoutMs: 20 * 60 * 1000 });
   if (code !== 0) return code;
   fs.cpSync(path.join(frontendDir, "dist"), path.join(releaseDir, "wwwroot"), { recursive: true });
   fs.mkdirSync(path.join(releaseDir, "plugins"), { recursive: true });
+  fs.copyFileSync(path.join(executionRoot, "README.md"), path.join(releaseDir, "README.md"));
+  console.error(`[生产构建] ${releaseDir}`);
   return verifyManifest(path.join(releaseDir, "nexus-pipeline.exe"), "requireAdministrator");
 }
 

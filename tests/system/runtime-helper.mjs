@@ -1,3 +1,4 @@
+import { controlServiceName } from "../../tools/installation-generation.mjs";
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
@@ -204,7 +205,7 @@ export async function waitForService(url = null, timeoutMs = 30000) {
   throw new Error(`System Smoke 服务未启动：${url}；尝试 ${attempts} 次；${lastError}\n${runtimeDiagnostic()}`);
 }
 
-const restartServiceName = "NexusPipeline";
+const restartServiceName = controlServiceName;
 const restartObservationLimit = 8;
 
 function normalizePort(value) {

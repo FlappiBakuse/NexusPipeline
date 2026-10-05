@@ -58,6 +58,28 @@ class BatchRequiredTests(unittest.TestCase):
     def test_complete_typed_control_passes(self):
         self.assertEqual(self.check()["status"],"PASS")
 
+    def test_python_gate_requires_native_positive_cases_without_skips(self):
+        native = {"schemaVersion":1, "suite":"release", "status":"PASS", "caseIds":["Release.test_current"],
+                  "counts":{"testsRun":1, "failures":0, "errors":0, "skipped":0, "unexpectedSuccesses":0, "expectedFailures":0}}
+        required.validate_unittest_report(native, "release")
+        for key,value in [("testsRun",0), ("testsRun",True), ("failures",1), ("errors",1), ("skipped",1),
+                          ("unexpectedSuccesses",1), ("expectedFailures",1)]:
+            changed = copy.deepcopy(native); changed["counts"][key] = value
+            with self.subTest(key=key), self.assertRaises(ValueError): required.validate_unittest_report(changed, "release")
+        for cases in [[], ["Release.test_current", "Release.test_current"], [""]]:
+            with self.subTest(cases=cases), self.assertRaises(ValueError):
+                required.validate_unittest_report({**native, "caseIds":cases}, "release")
+        with self.assertRaises(ValueError): required.validate_unittest_report(native, "ci")
+        unit = self.plan["control"]["units"][0]
+        unit["id"] = "host.release-contract"; unit["provides"] = [unit["id"]]
+        self.actual["id"] = unit["id"]; self.actual["providedObligations"] = unit["provides"]
+        self.write("unit-receipt.json", {"unitId":unit["id"], "provides":unit["provides"], "status":"PASS", "exitCode":0})
+        files = {name:self.root/name for name in self.actual["rawEvidence"]}
+        with self.assertRaises(ValueError): required.validate_unit(unit, self.actual, files, self.root)
+        self.write("python-release.json", native); self.actual["rawEvidence"].append("python-release.json")
+        files["python-release.json"] = self.root/"python-release.json"
+        required.validate_unit(unit, self.actual, files, self.root)
+
     def test_finite_union_requires_every_native_scenario_and_observation(self):
         scenarios = ["H-E01", "H-E02", "H-E03"]
         expected = {"id":"host.finite", "kind":"finite", "provides":["execution", "config", "control"],

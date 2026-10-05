@@ -12,7 +12,7 @@ internal static class DailyProtocolProbe
     {
         if (Directory.Exists(output)) throw new IOException("Daily probe output already exists");
         Directory.CreateDirectory(output);
-        string source = Path.Combine(plugins, "examples", "DailyProtocolExample");
+        string source = Path.Combine(plugins, "examples", "task-protocol", "json-id-array");
         var manifest = JsonNode.Parse(File.ReadAllText(Path.Combine(source, "plugin.json")))!.AsObject();
         var protocol = TaskProtocolManifest.Freeze(manifest, source)!;
         string config = Path.Combine(output, "config.json");
@@ -20,7 +20,7 @@ internal static class DailyProtocolProbe
         string other = Path.Combine(output, "account-b.json");
         File.WriteAllBytes(other, [0xef, 0xbb, 0xbf, 0x7b, 0x7d]);
         byte[] originalOther = File.ReadAllBytes(other);
-        var script = new ScriptInstance { Id = "daily-fixture", Name = "日常合成验证", PluginType = "daily-protocol-example", ConfigPath = config, RootPath = output };
+        var script = new ScriptInstance { Id = "daily-fixture", Name = "日常合成验证", PluginType = "task-protocol-example", ConfigPath = config, RootPath = output };
         var spec = new ResolvedScriptSpec(script, "0.1.0", new(true, "javascript", "plugin-file", "", ""), "fixture") { TaskProtocol = protocol };
         var record = new RunRecord { ScriptInstanceId = script.Id, ScriptName = script.Name, UserId = "fixture-a", UserName = "合成账号", StartTime = DateTime.Now };
         var run = new TaskProtocolRun(spec, record.Id, record.UserId, Path.Combine(output, "journal"));
@@ -44,7 +44,7 @@ internal static class DailyProtocolProbe
         Require(record.TaskReport!["schemaVersion"]!.GetValue<int>() == 2, "report version");
         Require(record.TaskReport["attemptReports"]!.AsArray().Count == 2, "real attempts");
         record.Outcomes = RunOutcomeProjector.Project(record, true, false);
-        var history = new RunHistoryService(Path.Combine(output, "history"), Path.Combine(output, "outputs"), Path.Combine(output, "logs"));
+        var history = new RunHistoryService(Path.Combine(output, "history"));
         Require(history.Save(record, [], []).PersistenceWarning is null, "history save");
         Require(history.FindById(record.Id)!.TaskReport!.ToJsonString() == record.TaskReport.ToJsonString(), "history reload");
         File.WriteAllText(Path.Combine(output, "result.json"), new JsonObject

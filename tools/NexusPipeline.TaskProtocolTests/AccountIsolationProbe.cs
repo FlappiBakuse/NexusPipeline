@@ -22,9 +22,11 @@ internal static class AccountIsolationProbe
             "r2-oknte-exclusive-order", "r2-okww-farm-tacet"];
         var results = new JsonArray();
         ConfigSwapSession.ConfigureRecovery(_ => null, () => []);
+        string fixtureRoot = Path.Combine(plugins, "tests", "fixtures", "task-protocol");
+        var fixtureIndex = TaskFixtures.Index(fixtureRoot);
         foreach (string fixtureName in fixtures)
         {
-            var fixture = JsonNode.Parse(File.ReadAllText(Path.Combine(plugins, "tools", "task-protocol", "fixtures", fixtureName + ".json")))!;
+            var fixture = JsonNode.Parse(File.ReadAllText(fixtureIndex[fixtureName]))!;
             string artifact = fixture["artifact"]!.GetValue<string>();
             string plugin = Path.Combine(plugins, "plugins", "specialized", artifact);
             var manifest = JsonNode.Parse(File.ReadAllText(Path.Combine(plugin, "plugin.json")))!.AsObject();
@@ -38,7 +40,7 @@ internal static class AccountIsolationProbe
                 bool passed = false;
                 try
                 {
-                    var entries = TaskFixtureResources.Read(fixture, Path.Combine(plugins, "tools", "task-protocol", "fixtures")).Select((r, i) =>
+                    var entries = TaskFixtures.Read(fixture, fixtureRoot).Select((r, i) =>
                         (Id: r!["id"]!.GetValue<string>(), Format: r["format"]!.GetValue<string>(),
                          Text: r["text"]!.GetValue<string>(), Sha256: r["sha256"]?.GetValue<string>(), File: i + ".config")).ToArray();
                     foreach (var r in entries) File.WriteAllText(Path.Combine(r.Id.StartsWith("config:") ? site : resources, r.File), r.Text);

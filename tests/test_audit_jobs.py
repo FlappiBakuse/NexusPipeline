@@ -22,14 +22,14 @@ class AuditJobsTests(unittest.TestCase):
         real = {**job(1), "name": "Final Budget", "runner_id": 8, "labels": ["windows"], "steps": [{}], "conclusion": "failure"}
         synthetic = {**job(2), "runner_id": None, "labels": [], "steps": [],
                      "check_run_url": "https://api.github.com/repos/owner/repo/check-runs/2"}
-        check = {"id": 2, "head_sha": "a" * 40, "app": {"id": 17}, "name": "Final Budget", "external_id": "",
+        check = {"id": 2, "head_sha": "a" * 40, "app": {"id": 17}, "name": "Final Budget", "external_id": "nxp-budget-v2:7:12:2:22:1:" + "a" * 40,
                  "output": {"title": "Complete CI job budget", "summary": "Run 12, attempt 1: old result"}}
         with patch.object(audit_jobs, "api", return_value=check):
             physical, checks = audit_jobs.physical_jobs("owner/repo", {"id": 12, "run_attempt": 2, "head_sha": "a" * 40}, [real, synthetic], "Final Budget", 17)
         self.assertEqual(physical, [real])
         self.assertEqual(checks, [check])
         self.assertEqual(audit_jobs.audit(physical, 12, 2)[0]["status"], "FAIL")
-        for field, value in [("id", 3), ("head_sha", "b" * 40), ("app", {"id": 18}), ("name", "unknown")]:
+        for field, value in [("id", 3), ("head_sha", "b" * 40), ("app", {"id": 18}), ("name", "unknown"), ("external_id", "")]:
             with patch.object(audit_jobs, "api", return_value={**check, field: value}):
                 with self.assertRaises(ValueError):
                     audit_jobs.physical_jobs("owner/repo", {"id": 12, "run_attempt": 2, "head_sha": "a" * 40}, [real, synthetic], "Final Budget", 17)

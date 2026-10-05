@@ -99,8 +99,7 @@ def current_check(repository, sha, check_name, app_id, pr):
     checks = audit_jobs.paged(f"/repos/{repository}/commits/{sha}/check-runs?filter=all", "check_runs")
     owned = [check for check in checks if check.get("name") == check_name and check.get("head_sha") == sha
              and check.get("app", {}).get("id") == app_id
-             and (check.get("external_id", "").startswith((f"nxp-budget-v2:{pr}:", f"nxp-budget-v3:{pr}:"))
-                  or not check.get("external_id") and check.get("output", {}).get("title") == "Complete CI job budget")]
+             and (check.get("external_id", "").startswith((f"nxp-budget-v2:{pr}:", f"nxp-budget-v3:{pr}:")))]
     return max(owned, key=lambda check: check["id"], default=None)
 
 

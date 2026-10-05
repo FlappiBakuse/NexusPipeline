@@ -21,7 +21,7 @@
 - [ ] `node tests\run.mjs smoke`
 - [ ] `node tests\run.mjs integration`（涉及 UI、进程、配置交换、插件或更新事务时）
 - [ ] `node tests\run.mjs release`（涉及构建或发布时）
-- [ ] 测试命令与 `docs/TESTING.md` 保持一致
+- [ ] 测试命令与 `docs/testing/README.md` 保持一致
 
 ## 安全与配置影响
 

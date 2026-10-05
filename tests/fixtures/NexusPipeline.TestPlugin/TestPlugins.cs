@@ -25,21 +25,14 @@ public sealed class TestPlugin : INexusPlugin
     public async ValueTask InitializeAsync(IPluginHostContext context, CancellationToken cancellationToken)
     {
         _context = context;
-        if (context is IPluginHostContextV1_2 v12)
-        {
-            _registrations.Add(v12.UserListBadges.Register(new PluginUserListBadgeContribution(
+        _registrations.Add(context.UserListBadges.Register(new PluginUserListBadgeContribution(
                 "fixture-badge",
                 10,
                 (_, _) => ValueTask.FromResult<PluginUserListBadge?>(new PluginUserListBadge("Fixture 徽章", "blue", "Fixture")))));
-        }
-        if (context is IPluginHostContextV1_3 v13)
+        RegisterWebApi(context);
+        if (string.Equals(Environment.GetEnvironmentVariable("NEXUS_TEST_EMULATOR_PLUGIN"), "1", StringComparison.Ordinal))
         {
-            RegisterWebApi(v13);
-        }
-        if (context is IPluginHostContextV1_7 v17
-            && string.Equals(Environment.GetEnvironmentVariable("NEXUS_TEST_EMULATOR_PLUGIN"), "1", StringComparison.Ordinal))
-        {
-            _registrations.Add(v17.EmulatorSupport.Register(new FixtureEmulatorSupportProvider()));
+            _registrations.Add(context.EmulatorSupport.Register(new FixtureEmulatorSupportProvider()));
         }
         await SetStateAsync(state => state.Initialized = true, cancellationToken).ConfigureAwait(false);
         try
@@ -74,7 +67,7 @@ public sealed class TestPlugin : INexusPlugin
     }
 
     /// <summary>注册宿主 Web API 传输契约所需的固定路由：JSON 回显、二进制请求回显与受限类型响应。</summary>
-    private void RegisterWebApi(IPluginHostContextV1_3 context)
+    private void RegisterWebApi(IPluginHostContext context)
     {
         _registrations.Add(context.WebApi.Register(new PluginWebApiRoute(
             "PUT",
@@ -139,10 +132,7 @@ public sealed class FailingPlugin : INexusPlugin
 {
     public ValueTask InitializeAsync(IPluginHostContext context, CancellationToken cancellationToken)
     {
-        if (context is IPluginHostContextV1_7 v17)
-        {
-            v17.EmulatorSupport.Register(new FixtureEmulatorSupportProvider());
-        }
+        context.EmulatorSupport.Register(new FixtureEmulatorSupportProvider());
         throw new InvalidOperationException("fixture init failure");
     }
 

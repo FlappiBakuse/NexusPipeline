@@ -4,6 +4,7 @@ using NexusPipeline.Modules.Execution.Judgement;
 using NexusPipeline.Modules.History;
 using NexusPipeline.Modules.Notifications;
 using NexusPipeline.Modules.Plugins;
+using NexusPipeline.Modules.Plugins.Contracts;
 using NexusPipeline.Modules.Plugins.Repository;
 using NexusPipeline.Modules.Scripts;
 using NexusPipeline.Modules.Scripts.Contracts;
@@ -15,6 +16,7 @@ internal static class PluginHistoryProbe
     {
         string root = Path.Combine(Path.GetTempPath(), "nxp-author-history-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
+        bool completed = false;
         try
         {
             var manifest = JsonNode.Parse(File.ReadAllText(Path.Combine(source, "plugin.json")))!.AsObject();
@@ -44,20 +46,20 @@ internal static class PluginHistoryProbe
             var record = new RunRecord { ScriptInstanceId = script.Id, ScriptName = script.Name, UserId = "author", UserName = "Fixture account", StartTime = DateTime.Now };
             var run = new TaskProtocolRun(spec, record.Id, "author", Path.Combine(root, "journal"));
             await run.BeginAsync(1, default);
-            run.Append("stdout", "TASK daily-reward FAIL\n");
+            run.Append("stdout", "TASK daily-reward START\nTASK daily-reward FAIL\n");
             Require((await run.ObserveAsync(true, default)).JudgeError is null, "observe");
             run.Finish(RunAttemptResult.Partial("normal exit"), 1);
             Require(run.Restore() is null, "restore");
             record.TaskReport = run.Snapshot()!; record.Status = "failed"; record.EndTime = DateTime.Now;
             string history = Path.Combine(root, "history");
-            RunHistoryService History() => new(history, Path.Combine(root, "output"), Path.Combine(root, "logs"));
+            RunHistoryService History() => new(history);
             Require(History().Save(record, [], []).PersistenceWarning is null, "history save");
             string frozen = record.TaskReport.ToJsonString();
             // Change installed dictionaries before uninstalling through the real transaction engine.
             var dictionaries = manifest["taskProtocol"]!["localization"]!["messages"]!.AsObject();
             Require(dictionaries.Count > 0, "nonempty frozen dictionaries");
             foreach (var dictionary in dictionaries) File.WriteAllText(Path.Combine(installed, dictionary.Value!.GetValue<string>()), "{}");
-            Require(record.TaskReport["originalPlan"]!["configAssessment"] is JsonObject, "protocol 0.1.0 diagnostic history");
+            Require(record.TaskReport["originalPlan"]!["configAssessment"] is JsonObject, "current diagnostic history");
             Apply("uninstall");
             Require(!Directory.Exists(installed) && PluginInstallRecovery.ReadOwnership(ownership).Count == 0, "uninstall ownership");
             var reloaded = History().FindById(record.Id)!;
@@ -66,11 +68,20 @@ internal static class PluginHistoryProbe
             {
                 using var scope = LocaleContext.Push(locale);
                 string message = NotificationFormatter.Script(script, reloaded);
-                Require(message.Contains(task) && message.Contains(reason) && message.Contains(record.Id), "frozen notification " + locale);
+                Require(message.Contains(task) && message.Contains(record.Id), "frozen notification " + locale);
+                var display = TaskProtocolJson.Read<TaskDisplaySnapshot>(reloaded.TaskReport!["displaySnapshot"]!.ToJsonString());
+                var failed = reloaded.TaskReport["finalTaskResults"]!.AsArray().Single()!.AsObject();
+                Require(TaskDisplaySnapshot.Resolve(failed["reasonText"] as JsonObject, display, locale, "") == reason,
+                    "frozen history reason " + locale);
             }
             Console.WriteLine("PASS author plugin install → real Jint failure → history → dictionary replacement → transactional uninstall → restarted history → bilingual notification: " + artifact);
+            completed = true;
         }
-        finally { Directory.Delete(root, true); }
+        finally
+        {
+            if (completed) Directory.Delete(root, true);
+            else Console.Error.WriteLine("Failed author history fixture retained: " + root);
+        }
     }
 
     private static void Require(bool condition, string stage)

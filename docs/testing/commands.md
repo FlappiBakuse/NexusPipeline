@@ -2,7 +2,7 @@
 
 ## 默认命令
 
-配置破坏性修订诊断：在已登记的外部测试根中设置 `NEXUS_TEST_MODE=test-host`、`NEXUS_TEST_HOST_DIR` 为现役 runner 构建的 asInvoker Host、新的 `NEXUS_TEST_RUN_ID` 和独立 `NEXUS_FINITE_RESULT`，执行 `node tests/system/config-revision.mjs`。它通过现役 runtime-helper 验证启动归档、实际 HTTP 候选信封、脚本设置确认及重启保全；使用合成插件与账号，不执行原生自动化程序。该诊断不替代核心 smoke 或完整 daily。
+配置破坏性修订诊断：在已登记的外部测试根中设置 `NEXUS_TEST_MODE=test-host`、`NEXUS_TEST_HOST_DIR` 为现役 runner 构建的 asInvoker Host、新的 `NEXUS_TEST_RUN_ID` 和独立 `NEXUS_FINITE_RESULT`，执行 `node tests/system/config-revision.mjs`。它通过现役 runtime-helper 验证旧格式快照保全、实际 HTTP 候选信封、脚本设置确认及重启保全；使用合成插件与账号，不执行原生自动化程序。该诊断不替代核心 smoke 或完整 daily。
 
 以下命令均在仓库根目录执行：
 
@@ -37,7 +37,7 @@ node tests/run.mjs gate --id host.ci-policy
 | H-E03 control | 真实 CLI、MCP HTTP 初始化与运行观察、合法包安装更新、坏 hash 阻断、两次重启交接 | 官方 HTTPS 响应和合成测试插件 |
 | H-E04 schedule | 真实分钟计时产生队列执行、结果归属、持久化水位与重启去重 | 拥有的外部目标程序 |
 
-`integration` 保留已有 UI Smoke/System Smoke 诊断，部分 UI 响应由夹具提供；它不是 `daily` 的替代。`release` 是生产构建入口。
+`integration` 保留已有 UI Smoke/System Smoke 诊断，部分 UI 响应由夹具提供；它不是 `daily` 的替代。`release` 在外部隔离源副本构建生产 requireAdministrator EXE，输出到 `runs/<runId>/production/`，不写项目 release 目录。更新事务诊断同时验证独立 worker、真实新实例启动收据及用户文件保全。
 
 `diagnostic --group store` 在同一180秒父预算内构建实际 Test Host 和合成 managed fixture，访问官方 HTTPS catalog/package 地址，由 Test Host 的传输夹具返回固定响应。它验证坏 hash 拒绝、安装事务、新安装后自动启用、重复重启保持启用、显式禁用、插件加载和卸载。商店与更新重启的 System gate 不访问浏览器资源，因此 Test Host 只准备空 `wwwroot`；前端资产由独立的生产构建和 UI gate 验证。原生 TAP 与 `store-evidence.json` 位于本次运行目录；这是 H-C09 的安装生命周期诊断，不代表浏览器交互、全部商店恢复矩阵或四组 daily 已完成。
 
@@ -77,7 +77,7 @@ python -m unittest discover -s tools/tests -p test_pe_manifest.py
 
 跨账号配置与恢复：`dotnet run --project tools/NexusPipeline.TaskProtocolTests -p:NexusTestHost=true -- --plugin-root <Plugins> --account-isolation <报告.json>`。八个生产适配器、两个账号、六种生命周期情景，共 96 项；使用新建目录和合成配置，不启动目标软件。失败时输出并保留该情景的隔离目录。
 
-修改 `frontend/src/plugin-bridge/**`、`frontend/src/platform/appearance.ts`、公开 `nxp-*` 元素或 Frontend API 契约时，在插件仓库执行 `NexusPipeline-Plugins/tools/Test-FrontendPlugins.mjs`，用 mock host 验证插件业务与生命周期；两仓库各自固定一次对端官方完整 SHA。
+修改 `frontend/src/plugin-bridge/**`、`frontend/src/platform/appearance.ts`、公开 `nxp-*` 元素或 Frontend API 契约时，在插件仓库执行 `NexusPipeline-Plugins/tests/frontend/run.mjs`，用 mock host 验证插件业务与生命周期；两仓库各自固定一次对端官方完整 SHA。
 
 ## 外部实例日志只读回放
 
@@ -89,7 +89,7 @@ python -m unittest discover -s tools/tests -p test_pe_manifest.py
 
 `tools/NexusPipeline.TaskProtocolTests` 支持 `--plugin-root <Plugins> --plugin <已知专项> --report <新报告路径>`，可附加 `--scenario <fixture文件名去掉.json>`。未知插件、重复参数、空选择和已有报告路径均失败；不通过删除生产数据选择场景。
 
-使用 `NexusTestHost=true` 时先 `dotnet build tools/NexusPipeline.TaskProtocolTests -p:NexusTestHost=true`，再运行实际输出 `bin/test-host/NexusPipeline.TaskProtocolTests/Debug/net8.0-windows/NexusPipeline.TaskProtocolTests.dll` 并传上述参数。全部命令应在外部隔离副本中运行；该工具报告仅证明选中的真实 Jint/发现/归并/配置事务，不表示上游真实设备已经验证。
+使用 `NexusTestHost=true` 时先 `dotnet build tools/NexusPipeline.TaskProtocolTests -p:NexusTestHost=true`，再运行实际输出 `bin/test-host/NexusPipeline.TaskProtocolTests/Debug/net10.0-windows/NexusPipeline.TaskProtocolTests.dll` 并传上述参数。全部命令应在外部隔离副本中运行；该工具报告仅证明选中的真实 Jint/发现/归并/配置事务，不表示上游真实设备已经验证。
 
 固定对端插件的编辑用例由其 `tests/policy.json` 声明的 `editorCaseIds` 约束，保留旧版 BetterGI/ZZZ 的两项编辑用例。MaaStellaSora 的旧 MXU 协议没有编辑入口；新版 MFA 协议要求真实编辑脚本的选择、保留无关设置与重复执行证据，入口读取实际 manifest，缺少声明或文件即失败。
 

@@ -11,8 +11,6 @@ internal static class FiniteEditor
         string plugin = Path.Combine(root, "plugins", "specialized", artifact);
         var manifest = JsonNode.Parse(File.ReadAllText(Path.Combine(plugin, "plugin.json")))!;
         string? entry = manifest["configEditor"]?.GetValue<string>();
-        if (artifact == "MaaStellaSora" && manifest["taskProtocol"]?["version"]?.GetValue<string>() == "0.1.0"
-            && entry is null) return [];
         if (string.IsNullOrWhiteSpace(entry)) throw new InvalidDataException("Declared editor is required");
         string temporary = Path.Combine(Path.GetTempPath(), "nxp-finite-editor-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(temporary);

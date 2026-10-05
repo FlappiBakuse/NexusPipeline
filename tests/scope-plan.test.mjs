@@ -5,12 +5,27 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { collectChanges, parseNameStatus, planForChanges, readRegistry } from "./scope-plan.mjs";
+import { defaultPartner } from "./ci-inputs.mjs";
 
 const root = path.resolve(import.meta.dirname, "..");
 const { registry } = readRegistry(root);
 const policy = JSON.parse(fs.readFileSync(path.join(root, "tests/policy.json"), "utf8"));
 const ids = changes => planForChanges(root, changes, registry, policy).selected.map(item => item.id);
 const change = name => [{ status: "M", path: name }];
+
+test("default partner input requires the official main policy", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "nxp-default-partner-"));
+  try {
+    const current = {schemaVersion: 1, repository: "FlappiBakuse/NexusPipeline-Plugins", ref: "main"};
+    fs.writeFileSync(path.join(directory, "plugins.lock.json"), JSON.stringify(current));
+    assert.deepEqual(defaultPartner(directory), current);
+    for (const input of [{...current, ref: "a".repeat(40)}, {...current, repository: "other/plugins"},
+      {...current, schemaVersion: 0}, {...current, unknown: true}]) {
+      fs.writeFileSync(path.join(directory, "plugins.lock.json"), JSON.stringify(input));
+      assert.throws(() => defaultPartner(directory));
+    }
+  } finally { fs.rmSync(directory, {recursive: true}); }
+});
 
 test("producer naming and report matching inputs select the CI policy owner", () => {
   for (const file of ["tests/ci-names.json", "tests/ci-names.mjs", "tests/batch-required.py", "tests/test_batch_required.py"])

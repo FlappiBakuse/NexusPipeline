@@ -80,6 +80,20 @@ for (const file of documents) {
   }
 }
 
+const navigation = JSON.parse(fs.readFileSync(path.join(projectRoot, "docs/map.json"), "utf8"));
+const topicIds = new Set();
+if (navigation.schemaVersion !== 1 || !Array.isArray(navigation.topics) || !navigation.topics.length)
+  failures.push("docs/map.json: invalid navigation schema");
+for (const topic of navigation.topics || []) {
+  if (!topic.id || topicIds.has(topic.id)) failures.push(`docs/map.json: duplicate/empty topic ${topic.id}`);
+  topicIds.add(topic.id);
+  for (const [base, relative] of [["docs", topic.path], ...(topic.codePaths || []).map(value => ["", value])]) {
+    const resolved = typeof relative === "string" ? path.resolve(projectRoot, base, relative) : projectRoot;
+    if (typeof relative !== "string" || path.isAbsolute(relative) || path.relative(projectRoot, resolved).startsWith("..")
+        || !fs.existsSync(path.join(projectRoot, base, relative))) failures.push(`docs/map.json: missing/invalid path ${relative}`);
+  }
+}
+
 if (failures.length > 0) {
   console.error(`文档内链检查失败（${failures.length} 项）：`);
   for (const failure of failures) console.error(`  ${failure}`);
