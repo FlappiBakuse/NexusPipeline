@@ -510,9 +510,11 @@ internal sealed class UpdateService
     /// </summary>
     public UpdateApplyResult RequestApply(bool defer, string auditSource)
     {
+        string verifiedVersion;
+        string verifiedStaging;
         lock (_gate)
         {
-            if (!TryGetReadyLocked(out _, out _, out UpdateApplyResult? failure))
+            if (!TryGetReadyLocked(out verifiedVersion, out verifiedStaging, out UpdateApplyResult? failure))
             {
                 return failure!;
             }
@@ -520,6 +522,8 @@ internal sealed class UpdateService
 
         if (defer)
         {
+            UpdateApplyResult? policyFailure = VerifyApplyTarget(verifiedVersion);
+            if (policyFailure is not null) return policyFailure;
             string deferVersion;
             string deferStagingDir;
             try
@@ -530,7 +534,9 @@ internal sealed class UpdateService
                     {
                         return failure!;
                     }
-                    new UpdateTask("defer", deferVersion, deferStagingDir, UpdatePhase.Deferred, DateTimeOffset.UtcNow).Write(TaskFile);
+                    if (deferVersion != verifiedVersion || deferStagingDir != verifiedStaging)
+                        return UpdateApplyResult.Busy("update-changed", "待应用更新已变化，请重新申请");
+                    UpdateTask.Create("defer", deferVersion, deferStagingDir).Write(TaskFile);
                     _state = UpdateState.ApplyPending;
                 }
                 Audit.Log(auditSource, "申请下次启动更新", $"v{deferVersion}");
@@ -563,6 +569,15 @@ internal sealed class UpdateService
                 lease.Dispose();
                 return failure!;
             }
+        }
+        UpdateApplyResult? policyFailure = VerifyApplyTarget(version);
+        if (policyFailure is not null) { lease.Dispose(); return policyFailure; }
+        lock (_gate)
+        {
+            if (!TryGetReadyLocked(out string readyVersion, out string readyStaging, out UpdateApplyResult? failure))
+            { lease.Dispose(); return failure!; }
+            if (readyVersion != version || readyStaging != stagingDir)
+            { lease.Dispose(); return UpdateApplyResult.Busy("update-changed", "待应用更新已变化，请重新申请"); }
             _state = UpdateState.Applying;
             _maintenanceLease = lease;
         }
@@ -592,6 +607,8 @@ internal sealed class UpdateService
                 throw new InvalidDataException("安装器程序摘要不匹配");
         }
         catch (Exception ex) { return UpdateApplyResult.Busy("installer-staging-invalid", ex.Message); }
+        UpdateApplyResult? policyFailure = VerifyApplyTarget(version);
+        if (policyFailure is not null) return policyFailure;
         var (lease, reason) = _acquireMaintenance();
         if (lease is null) return UpdateApplyResult.Busy("busy", reason ?? "宿主当前繁忙");
         lock (_gate)
@@ -604,16 +621,38 @@ internal sealed class UpdateService
         return StartImmediateApply(lease, version, stagingDir, auditSource, transactionId, imageHash);
     }
 
+    internal UpdateApplyResult? VerifyApplyTarget(string version)
+    {
+        try
+        {
+            if (!NexusVersion.TryParse(version, out NexusVersion target))
+                return UpdateApplyResult.Busy("policy-unavailable", "无法核验目标版本");
+            var source = new UpdateSourcePolicy(EffectiveSourceUrl(_settings()));
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            using HttpClient http = _outbound.CreateClient(source.SourceUri, TimeSpan.FromSeconds(30), allowAutoRedirect: false);
+            var result = UpdatePolicy.FetchAsync(source, http, "NexusPipeline-update/" + CurrentVersion,
+                Path.Combine(_installDir, ".nxp", "state"), deadline.Token).GetAwaiter().GetResult();
+            if (!result.Verified)
+                return UpdateApplyResult.Busy("policy-unavailable", result.Error ?? "无法核验当前升级策略");
+            var barrier = UpdatePolicy.FindBarrier(result.Policy!, ParseCurrent(), target);
+            return barrier is null ? null : UpdateApplyResult.Busy("breaking-update", $"目标版本跨越升级屏障 {barrier.Version}，请使用全新目录安装");
+        }
+        catch (Exception ex) { return UpdateApplyResult.Busy("policy-unavailable", $"无法核验当前升级策略：{ex.Message}"); }
+    }
+
     private UpdateApplyResult StartImmediateApply(HostMaintenanceLease lease, string version, string stagingDir,
         string auditSource, string? transactionId = null, string? imageHash = null)
     {
         bool workerLaunched = false;
+        UpdateTask? startedJournal = null;
         try
         {
             string handoffId = _restartHandoff();
-            new UpdateTask("apply", version, stagingDir, UpdatePhase.ApplyRequested, DateTimeOffset.UtcNow)
+            var journal = UpdateTask.Create("apply", version, stagingDir) with
             { TransactionId = transactionId, TargetImageHash = imageHash,
-              RestartHandoffId = Guid.TryParseExact(handoffId, "N", out _) ? handoffId : null }.Write(TaskFile);
+              RestartHandoffId = Guid.TryParseExact(handoffId, "N", out _) ? handoffId : null };
+            journal.Write(TaskFile);
+            startedJournal = journal;
             if (!UpdateApply.LaunchApplyWorker(stagingDir, _isWebOnly()))
             {
                 throw new InvalidOperationException("apply-update 子进程未能拉起");
@@ -655,7 +694,8 @@ internal sealed class UpdateService
                 _maintenanceLease = null;
             }
             lease.Dispose();
-            UpdateTask.Clear(TaskFile);
+            try { startedJournal?.Clear(TaskFile); }
+            catch (Exception cleanupError) { Logger.Warn($"[更新] 保留不能确认归属的 journal：{cleanupError.Message}"); }
             return UpdateApplyResult.Busy("worker-launch-failed", $"无法启动更新切换：{ex.Message}");
         }
     }

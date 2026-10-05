@@ -6,7 +6,7 @@ namespace NexusPipeline.Platform.Windows;
 /// <summary>开机自启动：计划任务（schtasks /sc onlogon /rl highest），登录时以最高权限静默启动（免 UAC 弹窗），与提权版主程序配套。</summary>
 internal static class WindowsScheduledTaskRegistration
 {
-    private const string TaskName = "NexusPipeline";
+    private const string TaskName = "NexusPipeline " + Storage.InstallationGeneration.Id;
 
     public static bool IsRegistered()
     {

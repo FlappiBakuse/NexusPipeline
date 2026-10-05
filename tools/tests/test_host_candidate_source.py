@@ -6,7 +6,7 @@ import unittest
 import urllib.error
 from unittest import mock
 
-from tools.host_candidate_source import CandidateSourceError, NEW_REQUIRED_JOBS, github_fetch, resolve_candidate
+from tools.host_candidate_source import CandidateSourceError, REQUIRED_JOBS, github_fetch, resolve_candidate
 
 
 REPO = "FlappiBakuse/NexusPipeline"
@@ -27,7 +27,9 @@ class CandidateSourceTests(unittest.TestCase):
             f"{PREFIX}/runs/99": current,
             f"{PREFIX}/runs/12/artifacts?per_page=100&page=1": {"artifacts": [artifact]},
             f"{PREFIX}/runs/12/attempts/2/jobs?per_page=100&page=1":
-                {"jobs": [{"name": "Build and validate Host candidate", "status": "completed", "conclusion": "success"}]},
+                {"jobs": [{"name": name, "status": "completed", "conclusion": "success",
+                           "started_at": "2026-10-04T00:00:00Z", "completed_at": "2026-10-04T00:02:30Z"}
+                          for name in REQUIRED_JOBS]},
         }
         return paths
 
@@ -67,10 +69,11 @@ class CandidateSourceTests(unittest.TestCase):
         with self.assertRaisesRegex(CandidateSourceError, "未真实成功"):
             self.resolve(paths)
 
-    def test_legacy_requires_approved_controller_and_current_attempt(self):
+    def test_retired_producer_and_old_attempt_are_rejected(self):
         paths = self.fixture()
-        paths[f"{PREFIX}/runs/12"]["head_sha"] = "f" * 40
-        with self.assertRaisesRegex(CandidateSourceError, "legacy candidate controller"):
+        paths[f"{PREFIX}/runs/12/attempts/2/jobs?per_page=100&page=1"] = {"jobs": [
+            {"name": "Build and validate Host candidate", "status": "completed", "conclusion": "success"}]}
+        with self.assertRaisesRegex(CandidateSourceError, "已退役"):
             self.resolve(paths)
         paths = self.fixture()
         paths[f"{PREFIX}/runs/12"]["run_attempt"] = 3
@@ -82,7 +85,7 @@ class CandidateSourceTests(unittest.TestCase):
         paths[f"{PREFIX}/runs/12"]["head_sha"] = "c" * 40
         jobs = [{"name": name, "status": "completed", "conclusion": "success",
                  "started_at": "2026-09-29T00:00:00Z", "completed_at": "2026-09-29T00:02:30Z"}
-                for name in NEW_REQUIRED_JOBS]
+                for name in REQUIRED_JOBS]
         paths[f"{PREFIX}/runs/12/attempts/2/jobs?per_page=100&page=1"] = {"jobs": jobs}
         self.assertTrue(self.resolve(paths)["budgetQualified"])
         jobs[-1]["completed_at"] = "2026-09-29T00:02:31Z"

@@ -10,6 +10,7 @@ import hashlib
 import json
 import re
 import subprocess
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 try:
@@ -23,6 +24,13 @@ except ImportError:
 INNO_COMPILER_SHA256 = "0a8757031b33777e4c9cbffee40f11a5062b36d25cbe144c1db73b6102b80ad7"
 INNO_DISTRIBUTION_SHA256 = "9c73c3bae7ed48d44112a0f48e66742c00090bdb5bef71d9d3c056c66e97b732"
 CHINESE_ISL_SHA256 = "7d544b9bb1d142cfa11f2e5d3cc8abe2e55f8e066c5124e3772675aa236e1278"
+
+
+def installation_generation() -> str:
+    values = ET.parse(Path(__file__).resolve().parents[1] / "Directory.Build.props").findall(".//NexusInstallationGeneration")
+    _require(len(values) == 1 and re.fullmatch(r"g[0-9]+", values[0].text or "") is not None,
+             "安装代际构建字段无效")
+    return values[0].text
 
 
 def sha256(path: Path) -> str:
@@ -70,7 +78,7 @@ def dependency_pair(path: Path) -> dict[str, dict]:
     by_framework = {item.get("framework"): item for item in items}
     _require(set(by_framework) == {"Microsoft.WindowsDesktop.App", "Microsoft.AspNetCore.App"}, "依赖框架不完整")
     for item in items:
-        _require(item.get("version") == "8.0.31" and item.get("rid") == "win-x64", "依赖版本或架构不符")
+        _require(item.get("version") == "10.0.12" and item.get("rid") == "win-x64", "依赖版本或架构不符")
         _require(isinstance(item.get("url"), str) and item["url"].startswith("https://builds.dotnet.microsoft.com/dotnet/"),
                  "依赖下载 URL 非固定微软官方包")
         _require(re.fullmatch(r"[0-9a-f]{64}", item.get("sha256", "")) is not None, "依赖 SHA256 无效")
@@ -135,6 +143,7 @@ def render_script(template: str, *, production_root: Path, output_dir: Path,
             file_lines.append(f'Source: "{source}"; DestDir: "{stage_parent}"; Flags: {flags}; Check: IsTrustedUpgrade')
             stage_checks.append(f"  VerifyStagedFile('{relative.replace('/', chr(92))}', '{item['sha256']}');")
     replacements = {
+        "@@GENERATION@@": installation_generation(),
         "@@VERSION@@": version,
         "@@OUTPUT_DIR@@": str(output_dir),
         "@@FILES@@": "\n".join(file_lines),

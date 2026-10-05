@@ -321,6 +321,30 @@ public sealed class UpdateServiceTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Apply_RevalidatesPolicyAfterDownloadWithoutChangingStaging()
+    {
+        UpdateService service = NewService();
+        await service.CheckAsync("test");
+        Assert.True(service.StartDownload("test").Succeeded);
+        await WaitStateAsync(service, UpdateState.Ready);
+        string update = Path.Combine(_installDir!, ".nxp-update");
+        var original = Directory.GetFiles(update, "*", SearchOption.AllDirectories)
+            .ToDictionary(file => file, File.ReadAllBytes);
+        foreach (bool defer in new[] { false, true })
+        {
+            _policyJson = $"{{\"schemaVersion\":1,\"repository\":\"FlappiBakuse/NexusPipeline\",\"barriers\":[{{\"version\":\"{CandidateVersion}\",\"code\":\"new-barrier\"}}]}}";
+            Assert.Equal("breaking-update", service.RequestApply(defer, "test").Code);
+            _policyJson = "{}";
+            Assert.Equal("policy-unavailable", service.RequestApply(defer, "test").Code);
+            Assert.Equal(UpdateState.Ready, service.State);
+            Assert.False(_exited);
+            Assert.Empty(_launched);
+            Assert.False(File.Exists(Path.Combine(update, "task.json")));
+            foreach (var (file, bytes) in original) Assert.Equal(bytes, File.ReadAllBytes(file));
+        }
+    }
+
+    [Fact]
     public async Task Download_VerifiesAndStagesReady()
     {
         UpdateService service = NewService();

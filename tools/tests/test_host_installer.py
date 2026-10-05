@@ -71,7 +71,7 @@ class HostInstallerTests(unittest.TestCase):
     def test_runtime_lock_rejects_nonofficial_or_wrong_architecture(self) -> None:
         with tempfile.TemporaryDirectory(prefix="nxp-installer-dependencies-") as temporary:
             path = Path(temporary) / "deps.json"
-            items = [{"framework": name, "version": "8.0.31", "rid": "win-x64",
+            items = [{"framework": name, "version": "10.0.12", "rid": "win-x64",
                       "url": "https://builds.dotnet.microsoft.com/dotnet/runtime.exe", "sha256": "a" * 64}
                      for name in ("Microsoft.WindowsDesktop.App", "Microsoft.AspNetCore.App")]
             path.write_text(json.dumps({"schemaVersion": 1, "dependencies": items}), encoding="utf-8")

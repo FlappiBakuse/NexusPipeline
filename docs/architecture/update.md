@@ -4,7 +4,7 @@
 
 Setup 使用本实例事务互斥体，将已核验的新 EXE 复制为独立 worker；正在被替换的原 EXE 不充当 worker。已有服务时通过本地 `installer-apply` API 取得现役维护租约；无服务时经同一 `UpdateService` 准入。配置恢复、运行、编辑和其他更新事务阻断切换。
 
-交换完成先写 `AwaitingStartup`，保留 immutable backup。新宿主在维护租约下初始化插件和 Control API 后提交回执；worker 核对事务 ID、真实程序集版本、实际 EXE SHA256、PID、完整映像路径及启动时间，收尾完成后才返回成功。新宿主等待成功结果后解除维护，执行正常启动检查。回执失败时只按已捕获身份停止候选并回滚；无法确认停止或清理时保留 journal、备份和错误结果，不称更新完成。兼容旧 journal 缺少时间戳时，worker 在发出启动挑战前冻结一次时间。
+交换完成先写 `AwaitingStartup`，保留 immutable backup。新宿主在维护租约下初始化插件和 Control API 后提交回执；worker 核对事务 ID、真实程序集版本、实际 EXE SHA256、PID、完整映像路径及启动时间，收尾完成后才返回成功。新宿主等待成功结果后解除维护，执行正常启动检查。回执失败时只按已捕获身份停止候选并回滚；无法确认停止或清理时保留 journal、备份和错误结果，不称更新完成。缺失 Phase、CreatedAt 或身份的旧 journal 保留原字节并阻断更新；当前事务的 CreatedAt 不刷新。worker 在备份前冻结自身身份和目标映像，失败证明与已退出 worker 对应后才清理本次暂存，避免重复启动失败事务。
 
 ## 实例归属和卸载
 

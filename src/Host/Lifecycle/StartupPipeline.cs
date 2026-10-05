@@ -339,7 +339,7 @@ internal static class StartupPipeline
     private static bool PrepareHostedStart(HostRuntime runtime)
     {
         AppPaths.RuntimeState.EnsureDirectories();
-        if (UpdateApply.RunStartupFinalization(ApplicationHost.IsWebOnly, SingleInstanceMutexName, HostInstance.RestartHandoffId))
+        if (UpdateApply.RunStartupFinalization(runtime.UpdateService.VerifyApplyTarget, ApplicationHost.IsWebOnly, SingleInstanceMutexName, HostInstance.RestartHandoffId))
         {
             return false;
         }

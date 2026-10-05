@@ -143,22 +143,6 @@ internal static class SystemActions
     public static void ExitApp(IApplicationExitRequest? request = null) =>
         SystemPowerActions.ExitApp(request);
 
-    internal readonly record struct RequesterWindowIdentity(
-        IntPtr Handle,
-        ProcessIdentity OwnerIdentity);
-
-    internal static bool IsRequesterWindowTokenValid(string? token) =>
-        ProcessWindows.IsRequesterWindowTokenValid(token);
-
-    internal static RequesterWindowIdentity? CaptureRequesterWindow(string? token) =>
-        ProcessWindows.CaptureRequesterWindow(token);
-
-    internal static Task<bool> LowerRequesterWindowAsync(
-        RequesterWindowIdentity requester,
-        ProcessIdentity startedIdentity,
-        CancellationToken cancellationToken) =>
-        ProcessWindows.LowerRequesterWindowAsync(requester, startedIdentity, cancellationToken);
-
     public static void BringToFrontFireAndForget(int pid, string what) =>
         ProcessWindows.BringToFrontFireAndForget(pid, what);
 

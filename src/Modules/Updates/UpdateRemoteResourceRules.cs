@@ -60,7 +60,4 @@ internal static class UpdateRemoteResourceRules
             initialAllowedHosts: hosts,
             requireInitialSourceUri: resourceKind == UpdateResourceKind.Manifest);
     }
-
-    internal static bool IsDefaultHost(string host)
-        => DefaultAssetHosts.Contains(host, StringComparer.OrdinalIgnoreCase);
 }

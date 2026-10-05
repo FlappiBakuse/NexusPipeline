@@ -16,13 +16,13 @@ internal sealed record InstallerInstanceIdentity(int SchemaVersion, string Insta
 /// <summary>Setup instance and retained-data ownership; updates keep this same payload manifest current.</summary>
 internal static class InstallationOwnership
 {
-    internal const string RegistryPath = @"Software\NexusPipeline\Installer";
+    internal const string RegistryPath = @"Software\NexusPipeline.Generations\" + InstallationGeneration.Id + @"\Installer";
     internal static string CurrentRegistryPath => TestScope() is { } scope ? @"Software\NexusPipeline\Tests\Installer\" + scope.Id : RegistryPath;
     internal static string CurrentUninstallRegistryPath => TestScope() is { } scope
         ? @"Software\NexusPipeline\Tests\Uninstall\" + scope.Id
-        : @"Software\Microsoft\Windows\CurrentVersion\Uninstall\NexusPipeline.PerUser_is1";
+        : @"Software\Microsoft\Windows\CurrentVersion\Uninstall\NexusPipeline.PerUser." + InstallationGeneration.Id + "_is1";
     internal static string ManagerDirectory => TestScope() is { } scope ? Path.Combine(scope.Root, "manager")
-        : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "NexusPipeline", "installer");
+        : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "NexusPipeline.Generations", InstallationGeneration.Id, "installer");
     private static (string Id, string Root)? TestScope()
     {
 #if NEXUS_TEST_HOST
@@ -49,6 +49,42 @@ internal static class InstallationOwnership
         for (string? part = Path.GetFullPath(path); part is not null; part = Path.GetDirectoryName(part))
             if ((File.Exists(part) || Directory.Exists(part)) && (File.GetAttributes(part) & FileAttributes.ReparsePoint) != 0)
                 throw new IOException("installer.link_path");
+    }
+
+    internal static void RequireSeparateRoots(string root, IEnumerable<string> protectedRoots)
+    {
+        string full = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar);
+        RequireLinkFree(full);
+        foreach (string protectedRoot in protectedRoots)
+        {
+            string other = Path.GetFullPath(protectedRoot).TrimEnd(Path.DirectorySeparatorChar);
+            if (string.Equals(full, other, StringComparison.OrdinalIgnoreCase)
+                || full.StartsWith(other + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
+                || other.StartsWith(full + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                throw new IOException("installer.generation_path_overlap");
+        }
+    }
+
+    private static void RequireGenerationDestination(string root)
+    {
+        var protectedRoots = new List<string> { ManagerDirectory };
+        var scope = TestScope();
+        string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        protectedRoots.Add(scope is { } test ? Path.Combine(test.Root, "old-manager")
+            : Path.Combine(local, "NexusPipeline"));
+        protectedRoots.Add(scope is { } fixture ? Path.Combine(fixture.Root, "old-app")
+            : Path.Combine(local, "Programs", "NexusPipeline"));
+        string legacyKey = scope is { } registry ? @"Software\NexusPipeline\Tests\LegacyInstaller\" + registry.Id
+            : @"Software\NexusPipeline\Installer";
+        using var key = Registry.CurrentUser.OpenSubKey(legacyKey, false);
+        foreach (string name in new[] { "DataRoot", "AppDir" })
+            if (key?.GetValue(name) is string path && !string.IsNullOrWhiteSpace(path)) protectedRoots.Add(path);
+        string uninstallKey = scope is { } uninstall ? @"Software\NexusPipeline\Tests\LegacyUninstall\" + uninstall.Id
+            : @"Software\Microsoft\Windows\CurrentVersion\Uninstall\NexusPipeline.PerUser_is1";
+        using var oldUninstall = Registry.CurrentUser.OpenSubKey(uninstallKey, false);
+        if (oldUninstall?.GetValue("InstallLocation") is string location && !string.IsNullOrWhiteSpace(location))
+            protectedRoots.Add(location);
+        RequireSeparateRoots(root, protectedRoots);
     }
 
     internal static string Seal(InstallerInstanceIdentity identity) => Convert.ToBase64String(ProtectedData.Protect(
@@ -80,6 +116,7 @@ internal static class InstallationOwnership
 
     internal static InstallerInstanceIdentity? Read(string root, bool requireActive = false)
     {
+        RequireGenerationDestination(root);
         RequireLinkFree(root); RequireLinkFree(ManagerDirectory); RequireLinkFree(IdentityPath);
         using var key = Registry.CurrentUser.OpenSubKey(CurrentRegistryPath, false);
         if (key?.GetValue("DataRoot") is string registeredRoot
@@ -101,6 +138,7 @@ internal static class InstallationOwnership
 
     private static void Save(InstallerInstanceIdentity identity)
     {
+        RequireGenerationDestination(identity.AppRoot);
         RequireLinkFree(identity.AppRoot); RequireLinkFree(ManagerDirectory);
         Directory.CreateDirectory(ManagerDirectory);
         if (identity.State == "active")
