@@ -8,6 +8,8 @@ build-tmp/
 *.user
 .vs/
 config/
+/data/
+/user-assets/
 settings.json
 scripts.json
 queues.json

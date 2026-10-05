@@ -24,8 +24,9 @@
 - [架构索引](architecture/README.md)：当前产品机制、不变量、模块边界和代码定位。
 - [参考索引](reference/plugin-api/README.md)：插件接口、公共 UI 和控制面契约。
 - [开发索引](development/README.md)：环境、协作、构建与发行步骤。
+- [宿主工具](../tools/README.md)：保留的入口、输入输出、调用者与副作用。
 - [测试索引](testing/README.md)：测试策略、唯一命令入口、逻辑域和隔离要求。
 - [决策索引](decisions/README.md)：仍影响当前实现的架构取舍。
 - [历史索引](history/README.md)：已发布版本归档，不作为当前行为规范。
 
-机器路由保存在 [map.json](map.json)。本地执行 `node tests\run.mjs smoke` 会用 `tools/check-doc-links.mjs` 核对本目录的相对链接与片段；测试命令见[测试命令](testing/commands.md)。
+机器路由保存在 [map.json](map.json)。本地执行 `node tools/check-doc-links.mjs` 核对本目录的相对链接与片段；测试命令见[测试命令](testing/commands.md)。

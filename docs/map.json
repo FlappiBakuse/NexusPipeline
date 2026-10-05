@@ -155,9 +155,6 @@
       "codePaths": [
         "src/Modules/Configuration",
         "src/Modules/Configuration/Exchange/ConfigSwapPrimitives.cs",
-        "src/Modules/Configuration/Snapshots/ConfigurationRevisionReset.cs",
-        "src/Modules/Configuration/Snapshots/ConfigMigrationTransaction.cs",
-        "tests/NexusPipeline.Tests/Configuration/ConfigContractMigrationTests.cs",
         "src/Modules/Configuration/Editing/ConfigRepairPolicy.cs",
         "tests/NexusPipeline.Tests/Configuration/ConfigRepairTests.cs",
         "tools/NexusPipeline.TaskProtocolTests/ConfigRepairProbe.cs"
@@ -866,7 +863,7 @@
         "开发流程"
       ],
       "codePaths": [
-        "docs/DEVELOPMENT.md",
+        "docs/development/README.md",
         "build.cmd",
         "tests/run.mjs"
       ],
