@@ -12,6 +12,7 @@ namespace NexusPipeline.Modules.Plugins.Repository;
 internal static class PluginInstallRecovery
 {
     private static readonly object Sync = new();
+    internal const int CurrentStateSchema = 3;
 
     /// <summary>仅首次服务启动且没有任何实例数据时，对四项发行载荷中的两个插件按嵌入文件清单确权。</summary>
     internal static bool SeedBundledForNewInstall(
@@ -158,7 +159,6 @@ internal static class PluginInstallRecovery
 
     private static readonly string[] PendingStateProperties = [nameof(PluginPendingState.SchemaVersion), nameof(PluginPendingState.Operations)];
 
-    // Channel/SourceCommit 是本轮新增的可选来源元数据；旧 stable journal 缺少它们时仍是现役格式。
     private static readonly string[] PendingOperationRequiredProperties =
     [
         nameof(PluginPendingOperation.Action),
@@ -172,11 +172,6 @@ internal static class PluginInstallRecovery
         nameof(PluginPendingOperation.BackupPath),
         nameof(PluginPendingOperation.Phase),
         nameof(PluginPendingOperation.CreatedAt),
-    ];
-
-    private static readonly string[] PendingOperationAllowedProperties =
-    [
-        .. PendingOperationRequiredProperties,
         nameof(PluginPendingOperation.Channel),
         nameof(PluginPendingOperation.SourceCommit),
         nameof(PluginPendingOperation.OperationId),
@@ -194,11 +189,6 @@ internal static class PluginInstallRecovery
         nameof(PluginOwnership.ApiVersion),
         nameof(PluginOwnership.Sha256),
         nameof(PluginOwnership.InstalledAt),
-    ];
-
-    private static readonly string[] OwnershipAllowedProperties =
-    [
-        .. OwnershipRequiredProperties,
         nameof(PluginOwnership.Channel),
         nameof(PluginOwnership.SourceCommit),
     ];
@@ -592,11 +582,11 @@ internal static class PluginInstallRecovery
         {
             return new PluginPendingState();
         }
-        string text = File.ReadAllText(path).Replace("\uFEFF", "");
+        string text = File.ReadAllText(path);
         ValidatePendingDocument(text);
         PluginPendingState state = JsonSerializer.Deserialize<PluginPendingState>(text, JsonOpts.Default)
             ?? throw new InvalidDataException("插件 pending.json 为空");
-        if (state.SchemaVersion != 2)
+        if (state.SchemaVersion != CurrentStateSchema)
         {
             throw new InvalidDataException($"不支持的插件 pending schemaVersion：{state.SchemaVersion}");
         }
@@ -622,11 +612,11 @@ internal static class PluginInstallRecovery
         {
             return new PluginOwnershipState();
         }
-        string text = File.ReadAllText(path).Replace("\uFEFF", "");
+        string text = File.ReadAllText(path);
         ValidateOwnershipDocument(text);
         PluginOwnershipState state = JsonSerializer.Deserialize<PluginOwnershipState>(text, JsonOpts.Default)
             ?? throw new InvalidDataException("插件 ownership.json 为空");
-        if (state.SchemaVersion != 2)
+        if (state.SchemaVersion != CurrentStateSchema)
         {
             throw new InvalidDataException($"不支持的插件 ownership schemaVersion：{state.SchemaVersion}");
         }
@@ -659,9 +649,10 @@ internal static class PluginInstallRecovery
         {
             throw new InvalidDataException($"{label}根节点必须是对象");
         }
-        HashSet<string> properties = document.RootElement.EnumerateObject()
-            .Select(property => property.Name)
-            .ToHashSet(StringComparer.Ordinal);
+        var properties = new HashSet<string>(StringComparer.Ordinal);
+        foreach (JsonProperty property in document.RootElement.EnumerateObject())
+            if (!properties.Add(property.Name))
+                throw new InvalidDataException($"{label}包含重复字段");
         if (required.Any(property => !properties.Contains(property))
             || properties.Any(property => !allowed.Contains(property)))
         {
@@ -684,7 +675,7 @@ internal static class PluginInstallRecovery
                 operation.GetRawText(),
                 "插件 pending 操作",
                 PendingOperationRequiredProperties,
-                PendingOperationAllowedProperties);
+                PendingOperationRequiredProperties);
         }
     }
 
@@ -703,7 +694,7 @@ internal static class PluginInstallRecovery
                 owner.GetRawText(),
                 "插件 ownership 记录",
                 OwnershipRequiredProperties,
-                OwnershipAllowedProperties);
+                OwnershipRequiredProperties);
         }
     }
 
@@ -733,6 +724,7 @@ internal static class PluginInstallRecovery
 
     private static void ValidateProvenance(string channel, string sourceCommit, string name)
     {
+        if (sourceCommit is null) throw new InvalidDataException($"插件事务来源元数据无效：{name}");
         bool validCommit = sourceCommit.Length == 40
             && sourceCommit.All(ch => char.IsAsciiDigit(ch) || ch is >= 'a' and <= 'f');
         if (channel is not ("stable" or "develop")
@@ -765,14 +757,14 @@ internal static class PluginInstallRecovery
 
     private static void SavePending(string path, PluginPendingState state)
     {
-        state.SchemaVersion = 2;
+        state.SchemaVersion = CurrentStateSchema;
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         JsonUtil.WriteAtomic(path, JsonSerializer.Serialize(state, JsonOpts.Indented));
     }
 
     private static void SaveOwnership(string path, PluginOwnershipState state)
     {
-        state.SchemaVersion = 2;
+        state.SchemaVersion = CurrentStateSchema;
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         JsonUtil.WriteAtomic(path, JsonSerializer.Serialize(state, JsonOpts.Indented));
     }

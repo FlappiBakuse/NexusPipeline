@@ -570,9 +570,6 @@ internal static class ApiPluginContributionsHandler
         await HttpHelper.WriteJsonAsync(context, new { ok = true }).ConfigureAwait(false);
     }
 
-    private static Task ContributionNotFoundAsync(HttpListenerContext context) =>
-        HttpHelper.ErrorAsync(context, "contribution_not_found", 404);
-
     private static Task PluginErrorAsync(HttpListenerContext context, string message) =>
         HttpHelper.ErrorAsync(context, "plugin_error", 500);
 

@@ -29,8 +29,8 @@ public sealed class PluginRepositoryCatalogTests
         PluginCatalogEntry entry = Assert.Single(catalog!.Plugins);
         Assert.Equal("bettergi", entry.Name);
         Assert.Equal("data-specialized", entry.Kind);
-        Assert.Equal("0.10.8", entry.MinHostVersion);
-        Assert.True(PluginRepositoryCatalog.IsCompatible(entry, "0.10.8", out _));
+        Assert.Equal("0.16.15", entry.MinHostVersion);
+        Assert.True(PluginRepositoryCatalog.IsCompatible(entry, "0.16.15", out _));
         Assert.False(PluginRepositoryCatalog.IsCompatible(entry, "0.10.7", out string reason));
         Assert.Contains("需要宿主", reason);
     }
@@ -181,11 +181,19 @@ public sealed class PluginRepositoryCatalogTests
             managed with { MinHostVersion = "not-a-version" },
             UpdateService.CurrentVersion).Code);
 
-        // Plugin API 只比较 major/minor：1.x 可装，更高 minor 必须拒绝。
-        PluginCatalogEntry currentApi = managed with { ApiVersion = "1.9", MinHostVersion = "0.11.0" };
-        Assert.True(PluginRepositoryCatalog.IsCompatible(currentApi, "0.11.0", out _));
-        Assert.False(PluginRepositoryCatalog.IsCompatible(currentApi with { ApiVersion = "1.10" }, "0.11.0", out string apiReason));
-        Assert.Contains("Plugin API", apiReason);
+        PluginCatalogEntry currentApi = managed with { ApiVersion = "2.0", MinHostVersion = "0.16.15" };
+        Assert.True(PluginRepositoryCatalog.IsCompatible(currentApi, "0.16.15", out _));
+        foreach (string rejected in new[] { "1.0", "1.9", "2.1", "3.0" })
+        {
+            Assert.False(PluginRepositoryCatalog.IsCompatible(currentApi with { ApiVersion = rejected }, "0.16.15", out string apiReason));
+            Assert.Contains("Plugin API", apiReason);
+        }
+        foreach (string obsolete in new[] { "0.0.0", "0.16.14" })
+        {
+            Assert.Equal("plugin_contract_obsolete", PluginRepositoryCatalog.EvaluateCompatibility(
+                currentApi with { MinHostVersion = obsolete }, "0.16.15").Code);
+            Assert.False(PluginRepositoryCatalog.IsHostVersionCompatible(obsolete, "0.16.15", out _));
+        }
         Assert.False(PluginRepositoryCatalog.TryParseApiVersion("1.2.0", out _, out _));
     }
 
@@ -233,7 +241,7 @@ public sealed class PluginRepositoryCatalogTests
             ["kind"] = "data-specialized",
             ["apiVersion"] = "",
             ["capabilities"] = new JsonArray(),
-            ["minHostVersion"] = "0.10.8",
+            ["minHostVersion"] = "0.16.15",
             ["packageUrl"] = "https://raw.githubusercontent.com/FlappiBakuse/NexusPipeline-Plugins/main/packages/BetterGI/BetterGI-0.1.0.zip",
             ["sha256"] = new string('a', 64),
             ["sizeBytes"] = 128,

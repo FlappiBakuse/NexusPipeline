@@ -11,7 +11,7 @@ NexusPipeline-Plugins/plugins/
 │   │   └── web/                  # 可选 Frontend API 模块与静态资源
 │   ├── EmulatorSupport/           # managed-code 模拟器 provider；name = emulator-support
 │   │   ├── plugin.json
-│   │   └── src/                  # Plugin API v1.7 驱动实现
+│   │   └── src/                  # Plugin API 2.0 驱动实现
 │   └── CustomWallpaper/          # managed-code 源码
 └── specialized/
     ├── BetterGI/                 # data-specialized 源码；name = bettergi

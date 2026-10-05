@@ -16,7 +16,7 @@ using NexusPipeline.Shared.Serialization;
 
 namespace NexusPipeline.Modules.Plugins.Managed;
 
-internal sealed class PluginHostContext : IPluginHostContextV1_9
+internal sealed class PluginHostContext : IPluginHostContext
 {
     public PluginHostContext(
         string pluginName,
@@ -397,7 +397,7 @@ internal static class PluginConfigPath
 {
     public static string For(string pluginName)
     {
-        string safe = PluginNameCanonicalization.Canonicalize(pluginName);
+        string safe = pluginName.Trim();
         foreach (char c in Path.GetInvalidFileNameChars())
         {
             safe = safe.Replace(c, '_');

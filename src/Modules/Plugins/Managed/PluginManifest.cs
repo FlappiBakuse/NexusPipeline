@@ -102,7 +102,7 @@ internal sealed class PluginManifest
                 error = $"插件 version 无效：{version}";
                 return false;
             }
-            string minHostVersion = root["minHostVersion"]?.ToString()?.Trim() ?? "0.0.0";
+            string minHostVersion = root["minHostVersion"]?.ToString()?.Trim() ?? "";
             if (!PluginRepositoryCatalog.TryParseVersion(minHostVersion, out _))
             {
                 error = $"插件 minHostVersion 无效：{minHostVersion}";
@@ -219,11 +219,6 @@ internal sealed class PluginManifest
         }
     }
 
-    public bool IsCompatibleWith(int apiMajor)
-    {
-        return IsCompatibleWith(apiMajor, int.MaxValue);
-    }
-
     public bool IsCompatibleWith(int apiMajor, int apiMinor)
     {
         if (SchemaVersion != PluginRepositoryCatalog.SchemaVersion
@@ -231,7 +226,7 @@ internal sealed class PluginManifest
         {
             return false;
         }
-        return parsedMajor == apiMajor && parsedMinor <= apiMinor;
+        return parsedMajor == apiMajor && parsedMinor == apiMinor;
     }
 
     public static bool TryParseApiVersion(string? value, out int major, out int minor)
