@@ -1097,7 +1097,7 @@
   "tasks.incident.terminal": "Confirmed incomplete",
   "tasks.incident.title": "Incident",
   "tasks.incident.unattributed": "These incidents have no unique task scope and do not establish a task failure.",
-  "tasks.legacy": "This legacy record has no task details",
+  "tasks.plan_unavailable": "No task details are available for this run",
   "tasks.not_retried": "Not selected in this attempt",
   "tasks.outcome.empty": "No enabled business tasks",
   "tasks.outcome.failed": "Task execution failed",
@@ -1153,7 +1153,6 @@
   "tasks.status.unknown": "Unknown",
   "tasks.summary.bad": "Failed",
   "tasks.summary.latest": "Run finished · results unconfirmed",
-  "tasks.summary.legacy_unknown": "No task details in legacy record",
   "tasks.summary.muted": "Results unconfirmed",
   "tasks.summary.no_bindings": "No specialized bindings",
   "tasks.summary.not_run": "Not run yet",
@@ -1295,6 +1294,11 @@
   "tasks.daily_status.skipped": "Normally skipped",
   "tasks.daily_status.blocked": "Not executed",
   "tasks.daily_status.cancelled": "Cancelled",
+  "tasks.reason.tasks.execution_failed": "Task workflow failed",
+  "tasks.reason.tasks.no_execution_required": "No execution required; skipped normally",
+  "tasks.reason.tasks.runtime_identity_changed": "The runtime changed; this task was stopped",
+  "tasks.reason.tasks.failed": "Task execution failed",
+  "tasks.reason.tasks.admission_blocked": "Run requirements were not met; execution was blocked",
   "tasks.reason.tasks.missing_terminal": "No terminal evidence after task start",
   "tasks.reason.tasks.missing_logs": "Missing task logs",
   "tasks.reason.tasks.log_gap": "Task log gap",
@@ -1330,5 +1334,7 @@
   "tasks.error.migration_required": "The plugin configuration has a breaking change. Set up the script instance again and edit this user’s configuration.",
   "scripts.configuration_setup_required": "The plugin has a breaking configuration change. Set up and save the script instance again, then save this user’s configuration.",
   "tasks.config.setting.mfa.launch_owner": "MFA → Add task → Special task → Custom program; place before daily tasks, set program path, do not wait for exit.",
-  "tasks.config.setting.mfa.finish_action": "MFA → Startup settings → After-task action."
+  "tasks.config.setting.mfa.finish_action": "MFA → Startup settings → After-task action.",
+  "tasks.unsupported_report": "This history format is unsupported. View it using a complete backup of the older app.",
+  "history.unsupported_records": "Kept and skipped {count} unsupported history files. View them using a complete backup of the older app."
 }

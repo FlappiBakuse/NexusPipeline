@@ -1,8 +1,3 @@
-/** Host 已验证的 data-specialized capability typed 投影。
- *
- * 专项插件只提供声明数据；浏览器行为仍由 Host feature 实现。非法 capability
- * 应在后端被拒绝，这里只对缺省/兼容输入提供安全的 false/true 默认值。
- */
 export interface SpecializedCapabilities {
   supportsEmulator: boolean;
   selfManagedPcLaunch: boolean;
@@ -15,20 +10,16 @@ const NO_FRESH_CONFIG = "no-fresh-config";
 
 export function projectSpecializedCapabilities(
   capabilities: unknown,
-  legacyProjection?: {
-    supportsEmulator?: boolean;
-    selfManagedPcLaunch?: boolean;
-    noFreshConfig?: boolean;
-  },
 ): SpecializedCapabilities {
-  if (!Array.isArray(capabilities)) {
+  if (!Array.isArray(capabilities) || capabilities.some(value =>
+    typeof value !== "string" || ![EMULATOR, SELF_MANAGED_PC_LAUNCH, NO_FRESH_CONFIG].includes(value))) {
     return {
-      supportsEmulator: legacyProjection?.supportsEmulator === true,
-      selfManagedPcLaunch: legacyProjection?.selfManagedPcLaunch === true,
-      allowFreshConfig: legacyProjection?.noFreshConfig !== true,
+      supportsEmulator: false,
+      selfManagedPcLaunch: false,
+      allowFreshConfig: false,
     };
   }
-  const keys = new Set(capabilities.map(value => String(value || "").trim().toLowerCase()));
+  const keys = new Set(capabilities);
   return {
     supportsEmulator: keys.has(EMULATOR),
     selfManagedPcLaunch: keys.has(SELF_MANAGED_PC_LAUNCH),

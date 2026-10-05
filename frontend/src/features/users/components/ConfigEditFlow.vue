@@ -14,35 +14,11 @@ const emit = defineEmits<{ changed: [userId: string] }>();
 const controller = new AbortController();
 let disposed = false;
 
-function createRequesterWindowToken() {
-  const cryptoApi = globalThis.crypto;
-  if (cryptoApi && typeof cryptoApi.getRandomValues === "function") {
-    const bytes = new Uint8Array(8);
-    cryptoApi.getRandomValues(bytes);
-    return Array.from(bytes, byte => byte.toString(16).padStart(2, "0")).join("");
-  }
-  return Math.random().toString(36).slice(2, 18).padEnd(16, "0");
-}
-
-function waitForRequesterTitlePaint() {
-  return new Promise<void>(resolve => {
-    if (typeof requestAnimationFrame === "function") {
-      requestAnimationFrame(() => resolve());
-      return;
-    }
-    setTimeout(resolve, 0);
-  });
-}
-
 const flow = useConfigEditFlow({
   getStatus: (userId, scriptId) => getEditConfigStatus(userId, scriptId) as Promise<{ hasSnapshot?: boolean } | null>,
   start: (userId, scriptId, request) => editConfig(userId, scriptId, request, controller.signal),
   finish: (userId, scriptId, action) => editConfig(userId, scriptId, { action }, controller.signal) as Promise<{ validation?: { toasts?: Array<{ message?: string; kind?: string }> } } | null>,
   listSessions: () => listEditSessions(controller.signal),
-  createRequesterWindowToken,
-  waitForRequesterTitlePaint,
-  getDocumentTitle: () => document.title,
-  setDocumentTitle: (title) => { document.title = title; },
   notify: (message, kind) => {
     if (kind === "error") toast(message, "error");
     else toast(message);

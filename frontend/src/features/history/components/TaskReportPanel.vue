@@ -6,7 +6,7 @@ import NxpScrollArea from "../../../ui/primitives/NxpScrollArea.vue";
 import NxpDismissibleNotice from "../../../ui/composites/NxpDismissibleNotice.vue";
 import TaskPlanItem from "./TaskPlanItem.vue";
 import { resolveTaskText } from "../utils/taskText";
-import { taskDiagnosticLabel, dailyTaskReport, taskStatusLabel } from "../utils/taskLabels";
+import { taskDiagnosticLabel, currentTaskReport, providerTaskReport, dailyTaskReport, taskStatusLabel } from "../utils/taskLabels";
 import type { TaskConfigCheck, TaskDefinition, TaskPlan, TaskReport } from "../utils/taskTypes";
 const props = defineProps<{
   plan?: TaskPlan;
@@ -14,12 +14,13 @@ const props = defineProps<{
   layout?: "cards" | "steps";
   stale?: boolean;
 }>();
-const plan = computed(() => props.report?.originalPlan || props.plan);
+const report = computed(() => currentTaskReport(props.report) ? props.report : undefined);
+const plan = computed(() => props.report ? report.value?.originalPlan : props.plan);
 const tasks = computed(() => (plan.value?.tasks || []).filter(task => task.enabled).slice().sort((a, b) => a.order - b.order));
 const roots = computed(() => tasks.value.filter(task => !task.parentId || !tasks.value.some(parent => parent.id === task.parentId)));
 const diagnostics = computed(() => {
   const unique = new Map<string, TaskPlan['diagnostics'][number]>();
-  for (const item of [...(plan.value?.diagnostics || []), ...(props.report?.diagnostics || [])]) {
+  for (const item of [...(plan.value?.diagnostics || []), ...(report.value?.diagnostics || [])]) {
     const owner = plan.value?.tasks.find(task => task.id === item.taskId);
     if (owner && !owner.enabled) continue;
     unique.set(JSON.stringify([item.code, item.taskId, item.message, item.reasonText]), item);
@@ -30,30 +31,30 @@ const noticeDismissed = ref(false);
 watch(() => [props.plan, props.stale], () => { noticeDismissed.value = false; });
 const focusTaskId = ref("");
 const businessTasks = computed(() => tasks.value.filter(task => !task.parentId && task.role === 'business' && task.countsAsUnit !== false));
-// Frozen Host summary is authoritative. Older reports without total use the same business predicate.
-const businessTotal = computed(() => props.report?.summary?.counts.total ?? businessTasks.value.length);
-const finished = computed(() => props.report?.summary?.counts.total !== undefined
-  ? (props.report?.summary?.counts.succeeded || 0) + (dailyTaskReport(props.report) ? 0 : (props.report?.summary?.counts.skipped || 0))
+// Preview counts come from the plan; completed reports use the frozen Host summary.
+const businessTotal = computed(() => report.value?.summary?.counts.total ?? businessTasks.value.length);
+const finished = computed(() => report.value?.summary?.counts.total !== undefined
+  ? (report.value?.summary?.counts.succeeded || 0) + (dailyTaskReport(report.value) ? 0 : (report.value?.summary?.counts.skipped || 0))
   : businessTasks.value.filter(task => ['succeeded', 'skipped'].includes(status(task.id))).length);
-const unverified = computed(() => props.report?.summary?.counts.unknown || 0);
-const activeAssessment = computed(() => props.report?.admissionBlocked?.configAssessment || plan.value?.configAssessment);
-const activeReadiness = computed(() => props.report?.admissionBlocked?.readiness || plan.value?.currentReadiness);
+const unverified = computed(() => report.value?.summary?.counts.unknown || 0);
+const activeAssessment = computed(() => report.value?.admissionBlocked?.configAssessment || plan.value?.configAssessment);
+const activeReadiness = computed(() => report.value?.admissionBlocked?.readiness || plan.value?.currentReadiness);
 const configChecks = computed(() => (activeAssessment.value?.checks || []).filter(check =>
   check.evaluation !== 'satisfied' && check.evaluation !== 'not_applicable'));
 const readiness = activeReadiness;
 const readinessStale = computed(() => props.stale || readiness.value?.stale);
 const unattributed = computed(() => {
   const latest = new Map<string, NonNullable<TaskReport['incidents']>[number]>();
-  for (const event of props.report?.incidents || [])
+  for (const event of report.value?.incidents || [])
     if (event.incident.taskId === null) latest.set(event.attemptId + ':' + event.incident.id, event);
-  return dailyTaskReport(props.report) ? [] : [...latest.values()];
+  return providerTaskReport(report.value) ? [...latest.values()] : [];
 });
 function taskName(task: TaskDefinition) {
-  return task.nameText ? resolveTaskText(task.nameText, props.report?.displaySnapshot || plan.value?.displaySnapshot, getLocale(), task.name) : task.name;
+  return task.nameText ? resolveTaskText(task.nameText, report.value?.displaySnapshot || plan.value?.displaySnapshot, getLocale(), task.name) : task.name;
 }
 
 const panel = ref<HTMLElement | null>(null);
-watch(() => props.report, async report => {
+watch(() => report.value, async report => {
   focusTaskId.value = "";
   const query = new URLSearchParams(window.location.hash.split("?")[1] || "");
   if (!report || query.get("recordId") !== report.runId || !query.get("taskId")) return;
@@ -68,9 +69,9 @@ watch(() => props.report, async report => {
   focus?.focus();
   focus?.scrollIntoView?.({ block: "nearest" });
 }, { immediate: true });
-function status(id: string) { return props.report?.finalTaskResults.find(r => r.taskId === id)?.status || "pending"; }
+function status(id: string) { return report.value?.finalTaskResults.find(r => r.taskId === id)?.status || "pending"; }
 function incidentEvidence(attemptId: string, sourceId: string, epoch: number, sequence: number) {
-  return props.report?.evidenceLines?.find(line => line.attemptId === attemptId && line.sourceId === sourceId && line.epoch === epoch && line.sequence === sequence)?.text || t('tasks.evidence_unavailable');
+  return report.value?.evidenceLines?.find(line => line.attemptId === attemptId && line.sourceId === sourceId && line.epoch === epoch && line.sequence === sequence)?.text || t('tasks.evidence_unavailable');
 }
 function diagnosticOwnerName(id?: string | null) {
   const task = plan.value?.tasks.find(task => task.id === id);
@@ -81,7 +82,7 @@ function readinessTone(value?: string) { return value === 'ready' ? 'ok' : value
 function readinessLabel(value?: string) { return t(`tasks.readiness.${value || 'unknown'}`); }
 function configCheckText(check: TaskConfigCheck) {
   return check.reasonText
-    ? resolveTaskText(check.reasonText, props.report?.displaySnapshot || plan.value?.displaySnapshot, getLocale(), t('tasks.config.setting.default'))
+    ? resolveTaskText(check.reasonText, report.value?.displaySnapshot || plan.value?.displaySnapshot, getLocale(), t('tasks.config.setting.default'))
     : t('tasks.config.setting.default');
 }
 function configCheckLabel(check: TaskConfigCheck) { return t(`tasks.config.evaluation.${check.evaluation}`); }
@@ -90,6 +91,7 @@ function configSettingHint(check: TaskConfigCheck) {
 }
 </script>
 <template>
+  <p v-if="props.report && !report" role="status">{{ t('tasks.unsupported_report') }}</p>
   <section ref="panel" class="task-report" :aria-label="t('tasks.title')">
     <NxpDismissibleNotice v-if="!report && plan" :visible="!noticeDismissed && Boolean(stale || plan.coverage !== 'complete')" :close-label="t('common.close')" @dismiss="noticeDismissed = true">
       <p v-if="stale" class="task-warning-copy">{{ t('tasks.stale') }}</p>
@@ -99,7 +101,7 @@ function configSettingHint(check: TaskConfigCheck) {
       <div><h3>{{ t('tasks.title') }}</h3><p v-if="plan">{{ t(report ? 'tasks.progress' : 'tasks.enabled_count', { count: businessTotal, done: finished }) }}</p></div>
       <NxpBadge v-if="plan && layout !== 'steps'" :tone="plan.coverage === 'complete' ? 'ok' : 'muted'">{{ t(`tasks.coverage.${plan.coverage}`) }}</NxpBadge>
     </header>
-    <p v-if="!plan" class="muted">{{ t('tasks.legacy') }}</p>
+    <p v-if="!plan" class="muted">{{ t('tasks.plan_unavailable') }}</p>
     <template v-else>
       <div v-if="report?.admissionBlocked" class="task-admission-blocked" role="alert">
         <strong>{{ t('tasks.admission_blocked') }}</strong>
@@ -147,7 +149,7 @@ function configSettingHint(check: TaskConfigCheck) {
           </figure>
         </div>
       </div>
-      <p v-if="!dailyTaskReport(report) && report?.summary?.recovered && layout !== 'steps'" class="task-notice">{{ t('tasks.recovered') }}</p>
+      <p v-if="providerTaskReport(report) && report?.summary?.recovered && layout !== 'steps'" class="task-notice">{{ t('tasks.recovered') }}</p>
       <p v-if="report && unverified && report.lifecycleOutcome === 'completed'" class="task-footnote">{{ t('tasks.outcome.unverified_count', { count: unverified }) }}</p>
       <ul v-if="diagnostics.length" class="task-plan-notes" :aria-label="t('tasks.plan_notes')">
         <li v-for="(item, index) in diagnostics" :key="index">

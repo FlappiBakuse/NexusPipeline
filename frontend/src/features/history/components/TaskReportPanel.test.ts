@@ -14,7 +14,7 @@ vi.mock('../../../platform/i18n', () => ({
 
 function report(status: string, schemaVersion = 2): TaskReport {
   return {
-    schemaVersion, semanticsVersion: schemaVersion === 2 ? 'daily-flow-v1' : undefined,
+    schemaVersion, semanticsVersion: schemaVersion === 2 ? 'daily-flow-v1' : 'provider-execution-v1',
     runId: 'run', revision: 1, userId: 'a', scriptInstanceId: 'script', lifecycleOutcome: 'completed',
     originalPlan: { tasks: [{ id: 'daily', name: '日常', parentId: null, role: 'business', enabled: true,
       detection: 'supported', retryRisk: 'safe', order: 0 }], coverage: 'complete', pluginVersion: '1', generatedAt: '', diagnostics: [] },
@@ -26,6 +26,17 @@ function report(status: string, schemaVersion = 2): TaskReport {
 }
 
 describe('daily report projection', () => {
+  it('rejects missing or mismatched semantics without exposing old task facts', () => {
+    for (const invalid of [undefined, 'unknown', 'provider-execution-v1']) {
+      const old = report('succeeded');
+      old.semanticsVersion = invalid;
+      old.originalPlan.tasks[0]!.name = 'unsupported-private-task';
+      const wrapper = mount(TaskReportPanel, { props: { report: old } });
+      expect(wrapper.text()).not.toContain('unsupported-private-task');
+      expect(wrapper.text()).toContain('不支持此历史格式');
+      wrapper.unmount();
+    }
+  });
   it('shows recovered daily work as completed without resurfacing the recovered incident', () => {
     const wrapper = mount(TaskReportPanel, { props: { report: report('succeeded') } });
     expect(wrapper.text()).toContain('完成');
@@ -33,7 +44,7 @@ describe('daily report projection', () => {
     expect(wrapper.text()).not.toContain('未核验');
     wrapper.unmount();
   });
-  it('keeps partial completion distinct from failure and preserves legacy incident evidence', async () => {
+  it('keeps partial completion distinct from failure and preserves provider incident evidence', async () => {
     const wrapper = mount(TaskReportPanel, { props: { report: report('partial') } });
     expect(wrapper.text()).toContain('部分完成');
     expect(wrapper.text()).not.toContain('部分失败');

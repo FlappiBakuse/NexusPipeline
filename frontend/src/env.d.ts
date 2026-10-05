@@ -1,4 +1,5 @@
 /// <reference types="vite/client" />
+declare const __NEXUS_INSTALLATION_GENERATION__: string;
 
 declare module "*.vue" {
   import type { DefineComponent } from "vue";

@@ -38,6 +38,8 @@ frontend/src/app/App.vue → router / stores / features / ui
 
 样式分层：`frontend/src/styles/tokens.css` 提供设计 token，`styles/app.css` 提供基础元素样式与 shell 过渡，`styles/shell.css` 提供页面布局、shell 与插件 surface 样式；Nexus UI 元件的 DOM、交互和内部样式由对应 SFC 维护，feature 只通过公开元素根节点和业务 wrapper 组织布局。
 
+`RouterView` 本身保持挂载，其 slot 以 `route.fullPath` 为页面容器 key。导航直接卸载上一页面并挂载目标页面，页面容器使用 CSS 入场动画，动画完成事件不控制路由挂载；连续切换仍以最后提交的路由为准。启动加载态独立于页面动画。
+
 新增交互的落点：
 
 1. 新业务页面放在 `frontend/src/features/<domain>/`，通过 platform service、Pinia 或组件本地状态获取数据，不直接操作页面外部 DOM。

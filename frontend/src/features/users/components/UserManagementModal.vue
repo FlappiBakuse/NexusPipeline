@@ -331,7 +331,6 @@ function openConfigEdit(binding: Binding) {
     scriptName: bindingName(binding),
     freshAvailable: projectSpecializedCapabilities(
       pluginStatus?.plugin?.capabilities,
-      pluginStatus?.plugin ?? undefined,
     ).allowFreshConfig,
   });
 }

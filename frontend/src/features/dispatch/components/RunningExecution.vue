@@ -89,7 +89,7 @@ function isNearBottom(viewport: HTMLElement) {
 function findViewport(runId: string): HTMLElement | null {
   const articles = root.value?.querySelectorAll<HTMLElement>("[data-run-id]") || [];
   for (const article of articles) {
-    if (article.dataset.runId === runId) return article.querySelector<HTMLElement>(".nxp-scroll-viewport");
+    if (article.dataset.runId === runId) return article.querySelector<HTMLElement>(".run-log-viewport");
   }
   return null;
 }
@@ -162,10 +162,10 @@ function recordMode(record: DispatchRunningRecord) {
 </script>
 
 <template>
-  <div ref="root" id="system-action-area">
+  <div id="system-action-area">
     <SystemActionCard v-if="systemAction && systemAction.action !== 'exit'" :action="systemAction" @cancelled="emit('cancelled')" />
   </div>
-  <section id="dispatch-running" class="content-section list-surface" data-testid="dispatch-running">
+  <section ref="root" id="dispatch-running" class="content-section list-surface" data-testid="dispatch-running">
     <div class="section-heading">
       <h3>{{ t("common.running") }} ({{ running.length }})</h3>
       <span class="muted">{{ t("dispatch.updates_every_second") }}</span>
@@ -194,7 +194,7 @@ function recordMode(record: DispatchRunningRecord) {
         <LiveTaskReports :execution-id="record.id" :current-script-id="record.currentScriptId" />
         <div class="running-item-content" :class="{ 'has-execution-preview': executionPreviewLayoutEnabled }">
           <div class="run-log-resizable" :style="{ height: `${logHeight(record.id)}px` }" :data-log-height="logHeight(record.id)" :data-testid="`run-log-resizable-${record.id}`">
-            <NxpScrollArea class="run-log run-terminal" direction="both" :aria-label="t('dispatch.run_log')"><pre class="logbox"><span v-if="record.logTruncated" class="run-log-truncated">{{ t("dispatch.log_truncated", {}, "较早日志已折叠") }}</span><span v-if="!runningLogEntries(record).length" class="run-log-empty">({{ t("dispatch.no_log_output") }})</span><span v-for="entry in runningLogEntries(record)" :key="entry.sequence || `${entry.text}-${entry.level}`" class="run-log-line" :class="runningLogClass(entry.level)">{{ entry.text || entry.formattedText || entry.message || "" }}</span></pre></NxpScrollArea>
+            <NxpScrollArea class="run-log run-terminal" viewport-class="run-log-viewport" direction="vertical" :aria-label="t('dispatch.run_log')"><pre class="logbox"><span v-if="record.logTruncated" class="run-log-truncated">{{ t("dispatch.log_truncated", {}, "较早日志已折叠") }}</span><span v-if="!runningLogEntries(record).length" class="run-log-empty">({{ t("dispatch.no_log_output") }})</span><span v-for="entry in runningLogEntries(record)" :key="entry.sequence || `${entry.text}-${entry.level}`" class="run-log-line" :class="runningLogClass(entry.level)">{{ entry.text || entry.formattedText || entry.message || "" }}</span></pre></NxpScrollArea>
             <div
               class="run-log-resize-handle"
               role="separator"

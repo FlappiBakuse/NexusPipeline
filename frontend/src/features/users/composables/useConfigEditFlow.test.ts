@@ -9,18 +9,17 @@ describe("configuration edit lifecycle", () => {
     } }).mockResolvedValueOnce({});
     const adapters: ConfigEditFlowAdapters = {
       getStatus: async () => ({ hasSnapshot: false }), start, finish: async () => ({}),
-      listSessions: async () => [], createRequesterWindowToken: () => "fixture",
-      waitForRequesterTitlePaint: async () => {}, getDocumentTitle: () => "title",
-      setDocumentTitle: vi.fn(), notify: vi.fn(), translate: key => key, onTransactionChanged: changed,
+      listSessions: async () => [], notify: vi.fn(), translate: key => key, onTransactionChanged: changed,
     };
     const flow = useConfigEditFlow(adapters);
     await flow.open({ userId: "account", scriptId: "script", userName: "Account", scriptName: "Script" }, false);
     await flow.chooseMode("reuse");
     expect(flow.configCandidates.value).toBeNull();
     expect(changed).not.toHaveBeenCalled();
-    expect(start).toHaveBeenLastCalledWith("account", "script", expect.objectContaining({
-      mode: "reuse", configInputName: "instance", configInputValue: "default",
-    }));
+    expect(start).toHaveBeenNthCalledWith(1, "account", "script", { action: "start", mode: "reuse" });
+    expect(start).toHaveBeenLastCalledWith("account", "script", {
+      action: "start", mode: "reuse", configInputName: "instance", configInputValue: "default",
+    });
     await flow.finish("done");
     expect(changed).toHaveBeenCalledExactlyOnceWith("account");
     expect(flow.configEdit.value).toBeNull();
@@ -32,7 +31,9 @@ describe("configuration edit lifecycle", () => {
     expect(flow.configCandidates.value?.candidates).toEqual(["first", "second"]);
     expect(start).toHaveBeenCalledTimes(3);
     await flow.chooseCandidate("second");
-    expect(start).toHaveBeenLastCalledWith("other", "script", expect.objectContaining({ configInputValue: "second" }));
+    expect(start).toHaveBeenLastCalledWith("other", "script", {
+      action: "start", mode: "reuse", configInputName: "instance", configInputValue: "second",
+    });
     await flow.finish("cancel");
     start.mockRejectedValue({ code: "config_input_mismatch", data: {
       args: { inputName: "instance", candidates: ["changed"] },
@@ -49,13 +50,11 @@ describe("configuration edit lifecycle", () => {
     const users = [{ id: "account", name: "Account", bindings: [{ scriptInstanceId: "script" }] }];
     const scripts = [{ id: "script", name: "Script" }];
     start.mockClear();
-    const title = vi.mocked(adapters.setDocumentTitle); title.mockClear();
     await restored.restoreExisting(users, scripts);
     expect(restored.configEdit.value).toEqual({ userId: "account", scriptId: "script",
       userName: "Account", scriptName: "Script", mode: "reuse" });
     expect(restored.isOpen.value).toBe(true);
     expect(start).not.toHaveBeenCalled();
-    expect(title).not.toHaveBeenCalled();
     await restored.finish("done");
     expect(restored.configEdit.value?.userId).toBe("account");
     await restored.finish("done");

@@ -8,7 +8,7 @@ import type { EditSessionScriptLike, EditSessionUserLike } from "../utils/editSe
  *  两类事务严格分开：
  *  - `startSession`：创建新编辑事务，唯一允许 POST `action:"start"` 的入口；
  *  - `restoreExisting`：恢复宿主已存在的编辑事务，只还原前端锁定编辑 UI，
- *    不发起 start、不创建 requester window token、不改 document title、不重新解析候选。
+ *    不发起 start、不重新解析候选。
  */
 
 export interface ConfigEditDetails {
@@ -56,10 +56,6 @@ export interface ConfigEditFlowAdapters {
   ): Promise<{ validation?: { toasts?: ConfigEditResultToast[]; diagnostics?: ConfigEditResultDiagnostic[] } } | null>;
   /** 读取宿主当前进行中的编辑会话。 */
   listSessions(): Promise<unknown>;
-  createRequesterWindowToken(): string;
-  waitForRequesterTitlePaint(): Promise<void>;
-  getDocumentTitle(): string;
-  setDocumentTitle(title: string): void;
   notify(message: string, kind?: "info" | "error"): void;
   translate(key: string, args?: Record<string, unknown>): string;
   onTransactionChanged(userId: string): void;
@@ -93,15 +89,8 @@ export function useConfigEditFlow(adapters: ConfigEditFlowAdapters) {
 
   /** 创建新编辑事务：唯一发送 `action:"start"` 的路径。 */
   async function startSession(item: ConfigEditItem, inputOverride?: { name: string; value: string }) {
-    // 临时标记发起请求的浏览器窗口，宿主据此把该窗口后置。
-    const requesterWindowToken = adapters.createRequesterWindowToken();
-    const savedTitle = adapters.getDocumentTitle();
-    adapters.setDocumentTitle(
-      `${adapters.translate("users.nexuspipeline_core")} · ${requesterWindowToken}`,
-    );
     try {
-      const request = buildConfigEditRequest(item.mode, inputOverride, requesterWindowToken);
-      await adapters.waitForRequesterTitlePaint();
+      const request = buildConfigEditRequest(item.mode, inputOverride);
       await adapters.start(item.userId, item.scriptId, request);
       configChooser.value = null;
       configCandidates.value = null;
@@ -130,8 +119,6 @@ export function useConfigEditFlow(adapters: ConfigEditFlowAdapters) {
         return;
       }
       if (!isAbortError(reason)) adapters.notify(errorText(reason), "error");
-    } finally {
-      adapters.setDocumentTitle(savedTitle);
     }
   }
 
@@ -151,7 +138,7 @@ export function useConfigEditFlow(adapters: ConfigEditFlowAdapters) {
 
   /**
    * 恢复宿主已存在的编辑事务：只还原锁定编辑 UI。
-   * 不 POST start、不创建 token、不改标题、不重新解析候选；失败静默。
+   * 不 POST start、不重新解析候选；失败静默。
    */
   function restore(item: ConfigEditItem) {
     configChooser.value = null;
