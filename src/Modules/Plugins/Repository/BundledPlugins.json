@@ -5,55 +5,60 @@
     {
       "name": "emulator-support",
       "artifactName": "EmulatorSupport",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "kind": "managed-code",
-      "apiVersion": "1.7",
-      "minHostVersion": "0.16.5",
-      "packageSha256": "95948588cee447e5f02cfc57178e0437a2530a920d9a6e4155c5659b400417a6",
-      "packageSizeBytes": 163017,
+      "apiVersion": "2.0",
+      "minHostVersion": "0.16.15",
+      "packageSha256": "cb16118c673be4edb2822de8837406bed648b2c2248ce2f9523ad07921b56ce5",
+      "packageSizeBytes": 84655,
       "files": [
         {
-          "path": "NexusPipeline.Plugin.Abstractions.deps.json",
-          "sizeBytes": 469,
-          "sha256": "59e512e585bbc8a50c4ad340344d22b88390e338c781f156283412e7036c6397"
-        },
-        {
-          "path": "NexusPipeline.Plugin.Abstractions.dll",
-          "sizeBytes": 77312,
-          "sha256": "1c0c676110b83e909736adb8ed89852337a1cfd68c2b0b69db8233df6cbe915d"
-        },
-        {
           "path": "NexusPipeline.Plugin.EmulatorSupport.deps.json",
-          "sizeBytes": 933,
-          "sha256": "45dfcd7e0ed01bba7573f0c3eef8086690d61f35c6693f2be584001790cc7990"
+          "sizeBytes": 480,
+          "sha256": "cd4b8461315d84b8a906cae317e582ca42b8d60a2acff0248c6002d1caf4ffff"
         },
         {
           "path": "NexusPipeline.Plugin.EmulatorSupport.dll",
           "sizeBytes": 82432,
-          "sha256": "d85acc3c17f225c84fed3d1e04a31249e730e2255092299bce213dedec26cc4f"
+          "sha256": "61eda7368d68eb9bceadcb2942b2f6d8320ebc8b72e9f21ab2798e1d6f3f80f6"
         },
         {
           "path": "plugin.json",
-          "sizeBytes": 475,
-          "sha256": "170e23fd4fe398930b8368cbcbb3b2ae22672e2374314329d0974ea45f7ebce7"
+          "sizeBytes": 476,
+          "sha256": "40afe97a7b4b5fa0bd062f3acc045199263dcb9fa0f1dda51a53cb8efbb570ed"
         },
         {
           "path": "store.json",
-          "sizeBytes": 544,
-          "sha256": "e38bf8b73d0fb66b33dea406461a0072f6c6cb375de70347e5b88af56eed443c"
+          "sizeBytes": 727,
+          "sha256": "79bdb0a69be50ae7d9e176b990aedbf303d4b88db46a53429f88a55c4dc567c0"
         }
       ]
     },
     {
       "name": "live-screenshot",
       "artifactName": "LiveScreenshot",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "kind": "managed-code",
-      "apiVersion": "1.5",
-      "minHostVersion": "0.15.9",
-      "packageSha256": "015e4270d0cb75ce0be0961ceefed02d118913c9c9900954d5bd4be16a73aafc",
-      "packageSizeBytes": 170192,
+      "apiVersion": "2.0",
+      "minHostVersion": "0.16.15",
+      "packageSha256": "44528558326d13d3a94867f371ae336c0d58828c3a74d3aeabc65a7e51f5ea63",
+      "packageSizeBytes": 97836,
       "files": [
+        {
+          "path": "NexusPipeline.Plugin.LiveScreenshot.deps.json",
+          "sizeBytes": 477,
+          "sha256": "de9773e1ac427f119533fcff5c72c081e308ddce9f83e09be32d63fac7b0a89b"
+        },
+        {
+          "path": "NexusPipeline.Plugin.LiveScreenshot.dll",
+          "sizeBytes": 4608,
+          "sha256": "ed87da3b628ed04ea065ed673ce3cebbf8e4b496d8631e67515c78dd20e72684"
+        },
+        {
+          "path": "README.md",
+          "sizeBytes": 721,
+          "sha256": "ce807321196942cb53c18cd73bab25867b94b6a507822faf0a2ceeed232e9d41"
+        },
         {
           "path": "i18n/en-US.json",
           "sizeBytes": 437,
@@ -65,39 +70,14 @@
           "sha256": "67fad34d3026c95312159c163394cc7d471f807457facf4a9336197bdf4d8da9"
         },
         {
-          "path": "NexusPipeline.Plugin.Abstractions.deps.json",
-          "sizeBytes": 469,
-          "sha256": "cdfc05b9d084a9e654c1aac39d142d368faa05016937ec91783188bbdbd0923b"
-        },
-        {
-          "path": "NexusPipeline.Plugin.Abstractions.dll",
-          "sizeBytes": 71168,
-          "sha256": "a83cea5bb2c0590efc078b204d66c17441c387d3a701f0f5ca188eed4b33ea1b"
-        },
-        {
-          "path": "NexusPipeline.Plugin.LiveScreenshot.deps.json",
-          "sizeBytes": 930,
-          "sha256": "fb2106a05bcda9af04c141a7b4b8af2a4738e8e260d60444c7f39b936c8f3716"
-        },
-        {
-          "path": "NexusPipeline.Plugin.LiveScreenshot.dll",
-          "sizeBytes": 4608,
-          "sha256": "942a372e535443bec170e571c4ff4980c1d827514afa2223bc552693ae066915"
-        },
-        {
           "path": "plugin.json",
-          "sizeBytes": 820,
-          "sha256": "7f0d5c8ad5a6aff9d0098d7106197af4f3ed68eac0309fdb3b670d21d3b4c036"
-        },
-        {
-          "path": "README.md",
-          "sizeBytes": 721,
-          "sha256": "ce807321196942cb53c18cd73bab25867b94b6a507822faf0a2ceeed232e9d41"
+          "sizeBytes": 821,
+          "sha256": "f99b23198251d348f98d94802a63a296e6dae95cfcddc34b5cb27915f68792ae"
         },
         {
           "path": "store.json",
-          "sizeBytes": 1843,
-          "sha256": "0b16e4befcf78f58724e44555d50d0392c595a4d9fe84a33060a00013f72ad1a"
+          "sizeBytes": 1888,
+          "sha256": "a3dd276d7cdc0c83b103ccd1f5fde4bd4b312c74dbf4fa13a8a598e51d444582"
         },
         {
           "path": "web/main.js",
