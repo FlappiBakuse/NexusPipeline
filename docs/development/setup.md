@@ -4,8 +4,8 @@
 
 | 依赖 | 版本 | 用途 |
 |---|---|---|
-| Windows | 10/11 | 唯一支持平台（WinForms 托盘 + Win32 API） |
-| .NET SDK | 8.x | 编译与运行；部署机需要 .NET 8 Desktop Runtime |
+| Windows | 11 x64 | 唯一支持平台（WinForms 托盘 + Win32 API） |
+| .NET SDK | global.json 指定的 10.0.401 补丁带 | 编译与运行；部署机需要 .NET 10 Desktop Runtime |
 | Node.js | 24.x | 前端构建、Web Logic、System Smoke 和 Playwright 测试 |
 
 - 网页管理界面由 `frontend/` 中的 Vue/TypeScript/Vite 源码构建为纯静态 ES modules；运行程序只加载构建结果，源码构建需要 Node.js/npm。
@@ -16,47 +16,28 @@
 
 ## 从源码编译
 
-在项目根目录执行：
+在项目根目录设置本次外部构建根与唯一 run ID，然后执行：
 
-```text
+```powershell
+$env:NEXUS_TEST_ARTIFACT_ROOT = '<绝对外部构建根>'
+$env:NEXUS_TEST_RUN_ID = '<本次唯一ID>'
 build.cmd
 ```
 
-产物输出到隔离的 `release/` 目录：
+`build.cmd` 调用唯一生产构建实现 `node tests/run.mjs release`。该实现复制当前源码到外部隔离副本，安装并校验前端依赖、构建静态网页，再发布框架依赖的单文件程序并验证嵌入的 requireAdministrator 清单。输出位于 `<外部构建根>/runs/<本次唯一ID>/production/`，包含 `nexus-pipeline.exe`、`README.md`、`wwwroot/` 和空 `plugins/`；缓存和中间输出也位于外部构建根。输出已存在则失败，请使用新的 ID。
 
-```text
-release/
-├── nexus-pipeline.exe   ← 框架依赖的单文件、requireAdministrator
-├── wwwroot/              ← 由 frontend/dist 同步的纯静态网页
-└── plugins/              ← 用户插件运行目录（由插件管理器维护）
-```
-
-构建脚本先安装并校验 `frontend/` 依赖，再生成 Vite 静态资源，将其同步到发布包 `release/wwwroot/`；随后调用 `tools/source-hash.mjs` 计算宿主 `src/` 与 `frontend/` 的源码指纹，并排除构建产生的 `bin/`、`obj/`、`node_modules/` 和 `dist/`。仓库根目录没有 `wwwroot/` 源码目录：宿主前端源码唯一入口是 `frontend/`。插件实现由独立的 `NexusPipeline-Plugins` 仓库打包。`release/` 属于运行产物，不提交到版本库。
-
-重构建前若提示 exe 被占用，确认没有正在运行的服务进程后执行：
-
-```cmd
-# 先核对该实例的安装目录、运行目录和 PID，再停止该确权实例。
-```
-
-需要指定参数时可使用等价的 .NET 发布命令：
-
-```text
-dotnet publish src\NexusPipeline.csproj -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -p:DebugType=none -p:DebugSymbols=false -o release
-```
-
-
+生产构建不会安装或启动程序。插件由独立的 NexusPipeline-Plugins 仓库构建；正式候选按[发行指南](release.md)核验预装包。前端唯一源码入口为 `frontend/`；普通测试使用另一份 asInvoker Test Host。
 
 ## 运行程序
 
 | 命令 | 行为 |
 |---|---|
-| `release\nexus-pipeline.exe` | 常驻服务模式：托盘、Web 和调度器 |
-| `release\nexus-pipeline.exe web` | 网页模式；按回车或在 stdin 结束时退出 |
-| `release\nexus-pipeline.exe manage` | 交互式命令行管理菜单 |
-| `release\nexus-pipeline.exe status` | 查看当前状态 |
-| `release\nexus-pipeline.exe run script ...` / `run queue ...` / `run cancel ...` | 经常驻服务 HTTP 通道提交或取消任务 |
-| `release\nexus-pipeline.exe register` / `unregister` | 注册或取消开机自启动任务 |
+| `<production>\nexus-pipeline.exe` | 常驻服务模式：托盘、Web 和调度器 |
+| `<production>\nexus-pipeline.exe web` | 网页模式；按回车或在 stdin 结束时退出 |
+| `<production>\nexus-pipeline.exe manage` | 交互式命令行管理菜单 |
+| `<production>\nexus-pipeline.exe status` | 查看当前状态 |
+| `<production>\nexus-pipeline.exe run script ...` / `run queue ...` / `run cancel ...` | 经常驻服务 HTTP 通道提交或取消任务 |
+| `<production>\nexus-pipeline.exe register` / `unregister` | 注册或取消开机自启动任务 |
 
 网页默认地址为 `http://127.0.0.1:58731/`；端口被占用时按顺序寻找可用端口。首次运行会创建当前运行时目录并执行崩溃恢复扫描。
 
@@ -98,7 +79,7 @@ PR 范围计划映射逻辑义务到可选 control 与最多五个 Windows batch
 - 无控制台父进程启动 cmd/bat 时必须提供并消费重定向的 stdout/stderr；构建和测试脚本保持非交互，不加入无条件 `pause`。
 - 正式程序仍需管理员上下文；每个 UI/System suite 使用隔离 Test Host runtime 验证脚本与解释器边界。目标程序返回 Win32Exception 740 时应明确失败，保留正式运行边界。
 - 以显式路径开头的 `Args` 表示运行时启动目标，`?` 后为目标参数；Args 不使用引号表达路径。
-- 使用 `cmd.exe` 运行批处理时，注意工作目录和环境变量继承；运行进程残留会锁定 `release\nexus-pipeline.exe`。
+- 使用 `cmd.exe` 运行批处理时，注意工作目录和环境变量继承；运行进程残留会锁定 `<production>\nexus-pipeline.exe`。
 
 ### 单元与组件测试定位
 
@@ -123,7 +104,7 @@ PR 范围计划映射逻辑义务到可选 control 与最多五个 Windows batch
 | `logs/` | 管理器日志 |
 | `data/{脚本Id}/{UserId}/` | 配置交换快照、恢复标记、脚本目录和临时事务 |
 | `.nxp/runtime/` | `service.pid`、`web.port` 等可重建运行标记 |
-| `.nxp/state/` | `scheduler-state.json`、旧外观数据搬迁标记 `appearance-migration.json` 等需要跨重启保留的内部运行状态 |
+| `.nxp/state/` | `scheduler-state.json` 等需要跨重启保留的当前内部运行状态 |
 | `.nxp/state/plugins/` | 插件仓库 catalog 缓存、商店归属、待重启事务以及 staging/backup 操作现场 |
 
 `.nxp-update/`、`.nxp-backup/`、`.nxp-version` 和根目录 update worker 属于更新事务协议，继续留在安装根目录；它们与 `.nxp/` 当前运行状态目录职责分离。

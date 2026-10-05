@@ -2,12 +2,12 @@ using System.Text.Json.Nodes;
 
 namespace NexusPipeline.Plugin.Abstractions;
 
-/// <summary>稳定的 NexusPipeline managed-code 插件生命周期契约（Plugin API v1.9）。</summary>
+/// <summary>稳定的 NexusPipeline managed-code 插件生命周期契约（Plugin API v2.0）。</summary>
 public static class PluginApiVersion
 {
-    public const int Major = 1;
+    public const int Major = 2;
 
-    public const int Minor = 9;
+    public const int Minor = 0;
 }
 
 /// <summary>独立于 C# Plugin API 维护的前端扩展 ABI 版本；要求精确版本匹配。</summary>
@@ -25,7 +25,7 @@ public static class FrontendApiVersion
     }
 }
 
-/// <summary>v1.4 的稳定 UI 槽位。槽位是前端 ABI 的一部分，页面布局可以变化但槽位名称保持兼容。</summary>
+/// <summary>槽位是前端 ABI 的一部分，页面布局变化时名称仍保持稳定。</summary>
 public static class PluginUiSlots
 {
     public const string DashboardCards = "dashboard.cards";
@@ -100,11 +100,7 @@ public interface IPluginHostContext
     IPluginNotificationService Notifications { get; }
 
     IPluginJobScheduler Scheduler { get; }
-}
 
-/// <summary>Plugin API v1.1 的附加宿主能力；扩展接口保持 v1.0 插件二进制兼容。</summary>
-public interface IPluginHostContextV1_1 : IPluginHostContext
-{
     IPluginUserDataStore UserData { get; }
 
     IPluginUserGlobalManagementRegistry UserGlobalManagement { get; }
@@ -112,17 +108,9 @@ public interface IPluginHostContextV1_1 : IPluginHostContext
     IPluginExecutionEventService ExecutionEvents { get; }
 
     IPluginHttpClientFactory Http { get; }
-}
 
-/// <summary>Plugin API v1.2 的用户列表展示扩展；v1.1 插件仍可继续使用 IPluginHostContextV1_1。</summary>
-public interface IPluginHostContextV1_2 : IPluginHostContextV1_1
-{
     IPluginUserListBadgeRegistry UserListBadges { get; }
-}
 
-/// <summary>Plugin API v1.3 的通用 UI、作用域数据、插件 Web API 与历史展示端口。</summary>
-public interface IPluginHostContextV1_3 : IPluginHostContextV1_2
-{
     IPluginUiContributionRegistry Ui { get; }
 
     IPluginScopedDataStore ScopedData { get; }
@@ -130,34 +118,13 @@ public interface IPluginHostContextV1_3 : IPluginHostContextV1_2
     IPluginWebApiRegistry WebApi { get; }
 
     IPluginHistoryContributionRegistry History { get; }
-}
 
-/// <summary>Plugin API v1.5 的插件自有本地化能力。语言由宿主请求作用域决定。</summary>
-public interface IPluginHostContextV1_4 : IPluginHostContextV1_3
-{
     IPluginLocalization I18n { get; }
-}
 
-/// <summary>Plugin API v1.6 的通用二进制资产端口；资产按插件命名空间隔离，宿主不解释资产业务含义。</summary>
-public interface IPluginHostContextV1_6 : IPluginHostContextV1_4
-{
     IPluginAssetStore Assets { get; }
-}
 
-/// <summary>Plugin API v1.7 的模拟器支持扩展注册端口。</summary>
-public interface IPluginHostContextV1_7 : IPluginHostContextV1_6
-{
     IPluginEmulatorSupportRegistry EmulatorSupport { get; }
-}
 
-/// <summary>Plugin API v1.8 的通知收件人覆盖能力。</summary>
-public interface IPluginHostContextV1_8 : IPluginHostContextV1_7
-{
-}
-
-/// <summary>Plugin API v1.9 的可选执行 provider 注册端口。</summary>
-public interface IPluginHostContextV1_9 : IPluginHostContextV1_8
-{
     IPluginExecutionProviderRegistry ExecutionProviders { get; }
 }
 
