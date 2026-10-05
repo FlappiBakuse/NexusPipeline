@@ -228,21 +228,28 @@ async function runBatch() {
         batchContext.partnerSource=staged.source;batchContext.partnerFingerprint=staged.sourceFingerprint;
         try {
           code=await run("dotnet",["build","tools/NexusPipeline.TaskProtocolTests","-c","Release","-p:NexusTestHost=true","-p:UseSharedCompilation=false","--disable-build-servers","--nologo"]);
-          for(const plugin of unit.partnerPlugins) for(const [index,fixture] of plugin.fixtureIds.entries()) {
-            if(code) break;
+          const trajectories=unit.partnerPlugins.flatMap(plugin=>plugin.fixtureIds.map((fixture,index)=>({plugin,fixture,index})));
+          let next=0;
+          const outcomes=await Promise.allSettled(Array.from({length:2},async()=>{
+          while(next<trajectories.length) {
+            if(code) return;
+            const {plugin,fixture,index}=trajectories[next++];
             invocationBudget.check();
             const report=path.join(runRoot,`${plugin.artifact}-${fixture}.json`);
             const args=[path.join(executionRoot,"bin/test-host/NexusPipeline.TaskProtocolTests/Release/net10.0-windows/NexusPipeline.TaskProtocolTests.dll"),"--plugin-root",staged.directory,
               "--plugin",plugin.artifact,"--scenario",fixture,"--report",report];
             if(index===0) args.push("--observe-count","12");
-            code=await run("dotnet",args);
-            if(code) break;
+            const exitCode=await run("dotnet",args);
+            if(exitCode) {code ||=exitCode;return;}
             const native=JSON.parse(fs.readFileSync(report));
             if(native.artifact!==plugin.artifact||native.passed!==1||native.failed||native.skipped||JSON.stringify(native.completedCaseIds)!==JSON.stringify([fixture])
               ||index===0&&(native.observeCount!==12||!native.isolatedRunChecked||JSON.stringify(native.editorCaseIds)!==JSON.stringify(plugin.expectedEditorCaseIds))) throw new Error("Invalid production Jint/editor evidence");
             result.completedCaseIds.push(`${plugin.artifact}/${fixture}`);
             if(index===0) result.completedEditorCaseIds.push(...native.editorCaseIds);
           }
+          }));
+          const failure=outcomes.find(outcome=>outcome.status==="rejected");
+          if(failure) throw failure.reason;
           if(!code) result.completedScenarioIds=unit.expectedScenarioIds;
         } finally {if(getProcessRunnerState().cleanupComplete) staged.release();}
       } else {
