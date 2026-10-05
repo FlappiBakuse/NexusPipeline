@@ -19,7 +19,7 @@ public class QueueTask
 
     public string ScriptInstanceId { get; set; } = "";
 
-    /// <summary>Only named earlier queue items are prerequisites; empty preserves legacy independent ordering.</summary>
+    /// <summary>Only named earlier queue items are prerequisites; an empty set permits independent execution.</summary>
     public List<string> DependsOnTaskIds { get; set; } = new();
 }
 
@@ -76,16 +76,6 @@ internal static class QueueRule
             "reboot" => "重启",
             "shutdown" => "关机",
             _ => "无操作",
-        };
-    }
-
-    public static string AutoRunModeDesc(string mode)
-    {
-        return mode switch
-        {
-            "startup" => "启动时运行",
-            "none" => "不运行",
-            _ => "定时运行",
         };
     }
 }

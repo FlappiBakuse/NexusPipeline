@@ -42,23 +42,29 @@ internal static class CliTransport
     public static int? EnsureService()
     {
         int port = _readStartupPort();
-        int? existing = FindServicePort(port);
+        int? existing = FindServicePort(port, out bool otherGeneration);
+        if (otherGeneration)
+        {
+            CliOutput.WriteDiagnostic("transport.other_generation",
+                "[错误] 另一安装代际的 NexusPipeline 正在运行。请先关闭旧程序和连接，再启动当前代际。");
+            return null;
+        }
         if (existing is not null)
         {
             return existing;
         }
-        CliOutput.WriteDiagnostic(CliText.Get(
+        CliOutput.WriteDiagnostic(
             "transport.service_starting",
             "[提示] 常驻服务未运行，正在自动拉起（端口 {port}）...",
-            ("port", port)));
+            ("port", port));
         try
         {
             string exePath = Environment.ProcessPath ?? "";
             if (string.IsNullOrWhiteSpace(exePath))
             {
-                CliOutput.WriteDiagnostic(CliText.Get(
+                CliOutput.WriteDiagnostic(
                     "transport.executable_missing",
-                    "[错误] 无法确定 NexusPipeline 程序路径"));
+                    "[错误] 无法确定 NexusPipeline 程序路径");
                 return null;
             }
             Process.Start(new ProcessStartInfo(exePath)
@@ -69,10 +75,10 @@ internal static class CliTransport
         }
         catch (Exception ex)
         {
-            CliOutput.WriteDiagnostic(CliText.Get(
+            CliOutput.WriteDiagnostic(
                 "transport.start_failed",
                 "[错误] 自动拉起常驻服务失败：{detail}",
-                ("detail", ex.Message)));
+                ("detail", ex.Message));
             return null;
         }
         DateTime deadline = DateTime.Now.AddSeconds(30);
@@ -85,18 +91,23 @@ internal static class CliTransport
                 return discovered;
             }
         }
-        CliOutput.WriteDiagnostic(CliText.Get(
+        CliOutput.WriteDiagnostic(
             "transport.connection_failed",
-            "[错误] 自动拉起常驻服务后仍无法连接（请查看管理器日志确认服务状态）。"));
+            "[错误] 自动拉起常驻服务后仍无法连接（请查看管理器日志确认服务状态）。");
         return null;
     }
 
     /// <summary>只探测已有服务，不自动启动。优先读取实际端口标记，再探测配置端口及其漂移范围。</summary>
     public static int? FindServicePort(int configuredPort)
+        => FindServicePort(configuredPort, out _);
+
+    private static int? FindServicePort(int configuredPort, out bool otherGeneration)
     {
+        otherGeneration = false;
         foreach (int port in CandidatePorts(configuredPort))
         {
-            int? actual = ProbeActualPort(port, 250);
+            int? actual = ProbeActualPort(port, 250, out bool different);
+            if (different) { otherGeneration = true; return null; }
             if (actual is not null)
             {
                 return actual;
@@ -149,8 +160,9 @@ internal static class CliTransport
         return ports;
     }
 
-    private static int? ProbeActualPort(int port, int timeoutMs)
+    private static int? ProbeActualPort(int port, int timeoutMs, out bool otherGeneration)
     {
+        otherGeneration = false;
         try
         {
             using var cts = new CancellationTokenSource(timeoutMs);
@@ -161,6 +173,7 @@ internal static class CliTransport
                 return null;
             }
             JsonNode? node = JsonNode.Parse(response.Content.ReadAsStringAsync().GetAwaiter().GetResult());
+            otherGeneration = IsDifferentGeneration(node);
             if (!IsCompatibleStatus(node))
             {
                 return null;
@@ -179,7 +192,14 @@ internal static class CliTransport
     /// <summary>GET /api/status 探测 NexusPipeline 服务身份与可达性。</summary>
     public static bool Probe(int port, int timeoutMs)
     {
-        return ProbeActualPort(port, timeoutMs) is not null;
+        return ProbeActualPort(port, timeoutMs, out _) is not null;
+    }
+
+    internal static bool IsDifferentGeneration(JsonNode? node)
+    {
+        string service = node?["service"]?.ToString() ?? "";
+        return service != ControlApiContract.ServiceName
+            && (service == "NexusPipeline" || service.StartsWith("NexusPipeline.", StringComparison.Ordinal));
     }
 
     internal static bool IsCompatibleStatus(JsonNode? node)
@@ -208,22 +228,6 @@ internal static class CliTransport
             return PluginRepositoryTimeout;
         }
         return DefaultControlTimeout;
-    }
-
-    /// <summary>读取响应体 {error} 字段（失败时回退原文/状态码）。</summary>
-    public static string ReadError(HttpResponseMessage resp)
-    {
-        try
-        {
-            string text = resp.Content.ReadAsStringAsync().GetAwaiter().GetResult();
-            JsonNode? node = JsonNode.Parse(text);
-            string code = node?["code"]?.ToString() ?? "service_unavailable";
-            return HostLocalization.TranslateApiError(code, node?["args"], (int)resp.StatusCode, LocaleCatalog.HostLocale);
-        }
-        catch
-        {
-            return HostLocalization.TranslateApiError("service_unavailable", null, (int)resp.StatusCode, LocaleCatalog.HostLocale);
-        }
     }
 
     /// <summary>POST JSON 到常驻服务 API；超时按请求类型采用显式策略。</summary>

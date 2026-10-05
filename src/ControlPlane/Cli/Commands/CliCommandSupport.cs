@@ -71,7 +71,7 @@ internal static partial class CliCommandRouter
         }
         if (!string.IsNullOrWhiteSpace(message))
         {
-            CliOutput.WriteDiagnostic(CliText.Get("output.done", "[完成] {message}", ("message", message)));
+            CliOutput.WriteDiagnostic("output.done", "[完成] {message}", ("message", message));
         }
         if (body is not null)
         {

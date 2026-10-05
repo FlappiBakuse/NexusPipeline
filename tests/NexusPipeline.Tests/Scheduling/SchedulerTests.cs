@@ -192,7 +192,7 @@ public class SchedulerTests
     }
 
     /// <summary>
-    /// 语义保留（v0.10.0 语义审计，见 DESIGN.md §8.1）：定时触发为秒级 tick，跨整点错过不补跑——
+    /// 定时触发为秒级 tick，跨整点错过不补跑——
     /// 触发时间若在过去且不属于当前 tick 窗口，不补发历史 occurrence。
     /// </summary>
     [Fact]

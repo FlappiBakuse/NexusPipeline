@@ -139,25 +139,6 @@ internal sealed class McpToolContext
 
     public object GetUpdateStatus() => _statusQuery.BuildUpdateStatus();
 
-    public object GetHistoryDetail(RunRecord record)
-    {
-        var attemptLogs = record.AttemptDetails.Select(attempt =>
-        {
-            (string LogText, int TotalLines)? log = History.ReadScriptLog(record, attempt.Number);
-            return new
-            {
-                attempt.Number,
-                logTail = log is null ? null : TextTail.TakeTail(log.Value.LogText, 200),
-                logTotalLines = log?.TotalLines ?? 0,
-            };
-        }).ToList();
-        return new
-        {
-            record = RunHistoryService.ToView(record),
-            attemptLogs,
-        };
-    }
-
     public static OperationResult<T> NotFound<T>(string message) =>
         OperationResult<T>.Failure("not_found", message, OperationErrorKind.NotFound);
 
