@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "productVersion": "0.17.0",
+  "generation": "g0170",
+  "rid": "win-x64",
+  "sourceSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "sourceTreeSha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "partnerSha": "cccccccccccccccccccccccccccccccccccccccc",
+  "workflowSha": "dddddddddddddddddddddddddddddddddddddddd",
+  "frontendHash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "frontendPackageLockSha256": "9999999999999999999999999999999999999999999999999999999999999999",
+  "desktopPackageLockSha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+  "electronVersion": "0.0.0",
+  "electronArchiveSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+  "bootstrapProtocolVersion": 1,
+  "toolchain": {
+    "dotnetSdkVersion": "0.0.0",
+    "dotnetRuntimeVersion": "0.0.0",
+    "nodeVersion": "0.0.0",
+    "npmVersion": "0.0.0",
+    "pythonVersion": "0.0.0",
+    "innoSetupVersion": "0.0.0",
+    "innoCompilerSha256": "7777777777777777777777777777777777777777777777777777777777777777",
+    "innoDistributionSha256": "8888888888888888888888888888888888888888888888888888888888888888"
+  }
+}

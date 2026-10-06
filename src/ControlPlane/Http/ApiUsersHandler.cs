@@ -235,11 +235,6 @@ internal static class ApiUsersHandler
         }
         if (seg.Length == 5 && seg[4].Equals("edit-config", StringComparison.OrdinalIgnoreCase))
         {
-            if (!HttpHelper.IsLoopback(context))
-            {
-                await HttpHelper.ErrorAsync(context, "local_only", 403).ConfigureAwait(false);
-                return;
-            }
             if (method == "GET")
             {
                 // v0.12.8：编辑配置前置状态——该用户在脚本实例上是否已有配置快照（首次编辑需选择配置方式）。
@@ -262,11 +257,6 @@ internal static class ApiUsersHandler
         }
         if (seg.Length == 5 && seg[4].Equals("config-repair", StringComparison.OrdinalIgnoreCase))
         {
-            if (!HttpHelper.IsLoopback(context))
-            {
-                await HttpHelper.ErrorAsync(context, "local_only", 403).ConfigureAwait(false);
-                return;
-            }
             string scriptId = Uri.UnescapeDataString(seg[3]);
             if (method == "GET")
             {

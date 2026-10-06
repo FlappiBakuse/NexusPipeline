@@ -1,5 +1,4 @@
-using System.Security.Cryptography;
-using NexusPipeline.Platform.Storage;
+using NexusPipeline.Modules.Updates;
 
 namespace NexusPipeline.Host.Lifecycle;
 
@@ -11,22 +10,27 @@ namespace NexusPipeline.Host.Lifecycle;
 internal static class HostInstance
 {
     private static int _ready;
-    private static readonly Lazy<string> BuildId = new(() =>
+    private static string _frontendBuildId = "";
+    private static readonly Lazy<ApplicationBuildIdentity?> BuildIdentity = new(() =>
     {
-        string index = Path.Combine(AppPaths.AppRoot, "wwwroot", "index.html");
-        try
-        {
-            return File.Exists(index) ? Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(index))).ToLowerInvariant() : "";
-        }
-        catch
-        {
-            return "";
-        }
+        using Stream? stream = typeof(HostInstance).Assembly.GetManifestResourceStream("NexusPipeline.Desktop.BuildIdentity");
+        if (stream is null) return null;
+        using var buffer = new MemoryStream();
+        stream.CopyTo(buffer);
+        return ApplicationBuildIdentity.Parse(buffer.ToArray());
     });
 
     public static string Id { get; } = Guid.NewGuid().ToString("N");
     public static bool Ready => Volatile.Read(ref _ready) != 0;
-    public static string FrontendBuildId => BuildId.Value;
+    public static string FrontendBuildId => _frontendBuildId;
+    public static string DesktopBuildId => BuildIdentity.Value?.BuildId ?? "";
+    internal static ApplicationBuildIdentity? Identity => BuildIdentity.Value;
+    internal static void ConfigureBuildIdentity(string frontendHash)
+    {
+        if (BuildIdentity.Value is { } identity && identity.FrontendHash != frontendHash)
+            throw new InvalidDataException("Embedded frontend and desktop build identity differ");
+        _frontendBuildId = frontendHash;
+    }
     public static void MarkReady() => Volatile.Write(ref _ready, 1);
     public static void MarkNotReady() => Volatile.Write(ref _ready, 0);
 

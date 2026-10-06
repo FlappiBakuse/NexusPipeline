@@ -2,7 +2,7 @@ import { controlServiceName } from "../../tools/installation-generation.mjs";
 import { spawnSync } from "node:child_process";
 import { findAvailablePort } from "../support/test-runtime.mjs";
 import { runtime, assert, fs, path, json, target, settled, report } from "./finite-common.mjs";
-const handoffs = [], protocol = [];
+const handoffs = [], protocol = [], remoteAccessStates = [];
 let cliRun, mcpRun, operation = "boot";
 function cli(args) {
   operation = `CLI ${args[0]}`;
@@ -57,13 +57,30 @@ try {
   assert.equal((await json("GET", "api/plugins/store")).available, true);
   await json("POST", "api/plugins/store/broken-fixture/install", undefined, 409);
   assert.equal((await json("POST", "api/plugins/store/store-fixture/install")).pending, true);
+  await json("PUT", "api/settings", { allowRemoteAccess: true, secretKey: "accessToken", secretValue: "owned-restart-token" });
+  let beforeRemoteRestart = (await json("GET", "api/settings")).status.remote;
+  assert.equal(beforeRemoteRestart.bound, false);
   await restart();
+  let remote = await json("GET", "api/settings");
+  assert.equal(remote.settings.allowRemoteAccess, true);
+  assert.equal(remote.status.remote.bound, true);
+  assert.equal(remote.status.remote.tokenSet, true);
+  assert.equal(remote.settings.accessToken, "enc:***");
+  remoteAccessStates.push({ change: "enable", before: { allowed: beforeRemoteRestart.allowed, bound: beforeRemoteRestart.bound }, after: { allowed: remote.status.remote.allowed, bound: remote.status.remote.bound, tokenSet: remote.status.remote.tokenSet } });
   let installed = (await json("GET", "api/plugins")).find(item => item.name === "store-fixture");
   assert.equal(installed.version, "0.1.0");
   await json("POST", "api/plugins/store-fixture/enable");
   await json("POST", "api/plugins/store/refresh");
   assert.equal((await json("POST", "api/plugins/store/store-fixture/update")).pending, true);
+  await json("PUT", "api/settings", { allowRemoteAccess: false });
+  beforeRemoteRestart = (await json("GET", "api/settings")).status.remote;
+  assert.equal(beforeRemoteRestart.bound, true);
   await restart();
+  remote = await json("GET", "api/settings");
+  assert.equal(remote.settings.allowRemoteAccess, false);
+  assert.equal(remote.status.remote.bound, false);
+  assert.equal(remote.status.remote.tokenSet, true);
+  remoteAccessStates.push({ change: "disable", before: { allowed: beforeRemoteRestart.allowed, bound: beforeRemoteRestart.bound }, after: { allowed: remote.status.remote.allowed, bound: remote.status.remote.bound, tokenSet: remote.status.remote.tokenSet } });
   installed = (await json("GET", "api/plugins")).find(item => item.name === "store-fixture");
   assert.equal(installed.version, "0.1.1"); assert.equal(installed.runtimeEnabled, true);
   assert.equal((await json("GET", "api/history?days=1&limit=100")).records.length, 2);
@@ -80,6 +97,6 @@ try {
   console.error(operation, error, runtime.runtimeDiagnostic());
   throw error;
 } finally { await runtime.stopRuntime(); }
-report("H-E03", { cliRun, mcpRun, protocol, handoffs,
-  real: ["CLI service client", "MCP HTTP protocol", "store install/update/hash/managed loading", "restart handoff"],
+report("H-E03", { cliRun, mcpRun, protocol, handoffs, remoteAccessStates,
+  real: ["CLI service client", "MCP HTTP protocol", "store install/update/hash/managed loading", "restart handoff", "remote access policy and encrypted token survive enable/disable restarts"],
   substituted: ["official HTTPS responses", "owned target and synthetic plugin"] });

@@ -5,6 +5,7 @@ using NexusPipeline.Host.Composition;
 using NexusPipeline.Host.Initialization;
 using NexusPipeline.Host.Tray;
 using NexusPipeline.Host;
+using NexusPipeline.Host.Desktop;
 using NexusPipeline.Modules.Updates;
 using NexusPipeline.Platform.Storage;
 using NexusPipeline.Shared.Logging;
@@ -16,15 +17,17 @@ internal static class StartupPipeline
     private static Control? _serviceExitDispatcher;
     private static readonly ManualResetEventSlim WebOnlyExitRequested = new(false);
 
-    internal static void RunService(HostRuntime runtime)
+    internal static void RunService(HostRuntime runtime, DesktopLaunchOptions? launch = null)
     {
         using Mutex? mutex = AcquireSingleInstanceMutex();
         if (mutex is null)
         {
             Logger.Info("检测到 NexusPipeline 已在运行，本次启动退出（可在托盘图标打开管理页面）。");
-            TrayApp.OpenWeb();
+            if (launch?.Intent == "show") DesktopActivationClient.ShowAsync().GetAwaiter().GetResult();
             return;
         }
+        DesktopCoordinator desktop = runtime.Get<DesktopCoordinator>();
+        desktop.Start();
         if (!PrepareHostedStart(runtime))
         {
             // 更新 worker 必须等当前进程真正终止后才能替换宿主 EXE。
@@ -73,10 +76,6 @@ internal static class StartupPipeline
             if (web is not null)
             {
                 runtime.Bootstrap.AfterWebStarted(web);
-                if (webOptions.ServeWebUi && runtime.Settings.AutoOpenBrowser)
-                {
-                    TrayApp.OpenWeb(web.Port);
-                }
             }
             McpHost? mcp = web is null ? null : runtime.Bootstrap.StartMcp();
             if (!webOptions.ServeWebUi)
@@ -97,6 +96,9 @@ internal static class StartupPipeline
             if (qualifyUpdate && RunStartupUpdateGate(runtime) != StartupUpdateDisposition.ContinueStartup)
             { runtime.Stop(web, mcp); ClearServicePid(); return; }
             HostInstance.MarkReady();
+            desktop.MarkReady(web.Port);
+            if (webOptions.ServeWebUi && (launch ?? new DesktopLaunchOptions("from-settings")).ShouldShow(runtime.Settings.OpenDesktopOnStartup, desktop.RestoredVisible))
+                desktop.ShowAsync("startup").GetAwaiter().GetResult();
 
 #if NEXUS_TEST_HOST
             StartTestHostExitMonitor();
@@ -238,7 +240,7 @@ internal static class StartupPipeline
         }
         else
         {
-            RunService(runtime);
+            RunService(runtime, new DesktopLaunchOptions("restore"));
         }
         return 0;
     }
@@ -313,7 +315,7 @@ internal static class StartupPipeline
         { runtime.Stop(web, mcp); ClearServicePid(); return 1; }
         HostInstance.MarkReady();
         Console.WriteLine(CliText.Get("startup.web_started", "Web 界面：http://127.0.0.1:{port}/（按回车停止）", ("port", web.Port)));
-        if (runtime.Settings.AutoOpenBrowser)
+#if !NEXUS_TEST_HOST
         {
             try
             {
@@ -327,6 +329,7 @@ internal static class StartupPipeline
                 Logger.Warn($"自动打开浏览器失败：{ex.Message}");
             }
         }
+#endif
         WaitForWebOnlyStop(ApplicationHost.KeepWebOnlyAlive);
         ShutdownHosted(runtime, web, mcp);
         return 0;
@@ -339,7 +342,10 @@ internal static class StartupPipeline
     private static bool PrepareHostedStart(HostRuntime runtime)
     {
         AppPaths.RuntimeState.EnsureDirectories();
-        if (UpdateApply.RunStartupFinalization(runtime.UpdateService.VerifyApplyTarget, ApplicationHost.IsWebOnly, SingleInstanceMutexName, HostInstance.RestartHandoffId))
+        var desktop = runtime.Get<IDesktopHost>();
+        desktop.Start();
+        if (UpdateApply.RunStartupFinalization(runtime.UpdateService.VerifyApplyTarget, ApplicationHost.IsWebOnly, SingleInstanceMutexName, HostInstance.RestartHandoffId,
+            transaction => desktop.PrepareAssetReplacementAsync(transaction, TimeSpan.FromSeconds(8)).GetAwaiter().GetResult()))
         {
             return false;
         }

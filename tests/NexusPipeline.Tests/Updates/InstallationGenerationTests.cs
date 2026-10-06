@@ -23,7 +23,7 @@ public sealed class InstallationGenerationTests
         string? savedRoot = Environment.GetEnvironmentVariable("NEXUS_INSTALLER_TEST_ROOT");
         Directory.CreateDirectory(app); Directory.CreateDirectory(old);
         File.WriteAllText(Path.Combine(root, ".nxp-installer-lab"), id);
-        File.WriteAllText(Path.Combine(old, "nexus-pipeline.exe"), "old image remains");
+        File.WriteAllText(Path.Combine(old, "NexusPipeline.exe"), "old image remains");
         Directory.CreateDirectory(Path.Combine(root, "old-manager"));
         File.WriteAllText(Path.Combine(root, "old-manager", "identity.protected"), "old identity remains");
         using (var key = Registry.CurrentUser.CreateSubKey(oldKey))
@@ -38,12 +38,16 @@ public sealed class InstallationGenerationTests
             Assert.Throws<IOException>(() => InstallationOwnership.Read(old));
             Assert.Throws<IOException>(() => InstallationOwnership.Read(root));
             Assert.False(Directory.Exists(InstallationOwnership.ManagerDirectory));
-            string image = Path.Combine(app, "nexus-pipeline.exe");
+            string image = Path.Combine(app, "NexusPipeline.exe");
             File.WriteAllText(image, "new image");
             string inventory = Path.Combine(root, "manifest.json");
             File.WriteAllText(inventory, JsonSerializer.Serialize(new[] {
-                new InstalledPayloadFile("nexus-pipeline.exe", UpdateApply.ImageHash(image)) }));
-            InstallationOwnership.Register(app, "0.16.15", inventory);
+                new InstalledPayloadFile("NexusPipeline.exe", UpdateApply.ImageHash(image)) }));
+            Assert.ThrowsAny<IOException>(() => InstallationOwnership.Register(app, "0.17.0", inventory));
+            Assert.False(Directory.Exists(InstallationOwnership.ManagerDirectory));
+            Assert.Equal("new image", File.ReadAllText(image));
+            InstallationOwnership.RegisterOwnedInventoryForTest(app, "0.17.0", inventory,
+                [new InstalledPayloadFile("NexusPipeline.exe", UpdateApply.ImageHash(image))]);
             Assert.Equal("active", InstallationOwnership.Read(app)!.State);
             Directory.CreateDirectory(Path.Combine(app, "data"));
             string data = Path.Combine(app, "data", "user.json");
@@ -52,7 +56,7 @@ public sealed class InstallationGenerationTests
             Assert.False(File.Exists(image));
             Assert.Equal("preserved data", File.ReadAllText(data));
             Assert.Equal("retained-data", InstallationOwnership.Read(app)!.State);
-            Assert.Equal("old image remains", File.ReadAllText(Path.Combine(old, "nexus-pipeline.exe")));
+            Assert.Equal("old image remains", File.ReadAllText(Path.Combine(old, "NexusPipeline.exe")));
             Assert.Equal("old identity remains", File.ReadAllText(Path.Combine(root, "old-manager", "identity.protected")));
             using var retained = Registry.CurrentUser.OpenSubKey(oldKey);
             Assert.Equal("old registration remains", retained!.GetValue("IdentityDigest"));

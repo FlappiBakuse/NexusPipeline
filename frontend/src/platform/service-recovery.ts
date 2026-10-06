@@ -8,6 +8,9 @@ import {
   type ServiceRestartHandoff,
 } from "./service-restart";
 import { useShellStore } from "../stores/shell";
+import {desktopBridge,type ConnectionCandidate} from './desktop';
+import {setServiceTrafficPaused} from './service-traffic';
+import { invalidateClientCapabilities } from './client-capabilities';
 
 type ShellStore = ReturnType<typeof useShellStore>;
 
@@ -41,6 +44,18 @@ let pending: SavedRecovery | null = null;
 let observed: HostIdentity | null = null;
 let generation = 0;
 let active = false;
+let desktopCandidate: ConnectionCandidate|null=null;
+let desktopSubscriptions: Array<()=>void>=[];
+let restartAwaitingApproval=false;
+
+async function confirmDesktopCandidate(discardDirty=false): Promise<void> {
+  const bridge=desktopBridge(),candidate=desktopCandidate;
+  if(!shell||!bridge||!candidate||shell.recoveryPhase==='navigating')return;
+  if(!discardDirty&&isDirty()){shell.recoveryPhase='dirty-blocked';return;}
+  shell.recoveryPhase='navigating';
+  const result=await bridge.confirmConnectionNavigation(candidate.candidateId).catch(()=>'unavailable');
+  if(result!=='accepted'&&shell&&desktopCandidate===candidate)shell.recoveryPhase=result==='stale'?'waiting':'failed';
+}
 
 function storageGet(key: string): string | null {
   try { return sessionStorage.getItem(key); } catch { return null; }
@@ -87,6 +102,7 @@ export function registerRecoveryDirtyGuard(guard: () => boolean): () => void {
 }
 
 function navigateToIdentity(value: HostIdentity, discardDirty = false): void {
+  if(desktopBridge())return;
   if (!shell || shell.recoveryPhase === "navigating") return;
   const key = identityKey(value);
   if (storageGet(HANDLED_KEY) === key) return;
@@ -112,6 +128,7 @@ async function checkIdentity(): Promise<void> {
     const next = await api<HostIdentity>("GET", "/api/status?view=identity", undefined, request.signal);
     if (!active || seenGeneration !== generation || !validIdentity(next)) return;
     const previous = observed;
+    if (previous && identityKey(previous) !== identityKey(next)) invalidateClientCapabilities();
     observed = next;
     shell.setHostIdentity(next);
     if (!pending && previous && next.ready && identityKey(previous) !== identityKey(next)) {
@@ -145,6 +162,17 @@ export function startServiceObserver(store: ShellStore): () => void {
   shell = store;
   if (active) return stopServiceObserver;
   active = true;
+  const bridge=desktopBridge();
+  if(bridge)desktopSubscriptions=[bridge.onConnectionStateChanged(value=>{
+    if(!shell)return;
+    if(value==='ready'&&!desktopCandidate){setServiceTrafficPaused(false);shell.finishRestart();shell.recoveryPhase='idle';}
+    else if(['restarting','disconnected','stopping'].includes(value)){
+      setServiceTrafficPaused(true);shell.beginRestart();shell.identityConnection='offline';shell.recoveryPhase='waiting';
+    }
+  }),bridge.onConnectionCandidate(value=>{
+    desktopCandidate=Object.freeze({...value});setServiceTrafficPaused(true);
+    if(shell){shell.beginRestart();shell.recoveryPhase='waiting';void confirmDesktopCandidate();}
+  })];
   pending = readPending();
   void checkIdentity();
   if (pending) void continueServiceRecovery();
@@ -168,10 +196,14 @@ function stopServiceObserver(): void {
   document.removeEventListener("visibilitychange", onVisibility);
   shell = null;
   observed = null;
+  for(const dispose of desktopSubscriptions)dispose();desktopSubscriptions=[];desktopCandidate=null;
+  restartAwaitingApproval=false;setServiceTrafficPaused(false);
 }
 
-export async function beginServiceRecovery(): Promise<void> {
+export async function beginServiceRecovery(discardDirty=false): Promise<void> {
   if (!shell || !active || controller) return;
+  if(!discardDirty&&isDirty()){restartAwaitingApproval=true;shell.recoveryPhase='dirty-blocked';return;}
+  restartAwaitingApproval=false;
   if (pending) { await continueServiceRecovery(); return; }
   const request = new AbortController();
   controller = request;
@@ -185,7 +217,8 @@ export async function beginServiceRecovery(): Promise<void> {
     pending = { schema: 1, origin: location.origin, expiresAt: Date.now() + RECOVERY_MS, handoff };
     storageSet(STORAGE_KEY, JSON.stringify(pending));
     controller = null;
-    await continueServiceRecovery();
+    if(desktopBridge()){shell.recoveryPhase='waiting';return;}
+    await continueServiceRecovery(discardDirty);
   } catch (reason) {
     if (active && currentGeneration === generation && shell && !isAbortError(reason)) {
       shell.recoveryPhase = "failed";
@@ -197,7 +230,8 @@ export async function beginServiceRecovery(): Promise<void> {
   }
 }
 
-export async function continueServiceRecovery(): Promise<void> {
+export async function continueServiceRecovery(discardDirty = false): Promise<void> {
+  if(desktopBridge()){if(desktopCandidate)await confirmDesktopCandidate();return;}
   if (!shell || !active || !pending || controller) return;
   const request = new AbortController();
   controller = request;
@@ -232,7 +266,7 @@ export async function continueServiceRecovery(): Promise<void> {
     observed = identity;
     shell.setHostIdentity(identity);
     shell.finishRestart();
-    navigateToIdentity(identity);
+    navigateToIdentity(identity, discardDirty);
   } catch (reason) {
     if (!isAbortError(reason) && shell) {
       shell.recoveryPhase = "failed";
@@ -245,6 +279,8 @@ export async function continueServiceRecovery(): Promise<void> {
 
 export function resumeServiceRecovery(discardDirty = false): void {
   if (!shell) return;
+  if(desktopCandidate){void confirmDesktopCandidate(discardDirty);return;}
+  if(restartAwaitingApproval&&discardDirty){void beginServiceRecovery(true);return;}
   if (shell.recoveryPhase === "dirty-blocked" && observed?.ready) navigateToIdentity(observed, discardDirty);
   else if (pending) {
     pending.expiresAt = Date.now() + RECOVERY_MS;

@@ -27,7 +27,7 @@ def main():
     sys.path.insert(0, str(root))
     loader = unittest.TestLoader()
     suite = loader.discover(str(root / "tests"), pattern="test_*.py") if args.suite == "ci" else loader.loadTestsFromNames(
-        ["tools.tests.test_host_release", "tools.tests.test_host_candidate_source"] if args.suite == "release"
+        ["tools.tests.test_host_release", "tools.tests.test_host_candidate_source", "tools.tests.test_build_identity", "tools.tests.test_embed_frontend"] if args.suite == "release"
         else ["tools.tests.test_host_installer"])
     result = unittest.TextTestRunner(stream=sys.stdout, verbosity=2, resultclass=NativeResult).run(suite)
     counts = {"testsRun": result.testsRun, "failures": len(result.failures), "errors": len(result.errors),

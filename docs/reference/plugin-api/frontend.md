@@ -1,13 +1,13 @@
 # 前端架构
 
-## 前端插件运行时（Frontend API 1.5）
+## 前端插件运行时（Frontend API 1.6）
 
 前端扩展与 C# API 独立版本化。manifest 同时声明 `frontend-module` capability 和 `frontend` 对象：
 
 ```json
 "capabilities": ["frontend-module"],
 "frontend": {
-  "apiVersion": "1.5",
+  "apiVersion": "1.6",
   "entry": "web/main.js",
   "styles": ["web/style.css"]
 }
@@ -28,9 +28,9 @@
 - `host.executionPreview.capture(runId, signal)`：按宿主当前运行目标读取受控的 PC 游戏客户区或模拟器画面；返回 360p JPEG 或等待状态。该接口用于运行预览，不等同于判断脚本的运行期通知截图。
 - `host.i18n`：读取插件 manifest 中的本地化资源，提供 `locale`、`defaultLocale`、`t(key, args, fallback)` 和本地化日期/时间/数字格式化；资源仅属于当前插件。
 
-稳定的外部契约包括 Frontend API `1.5` 精确版本、上述 `host.*` 能力、18 个公开 slot 名称、renderer surface 与 context 的可观察语义、公开 `nxp-*` 元素、主题 token、light DOM 下的可观察视觉与交互行为，以及 route/nav/slot/lifecycle 的挂载与清理语义。宿主侧桥接实现位于 `frontend/src/plugin-bridge/`，其文件划分、内部函数、宿主平台模块路径和宿主私有 class 都是内部实现，不构成插件公共 API。
+稳定的外部契约包括 Frontend API `1.6` 精确版本、上述 `host.*` 能力、18 个公开 slot 名称、renderer surface 与 context 的可观察语义、公开 `nxp-*` 元素、主题 token、light DOM 下的可观察视觉与交互行为，以及 route/nav/slot/lifecycle 的挂载与清理语义。宿主侧桥接实现位于 `frontend/src/plugin-bridge/`，其文件划分、内部函数、宿主平台模块路径和宿主私有 class 都是内部实现，不构成插件公共 API。
 
-前端模块运行在管理页面同源环境，可以使用 DOM、构建后的 ES module 和 CSS。Frontend API 采用精确版本匹配：只有 `1.5` 被接受，其他主次版本均拒绝加载，不提供兼容桥。启用且兼容的插件会直接加载其前端模块；宿主继续校验运行状态、Frontend API 版本、公开资源路径、扩展名和文件存在性。插件前端应使用 Vue/TypeScript/Vite 或等效构建链生成 `web/` 静态资源，通过公开 `nxp-*` Native Custom Elements 以及 slot surface 与宿主交互，不依赖宿主 Vue 内部实现。
+前端模块运行在管理页面同源环境，可以使用 DOM、构建后的 ES module 和 CSS。Frontend API 采用精确版本匹配：只有 `1.6` 被接受，其他主次版本均拒绝加载，不提供兼容桥。启用且兼容的插件会直接加载其前端模块；宿主继续校验运行状态、Frontend API 版本、公开资源路径、扩展名和文件存在性。插件前端应使用 Vue/TypeScript/Vite 或等效构建链生成 `web/` 静态资源，通过公开 `nxp-*` Native Custom Elements 以及 slot surface 与宿主交互，不依赖宿主 Vue 内部实现。
 
 公开元素注册表位于 frontend/src/ui/register.ts 的 NEXUS_PUBLIC_ELEMENTS，当前包含 39 个元素，完整清单与复合元件契约见[公共 UI 目录](../ui/README.md)。插件使用注册表登记的元素。
 
@@ -54,3 +54,13 @@
 `capabilities` 仅作为发现元数据，除已明确接入的当前扩展端口外不会自动获得业务语义。`script-profile` 等未来能力需要宿主明确接入；`background-jobs` 不会被当作专项脚本选择器。代码插件默认关闭，启用后需重启服务；运行状态可在 `/api/status` 的 `configuredEnabled`、`runtimeEnabled`、`state`、`minHostVersion`、`runtimeErrorCode`、`hasFrontend` 和 `frontendApiVersion` 字段中查看。宿主版本低于 `minHostVersion` 时使用 `state=Incompatible` 与 `runtimeErrorCode=plugin_incompatible_host`，不会解析专项插件、注册其能力或加载 managed-code 程序集；Plugin API 不兼容使用 `plugin_incompatible_api`。插件商店列表与详情另提供 `compatibilityCode`，使用 `host_version_too_low`、`plugin_api_incompatible` 或 `invalid_version` 区分更新阻断原因。前端描述中的 `defaultLocale` 与 `localization` 只包含该插件已声明并通过校验的资源。
 
 插件管理页使用 `/api/plugins` 与 `/api/plugins/store` 获取列表，使用 `/api/plugins/{name}/detail` 与 `/api/plugins/store/{name}/detail` 获取详情。详情包含统一展示元数据、完整更新记录和受限 README；作者、标签、主页和 README 由插件仓库的 `store.json` 与包内容提供，`createdAt` 是 catalog 可选的创建日期投影，缺失时按空值展示，更新时间取最新更新记录日期。
+
+## 请求来源与本机交互
+
+Plugin API 2.1 只定义 `General`、`HostFilePicker`、`NativeConfigEditor` 三类访问。每条 `PluginWebApiRoute` 必须显式设置 `Access`；声明式 UI 的读取、保存和每个动作分别显式设置访问类，缺失或未知值使注册失败。`PluginWebApiRequest.ConnectionKind` 由实际传输对端确定为 `Local`、`Remote` 或 `Unknown`，不采信 Host、Origin、Referer 或转发头。General 在三种来源均可用；后两类只允许 Local，在读取参数、请求体或执行回调前拒绝 Remote/Unknown。SDK 包及程序集继续为 2.0.0，与接口 2.1 独立治理。
+
+Frontend API 1.6 的 `host.getCapabilities(signal?)` 返回冻结只读的 schema 1 对象：`connectionKind` 为 local/remote/unknown，`operations` 精确包含 general、hostFilePicker、nativeConfigEditor，每项有 allowed 与 denyReason。拒绝原因分别为 host_file_picker_requires_local、native_config_editor_requires_local、client_origin_unverified。缓存绑定同源、认证和当前 Host 实例；重连或重启使旧读取失效。它用于呈现界面，后端每次操作仍重新判断来源。
+
+原生文件选择只能禁用“浏览”按钮，路径输入仍可编辑并保存。普通账号、脚本、队列、计划、运行、历史、插件安装与诊断是 General；诊断 ZIP 写入宿主受控 staging，返回明确路径。脚本文件读取只在已批准脚本根、配置位置及游戏程序父目录范围内，拒绝链接与路径穿越，不枚举宿主磁盘。
+
+路由处理器接收 `RouteSurface`：`element`、`routeToken`、`segments`、`signal`。必须在 element 内挂载，返回清理函数（或最终返回函数的 Promise）；路由离开、替换或插件停止时先中止 signal，再执行清理。不得查询宿主私有页面容器。公开 18 个 slot 与 39 个元素保持既有名称。

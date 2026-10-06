@@ -24,7 +24,7 @@ $env:NEXUS_TEST_RUN_ID = '<本次唯一ID>'
 build.cmd
 ```
 
-`build.cmd` 调用唯一生产构建实现 `node tests/run.mjs release`。该实现复制当前源码到外部隔离副本，安装并校验前端依赖、构建静态网页，再发布框架依赖的单文件程序并验证嵌入的 requireAdministrator 清单。输出位于 `<外部构建根>/runs/<本次唯一ID>/production/`，包含 `nexus-pipeline.exe`、`README.md`、`wwwroot/` 和空 `plugins/`；缓存和中间输出也位于外部构建根。输出已存在则失败，请使用新的 ID。
+`build.cmd` 调用唯一生产构建实现 `node tests/run.mjs release`。该实现复制当前源码到外部隔离副本，安装并校验前端依赖、构建静态网页，再发布框架依赖的单文件程序并验证嵌入的 requireAdministrator 清单。输出位于 `<外部构建根>/runs/<本次唯一ID>/production/`，包含 `NexusPipeline.exe`、`README.md`、`wwwroot/` 和空 `plugins/`；缓存和中间输出也位于外部构建根。输出已存在则失败，请使用新的 ID。
 
 生产构建不会安装或启动程序。插件由独立的 NexusPipeline-Plugins 仓库构建；正式候选按[发行指南](release.md)核验预装包。前端唯一源码入口为 `frontend/`；普通测试使用另一份 asInvoker Test Host。
 
@@ -32,12 +32,12 @@ build.cmd
 
 | 命令 | 行为 |
 |---|---|
-| `<production>\nexus-pipeline.exe` | 常驻服务模式：托盘、Web 和调度器 |
-| `<production>\nexus-pipeline.exe web` | 网页模式；按回车或在 stdin 结束时退出 |
-| `<production>\nexus-pipeline.exe manage` | 交互式命令行管理菜单 |
-| `<production>\nexus-pipeline.exe status` | 查看当前状态 |
-| `<production>\nexus-pipeline.exe run script ...` / `run queue ...` / `run cancel ...` | 经常驻服务 HTTP 通道提交或取消任务 |
-| `<production>\nexus-pipeline.exe register` / `unregister` | 注册或取消开机自启动任务 |
+| `<production>\NexusPipeline.exe` | 常驻服务模式：托盘、Web 和调度器 |
+| `<production>\NexusPipeline.exe web` | 网页模式；按回车或在 stdin 结束时退出 |
+| `<production>\NexusPipeline.exe manage` | 交互式命令行管理菜单 |
+| `<production>\NexusPipeline.exe status` | 查看当前状态 |
+| `<production>\NexusPipeline.exe run script ...` / `run queue ...` / `run cancel ...` | 经常驻服务 HTTP 通道提交或取消任务 |
+| `<production>\NexusPipeline.exe register` / `unregister` | 注册或取消开机自启动任务 |
 
 网页默认地址为 `http://127.0.0.1:58731/`；端口被占用时按顺序寻找可用端口。首次运行会创建当前运行时目录并执行崩溃恢复扫描。
 
@@ -79,7 +79,7 @@ PR 范围计划映射逻辑义务到可选 control 与最多五个 Windows batch
 - 无控制台父进程启动 cmd/bat 时必须提供并消费重定向的 stdout/stderr；构建和测试脚本保持非交互，不加入无条件 `pause`。
 - 正式程序仍需管理员上下文；每个 UI/System suite 使用隔离 Test Host runtime 验证脚本与解释器边界。目标程序返回 Win32Exception 740 时应明确失败，保留正式运行边界。
 - 以显式路径开头的 `Args` 表示运行时启动目标，`?` 后为目标参数；Args 不使用引号表达路径。
-- 使用 `cmd.exe` 运行批处理时，注意工作目录和环境变量继承；运行进程残留会锁定 `<production>\nexus-pipeline.exe`。
+- 使用 `cmd.exe` 运行批处理时，注意工作目录和环境变量继承；运行进程残留会锁定 `<production>\NexusPipeline.exe`。
 
 ### 单元与组件测试定位
 

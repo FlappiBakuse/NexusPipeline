@@ -20,6 +20,9 @@
   </ItemGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="..\fixtures\build-identity\build-inputs.example.json" LogicalName="NexusPipeline.Tests.BuildIdentity.Inputs" />
+    <EmbeddedResource Include="..\fixtures\build-identity\build-inputs.canonical.json" LogicalName="NexusPipeline.Tests.BuildIdentity.Canonical" />
+    <EmbeddedResource Include="..\fixtures\build-identity\desktop-build.example.json" LogicalName="NexusPipeline.Tests.BuildIdentity.Record" />
     <Compile Include="..\..\tools\NexusPipeline.TaskProtocolTests\TaskFixtures.cs" Link="Support\TaskFixtures.cs" />
     <ProjectReference Include="..\..\src\NexusPipeline.csproj" />
     <ProjectReference Include="..\fixtures\NexusPipeline.TestPlugin\NexusPipeline.TestPlugin.csproj" />

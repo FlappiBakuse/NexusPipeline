@@ -5,20 +5,30 @@ namespace NexusPipeline.Tests.Updates;
 
 public sealed class UpdateTaskTests
 {
+    private static UpdateTask MakeTask(string mode, string version, string staging) => UpdateTask.Create(mode, version, staging) with
+    {
+        TargetPayload = new(new string('a', 64), new string('b', 64), new string('c', 64), "g0170"),
+        PreviousPayload = new(new string('d', 64), new string('e', 64), new string('f', 64), "g0170"),
+        PackageSha256 = new string('1', 64), DesktopStopped = true,
+    };
+
     [Fact]
     public void UnsupportedJournalAndMarkerRemainDistinctFromMissingAndCannotBeRewritten()
     {
         string root = Path.Combine(Path.GetTempPath(), "nxp-update-format-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         string file = Path.Combine(root, "task.json");
-        var task = UpdateTask.Create("apply", "0.16.15", Path.Combine(root, "staging"));
+        var task = MakeTask("apply", "0.16.15", Path.Combine(root, "staging"));
         try
         {
             Assert.Equal(UpdateFileState.Missing, UpdateTask.ReadState(file).State);
             string valid = System.Text.Json.JsonSerializer.Serialize(task);
             foreach (string invalid in new[]
             {
-                "{}", "{broken", valid.Replace("\"CreatedAt\":", "\"createdAt\":"),
+                "{}", "{broken", System.Text.Json.JsonSerializer.Serialize(task with { TargetPayload = null }),
+                System.Text.Json.JsonSerializer.Serialize(task with { PackageSha256 = null }),
+                System.Text.Json.JsonSerializer.Serialize(task with { PayloadSchemaVersion = 2 }),
+                System.Text.Json.JsonSerializer.Serialize(task with { SwappedAssetCount = 1 }), valid.Replace("\"CreatedAt\":", "\"createdAt\":"),
                 valid.Replace("\"Phase\":\"ApplyRequested\"", "\"Phase\":\"future\""),
                 valid.Replace("\"Mode\":\"apply\"", "\"Mode\":\"apply\",\"mode\":\"apply\""),
                 System.Text.Json.JsonSerializer.Serialize(task with { CreatedAt = null }),
@@ -57,15 +67,17 @@ public sealed class UpdateTaskTests
             string update = Path.Combine(root, ".nxp-update"), staging = Path.Combine(update, "staging", "0.16.15.g1");
             string backup = Path.Combine(root, ".nxp-backup", "previous");
             Directory.CreateDirectory(staging); Directory.CreateDirectory(backup);
-            string worker = Path.Combine(root, ".nxp-update-worker-" + Guid.NewGuid().ToString("N") + ".exe");
+            string workers = Path.Combine(root, ".nxp", "runtime", "workers");
+            Directory.CreateDirectory(workers);
+            string worker = Path.Combine(workers, "update-" + Guid.NewGuid().ToString("N") + ".exe");
             File.WriteAllText(worker, "worker");
             File.WriteAllText(Path.Combine(staging, "README.md"), "current");
-            File.WriteAllText(Path.Combine(backup, "nexus-pipeline.exe"), "backup");
+            File.WriteAllText(Path.Combine(backup, "NexusPipeline.exe"), "backup");
             File.WriteAllText(Path.Combine(root, ".nxp-version"), "0.16.15");
             string journal = Path.Combine(update, "task.json");
-            var task = UpdateTask.Create("apply", "0.16.15", staging) with
+            var task = MakeTask("apply", "0.16.15", staging) with
             {
-                Mode = "completed", Phase = UpdatePhase.Committed, TransactionId = Guid.NewGuid().ToString("N"),
+                Mode = "completed", Phase = UpdatePhase.Committed, SwappedAssetCount = 4, TransactionId = Guid.NewGuid().ToString("N"),
                 TargetImageHash = new string('a', 64), WorkerIdentity = new(42, DateTime.UtcNow, worker),
             };
             task.Write(journal);
@@ -96,7 +108,7 @@ public sealed class UpdateTaskTests
         try
         {
             string handoff = Guid.NewGuid().ToString("N");
-            var task = UpdateTask.Create("apply", "0.16.15", Path.Combine(root, "staging")) with
+            var task = MakeTask("apply", "0.16.15", Path.Combine(root, "staging")) with
             {
                 RestartHandoffId = handoff,
             };
@@ -104,7 +116,7 @@ public sealed class UpdateTaskTests
             UpdateTask received = Assert.IsType<UpdateTask>(UpdateTask.Read(file));
             Assert.Equal(handoff, received.RestartHandoffId);
 
-            received = received with { Phase = UpdatePhase.AwaitingStartup, TransactionId = Guid.NewGuid().ToString("N"),
+            received = received with { Phase = UpdatePhase.AwaitingStartup, SwappedAssetCount = 4, TransactionId = Guid.NewGuid().ToString("N"),
                 TargetImageHash = new string('a', 64), WorkerIdentity = new(42, DateTime.UtcNow, Path.Combine(root, "worker.exe")) };
             received.Write(file);
             Assert.Equal(handoff, UpdateTask.Read(file)?.RestartHandoffId);
@@ -123,7 +135,7 @@ public sealed class UpdateTaskTests
         string file = Path.Combine(root, "task.json");
         try
         {
-            var task = UpdateTask.Create("apply", "0.16.15", Path.Combine(root, "staging")) with
+            var task = MakeTask("apply", "0.16.15", Path.Combine(root, "staging")) with
             {
                 RestartHandoffId = "not-an-id",
             };

@@ -15,6 +15,7 @@ public sealed class WebApiContractTests
             new[]
             {
                 "cancel",
+                "client-capabilities",
                 "diagnostics",
                 "dispatch",
                 "events",

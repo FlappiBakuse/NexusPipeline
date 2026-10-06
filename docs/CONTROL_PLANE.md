@@ -60,6 +60,7 @@ GameCheckIn v0.3.1 的独立签到页面由插件导航注册；状态读取位�
 - 插件启用、禁用与商店单插件安装、更新、卸载响应都返回 `restartRequired: true`；批量更新在至少一项登记成功时返回同一字段，页面据此显示重启入口。
 - 插件管理与详情投影包含 `minHostVersion`。运行时发现宿主版本过低时保留插件元数据并返回 `state=Incompatible`、`runtimeErrorCode=plugin_incompatible_host`；插件商店将 `host_version_too_low`、`plugin_api_incompatible` 和 `invalid_version` 分别投影为 `compatibilityCode`，只有已安装插件存在更高且宿主不兼容的新版本时使用 `status=update-requires-host-upgrade`，其余兼容性失败使用 `status=incompatible` 并禁止安装或更新。
 - `/api/status` 返回进程实例标识 `instanceId`、本次重启交接标识 `restartHandoffId` 与实际监听端口 `actualPort`；`POST /api/settings/restart` 返回候选端口 `newPort`、本次交接标识 `handoffId` 与旧实例 `instanceId`。管理页面据此确认新实例已经接管再跳转；只读的 `GET /api/status` 放行同主机的其他端口并返回可读 CORS 应答，其余接口保持同源要求。
+- `GET /api/settings` 的 `status.remote` 区分已保存开关 `allowed` 与当前监听策略 `bound`，并返回 `internalAddress`、`publicAddress` 和实际 `port`；每类地址至多一个，未检测到时为 null。虚拟网卡和保留 IPv4 不作为公网入口，NAT 出口不从本机网卡推断。令牌始终通过 `secretKey/accessToken` 密钥事务保存，响应仅返回是否设置及掩码。
 - 外观设置中的二级表面透明度开关仅影响 Modal、选择器、时间/日期弹层和同类浮层；关闭后这些表面使用不透明背景，一级页面表面保持原有外观设置。
 
 ## 维护规则

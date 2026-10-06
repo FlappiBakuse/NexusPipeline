@@ -360,6 +360,7 @@ internal sealed class Bootstrap
 
     private bool LaunchRestartChild(string handoffId)
     {
+        _runtime.Get<NexusPipeline.Host.Desktop.IDesktopHost>().PrepareHostRestartAsync(handoffId).GetAwaiter().GetResult();
         string exePath = Environment.ProcessPath ?? "";
         if (string.IsNullOrWhiteSpace(exePath))
         {
@@ -430,6 +431,7 @@ internal sealed class Bootstrap
         // waited for active runs/edit sessions through CanStopServices; force is
         // reserved for a failed startup/Dispose path where no public work may leak.
         Guarded("插件自动更新停止", _pluginAutoUpdateService.Stop);
+        Guarded("桌面停止", () => _runtime.Get<NexusPipeline.Host.Desktop.IDesktopHost>().StopForHostExitAsync().GetAwaiter().GetResult());
         Guarded("更新自动化停止", _updates.Stop);
         Guarded("调度器停止", _runtime.Scheduler.Stop);
         Guarded("配置恢复重试停止", ConfigRecoveryService.StopRecoveryRetry);

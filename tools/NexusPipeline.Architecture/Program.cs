@@ -13,9 +13,10 @@ internal static class Program
 
     private static async Task<int> Main(string[] args)
     {
-        if (args.Length != 3 || args[1] != "--report")
+        if (args.Length is not (3 or 7) || args[1] != "--report"
+            || args.Length == 7 && (args[3] != "--frontend-props" || args[5] != "--build-identity"))
         {
-            Console.Error.WriteLine("Usage: NexusPipeline.Architecture <Host root> --report <external JSON path>");
+            Console.Error.WriteLine("Usage: NexusPipeline.Architecture <Host root> --report <external JSON path> [--frontend-props <frozen props> --build-identity <frozen identity>]");
             return 2;
         }
         var root = Path.GetFullPath(args[0]);
@@ -24,12 +25,18 @@ internal static class Program
         var violations = new List<Violation>();
         foreach (var mode in new[] { "production", "test-host" })
         {
-            using var workspace = MSBuildWorkspace.Create(new Dictionary<string, string>
+            var properties = new Dictionary<string, string>
             {
                 ["Configuration"] = "Release",
                 ["RuntimeIdentifier"] = "win-x64",
                 ["NexusTestHost"] = mode == "test-host" ? "true" : "false",
-            });
+            };
+            if (args.Length == 7)
+            {
+                properties["NexusFrontendProps"] = Path.GetFullPath(args[4]);
+                properties["NexusBuildIdentityPath"] = Path.GetFullPath(args[6]);
+            }
+            using var workspace = MSBuildWorkspace.Create(properties);
             var project = await workspace.OpenProjectAsync(Path.Combine(root, "src", "NexusPipeline.csproj"));
             var compilation = await project.GetCompilationAsync()
                 ?? throw new InvalidOperationException($"Compilation unavailable: {mode}");

@@ -10,6 +10,7 @@ import { stageWorkspace } from "./support/workspace.mjs";
 import { runCore } from "./support/core.mjs";
 import { runScopeCommand } from "./scope-cli.mjs";
 import { readRegistry } from "./scope-plan.mjs";
+import {workingTreeSha} from "./control-inputs.mjs";
 import { loadBatch, saveBatch } from "./batch-runner.mjs";
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -152,31 +153,60 @@ async function buildFrontendBundle({typechecked=false}={}) {
   return 0;
 }
 
-/** 发布 asInvoker Test Host：nexus-pipeline.exe 与 wwwroot 放在同一次运行目录内。 */
-let publishedTestHost=false, publishedFrontend=false;
-async function publishTestHost({ withFrontend = true } = {}) {
+/** 发布带内嵌前端的 asInvoker Test Host。 */
+let publishedTestHost=false, publishedFrontend=false, publishedApplication=false;
+let applicationInputs=null;
+async function prepareApplicationInputs() {
+  if(applicationInputs) return 0;
+  const built=await buildFrontendBundle(); if(built) return built;
+  const partner=process.env.NEXUS_PARTNER_ROOT;
+  if(!partner||!path.isAbsolute(partner)) throw new Error("Full application build requires NEXUS_PARTNER_ROOT");
+  const git=(root,ref)=>execFileSync("git",["-C",root,"rev-parse",ref],{encoding:"utf8"}).trim();
+  const output=path.join(runRoot,"application-inputs");
+  const args=["tools/application_build.py","--root",executionRoot,"--output",output,
+    "--source-sha",git(projectRoot,"HEAD"),"--source-tree-sha",workingTreeSha(projectRoot),
+    "--partner-sha",git(partner,"HEAD"),"--workflow-sha",git(projectRoot,"HEAD")];
+  if(process.env.NEXUS_ELECTRON_ARCHIVE) args.push("--electron-archive",process.env.NEXUS_ELECTRON_ARCHIVE);
+  const code=await run(pythonCommand,args); if(code) return code;
+  applicationInputs=JSON.parse(fs.readFileSync(path.join(output,"application-inputs.json")));
+  return 0;
+}
+async function assembleApplication(directory) {
+  fs.cpSync(applicationInputs.desktopBundle,path.join(directory,"resources/desktop"),{recursive:true});
+  fs.copyFileSync(path.join(executionRoot,"README.md"),path.join(directory,"README.md"));
+  return run(pythonCommand,["tools/application_payload.py","--directory",directory,"--identity",applicationInputs.identity,"--root",executionRoot]);
+}
+async function publishTestHost({ withFrontend = true, withApplication = false } = {}) {
   if (publishedTestHost) {
-    if(withFrontend&&!publishedFrontend) {
-      fs.cpSync(path.join(frontendDir,"dist"),path.join(testHostDir,"wwwroot"),{recursive:true});publishedFrontend=true;
-    }
-    return 0;
+    if((!withFrontend||publishedFrontend)&&(!withApplication||publishedApplication)) return 0;
   }
   step("发布 asInvoker Test Host");
+  const embeddedInputs=[];
+  if(withApplication) {
+    const prepared=await prepareApplicationInputs(); if(prepared) return prepared;
+    withFrontend=true;
+    embeddedInputs.push(`-p:NexusFrontendProps=${applicationInputs.frontendProps}`,`-p:NexusBuildIdentityPath=${applicationInputs.identity}`);
+  } else if(withFrontend) {
+    const embedding=path.join(runRoot,"frontend-embedding");
+    const embedded=await run(pythonCommand,["tools/embed_frontend.py","--source",path.join(frontendDir,"dist"),"--output",embedding]);
+    if(embedded) return embedded;
+    embeddedInputs.push(`-p:NexusFrontendProps=${path.join(embedding,"embedded-frontend.props")}`);
+  }
   fs.rmSync(testHostDir, { recursive: true, force: true, maxRetries: 120, retryDelay: 250 });
   fs.mkdirSync(testHostDir, { recursive: true });
   const code = await run("dotnet", [
     "publish", "src\\NexusPipeline.csproj", "-c", "Release", "-r", "win-x64", "--self-contained", "false",
     "-p:PublishSingleFile=true", "-p:DebugType=none", "-p:DebugSymbols=false", "-p:NexusTestHost=true",
     "-p:UseSharedCompilation=false", "--disable-build-servers",
+    ...embeddedInputs,
     "-o", testHostDir, "--nologo",
   ], { timeoutMs: 20 * 60 * 1000 });
   if (code !== 0) return code;
-  const manifestCode = await verifyManifest(path.join(testHostDir, "nexus-pipeline.exe"), "asInvoker");
+  const manifestCode = await verifyManifest(path.join(testHostDir, "NexusPipeline.exe"), "asInvoker");
   if (manifestCode !== 0) return manifestCode;
-  if (withFrontend) fs.cpSync(path.join(frontendDir, "dist"), path.join(testHostDir, "wwwroot"), { recursive: true });
-  else fs.mkdirSync(path.join(testHostDir, "wwwroot"), { recursive: true });
   fs.mkdirSync(path.join(testHostDir, "plugins"), { recursive: true });
-  publishedTestHost=true;publishedFrontend=withFrontend;
+  if(withApplication) { const assembled=await assembleApplication(testHostDir);if(assembled) return assembled; }
+  publishedTestHost=true;publishedFrontend=withFrontend;publishedApplication=withApplication;
   return 0;
 }
 
@@ -266,7 +296,7 @@ async function runBatch() {
       } else {
         if (unit.id === "host.integration.restart-update"
           && batchContext.batch.units.some(item => item.id === "host.integration.store")) {
-          const prepared = await publishTestHost({withFrontend:false});
+          const prepared = await publishTestHost({withApplication:true});
           if (prepared) throw Object.assign(new Error("Test Host preparation failed"), {exitCode:prepared});
           const storeRunId = `${batchParentId}-host-integration-store`;
           const storeRunRoot = resolveTestRunRoot(projectRoot, storeRunId);
@@ -313,7 +343,7 @@ async function runBatch() {
         for(const entry of fs.readdirSync(source,{withFileTypes:true})) {
           const from=path.join(source,entry.name),to=path.join(target,entry.name);
           if(entry.isSymbolicLink()) throw new Error("Linked native output");
-          if(entry.isDirectory()&&!["test-host","architecture-bin","architecture-obj","runtime","wwwroot","plugins"].includes(entry.name)) copy(from,to);
+          if(entry.isDirectory()&&!["test-host","architecture-bin","architecture-obj","runtime","resources","software","client-fixture","application-inputs","plugins"].includes(entry.name)) copy(from,to);
           else if(entry.isFile()&&/\.(json|trx|tap|log|txt)$/.test(entry.name)) {
             fs.copyFileSync(from,to);result.rawEvidence.push(path.relative(batchParentRoot,to).replaceAll("\\","/"));
           }
@@ -544,6 +574,8 @@ async function runGate(id) {
   if (id === "host.installer-localization")
     return run(pythonCommand, ["tests/support/unittest-runner.py", "--suite", "installer", "--report", path.join(runRoot, "python-installer.json")]);
   if (id === "host.architecture.backend") {
+    const prepared = await prepareApplicationInputs();
+    if (prepared) return prepared;
     const project = "tools/NexusPipeline.Architecture/NexusPipeline.Architecture.csproj";
     const output = path.join(runRoot, "architecture-bin") + path.sep;
     const intermediate = path.join(runRoot, "architecture-obj") + path.sep;
@@ -557,7 +589,8 @@ async function runGate(id) {
       if (code) return code;
     }
     const checker = path.join(output, "Release", "net10.0", "NexusPipeline.Architecture.dll");
-    code = await run("dotnet", [checker, executionRoot, "--report", path.join(runRoot, "architecture-backend.json")]);
+    code = await run("dotnet", [checker, executionRoot, "--report", path.join(runRoot, "architecture-backend.json"),
+      "--frontend-props",applicationInputs.frontendProps,"--build-identity",applicationInputs.identity]);
     if (code) return code;
     return run(pythonCommand, ["tests/architecture-fixture.py", checker]);
   }
@@ -569,9 +602,21 @@ async function runGate(id) {
       { cwd: frontendDir });
     return checked || run(process.execPath, ["--test", "scripts/architecture-check.test.mjs"], { cwd: frontendDir });
   }
+  if (id === "host.integration.desktop") {
+    let code=await publishTestHost({withApplication:true});if(code)return code;
+    code=await run(pythonCommand,["tests/desktop/application-payload.py","--application",testHostDir,"--output",path.join(runRoot,"readonly-payload")]);if(code)return code;
+    const directory=path.join(runRoot,"desktop-observation");
+    code=await run(pythonCommand,["tests/desktop/prepare.py","--application",testHostDir,"--inputs",path.dirname(applicationInputs.identity),"--output",directory]);if(code)return code;
+    const native=path.join(runRoot,"desktop-native.tap");
+    code=await run(process.execPath,["--test","--test-reporter=tap",`--test-reporter-destination=${native}`,"out/tests/*.test.js"],{cwd:path.join(path.dirname(applicationInputs.identity),"desktop/source")});if(code)return code;
+    const tap=fs.readFileSync(native,"utf8");
+    for(const [counter,count] of Object.entries({tests:4,pass:4,fail:0,cancelled:0,skipped:0,todo:0}))
+      if(!new RegExp(`^# ${counter} ${count}\\r?$`,"m").test(tap))return 4;
+    return run(process.execPath,["tests/desktop/run-client.mjs",directory]);
+  }
   if (id === "host.integration.store") return runStoreDiagnostic();
   if (id === "host.integration.restart-update") {
-    const code = await publishTestHost({ withFrontend: false });
+    const code = await publishTestHost({ withApplication: true });
     return code || runSystemSuite({ file: "tests/system/runtime-smoke.mjs", files: ["tests/system/runtime-smoke.mjs", "tests/system/update-transaction.mjs"], runtimeName: "runtime" });
   }
   const finite = {
@@ -594,7 +639,7 @@ async function runRelease() {
     new Budget("生产构建准备", 20 * 60 * 1000));
   executionRoot = workspace.directory;
   frontendDir = path.join(executionRoot, "frontend");
-  let code = await buildFrontendBundle();
+  let code = await prepareApplicationInputs();
   if (code !== 0) return code;
   const releaseDir = path.join(runRoot, "production");
   if (fs.existsSync(releaseDir)) throw new Error("Production output already exists");
@@ -602,14 +647,14 @@ async function runRelease() {
   code = await run("dotnet", [
     "publish", "src\\NexusPipeline.csproj", "-c", "Release", "-r", "win-x64", "--self-contained", "false",
     "-p:PublishSingleFile=true", "-p:DebugType=none", "-p:DebugSymbols=false", "-p:NexusTestHost=false",
+    `-p:NexusFrontendProps=${applicationInputs.frontendProps}`,`-p:NexusBuildIdentityPath=${applicationInputs.identity}`,
     "-p:UseSharedCompilation=false", "--disable-build-servers", "-o", releaseDir, "--nologo",
   ], { timeoutMs: 20 * 60 * 1000 });
   if (code !== 0) return code;
-  fs.cpSync(path.join(frontendDir, "dist"), path.join(releaseDir, "wwwroot"), { recursive: true });
-  fs.mkdirSync(path.join(releaseDir, "plugins"), { recursive: true });
-  fs.copyFileSync(path.join(executionRoot, "README.md"), path.join(releaseDir, "README.md"));
+  code=await assembleApplication(releaseDir);if(code) return code;
+  fs.mkdirSync(path.join(releaseDir,"plugins"),{recursive:true});
   console.error(`[生产构建] ${releaseDir}`);
-  return verifyManifest(path.join(releaseDir, "nexus-pipeline.exe"), "requireAdministrator");
+  return verifyManifest(path.join(releaseDir, "NexusPipeline.exe"), "requireAdministrator");
 }
 
 function printUsage() {
@@ -657,7 +702,7 @@ try {
   exitCode = 1;
 } finally {
   if (["integration", "diagnostic"].includes(command.toLowerCase())
-      || ["host.integration.store", "host.integration.restart-update"].includes(gateId)) {
+      || ["host.integration.store", "host.integration.restart-update", "host.integration.desktop"].includes(gateId)) {
     if (!fs.existsSync(runRoot)) fs.mkdirSync(runRoot, { recursive: true });
     const cleanupMs = Math.min(8_000, invocationBudget.remainingMs({ cleanup: true }) - 1_000);
     if (cleanupMs <= 0) {

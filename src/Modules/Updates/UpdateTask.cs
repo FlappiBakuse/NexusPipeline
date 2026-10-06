@@ -20,6 +20,13 @@ internal sealed record UpdateTask(string Mode, string Version, string StagedDir,
     public ProcessIdentity? WorkerIdentity { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? RestartHandoffId { get; init; }
+    public int PayloadSchemaVersion { get; init; } = 1;
+    public UpdatePayloadIdentity? TargetPayload { get; init; }
+    public UpdatePayloadIdentity? PreviousPayload { get; init; }
+    public string? PackageSha256 { get; init; }
+    public string PackageSource { get; init; } = "download";
+    public bool DesktopStopped { get; init; }
+    public int SwappedAssetCount { get; init; }
 
     internal static UpdateTask Create(string mode, string version, string staging) =>
         new(mode, version, staging, mode == "defer" ? UpdatePhase.Deferred : UpdatePhase.ApplyRequested, DateTimeOffset.UtcNow);
@@ -43,7 +50,8 @@ internal sealed record UpdateTask(string Mode, string Version, string StagedDir,
                 throw new InvalidDataException("invalid update journal file");
             using var document = JsonDocument.Parse(File.ReadAllText(file));
             CheckMembers(document.RootElement);
-            foreach (string required in new[] { nameof(Mode), nameof(Version), nameof(StagedDir), nameof(Phase), nameof(CreatedAt) })
+            foreach (string required in new[] { nameof(Mode), nameof(Version), nameof(StagedDir), nameof(Phase), nameof(CreatedAt),
+                nameof(PayloadSchemaVersion), nameof(TargetPayload), nameof(PreviousPayload), nameof(PackageSha256), nameof(PackageSource), nameof(DesktopStopped), nameof(SwappedAssetCount) })
                 if (!document.RootElement.TryGetProperty(required, out _)) throw new InvalidDataException("missing update journal field: " + required);
             var task = JsonSerializer.Deserialize<UpdateTask>(document.RootElement, CurrentOptions)
                 ?? throw new InvalidDataException("null update journal");
@@ -82,6 +90,15 @@ internal sealed record UpdateTask(string Mode, string Version, string StagedDir,
             || Mode != (Phase == UpdatePhase.Deferred ? "defer" : Phase == UpdatePhase.Committed ? "completed" : "apply"))
             throw new InvalidDataException("unsupported_update_journal: invalid phase, time or identity");
         bool frozen = Phase is not (UpdatePhase.Deferred or UpdatePhase.ApplyRequested);
+        static bool Hash(string? value) => value is { Length: 64 } && value.All(c => char.IsAsciiHexDigit(c) && !char.IsUpper(c));
+        static bool Payload(UpdatePayloadIdentity? value) => value is not null && Hash(value.ManifestSha256) && Hash(value.BuildId)
+            && Hash(value.FrontendHash) && value.Generation == InstallationGeneration.Id;
+        if (PayloadSchemaVersion != 1 || !Payload(TargetPayload) || !Hash(PackageSha256) || PackageSource is not ("download" or "installer")
+            || frozen && (!Payload(PreviousPayload) || !DesktopStopped)
+            || SwappedAssetCount is < 0 or > 4
+            || Phase is (UpdatePhase.Deferred or UpdatePhase.ApplyRequested or UpdatePhase.BackupPreparing or UpdatePhase.BackupReady) && SwappedAssetCount != 0
+            || Phase is (UpdatePhase.SwapReady or UpdatePhase.AwaitingStartup or UpdatePhase.Committed) && SwappedAssetCount != 4)
+            throw new InvalidDataException("unsupported_update_journal: application identity missing");
         if ((TransactionId is null) != (TargetImageHash is null)
             || TransactionId is not null && (!Guid.TryParseExact(TransactionId, "N", out _)
                 || TargetImageHash is not { Length: 64 } || TargetImageHash.Any(ch => !Uri.IsHexDigit(ch)))
@@ -100,6 +117,10 @@ internal sealed record UpdateTask(string Mode, string Version, string StagedDir,
             || previous.TransactionId is not null && previous.TransactionId != TransactionId
             || previous.TargetImageHash is not null && previous.TargetImageHash != TargetImageHash))
             throw new InvalidDataException("update_journal_identity_changed");
+        if (previous is not null && (previous.TargetPayload != TargetPayload || previous.PackageSha256 != PackageSha256 || previous.PackageSource != PackageSource
+            || previous.PreviousPayload is not null && previous.PreviousPayload != PreviousPayload
+            || SwappedAssetCount < previous.SwappedAssetCount))
+            throw new InvalidDataException("update_journal_payload_changed");
         Directory.CreateDirectory(Path.GetDirectoryName(file)!);
         JsonUtil.WriteAtomic(file, JsonSerializer.Serialize(this, JsonOpts.Indented));
     }

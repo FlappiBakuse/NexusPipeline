@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
- * Frontend API 1.5 外部契约：精确版本匹配、host.* 能力面（含二进制 api.blob/api.upload）、
+ * Frontend API 1.6 外部契约：精确版本匹配、host.* 能力面（含二进制 api.blob/api.upload）、
  * 18 个公开 slot 白名单、renderer surface context 与清理、生命周期订阅与释放、dispose 后无残留注册。
  *
  * 宿主平台依赖经 host-adapter 注入，测试只替换该边界。
@@ -16,6 +16,7 @@ const appearanceCalls: string[] = [];
 let apiResponder: (method: string, path: string, body: unknown) => unknown = () => null;
 
 vi.mock("./host-adapter", () => ({
+  getCapabilities: async () => ({ schemaVersion: 1, connectionKind: "local", operations: { general: { allowed: true, denyReason: null }, hostFilePicker: { allowed: true, denyReason: null }, nativeConfigEditor: { allowed: true, denyReason: null } } }),
   api: async (method: string, path: string, body: unknown) => {
     apiCalls.push({ method, path, body });
     return apiResponder(method, path, body);
@@ -125,7 +126,7 @@ function installFixtureNav() {
   document.body.innerHTML = '<nav data-plugin-anchor="shell.nav"></nav>';
 }
 
-describe("Frontend API 1.5 contract", () => {
+describe("Frontend API 1.6 contract", () => {
   beforeEach(() => {
     apiCalls.length = 0;
     toasts.length = 0;
@@ -138,12 +139,12 @@ describe("Frontend API 1.5 contract", () => {
     resetPluginRuntimeForTests();
   });
 
-  it("accepts only the exact 1.5 frontend API version", () => {
-    expect(FRONTEND_API_VERSION).toBe("1.5");
-    expect(verifyPluginApiVersion("1.5")).toBe(true);
+  it("accepts only the exact 1.6 frontend API version", () => {
+    expect(FRONTEND_API_VERSION).toBe("1.6");
+    expect(verifyPluginApiVersion("1.6")).toBe(true);
     expect(verifyPluginApiVersion("1.4")).toBe(false);
-    expect(verifyPluginApiVersion("1.6")).toBe(false);
-    expect(verifyPluginApiVersion("1.5.0")).toBe(false);
+    expect(verifyPluginApiVersion("1.5")).toBe(false);
+    expect(verifyPluginApiVersion("1.6.0")).toBe(false);
     expect(verifyPluginApiVersion("")).toBe(false);
     expect(verifyPluginApiVersion(undefined)).toBe(false);
   });
@@ -228,15 +229,20 @@ describe("Frontend API 1.5 contract", () => {
   it("registers routes per plugin namespace and rejects duplicates", async () => {
     const descriptor = descriptorFixture();
     const host = createPluginHost(descriptor) as Host;
-    const handler = vi.fn();
+    const cleanup = vi.fn();
+    const handler = vi.fn(() => cleanup);
     const registration = host.routes.register("reports/daily", handler);
     expect(typeof registration.dispose).toBe("function");
 
     const segments = ["plugin", descriptor.name, "reports", "daily"];
     const resolved = resolvePluginRoute(segments);
     expect(typeof resolved).toBe("function");
-    await resolved!(1, segments);
-    expect(handler).toHaveBeenCalledWith(1, segments, undefined);
+    const controller = new AbortController();
+    const element = document.createElement("div");
+    await resolved!({ element, token: 1, segments, signal: controller.signal });
+    expect(handler).toHaveBeenCalledWith(expect.objectContaining({ element, token: 1, segments }), host);
+    controller.abort();
+    expect(cleanup).toHaveBeenCalledTimes(1);
 
     expect(resolvePluginRoute(["plugin", "other-plugin", "reports", "daily"])).toBeNull();
     expect(resolvePluginRoute(["plugin", descriptor.name, "reports"])).toBeNull();
@@ -251,6 +257,33 @@ describe("Frontend API 1.5 contract", () => {
     const host = createPluginHost(descriptorFixture()) as Host;
     expect(() => host.routes.register("", () => null)).toThrow();
     expect(() => host.routes.register("state", "not-a-function")).toThrow();
+  });
+
+  it("aborts a route before cleaning it exactly once when its registration is disposed", async () => {
+    const host = createPluginHost(descriptorFixture());
+    let signal!: AbortSignal;
+    const cleanup = vi.fn(() => expect(signal.aborted).toBe(true));
+    const registration = host.routes.register("surface", (surface: { signal: AbortSignal }) => { signal = surface.signal; return cleanup; });
+    const handler = resolvePluginRoute(["plugin", host.plugin.name, "surface"]);
+    const controller = new AbortController();
+    await handler!({ element: document.createElement("main"), token: 1, segments: ["surface"], signal: controller.signal });
+    registration.dispose(); controller.abort(); registration.dispose();
+    expect(cleanup).toHaveBeenCalledTimes(1);
+  });
+
+  it("cleans a late asynchronous route result after navigation and rejects a missing cleanup", async () => {
+    const host = createPluginHost(descriptorFixture());
+    let finish!: (cleanup: () => void) => void;
+    const cleanup = vi.fn();
+    host.routes.register("late", () => new Promise(resolve => { finish = resolve; }));
+    const controller = new AbortController();
+    const handler = resolvePluginRoute(["plugin", host.plugin.name, "late"]);
+    const pending = handler!({ element: document.createElement("main"), token: 1, segments: ["late"], signal: controller.signal });
+    controller.abort(); finish(cleanup); await pending;
+    expect(cleanup).toHaveBeenCalledTimes(1);
+    host.routes.register("invalid", () => undefined);
+    const invalid = resolvePluginRoute(["plugin", host.plugin.name, "invalid"]);
+    await expect(invalid!({ element: document.createElement("main"), token: 2, segments: ["invalid"], signal: new AbortController().signal })).rejects.toThrow("plugin_route_cleanup_required");
   });
 
   it("registers navigation items, syncs active state, and removes them on dispose", () => {

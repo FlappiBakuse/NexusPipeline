@@ -638,7 +638,7 @@
 
 - 设置页新增无代理、使用系统设置和自定义 HTTP/HTTPS 代理三档模式；插件仓库、插件包、宿主更新和 Webhook 使用统一外部 HTTP 出口。
 - 代理密码使用 DPAPI 保存，设置 API 与界面只显示脱敏占位符；SMTP、Control API、MCP、本机地址和插件子进程保持独立网络边界。
-- 宿主更新事务只交换 `nexus-pipeline.exe` 与 `wwwroot/`，发布包中的 `plugins/.nxp-root` 用于旧版本更新器兼容。
+- 宿主更新事务只交换 `NexusPipeline.exe` 与 `wwwroot/`，发布包中的 `plugins/.nxp-root` 用于旧版本更新器兼容。
 
 ### 测试与文档
 
@@ -684,7 +684,7 @@
 
 ### MCP Agent 控制面
 
-- 在同一 `nexus-pipeline.exe` 内嵌官方 `ModelContextProtocol.AspNetCore 2.2.0` Streamable HTTP MCP Server；默认关闭，启用后使用独立固定端口 `http://127.0.0.1:<McpPort>/mcp`，端口冲突不漂移且不影响 Web/Control API。
+- 在同一 `NexusPipeline.exe` 内嵌官方 `ModelContextProtocol.AspNetCore 2.2.0` Streamable HTTP MCP Server；默认关闭，启用后使用独立固定端口 `http://127.0.0.1:<McpPort>/mcp`，端口冲突不漂移且不影响 Web/Control API。
 - 新增 `McpEnabled`、`McpPort`、`McpAllowDestructiveTools` 设置，并在设置页提供 MCP Agent 配置入口；轻量模式保留本机 Control API，同时可独立启用 MCP。
 - 新增类型化状态、脚本、用户/绑定、队列、运行、历史、插件、设置、更新、维护和执行工具；所有写入复用 Application Commands/核心服务，长运行任务立即返回 `runId`。
 - 破坏性工具按设置条件注册，覆盖删除、遗留数据清理、secret、插件启停、服务重启和应用更新；队列完成系统操作与安全设置绕过均通过行为级策略拦截。
@@ -756,7 +756,7 @@
 ### 内建更新（设置 → 更新）
 
 - 新增更新服务：检查（GitHub Releases 兼容源，支持渠道 stable/prerelease 与镜像源）、下载（https 白名单 + 200MB 上限 + SHA256 强校验 + zip 条目防穿越/布局归一）、「立即更新」与「下次启动更新」。
-- 更新只替换 `nexus-pipeline.exe`、`wwwroot/`、`plugins/`（保留包内不存在的用户自加插件目录）；`config/`、`data/`、`history/`、`logs/` 一律不写入。
+- 更新只替换 `NexusPipeline.exe`、`wwwroot/`、`plugins/`（保留包内不存在的用户自加插件目录）；`config/`、`data/`、`history/`、`logs/` 一律不写入。
 - 应用走独立 `apply-update` 进程：等待宿主退出 → 备份旧版本 → 交换文件 → 重新拉起宿主；失败自动回滚、启动自愈（完成清理 / 失败回滚 / defer 自动应用三重保障）。
 - 应用前与「退出/重启」同一安全门禁（无活动运行 / 无编辑会话 / 无待执行系统操作），busy 时前端提供「下次启动更新」。
 - 新增 API：`/api/update/check|status|download|apply|cancel`；CLI「设置 → 更新」子菜单复用常驻服务 HTTP 通道；设置新增 `UpdateCheckEnabled` / `UpdateChannel` / `UpdateSourceUrl`。
@@ -970,7 +970,7 @@
 
 ### 验证
 
-- 管理员构建通过：`release/nexus-pipeline.exe`（版本 0.9.2），仅保留基线已有的 3 条 nullable 警告。
+- 管理员构建通过：`release/NexusPipeline.exe`（版本 0.9.2），仅保留基线已有的 3 条 nullable 警告。
 - 单元测试通过：178/178。
 - 加速档全量 Playwright：87/87；`judge-scenarios` 150/150；`chaos-queue` 166/166。
 - 发布前真实计时档：Playwright 87/87；`judge-scenarios` 150/150；`chaos-queue` 166/166。
@@ -990,7 +990,7 @@
 
 ### 验证
 
-- 管理员构建通过：`release/nexus-pipeline.exe`（版本 0.9.1）。
+- 管理员构建通过：`release/NexusPipeline.exe`（版本 0.9.1）。
 - 单元测试通过：163/163。
 - 加速档全量 Playwright：86 通过、1 个 CI 预期跳过；`judge-scenarios` 150/150；`chaos-queue` 166/166。
 - 发布前真实计时档：Playwright 87/87（约 9.0 分钟）；`judge-scenarios` 150/150；`chaos-queue` 166/166。
@@ -1009,7 +1009,7 @@
 
 ### 验证
 
-- 管理员构建通过：`release/nexus-pipeline.exe`（版本 0.9.0）。
+- 管理员构建通过：`release/NexusPipeline.exe`（版本 0.9.0）。
 - 单元测试通过：158/158。
 - 加速档全量 Playwright：86 通过、1 个 CI 预期跳过；`judge-scenarios` 150/150；`chaos-queue` 166/166。
 - 发布前真实计时档：Playwright 86 通过、1 个 CI 预期跳过（约 9.0 分钟）；`judge-scenarios` 150/150；`chaos-queue` 166/166。
@@ -1030,7 +1030,7 @@
 
 ### 验证
 
-- 管理员构建通过：`release/nexus-pipeline.exe`（版本 0.8.7，内置品牌图标）。
+- 管理员构建通过：`release/NexusPipeline.exe`（版本 0.8.7，内置品牌图标）。
 - 单元测试通过：148/148。
 - 加速档全量 Playwright 回归通过：86/86；加速档专项：`judge-scenarios` 150/150、`chaos-queue` 166/166。
 - 发布前真实计时档全量回归：Playwright 86/86（约 8.9 分钟）、`judge-scenarios` 150/150、`chaos-queue` 166/166。
@@ -1048,7 +1048,7 @@
 
 ### 验证
 
-- 管理员构建通过：`release/nexus-pipeline.exe`。
+- 管理员构建通过：`release/NexusPipeline.exe`。
 - 单元测试通过：148/148。
 - 加速档全量 Playwright 回归通过：83/83；真实计时档全量 Playwright 回归通过：83/83。
 - 真实计时档 `judge-scenarios` 通过：150/150；`chaos-queue` 通过：166/166。
@@ -1066,7 +1066,7 @@
 
 ### 验证
 
-- 管理员构建通过：`release/nexus-pipeline.exe`。
+- 管理员构建通过：`release/NexusPipeline.exe`。
 - 单元测试通过：148/148。
 - 加速档全量 Playwright 回归通过：83/83；验收修正定向回归通过：6/6。
 - 发布前真实计时档通过：Playwright 83/83（约 9.0 分钟）、judge 150/150、chaos 166/166。
@@ -1578,7 +1578,7 @@
 
 ### 变更
 
-- **设置页「重启服务」**：常驻服务模式可在 Web 界面一键重启（`POST /api/settings/restart`）——先响应 `{ ok, newPort }` 再由后台拉起 `nexus-pipeline.exe restart` 新进程（等待旧进程退出并接管，最多 30 秒）后退出；前端确认卡片 + 「重启中」锁定弹窗 + 轮询 `/api/status` 恢复后自动刷新（端口漂移自动跳转，含 +1 补偿）；校验：轻量模式 400（重启后无 Web）、web 仅网页模式 400、有运行任务 409。保存设置不自动重启；端口改动未保存时前端提示先保存。
+- **设置页「重启服务」**：常驻服务模式可在 Web 界面一键重启（`POST /api/settings/restart`）——先响应 `{ ok, newPort }` 再由后台拉起 `NexusPipeline.exe restart` 新进程（等待旧进程退出并接管，最多 30 秒）后退出；前端确认卡片 + 「重启中」锁定弹窗 + 轮询 `/api/status` 恢复后自动刷新（端口漂移自动跳转，含 +1 补偿）；校验：轻量模式 400（重启后无 Web）、web 仅网页模式 400、有运行任务 409。保存设置不自动重启；端口改动未保存时前端提示先保存。
 - **单实例互斥体加固（服务强杀恢复）**：`Program.AcquireSingleInstanceMutex` 捕获互斥体被遗弃（abandoned）场景——强杀服务后首次重启不再抛 `AbandonedMutexException` 崩溃退出（此前需启动两次）；`restart` 分支轮询等待旧进程释放互斥体时同样处理遗弃状态。
 - **日志监控 fresh 判定收紧（判定输入防污染）**：`RunSession` 在尝试开始前记录日志文件快照（存在性 + 长度），启动前不存在的文件才从头读；已存在的残留日志从「尝试开始时长度」续读——残留被启动后追加写刷新 `LastWriteTime` 不再误判从头读，旧内容不再进入判断脚本/关键字判定输入（`LogMonitor` 新增显式初始读取位置；轮换/替换/截断语义不变）。
 - **脚本运行防重入（原子化）**：`DispatchCenter.Register` 锁内按脚本实例查重——并发触发（如双击）不再通过进程检测窗口双开会话，后者返回「正在运行」错误。

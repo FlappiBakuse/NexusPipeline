@@ -1,0 +1,16 @@
+{
+  "name": "nexuspipeline-desktop",
+  "version": "0.17.0",
+  "private": true,
+  "main": "main/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "node --test out/tests/*.test.js"
+  },
+  "dependencies": { "koffi": "3.3.2" },
+  "devDependencies": {
+    "@electron/asar": "4.3.1",
+    "electron": "44.5.1",
+    "typescript": "5.9.3"
+  }
+}

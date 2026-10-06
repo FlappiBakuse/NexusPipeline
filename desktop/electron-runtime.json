@@ -1,0 +1,8 @@
+{
+  "version": "44.5.1",
+  "tag": "v44.5.1",
+  "sourceSha": "19c601167d4ae75989938416c18ed81eb21c6020",
+  "archive": "electron-v44.5.1-win32-x64.zip",
+  "archiveSha256": "9b382492dcfee91f8f9e92c91f7972550a1b95d2299cac72279dab33a600d7db",
+  "url": "https://github.com/electron/electron/releases/download/v44.5.1/electron-v44.5.1-win32-x64.zip"
+}

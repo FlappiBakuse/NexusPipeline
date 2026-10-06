@@ -96,7 +96,7 @@ internal class TrayApp : ApplicationContext
         int port = WebServer.Current?.Port
             ?? CliTransport.FindServicePort(_runtime.Settings.WebPort)
             ?? _runtime.Settings.WebPort;
-        OpenWeb(port);
+        _runtime.Get<NexusPipeline.Host.Desktop.IDesktopHost>().ShowAsync("tray").GetAwaiter().GetResult();
     }
 
     public static void OpenWeb()
@@ -131,7 +131,7 @@ internal class TrayApp : ApplicationContext
     {
         try
         {
-            string exe = Process.GetCurrentProcess().MainModule?.FileName ?? "nexus-pipeline.exe";
+            string exe = Process.GetCurrentProcess().MainModule?.FileName ?? "NexusPipeline.exe";
             Process.Start(new ProcessStartInfo("cmd.exe", $"/c \"\"{exe}\" {args}\"")
             {
                 UseShellExecute = true,

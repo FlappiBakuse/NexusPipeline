@@ -25,7 +25,7 @@ internal static class ApplicationHost
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool AttachConsole(int processId);
 
-    /// <summary>当前进程是否为「仅网页模式」（nexus-pipeline.exe web）。</summary>
+    /// <summary>当前进程是否为「仅网页模式」（NexusPipeline.exe web）。</summary>
     internal static bool IsWebOnly { get; set; }
 
     /// <summary>仅网页模式作为无人值守重启子进程运行时，不因继承到的 stdin EOF 退出。</summary>
@@ -34,6 +34,8 @@ internal static class ApplicationHost
     [STAThread]
     public static int Run(string[] args)
     {
+        try { ApplicationExecutionRoot.Configure(args); }
+        catch (Exception error) { Console.Error.WriteLine(error.Message); return 2; }
         AppDomain.CurrentDomain.UnhandledException += (_, e) => Logger.Fatal($"未处理异常：{e.ExceptionObject}");
         Application.ThreadException += (_, e) => Logger.Fatal($"UI 线程异常：{e.Exception}");
         bool stdoutRedirected = Console.IsOutputRedirected;
@@ -108,14 +110,14 @@ internal static class ApplicationHost
         {
             if (args.Length == 0)
             {
-                StartupPipeline.RunService(runtime);
+                StartupPipeline.RunService(runtime, NexusPipeline.Host.Desktop.DesktopLaunchOptions.Parse(args));
                 return 0;
             }
 
             switch (args[0].ToLowerInvariant())
             {
                 case "service":
-                    StartupPipeline.RunService(runtime);
+                    StartupPipeline.RunService(runtime, NexusPipeline.Host.Desktop.DesktopLaunchOptions.Parse(args));
                     return 0;
                 case "manage":
                     NexusPipeline.ControlPlane.Cli.ControlMenu.Show();
@@ -210,7 +212,7 @@ internal static class ApplicationHost
         {
             Console.WriteLine(CliText.Get(
                 "apply.usage",
-                "用法：nexus-pipeline.exe apply-update --staged <暂存目录>"));
+                "用法：NexusPipeline.exe apply-update --staged <暂存目录>"));
             return 1;
         }
         try
@@ -284,8 +286,8 @@ internal static class ApplicationHost
         try
         {
             var options = ReadInstallerOptions(args);
-            string staged = options["--staged"], version = options["--version"], hash = options["--image-hash"], transaction = options["--transaction"];
-            var request = new JsonObject { ["stagedDir"] = staged, ["version"] = version, ["imageHash"] = hash, ["transactionId"] = transaction };
+            string staged = options["--staged"], version = options["--version"], hash = options["--image-hash"], transaction = options["--transaction"], packageHash = options["--package-hash"];
+            var request = new JsonObject { ["stagedDir"] = staged, ["version"] = version, ["imageHash"] = hash, ["transactionId"] = transaction, ["packageHash"] = packageHash };
             // The copied helper never occupies the replaceable program. An existing owning service keeps admission authority.
             using (var singleInstance = StartupPipeline.AcquireSingleInstanceMutex())
             {
@@ -298,7 +300,7 @@ internal static class ApplicationHost
                 }
                 else
                 {
-                    var result = runtime.UpdateService.RequestInstallerApply(staged, version, hash, transaction, Audit.System);
+                    var result = runtime.UpdateService.RequestInstallerApply(staged, version, hash, transaction, Audit.System, packageHash);
                     if (!result.Succeeded) throw new IOException(result.Code + ":" + result.Error);
                 }
             }

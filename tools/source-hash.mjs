@@ -10,8 +10,8 @@ function inputPaths(mode) {
   return mode === "--frontend"
     ? ["frontend", "tools/source-hash.mjs"]
     : mode === "--test-host"
-      ? ["src", "frontend", "Directory.Build.props", "build.cmd", "tests/run.mjs", "tools/source-hash.mjs"]
-      : ["src", "frontend", "Directory.Build.props", "build.cmd", "tools/source-hash.mjs"];
+      ? ["src", "frontend", "desktop", "tools/application_build.py", "tools/application_payload.py", "tools/desktop_build.py", "tools/embed_frontend.py", "tools/build_identity.py", "Directory.Build.props", "build.cmd", "tests/run.mjs", "tools/source-hash.mjs"]
+      : ["src", "frontend", "desktop", "tools/application_build.py", "tools/application_payload.py", "tools/desktop_build.py", "tools/embed_frontend.py", "tools/build_identity.py", "Directory.Build.props", "build.cmd", "tools/source-hash.mjs"];
 }
 
 function collectFiles(root) {

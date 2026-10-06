@@ -1034,6 +1034,61 @@
         "task-protocol-host"
       ],
       "status": "current"
+    },
+    {
+      "id": "development.build-identity",
+      "path": "development/build-identity.md",
+      "summary": "冻结输入、规范字节、Host 与桌面构建身份",
+      "topics": [
+        "构建身份",
+        "buildInputs",
+        "buildId",
+        "frontendHash"
+      ],
+      "aliases": [
+        "desktop-build"
+      ],
+      "codePaths": [
+        "tools/build_identity.py",
+        "tools/schemas",
+        "src/Modules/Updates/ApplicationBuildIdentity.cs"
+      ],
+      "testDomains": [
+        "backend.updates-restart",
+        "host.release-contract"
+      ],
+      "authorityFor": [
+        "build-identity"
+      ],
+      "status": "current"
+    },
+    {
+      "id": "development.desktop",
+      "path": "development/desktop-client.md",
+      "summary": "Electron 生命周期、窗口、安全 IPC、嵌入 Vue 和完整应用构建",
+      "topics": [
+        "桌面",
+        "Electron",
+        "窗口",
+        "应用载荷"
+      ],
+      "aliases": [
+        "workspace"
+      ],
+      "codePaths": [
+        "desktop",
+        "src/Host/Desktop",
+        "src/Modules/Updates/ApplicationPayload.cs",
+        "tools/application_build.py"
+      ],
+      "testDomains": [
+        "hostAreas.control",
+        "hostAreas.update"
+      ],
+      "authorityFor": [
+        "desktop-client"
+      ],
+      "status": "current"
     }
   ]
 }

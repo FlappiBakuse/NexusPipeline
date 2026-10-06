@@ -1,5 +1,6 @@
 import { releaseController, trackController } from "./page-state";
 import { getLocale, t } from "./i18n";
+import { requireServiceTraffic } from "./service-traffic";
 
 export interface ApiError extends Error {
   code: string | null;
@@ -40,9 +41,10 @@ function normalizeAbortError(reason: unknown, signal?: AbortSignal | null): unkn
 }
 
 function formatApiError(data: unknown, status: number): string {
-  const payload = data as { code?: string; args?: Record<string, unknown> } | null;
+  const payload = data as { code?: string; args?: Record<string, unknown>; details?: { denyReason?: string } } | null;
   const code = payload?.code;
   if (code) {
+    if (code === "operation_requires_local" && payload?.details?.denyReason) return t(`api.error.${payload.details.denyReason}`);
     return t(`api.error.${code}`, payload?.args || {}, code);
   }
   return t("api.error.http", { status }, `HTTP ${status}`);
@@ -82,6 +84,7 @@ function handleAuthFailure(response: Response, data: unknown): ApiError {
 
 /** 获取受保护的二进制资源。调用方应在资源不再使用时释放返回 blob 对应的 ObjectURL。 */
 export async function apiBlob(path: string, signal?: AbortSignal | null): Promise<Blob> {
+  requireServiceTraffic();
   const controller = signal ? null : trackController(new AbortController());
   try {
     const response = await fetch(path, {
@@ -103,6 +106,7 @@ export async function apiBlob(path: string, signal?: AbortSignal | null): Promis
 }
 
 export async function api<T = unknown>(method: string, path: string, body?: unknown, signal?: AbortSignal | null): Promise<T> {
+  requireServiceTraffic();
   const controller = signal ? null : trackController(new AbortController());
   const options: RequestInit = { method, headers: {}, signal: signal || controller!.signal };
   try {
@@ -132,6 +136,7 @@ export async function api<T = unknown>(method: string, path: string, body?: unkn
  * 并应传入页面生命周期控制器以便路由离开时中止连接。
  */
 export async function apiStream(path: string, signal?: AbortSignal | null): Promise<Response> {
+  requireServiceTraffic();
   const controller = signal ? null : trackController(new AbortController());
   try {
     const response = await fetch(path, {
@@ -158,6 +163,7 @@ export async function apiUpload<T = unknown>(
   body: Blob | ArrayBuffer | string,
   contentType = "application/octet-stream",
   signal?: AbortSignal | null): Promise<T> {
+  requireServiceTraffic();
   const controller = signal ? null : trackController(new AbortController());
   try {
     const response = await fetch(path, {

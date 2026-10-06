@@ -37,14 +37,14 @@ internal static class UpdateCleanup
         string backup = Path.Combine(root, ".nxp-backup", "previous");
         if (abort && task.Phase != UpdatePhase.BackupPreparing && (File.Exists(backup) || Directory.Exists(backup)))
             throw new IOException("update abort backup ownership unconfirmed");
-        CheckTree(root, task.StagedDir, ["nexus-pipeline.exe", "wwwroot", "README.md", "LICENSE", "plugins"]);
-        CheckTree(root, backup, ["nexus-pipeline.exe", "wwwroot", "README.md", ".installer-identity", ".backup-ready"]);
+        CheckTree(root, task.StagedDir, ["NexusPipeline.exe", "resources", "README.md", "plugins"]);
+        CheckTree(root, backup, ["NexusPipeline.exe", "resources", "README.md", ".installer-identity", ".backup-ready"]);
         string? worker = task.WorkerIdentity?.ImageName;
         if (worker is not null)
         {
             string workerName = Path.GetFileNameWithoutExtension(worker);
-            const string prefix = ".nxp-update-worker-";
-            if (!string.Equals(Path.GetDirectoryName(worker), root, StringComparison.OrdinalIgnoreCase)
+            const string prefix = "update-";
+            if (!string.Equals(Path.GetDirectoryName(worker), Path.Combine(root, ".nxp", "runtime", "workers"), StringComparison.OrdinalIgnoreCase)
                 || !workerName.StartsWith(prefix, StringComparison.Ordinal) || !Guid.TryParseExact(workerName[prefix.Length..], "N", out _)
                 || Path.GetExtension(worker) != ".exe" || observeWorker(task.WorkerIdentity) != false)
                 throw new IOException("update cleanup worker exit or identity unconfirmed");

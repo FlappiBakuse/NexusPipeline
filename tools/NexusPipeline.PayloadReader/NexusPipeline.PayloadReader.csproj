@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
+    <NexusGenerateInstallationGeneration>true</NexusGenerateInstallationGeneration>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../src/Platform/Storage/BundleResourceReader.cs" Link="BundleResourceReader.cs" />
+    <Compile Include="../../src/Modules/Updates/ApplicationPayload.cs" Link="ApplicationPayload.cs" />
+    <Compile Include="../../src/Modules/Updates/ApplicationBuildIdentity.cs" Link="ApplicationBuildIdentity.cs" />
+    <Compile Include="../../src/Shared/Versioning/NexusVersion.cs" Link="NexusVersion.cs" />
+    <Compile Include="../../src/Platform/Storage/PayloadPathSafety.cs" Link="PayloadPathSafety.cs" />
+  </ItemGroup>
+</Project>

@@ -48,13 +48,14 @@ gh workflow run release.yml --ref main -f operation=publish-only -f tag=<已有 
 发布包采用扁平根布局：
 
 ```text
-nexus-pipeline.exe
-wwwroot/
-plugins/
+NexusPipeline.exe
 README.md
+resources/desktop/
+resources/payload-manifest.json
+plugins/
 ```
 
-主程序更新引擎交换 `nexus-pipeline.exe`、`wwwroot/` 和包内提供的 `README.md`，不会覆盖运行时 `plugins/`。包内排除 `config/`、`data/`、`history/` 和 `logs/`。更新引擎支持当前发布包布局，并拒绝绝对路径、`..` 路径和重复目录条目。已发行 v0.16.8 的旧 worker 及 README 收尾限制见[自动更新](../architecture/update.md)。
+主程序更新引擎交换 `NexusPipeline.exe`、`resources/desktop/`、`resources/payload-manifest.json` 和包内提供的 `README.md`，不会覆盖运行时 `plugins/`。包内排除 `config/`、`data/`、`history/` 和 `logs/`。更新引擎支持当前发布包布局，并拒绝绝对路径、`..` 路径和重复目录条目。四项应用资产作为同一事务交换、校验和回滚；插件和用户数据不纳入应用事务。
 
 ### 安装器运行时依赖
 

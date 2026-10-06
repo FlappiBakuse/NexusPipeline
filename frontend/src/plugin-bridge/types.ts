@@ -36,9 +36,15 @@ export interface Disposable {
   dispose: () => void;
 }
 
-export interface PluginRouteHandler {
-  (token: number, segments: string[], host?: unknown): unknown;
+export interface PluginRouteSurface {
+  readonly element: HTMLElement;
+  readonly token: number;
+  readonly segments: readonly string[];
+  readonly signal: AbortSignal;
 }
+export type PluginRouteCleanup = () => void;
+export type PluginRouteHandler = (surface: PluginRouteSurface, host: unknown) => PluginRouteCleanup | Promise<PluginRouteCleanup>;
+export type { ClientCapabilities, ConnectionKind, OperationAccess, AccessDecision, AccessDenyReason } from "../platform/client-capabilities";
 
 export interface PluginLifecyclePayload {
   hash: string;

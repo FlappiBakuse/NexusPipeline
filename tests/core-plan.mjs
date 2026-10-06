@@ -89,6 +89,7 @@ export function coreUnits(selected, registry, policy, partnerPolicy = null) {
       if(policy.integrationScenarios?.[id]) item.expectedScenarioIds.push(policy.integrationScenarios[id]);
       item.control = controlKinds.has(gate.kind) && !id.includes("architecture") && !gate.partnerRequired;
       if (id === "host.architecture.frontend") item.preparations.push("host.frontend.dependencies");
+      if (id === "host.architecture.backend") item.preparations.push("host.frontend.dependencies", "host.application.inputs");
       item.preparations.push(id.startsWith("host.integration.") || id === "host.build.test-host"
         ? "host.runtime.test-build" : "source");
     }

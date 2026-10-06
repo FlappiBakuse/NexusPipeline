@@ -9,6 +9,38 @@ namespace NexusPipeline.ControlPlane.Http;
 
 internal static class HttpHelper
 {
+    internal static async Task ServeFrontendAsync(HttpListenerContext context, Static.IFrontendAssetProvider provider, string path)
+    {
+        if (context.Request.HttpMethod is not ("GET" or "HEAD"))
+        {
+            context.Response.Headers["Allow"] = "GET, HEAD";
+            await MethodNotAllowedAsync(context).ConfigureAwait(false);
+            return;
+        }
+        Static.FrontendAsset? asset = provider.Resolve(path);
+        if (asset is null) { await NotFoundAsync(context).ConfigureAwait(false); return; }
+        byte[] bytes = provider.Read(asset);
+        string etag = '"' + asset.Sha256 + '"';
+        context.Response.Headers["ETag"] = etag;
+        context.Response.Headers["Cache-Control"] = asset.Immutable ? "public, max-age=31536000, immutable" : "no-cache";
+        context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+        context.Response.Headers["Referrer-Policy"] = "no-referrer";
+        string host = context.Request.Url?.Host ?? "127.0.0.1";
+        if (host.Contains(':') && !host.StartsWith('[')) host = '[' + host + ']';
+        context.Response.Headers["Content-Security-Policy"] = $"default-src 'self'; img-src 'self' data: blob:; style-src 'self'; script-src 'self'; connect-src 'self' http://127.0.0.1:* http://{host}:*; font-src 'self' data:";
+        context.Response.ContentType = asset.ContentType;
+        if ((context.Request.Headers["If-None-Match"] ?? "").Split(',').Any(value => value.Trim() is "*" || value.Trim().Replace("W/", "", StringComparison.Ordinal) == etag))
+        {
+            context.Response.StatusCode = 304;
+            context.Response.ContentLength64 = 0;
+        }
+        else
+        {
+            context.Response.ContentLength64 = bytes.Length;
+            if (context.Request.HttpMethod == "GET") await context.Response.OutputStream.WriteAsync(bytes).ConfigureAwait(false);
+        }
+        context.Response.Close();
+    }
     public static bool IsLoopback(HttpListenerContext context)
     {
         IPAddress? address = context.Request.RemoteEndPoint?.Address;
@@ -104,14 +136,14 @@ internal static class HttpHelper
         context.Response.OutputStream.Close();
     }
 
-    public static async Task WriteJsonAsync(HttpListenerContext context, object value, int statusCode = 200)
+    public static async Task WriteJsonAsync(HttpListenerContext context, object value, int statusCode = 200, string cacheControl = "no-cache")
     {
         byte[] data = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(value, JsonOpts.Web));
         context.Response.StatusCode = statusCode;
         context.Response.ContentType = "application/json; charset=utf-8";
         // API 响应补 no-cache（与静态文件一致；此前缺失致浏览器启发式缓存 /api/status，
         // 插件状态变更后刷新页面仍读到旧值——复现：禁用「模拟器适配」后前端选择器残留）。
-        context.Response.Headers["Cache-Control"] = "no-cache";
+        context.Response.Headers["Cache-Control"] = cacheControl;
         context.Response.ContentLength64 = data.Length;
         await context.Response.OutputStream.WriteAsync(data).ConfigureAwait(false);
         context.Response.OutputStream.Close();

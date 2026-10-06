@@ -184,9 +184,11 @@ def validate_unit(expected, actual, files, base):
                 require(re.search(r"^# "+name+r" 0\r?$",native,re.M),"Failed/skipped TAP counters")
             require(re.search(r"^# tests [1-9]\d*\r?$",native,re.M),"Zero TAP tests")
             if expected["id"] == "host.integration.restart-update":
-                require(re.search(r"^# tests 9\r?$", native, re.M), "Missing update transaction cases")
+                require(re.search(r"^# tests 11\r?$", native, re.M), "Missing update transaction cases")
                 for case in ["current update worker commits only after actual services are ready and preserves user files",
-                             "failed policy proof aborts only its exited worker and cannot repeat the apply loop"]:
+                             "failed policy proof aborts only its exited worker and cannot repeat the apply loop",
+                             "whole application rollback preserves frozen old assets after BackupReady corruption",
+                             "whole application rollback preserves frozen old assets after SwapReady corruption"]:
                     require(re.search(r"^ok \d+ - " + re.escape(case) + r"\r?$", native, re.M), "Missing native update transaction: " + case)
         if expected["id"].startswith("plugins.plugin.package:"):
             built = load(one("package-report.json"))
@@ -194,6 +196,21 @@ def validate_unit(expected, actual, files, base):
             require(built["status"] == "PASS" and built["artifactName"] == expected["artifact"]
                     and built["kind"] == expected["pluginKind"] and built["sha256"] == digest(package.read_bytes())
                     and built["sizeBytes"] == package.stat().st_size, "Production package identity mismatch")
+        if expected["id"] == "host.integration.desktop":
+            native=one("desktop-native.tap").read_text(encoding="utf-8")
+            require(not re.search(r"^\s*not ok\b",native,re.M),"Failed desktop native cases")
+            for name,count in {"tests":4,"pass":4,"fail":0,"cancelled":0,"skipped":0,"todo":0}.items():
+                require(re.search(r"^# "+name+" "+str(count)+r"\r?$",native,re.M),"Missing desktop native counters")
+            reader=load(one("reader-report.json"))
+            require(reader["status"] == "PASS" and reader["candidateExecuted"] is False
+                    and reader["counts"] == {"testsRun":8,"failures":0,"skipped":0}
+                    and len(set(reader["caseIds"])) == 8,"Missing readonly payload cases")
+            client=load(one("client-report.json"))
+            require(client["status"] == "PASS" and client["closeHides"] is True
+                    and exact([page["route"] for page in client["pages"]],
+                              ["#/"+route for route in ["dashboard","dispatch","queues","scripts","users","history","plugins","settings"]]),"Missing real desktop routes")
+            require(all(client["restart"][key] is True for key in ["rendererRetained","draftRetained","explicitDiscard"])
+                    and all(client["rendererCrash"][key] is True for key in ["hostPreserved","rendererReplaced","lossNotice"]),"Missing desktop lifecycle evidence")
 
 
 def validate_bundle(plan, plan_file, report_files, official=True):

@@ -38,6 +38,8 @@ internal sealed class UpdateService
     private readonly Func<bool> _requestExit;
     private readonly Func<bool> _isWebOnly;
     private readonly Func<string> _restartHandoff;
+    private readonly Func<string, TimeSpan, bool> _stopDesktop;
+    private readonly Func<string, string?, bool, UpdatePayloadIdentity> _freezePayload;
     private readonly Func<(HostMaintenanceLease? Lease, string? Reason)> _acquireMaintenance;
     private readonly OutboundHttpClientProvider _outbound;
     private readonly object _gate = new();
@@ -50,6 +52,8 @@ internal sealed class UpdateService
     private long _generation;
     private UpdateOperation? _operation;
     private string? _readyStagingDir;
+    private UpdatePayloadIdentity? _readyPayload;
+    private string? _readyPackageHash;
     private HostMaintenanceLease? _maintenanceLease;
     private bool _hasChecked;
     private bool _discoveryInvalidationPending;
@@ -69,7 +73,9 @@ internal sealed class UpdateService
         Func<(HostMaintenanceLease? Lease, string? Reason)>? acquireMaintenance = null,
         OutboundHttpClientProvider? outbound = null,
         Func<bool>? isWebOnly = null,
-        Func<string>? restartHandoff = null)
+        Func<string>? restartHandoff = null,
+        Func<string, TimeSpan, bool>? stopDesktop = null,
+        Func<string, string?, bool, UpdatePayloadIdentity>? freezePayload = null)
     {
         _settings = settings;
         _installDir = installDir;
@@ -77,6 +83,8 @@ internal sealed class UpdateService
         _requestExit = requestExit;
         _isWebOnly = isWebOnly ?? (() => false);
         _restartHandoff = restartHandoff ?? (() => "");
+        _stopDesktop = stopDesktop ?? ((_, _) => true);
+        _freezePayload = freezePayload ?? ApplicationPayload.Freeze;
         _outbound = outbound ?? new OutboundHttpClientProvider(() => OutboundProxyOptions.Direct);
         if (acquireMaintenance is not null)
         {
@@ -427,13 +435,15 @@ internal sealed class UpdateService
                     throw new IOException(verifyError ?? "SHA256 校验失败");
                 }
                 operation.Cts.Token.ThrowIfCancellationRequested();
-                string? extractError = UpdatePackage.Extract(zipPath, stagingDir);
+                string? extractError = UpdatePackage.ExtractApplication(zipPath, stagingDir, version, _freezePayload);
                 operation.Cts.Token.ThrowIfCancellationRequested();
                 if (extractError is not null)
                 {
                     throw new IOException(extractError);
                 }
-                if (!TrySetReady(operation))
+                var frozenPayload = _freezePayload(stagingDir, version, false);
+                string frozenPackageHash = UpdateApply.ImageHash(zipPath);
+                if (!TrySetReady(operation, frozenPayload, frozenPackageHash))
                 {
                     return;
                 }
@@ -536,7 +546,7 @@ internal sealed class UpdateService
                     }
                     if (deferVersion != verifiedVersion || deferStagingDir != verifiedStaging)
                         return UpdateApplyResult.Busy("update-changed", "待应用更新已变化，请重新申请");
-                    UpdateTask.Create("defer", deferVersion, deferStagingDir).Write(TaskFile);
+                    FreezeJournal("defer", deferVersion, deferStagingDir).Write(TaskFile);
                     _state = UpdateState.ApplyPending;
                 }
                 Audit.Log(auditSource, "申请下次启动更新", $"v{deferVersion}");
@@ -585,9 +595,9 @@ internal sealed class UpdateService
     }
 
     /// <summary>Explicit same-instance Setup handoff; all runtime admission uses the existing maintenance owner.</summary>
-    internal UpdateApplyResult RequestInstallerApply(string stagingDir, string version, string imageHash, string transactionId, string auditSource)
+    internal UpdateApplyResult RequestInstallerApply(string stagingDir, string version, string imageHash, string transactionId, string auditSource, string packageHash)
     {
-        if (!Guid.TryParseExact(transactionId, "N", out _) || !NexusVersion.TryParse(version, out var target)
+        if (!Guid.TryParseExact(transactionId, "N", out _) || packageHash.Length != 64 || !packageHash.All(char.IsAsciiHexDigitLower) || !NexusVersion.TryParse(version, out var target)
             || !NexusVersion.TryParse(CurrentVersion, out var current) || target.CompareTo(current) < 0)
             return UpdateApplyResult.Busy("installer-input-invalid", "安装器版本或事务参数无效");
         try
@@ -603,8 +613,9 @@ internal sealed class UpdateService
                 if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0) throw new IOException("安装器暂存包含链接");
                 if (string.Equals(path.TrimEnd('\\'), _installDir.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase)) break;
             }
-            if (UpdateApply.ImageHash(Path.Combine(full, "nexus-pipeline.exe")) != imageHash)
+            if (UpdateApply.ImageHash(Path.Combine(full, "NexusPipeline.exe")) != imageHash)
                 throw new InvalidDataException("安装器程序摘要不匹配");
+            _ = _freezePayload(full, version, false);
         }
         catch (Exception ex) { return UpdateApplyResult.Busy("installer-staging-invalid", ex.Message); }
         UpdateApplyResult? policyFailure = VerifyApplyTarget(version);
@@ -618,7 +629,7 @@ internal sealed class UpdateService
             { lease.Dispose(); return UpdateApplyResult.Busy("recovery-pending", "存在活动更新或恢复现场"); }
             _state = UpdateState.Applying; _maintenanceLease = lease;
         }
-        return StartImmediateApply(lease, version, stagingDir, auditSource, transactionId, imageHash);
+        return StartImmediateApply(lease, version, stagingDir, auditSource, transactionId, imageHash, packageHash);
     }
 
     internal UpdateApplyResult? VerifyApplyTarget(string version)
@@ -641,15 +652,20 @@ internal sealed class UpdateService
     }
 
     private UpdateApplyResult StartImmediateApply(HostMaintenanceLease lease, string version, string stagingDir,
-        string auditSource, string? transactionId = null, string? imageHash = null)
+        string auditSource, string? transactionId = null, string? imageHash = null, string? packageHash = null)
     {
         bool workerLaunched = false;
+        bool installer = transactionId is not null;
         UpdateTask? startedJournal = null;
         try
         {
+            transactionId ??= Guid.NewGuid().ToString("N");
+            var journal = FreezeJournal("apply", version, stagingDir, packageHash) with { TransactionId = transactionId,
+                TargetImageHash = imageHash ?? UpdateApply.ImageHash(Path.Combine(stagingDir, "NexusPipeline.exe")) };
+            if (!_stopDesktop(transactionId, TimeSpan.FromSeconds(8))) throw new IOException("desktop_stop_unconfirmed");
             string handoffId = _restartHandoff();
-            var journal = UpdateTask.Create("apply", version, stagingDir) with
-            { TransactionId = transactionId, TargetImageHash = imageHash,
+            journal = journal with
+            { DesktopStopped = true,
               RestartHandoffId = Guid.TryParseExact(handoffId, "N", out _) ? handoffId : null };
             journal.Write(TaskFile);
             startedJournal = journal;
@@ -689,7 +705,7 @@ internal sealed class UpdateService
             {
                 if (_state == UpdateState.Applying)
                 {
-                    _state = transactionId is null ? UpdateState.Ready : UpdateState.Idle;
+                    _state = installer ? UpdateState.Idle : UpdateState.Ready;
                 }
                 _maintenanceLease = null;
             }
@@ -698,6 +714,17 @@ internal sealed class UpdateService
             catch (Exception cleanupError) { Logger.Warn($"[更新] 保留不能确认归属的 journal：{cleanupError.Message}"); }
             return UpdateApplyResult.Busy("worker-launch-failed", $"无法启动更新切换：{ex.Message}");
         }
+    }
+
+    private UpdateTask FreezeJournal(string mode, string version, string staging, string? installerPackageHash = null)
+    {
+        var payload = _freezePayload(staging, version, false);
+        string archive = Path.Combine(UpdateDir, AppPaths.UpdatePackageZipName(version) + Path.GetFileName(staging)[version.Length..]);
+        string packageHash = installerPackageHash ?? UpdateApply.ImageHash(archive);
+        if (installerPackageHash is null && (_readyPayload != payload || _readyPackageHash != packageHash))
+            throw new InvalidDataException("update.ready_payload_changed");
+        return UpdateTask.Create(mode, version, staging) with { TargetPayload = payload, PackageSha256 = packageHash,
+            PackageSource = installerPackageHash is null ? "download" : "installer" };
     }
 
     private bool TryGetReadyLocked(
@@ -734,7 +761,7 @@ internal sealed class UpdateService
             return false;
         }
         stagingDir = _readyStagingDir ?? "";
-        if (string.IsNullOrWhiteSpace(stagingDir) || !File.Exists(Path.Combine(stagingDir, "nexus-pipeline.exe")))
+        if (string.IsNullOrWhiteSpace(stagingDir) || !File.Exists(Path.Combine(stagingDir, "NexusPipeline.exe")))
         {
             failure = UpdateApplyResult.Busy("not-ready", "暂存文件不完整，请重新下载");
             return false;
@@ -774,7 +801,7 @@ internal sealed class UpdateService
         }
     }
 
-    private bool TrySetReady(UpdateOperation operation)
+    private bool TrySetReady(UpdateOperation operation, UpdatePayloadIdentity payload, string packageHash)
     {
         lock (_gate)
         {
@@ -784,6 +811,8 @@ internal sealed class UpdateService
             }
             _state = UpdateState.Ready;
             _readyStagingDir = operation.StagingDir;
+            _readyPayload = payload;
+            _readyPackageHash = packageHash;
             _bytesRead = 0;
             _bytesTotal = 0;
             return true;

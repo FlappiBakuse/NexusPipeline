@@ -217,6 +217,7 @@ jobs:
           python ../NexusPipeline-Control/tools/host_release.py build-host --root .
           --source-sha '${{ needs.source-plan.outputs.source_sha }}'
           --partner-sha '${{ needs.source-plan.outputs.partner_sha }}'
+          --workflow-sha '${{ github.workflow_sha }}'
           --frontend-phase .generated/frontend-phase
           --bundled-phase .generated/bundled-phase
           --output .generated/host-phase

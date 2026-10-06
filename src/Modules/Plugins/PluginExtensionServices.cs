@@ -24,6 +24,11 @@ internal sealed class PluginUiContributionRegistry
         PluginUiContribution contribution)
     {
         PluginUiValidation.ValidateContribution(contribution);
+        contribution = contribution with { Access = contribution.Access with
+        {
+            Actions = new System.Collections.ObjectModel.ReadOnlyDictionary<string, PluginOperationAccess>(
+                new Dictionary<string, PluginOperationAccess>(contribution.Access.Actions, StringComparer.OrdinalIgnoreCase)),
+        } };
         Guid token = Guid.NewGuid();
         lock (_sync)
         {
@@ -491,6 +496,16 @@ internal static class PluginUiValidation
     public static void ValidateContribution(PluginUiContribution contribution)
     {
         ArgumentNullException.ThrowIfNull(contribution);
+        PluginUiAccessDeclaration? access = contribution.Access;
+        if (access is null || access.Actions is null
+            || (contribution.ReadHandler is null ? access.Read is not null : access.Read is null || !Enum.IsDefined(access.Read.Value))
+            || (contribution.SaveHandler is null ? access.Save is not null : access.Save is null || !Enum.IsDefined(access.Save.Value))
+            || (contribution.ActionHandler is null ? access.Actions.Count != 0 : access.Actions.Count == 0))
+            throw new InvalidDataException($"插件 UI 贡献 {contribution.Id} 的 Access 声明与处理器不匹配");
+        var actions = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var action in access.Actions)
+            if (!IsSafeKey(action.Key, 64) || !actions.Add(action.Key) || !Enum.IsDefined(action.Value))
+                throw new InvalidDataException($"插件 UI 贡献 {contribution.Id} 的 Access.Actions 无效或重复：{action.Key}");
         if (!IsSafeKey(contribution.Id, 64)) throw new InvalidDataException("插件 UI 贡献 ID 无效");
         if (!PluginUiSlots.All.Contains(contribution.Slot)) throw new InvalidDataException($"插件 UI slot 不受支持：{contribution.Slot}");
         if (!AllowedKinds.Contains(contribution.Kind)) throw new InvalidDataException($"插件 UI 贡献类型不受支持：{contribution.Kind}");
@@ -835,6 +850,7 @@ internal static class PluginWebApiValidation
 
     public static void Validate(PluginWebApiRoute route)
     {
+        if (route is null || !Enum.IsDefined(route.Access)) throw new InvalidDataException($"插件 Web API {route?.Route} 的 Access 无效");
         ArgumentNullException.ThrowIfNull(route);
         if (!Methods.Contains(route.Method?.Trim() ?? "")) throw new InvalidDataException("插件 Web API method 无效");
         string normalized = PluginWebApiRegistry.NormalizeRoute(route.Route);

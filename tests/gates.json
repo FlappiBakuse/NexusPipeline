@@ -403,6 +403,19 @@
       "trigger": "Jint dependency or production scripting bridge",
       "dependsOn": [],
       "partnerRequired": true
+    },
+    {
+      "id": "host.integration.desktop",
+      "repository": "Host",
+      "name": "Host / 桌面管理",
+      "kind": "test",
+      "hardTimeoutMs": 180000,
+      "qualificationMs": 150000,
+      "trigger": "桌面入口、窗口、IPC、内嵌前端和生命周期变化",
+      "dependsOn": [
+        "host.build.test-host"
+      ],
+      "partnerRequired": true
     }
   ]
 }

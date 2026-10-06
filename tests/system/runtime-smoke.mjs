@@ -300,5 +300,5 @@ test("System Smoke runtime 位于隔离目录", { skip }, () => {
   const marker = readRunMarker(runMarkerPath);
   assert.equal(marker?.runId, runId);
   assert.equal(path.resolve(marker?.executablePath || ""), path.resolve(runtimeExe));
-  assert.ok(fs.existsSync(path.join(runtimeDir, "nexus-pipeline.exe")));
+  assert.ok(fs.existsSync(path.join(runtimeDir, "NexusPipeline.exe")));
 });

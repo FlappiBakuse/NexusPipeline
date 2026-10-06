@@ -438,7 +438,7 @@ internal sealed class WebServer : IDisposable
             {
                 if (_options.ServeWebUi)
                 {
-                    HttpHelper.ServeFile(context, Path.Combine(AppPaths.WwwRootDir, "index.html"));
+                    await HttpHelper.ServeFrontendAsync(context, _routeBindings.FrontendAssets, path).ConfigureAwait(false);
                 }
                 else
                 {
@@ -512,16 +512,7 @@ internal sealed class WebServer : IDisposable
                 await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);
                 return;
             }
-            string filePath = Path.Combine(AppPaths.WwwRootDir, path.TrimStart('/').Replace('/', Path.DirectorySeparatorChar));
-            // 静态文件路径包含校验（，纵深防御）：HttpListener 已规范化拒绝 .. 段，此处兜底防止路径逃逸出 wwwroot。
-            string fullPath = Path.GetFullPath(filePath);
-            string rootFull = Path.GetFullPath(AppPaths.WwwRootDir).TrimEnd('\\', '/') + Path.DirectorySeparatorChar;
-            if (!fullPath.StartsWith(rootFull, StringComparison.OrdinalIgnoreCase))
-            {
-                await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);
-                return;
-            }
-            HttpHelper.ServeFile(context, fullPath);
+            await HttpHelper.ServeFrontendAsync(context, _routeBindings.FrontendAssets, path).ConfigureAwait(false);
         }
         catch (Exception ex)
         {

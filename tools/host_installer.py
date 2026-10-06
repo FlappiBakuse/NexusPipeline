@@ -119,7 +119,7 @@ def render_script(template: str, *, production_root: Path, output_dir: Path,
         template = template.replace("@@CUSTOM_MESSAGES@@", "\n".join(message_lines))
         template = template.replace("@@CHINESE_ISL@@", str(chinese))
         template = template.replace("@@CHINESE_UI_ISL@@", str(chinese_ui))
-    image = production_root / "nexus-pipeline.exe"
+    image = production_root / "NexusPipeline.exe"
     file_lines: list[str] = []
     if "@@LAUNCH_CODE@@" in template:
         _require(metadata_helper is not None and metadata_helper.is_file(),
@@ -152,7 +152,8 @@ def render_script(template: str, *, production_root: Path, output_dir: Path,
         "@@PAYLOAD_MANIFEST@@": json.dumps(
             [{"Path": item["path"], "Sha256": item["sha256"]} for item in files
              if not item["path"].startswith("plugins/")], ensure_ascii=True, separators=(",", ":")).replace("'", "''"),
-        "@@EXE_SHA256@@": next(item["sha256"] for item in files if item["path"] == "nexus-pipeline.exe"),
+        "@@EXE_SHA256@@": next(item["sha256"] for item in files if item["path"] == "NexusPipeline.exe"),
+        "@@PACKAGE_SHA256@@": metadata["sha256"],
         "@@DESKTOP_URL@@": dependencies["Microsoft.WindowsDesktop.App"]["url"],
         "@@DESKTOP_SHA256@@": dependencies["Microsoft.WindowsDesktop.App"]["sha256"],
         "@@ASPNET_URL@@": dependencies["Microsoft.AspNetCore.App"]["url"],
@@ -209,6 +210,7 @@ def build_installer(production_root: Path, metadata_path: Path, dependency_path:
               "tag": metadata["tag"], "version": metadata["version"], "zipSha256": metadata["sha256"],
               "setupSha256": digest, "setupSizeBytes": setup.stat().st_size,
               "payloadFiles": files, "compilerSha256": INNO_COMPILER_SHA256,
+              "buildInputs": metadata["buildInputs"], "buildId": metadata["buildId"], "frontendHash": metadata["frontendHash"],
               "compilerDistributionSha256": INNO_DISTRIBUTION_SHA256,
               "dependencies": list(dependencies.values())}
     (output_dir / "installer-build-metadata.json").write_text(json.dumps(result, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")

@@ -89,6 +89,8 @@ internal class HostCompositionRoot
         ServiceCollection collection = new();
         collection.AddSingleton(_entityState);
         collection.AddSingleton(_settingsState);
+        collection.AddSingleton(new NexusPipeline.Host.Desktop.DesktopCoordinator(() => _lifecycle.TryRequestDirectExit()));
+        collection.AddSingleton<NexusPipeline.Host.Desktop.IDesktopHost>(provider => provider.GetRequiredService<NexusPipeline.Host.Desktop.DesktopCoordinator>());
         collection.AddSingleton(_admissionBridge);
         collection.AddSingleton<ISettingsMutationGate>(_admissionBridge);
         collection.AddSingleton<IPluginConfigurationMutationGate>(_admissionBridge);
@@ -276,7 +278,10 @@ internal class HostCompositionRoot
             provider.GetRequiredService<UserCommands>(),
             provider.GetRequiredService<ITaskProtocolConfigAssessmentPort>(),
             provider.GetRequiredService<ISettingsProvider>()));
-        collection.AddSingleton<UpdateService>(provider => new UpdateService(
+        collection.AddSingleton<UpdateService>(provider =>
+        {
+            var desktop = provider.GetRequiredService<NexusPipeline.Host.Desktop.IDesktopHost>();
+            return new UpdateService(
             () => Settings,
             AppPaths.AppRoot,
             () => _lifecycle.CanRequestDirectExit(out _),
@@ -284,7 +289,9 @@ internal class HostCompositionRoot
             _lifecycle.TryAcquireUpdateMaintenanceLease,
             provider.GetRequiredService<OutboundHttpClientProvider>(),
             () => ApplicationHost.IsWebOnly,
-            () => HostInstance.RestartHandoffId));
+            () => HostInstance.RestartHandoffId,
+            (transaction, remaining) => desktop.PrepareAssetReplacementAsync(transaction, remaining).GetAwaiter().GetResult());
+        });
         collection.AddSingleton<AutoUpdateIdlePolicy>(provider => new AutoUpdateIdlePolicy(
             provider.GetRequiredService<ExecutionDispatcher>(),
             provider.GetRequiredService<ISchedulerIdleReader>()));
@@ -307,6 +314,8 @@ internal class HostCompositionRoot
             provider.GetRequiredService<ISettingsMutationGate>(),
             provider.GetRequiredService<ISettingsChangedEffects>()));
         collection.AddSingleton<NexusPipeline.Modules.Users.Contracts.ITaskQueryProjection, TaskQueryProjection>();
+        collection.AddSingleton<NexusPipeline.ControlPlane.Http.Static.IFrontendAssetProvider>(
+            _ => NexusPipeline.ControlPlane.Http.Static.EmbeddedFrontendAssetProvider.FromAssembly());
         collection.AddSingleton<HttpRouteBindings>(provider => new HttpRouteBindings(
             provider.GetRequiredService<SettingsCommands>(),
             provider.GetRequiredService<ScriptCommands>(),
@@ -337,7 +346,8 @@ internal class HostCompositionRoot
             provider.GetRequiredService<OutboundHttpClientProvider>(),
             provider.GetRequiredService<ScriptIconService>(),
             provider.GetRequiredService<ScriptFileBrowser>(),
-            provider.GetRequiredService<NexusPipeline.Modules.Users.Contracts.ITaskQueryProjection>()));
+            provider.GetRequiredService<NexusPipeline.Modules.Users.Contracts.ITaskQueryProjection>(),
+            provider.GetRequiredService<NexusPipeline.ControlPlane.Http.Static.IFrontendAssetProvider>()));
         collection.AddSingleton<ExecutionExplainService>();
         collection.AddSingleton<DiagnosticsService>();
         _services = collection.BuildServiceProvider(new ServiceProviderOptions
@@ -346,6 +356,7 @@ internal class HostCompositionRoot
             ValidateScopes = true,
         });
         _admissionBridge.BindOnce(_services.GetRequiredService<ExecutionDispatcher>());
+        HostInstance.ConfigureBuildIdentity(_services.GetRequiredService<NexusPipeline.ControlPlane.Http.Static.IFrontendAssetProvider>().FrontendHash);
     }
 
     public AppSettings Settings => _settingsState.Current;

@@ -107,10 +107,18 @@ export function planForChanges(root, changes, registry, policy) {
     if (/^(tools\/host_release|tools\/host_candidate|\.github\/workflows\/release)/.test(name)) {
       host("release-contract", reason); return;
     }
+    if (/^(tools\/(?:build_identity|embed_frontend)\.py|tools\/tests\/test_(?:build_identity|embed_frontend)\.py|tools\/schemas\/(?:build-inputs|desktop-build)\.schema\.json|tests\/fixtures\/build-identity\/)/.test(name)) {
+      host("release-contract", reason); host("backend.updates-restart", reason); host("build.test-host", reason); return;
+    }
     if (name.startsWith("tools/NexusPipeline.Architecture/") || name === "tests/architecture-fixture.py") {
       host("architecture.backend", reason); return;
     }
     if (name === "tests/partner-contract.py") { host("partner-contract", reason); return; }
+    if (name.startsWith("desktop/") || /^(tools\/(?:application_|desktop_build|NexusPipeline.PayloadReader))/.test(name)) {
+      host("release-contract", reason); host("backend.control", reason); host("backend.updates-restart", reason);
+      host("build.test-host", reason); host("integration.control", reason); host("integration.desktop", reason); return;
+    }
+    if(name.startsWith("src/Host/Desktop/")||name.startsWith("src/Platform/Windows/Desktop")||name.startsWith("tests/desktop/")) host("integration.desktop",reason);
     if (name.startsWith("frontend/")) {
       host("frontend.typecheck", reason); host("frontend.build", reason);
       if (!/\.(css|scss|svg|png|jpg)$/.test(name)) host("frontend.state", reason);

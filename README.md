@@ -27,11 +27,11 @@ NexusPipeline 是一个运行在 Windows 11 x64 上的本地游戏自动化脚�
 
 1. 从 [GitHub Releases](https://github.com/FlappiBakuse/NexusPipeline/releases) 下载当前版本提供的安装器或便携包。
 2. 首次使用安装器时按向导选择语言和空目录；支持英文与简体中文。升级默认沿用上次安装语言，可用 `/LANG=en` 或 `/LANG=zh` 指定。安装器会先暂存并核验应用文件，再交给宿主现有更新事务切换。同一 Windows 用户已登记的安装实例可选择原路径升级。使用便携包时解压到固定空目录，例如 `D:\NexusPipeline\`。请勿把新包直接解压覆盖旧实例，安装器也不会接管未登记的旧便携目录。
-3. 双击 `nexus-pipeline.exe`，按系统提示允许管理员权限。
-4. 浏览器打开 `http://127.0.0.1:58731/`，完成脚本、用户和队列设置。
+3. 双击 `NexusPipeline.exe`，按系统提示允许管理员权限。
+4. 双击根 `NexusPipeline.exe` 打开桌面管理，完成脚本、账号和队列设置。网页入口仍可通过托盘打开，使用服务实际端口。
 5. 需要开机运行时，在「设置」中开启开机自启动。
 
-便携版缺少运行时会显示 .NET 自带的提示。可直接打开包内的 `wwwroot/help/runtime-prerequisites.html`，或分别下载官方 [Desktop Runtime 10.0.12 x64](https://builds.dotnet.microsoft.com/dotnet/WindowsDesktop/10.0.12/windowsdesktop-runtime-10.0.12-win-x64.exe) 和 [ASP.NET Core Runtime 10.0.12 x64](https://builds.dotnet.microsoft.com/dotnet/aspnetcore/Runtime/10.0.12/aspnetcore-runtime-10.0.12-win-x64.exe)。安装器会检查两项依赖；便携版不会自动下载。
+便携版缺少运行时会显示 .NET 自带的提示。可直接打开包内的 [运行依赖说明](https://github.com/FlappiBakuse/NexusPipeline/blob/main/docs/user/README.md#安装和依赖)，或分别下载官方 [Desktop Runtime 10.0.12 x64](https://builds.dotnet.microsoft.com/dotnet/WindowsDesktop/10.0.12/windowsdesktop-runtime-10.0.12-win-x64.exe) 和 [ASP.NET Core Runtime 10.0.12 x64](https://builds.dotnet.microsoft.com/dotnet/aspnetcore/Runtime/10.0.12/aspnetcore-runtime-10.0.12-win-x64.exe)。安装器会检查两项依赖；便携版不会自动下载。
 
 ## 升级前备份（重要）
 
@@ -45,9 +45,8 @@ config/    data/    history/    logs/    plugins/    .nxp/
 
 跨越 v0.16.15 或后续声明的破坏性版本时，必须在新的空目录安装并手动重新配置，完整保留旧实例；不要覆盖安装、复制旧运行目录或导入旧插件。具体步骤见[用户指南](docs/user/README.md#破坏性版本在新目录安装)。v0.17.0 也需要单独手动升级。插件仓库独立维护，插件版本和最低宿主版本以插件 manifest 为准。
 
-同格式、未跨越更新屏障的普通更新仍可使用内置更新。此类更新如需手动替换程序，只替换 `nexus-pipeline.exe`、`wwwroot/` 和 `README.md`，保留运行时目录及已有 `plugins/`。
+同格式、未跨越更新屏障的普通更新仍可使用内置更新。此类更新如需手动替换程序，只替换 `NexusPipeline.exe`、`resources/desktop/`、`resources/payload-manifest.json` 和 `README.md`，保留运行时目录及已有 `plugins/`。
 
-从 v0.16.8 通过内置更新到 v0.16.9 时，旧版更新 worker 只交换 EXE 和 `wwwroot/`。新版首次启动会在原目录没有 `README.md` 时，从已暂存的包补上说明文件；已存在的 README 保留原字节，必要时可按上述手动步骤更新。旧实例中的插件及启用状态保持原样；两个预装插件仅用于全新安装。
 
 ## 快速开始
 
@@ -67,14 +66,14 @@ config/    data/    history/    logs/    plugins/    .nxp/
 常驻服务运行后，可以使用正式 CLI：
 
 ```text
-nexus-pipeline.exe status --json
-nexus-pipeline.exe doctor --json
-nexus-pipeline.exe doctor export --output "D:\Temp\nexus-pipeline-diagnostics.zip" --json
-nexus-pipeline.exe script list --json
-nexus-pipeline.exe user create --name "我的账号"
-nexus-pipeline.exe run script <脚本 ID 或名称> --dry-run --user "我的账号" --json
-nexus-pipeline.exe run script <脚本 ID 或名称> --detach --json
-nexus-pipeline.exe run cancel <运行 ID> --json
+NexusPipeline.exe status --json
+NexusPipeline.exe doctor --json
+NexusPipeline.exe doctor export --output "D:\Temp\nexus-pipeline-diagnostics.zip" --json
+NexusPipeline.exe script list --json
+NexusPipeline.exe user create --name "我的账号"
+NexusPipeline.exe run script <脚本 ID 或名称> --dry-run --user "我的账号" --json
+NexusPipeline.exe run script <脚本 ID 或名称> --detach --json
+NexusPipeline.exe run cancel <运行 ID> --json
 ```
 
 复杂对象通过 `--file <json 文件>` 或 `--file -` 传入。带 `--json` 的命令输出单个稳定 envelope，目标按 ID 或唯一名称解析。
@@ -116,7 +115,7 @@ Web 默认端口被占用时会顺延到可用端口；实际端口可在状态�
 
 **如何准备诊断信息？**
 
-打开「设置 → 系统诊断」查看检查结果，或运行 `nexus-pipeline.exe doctor export --output <路径>` 导出脱敏支持包。支持包只包含有限大小的诊断事实、插件状态、运行状态和最近日志尾部。
+打开「设置 → 系统诊断」查看检查结果，或运行 `NexusPipeline.exe doctor export --output <路径>` 导出脱敏支持包。支持包只包含有限大小的诊断事实、插件状态、运行状态和最近日志尾部。
 
 **运行脚本产生的配置文件会保留吗？**
 

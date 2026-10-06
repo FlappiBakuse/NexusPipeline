@@ -1,0 +1,133 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:nexuspipeline:schemas:build-inputs:1",
+  "title": "NexusPipeline canonical frozen build inputs",
+  "description": "See docs/development/build-identity.md. Build ID is SHA256 of recursively ASCII-key-sorted, compact UTF-8 JSON, with no BOM or trailing newline. Duplicate keys are rejected before validation. Leaves are printable ASCII strings or non-negative integers; no floats, booleans, null or arrays.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "productVersion",
+    "generation",
+    "rid",
+    "sourceSha",
+    "sourceTreeSha",
+    "partnerSha",
+    "workflowSha",
+    "frontendHash",
+    "frontendPackageLockSha256",
+    "desktopPackageLockSha256",
+    "electronVersion",
+    "electronArchiveSha256",
+    "bootstrapProtocolVersion",
+    "toolchain"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "productVersion": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-(beta|rc)\\.(0|[1-9][0-9]*))?$"
+    },
+    "generation": {
+      "const": "g0170"
+    },
+    "rid": {
+      "const": "win-x64"
+    },
+    "sourceSha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "sourceTreeSha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "partnerSha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "workflowSha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "frontendHash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "frontendPackageLockSha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "desktopPackageLockSha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "electronVersion": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+    },
+    "electronArchiveSha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "bootstrapProtocolVersion": {
+      "const": 1
+    },
+    "toolchain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dotnetSdkVersion",
+        "dotnetRuntimeVersion",
+        "nodeVersion",
+        "npmVersion",
+        "pythonVersion",
+        "innoSetupVersion",
+        "innoCompilerSha256",
+        "innoDistributionSha256"
+      ],
+      "properties": {
+        "dotnetSdkVersion": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[\\x20-\\x7e]+$"
+        },
+        "dotnetRuntimeVersion": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[\\x20-\\x7e]+$"
+        },
+        "nodeVersion": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[\\x20-\\x7e]+$"
+        },
+        "npmVersion": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[\\x20-\\x7e]+$"
+        },
+        "pythonVersion": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[\\x20-\\x7e]+$"
+        },
+        "innoSetupVersion": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[\\x20-\\x7e]+$"
+        },
+        "innoCompilerSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "innoDistributionSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    }
+  }
+}

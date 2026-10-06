@@ -360,7 +360,7 @@ internal static partial class CliCommandRouter
     {
         string usage = CliText.Get(
             "help.usage",
-            "用法：nexus-pipeline.exe <命令> [子命令] [参数]\n\n基础：status、doctor（含 export）\n资源：script、user、queue、run、history、settings、plugin（含 store/user-settings）、update、system-action\n\n机器接口：所有正式命令支持 --json；复杂对象使用 --file <json|->，--file - 从 stdin 读取。\n目标解析：ID 精确优先；名称唯一匹配；同名返回 ambiguous_target。\n进程入口：manage、service、web、restart、register、unregister、apply-update。");
+            "用法：NexusPipeline.exe <命令> [子命令] [参数]\n\n基础：status、doctor（含 export）\n资源：script、user、queue、run、history、settings、plugin（含 store/user-settings）、update、system-action\n\n机器接口：所有正式命令支持 --json；复杂对象使用 --file <json|->，--file - 从 stdin 读取。\n目标解析：ID 精确优先；名称唯一匹配；同名返回 ambiguous_target。\n进程入口：manage、service、web、restart、register、unregister、apply-update。");
         if (CliOutput.MachineMode)
         {
             CliOutput.WriteSuccess(new JsonObject { ["usage"] = usage });

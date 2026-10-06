@@ -205,7 +205,8 @@ internal static class ApiPluginContributionsHandler
             foreach (PluginUiContext uiContext in parsedContexts)
             {
                 JsonObject values = new();
-                if (registration.Contribution.ReadHandler is not null)
+                if (registration.Contribution.ReadHandler is not null
+                    && RequestAccessPolicy.Decide(context.Request, registration.Contribution.Access.Read!.Value).Allowed)
                 {
                     try
                     {
@@ -227,7 +228,7 @@ internal static class ApiPluginContributionsHandler
                     }
                 }
 
-                result.Add(ProjectUiContribution(registration, uiContext, values, context.Request.Locale, plugins));
+                result.Add(ProjectUiContribution(registration, uiContext, values, context.Request.Locale, plugins, context.Request));
             }
         }
         await HttpHelper.WriteJsonAsync(context, new { slot, contributions = result }).ConfigureAwait(false);
@@ -258,6 +259,7 @@ internal static class ApiPluginContributionsHandler
             await HttpHelper.ErrorAsync(context, "action_not_supported", 405).ConfigureAwait(false);
             return;
         }
+        if (!await RequestAccessPolicy.RequireAsync(context, registration.Contribution.Access.Save!.Value).ConfigureAwait(false)) return;
         if (!PluginUiValidation.TryValidateValues(registration.Contribution, values, out error))
         {
             await UiValidationErrorAsync(context, error).ConfigureAwait(false);
@@ -310,11 +312,12 @@ internal static class ApiPluginContributionsHandler
             await UiContributionNotFoundAsync(context).ConfigureAwait(false);
             return;
         }
-        if (registration.Contribution.ActionHandler is null)
+        if (registration.Contribution.ActionHandler is null || !registration.Contribution.Access.Actions.TryGetValue(action, out PluginOperationAccess actionAccess))
         {
             await HttpHelper.ErrorAsync(context, "action_not_supported", 405).ConfigureAwait(false);
             return;
         }
+        if (!await RequestAccessPolicy.RequireAsync(context, actionAccess).ConfigureAwait(false)) return;
         if (!PluginUiValidation.TryValidateValues(registration.Contribution, values, out error))
         {
             await UiValidationErrorAsync(context, error).ConfigureAwait(false);
@@ -399,7 +402,8 @@ internal static class ApiPluginContributionsHandler
         PluginUiContext uiContext,
         JsonObject values,
         string locale,
-        PluginManager plugins)
+        PluginManager plugins,
+        WebRequest request)
     {
         PluginUiContribution contribution = registration.Contribution;
         PluginLocalizationManifest localization = plugins.GetPluginLocalization(registration.PluginName);
@@ -417,6 +421,12 @@ internal static class ApiPluginContributionsHandler
             title = PluginLocalizedTextResolver.Resolve(contribution.LocalizedTitle, contribution.Title, localization),
             description = PluginLocalizedTextResolver.Resolve(contribution.LocalizedDescription, contribution.Description, localization),
             order = contribution.Order,
+            access = new
+            {
+                read = contribution.Access.Read is { } read ? RequestAccessPolicy.Decide(request, read) : null,
+                save = contribution.Access.Save is { } save ? RequestAccessPolicy.Decide(request, save) : null,
+                actions = contribution.Access.Actions.ToDictionary(item => item.Key, item => RequestAccessPolicy.Decide(request, item.Value)),
+            },
             fields = ProjectUiFields(contribution, localization),
             context = new
             {

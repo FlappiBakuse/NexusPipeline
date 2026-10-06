@@ -31,6 +31,7 @@ namespace NexusPipeline.ControlPlane.Http.Services;
 /// </summary>
 internal interface IHttpRouteBindings
 {
+    NexusPipeline.ControlPlane.Http.Static.IFrontendAssetProvider FrontendAssets { get; }
     IReadOnlyDictionary<string, ApiRouteCatalog.BoundRoute> Routes { get; }
 
     SettingsCommands SettingsCommands { get; }

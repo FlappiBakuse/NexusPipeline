@@ -30,6 +30,7 @@ namespace NexusPipeline.Host.Composition;
 /// <summary>HTTP route binding assembled by Host composition.</summary>
 internal sealed class HttpRouteBindings : IHttpRouteBindings
 {
+    public NexusPipeline.ControlPlane.Http.Static.IFrontendAssetProvider FrontendAssets { get; }
     public HttpRouteBindings(
         SettingsCommands settingsCommands,
         ScriptCommands scriptCommands,
@@ -60,8 +61,10 @@ internal sealed class HttpRouteBindings : IHttpRouteBindings
         OutboundHttpClientProvider outboundHttp,
         ScriptIconService scriptIcons,
         ScriptFileBrowser scriptFileBrowser,
-        NexusPipeline.Modules.Users.Contracts.ITaskQueryProjection taskQueries)
+        NexusPipeline.Modules.Users.Contracts.ITaskQueryProjection taskQueries,
+        NexusPipeline.ControlPlane.Http.Static.IFrontendAssetProvider frontendAssets)
     {
+        FrontendAssets = frontendAssets;
         Routes = ApiRouteCatalog.Bind(typeof(WebServer).Assembly, Array.Empty<object>());
         SettingsCommands = settingsCommands;
         ScriptCommands = scriptCommands;

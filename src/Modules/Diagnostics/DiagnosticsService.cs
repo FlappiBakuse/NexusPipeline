@@ -195,7 +195,7 @@ internal sealed class DiagnosticsService
             {
                 throw new InvalidOperationException($"诊断包超过大小上限（{BundleMaxBytes / (1024 * 1024)} MiB）");
             }
-            File.Move(temporary, path, overwrite: true);
+            File.Move(temporary, path, overwrite: false);
             return new DiagnosticBundleResult(path, size);
         }
         finally
@@ -571,16 +571,21 @@ internal sealed class DiagnosticsService
     {
         if (string.IsNullOrWhiteSpace(requested))
         {
-            Directory.CreateDirectory(AppPaths.RuntimeStagingDir);
-            return Path.Combine(
+            requested = Path.Combine(
                 AppPaths.RuntimeStagingDir,
-                $"nexus-pipeline-diagnostics-{DateTime.Now:yyyyMMdd-HHmmss}.zip");
+                $"nexus-pipeline-diagnostics-{DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}.zip");
         }
         string path = Path.GetFullPath(requested.Trim());
-        if (Path.GetPathRoot(path)?.Equals(path, StringComparison.OrdinalIgnoreCase) == true)
+        string root = Path.GetFullPath(AppPaths.RuntimeStagingDir).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        if (!path.StartsWith(root, StringComparison.OrdinalIgnoreCase) || !path.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)
+            || File.Exists(path) || Directory.Exists(path))
         {
-            throw new InvalidOperationException("诊断包输出路径不能是文件系统根目录");
+            throw new InvalidOperationException("诊断包只能保存到运行态 staging 内的新 ZIP 文件");
         }
+        for (string? current = Path.GetDirectoryName(path); current is not null; current = Path.GetDirectoryName(current))
+            if (Directory.Exists(current) && (File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
+                throw new InvalidOperationException("诊断包路径不能包含链接");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         return path;
     }
 

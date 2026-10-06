@@ -4,9 +4,9 @@ For official downloads and published versions, see [Releases](https://github.com
 
 ## Installation and prerequisites
 
-For a first installation, choose either the installer or the portable ZIP. Both start with the same application files: `nexus-pipeline.exe`, `wwwroot/`, `plugins/`, and `README.md`. The bundled EmulatorSupport and LiveScreenshot plugins are disabled by default; enable them on the Plugins page when needed. The installer accepts an empty local directory, or the original directory of an instance registered to the same user when its identity matches. It does not migrate or take over an unknown portable directory. Extract the portable ZIP into an empty directory instead of overwriting an older instance.
+For a first installation, choose either the installer or the portable ZIP. Both start with the same application files: `NexusPipeline.exe`, `resources/desktop/`、`resources/payload-manifest.json`, `plugins/`, and `README.md`. The bundled EmulatorSupport and LiveScreenshot plugins are disabled by default; enable them on the Plugins page when needed. The installer accepts an empty local directory, or the original directory of an instance registered to the same user when its identity matches. It does not migrate or take over an unknown portable directory. Extract the portable ZIP into an empty directory instead of overwriting an older instance.
 
-The application requires .NET Desktop Runtime 10 x64 and ASP.NET Core Runtime 10 x64. If a dependency is missing, the installer asks about each one and downloads a verified package from a fixed Microsoft URL. The portable build retains .NET's missing-runtime prompt. The two precise download buttons are also available on the offline [`wwwroot/help/runtime-prerequisites.html`](../../frontend/public/help/runtime-prerequisites.html) page. Installing a .NET prerequisite may require system authorization; if you cancel, you can run the installer again.
+The application requires .NET Desktop Runtime 10 x64 and ASP.NET Core Runtime 10 x64. If a dependency is missing, the installer asks about each one and downloads a verified package from a fixed Microsoft URL. The portable build retains .NET's missing-runtime prompt. The two precise download buttons are also available on the offline [[运行依赖说明](https://github.com/FlappiBakuse/NexusPipeline/blob/main/docs/user/README.md#安装和依赖)](../../frontend/public/help/runtime-prerequisites.html) page. Installing a .NET prerequisite may require system authorization; if you cancel, you can run the installer again.
 
 ## Running, cancelling, and logs
 
@@ -50,7 +50,7 @@ v0.16.15 switches to .NET 10 and Plugin API 2.0 and removes support for older da
 
 The new version does not convert, import, move or delete affected old configuration, appearance or history files, and provides no migration tool. View old history with the old version from a complete backup. To roll back, use the complete old instance; do not point old binaries at new data.
 
-Ordinary updates using the same formats and crossing no barrier can still use the built-in updater. If such an update is performed manually, replace only `nexus-pipeline.exe`, `wwwroot/` and `README.md`, preserving user directories and existing `plugins/`. The installer cannot take over an unknown directory.
+Ordinary updates using the same formats and crossing no barrier can still use the built-in updater. If such an update is performed manually, replace only `NexusPipeline.exe`, `resources/desktop/`、`resources/payload-manifest.json` and `README.md`, preserving user directories and existing `plugins/`. The installer cannot take over an unknown directory.
 
 ### Uninstalling and recovery
 

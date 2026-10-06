@@ -11,7 +11,7 @@ internal static class CliRouterIntExtensions
     {
         if (!CliOutput.MachineMode)
         {
-            Console.WriteLine(CliText.Get("error.usage", "使用 nexus-pipeline.exe --help 查看命令帮助。"));
+            Console.WriteLine(CliText.Get("error.usage", "使用 NexusPipeline.exe --help 查看命令帮助。"));
         }
         return result;
     }

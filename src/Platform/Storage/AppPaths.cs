@@ -2,7 +2,7 @@ namespace NexusPipeline.Platform.Storage;
 
 internal static class AppPaths
 {
-    public static readonly string AppRoot = AppContext.BaseDirectory;
+    public static readonly string AppRoot = ApplicationExecutionRoot.Root;
 
     public static readonly string ConfigDir = Path.Combine(AppRoot, "config");
 
@@ -41,6 +41,11 @@ internal static class AppPaths
 
     /// <summary>需要跨重启保留的内部状态目录。</summary>
     public static readonly string StateDir = Path.Combine(InternalDir, "state");
+    public static readonly string DesktopBundleDir = Path.Combine(AppRoot, "resources", "desktop");
+    public static readonly string DesktopExecutablePath = Path.Combine(DesktopBundleDir, "NexusPipeline.Desktop.exe");
+    public static readonly string DesktopStateDir = Path.Combine(StateDir, "desktop");
+    public static readonly string DesktopRuntimeDir = Path.Combine(RuntimeDir, "desktop");
+    public static readonly string UpdateWorkersDir = Path.Combine(RuntimeDir, "workers");
 
     /// <summary>插件商店缓存、归属和待应用事务目录。</summary>
     public static readonly string PluginStateDir = Path.Combine(StateDir, "plugins");
@@ -81,7 +86,7 @@ internal static class AppPaths
     /// <summary>更新任务标记（mode: apply|defer|completed + 目标版本 + staging 路径）。</summary>
     public static readonly string UpdateTaskFile = Path.Combine(UpdateDir, "task.json");
 
-    /// <summary>应用前旧版本备份（仅 nexus-pipeline.exe + wwwroot；plugins 属于用户数据）。</summary>
+    /// <summary>应用前旧版本备份（仅 NexusPipeline.exe + wwwroot；plugins 属于用户数据）。</summary>
     public static readonly string UpdateBackupDir = Path.Combine(AppRoot, ".nxp-backup", "previous");
 
     /// <summary>应用成功标记（内容 = 目标版本），供新实例启动收尾读取。</summary>

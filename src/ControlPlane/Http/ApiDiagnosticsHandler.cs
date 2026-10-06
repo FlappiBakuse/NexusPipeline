@@ -42,11 +42,6 @@ internal static class ApiDiagnosticsHandler
             await HttpHelper.MethodNotAllowedAsync(context).ConfigureAwait(false);
             return;
         }
-        if (!HttpHelper.IsLoopback(context))
-        {
-            await HttpHelper.ErrorAsync(context, "local_only", 403).ConfigureAwait(false);
-            return;
-        }
 
         JsonNode? node = HttpHelper.ParseBody(body);
         string? outputPath = node?.Get("outputPath").Str();

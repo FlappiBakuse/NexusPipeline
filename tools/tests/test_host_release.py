@@ -76,7 +76,8 @@ class HostReleaseTests(unittest.TestCase):
                 if args == ('rev-parse', f"{'a' * 40}^{{tree}}"): return 'b' * 40
                 raise AssertionError(args)
             with patch.object(host_release, 'git_output', side_effect=git_result), \
-                 patch.object(host_release, 'verify_received_package', return_value={'sha256': digest}), \
+                 patch.object(host_release, 'verify_received_package', return_value={'sha256': digest,
+                     'buildInputs':{'sourceSha':'a'*40,'sourceTreeSha':'b'*40,'partnerSha':'c'*40,'workflowSha':'d'*40}}) as package_reader, \
                  patch.object(host_release, 'verify_received_installer'):
                 candidate = write_candidate_manifest(root, output, source_sha='a' * 40,
                     partner_sha='c' * 40, workflow_sha='d' * 40, run_id=12, run_attempt=2)
@@ -95,6 +96,11 @@ class HostReleaseTests(unittest.TestCase):
                     with self.assertRaisesRegex(HostReleaseError, 'partner'):
                         validate_candidate_data(root, output, expected_source_sha='a' * 40,
                             expected_producer=candidate['producer'], expected_partner_sha=None)
+                    package_reader.return_value['buildInputs']['workflowSha']='e'*40
+                    with self.assertRaisesRegex(HostReleaseError, 'buildInputs'):
+                        validate_candidate_data(root, output, expected_source_sha='a'*40,
+                            expected_producer=candidate['producer'], expected_partner_sha='c'*40)
+                    package_reader.return_value['buildInputs']['workflowSha']='d'*40
                 (output / 'candidate.json').unlink()
                 (output / 'unexpected.txt').write_text('extra', encoding='utf-8')
                 with self.assertRaisesRegex(HostReleaseError, '文件集合无效'):
@@ -125,10 +131,11 @@ class HostReleaseTests(unittest.TestCase):
                     'setupSizeBytes': setup.stat().st_size, 'payloadFiles': payload,
                     'compilerSha256': INNO_COMPILER_SHA256,
                     'compilerDistributionSha256': INNO_DISTRIBUTION_SHA256,
+                    'buildId': 'd' * 64, 'buildInputs': {'sourceSha': 'a' * 40}, 'frontendHash': 'e' * 64,
                     'dependencies': [dependency, other]}
             manifest = output / 'installer-build-metadata.json'
             manifest.write_text(json.dumps(data), encoding='utf-8')
-            zip_metadata = {'sha256': 'c' * 64, 'payloadFiles': payload}
+            zip_metadata = {'sha256': 'c' * 64, 'payloadFiles': payload, 'buildId': data['buildId'], 'buildInputs': data['buildInputs'], 'frontendHash': data['frontendHash']}
             self.assertEqual(verify_received_installer(output, root, zip_metadata,
                              expected_source_sha='a' * 40, expected_tag='v1.2.3'), data)
             received = root / 'remote-download.exe'
@@ -151,11 +158,19 @@ class HostReleaseTests(unittest.TestCase):
             for entries in cases:
                 package = root / 'candidate.zip'
                 with zipfile.ZipFile(package, 'w') as archive:
-                    archive.writestr('nexus-pipeline.exe', b'not-read')
+                    archive.writestr('NexusPipeline.exe', b'not-read')
                     for entry in entries:
                         archive.writestr(entry, b'' if entry.endswith('/') else b'data')
                 metadata = root / 'metadata.json'
-                metadata.write_text(json.dumps({'schemaVersion':1, 'sourceSha':'a'*40, 'tag':'v1.2.3', 'version':'1.2.3', 'mode':'production', 'sha256':hashlib.sha256(package.read_bytes()).hexdigest(), 'sizeBytes':package.stat().st_size}), encoding='utf-8')
+                from tools.build_identity import create_record
+                inputs=json.loads((Path(__file__).resolve().parents[2]/'tests/fixtures/build-identity/build-inputs.example.json').read_text(encoding='utf-8'))
+                inputs.update(productVersion='1.2.3')
+                frozen=create_record(inputs)
+                metadata.write_text(json.dumps({'schemaVersion':1, 'sourceSha':'a'*40, 'sourceTreeSha':inputs['sourceTreeSha'],
+                    'tag':'v1.2.3','version':'1.2.3','mode':'production','sdkSha':'','buildTool':'isolated ZIP fixture',
+                    'buildInputs':inputs,'buildId':frozen['buildId'],'frontendHash':frozen['frontendHash'],
+                    'installationGeneration':frozen['installationGeneration'],'payloadFiles':[],
+                    'sha256':hashlib.sha256(package.read_bytes()).hexdigest(),'sizeBytes':package.stat().st_size}), encoding='utf-8')
                 verifier = Mock()
                 with self.subTest(entries=entries), self.assertRaises(HostReleaseError):
                     verify_received_package(package, metadata, expected_source_sha='a'*40, expected_tag='v1.2.3', manifest_verifier=verifier)
@@ -163,14 +178,15 @@ class HostReleaseTests(unittest.TestCase):
 
     def test_writer_enforces_types_and_expansion_limits(self) -> None:
         for mode in (0o120777, 0o010644, 0o060644):
-            info = zipfile.ZipInfo('nexus-pipeline.exe')
+            info = zipfile.ZipInfo('NexusPipeline.exe')
             info.external_attr = mode << 16
             with self.subTest(mode=mode), self.assertRaises(HostReleaseError):
                 host_release._validate_package_layout([info])
-        info = zipfile.ZipInfo('nexus-pipeline.exe')
+        info = zipfile.ZipInfo('NexusPipeline.exe')
         info.file_size = host_release.MAX_SINGLE_ENTRY_BYTES
         info.compress_size = info.file_size
-        host_release._validate_package_layout([info])
+        desktop = zipfile.ZipInfo("resources/desktop/NexusPipeline.Desktop.exe")
+        host_release._validate_package_layout([info, desktop])
         info.file_size += 1
         with self.assertRaises(HostReleaseError): host_release._validate_package_layout([info])
         with patch.object(host_release, 'MAX_PACKAGE_ENTRIES', 0), self.assertRaises(HostReleaseError):
@@ -192,9 +208,11 @@ class HostReleaseTests(unittest.TestCase):
             )
             production = root / "production"
             production.mkdir()
-            (production / "nexus-pipeline.exe").write_bytes(b"binary")
-            (production / "wwwroot").mkdir()
-            (production / "wwwroot" / "index.html").write_bytes(b"<html>\r\n</html>")
+            (production / "NexusPipeline.exe").write_bytes(b"binary")
+            desktop = production / "resources" / "desktop"
+            desktop.mkdir(parents=True)
+            (desktop / "NexusPipeline.Desktop.exe").write_bytes(b"desktop")
+            (production / "resources" / "payload-manifest.json").write_bytes(b"{}")
             (production / "README.md").write_bytes(b"README\n")
             for artifact in ("EmulatorSupport", "LiveScreenshot"):
                 plugin = production / "plugins" / artifact
@@ -207,6 +225,14 @@ class HostReleaseTests(unittest.TestCase):
                 archive_production(production, output, "v1.2.3", source_sha="a" * 40, manifest_path=root / "src" / "app.manifest")
             (production / "config" / "secret.json").unlink()
             (production / "config").rmdir()
+            from tools.build_identity import create_record, parse_json
+            inputs = parse_json((Path(__file__).resolve().parents[2] / "tests/fixtures/build-identity/build-inputs.example.json").read_bytes())
+            inputs.update(productVersion="1.2.3", sourceSha="a" * 40)
+            application = create_record(inputs)
+            reader = patch("tools.application_reader.read", return_value=application)
+            validator = patch("tools.application_payload.validate", return_value={})
+            reader.start(); validator.start()
+            self.addCleanup(reader.stop); self.addCleanup(validator.stop)
             first = archive_production(production, output, "v1.2.3", source_sha="a" * 40, manifest_path=root / "src" / "app.manifest")
             self.assertEqual(Path(first["zip"]).name, "NexusPipeline-v1.2.3-win-x64.zip")
             self.assertEqual(Path(first["sha"]).name, "NexusPipeline-v1.2.3-win-x64.zip.sha256")
@@ -215,8 +241,8 @@ class HostReleaseTests(unittest.TestCase):
             second = archive_production(production, output, "v1.2.3", source_sha="a" * 40, manifest_path=root / "src" / "app.manifest")
             self.assertEqual(first_bytes, Path(second["zip"]).read_bytes())
             with zipfile.ZipFile(second["zip"]) as archive:
-                self.assertEqual(archive.namelist(), ["nexus-pipeline.exe", "plugins/EmulatorSupport/plugin.json", "plugins/LiveScreenshot/plugin.json", "README.md", "wwwroot/index.html"])
-                self.assertEqual(archive.read("wwwroot/index.html"), b"<html>\r\n</html>")
+                self.assertEqual(archive.namelist(), ["NexusPipeline.exe", "plugins/EmulatorSupport/plugin.json", "plugins/LiveScreenshot/plugin.json", "README.md", "resources/desktop/NexusPipeline.Desktop.exe", "resources/payload-manifest.json"])
+                self.assertEqual(archive.read("resources/desktop/NexusPipeline.Desktop.exe"), b"desktop")
                 self.assertEqual(archive.read("plugins/EmulatorSupport/plugin.json"), b"{\"name\":\"fixture\"}\r\n")
 
             verified = verify_received_package(

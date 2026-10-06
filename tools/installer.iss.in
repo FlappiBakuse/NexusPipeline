@@ -39,8 +39,8 @@ Name: "zh_ui"; MessagesFile: "@@CHINESE_ISL@@,@@CHINESE_UI_ISL@@"
 Name: desktopicon; Description: "{cm:DesktopIcon}"; Flags: unchecked
 
 [Icons]
-Name: "{autoprograms}\NexusPipeline @@GENERATION@@"; Filename: "{app}\nexus-pipeline.exe"
-Name: "{autodesktop}\NexusPipeline @@GENERATION@@"; Filename: "{app}\nexus-pipeline.exe"; Tasks: desktopicon
+Name: "{autoprograms}\NexusPipeline @@GENERATION@@"; Filename: "{app}\NexusPipeline.exe"
+Name: "{autodesktop}\NexusPipeline @@GENERATION@@"; Filename: "{app}\NexusPipeline.exe"; Tasks: desktopicon
 
 [Files]
 @@FILES@@
@@ -170,7 +170,7 @@ begin
     'if ($CheckHelper -eq ''true'') {' + #13#10 +
     '$exe = Join-Path $m ''nexus-installer-helper.exe''' + #13#10 +
     'if ((Get-Item -LiteralPath $exe).Attributes -band [IO.FileAttributes]::ReparsePoint) { exit 1 }' + #13#10 +
-    '$expected = @($i.PayloadFiles | Where-Object Path -eq ''nexus-pipeline.exe'')' + #13#10 +
+    '$expected = @($i.PayloadFiles | Where-Object Path -eq ''NexusPipeline.exe'')' + #13#10 +
     'if ($expected.Count -ne 1 -or (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash -ne $expected[0].Sha256) { exit 1 }' + #13#10 +
     '}' + #13#10 + '[IO.File]::WriteAllText($ResultFile,$i.State,[Text.Encoding]::ASCII)' + #13#10 + '} catch { exit 1 }' + #13#10, False) then Exit;
   Params := '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + Script + '" -Root "' + Path + '" -CheckHelper ';
@@ -208,12 +208,17 @@ begin
   Result := False;
   if RootsOverlap(Path, ExpandConstant('{localappdata}\NexusPipeline')) or
      RootsOverlap(Path, ExpandConstant('{localappdata}\Programs\NexusPipeline')) or
+     RootsOverlap(Path, ExpandConstant('{localappdata}\NexusPipeline.Generations\g01615')) or
      RootsOverlap(Path, ExpandConstant('{localappdata}\NexusPipeline.Generations\@@GENERATION@@\installer')) then Exit;
   if RegQueryStringValue(HKCU, 'Software\NexusPipeline\Installer', 'DataRoot', OldRoot) then
     if RootsOverlap(Path, OldRoot) then Exit;
   if RegQueryStringValue(HKCU, 'Software\NexusPipeline\Installer', 'AppDir', OldRoot) then
     if RootsOverlap(Path, OldRoot) then Exit;
   if RegQueryStringValue(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Uninstall\NexusPipeline.PerUser_is1', 'InstallLocation', OldRoot) then
+    if RootsOverlap(Path, OldRoot) then Exit;
+  if RegQueryStringValue(HKCU, 'Software\NexusPipeline.Generations\g01615\Installer', 'AppDir', OldRoot) then
+    if RootsOverlap(Path, OldRoot) then Exit;
+  if RegQueryStringValue(HKCU, 'Software\NexusPipeline.Generations\g01615\Installer', 'DataRoot', OldRoot) then
     if RootsOverlap(Path, OldRoot) then Exit;
   Result := True;
 end;
@@ -457,13 +462,15 @@ begin
     if UpgradeMode then begin
       Staged := AddBackslash(Path) + '.nxp-update\staging\@@VERSION@@';
       VerifyStagedPayload;
-      Helper := AddBackslash(Path) + '.nxp-update-worker-setup-' + TransactionId + '.exe';
-      if not FileCopy(AddBackslash(Staged) + 'nexus-pipeline.exe', Helper, True) then
+      if not ForceDirectories(AddBackslash(Path) + '.nxp\runtime\workers') then RaiseException(CustomMessage('HandoffCopyFailed'));
+      Helper := AddBackslash(Path) + '.nxp\runtime\workers\update-' + TransactionId + '.exe';
+      if FileExists(Helper) then RaiseException(CustomMessage('HandoffCopyFailed'));
+      if not FileCopy(AddBackslash(Path) + 'NexusPipeline.exe', Helper, True) then
         RaiseException(CustomMessage('HandoffCopyFailed'));
-      if CompareText(GetSHA256OfFile(Helper), '@@EXE_SHA256@@') <> 0 then
+      if CompareText(GetSHA256OfFile(Helper), GetSHA256OfFile(AddBackslash(Path) + 'NexusPipeline.exe')) <> 0 then
         RaiseException(CustomMessage('HandoffHashFailed'));
       ApplyInstallerLaunch(Helper,
-        'installer-update --staged "' + Staged + '" --version @@VERSION@@ --image-hash @@EXE_SHA256@@ --transaction ' + TransactionId,
+        'installer-update --app-root "' + Path + '" --staged "' + Staged + '" --version @@VERSION@@ --image-hash @@EXE_SHA256@@ --package-hash @@PACKAGE_SHA256@@ --transaction ' + TransactionId,
         Path, Launched, Resolved, Code);
       InstallationQualified := True;
       DeleteFile(Helper);
@@ -475,7 +482,7 @@ begin
     Manifest := ExpandConstant('{tmp}\nxp-payload-manifest.json');
     if not SaveStringToFile(Manifest, '@@PAYLOAD_MANIFEST@@', False) then
       RaiseException(CustomMessage('ManifestWriteFailed'));
-    Launched := ShellExec('runas', AddBackslash(Path) + 'nexus-pipeline.exe',
+    Launched := ShellExec('runas', AddBackslash(Path) + 'NexusPipeline.exe',
       'installer-state register --root "' + Path + '" --version @@VERSION@@ --manifest "' + Manifest + '"',
       Path, SW_HIDE, ewWaitUntilTerminated, Code);
     Resolution := ResolveInstallerMetadata(Launched, Code, True);

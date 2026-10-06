@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:nexuspipeline:schemas:desktop-build:1",
+  "title": "NexusPipeline embedded build identity",
+  "description": "Exact record at ASAR /desktop-build.json and embedded in Host. Cross-field equality and buildId recomputation are mandatory code-level validation, in addition to this schema.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "product",
+    "productVersion",
+    "installationGeneration",
+    "rid",
+    "buildId",
+    "frontendHash",
+    "bootstrapProtocolVersion",
+    "buildInputs"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "product": {
+      "const": "NexusPipeline"
+    },
+    "productVersion": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-(beta|rc)\\.(0|[1-9][0-9]*))?$"
+    },
+    "installationGeneration": {
+      "const": "g0170"
+    },
+    "rid": {
+      "const": "win-x64"
+    },
+    "buildId": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "frontendHash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "bootstrapProtocolVersion": {
+      "const": 1
+    },
+    "buildInputs": {
+      "$ref": "urn:nexuspipeline:schemas:build-inputs:1"
+    }
+  }
+}

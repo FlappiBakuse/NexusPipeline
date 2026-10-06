@@ -30,3 +30,5 @@
 - [历史索引](history/README.md)：已发布版本归档，不作为当前行为规范。
 
 机器路由保存在 [map.json](map.json)。本地执行 `node tools/check-doc-links.mjs` 核对本目录的相对链接与片段；测试命令见[测试命令](testing/commands.md)。
+
+桌面、窗口与完整应用资源见[桌面管理与应用载荷](development/desktop-client.md)。

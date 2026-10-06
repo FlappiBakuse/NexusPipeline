@@ -24,11 +24,11 @@ except ImportError:
 REPOSITORY = "FlappiBakuse/NexusPipeline"
 VERSION_PATTERN = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(beta|rc)\.(0|[1-9]\d*))?$")
 PROTECTED_NAMES = {"config", "data", "history", "logs", ".nxp", "outputs", "user-assets", ".nxp-update", ".nxp-backup"}
-PAYLOAD_ROOTS = {"nexus-pipeline.exe", "README.md", "wwwroot", "plugins"}
+PAYLOAD_ROOTS = {"NexusPipeline.exe", "README.md", "resources", "plugins"}
 TEXT_SUFFIXES = {".css", ".html", ".js", ".json", ".md", ".mjs", ".txt", ".xml", ".yaml", ".yml"}
 MAX_PACKAGE_ENTRIES = 4096
 MAX_PACKAGE_UNCOMPRESSED_BYTES = 512 * 1024 * 1024
-MAX_SINGLE_ENTRY_BYTES = 128 * 1024 * 1024
+MAX_SINGLE_ENTRY_BYTES = 256 * 1024 * 1024
 MAX_COMPRESSION_RATIO = 250
 WINDOWS_RESERVED_NAMES = {"CON", "PRN", "AUX", "NUL", *(f"COM{x}" for x in '123456789¹²³'), *(f"LPT{x}" for x in '123456789¹²³')}
 
@@ -110,17 +110,6 @@ def _safe_archive_name(path: Path, production_root: Path) -> str:
     return relative
 
 
-def _normalize_host_text(production_root: Path) -> None:
-    for root in (production_root / "wwwroot",):
-        for path in root.rglob("*"):
-            if path.is_file() and path.suffix.casefold() in TEXT_SUFFIXES:
-                data = path.read_bytes()
-                path.write_bytes(data.replace(b"\r\n", b"\n").replace(b"\r", b"\n"))
-    readme = production_root / "README.md"
-    data = readme.read_bytes()
-    readme.write_bytes(data.replace(b"\r\n", b"\n").replace(b"\r", b"\n"))
-
-
 def stage_bundled_plugins(production_root: Path, plugins_root: Path, manifest_path: Path) -> None:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     _require(manifest.get("schemaVersion") == 1 and manifest.get("repository") == "FlappiBakuse/NexusPipeline-Plugins", "预装插件清单来源无效")
@@ -186,10 +175,20 @@ def archive_production(
     folded = [name.casefold() for name, _ in files]
     _require(len(folded) == len(set(folded)), "生产载荷大小写路径冲突")
     files.sort(key=lambda item: (item[0].casefold(), item[0]))
-    _require({name for name, _ in files if "/" not in name} == {"nexus-pipeline.exe", "README.md"}, "生产载荷根文件不符")
+    _require({name for name, _ in files if "/" not in name} == {"NexusPipeline.exe", "README.md"}, "生产载荷根文件不符")
     _require(any(name.startswith("plugins/EmulatorSupport/") for name, _ in files)
              and any(name.startswith("plugins/LiveScreenshot/") for name, _ in files)
-             and any(name.startswith("wwwroot/") for name, _ in files), "生产载荷目录缺失")
+             and any(name == "resources/payload-manifest.json" for name, _ in files), "生产载荷目录缺失")
+    try:
+        from .application_reader import read as read_application
+    except ImportError:
+        from application_reader import read as read_application
+    application = read_application(production_root, version)
+    try:
+        from .application_payload import validate as validate_application
+    except ImportError:
+        from application_payload import validate as validate_application
+    validate_application(production_root, json.loads((production_root / "resources/payload-manifest.json").read_bytes()), application, Path(__file__).resolve().parents[1])
     payload_files = []
     with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
         for relative, path in files:
@@ -210,6 +209,11 @@ def archive_production(
         "version": version,
         "mode": "production",
         "sdkSha": sdk_sha,
+        "sourceTreeSha": application["buildInputs"]["sourceTreeSha"],
+        "buildId": application["buildId"],
+        "buildInputs": application["buildInputs"],
+        "frontendHash": application["frontendHash"],
+        "installationGeneration": application["installationGeneration"],
         "buildTool": build_tool,
         "sha256": digest,
         "sizeBytes": zip_path.stat().st_size,
@@ -251,6 +255,8 @@ def build_production(
     plugins_root: Path | None = None,
     bundled_phase: Path | None = None,
     bundled_partner_sha: str | None = None,
+    workflow_sha: str | None = None,
+    electron_archive: Path | None = None,
 ) -> dict[str, Any]:
     root = root.resolve()
     production_root = output_dir.resolve() / "production"
@@ -263,16 +269,22 @@ def build_production(
         _run_checked([npm, "ci", "--no-audit", "--no-fund"], frontend, runner)
         _run_checked([npm, "run", "typecheck"], frontend, runner)
         _run_checked([npm, "run", "build"], frontend, runner)
-    _run_checked([dotnet, "publish", str(root / "src" / "NexusPipeline.csproj"), "--configuration", "Release", "--runtime", "win-x64", "--self-contained", "false", "-p:PublishSingleFile=true", "-p:DebugType=none", "-p:DebugSymbols=false", "-p:NexusTestHost=false", "--output", str(production_root)], root, runner)
-    verify_embedded_manifest(production_root / "nexus-pipeline.exe", "requireAdministrator")
+    try:
+        from .application_build import prepare as prepare_application
+    except ImportError:
+        from application_build import prepare as prepare_application
+    partner_sha = bundled_partner_sha or (git_output(plugins_root, "rev-parse", "HEAD") if plugins_root else "")
+    _require(re.fullmatch(r"[0-9a-f]{40}", partner_sha) is not None, "生产构建缺少固定 Plugins SHA")
+    inputs = prepare_application(root, output_dir.resolve() / "application-inputs", source_sha=source_sha,
+        source_tree_sha=git_output(root, "rev-parse", "HEAD^{tree}"), partner_sha=partner_sha,
+        workflow_sha=workflow_sha or source_sha, electron_archive=electron_archive)
+    _run_checked([dotnet, "publish", str(root / "src" / "NexusPipeline.csproj"), "--configuration", "Release", "--runtime", "win-x64", "--self-contained", "false", "-p:PublishSingleFile=true", "-p:DebugType=none", "-p:DebugSymbols=false", "-p:NexusTestHost=false", "-p:NexusFrontendProps=" + inputs["frontendProps"], "-p:NexusBuildIdentityPath=" + inputs["identity"], "--output", str(production_root)], root, runner)
+    verify_embedded_manifest(production_root / "NexusPipeline.exe", "requireAdministrator")
     if "@@LAUNCH_CODE@@" in (root / "tools" / "installer.iss.in").read_text(encoding="utf-8"):
         helper_root = output_dir.resolve() / "installer-helper"
         _run_checked([dotnet, "publish", str(root / "src" / "NexusPipeline.csproj"), "--configuration", "Release", "--runtime", "win-x64", "--self-contained", "false", "-p:PublishSingleFile=true", "-p:DebugType=none", "-p:DebugSymbols=false", "-p:NexusTestHost=false", "-p:NexusInstallerMetadataHelper=true", "--output", str(helper_root)], root, runner)
         verify_embedded_manifest(helper_root / "nxp-metadata-helper.exe", "asInvoker")
-    wwwroot = production_root / "wwwroot"
-    if wwwroot.exists():
-        shutil.rmtree(wwwroot)
-    shutil.copytree(frontend / "dist", wwwroot)
+    shutil.copytree(inputs["desktopBundle"], production_root / "resources" / "desktop")
     shutil.copy2(root / "README.md", production_root / "README.md")
     if bundled_phase is None:
         _require(plugins_root is not None, "必须显式提供官方 Plugins 检出路径")
@@ -280,7 +292,11 @@ def build_production(
     else:
         consume_bundled_phase(root, bundled_phase, production_root,
                               source_sha=source_sha, partner_sha=bundled_partner_sha)
-    _normalize_host_text(production_root)
+    try:
+        from .application_payload import create as create_application_manifest
+    except ImportError:
+        from application_payload import create as create_application_manifest
+    create_application_manifest(production_root, json.loads(Path(inputs["identity"]).read_bytes()), root)
     return archive_production(
         production_root,
         output_dir,
@@ -457,18 +473,20 @@ def verify_received_installer(output_dir: Path, root: Path, zip_metadata: dict[s
     _require(all(path.is_file() and not path.is_symlink() for path in (setup, sidecar, metadata_path)),
              "安装器候选文件缺失或不是普通文件")
     try:
-        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        metadata = _strict_metadata(metadata_path)
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise HostReleaseError("安装器元数据无效") from exc
     _require(isinstance(metadata, dict) and set(metadata) == {
         "schemaVersion", "sourceSha", "tag", "version", "zipSha256", "setupSha256",
         "setupSizeBytes", "payloadFiles", "compilerSha256", "compilerDistributionSha256", "dependencies",
+        "buildInputs", "buildId", "frontendHash",
     }, "安装器元数据字段集合无效")
     _require(metadata["schemaVersion"] == 1 and metadata["sourceSha"] == expected_source_sha
              and metadata["tag"] == expected_tag and metadata["version"] == expected_tag[1:]
              and metadata["zipSha256"] == zip_metadata["sha256"]
              and metadata["payloadFiles"] == zip_metadata["payloadFiles"],
              "安装器与 ZIP 来源或应用载荷不一致")
+    _require(all(metadata[key] == zip_metadata[key] for key in ('buildInputs','buildId','frontendHash')), "安装器与 ZIP 构建身份不一致")
     _require(metadata["compilerSha256"] == INNO_COMPILER_SHA256
              and metadata["compilerDistributionSha256"] == INNO_DISTRIBUTION_SHA256,
              "安装器编译器身份不符")
@@ -481,6 +499,15 @@ def verify_received_installer(output_dir: Path, root: Path, zip_metadata: dict[s
              and sidecar.read_text(encoding="ascii").strip() == digest,
              "安装器摘要或大小不符")
     return metadata
+
+
+def _verify_candidate_build_inputs(metadata: dict[str, Any], source_sha: str, tree_sha: str,
+                                   partner_sha: str | None, workflow_sha: str) -> None:
+    inputs = metadata.get("buildInputs")
+    _require(isinstance(inputs, dict) and inputs.get("sourceSha") == source_sha
+             and inputs.get("sourceTreeSha") == tree_sha and inputs.get("partnerSha") == partner_sha
+             and inputs.get("workflowSha") == workflow_sha,
+             "Host candidate 与冻结 buildInputs 来源不符")
 
 
 def write_candidate_manifest(
@@ -511,6 +538,7 @@ def write_candidate_manifest(
              f"Host candidate 文件集合无效：{sorted(actual)}")
     metadata = verify_received_package(output_dir / zip_name, output_dir / "build-metadata.json",
                                        expected_source_sha=source_sha, expected_tag=tag)
+    _verify_candidate_build_inputs(metadata, source_sha, tree_sha, partner_sha, workflow_sha)
     _require((output_dir / f"{zip_name}.sha256").read_text(encoding="ascii").strip() == metadata["sha256"], "Host SHA sidecar 与包不一致")
     verify_received_installer(output_dir, root, metadata, expected_source_sha=source_sha, expected_tag=tag)
     files = [
@@ -559,7 +587,7 @@ def validate_candidate_data(
     manifest_file = output_dir / "candidate.json"
     _require(manifest_file.is_file() and not manifest_file.is_symlink(), "Host candidate.json 必须是普通文件")
     try:
-        candidate = json.loads(manifest_file.read_text(encoding="utf-8"))
+        candidate = _strict_metadata(manifest_file)
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise HostReleaseError("Host candidate.json 缺失或无效") from exc
     _require(isinstance(candidate, dict) and set(candidate) == {
@@ -608,6 +636,8 @@ def validate_candidate_data(
                  f"Host candidate inventory 摘要或大小不符：{name}")
     metadata = verify_received_package(output_dir / zip_name, output_dir / "build-metadata.json",
                                        expected_source_sha=expected_source_sha, expected_tag=tag)
+    _verify_candidate_build_inputs(metadata, expected_source_sha, candidate["sourceTreeSha"],
+                                   expected_partner_sha, expected_producer["workflowSha"])
     _require((output_dir / f"{zip_name}.sha256").read_text(encoding="ascii").strip() == metadata["sha256"], "Host candidate SHA sidecar 不符")
     verify_received_installer(output_dir, root, metadata, expected_source_sha=expected_source_sha, expected_tag=tag)
     return candidate
@@ -715,8 +745,19 @@ def _validate_package_layout(infos: list[zipfile.ZipInfo]) -> dict[str, zipfile.
     for name in folded_names:
         parts = name.split('/')
         _require(not any('/'.join(parts[:index]) in files for index in range(1, len(parts))), f"生产 ZIP 文件/目录冲突：{name}")
-    _require({name for name in files if name.endswith('.exe')} == {'nexus-pipeline.exe'}, "生产 ZIP 必须仅包含唯一宿主 EXE")
+    _require({name for name in files if name.endswith('.exe')} == {'nexuspipeline.exe', 'resources/desktop/nexuspipeline.desktop.exe'}, "生产 ZIP 的 Host 与桌面入口集合不符")
     return names
+
+
+def _strict_metadata(file: Path) -> dict:
+    _require(file.is_file() and not file.is_symlink() and file.stat().st_size <= 4 * 1024 * 1024, "metadata 文件无效")
+    def pairs(items):
+        value = {}
+        for key, item in items:
+            _require(key not in value, "metadata 重复字段：" + key)
+            value[key] = item
+        return value
+    return json.loads(file.read_text(encoding="utf-8"), object_pairs_hook=pairs)
 
 
 def verify_received_package(
@@ -733,16 +774,31 @@ def verify_received_package(
     metadata_path = metadata_path.resolve()
     _require(package_path.is_file() and not package_path.is_symlink(), f"生产 ZIP 不存在或不是普通文件：{package_path}")
     try:
-        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        metadata = _strict_metadata(metadata_path)
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise HostReleaseError(f"生产 metadata 无效：{metadata_path}") from exc
-    _require(isinstance(metadata, dict) and metadata.get("schemaVersion") == 1, "生产 metadata schemaVersion 无效")
+    _require(isinstance(metadata, dict) and set(metadata) == {
+        "schemaVersion", "sourceSha", "tag", "version", "mode", "sdkSha", "sourceTreeSha", "buildId", "buildInputs",
+        "frontendHash", "installationGeneration", "buildTool", "sha256", "sizeBytes", "payloadFiles"}, "生产 metadata 字段无效")
+    _require(type(metadata["schemaVersion"]) is int and metadata["schemaVersion"] == 1
+        and type(metadata["sizeBytes"]) is int and metadata["sizeBytes"] > 0, "生产 metadata schemaVersion 或大小无效")
     expected_tag = normalized_tag(expected_tag)
     _require(re.fullmatch(r"[0-9a-f]{40}", expected_source_sha) is not None, "expected source SHA 无效")
     _require(metadata.get("sourceSha") == expected_source_sha, "生产 ZIP sourceSha 不匹配")
     _require(metadata.get("tag") == expected_tag, "生产 ZIP tag 不匹配")
     _require(metadata.get("version") == expected_tag[1:], "生产 ZIP version 不匹配")
     _require(metadata.get("mode") == "production", "生产 ZIP mode 无效")
+    try:
+        from .build_identity import create_record, validate_inputs
+    except ImportError:
+        from build_identity import create_record, validate_inputs
+    try: validate_inputs(metadata["buildInputs"])
+    except ValueError as error: raise HostReleaseError("生产 ZIP 冻结输入无效") from error
+    frozen = create_record(metadata["buildInputs"])
+    _require(frozen["buildInputs"]["sourceSha"] == expected_source_sha and frozen["productVersion"] == expected_tag[1:]
+        and metadata["sourceTreeSha"] == frozen["buildInputs"]["sourceTreeSha"]
+        and all(metadata[key] == frozen[key] for key in ("buildId", "frontendHash", "installationGeneration")), "生产 ZIP 冻结身份不符")
+    _require(metadata["sdkSha"] in ("", frozen["buildInputs"]["partnerSha"]) and type(metadata["buildTool"]) is str and 0 < len(metadata["buildTool"]) <= 128, "生产 metadata 工具或对端身份无效")
     digest = hashlib.sha256(package_path.read_bytes()).hexdigest()
     _require(metadata.get("sha256") == digest, "生产 ZIP SHA256 不匹配")
     _require(metadata.get("sizeBytes") == package_path.stat().st_size, "生产 ZIP sizeBytes 不匹配")
@@ -750,12 +806,16 @@ def verify_received_package(
     try:
         with zipfile.ZipFile(package_path) as archive:
             names = _validate_package_layout(archive.infolist())
-            exe = names.get("nexus-pipeline.exe")
-            _require(exe is not None and not exe.filename.endswith(("/", "\\")), "生产 ZIP 必须包含根目录 nexus-pipeline.exe")
+            exe = names.get("NexusPipeline.exe")
+            _require(exe is not None and not exe.filename.endswith(("/", "\\")), "生产 ZIP 必须包含根目录 NexusPipeline.exe")
+            _require("payloadFiles" in metadata, "生产 ZIP 缺少完整文件清单")
             if "payloadFiles" in metadata:
                 listed = metadata["payloadFiles"]
                 _require(isinstance(listed, list) and len(listed) == len(names), "生产载荷清单条目数不符")
-                by_path = {item.get("path"): item for item in listed if isinstance(item, dict)}
+                _require(all(type(item) is dict and set(item) == {"path", "sizeBytes", "sha256"}
+                    and type(item["sizeBytes"]) is int and 0 <= item["sizeBytes"] <= MAX_SINGLE_ENTRY_BYTES
+                    and type(item["sha256"]) is str and re.fullmatch(r"[0-9a-f]{64}", item["sha256"]) for item in listed), "生产载荷清单字段无效")
+                by_path = {item.get("path"): item for item in listed}
                 _require(len(by_path) == len(names) and set(by_path) == set(names), "生产载荷清单路径不符")
                 for name, info in names.items():
                     data = archive.read(info)
@@ -763,12 +823,32 @@ def verify_received_package(
                     _require(item.get("sizeBytes") == len(data) and item.get("sha256") == hashlib.sha256(data).hexdigest(), f"生产载荷文件不符：{name}")
             verifier = manifest_verifier or verify_embedded_manifest
             with tempfile.TemporaryDirectory(prefix="nxp-host-package-verify-") as temporary:
-                executable = Path(temporary) / "nexus-pipeline.exe"
+                executable = Path(temporary) / "NexusPipeline.exe"
                 executable.write_bytes(archive.read(exe))
                 try:
                     verifier(executable, "requireAdministrator")
                 except Exception as exc:
                     raise HostReleaseError("生产 ZIP 可执行文件 manifest 未通过 requireAdministrator 校验") from exc
+                for name, info in names.items():
+                    target = Path(temporary).joinpath(*name.split('/'))
+                    if info.is_dir(): target.mkdir(parents=True, exist_ok=True)
+                    elif name != "NexusPipeline.exe":
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        with archive.open(info) as source, target.open('xb') as output:
+                            shutil.copyfileobj(source, output, 1024 * 1024)
+                try:
+                    from .application_reader import read as read_application
+                    from .application_payload import validate as validate_application
+                except ImportError:
+                    from application_reader import read as read_application
+                    from application_payload import validate as validate_application
+                application = read_application(Path(temporary), expected_tag[1:])
+                validate_application(Path(temporary), json.loads((Path(temporary) / "resources/payload-manifest.json").read_bytes()), application, Path(__file__).resolve().parents[1])
+                for key in ('sourceTreeSha', 'buildId', 'frontendHash', 'installationGeneration'):
+                    expected = application['buildInputs']['sourceTreeSha'] if key == 'sourceTreeSha' else application[key]
+                    _require(metadata.get(key) == expected, "生产 ZIP 应用身份不匹配：" + key)
+                _require(application['buildInputs']['sourceSha'] == expected_source_sha, "生产 ZIP 内嵌源码身份不符")
+                _require(metadata.get('buildInputs') == application['buildInputs'], "生产 ZIP 冻结输入不一致")
     except zipfile.BadZipFile as exc:
         raise HostReleaseError(f"生产 ZIP 无效：{package_path}") from exc
     return metadata
@@ -797,6 +877,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--host-phase", type=Path)
     parser.add_argument("--installer-phase", type=Path)
     parser.add_argument("--inno-compiler", type=Path)
+    parser.add_argument("--electron-archive", type=Path)
     parser.add_argument("--artifact-zip", type=Path)
     parser.add_argument("--expected-digest")
     parser.add_argument("--github-output", type=Path)
@@ -825,7 +906,7 @@ def main(argv: list[str] | None = None) -> int:
             consume_frontend_phase(root, args.frontend_phase, source_sha=args.source_sha)
             result = build_production(root, output, source_sha=args.source_sha,
                                       frontend_ready=True, bundled_phase=args.bundled_phase,
-                                      bundled_partner_sha=args.partner_sha)
+                                      bundled_partner_sha=args.partner_sha, workflow_sha=args.workflow_sha, electron_archive=args.electron_archive)
         else:
             for value, label in ((args.host_phase, "--host-phase"),
                                  (args.installer_phase, "--installer-phase"),

@@ -35,7 +35,7 @@ internal static class ApiUpdateHandler
                 var node = HttpHelper.ParseBody(body);
                 var result = updates.RequestInstallerApply(node?["stagedDir"]?.GetValue<string>() ?? "",
                     node?["version"]?.GetValue<string>() ?? "", node?["imageHash"]?.GetValue<string>() ?? "",
-                    node?["transactionId"]?.GetValue<string>() ?? "", Audit.Web);
+                    node?["transactionId"]?.GetValue<string>() ?? "", Audit.Web, node?["packageHash"]?.GetValue<string>() ?? "");
                 if (!result.Succeeded)
                 { await HttpHelper.ErrorAsync(context, result.Code ?? "installer_apply_failed", 409).ConfigureAwait(false); return; }
                 await HttpHelper.WriteJsonAsync(context, new { ok = true }).ConfigureAwait(false); return;

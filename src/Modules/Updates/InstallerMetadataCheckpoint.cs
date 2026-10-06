@@ -41,8 +41,8 @@ internal static class InstallerMetadataCheckpoint
         if (identity is null && (before.Uninstall.Exists || before.Ownership.Exists
             || before.UninstallFiles.Length != 0 || before.IdentityHash is not null || before.HelperHash is not null))
             throw new IOException("installer.metadata_unknown_preexisting");
-        string? sourceImage = File.Exists(Path.Combine(root, "nexus-pipeline.exe"))
-            ? UpdateApply.ImageHash(Path.Combine(root, "nexus-pipeline.exe")) : null;
+        string? sourceImage = File.Exists(Path.Combine(root, "NexusPipeline.exe"))
+            ? UpdateApply.ImageHash(Path.Combine(root, "NexusPipeline.exe")) : null;
         if (identity is not null && (identity.State is not ("active" or "retained-data")
             || identity.State == "active" && sourceImage is null))
             throw new IOException("installer.metadata_source_invalid");
@@ -157,7 +157,7 @@ internal static class InstallerMetadataCheckpoint
         InstallerInstanceIdentity? identity;
         try { identity = InstallationOwnership.Read(state.Root); }
         catch { return "Unknown"; }
-        string image = Path.Combine(state.Root, "nexus-pipeline.exe");
+        string image = Path.Combine(state.Root, "NexusPipeline.exe");
         string? currentHash = File.Exists(image) ? UpdateApply.ImageHash(image) : null;
         bool target = identity?.State == "active" && identity.Version == state.TargetVersion
             && currentHash == state.TargetImageHash;

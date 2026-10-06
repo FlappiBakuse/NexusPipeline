@@ -49,6 +49,8 @@ internal static class ApiPluginWebApiHandler
             return;
         }
 
+        if (!await RequestAccessPolicy.RequireAsync(context, registration.Route.Access).ConfigureAwait(false)) return;
+
         byte[] requestBody;
         try
         {
@@ -81,7 +83,8 @@ internal static class ApiPluginWebApiHandler
                 query,
                 IsJsonContentType(contentType) && requestBody.Length > 0
                     ? Encoding.UTF8.GetString(requestBody)
-                    : null)
+                    : null,
+                RequestAccessPolicy.Connection(context.Request))
             {
                 ContentType = contentType,
                 ContentLength = requestBody.Length,

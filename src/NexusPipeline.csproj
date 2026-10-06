@@ -6,9 +6,9 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <UseWindowsForms>true</UseWindowsForms>
-    <AssemblyName>nexus-pipeline</AssemblyName>
+    <AssemblyName>NexusPipeline</AssemblyName>
     <RootNamespace>NexusPipeline</RootNamespace>
-    <Version>0.16.15</Version>
+    <Version>0.17.0</Version>
     <InvariantGlobalization>false</InvariantGlobalization>
     <NoWarn>CA1416</NoWarn>
     <ApplicationIcon>NexusPipeline.ico</ApplicationIcon>
@@ -20,6 +20,15 @@
     <ApplicationManifest>app.test.manifest</ApplicationManifest>
     <DefineConstants>$(DefineConstants);NEXUS_TEST_HOST</DefineConstants>
   </PropertyGroup>
+
+  <Import Project="$(NexusFrontendProps)" Condition="'$(NexusFrontendProps)' != ''" />
+  <ItemGroup Condition="'$(NexusBuildIdentityPath)' != ''">
+    <EmbeddedResource Include="$(NexusBuildIdentityPath)" LogicalName="NexusPipeline.Desktop.BuildIdentity" />
+  </ItemGroup>
+  <Target Name="RequireFrontendInputs" BeforeTargets="PrepareForBuild" Condition="'$(NexusTestHost)' != 'true' and '$(NexusInstallerMetadataHelper)' != 'true'">
+    <Error Condition="'$(NexusFrontendProps)' == '' or !Exists('$(NexusFrontendProps)')" Text="Build the frontend and pass NexusFrontendProps from tools/embed_frontend.py." />
+    <Error Condition="'$(NexusBuildIdentityPath)' == '' or !Exists('$(NexusBuildIdentityPath)')" Text="Pass the frozen desktop-build.json as NexusBuildIdentityPath." />
+  </Target>
 
   <ItemGroup Condition="'$(NexusTestHost)' == 'true'">
     <Compile Include="..\tests\host\TestHostTransport.cs" Link="Host\Composition\TestHostTransport.cs" />
@@ -48,6 +57,7 @@
   <ItemGroup>
     <EmbeddedResource Include="Shared\Localization\Resources\*.json" />
     <EmbeddedResource Include="Modules\Plugins\Repository\BundledPlugins.json" />
+    <EmbeddedResource Include="..\desktop\runtime-files.json" LogicalName="NexusPipeline.Desktop.RuntimeFiles" />
   </ItemGroup>
 
   <ItemGroup>

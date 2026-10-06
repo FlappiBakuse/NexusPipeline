@@ -2,12 +2,12 @@ using System.Text.Json.Nodes;
 
 namespace NexusPipeline.Plugin.Abstractions;
 
-/// <summary>稳定的 NexusPipeline managed-code 插件生命周期契约（Plugin API v2.0）。</summary>
+/// <summary>稳定的 NexusPipeline managed-code 插件生命周期契约（Plugin API v2.1）。</summary>
 public static class PluginApiVersion
 {
     public const int Major = 2;
 
-    public const int Minor = 0;
+    public const int Minor = 1;
 }
 
 /// <summary>独立于 C# Plugin API 维护的前端扩展 ABI 版本；要求精确版本匹配。</summary>
@@ -15,9 +15,9 @@ public static class FrontendApiVersion
 {
     public const int Major = 1;
 
-    public const int Minor = 5;
+    public const int Minor = 6;
 
-    public const string Text = "1.5";
+    public const string Text = "1.6";
 
     public static bool IsCompatibleWith(string? value)
     {
@@ -354,6 +354,15 @@ public sealed record PluginUiField(
     public PluginLocalizedText? LocalizedPlaceholder { get; init; }
 };
 
+public enum PluginOperationAccess { General = 1, HostFilePicker = 2, NativeConfigEditor = 3 }
+
+public enum PluginClientConnectionKind { Unknown = 0, Local = 1, Remote = 2 }
+
+public sealed record PluginUiAccessDeclaration(
+    PluginOperationAccess? Read,
+    PluginOperationAccess? Save,
+    IReadOnlyDictionary<string, PluginOperationAccess> Actions);
+
 public sealed record PluginUiContribution(
     string Id,
     string Slot,
@@ -366,11 +375,14 @@ public sealed record PluginUiContribution(
     Func<PluginUiContext, JsonObject, CancellationToken, ValueTask>? SaveHandler = null,
     Func<PluginUiContext, string, JsonObject, CancellationToken, ValueTask<JsonObject?>>? ActionHandler = null)
 {
+    public required PluginUiAccessDeclaration Access { get; init; }
+
     public PluginLocalizedText? LocalizedTitle { get; init; }
 
     public PluginLocalizedText? LocalizedDescription { get; init; }
 
     public static PluginUiContribution Form(
+        PluginUiAccessDeclaration access,
         string id,
         string slot,
         string title,
@@ -380,17 +392,19 @@ public sealed record PluginUiContribution(
         string description = "",
         int order = 0,
         Func<PluginUiContext, string, JsonObject, CancellationToken, ValueTask<JsonObject?>>? actionHandler = null) =>
-        new(id, slot, PluginUiContributionKinds.Form, title, description, order, fields, readHandler, saveHandler, actionHandler);
+        new(id, slot, PluginUiContributionKinds.Form, title, description, order, fields, readHandler, saveHandler, actionHandler) { Access = access };
 
     public static PluginUiContribution Badge(
+        PluginUiAccessDeclaration access,
         string id,
         string slot,
         Func<PluginUiContext, CancellationToken, ValueTask<JsonObject?>> readHandler,
         int order = 0,
         string title = "") =>
-        new(id, slot, PluginUiContributionKinds.Badge, title, Order: order, ReadHandler: readHandler);
+        new(id, slot, PluginUiContributionKinds.Badge, title, Order: order, ReadHandler: readHandler) { Access = access };
 
     public static PluginUiContribution Card(
+        PluginUiAccessDeclaration access,
         string id,
         string slot,
         string title,
@@ -398,7 +412,7 @@ public sealed record PluginUiContribution(
         string description = "",
         int order = 0,
         Func<PluginUiContext, string, JsonObject, CancellationToken, ValueTask<JsonObject?>>? actionHandler = null) =>
-        new(id, slot, PluginUiContributionKinds.Card, title, description, order, ReadHandler: readHandler, ActionHandler: actionHandler);
+        new(id, slot, PluginUiContributionKinds.Card, title, description, order, ReadHandler: readHandler, ActionHandler: actionHandler) { Access = access };
 }
 
 /// <summary>按逻辑实体作用域隔离的插件 JSON 存储；scope 不得包含绝对路径或越界段。</summary>
@@ -424,13 +438,15 @@ public interface IPluginWebApiRegistry
 public sealed record PluginWebApiRoute(
     string Method,
     string Route,
+    PluginOperationAccess Access,
     Func<PluginWebApiRequest, CancellationToken, ValueTask<PluginWebApiResponse>> Handler);
 
 public sealed record PluginWebApiRequest(
     string Method,
     string Route,
     IReadOnlyDictionary<string, string> Query,
-    string? JsonBody)
+    string? JsonBody,
+    PluginClientConnectionKind ConnectionKind)
 {
     /// <summary>请求 Content-Type（小写、去掉参数）；没有请求体时为空字符串。</summary>
     public string ContentType { get; init; } = "";

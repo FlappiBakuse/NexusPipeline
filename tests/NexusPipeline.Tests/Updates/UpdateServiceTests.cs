@@ -51,13 +51,13 @@ public sealed class UpdateServiceTests : IAsyncLifetime
         _installDir = Path.Combine(_root, "install");
         Directory.CreateDirectory(_installDir);
 
-        // 构造与发布资产同名的 zip：exe + wwwroot + plugins/。
+        // 构造与发布资产同名的 zip：transport fixture with Host, resources and plugins/。
         using (var stream = new MemoryStream())
         {
             using (var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true))
             {
-                AddEntry(archive, "nexus-pipeline.exe", "fake-exe-" + Guid.NewGuid().ToString("N"));
-                AddEntry(archive, "wwwroot/index.js", "// fake");
+                AddEntry(archive, "NexusPipeline.exe", "fake-exe-" + Guid.NewGuid().ToString("N"));
+                AddEntry(archive, "resources/desktop/test.js", "// fake");
             }
             _zipBytes = stream.ToArray();
         }
@@ -249,7 +249,8 @@ public sealed class UpdateServiceTests : IAsyncLifetime
             () => _settings,
             _installDir!,
             () => _canApply,
-            () => _exited = true);
+            () => _exited = true,
+            freezePayload: (_, _, _) => new(new string('a', 64), new string('b', 64), new string('c', 64), "g0170"));
     }
 
     private static async Task WaitStateAsync(UpdateService service, UpdateState state, int timeoutMs = 15000)
@@ -358,8 +359,8 @@ public sealed class UpdateServiceTests : IAsyncLifetime
         Assert.True(string.IsNullOrEmpty(status.Error));
         string stagingRoot = Path.Combine(_installDir!, ".nxp-update", "staging");
         string staging = Assert.Single(Directory.GetDirectories(stagingRoot, $"{CandidateVersion}.g*", SearchOption.TopDirectoryOnly));
-        Assert.True(File.Exists(Path.Combine(staging, "nexus-pipeline.exe")));
-        Assert.True(File.Exists(Path.Combine(staging, "wwwroot", "index.js")));
+        Assert.True(File.Exists(Path.Combine(staging, "NexusPipeline.exe")));
+        Assert.True(File.Exists(Path.Combine(staging, "resources", "desktop", "test.js")));
     }
 
     [Fact]

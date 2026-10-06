@@ -50,12 +50,12 @@ public sealed class SettingsFormatTests
             string file = Path.Combine(root, "settings.json");
             foreach (string channel in AppSettings.WebhookTypes)
             {
-                string original = "{\"webhookEnabled\":true,\"webhookType\":\"" + channel + "\",\"webhookUrl\":\"https://example.test\",\"autoOpenBrowser\":false}";
+                string original = "{\"webhookEnabled\":true,\"webhookType\":\"" + channel + "\",\"webhookUrl\":\"https://example.test\",\"openDesktopOnStartup\":false}";
                 File.WriteAllText(file, original);
                 var settings = AppSettingsStore.Load(ConfigLoadMode.Repair, file);
                 Assert.Equal(channel, settings.WebhookType);
                 Assert.True(settings.WebhookEnabled);
-                Assert.False(settings.AutoOpenBrowser);
+                Assert.False(settings.OpenDesktopOnStartup);
                 Assert.Equal(original, File.ReadAllText(file));
                 AppSettingsStore.Save(settings, file);
                 Assert.Equal(channel, AppSettingsStore.Load(ConfigLoadMode.ReadOnly, file).WebhookType);
@@ -65,16 +65,19 @@ public sealed class SettingsFormatTests
     }
 
     [Fact]
-    public void BrowserDefaultAppliesOnlyWhenFieldIsAbsent()
+    public void DesktopStartupDefaultAppliesOnlyWhenFieldIsAbsent()
     {
         string root = NewRoot();
         try
         {
             string file = Path.Combine(root, "settings.json");
             File.WriteAllText(file, "{}");
-            Assert.True(AppSettingsStore.Load(ConfigLoadMode.ReadOnly, file).AutoOpenBrowser);
-            File.WriteAllText(file, "{\"autoOpenBrowser\":false}");
-            Assert.False(AppSettingsStore.Load(ConfigLoadMode.ReadOnly, file).AutoOpenBrowser);
+            Assert.False(AppSettingsStore.Load(ConfigLoadMode.ReadOnly, file).OpenDesktopOnStartup);
+            File.WriteAllText(file, "{\"openDesktopOnStartup\":true}");
+            Assert.True(AppSettingsStore.Load(ConfigLoadMode.ReadOnly, file).OpenDesktopOnStartup);
+            File.WriteAllText(file, "{\"autoOpenBrowser\":true}");
+            Assert.Throws<InvalidDataException>(() => AppSettingsStore.Load(ConfigLoadMode.ReadOnly, file));
+            Assert.Equal("{\"autoOpenBrowser\":true}", File.ReadAllText(file));
         }
         finally { Directory.Delete(root, recursive: true); }
     }

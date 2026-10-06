@@ -10,14 +10,14 @@ internal sealed record UpdateDownloadProgress(long BytesRead, long BytesTotal);
 
 /// <summary>
 /// 更新包：受策略约束的 zip/sha256 下载、SHA256 强校验与解压资源上限。
-/// 布局：flat root = nexus-pipeline.exe + wwwroot/ + plugins/ + README + LICENSE；
+/// 布局：根 Host、README、resources 应用清单与桌面树；plugins 单独装配。
 /// 拒绝数据目录、路径穿越、重复条目和 zip bomb。
 /// </summary>
 internal static class UpdatePackage
 {
     public const int MaxArchiveEntries = 4096;
     public const long MaxExtractedBytes = 512L * 1024 * 1024;
-    public const long MaxSingleEntryBytes = 128L * 1024 * 1024;
+    public const long MaxSingleEntryBytes = 256L * 1024 * 1024;
     public const long MaxCompressionRatio = 250;
 
     /// <summary>解压后被禁止的顶层目录（绝不写入数据/配置区域）。</summary>
@@ -168,7 +168,7 @@ internal static class UpdatePackage
 
     /// <summary>
     /// 解压 ZIP 到 staging：条目路径白名单与归档资源上限。
-    /// 必须存在根层 nexus-pipeline.exe；失败时尽力删除当前 staging。
+    /// 必须存在根层 NexusPipeline.exe；失败时尽力删除当前 staging。
     /// </summary>
     public static string? Extract(string zipPath, string stagingDir)
     {
@@ -244,9 +244,9 @@ internal static class UpdatePackage
                 Directory.CreateDirectory(Path.GetDirectoryName(full)!);
                 extracted = ExtractEntry(entry, full, extracted);
             }
-            if (!File.Exists(Path.Combine(stagingDir, "nexus-pipeline.exe")))
+            if (!File.Exists(Path.Combine(stagingDir, "NexusPipeline.exe")))
             {
-                throw new InvalidDataException("更新包缺少 nexus-pipeline.exe");
+                throw new InvalidDataException("更新包缺少 NexusPipeline.exe");
             }
             return null;
         }
@@ -264,12 +264,19 @@ internal static class UpdatePackage
 
     private static void ValidateEntryPath(string name, string original)
     {
-        if (name.StartsWith("/", StringComparison.Ordinal)
-            || name.Split('/').Any(part => part is "" or "." or "..")
-            || Path.IsPathRooted(name.Replace('/', Path.DirectorySeparatorChar)))
+        if (!ApplicationPayload.SafePath(name)
+            || name is not ("NexusPipeline.exe" or "README.md") && !name.StartsWith("resources/", StringComparison.Ordinal) && !name.StartsWith("plugins/", StringComparison.Ordinal))
         {
             throw new InvalidDataException($"zip 条目路径非法：{original}");
         }
+    }
+
+    internal static string? ExtractApplication(string zipPath, string stagingDir, string version, Func<string, string?, bool, UpdatePayloadIdentity>? freeze = null)
+    {
+        string? error = Extract(zipPath, stagingDir);
+        if (error is not null) return error;
+        try { _ = (freeze ?? ApplicationPayload.Freeze)(stagingDir, version, false); return null; }
+        catch (Exception failure) { return "Application payload rejected: " + failure.Message; }
     }
 
     private static long ExtractEntry(ZipArchiveEntry entry, string target, long extracted)

@@ -1,6 +1,6 @@
 // @ts-nocheck
 /**
- * Frontend API 1.5 插件运行时：同源模块加载、route/nav/slot/lifecycle 注册、
+ * Frontend API 1.6 插件运行时：同源模块加载、route/nav/slot/lifecycle 注册、
  * 插件 Web API（JSON 与二进制）、本地化、外观与运行预览宿主访问。
  *
  * 宿主平台依赖只通过 host-adapter 获取。
@@ -11,6 +11,7 @@ import {
   apiUpload,
   captureExecutionPreview,
   createAppearanceHost,
+  getCapabilities,
   getLocale,
   t,
   toast,
@@ -40,9 +41,9 @@ export const PLUGIN_SLOT_NAMES = Object.freeze([
 const SLOT_NAMES = new Set(PLUGIN_SLOT_NAMES);
 
 /** Frontend API 的精确版本；只有完全匹配的插件模块才会被加载。 */
-export const FRONTEND_API_VERSION = "1.5";
+export const FRONTEND_API_VERSION = "1.6";
 
-/** 插件可自行校验宿主 Frontend API 版本；非 1.5 一律返回 false。 */
+/** 插件可自行校验宿主 Frontend API 版本；非 1.6 一律返回 false。 */
 export function verifyPluginApiVersion(value) {
   return String(value ?? "") === FRONTEND_API_VERSION;
 }
@@ -93,13 +94,18 @@ function pluginApiPath(name, route, query) {
   return `/api/plugin-api/${encodeURIComponent(name)}${parts.length ? `/${parts.join("/")}` : ""}${suffix ? `?${suffix}` : ""}`;
 }
 
-function registerRoute(descriptor, route, handler) {
+const activeRoutes = new Set();
+function registerRoute(descriptor, route, handler, host) {
   const normalized = normalizeRoute(route);
   if (!normalized || typeof handler !== "function") throw new TypeError(t("common.plugin_route_invalid"));
   const key = pluginKey(descriptor.name, normalized);
   if (routes.has(key)) throw new Error(t("common.plugin_route_duplicate", { route: normalized }));
-  routes.set(key, { handler, plugin: descriptor.name, route: normalized });
-  return disposable(() => routes.delete(key));
+  const registration = { handler, plugin: descriptor.name, route: normalized, host };
+  routes.set(key, registration);
+  return disposable(() => {
+    for (const active of [...activeRoutes]) if (active.registration === registration) active.dispose();
+    routes.delete(key);
+  });
 }
 
 function renderPluginNav() {
@@ -214,6 +220,7 @@ function createPluginI18n(descriptor) {
 
 /** 构造授予插件的 host 对象；`activateDescriptor` 与 contract tests 都经此入口。 */
 export function createPluginHost(descriptor) {  const host = {
+    getCapabilities,
     plugin: Object.freeze({ ...descriptor }),
     i18n: createPluginI18n(descriptor),
     api: {
@@ -231,7 +238,7 @@ export function createPluginHost(descriptor) {  const host = {
         options.signal),
     },
     routes: {
-      register: (route, handler) => registerRoute(descriptor, route, handler),
+      register: (route, handler) => registerRoute(descriptor, route, handler, host),
     },
     nav: {
       register: item => registerNav(descriptor, item),
@@ -334,7 +341,27 @@ export function resolvePluginRoute(segments) {
   }
   const registration = routes.get(pluginKey(pluginName, normalizeRoute(route)));
   if (!registration) return null;
-  return (token, routeSegments) => registration.handler(token, routeSegments, registration.host || plugins.get(pluginName.toLowerCase())?.host);
+  return async surface => {
+    if (!(surface?.element instanceof HTMLElement) || !Number.isInteger(surface.token) || !Array.isArray(surface.segments) || !surface.signal)
+      throw new TypeError("plugin_route_surface_invalid");
+    const controller = new AbortController();
+    let cleanup = null, disposed = false, cleaned = false;
+    const active = { registration, dispose() {
+      if (!disposed) { disposed = true; controller.abort(); surface.signal.removeEventListener("abort", active.dispose); activeRoutes.delete(active); }
+      if (cleanup && !cleaned) { cleaned = true; cleanup(); }
+    } };
+    activeRoutes.add(active);
+    surface.signal.addEventListener("abort", active.dispose, { once: true });
+    if (surface.signal.aborted) active.dispose();
+    const mounted = Object.freeze({ element: surface.element, token: surface.token,
+      segments: Object.freeze([...surface.segments]), signal: controller.signal });
+    try {
+      cleanup = await registration.handler(mounted, registration.host);
+      if (typeof cleanup !== "function") throw new TypeError("plugin_route_cleanup_required");
+      if (disposed) active.dispose();
+      return active.dispose;
+    } catch (error) { active.dispose(); throw error; }
+  };
 }
 
 export async function queryContributions(slot, contexts, signal) {
@@ -438,6 +465,7 @@ export function pluginRuntimeStatus() {
 
 /** 清空全部插件注册状态；供宿主 contract tests 在用例之间建立干净边界。 */
 export function resetPluginRuntimeForTests() {
+  for (const active of [...activeRoutes]) active.dispose();
   plugins.clear();
   routes.clear();
   navItems.clear();
