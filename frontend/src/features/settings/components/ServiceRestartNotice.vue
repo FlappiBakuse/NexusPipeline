@@ -3,11 +3,14 @@ import { computed, ref, watch } from "vue";
 import { useShellStore } from "../../../stores/shell";
 import { t } from "../../../platform/i18n";
 import { api } from "../../../platform/api";
+import { toast } from "../../../platform/toast";
 import { beginServiceRecovery, resumeServiceRecovery } from "../../../platform/service-recovery";
 import NxpConfirmDialog from "../../../ui/composites/NxpConfirmDialog.vue";
 import NxpButton from "../../../ui/primitives/NxpButton.vue";
 
 const shell = useShellStore();
+const props = defineProps<{ beforeRestart?: () => Promise<void> }>();
+const preparing = ref(false);
 const lightweight = ref(false);
 const confirmationOpen = ref(false);
 
@@ -42,10 +45,18 @@ function requestRestart() {
   confirmationOpen.value = true;
 }
 
-function confirmRestart() {
-  if (shell.restarting) return;
+async function confirmRestart() {
+  if (shell.restarting || preparing.value) return;
   confirmationOpen.value = false;
-  void beginServiceRecovery();
+  preparing.value = true;
+  try {
+    await props.beforeRestart?.();
+    await beginServiceRecovery();
+  } catch (reason) {
+    toast(reason instanceof Error ? reason.message : String(reason), "error");
+  } finally {
+    preparing.value = false;
+  }
 }
 </script>
 
@@ -53,7 +64,7 @@ function confirmRestart() {
   <section
     v-if="shell.restartRequired"
     id="service-restart-notice"
-    class="dashboard-system-note"
+    class="dashboard-system-note service-restart-notice"
     role="status"
     aria-live="polite"
     data-testid="service-restart-notice"
@@ -65,6 +76,7 @@ function confirmRestart() {
       class="primary"
       type="button"
       data-testid="restart-service"
+      :disabled="preparing"
       @click="requestRestart"
     >
       {{ t("settings.restart_service") }}
@@ -82,3 +94,7 @@ function confirmRestart() {
     @close="confirmationOpen = false"
   />
 </template>
+
+<style>
+.dashboard-system-note.service-restart-notice { padding: var(--space-4); border: 1px solid var(--content-card-border); border-radius: var(--radius-lg); background: var(--content-card); }
+</style>

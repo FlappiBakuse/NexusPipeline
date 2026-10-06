@@ -7,15 +7,12 @@ import NxpNumberInput from "../../../ui/primitives/NxpNumberInput.vue";
 import NxpTextInput from "../../../ui/primitives/NxpTextInput.vue";
 import type { Settings } from "../utils/settingsTypes";
 
-/** 远程访问与 MCP section：访问令牌、远程地址列表、MCP 端口与开关。 */
-
 const props = defineProps<{
   settings: Settings;
   expanded: boolean;
   token: string;
   tokenVisible: boolean;
-  remoteAddresses: string[];
-  save: () => void;
+  remoteAddresses: { internalAddress: string | null; publicAddress: string | null; port: number };
   saveWithRestart: () => void;
   onRemoteChange: (value: boolean) => void;
   onMcpChange: (value: boolean) => void;
@@ -59,7 +56,6 @@ const emit = defineEmits<{ toggle: []; "update:token": [value: string]; "update:
               autocomplete="new-password"
               :placeholder="t('common.leave_blank_to_keep')"
               @update:model-value="emit('update:token', $event)"
-              @change="props.save"
             />
           </div>
           <NxpButton
@@ -81,8 +77,11 @@ const emit = defineEmits<{ toggle: []; "update:token": [value: string]; "update:
           class="detail"
           :data-help="props.settings.allowRemoteAccess ? t('settings.remote_access.lan_help_short') : undefined"
         >
-          <div v-for="address in props.remoteAddresses" :key="address" class="kv">
-            <span class="k">{{ t("settings.lan_address") }}</span><span>http://{{ address }}:{{ props.settings.webPort }}/</span>
+          <div class="kv">
+            <span class="k">{{ t("settings.remote_access.internal_address") }}</span><span>{{ props.remoteAddresses.internalAddress ? `http://${props.remoteAddresses.internalAddress}:${props.remoteAddresses.port}/` : t('settings.remote_access.no_internal_address') }}</span>
+          </div>
+          <div class="kv">
+            <span class="k">{{ t("settings.remote_access.public_address") }}</span><span>{{ props.remoteAddresses.publicAddress ? `http://${props.remoteAddresses.publicAddress}:${props.remoteAddresses.port}/` : t('settings.remote_access.no_public_address') }}</span>
           </div>
         </div>
         <p class="callout callout-warning">{{ t("settings.remote_access.warning") }}</p>

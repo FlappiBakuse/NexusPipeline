@@ -62,6 +62,35 @@ public sealed class SettingsCommandTests
     }
 
     [Fact]
+    public void RemoteSettingsAndEncryptedTokenSurviveReloadTogether()
+    {
+        Directory.CreateDirectory(AppPaths.ConfigDir);
+        byte[]? originalBytes = File.Exists(AppPaths.ConfigPath) ? File.ReadAllBytes(AppPaths.ConfigPath) : null;
+        try
+        {
+            var state = new SettingsState(new AppSettings());
+            var command = new SettingsCommands(state, new AllowMutation(), new TestEffects());
+            Assert.True(command.Update(new JsonObject { ["allowRemoteAccess"] = true,
+                ["secretKey"] = "accessToken", ["secretValue"] = "owned-remote-token" }).Success);
+            AppSettings loaded = AppSettingsStore.Load(ConfigLoadMode.ReadOnly);
+            Assert.True(loaded.AllowRemoteAccess);
+            Assert.StartsWith("enc:", loaded.AccessToken);
+            Assert.True(NexusPipeline.Platform.Security.SecretStore.TryDecrypt(loaded.AccessToken, out string? firstToken));
+            Assert.Equal("owned-remote-token", firstToken);
+            Assert.True(command.Update(new JsonObject { ["allowRemoteAccess"] = false }).Success);
+            loaded = AppSettingsStore.Load(ConfigLoadMode.ReadOnly);
+            Assert.False(loaded.AllowRemoteAccess);
+            Assert.True(NexusPipeline.Platform.Security.SecretStore.TryDecrypt(loaded.AccessToken, out string? secondToken));
+            Assert.Equal("owned-remote-token", secondToken);
+        }
+        finally
+        {
+            if (originalBytes is not null) File.WriteAllBytes(AppPaths.ConfigPath, originalBytes);
+            else File.Delete(AppPaths.ConfigPath);
+        }
+    }
+
+    [Fact]
     public void FileOnlyAndRetiredNotificationFieldsRejectWholePatch()
     {
         var state = new SettingsState(new AppSettings());

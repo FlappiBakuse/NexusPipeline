@@ -1,23 +1,27 @@
 <script setup lang="ts">
-import { computed } from "vue";
-import { t } from "../../../platform/i18n";
+import { computed, ref } from "vue";
+import { getLocale, setLocale, t } from "../../../platform/i18n";
 import NxpCollapsibleCard from "../../../ui/composites/NxpCollapsibleCard.vue";
 import NxpNumberInput from "../../../ui/primitives/NxpNumberInput.vue";
 import NxpSelect, { type NxpOption } from "../../../ui/primitives/NxpSelect.vue";
 import NxpSwitchSetting from "../../../ui/composites/NxpSwitchSetting.vue";
 import type { Settings } from "../utils/settingsTypes";
 
-/** 服务行为 section：启动注册、浏览器打开、保留期、端口、日志级别与语言。 */
+
 
 const props = defineProps<{
   settings: Settings;
   expanded: boolean;
-  locale: string;
   localeOptions: NxpOption[];
   save: () => void;
   saveWithRestart: () => void;
 }>();
-const emit = defineEmits<{ toggle: []; changeLocale: [value: string | string[]] }>();
+const emit = defineEmits<{ toggle: [] }>();
+const locale = ref(getLocale());
+async function changeLocale(value: string | string[]) {
+  const next = Array.isArray(value) ? value[0] : value;
+  if (next) locale.value = await setLocale(next);
+}
 
 const logLevelOptions = computed<NxpOption[]>(() => [
   { value: "debug", label: t("settings.log_level_debug") },
@@ -50,7 +54,7 @@ const logLevelOptions = computed<NxpOption[]>(() => [
       />
       <NxpSwitchSetting
         id="st-browser"
-        v-model="props.settings.autoOpenBrowser"
+        v-model="props.settings.openDesktopOnStartup"
         :label="t('settings.open_browser')"
         :description="t('settings.service.console_startup')"
         :aria-label="t('settings.open_browser')"
@@ -93,14 +97,14 @@ const logLevelOptions = computed<NxpOption[]>(() => [
         </div>
       </div>
       <div class="form-grid settings-service-grid settings-service-grid-locale">
-        <div class="field" :data-help="t('settings.language_help', {}, 'Language preference is stored in this browser only')">
-          <label class="field-label" for="settings-locale-trigger">{{ t("settings.language", {}, "Interface language") }}</label>
+        <div class="field">
+          <label class="field-label" for="settings-locale-trigger">{{ t("settings.language") }}</label>
           <NxpSelect
             id="settings-locale"
-            :model-value="props.locale"
+            :model-value="locale"
             :options="props.localeOptions"
             :aria-label="t('settings.language')"
-            @change="emit('changeLocale', $event)"
+            @change="changeLocale"
           />
         </div>
         <div class="field" :data-help="t('settings.host_language_help', {}, 'Controls CLI, tray, notifications, and background logs.')">
