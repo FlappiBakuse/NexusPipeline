@@ -375,7 +375,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <main id="view" ref="root" class="view-root" data-testid="main-view">
+  <main id="view" ref="root" class="view-root workspace-page page-dispatch" data-testid="main-view">
     <template v-if="loading && !scripts.length && !queues.length">
       <NxpEmptyState :title="t('common.loading')" />
     </template>
@@ -383,9 +383,10 @@ onBeforeUnmount(() => {
     <template v-else>
       <NxpPageHeader
         :eyebrow="t('dispatch.scheduler')"
-        :title="t('dispatch.scheduler')"
+        :title="t('shell.dispatch')"
         :description="t('dispatch.page.help')"
       />
+      <div class="dispatch-content">
       <div class="plugin-slot" data-plugin-slot="dispatch.cards" data-plugin-anchor="dispatch.cards" hidden></div>
       <section class="content-section" :aria-label="t('dispatch.target_type')">
         <div class="dispatch-runbar">
@@ -435,6 +436,7 @@ onBeforeUnmount(() => {
         @cancelled="refreshStatus"
       />
       <div class="plugin-slot" data-plugin-slot="dispatch.running.badges" data-plugin-anchor="dispatch.running.badges" hidden></div>
+      </div>
     </template>
     <NxpConfirmDialog
       :open="cancelConfirmRunId !== null"

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useOperationAccess } from "../../../platform/operation-access";
+const { allowed: nativeBrowseAllowed, reason: nativeBrowseReason } = useOperationAccess("hostFilePicker");
 import { nextTick, ref, watch } from "vue";
 import { isAbortError } from "../../../platform/api";
 import { state } from "../../../platform/page-state";
@@ -350,7 +352,7 @@ watch(
         </div>
         <div class="field">
           <label class="field-label" for="gm-advanced-pre">{{ t("users.before_task_script_path") }}</label>
-          <NxpPathPicker
+          <NxpPathPicker :browse-disabled="!nativeBrowseAllowed" :browse-disabled-reason="nativeBrowseAllowed ? '' : nativeBrowseReason"
             id="gm-advanced-pre"
             :model-value="encodePrePost(PRE_ONLY_MARKER, settings.advanced.preRunOnceOnly, settings.advanced.preRunScript)"
             kind="file"
@@ -364,7 +366,7 @@ watch(
         </div>
         <div class="field">
           <label class="field-label" for="gm-advanced-post">{{ t("users.after_task_script_path") }}</label>
-          <NxpPathPicker
+          <NxpPathPicker :browse-disabled="!nativeBrowseAllowed" :browse-disabled-reason="nativeBrowseAllowed ? '' : nativeBrowseReason"
             id="gm-advanced-post"
             :model-value="encodePrePost(POST_FINAL_MARKER, settings.advanced.postRunOnFinalOnly, settings.advanced.postRunScript)"
             kind="file"
@@ -423,7 +425,7 @@ watch(
             </div>
             <div v-else-if="fieldType(field) === 'path' || fieldType(field) === 'file' || fieldType(field) === 'folder'" class="field plugin-field" :data-help="field.description || undefined">
               <label class="field-label" :for="fieldId(contribution, field)">{{ field.label }}<span v-if="field.required" class="req"> *</span></label>
-              <NxpPathPicker :id="fieldId(contribution, field)" :model-value="contributionStringValue(contribution, field)" :kind="fieldType(field) === 'folder' ? 'folder' : 'file'" :placeholder="field.placeholder || undefined" :aria-label="field.label" :disabled="field.readOnly" @update:model-value="setContributionValue(contribution, field, $event)" @browse="browseContributionPath(contribution, field, $event)" />
+              <NxpPathPicker :browse-disabled="!nativeBrowseAllowed" :browse-disabled-reason="nativeBrowseAllowed ? '' : nativeBrowseReason" :id="fieldId(contribution, field)" :model-value="contributionStringValue(contribution, field)" :kind="fieldType(field) === 'folder' ? 'folder' : 'file'" :placeholder="field.placeholder || undefined" :aria-label="field.label" :disabled="field.readOnly" @update:model-value="setContributionValue(contribution, field, $event)" @browse="browseContributionPath(contribution, field, $event)" />
             </div>
             <div v-else-if="fieldType(field) === 'secret'" class="field plugin-field plugin-secret-field" :data-help="field.description || undefined">
               <label class="field-label" :for="fieldId(contribution, field)">{{ field.label }}<span v-if="field.required" class="req"> *</span></label>

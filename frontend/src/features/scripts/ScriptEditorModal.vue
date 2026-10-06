@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useOperationAccess } from "../../platform/operation-access";
+const { allowed: nativeBrowseAllowed, reason: nativeBrowseReason } = useOperationAccess("hostFilePicker");
 import { computed, nextTick, reactive, ref, watch } from "vue";
 import { isAbortError } from "../../platform/api";
 import { projectSpecializedCapabilities } from "../../platform/specialized-capabilities";
@@ -491,7 +493,7 @@ watch(
             <label class="field-label" for="sm-root"
               >{{ t("scripts.script_root_directory") }}
               <span class="req">*</span></label
-            ><NxpPathPicker
+            ><NxpPathPicker :browse-disabled="!nativeBrowseAllowed" :browse-disabled-reason="nativeBrowseAllowed ? '' : nativeBrowseReason"
               id="sm-root"
               :model-value="draft.rootPath"
               kind="folder"
@@ -509,7 +511,7 @@ watch(
               <label class="field-label" for="sm-exe"
                 >{{ t("scripts.main_program_path") }}
                 <span class="req">*</span></label
-              ><NxpPathPicker
+              ><NxpPathPicker :browse-disabled="!nativeBrowseAllowed" :browse-disabled-reason="nativeBrowseAllowed ? '' : nativeBrowseReason"
                 id="sm-exe"
                 :model-value="draft.mainExe"
                 kind="file"
@@ -539,7 +541,7 @@ watch(
               <label class="field-label" for="sm-config"
                 >{{ t("scripts.configuration_file_folder") }}
                 <span class="req">*</span></label
-              ><NxpPathPicker
+              ><NxpPathPicker :browse-disabled="!nativeBrowseAllowed" :browse-disabled-reason="nativeBrowseAllowed ? '' : nativeBrowseReason"
                 id="sm-config"
                 :model-value="draft.configPath"
                 kind="file-or-folder"
@@ -553,7 +555,7 @@ watch(
             <div class="field">
               <label class="field-label" for="sm-log"
                 >{{ t("scripts.editor.log_path.help") }} <span class="req">*</span></label
-              ><NxpPathPicker
+              ><NxpPathPicker :browse-disabled="!nativeBrowseAllowed" :browse-disabled-reason="nativeBrowseAllowed ? '' : nativeBrowseReason"
                 id="sm-log"
                 :model-value="draft.logPath"
                 kind="file-or-folder"
@@ -612,7 +614,7 @@ watch(
                     ? t("scripts.emulator_adb_address")
                     : t("scripts.game_path")
                 }} <span class="req">*</span></label
-                ><NxpPathPicker
+                ><NxpPathPicker :browse-disabled="!nativeBrowseAllowed" :browse-disabled-reason="nativeBrowseAllowed ? '' : nativeBrowseReason"
                   v-if="draft.gameMode !== 'emulator'"
                   id="sm-game-exe"
                   v-model="draft.gameExe"

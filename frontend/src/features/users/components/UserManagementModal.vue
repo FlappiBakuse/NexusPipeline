@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useOperationAccess } from "../../../platform/operation-access";
+const { allowed: nativeBrowseAllowed, reason: nativeBrowseReason } = useOperationAccess("hostFilePicker");
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { isAbortError } from "../../../platform/api";
 import { projectSpecializedCapabilities } from "../../../platform/specialized-capabilities";
@@ -604,7 +606,7 @@ onMounted(() => {
                     </div>
                     <div class="field">
                       <label class="field-label">{{ t("users.before_task_script_path") }}</label>
-                      <NxpPathPicker
+                      <NxpPathPicker :browse-disabled="!nativeBrowseAllowed" :browse-disabled-reason="nativeBrowseAllowed ? '' : nativeBrowseReason"
                         :model-value="encodePrePost(PRE_ONLY_MARKER, bindingValue(binding, 'preRunOnceOnly'), bindingValue(binding, 'preRunScript'))"
                         kind="file"
                         :placeholder="t('users.pre_task_placeholder')"
@@ -618,7 +620,7 @@ onMounted(() => {
                     </div>
                     <div class="field">
                       <label class="field-label">{{ t("users.after_task_script_path") }}</label>
-                      <NxpPathPicker
+                      <NxpPathPicker :browse-disabled="!nativeBrowseAllowed" :browse-disabled-reason="nativeBrowseAllowed ? '' : nativeBrowseReason"
                         :model-value="encodePrePost(POST_FINAL_MARKER, bindingValue(binding, 'postRunOnFinalOnly'), bindingValue(binding, 'postRunScript'))"
                         kind="file"
                         :placeholder="t('users.post_task_placeholder')"

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, provide, ref, watch } from "vue";
-import { RouterView, useRoute } from "vue-router";
+import { RouterLink, RouterView, useRoute } from "vue-router";
 import { useShellStore } from "../stores/shell";
 import BootLoadingState from "./BootLoadingState.vue";
 import TokenPrompt from "./TokenPrompt.vue";
@@ -18,6 +18,7 @@ import NxpIconButton from "../ui/primitives/NxpIconButton.vue";
 import NxpIcon from "../ui/primitives/NxpIcon.vue";
 import NxpScrollArea from "../ui/primitives/NxpScrollArea.vue";
 import NxpEmptyState from "../ui/primitives/NxpEmptyState.vue";
+import {desktopBridge} from '../platform/desktop';
 
 import ConfigEditFlow from "../features/users/components/ConfigEditFlow.vue";
 import { configEditContextKey } from "../features/users/composables/configEditContext";
@@ -30,6 +31,9 @@ function configurationChanged(userId: string) {
 }
 const route = useRoute();
 const shell = useShellStore();
+const desktop=desktopBridge();
+const shutdownNotice=ref(false);
+let stopShutdownNotice: (()=>void)|null=null;
 const isMobile = ref(false);
 const segments = computed(() => {
   const path = String(route.path || "/dashboard").replace(/^\/+|\/+$/g, "");
@@ -37,14 +41,15 @@ const segments = computed(() => {
 });
 const navigation = [
   ["dashboard", "dashboard", "shell.dashboard"],
-  ["users", "users", "shell.users"],
-  ["scripts", "scripts", "shell.scripts"],
-  ["queues", "queues", "shell.queues"],
   ["dispatch", "dispatch", "shell.dispatch"],
+  ["queues", "queues", "shell.queues"],
+  ["scripts", "scripts", "shell.scripts"],
+  ["users", "users", "shell.users"],
   ["history", "history", "shell.history"],
   ["plugins", "plugins", "shell.plugins"],
   ["settings", "settings", "shell.settings"],
 ] as const;
+const preferencesUnavailable = document.documentElement.dataset.desktopPreferences === 'unavailable';
 let autoScrollObserver: MutationObserver | null = null;
 let autoScrollFrame: number | null = null;
 let stopServiceObserver: (() => void) | null = null;
@@ -89,6 +94,7 @@ watch(() => route.fullPath, () => {
 });
 
 onBeforeUnmount(() => {
+  stopShutdownNotice?.();
   stopServiceObserver?.();
   stopServiceObserver = null;
   autoScrollObserver?.disconnect();
@@ -105,6 +111,7 @@ onBeforeUnmount(() => {
 });
 
 onMounted(async () => {
+  stopShutdownNotice=desktop?.onShutdownNotice(()=>{shutdownNotice.value=true;})??null;
   registerTokenPromptRenderer(() => {
     shell.tokenPromptOpen = true;
   });
@@ -143,24 +150,32 @@ function openNav() {
 </script>
 
 <template>
-  <div class="app-shell" :class="{ 'nav-open': shell.navOpen }">
-    <aside id="sidebar" class="sidebar" :aria-label="t('shell.nav.main')" data-i18n-aria-label="shell.nav.main" :aria-hidden="isMobile ? (shell.navOpen ? 'false' : 'true') : undefined">
+  <div v-if="desktop" class="desktop-titlebar"><span>NexusPipeline</span><span class="desktop-connection" role="status">{{ shell.identityConnection === 'offline' ? t('shell.recovery.disconnected') : '' }}</span></div>
+  <div class="app-shell" :class="{ 'nav-open': shell.navOpen, 'desktop-shell': !!desktop }" :inert="shell.recoveryPhase === 'navigating' || shutdownNotice">
+    <aside id="sidebar" class="sidebar" :aria-label="t('shell.nav.main')" data-i18n-aria-label="shell.nav.main" :inert="isMobile && !shell.navOpen" :aria-hidden="isMobile ? (shell.navOpen ? 'false' : 'true') : undefined">
       <div class="brand"><div class="brand-mark" aria-hidden="true">N</div><div class="brand-copy"><strong>NexusPipeline</strong><span data-i18n="shell.brand_suffix"></span></div></div>
+      <div class="sidebar-navigation">
       <div class="nav-caption" data-i18n="shell.workbench"></div>
         <nav class="main-nav" :aria-label="t('shell.workbench')" data-i18n-aria-label="shell.workbench">
-        <a v-for="[path, icon, label] in navigation.slice(0, 6)" :key="path" :href="`#/${path}`" :data-page="path" :data-testid="`nav-${path}`" :class="{ active: segments[0] === path }" :aria-current="segments[0] === path ? 'page' : undefined" @click="closeNav"><span class="nav-icon"><NxpIcon :name="icon" /></span><span :data-i18n="label"></span></a>
+        <RouterLink v-for="[path, icon, label] in navigation.slice(0, 3)" :key="path" :to="`/${path}`" :data-page="path" :data-testid="`nav-${path}`" :class="{ active: segments[0] === path }" :aria-current="segments[0] === path ? 'page' : undefined" @click="closeNav"><span class="nav-icon"><NxpIcon :name="icon" /></span><span :data-i18n="label"></span></RouterLink>
+      </nav>
+      <div class="nav-caption" data-i18n="shell.management"></div>
+      <nav class="main-nav" :aria-label="t('shell.management')">
+        <RouterLink v-for="[path, icon, label] in navigation.slice(3, 6)" :key="path" :to="`/${path}`" :data-page="path" :data-testid="`nav-${path}`" :class="{ active: segments[0] === path }" :aria-current="segments[0] === path ? 'page' : undefined" @click="closeNav"><span class="nav-icon"><NxpIcon :name="icon" /></span><span :data-i18n="label"></span></RouterLink>
       </nav>
       <div class="nav-caption nav-caption-bottom" data-i18n="shell.system"></div>
       <nav class="main-nav plugin-nav-host" data-plugin-anchor="shell.nav" :aria-label="t('shell.nav.plugins')" data-i18n-aria-label="shell.nav.plugins"></nav>
       <nav class="main-nav" :aria-label="t('shell.system')" data-i18n-aria-label="shell.system">
-        <a v-for="[path, icon, label] in navigation.slice(6)" :key="path" :href="`#/${path}`" :data-page="path" :data-testid="`nav-${path}`" :class="{ active: segments[0] === path }" :aria-current="segments[0] === path ? 'page' : undefined" @click="closeNav"><span class="nav-icon"><NxpIcon :name="icon" /></span><span :data-i18n="label"></span></a>
+        <RouterLink v-for="[path, icon, label] in navigation.slice(6)" :key="path" :to="`/${path}`" :data-page="path" :data-testid="`nav-${path}`" :class="{ active: segments[0] === path }" :aria-current="segments[0] === path ? 'page' : undefined" @click="closeNav"><span class="nav-icon"><NxpIcon :name="icon" /></span><span :data-i18n="label"></span></RouterLink>
       </nav>
+      </div>
       <div class="sidebar-foot"><div class="sidebar-foot-copy"><span id="local-addr" data-testid="local-addr">{{ localAddress }}</span><span id="app-version" :title="shell.identityConnection === 'online' ? '' : t('shell.recovery.disconnected')">{{ t('common.current_version') }} · {{ shell.hostVersion || t('shell.version_unknown') }}</span></div><NxpIconButton :label="t('shell.theme_toggle')" data-i18n-aria-label="shell.theme_toggle" @click="cycleTheme"><span data-theme-icon aria-hidden="true"><NxpIcon name="theme" /></span></NxpIconButton></div>
     </aside>
     <div class="nav-backdrop" @click.capture="closeNav"><button type="button" :aria-label="t('shell.close_navigation')" data-i18n-aria-label="shell.close_navigation" @pointerdown="closeNav" @click.stop="closeNav"></button></div>
     <div class="page-shell">
       <header class="topbar"><NxpIconButton class="menu-button" :label="t('shell.open_navigation')" data-i18n-aria-label="shell.open_navigation" :expanded="shell.navOpen" aria-controls="sidebar" @click="openNav"><NxpIcon name="menu" /></NxpIconButton><div class="topbar-context"><span class="topbar-product" data-i18n="shell.product"></span><span id="topbar-title" class="sr-only" data-i18n="shell.dashboard"></span></div><div class="topbar-actions"><NxpIconButton :label="t('shell.theme_toggle')" data-i18n-aria-label="shell.theme_toggle" @click="cycleTheme"><span id="theme-icon" data-theme-icon aria-hidden="true"><NxpIcon name="theme" /></span></NxpIconButton></div></header>
       <NxpScrollArea class="page-main-scroll" :aria-label="t('shell.main_content')">
+        <p v-if="preferencesUnavailable" class="desktop-preferences-warning" role="status">{{ t('shell.desktop.preferences_unavailable') }}</p>
         <RouterView v-if="shell.booted" v-slot="{ Component, route: viewRoute }">
           <div :key="viewRoute.fullPath" class="app-page">
             <component :is="Component" />
@@ -172,6 +187,7 @@ function openNav() {
   </div>
   <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
   <div id="notice-stack" aria-live="polite" :aria-label="t('shell.page_notifications')" data-i18n-aria-label="shell.page_notifications"></div>
+  <div v-if="shutdownNotice" class="dashboard-system-note" role="alert">{{ t('shell.desktop.asset_update') }}</div>
   <div v-if="shell.recoveryPhase !== 'idle' && shell.recoveryPhase !== 'navigating'" class="dashboard-system-note" role="status" aria-live="polite">
     <span>{{ recoveryMessage }}</span>
     <NxpButton v-if="['timeout', 'failed', 'dirty-blocked'].includes(shell.recoveryPhase)" class="ghost" type="button" @click="resumeServiceRecovery(shell.recoveryPhase === 'dirty-blocked')">

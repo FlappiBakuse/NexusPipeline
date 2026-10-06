@@ -387,10 +387,10 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <main id="view" ref="root" class="view-root" data-testid="main-view">
+  <main id="view" ref="root" class="view-root workspace-page page-queues" data-testid="main-view">
     <NxpPageHeader
-      :eyebrow="t('queues.queue_management')"
-      :title="t('common.schedule_queues')"
+      :eyebrow="t('common.schedule_queues')"
+      :title="t('shell.queues')"
       :description="t('queues.page.help')"
     >
       <template #actions>

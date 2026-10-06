@@ -32,11 +32,17 @@ frontend/src/app/App.vue → router / stores / features / ui
 | `frontend/src/platform/markdown.ts` / `platform/format.ts` / `platform/plugin-list.ts` | README 渲染、状态与结果码投影、插件浏览筛选排序 |
 | `frontend/src/platform/execution-preview.ts` | 插件运行预览捕获（受控截图） |
 | `frontend/src/plugin-bridge/index.ts` | 宿主侧桥接 facade：`renderPluginSlot`、`disposePluginSlot`、`initPluginRuntime` 与插件 route/nav/lifecycle 接入 |
-| `frontend/src/plugin-bridge/runtime.ts` | Frontend API 1.5：同源模块加载、route/nav/slot/lifecycle 注册、插件 Web API（含二进制 API）、本地化、外观与运行预览宿主访问 |
+| `frontend/src/plugin-bridge/runtime.ts` | Frontend API 1.6：同源模块加载、route/nav/slot/lifecycle 注册、插件 Web API（含二进制 API）、本地化、外观与运行预览宿主访问 |
 | `frontend/src/plugin-bridge/slots.ts` / `controls.ts` / `plugin-fields.ts` | 稳定 slot 名称、批量贡献查询、Form/Badge/Card 通用渲染与清理；声明式表单控件直接实例化公开 `nxp-*` 元素，桥接层只负责属性映射、值收集、改动同步与必填校验 |
 | `frontend/src/plugin-bridge/host-adapter.ts` | 桥接层唯一的宿主依赖边界；平台模块迁移只改这里的实现来源 |
 
-样式分层：`frontend/src/styles/tokens.css` 提供设计 token，`styles/app.css` 提供基础元素样式与 shell 过渡，`styles/shell.css` 提供页面布局、shell 与插件 surface 样式；Nexus UI 元件的 DOM、交互和内部样式由对应 SFC 维护，feature 只通过公开元素根节点和业务 wrapper 组织布局。
+样式分层：`frontend/src/styles/tokens.css` 提供设计 token，`styles/app.css` 提供基础元素样式与 shell 过渡，`styles/shell.css` 提供页面布局、shell 与插件 surface 样式，`styles/workspace.css` 维护工作空间的尺寸、排版与响应式表面；Nexus UI 元件的 DOM、交互和内部样式由对应 SFC 维护，feature 只通过公开元素根节点和业务 wrapper 组织布局。页面右侧操作区与标题说明区底部对齐。
+
+远程设置的访问令牌随输入提交独立密钥事务，空白保持原值，读取响应不回显明文。保存队列按编辑代次确认，较早响应不覆盖后续输入；设置页发起服务重启前等待队列完成，保存失败时保留草稿并阻止该次重启。地址仅展示一个优先含网关的非虚拟内网 IPv4 和一个实际公网 IPv4，端口使用当前监听值；NAT 出口不能从本机网卡推断，未检测到公网地址时说明域名与端口映射要求。
+
+令牌保存不会重复更新防火墙或登录启动项。防火墙仅在开启远程访问、退出轻量模式或远程监听配置端口变化时同步；登录启动项只在开关变化时同步。
+
+页面主标题沿用侧边栏对应导航名称，辅助标题保留该业务页的主题名称。Host 侧边栏通过 `RouterLink` 提交页面导航，活动链接随已提交路由更新。概览和运行中心的直接内容卡片由单一 grid 维护 16px 间距；设置中已展开的宿主及插件面板排在折叠面板前。桌面的 40 DIP 标题栏使用独立不透明表面，粒子与全屏业务遮罩仅覆盖标题栏下方的内容区。
 
 `RouterView` 本身保持挂载，其 slot 以 `route.fullPath` 为页面容器 key。导航直接卸载上一页面并挂载目标页面，页面容器使用 CSS 入场动画，动画完成事件不控制路由挂载；连续切换仍以最后提交的路由为准。启动加载态独立于页面动画。
 

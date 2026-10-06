@@ -167,7 +167,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <main id="view" ref="root" class="view-root" data-testid="main-view">
+  <main id="view" ref="root" class="view-root workspace-page page-scripts" data-testid="main-view">
     <NxpEmptyState v-if="loading" :title="t('common.loading')" />
     <NxpEmptyState
       v-else-if="error"
@@ -177,8 +177,8 @@ onBeforeUnmount(() => {
     />
     <template v-else>
       <NxpPageHeader
-        :eyebrow="t('scripts.automation_management')"
-        :title="t('common.script_instance')"
+        :eyebrow="t('common.script_instance')"
+        :title="t('shell.scripts')"
         :description="t('scripts.page.help')"
       >
         <template #actions>
