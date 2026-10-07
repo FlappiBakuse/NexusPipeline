@@ -6,6 +6,11 @@
       "version": "0.16.15",
       "code": "net10-plugin-api2-cleanup",
       "migrationUrl": "https://github.com/FlappiBakuse/NexusPipeline/blob/main/docs/user/README.md"
+    },
+    {
+      "version": "0.17.0",
+      "code": "desktop-shell-embedded-ui",
+      "migrationUrl": "https://github.com/FlappiBakuse/NexusPipeline/blob/main/docs/user/README.md"
     }
   ]
 }
