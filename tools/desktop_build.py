@@ -79,11 +79,17 @@ def build(root: Path, output: Path, identity: Path, electron_archive: Path, *, i
         destination=app/'node_modules'/name;destination.parent.mkdir(parents=True,exist_ok=True)
         shutil.copy2(dependency,destination)
     pack=output/'pack.mjs'
+    # ASAR matches absolute paths; a basename pattern also unpacks below .generated.
     pack.write_text('import {createPackageWithOptions,extractFile} from '+json.dumps((source/'node_modules'/'@electron'/'asar'/'lib'/'asar.js').as_uri())+';\n'
-        +'import fs from "node:fs";\nawait createPackageWithOptions(process.argv[2],process.argv[3],{unpack:"**/*.node"});\n'
+        +'import fs from "node:fs";\nawait createPackageWithOptions(process.argv[2],process.argv[3],{unpack:"*.node"});\n'
         +'if(!extractFile(process.argv[3],"desktop-build.json").equals(fs.readFileSync(process.argv[4])))throw new Error("ASAR build identity mismatch");\n',encoding='utf-8')
     archive=bundle/'resources'/'app.asar';archive.parent.mkdir(exist_ok=True)
     subprocess.run(['node',str(pack),str(app),str(archive),str(identity)],cwd=source,check=True)
+    for name in profile['dependencyFiles']:
+        if name.endswith('.node'):
+            native=Path(str(archive)+'.unpacked')/'node_modules'/name
+            if not native.is_file() or digest(native)!=digest(app/'node_modules'/name):
+                raise ValueError('Unpacked desktop dependency mismatch: '+name)
     for package_path,label in (('koffi','koffi'),('@koromix/koffi-win32-x64','koffi-win32-x64')):
         license_file=source/'node_modules'/package_path/'LICENSE.txt'
         if not license_file.exists(): license_file=source/'node_modules'/package_path/'LICENSE'

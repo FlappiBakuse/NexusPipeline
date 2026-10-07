@@ -162,7 +162,7 @@ async function prepareApplicationInputs(directory=runRoot) {
   if(!partner||!path.isAbsolute(partner)) throw new Error("Full application build requires NEXUS_PARTNER_ROOT");
   const built=await buildFrontendBundle({logRoot:directory}); if(built) return built;
   const git=(root,ref)=>execFileSync("git",["-C",root,"rev-parse",ref],{encoding:"utf8"}).trim();
-  const output=path.join(directory,"application-inputs");
+  const output=path.join(directory,".generated","application-inputs");
   const args=["tools/application_build.py","--root",executionRoot,"--output",output,
     "--source-sha",git(projectRoot,"HEAD"),"--source-tree-sha",workingTreeSha(projectRoot),
     "--partner-sha",git(partner,"HEAD"),"--workflow-sha",git(projectRoot,"HEAD")];
@@ -389,7 +389,7 @@ async function runBatch() {
         for(const entry of fs.readdirSync(source,{withFileTypes:true})) {
           const from=path.join(source,entry.name),to=path.join(target,entry.name);
           if(entry.isSymbolicLink()) throw new Error("Linked native output");
-          if(entry.isDirectory()&&!["test-host","architecture-bin","architecture-obj","runtime","update-runtime","resources","software","client-fixture","application-inputs","plugins","source","inputs","application","bin","obj",".git"].includes(entry.name)) copy(from,to);
+          if(entry.isDirectory()&&!["test-host","architecture-bin","architecture-obj","runtime","update-runtime","resources","software","client-fixture","application-inputs","plugins","source","inputs","application","bin","obj",".git",".generated"].includes(entry.name)) copy(from,to);
           else if(entry.isFile()&&/\.(json|trx|tap|log|txt)$/.test(entry.name)) {
             fs.copyFileSync(from,to);result.rawEvidence.push(path.relative(batchParentRoot,to).replaceAll("\\","/"));
           }

@@ -60,7 +60,8 @@ def inventory(directory: Path,upstream: dict) -> list[dict]:
         files.append({'path':name,'sizeBytes':size,'sha256':sha(file),'kind':kind(name,upstream)})
     if not 0<len(files)<=MAX_FILES:raise ValueError('Application file count')
     paths={item['path'] for item in files}
-    if not ({'NexusPipeline.exe','README.md',ENTRY,ASAR,NATIVE}|set(upstream)).issubset(paths):raise ValueError('Incomplete application tree')
+    missing=({'NexusPipeline.exe','README.md',ENTRY,ASAR,NATIVE}|set(upstream))-paths
+    if missing:raise ValueError('Incomplete application tree: '+', '.join(sorted(missing)))
     for item in files:
         if item['path'] in upstream:
             frozen=upstream[item['path']]
