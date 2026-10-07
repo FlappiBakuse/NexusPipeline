@@ -16,11 +16,7 @@ internal static class ConfigEditHttpAdapter
         string body,
         ConfigEditCommands commands)
     {
-        if (!HttpHelper.IsLoopback(context))
-        {
-            await HttpHelper.ErrorAsync(context, "local_only", 403).ConfigureAwait(false);
-            return;
-        }
+        if (!await RequestAccessPolicy.RequireAsync(context, NexusPipeline.Plugin.Abstractions.PluginOperationAccess.NativeConfigEditor).ConfigureAwait(false)) return;
 
         var parsed = HttpHelper.ParseBody(body);
         string action = parsed.Get("action").Str();

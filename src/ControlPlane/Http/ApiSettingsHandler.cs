@@ -31,6 +31,8 @@ internal static class ApiSettingsHandler
         AppSettings settings = settingsProvider.Current;
         if (method == "GET")
         {
+            RemoteAccessAddresses addresses = settings.AllowRemoteAccess
+                ? NetInfo.GetRemoteAccessAddresses() : new(null, null);
             Audit.Log(Audit.Web, "查询设置");
             await HttpHelper.WriteJsonAsync(context, new
             {
@@ -50,9 +52,12 @@ internal static class ApiSettingsHandler
                     remote = new
                     {
                         allowed = settings.AllowRemoteAccess,
+                        bound = WebServer.Current?.AllowsRemoteAccess ?? false,
                         localOnly = !settings.AllowRemoteAccess,
                         tokenSet = !string.IsNullOrWhiteSpace(settings.AccessToken),
-                        lanAddresses = settings.AllowRemoteAccess ? NetInfo.ListLanAddresses() : new List<string>(),
+                        addresses.InternalAddress,
+                        addresses.PublicAddress,
+                        port = WebServer.Current?.Port ?? settings.WebPort,
                     },
                 },
             }).ConfigureAwait(false);
@@ -137,7 +142,7 @@ internal static class ApiSettingsHandler
             settings.MinimizeToTray,
             settings.LightweightMode,
             settings.AllowConfigRepair,
-            settings.AutoOpenBrowser,
+            settings.OpenDesktopOnStartup,
             settings.HistoryRetentionDays,
             settings.WebPort,
             settings.McpEnabled,

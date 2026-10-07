@@ -24,20 +24,20 @@ $env:NEXUS_TEST_RUN_ID = '<本次唯一ID>'
 build.cmd
 ```
 
-`build.cmd` 调用唯一生产构建实现 `node tests/run.mjs release`。该实现复制当前源码到外部隔离副本，安装并校验前端依赖、构建静态网页，再发布框架依赖的单文件程序并验证嵌入的 requireAdministrator 清单。输出位于 `<外部构建根>/runs/<本次唯一ID>/production/`，包含 `nexus-pipeline.exe`、`README.md`、`wwwroot/` 和空 `plugins/`；缓存和中间输出也位于外部构建根。输出已存在则失败，请使用新的 ID。
+`build.cmd` 调用唯一生产构建实现 `node tests/run.mjs release`。该实现复制当前源码到外部隔离副本，安装并校验前端依赖、构建静态网页，再发布框架依赖的单文件程序并验证嵌入的 requireAdministrator 清单。输出位于 `<外部构建根>/runs/<本次唯一ID>/production/`，根目录包含 `NexusPipeline.exe`、`README.md`，`resources/desktop/` 与 `resources/payload-manifest.json` 为受管应用载荷；业务前端以只读资源内嵌 Host；缓存和中间输出也位于外部构建根。输出已存在则失败，请使用新的 ID。
 
-生产构建不会安装或启动程序。插件由独立的 NexusPipeline-Plugins 仓库构建；正式候选按[发行指南](release.md)核验预装包。前端唯一源码入口为 `frontend/`；普通测试使用另一份 asInvoker Test Host。
+生产构建不会安装或启动程序。外部插件安装到 `plugins/`，由独立的 NexusPipeline-Plugins 仓库构建。普通 release runner 只生成应用载荷；正式候选按[发行指南](release.md)装配并核验 EmulatorSupport 与 LiveScreenshot，首次默认禁用。本机个人验收装配实际构建并启用全部 13 个现役插件。前端唯一源码入口为 `frontend/`；普通测试使用另一份 asInvoker Test Host。
 
 ## 运行程序
 
 | 命令 | 行为 |
 |---|---|
-| `<production>\nexus-pipeline.exe` | 常驻服务模式：托盘、Web 和调度器 |
-| `<production>\nexus-pipeline.exe web` | 网页模式；按回车或在 stdin 结束时退出 |
-| `<production>\nexus-pipeline.exe manage` | 交互式命令行管理菜单 |
-| `<production>\nexus-pipeline.exe status` | 查看当前状态 |
-| `<production>\nexus-pipeline.exe run script ...` / `run queue ...` / `run cancel ...` | 经常驻服务 HTTP 通道提交或取消任务 |
-| `<production>\nexus-pipeline.exe register` / `unregister` | 注册或取消开机自启动任务 |
+| `<production>\NexusPipeline.exe` | 常驻服务模式：托盘、Web 和调度器 |
+| `<production>\NexusPipeline.exe web` | 网页模式；按回车或在 stdin 结束时退出 |
+| `<production>\NexusPipeline.exe manage` | 交互式命令行管理菜单 |
+| `<production>\NexusPipeline.exe status` | 查看当前状态 |
+| `<production>\NexusPipeline.exe run script ...` / `run queue ...` / `run cancel ...` | 经常驻服务 HTTP 通道提交或取消任务 |
+| `<production>\NexusPipeline.exe register` / `unregister` | 注册或取消开机自启动任务 |
 
 网页默认地址为 `http://127.0.0.1:58731/`；端口被占用时按顺序寻找可用端口。首次运行会创建当前运行时目录并执行崩溃恢复扫描。
 
@@ -47,7 +47,7 @@ build.cmd
 
 测试分层与归属见[测试索引](../testing/README.md)和[测试政策](../testing/policy.md)，三个入口命令、隔离 Test Host 与运行输出见[测试命令](../testing/commands.md)。统一入口为 `node tests\run.mjs smoke`、`integration` 或 `release`：本地改动先跑 `smoke`；涉及进程、端口、解释器、模拟器、插件或更新事务时再跑 `integration`。
 
-PR 范围计划映射逻辑义务到可选 control 与最多五个 Windows batch，按准备依赖选择工具链；必需汇总 汇总原生证据，可信 main 的 完整预算 审计完整 attempt。两项 required 检查均须成功。所有物理 job 三分钟硬停止，正式完整时长上限 150 秒，实际远端启用状态见 [STATUS](../STATUS.md)。合并后的发行工作流独立构建、验收生产候选。
+PR 范围计划映射逻辑义务到可选 control 与按准备依赖划分的 Windows batch，按准备依赖选择工具链；必需汇总 汇总原生证据，可信 main 的 完整预算 审计完整 attempt。两项 required 检查均须成功。所有物理 job 记录完整实际耗时，不设项目执行时间上限，实际远端启用状态见 [STATUS](../STATUS.md)。合并后的发行工作流独立构建、验收生产候选。
 
 
 
@@ -79,7 +79,7 @@ PR 范围计划映射逻辑义务到可选 control 与最多五个 Windows batch
 - 无控制台父进程启动 cmd/bat 时必须提供并消费重定向的 stdout/stderr；构建和测试脚本保持非交互，不加入无条件 `pause`。
 - 正式程序仍需管理员上下文；每个 UI/System suite 使用隔离 Test Host runtime 验证脚本与解释器边界。目标程序返回 Win32Exception 740 时应明确失败，保留正式运行边界。
 - 以显式路径开头的 `Args` 表示运行时启动目标，`?` 后为目标参数；Args 不使用引号表达路径。
-- 使用 `cmd.exe` 运行批处理时，注意工作目录和环境变量继承；运行进程残留会锁定 `<production>\nexus-pipeline.exe`。
+- 使用 `cmd.exe` 运行批处理时，注意工作目录和环境变量继承；运行进程残留会锁定 `<production>\NexusPipeline.exe`。
 
 ### 单元与组件测试定位
 
@@ -119,7 +119,7 @@ PR 范围计划映射逻辑义务到可选 control 与最多五个 Windows batch
 |---|---|
 | 启动即退出 | 正式程序确认管理员上下文；Test Host 测试检查隔离 runtime、启动日志和 exit code |
 | 检测到已在运行 | 检查任务管理器中的残留进程；确认单实例互斥体没有被其他服务占用 |
-| Web 打不开 | 确认服务正在运行、端口正确，轻量模式不会启动 Web |
+| Web 打不开 | 确认服务正在运行、实际监听端口正确；轻量模式同样提供 Web UI |
 | 重构建失败或 exe 被锁定 | 停止对应服务进程后重新构建 |
 | 测试出现级联失败 | 检查对应 suite 的隔离 runtime 和残留进程，按[测试命令](../testing/commands.md)清理 |
 | 配置还原异常 | 检查 `data/{脚本Id}/{UserId}/` 下的 `.session`、`original/` 和 `swap-backup/`，保留现场后再进行恢复操作 |

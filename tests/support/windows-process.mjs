@@ -86,15 +86,11 @@ export function isProcessAlive(pid) {
   if (!Number.isInteger(Number(pid)) || Number(pid) <= 0) return false;
   const numericPid = Number(pid);
   if (process.platform === "win32") {
-    const result = run("tasklist", ["/FI", `PID eq ${numericPid}`, "/FO", "CSV", "/NH"]);
-    const output = `${result.stdout || ""}\n${result.stderr || ""}`;
-    if (result.status === 0 && new RegExp(`"${numericPid}"`).test(output)) return true;
-    if (result.status === 0 && /INFO:|没有运行的任务|no tasks/i.test(output)) return false;
     const powershell = run("powershell.exe", [
       "-NoProfile",
       "-NonInteractive",
       "-Command",
-      `$p=Get-Process -Id ${numericPid} -ErrorAction SilentlyContinue; if ($null -eq $p) { 'absent' } else { 'present' }`,
+      `$p=Get-Process -Id ${numericPid} -ErrorAction SilentlyContinue; if ($null -eq $p) { 'absent' } else { try { if ($p.HasExited) { 'absent' } else { 'present' } } finally { $p.Dispose() } }`,
     ]);
     const state = String(powershell.stdout || "").trim().toLowerCase();
     if (powershell.status === 0 && state === "present") return true;

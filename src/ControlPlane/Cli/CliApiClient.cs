@@ -35,6 +35,26 @@ internal sealed class CliApiClient
 
     public CliApiResponse Delete(string path, JsonNode? body = null) => Send("DELETE", path, body);
 
+    internal JsonNode CopyDiagnosticArtifact(JsonNode receipt, string destination)
+    {
+        if (Port is null || receipt["artifactId"]?.GetValue<string>() is not { } id || !Guid.TryParseExact(id, "N", out _)
+            || receipt["sizeBytes"]?.GetValue<long>() is not { } size || receipt["sha256"]?.GetValue<string>() is not { } hash)
+            throw new InvalidDataException("诊断包回执无效");
+        using var deadline = new CancellationTokenSource(CliTransport.DefaultControlTimeout);
+        using var handler = new HttpClientHandler { AllowAutoRedirect = false, UseProxy = false };
+        using var client = new HttpClient(handler) { Timeout = CliTransport.DefaultControlTimeout };
+        using var response = client.GetAsync($"http://127.0.0.1:{Port}/api/diagnostics/artifacts/{id}", HttpCompletionOption.ResponseHeadersRead,
+            deadline.Token).GetAwaiter().GetResult();
+        response.EnsureSuccessStatusCode();
+        if (response.Content.Headers.ContentType?.MediaType != "application/zip"
+            || response.Content.Headers.ContentLength != size) throw new InvalidDataException("诊断包下载回执不符");
+        using var stream = response.Content.ReadAsStream(deadline.Token);
+        CliArtifactOutput.SaveAsync(stream, destination, size, hash, deadline.Token).GetAwaiter().GetResult();
+        var result = receipt.DeepClone();
+        result["path"] = Path.GetFullPath(destination);
+        return result;
+    }
+
     private CliApiResponse Send(string method, string path, JsonNode? body)
     {
         if (Port is null)

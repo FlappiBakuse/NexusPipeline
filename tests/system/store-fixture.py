@@ -11,8 +11,8 @@ assembly, output, run_id = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
 manifest = {
     "schemaVersion": 2, "name": "store-fixture", "artifactName": "StoreFixture",
     "displayName": "Store fixture", "description": "Synthetic installation fixture",
-    "version": "0.1.0", "kind": "managed-code", "apiVersion": "2.0",
-    "minHostVersion": "0.16.15", "capabilities": [],
+    "version": "0.1.0", "kind": "managed-code", "apiVersion": "2.1",
+    "minHostVersion": "0.17.0", "capabilities": [],
     "entryAssembly": "NexusPipeline.TestPlugin.dll", "entryType": "NexusPipeline.TestPlugin.TestPlugin",
 }
 buffer = io.BytesIO()

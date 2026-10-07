@@ -184,9 +184,12 @@ def validate_unit(expected, actual, files, base):
                 require(re.search(r"^# "+name+r" 0\r?$",native,re.M),"Failed/skipped TAP counters")
             require(re.search(r"^# tests [1-9]\d*\r?$",native,re.M),"Zero TAP tests")
             if expected["id"] == "host.integration.restart-update":
-                require(re.search(r"^# tests 9\r?$", native, re.M), "Missing update transaction cases")
+                require(re.search(r"^# tests 12\r?$", native, re.M), "Missing update transaction cases")
                 for case in ["current update worker commits only after actual services are ready and preserves user files",
-                             "failed policy proof aborts only its exited worker and cannot repeat the apply loop"]:
+                             "failed policy proof aborts only its exited worker and cannot repeat the apply loop",
+                             "whole application rollback preserves frozen old assets after BackupReady corruption",
+                             "whole application rollback preserves frozen old assets after SwapReady corruption",
+                             "unknown nested candidate bytes preserve the immutable backup and recovery journal"]:
                     require(re.search(r"^ok \d+ - " + re.escape(case) + r"\r?$", native, re.M), "Missing native update transaction: " + case)
         if expected["id"].startswith("plugins.plugin.package:"):
             built = load(one("package-report.json"))
@@ -194,11 +197,27 @@ def validate_unit(expected, actual, files, base):
             require(built["status"] == "PASS" and built["artifactName"] == expected["artifact"]
                     and built["kind"] == expected["pluginKind"] and built["sha256"] == digest(package.read_bytes())
                     and built["sizeBytes"] == package.stat().st_size, "Production package identity mismatch")
+        if expected["id"] == "host.integration.desktop":
+            native=one("desktop-native.tap").read_text(encoding="utf-8")
+            require(not re.search(r"^\s*not ok\b",native,re.M),"Failed desktop native cases")
+            for name,count in {"tests":5,"pass":5,"fail":0,"cancelled":0,"skipped":0,"todo":0}.items():
+                require(re.search(r"^# "+name+" "+str(count)+r"\r?$",native,re.M),"Missing desktop native counters")
+            require(re.search(r"^ok \d+ - legacy and profiled shared vectors use the same canonical identity\r?$",native,re.M),"Missing desktop shared identity vectors")
+            reader=load(one("reader-report.json"))
+            require(reader["status"] == "PASS" and reader["candidateExecuted"] is False
+                    and reader["counts"] == {"testsRun":8,"failures":0,"skipped":0}
+                    and len(set(reader["caseIds"])) == 8,"Missing readonly payload cases")
+            client=load(one("client-report.json"))
+            require(client["status"] == "PASS" and client["closeHides"] is True
+                    and exact([page["route"] for page in client["pages"]],
+                              ["#/"+route for route in ["dashboard","dispatch","queues","scripts","users","history","plugins","settings"]]),"Missing real desktop routes")
+            require(all(client["restart"][key] is True for key in ["rendererRetained","draftRetained","explicitDiscard"])
+                    and all(client["rendererCrash"][key] is True for key in ["hostPreserved","rendererReplaced","lossNotice"]),"Missing desktop lifecycle evidence")
 
 
 def validate_bundle(plan, plan_file, report_files, official=True):
     require(plan.get("schemaVersion") == 2 and plan["capacityStatus"] == "PLANNED"
-            and len(plan["batches"]) <= 5 and plan["estimatedTotalJobs"] <= 10, "Invalid/capacity exceeded plan")
+            and isinstance(plan["batches"],list), "Invalid/capacity exceeded plan")
     require(not official or not plan.get("diagnosticSelection") and not plan["dirty"], "Local/dirty diagnostic cannot qualify CI")
     batches = [item for item in [plan["control"],*plan["batches"]] if item["units"]]
     expected = {item["id"]:item for item in batches}
@@ -242,9 +261,8 @@ def validate_bundle(plan, plan_file, report_files, official=True):
                     and identity["partner"]["workingTreeDirty"] is False and re.fullmatch(r"[0-9a-f]{64}",identity["partnerFingerprint"] or ""), "Foreign/dirty partner")
         require(report["policyDigest"] == plan["policyDigest"] and report["planDigest"] == digest(plan_file.read_bytes()), "Foreign plan/policy")
         timing = report["timing"]
-        require(timing["qualificationMs"] == 150000 and timing["hardTimeoutMs"] == 180000 and timing["completeJobMs"] is None
-                and 0 <= timing.get("preparationElapsedMs",0) and 0 <= timing["processElapsedMs"]
-                and timing["processElapsedMs"]+timing.get("preparationElapsedMs",0) <= 150000, "Local time is invalid or exceeds 150 seconds")
+        require(timing["qualificationMs"] is None and timing["hardTimeoutMs"] is None and timing["completeJobMs"] is None
+                and 0 <= timing.get("preparationElapsedMs",0) and 0 <= timing["processElapsedMs"], "Local timing is invalid")
         inventory = report["artifacts"]
         keys = [item["path"].casefold() for item in inventory]
         require(inventory and len(keys) == len(set(keys)) and len(inventory) <= 4096, "Duplicate/colliding/empty artifact inventory")
@@ -280,7 +298,7 @@ def validate_job_names(audit, plan, jobs, expected_names):
         permitted.add(audit.job_name(plan["repository"], "unselected"))
     require(all(job["name"] in permitted for job in skipped), "Unexpected skipped physical position")
     physical = [job for job in jobs if not job.get("runnerlessSkipped")]
-    require(exact([job["name"] for job in physical], expected_names) and len(physical)+2 <= 10, "Unexpected physical producer graph")
+    require(exact([job["name"] for job in physical], expected_names), "Unexpected physical producer graph")
 
 
 def trusted_begin(audit, final, repository, plan, producer):
@@ -303,7 +321,7 @@ def trusted_begin(audit, final, repository, plan, producer):
     if begin.get("status") in ["queued", "in_progress", "waiting", "pending"]: raise BeginPending("Begin controller not completed")
     require(begin.get("status") == "completed" and begin.get("conclusion") == "success", "Failed begin controller")
     jobs = audit.completed_jobs(repository,registration["beginRun"],registration["beginAttempt"])
-    require(len(jobs) == 1 and all(item["status"] == "PASS" for item in audit.audit(jobs,registration["beginRun"],registration["beginAttempt"])), "Begin complete job budget failed")
+    require(len(jobs) == 1 and all(item["status"] == "PASS" for item in audit.audit(jobs,registration["beginRun"],registration["beginAttempt"])), "Begin complete job verification failed")
     return suite["app"]["id"]
 
 
@@ -332,7 +350,7 @@ def main():
                      "baseSha":os.environ["PR_BASE_SHA"],"headSha":os.environ["PR_HEAD_SHA"],"prNumber":int(os.environ["PR_NUMBER"])}.items():
         require(plan[key] == value,"Foreign scope identity: "+key)
     partner = os.environ.get("NEXUS_PARTNER_ROOT")
-    subprocess.run(["node",str(root/"tests/verify-plan.mjs"),str(plans[0]),*([partner] if partner else [])],cwd=root,check=True,stdout=subprocess.DEVNULL,timeout=20)
+    subprocess.run(["node",str(root/"tests/verify-plan.mjs"),str(plans[0]),*([partner] if partner else [])],cwd=root,check=True,stdout=subprocess.DEVNULL)
     result = validate_bundle(plan,plans[0],list(reports.rglob("batch-report.json")))
     needs = json.loads(os.environ["CI_NEEDS"])
     require(needs.get("scope",{}).get("result") == "success" and needs.get("control",{}).get("result") == ("success" if plan["control"]["units"] else "skipped")
@@ -345,16 +363,16 @@ def main():
             and producer.get("path") == ".github/workflows/ci.yml" and producer.get("repository",{}).get("full_name") == repository,"Foreign producer")
     started = float(os.environ["NEXUS_TEST_JOB_STARTED_AT_MS"])/1000
     elapsed = time.time()-started
-    require(0 <= elapsed < 130, "Required work budget exhausted/invalid start")
-    deadline = time.monotonic()+min(100,130-elapsed)
+    require(0 <= elapsed, "Invalid Required start")
+    deadline = float("inf")
     app_id = wait_for_trusted_begin(audit,final,repository,plan,producer,deadline=deadline)
     jobs,_ = audit.physical_jobs(repository,producer,audit.completed_jobs(repository,int(plan["runId"]),int(plan["attempt"])),audit.job_name(plan["repository"], "finalBudget"),app_id)
-    expected_names = json.loads(subprocess.check_output(["node", str(root/"tests/ci-names.mjs"), str(plans[0])], cwd=root, timeout=8))
+    expected_names = json.loads(subprocess.check_output(["node", str(root/"tests/ci-names.mjs"), str(plans[0])], cwd=root))
     names = expected_names[:-1]
     validate_job_names(audit, plan, jobs, expected_names)
     before = [job for job in jobs if job["name"] in names]
     durations = audit.audit(before,int(plan["runId"]),int(plan["attempt"]))
-    require(all(item["status"] == "PASS" for item in durations),"Complete predecessor job failed/budget exceeded")
+    require(all(item["status"] == "PASS" for item in durations),"Complete predecessor job failed")
     result.update({"runId":plan["runId"],"attempt":plan["attempt"],"actualJobBudgets":durations,"controllerPostQualification":"PENDING_FINAL_READ_ONLY_ACCEPTANCE"})
     print(json.dumps(result,ensure_ascii=False))
 

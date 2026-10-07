@@ -4,15 +4,15 @@
 
 ## 安装和依赖
 
-首次安装可选安装器或便携 ZIP。两者的初始应用文件来自同一份载荷：`nexus-pipeline.exe`、`wwwroot/`、`plugins/` 和 `README.md`。预装的 EmulatorSupport、LiveScreenshot 默认禁用，需要时再在插件页启用。安装器选择本地空目录；已登记且身份匹配的同一用户实例可选择原目录升级。它不会迁移或接管不明便携目录。便携包请解压到空目录，不要覆盖旧实例。
+首次安装可选安装器或便携 ZIP。两者的初始应用文件来自同一份载荷：`NexusPipeline.exe`、`resources/desktop/`、`resources/payload-manifest.json`、`plugins/` 和 `README.md`。预装的 EmulatorSupport、LiveScreenshot 默认禁用，需要时再在插件页启用。安装器选择本地空目录；已登记且身份匹配的同一用户实例可选择原目录升级。它不会迁移或接管不明便携目录。便携包请解压到空目录，不要覆盖旧实例。
 
 安装器提供英文和简体中文；首次安装按 Windows 用户界面语言选择并允许手动切换，升级默认沿用上次选择。`/LANG=en` 或 `/LANG=zh` 可明确指定语言。静默安装仍按显式语言、上次选择、系统语言的顺序决定提示语言。
 
 从仓库首次安装 managed-code 插件且没有既有启用偏好时，安装事务完成后会记录启用，重启加载时生效。更新插件、显式禁用后重装及预装插件均保留原有偏好。安装请求返回需要重启时，插件还没有运行；实际加载状态以插件页为准。
 
-新配置默认在服务启动时打开管理页面；`autoOpenBrowser: false` 可关闭此行为。轻量模式只能在停止宿主后编辑 `config/settings.json` 中的 `"lightweightMode": true` 并重启启用；轻量模式保留本机 Control API，但不提供 Web UI。网页设置页的「高级设置」卡片可单独保存「允许逐次配置修复」，每次修复仍需明确预览和应用。
+普通模式下，双击根 NexusPipeline.exe 或选择托盘“打开管理页面”会打开或激活同一桌面窗口，窗口 X 仅隐藏，托盘退出才停止 Host。登录自启动通过 `service` 入口运行，设置“登录自启动时显示客户端”决定是否自动显示桌面。轻量模式只能在停止宿主后编辑 `config/settings.json` 中的 `"lightweightMode": true` 并重启启用；它运行后台服务、托盘和 Web UI，不启动 Electron。轻量模式的首次双击和登录启动均由 `openDesktopOnStartup` 决定是否自动打开默认浏览器；关闭时保持后台，再次双击或使用托盘仍可打开网页。服务或更新重启不重复打开网页。两种模式的远程访问均由 `allowRemoteAccess` 和现役认证控制；轻量模式可在网页中重启服务，MCP 仍由自身开关控制。网页设置页的「高级设置」卡片可单独保存「允许逐次配置修复」，每次修复仍需明确预览和应用。
 
-程序需要 .NET Desktop Runtime 10 x64 和 ASP.NET Core Runtime 10 x64。安装器在缺少依赖时会逐项询问并从固定微软地址下载校验后的包。便携版保留 .NET 的缺运行时提示，两个准确下载按钮见可离线打开的 [`wwwroot/help/runtime-prerequisites.html`](../../frontend/public/help/runtime-prerequisites.html)。安装 .NET 依赖可能需要系统授权；取消后可重新运行安装器。
+程序需要 .NET Desktop Runtime 10 x64 和 ASP.NET Core Runtime 10 x64。安装器在缺少依赖时会逐项询问并从固定微软地址下载校验后的包。便携版保留 .NET 的缺运行时提示，两个准确下载按钮见可离线打开的 [[运行依赖说明](https://github.com/FlappiBakuse/NexusPipeline/blob/main/docs/user/README.md#安装和依赖)](../../frontend/public/help/runtime-prerequisites.html)。安装 .NET 依赖可能需要系统授权；取消后可重新运行安装器。
 
 ## 运行、取消和日志
 
@@ -56,7 +56,7 @@ v0.16.15 切换 .NET 10 与 Plugin API 2.0，并清理旧数据格式支持，�
 
 新版不转换、导入、移动或删除受影响的旧配置、外观及历史，不提供迁移工具。旧历史使用完整备份中的旧版查看；回退时也使用完整旧实例，不让旧程序读取新版数据。
 
-同格式且未跨越屏障的普通更新仍可使用内置更新。此类更新如需手动替换，只替换 `nexus-pipeline.exe`、`wwwroot/` 和 `README.md`，保留用户目录及已有 `plugins/`。不明目录不能通过安装器就地接管。
+同格式且未跨越屏障的普通更新仍可使用内置更新。此类更新如需手动替换，只替换 `NexusPipeline.exe`、`resources/desktop/`、`resources/payload-manifest.json` 和 `README.md`，保留用户目录及已有 `plugins/`。不明目录不能通过安装器就地接管。
 
 ### 卸载与恢复
 

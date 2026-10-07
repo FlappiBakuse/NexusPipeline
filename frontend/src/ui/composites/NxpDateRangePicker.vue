@@ -197,7 +197,7 @@ watch(() => props.open, value => {
 :host { display: block; min-width: 0; }
 .nxp-date-range-search { position: relative; min-width: 0; }
 .nxp-date-range-picker { position: relative; min-width: 0; }
-.nxp-date-range-display { position: relative; display: flex; width: 100%; min-height: 40px; align-items: center; justify-content: space-between; gap: 12px; padding: 0 40px 0 12px; border: 1px solid var(--content-control-border, var(--nx-color-border)); border-radius: 8px; background: var(--content-control, var(--nx-color-surface)); color: var(--text, var(--nx-color-text)); font-size: 13px; font-weight: 400; text-align: left; }
+.nxp-date-range-display { position: relative; display: flex; width: 100%; min-height: var(--control-height, var(--nx-control-height, 40px)); align-items: center; justify-content: space-between; gap: 12px; padding: 0 40px 0 12px; border: 1px solid var(--content-control-border, var(--nx-color-border)); border-radius: 8px; background: var(--content-control, var(--nx-color-surface)); color: var(--text, var(--nx-color-text)); font-size: 13px; font-weight: 400; text-align: left; }
 .nxp-date-range-display:hover, .nxp-date-range-display[aria-expanded="true"] { border-color: var(--accent, var(--nx-color-primary)); background: var(--content-control-hover, var(--nx-color-surface)); }
 .nxp-date-range-display > [data-nxp-date-range-label] { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nxp-date-range-icon { position: absolute; top: 50%; right: 12px; display: inline-flex; pointer-events: none; transform: translateY(-50%); color: var(--accent, var(--nx-color-primary)); }

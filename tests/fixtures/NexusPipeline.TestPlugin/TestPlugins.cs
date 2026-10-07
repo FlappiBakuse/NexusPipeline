@@ -71,7 +71,7 @@ public sealed class TestPlugin : INexusPlugin
     {
         _registrations.Add(context.WebApi.Register(new PluginWebApiRoute(
             "PUT",
-            "json/echo",
+            "json/echo", PluginOperationAccess.General,
             (request, _) => ValueTask.FromResult(PluginWebApiResponse.Json(new JsonObject
             {
                 ["jsonBody"] = request.JsonBody,
@@ -80,7 +80,7 @@ public sealed class TestPlugin : INexusPlugin
             })))));
         _registrations.Add(context.WebApi.Register(new PluginWebApiRoute(
             "POST",
-            "binary/echo",
+            "binary/echo", PluginOperationAccess.General,
             async (request, token) =>
             {
                 if (request.OpenBodyStream is null)
@@ -99,13 +99,13 @@ public sealed class TestPlugin : INexusPlugin
             })));
         _registrations.Add(context.WebApi.Register(new PluginWebApiRoute(
             "GET",
-            "binary/image",
+            "binary/image", PluginOperationAccess.General,
             (_, _) => ValueTask.FromResult(PluginWebApiResponse.Binary(
                 new MemoryStream(Encoding.UTF8.GetBytes("fixture-binary-payload")),
                 "image/png")))));
         _registrations.Add(context.WebApi.Register(new PluginWebApiRoute(
             "GET",
-            "binary/document",
+            "binary/document", PluginOperationAccess.General,
             (_, _) => ValueTask.FromResult(PluginWebApiResponse.Binary(
                 new MemoryStream(Encoding.UTF8.GetBytes("<html>fixture</html>")),
                 "text/html")))));

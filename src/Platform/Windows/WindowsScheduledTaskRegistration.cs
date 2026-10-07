@@ -1,105 +1,93 @@
 using System.Diagnostics;
+using System.Xml;
+using System.Xml.Linq;
 using NexusPipeline.Shared.Logging;
 
 namespace NexusPipeline.Platform.Windows;
 
-/// <summary>开机自启动：计划任务（schtasks /sc onlogon /rl highest），登录时以最高权限静默启动（免 UAC 弹窗），与提权版主程序配套。</summary>
 internal static class WindowsScheduledTaskRegistration
 {
     private const string TaskName = "NexusPipeline " + Storage.InstallationGeneration.Id;
+    internal enum ActionState { Legacy, Current, Unowned }
 
-    public static bool IsRegistered()
-    {
-        return RunSchTask("/query", "/tn", TaskName).ExitCode == 0;
-    }
-
-    public static void Register()
-    {
-        try
-        {
-            string exePath = Process.GetCurrentProcess().MainModule?.FileName ?? "";
-            if (string.IsNullOrWhiteSpace(exePath))
-            {
-                Logger.Error("[错误] 无法确定主程序路径。");
-                return;
-            }
-            var result = RunSchTask("/create", "/tn", TaskName, "/tr", $"\\\"{exePath}\\\"", "/sc", "onlogon", "/rl", "highest", "/f");
-            if (result.ExitCode == 0)
-            {
-                Audit.Log(Audit.System, "注册开机自启动（计划任务，最高权限）", exePath);
-                Logger.Info($"[提示] 开机自启动已注册为计划任务（{TaskName}，登录时以最高权限运行）。");
-            }
-            else
-            {
-                Logger.Error($"[错误] 注册开机自启动失败（schtasks 退出码 {result.ExitCode}）：{result.Output.Trim()}");
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.Error($"[错误] 注册开机自启动失败：{ex.Message}");
-        }
-    }
-
-    public static void Unregister()
-    {
-        try
-        {
-            var result = RunSchTask("/delete", "/tn", TaskName, "/f");
-            if (result.ExitCode == 0)
-            {
-                Audit.Log(Audit.System, "取消开机自启动");
-            }
-            else if (IsRegistered())
-            {
-                Logger.Error($"[错误] 取消开机自启动失败（schtasks 退出码 {result.ExitCode}）：{result.Output.Trim()}");
-            }
-            else
-            {
-                Logger.Info("[提示] 未注册开机自启动。");
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.Error($"[错误] 取消开机自启动失败：{ex.Message}");
-        }
-    }
+    public static bool IsRegistered() => RunSchTask(["/query", "/tn", TaskName]).ExitCode == 0;
+    public static void Register() => Sync(true);
+    public static void Unregister() => Sync(false);
 
     public static void Sync(bool autoStart)
     {
-        if (autoStart)
+#if NEXUS_TEST_HOST
+        if (Environment.GetEnvironmentVariable("NEXUS_SYSTEM_ACTION_DRYRUN") == "1") return;
+#endif
+        string? executable = Environment.ProcessPath;
+        if (string.IsNullOrWhiteSpace(executable)) return;
+        try { Sync(autoStart, executable, RunSchTask); }
+        catch (Exception exception) { Logger.Warn("startup_task_sync_failed: " + exception.GetType().Name); }
+    }
+
+    internal static void Sync(bool autoStart, string executable, Func<string[], (int ExitCode, string Output)> execute)
+    {
+        var query = execute(["/query", "/tn", TaskName, "/xml"]);
+        bool exists = query.ExitCode == 0;
+        ActionState action = exists ? InspectAction(query.Output, executable) : ActionState.Unowned;
+        if (exists && action == ActionState.Unowned)
         {
-            if (!IsRegistered())
-            {
-                Register();
-            }
+            Logger.Warn("startup_task_unowned");
+            return;
         }
-        else if (IsRegistered())
+        if (autoStart && (!exists || action == ActionState.Legacy))
         {
-            Unregister();
+            // /f is restricted to a verified legacy action; failed queries must never overwrite an existing task.
+            string[] args = ["/create", "/tn", TaskName, "/tr", $"\"{executable}\" service", "/sc", "onlogon", "/rl", "highest"];
+            var result = execute(exists ? [.. args, "/f"] : args);
+            if (result.ExitCode == 0) Audit.Log(Audit.System, "注册开机自启动（计划任务，最高权限）", executable);
+            else Logger.Warn("startup_task_register_failed: " + result.ExitCode);
+        }
+        else if (!autoStart && exists)
+        {
+            var result = execute(["/delete", "/tn", TaskName, "/f"]);
+            if (result.ExitCode == 0) Audit.Log(Audit.System, "取消开机自启动");
+            else Logger.Warn("startup_task_delete_failed: " + result.ExitCode);
         }
     }
 
-    /// <summary>调用 schtasks.exe（控制台程序，无控制台父进程须重定向 stdio，避免 0x800700E8）。</summary>
-    private static (int ExitCode, string Output) RunSchTask(params string[] args)
+    internal static ActionState InspectAction(string xml, string executable)
     {
-        var psi = new ProcessStartInfo("schtasks.exe")
+        try
         {
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
+            using var reader = XmlReader.Create(new StringReader(xml), new XmlReaderSettings
+            {
+                DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null, MaxCharactersInDocument = 128 * 1024,
+            });
+            XElement root = XElement.Load(reader);
+            XNamespace ns = "http://schemas.microsoft.com/windows/2004/02/mit/task";
+            XElement[] actions = root.Element(ns + "Actions")?.Elements().ToArray() ?? [];
+            if (root.Name != ns + "Task" || actions.Length != 1 || actions[0].Name != ns + "Exec") return ActionState.Unowned;
+            string command = actions[0].Element(ns + "Command")?.Value.Trim().Trim('"') ?? "";
+            if (!Path.IsPathFullyQualified(command) || !string.Equals(Path.GetFullPath(command), Path.GetFullPath(executable), StringComparison.OrdinalIgnoreCase))
+                return ActionState.Unowned;
+            string arguments = actions[0].Element(ns + "Arguments")?.Value.Trim() ?? "";
+            return arguments switch { "" => ActionState.Legacy, "service" => ActionState.Current, _ => ActionState.Unowned };
+        }
+        catch (Exception exception) when (exception is XmlException or ArgumentException or NotSupportedException)
+        { return ActionState.Unowned; }
+    }
+
+    private static (int ExitCode, string Output) RunSchTask(string[] args)
+    {
+        var start = new ProcessStartInfo("schtasks.exe")
+        {
+            UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true,
         };
-        foreach (string arg in args)
+        foreach (string arg in args) start.ArgumentList.Add(arg);
+        using Process? process = Process.Start(start);
+        if (process is null) return (-1, "无法创建 schtasks 进程");
+        Task<string> output = process.StandardOutput.ReadToEndAsync(), error = process.StandardError.ReadToEndAsync();
+        if (!process.WaitForExit(15000))
         {
-            psi.ArgumentList.Add(arg);
+            process.Kill(); process.WaitForExit();
+            return (-1, "schtasks timeout");
         }
-        using Process? process = Process.Start(psi);
-        if (process is null)
-        {
-            return (-1, "无法创建 schtasks 进程");
-        }
-        string output = process.StandardOutput.ReadToEnd() + process.StandardError.ReadToEnd();
-        process.WaitForExit(15000);
-        return (process.ExitCode, output);
+        return (process.ExitCode, output.GetAwaiter().GetResult() + error.GetAwaiter().GetResult());
     }
 }

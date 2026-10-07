@@ -17,84 +17,64 @@ internal sealed class ScriptFileBrowser
 
     public ScriptFileBrowseResult Browse(string? path)
     {
-        if (!string.IsNullOrWhiteSpace(path) && !IsAllowed(path))
-        {
-            return ScriptFileBrowseResult.Forbidden();
-        }
+        string[] roots = _queries.ListEffective().SelectMany(AllowedRoots).Distinct(StringComparer.OrdinalIgnoreCase)
+            .Where(SafeDirectory).OrderBy(value => value, StringComparer.OrdinalIgnoreCase).ToArray();
+        if (string.IsNullOrWhiteSpace(path))
+            return ScriptFileBrowseResult.Success(new FileBrowserResult("", null, roots, Array.Empty<string>()));
         try
         {
-            return ScriptFileBrowseResult.Success(_fileBrowser.Browse(path));
+            string full = Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            bool Allowed(string candidate) => roots.Any(root => Contains(root, candidate)) && SafeDirectory(candidate);
+            if (!Allowed(full)) return ScriptFileBrowseResult.Forbidden();
+            FileBrowserResult result = _fileBrowser.Browse(full);
+            return ScriptFileBrowseResult.Success(result with
+            {
+                Parent = result.Parent is { } parent && Allowed(parent) ? parent : null,
+                Directories = result.Directories.Where(Allowed).ToArray(),
+                Files = result.Files.Where(file => roots.Any(root => Contains(root, file)) && SafeChain(file)).ToArray(),
+            });
         }
-        catch (DirectoryNotFoundException)
+        catch (DirectoryNotFoundException) { return ScriptFileBrowseResult.NotFound(path); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        { return ScriptFileBrowseResult.Failed(); }
+    }
+
+    private static bool Contains(string root, string candidate) => candidate.Equals(root, StringComparison.OrdinalIgnoreCase)
+        || candidate.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+
+    private static bool SafeDirectory(string path) => Directory.Exists(path) && SafeChain(path)
+        && !string.Equals(Path.GetPathRoot(path)?.TrimEnd('\\', '/'), path.TrimEnd('\\', '/'), StringComparison.OrdinalIgnoreCase);
+
+    private static bool SafeChain(string path)
+    {
+        if (!Path.IsPathFullyQualified(path) || path.StartsWith(@"\\", StringComparison.Ordinal)) return false;
+        try
         {
-            return ScriptFileBrowseResult.NotFound(path ?? "");
+            for (string? current = path; current is not null; current = Path.GetDirectoryName(current))
+                if ((File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0) return false;
+            return true;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        { return false; }
+    }
+
+    private static IEnumerable<string> AllowedRoots(ScriptInstance script)
+    {
+        static string? Parent(string? value)
         {
-            return ScriptFileBrowseResult.Failed();
+            try { return string.IsNullOrWhiteSpace(value) ? null : Path.GetDirectoryName(value); }
+            catch (Exception error) when (error is ArgumentException or NotSupportedException) { return null; }
+        }
+        foreach (string? candidate in new[] { script.RootPath, script.ConfigPath, Parent(script.ConfigPath), Parent(script.GameExe) })
+        {
+            if (string.IsNullOrWhiteSpace(candidate) || !Path.IsPathFullyQualified(candidate)) continue;
+            string? normalized;
+            try { normalized = Path.GetFullPath(candidate).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar); }
+            catch { continue; }
+            yield return normalized;
         }
     }
 
-    private bool IsAllowed(string path)
-    {
-        string full;
-        try
-        {
-            full = Path.GetFullPath(path).TrimEnd('\\', '/') + Path.DirectorySeparatorChar;
-        }
-        catch
-        {
-            return false;
-        }
-        foreach (ScriptInstance script in _queries.ListEffective())
-        {
-            foreach (string prefix in AllowedPrefixes(script))
-            {
-                if (full.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-                {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
-    private static IEnumerable<string> AllowedPrefixes(ScriptInstance script)
-    {
-        if (!string.IsNullOrWhiteSpace(script.RootPath))
-        {
-            yield return PathPrefix(script.RootPath);
-        }
-        if (!string.IsNullOrWhiteSpace(script.ConfigPath))
-        {
-            yield return PathPrefix(script.ConfigPath);
-            string? configDir = Path.GetDirectoryName(script.ConfigPath);
-            if (!string.IsNullOrWhiteSpace(configDir))
-            {
-                yield return PathPrefix(configDir);
-            }
-        }
-        if (!string.IsNullOrWhiteSpace(script.GameExe))
-        {
-            string? gameDir = Path.GetDirectoryName(script.GameExe);
-            if (!string.IsNullOrWhiteSpace(gameDir))
-            {
-                yield return PathPrefix(gameDir);
-            }
-        }
-    }
-
-    private static string PathPrefix(string path)
-    {
-        try
-        {
-            return Path.GetFullPath(path).TrimEnd('\\', '/') + Path.DirectorySeparatorChar;
-        }
-        catch
-        {
-            return path.TrimEnd('\\', '/') + Path.DirectorySeparatorChar;
-        }
-    }
 }
 
 internal sealed record ScriptFileBrowseResult(

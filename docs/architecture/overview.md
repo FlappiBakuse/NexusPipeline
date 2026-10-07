@@ -241,7 +241,7 @@ Host/Composition（唯一组合根）
 - HTTP 路由：在 `src/ControlPlane/Http/` 新增或扩展 `ApiXxxHandler`，类上标注 `[ApiRoute("资源名")]`（子路由标注在方法上，如 `cancel`）；`WebServer` 启动时反射扫描自动注册，**无需改路由表**。
 - 控制命令：先在 owning module 的 use case/handler 增加资源操作，再由 `CliCommandRouter` 添加参数与响应适配；交互菜单调用正式命令，不直接触碰 `HostCompositionRoot` 或持久化集合。
 - MCP 适配器：在 `src/ControlPlane/Mcp/` 增加类型化工具和投影；只有面向 Agent 的核心子集才进入工具面，其余能力走 CLI；`McpHost` 负责 Streamable HTTP 生命周期，`McpSecurity` 负责 loopback/Host/Origin/体积边界，业务写入必须转入 Modules use cases/commands 或既有核心服务。
-- 轻量控制面：`WebServerOptions.FromSettings` 保留 `/api/*`，关闭静态 Web UI 与远程绑定；Normal 模式继续按设置提供 Web UI/远程访问。
+- 轻量 Web 模式：`WebServerOptions.FromSettings` 在两种模式下提供 `/api/*` 和静态 Web UI，远程绑定均遵循设置；Host 界面协调器在轻量模式下仅打开默认浏览器，不启用 Electron。
 - 业务服务：在对应 `src/Modules/<owner>/` 增加服务和 typed port，由 `HostCompositionRoot` 完成注册；调用方通过构造注入获取依赖，不使用 `Resolve<T>()` 或全局服务定位器。
 
 

@@ -354,7 +354,7 @@ internal static class McpViews
             settings.AutoStart,
             settings.MinimizeToTray,
             settings.LightweightMode,
-            settings.AutoOpenBrowser,
+            settings.OpenDesktopOnStartup,
             settings.HistoryRetentionDays,
             settings.WebPort,
             settings.McpEnabled,

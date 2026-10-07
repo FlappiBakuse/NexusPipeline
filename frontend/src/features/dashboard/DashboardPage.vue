@@ -272,7 +272,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <main id="view" class="view-root" data-testid="main-view">
+  <main id="view" class="view-root workspace-page page-dashboard" data-testid="main-view">
     <template v-if="loading && !status.version">
       <NxpEmptyState :title="t('common.loading')" />
     </template>
@@ -281,12 +281,12 @@ onBeforeUnmount(() => {
     </template>
     <template v-else>
       <NxpPageHeader
-        :eyebrow="t('dashboard.run_overview')"
-        :title="t('dashboard.dashboard')"
+        :eyebrow="t('dashboard.dashboard')"
+        :title="t('shell.dashboard')"
         :description="t('dashboard.overview.help')"
       />
       <div class="dashboard-content">
-        <div ref="cardsSlot" class="plugin-slot" data-plugin-slot="dashboard.cards" data-plugin-anchor="dashboard.cards" hidden></div>
+        <p v-if="error" class="dashboard-system-note" role="alert">{{ error }}</p>
         <section id="dashboard-state" class="dashboard-state" :class="(status.running || []).length ? 'running' : 'idle'" data-testid="dashboard-state" aria-live="polite">
           <div class="dashboard-state-copy"><div class="state-label">{{ (status.running || []).length ? t("common.running") : t("dashboard.system_idle") }}</div><h3>{{ (status.running || []).length ? t("dashboard.task_in_progress") : t("dashboard.everything_is_ready") }}</h3><p>{{ (status.running || []).length ? t("dashboard.running.summary", { count: (status.running || []).length }) : t("dashboard.running.empty_help") }}</p></div>
         </section>
@@ -299,6 +299,7 @@ onBeforeUnmount(() => {
             <div class="running-records"><article v-for="record in status.running" :key="`mobile-${record.targetName}`" class="running-record"><div class="running-record-head"><strong>{{ record.targetName }}</strong><NxpBadge :tone="tone(record.status)">{{ statusText(record.status) }}</NxpBadge></div><div class="running-record-meta"><span>{{ recordType(record) }}</span><span>{{ recordMode(record) }}</span></div><div class="running-record-progress">{{ record.currentScriptName || "-" }} {{ record.currentStatus || "" }}<br><span class="muted">{{ t("dashboard.running.attempt", { attempt: record.currentAttempt, max: record.currentMaxAttempts }) }}</span><br v-if="record.persistenceWarning"><NxpBadge v-if="record.persistenceWarning" tone="warn">{{ t("dashboard.persistence_warning", { label: t("common.history.persistence_warning"), warning: record.persistenceWarning }) }}</NxpBadge></div></article></div>
           </template>
         </NxpCard>
+        <div ref="afterRunningSlot" class="plugin-slot" data-plugin-slot="dashboard.after-running" data-plugin-anchor="dashboard.after-running" hidden></div>
         <DashboardHistorySummary
           :summary="historySummary"
           :loading="historySummaryLoading"
@@ -306,7 +307,7 @@ onBeforeUnmount(() => {
           :from="historyFrom"
           :to="historyTo"
         />
-        <div ref="afterRunningSlot" class="plugin-slot" data-plugin-slot="dashboard.after-running" data-plugin-anchor="dashboard.after-running" hidden></div>
+        <div ref="cardsSlot" class="plugin-slot" data-plugin-slot="dashboard.cards" data-plugin-anchor="dashboard.cards" hidden></div>
         <section v-if="disabledPlugins().length" class="dashboard-system-note" data-testid="plugin-health"><p>{{ t("dashboard.plugins.disabled_summary", { count: disabledPlugins().length, plugins: formatList(disabledPlugins().map(plugin => plugin.displayName || "")) }) }}</p><a class="back-link" href="#/plugins">{{ t("dashboard.view_plugins") }}</a></section>
       </div>
     </template>

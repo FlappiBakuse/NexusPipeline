@@ -1,29 +1,16 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, ref } from "vue";
 import { useShellStore } from "../../../stores/shell";
 import { t } from "../../../platform/i18n";
-import { api } from "../../../platform/api";
+import { toast } from "../../../platform/toast";
 import { beginServiceRecovery, resumeServiceRecovery } from "../../../platform/service-recovery";
 import NxpConfirmDialog from "../../../ui/composites/NxpConfirmDialog.vue";
 import NxpButton from "../../../ui/primitives/NxpButton.vue";
 
 const shell = useShellStore();
-const lightweight = ref(false);
+const props = defineProps<{ beforeRestart?: () => Promise<void> }>();
+const preparing = ref(false);
 const confirmationOpen = ref(false);
-
-/** 轻量模式不启动 Web 服务，此时只提示手动重启，不显示不可执行的按钮。 */
-async function loadServiceMode() {
-  try {
-    const status = await api<{ lightweightMode?: boolean }>("GET", "/api/status");
-    lightweight.value = status?.lightweightMode === true;
-  } catch {
-    lightweight.value = false;
-  }
-}
-
-watch(() => shell.restartRequired, required => {
-  if (required) void loadServiceMode();
-});
 
 const message = computed(() => {
   if (shell.restarting) return t("settings.service_restarting");
@@ -31,7 +18,7 @@ const message = computed(() => {
 });
 
 /** 重启期间只显示进行中的提示：页面在确认新实例接管后自动刷新。 */
-const actionVisible = computed(() => !shell.restarting && !lightweight.value);
+const actionVisible = computed(() => !shell.restarting);
 
 function requestRestart() {
   if (shell.restarting) return;
@@ -42,10 +29,18 @@ function requestRestart() {
   confirmationOpen.value = true;
 }
 
-function confirmRestart() {
-  if (shell.restarting) return;
+async function confirmRestart() {
+  if (shell.restarting || preparing.value) return;
   confirmationOpen.value = false;
-  void beginServiceRecovery();
+  preparing.value = true;
+  try {
+    await props.beforeRestart?.();
+    await beginServiceRecovery();
+  } catch (reason) {
+    toast(reason instanceof Error ? reason.message : String(reason), "error");
+  } finally {
+    preparing.value = false;
+  }
 }
 </script>
 
@@ -53,18 +48,18 @@ function confirmRestart() {
   <section
     v-if="shell.restartRequired"
     id="service-restart-notice"
-    class="dashboard-system-note"
+    class="dashboard-system-note service-restart-notice"
     role="status"
     aria-live="polite"
     data-testid="service-restart-notice"
   >
     <p>{{ message }}</p>
-    <span v-if="lightweight" class="muted">{{ t("settings.service.lightweight_restart") }}</span>
     <NxpButton
-      v-else-if="actionVisible"
+      v-if="actionVisible"
       class="primary"
       type="button"
       data-testid="restart-service"
+      :disabled="preparing"
       @click="requestRestart"
     >
       {{ t("settings.restart_service") }}
@@ -82,3 +77,7 @@ function confirmRestart() {
     @close="confirmationOpen = false"
   />
 </template>
+
+<style>
+.dashboard-system-note.service-restart-notice { padding: var(--space-4); border: 1px solid var(--content-card-border); border-radius: var(--radius-lg); background: var(--content-card); }
+</style>

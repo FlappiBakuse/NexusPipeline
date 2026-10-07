@@ -30,6 +30,7 @@ namespace NexusPipeline.Host.Composition;
 /// <summary>HTTP route binding assembled by Host composition.</summary>
 internal sealed class HttpRouteBindings : IHttpRouteBindings
 {
+    public NexusPipeline.ControlPlane.Http.Static.IFrontendAssetProvider FrontendAssets { get; }
     public HttpRouteBindings(
         SettingsCommands settingsCommands,
         ScriptCommands scriptCommands,
@@ -59,9 +60,12 @@ internal sealed class HttpRouteBindings : IHttpRouteBindings
         UserAssetService userAssets,
         OutboundHttpClientProvider outboundHttp,
         ScriptIconService scriptIcons,
+        ScriptTypeIconService scriptTypeIcons,
         ScriptFileBrowser scriptFileBrowser,
-        NexusPipeline.Modules.Users.Contracts.ITaskQueryProjection taskQueries)
+        NexusPipeline.Modules.Users.Contracts.ITaskQueryProjection taskQueries,
+        NexusPipeline.ControlPlane.Http.Static.IFrontendAssetProvider frontendAssets)
     {
+        FrontendAssets = frontendAssets;
         Routes = ApiRouteCatalog.Bind(typeof(WebServer).Assembly, Array.Empty<object>());
         SettingsCommands = settingsCommands;
         ScriptCommands = scriptCommands;
@@ -91,6 +95,7 @@ internal sealed class HttpRouteBindings : IHttpRouteBindings
         UserAssets = userAssets;
         OutboundHttp = outboundHttp;
         ScriptIcons = scriptIcons;
+        ScriptTypeIcons = scriptTypeIcons;
         ScriptFileBrowser = scriptFileBrowser;
         TaskQueries = taskQueries;
     }
@@ -152,6 +157,8 @@ internal sealed class HttpRouteBindings : IHttpRouteBindings
     public OutboundHttpClientProvider OutboundHttp { get; }
 
     public ScriptIconService ScriptIcons { get; }
+
+    public ScriptTypeIconService ScriptTypeIcons { get; }
 
     public ScriptFileBrowser ScriptFileBrowser { get; }
     public NexusPipeline.Modules.Users.Contracts.ITaskQueryProjection TaskQueries { get; }

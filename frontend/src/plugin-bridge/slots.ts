@@ -116,6 +116,8 @@ function renderFormContribution(parent, contribution) {
   const footer = document.createElement("div");
   footer.className = "row-actions";
   const save = textElement("nxp-button", "Save");
+  save.disabled = contribution.access?.save?.allowed !== true;
+  if (contribution.access?.save?.denyReason) save.title = t(`api.error.${contribution.access.save.denyReason}`);
   save.type = "submit";
   footer.append(save);
   form.append(footer);
@@ -139,12 +141,16 @@ function renderFormContribution(parent, contribution) {
     } catch (error) {
       if (!isAbortError(error)) toast(error.message, "error");
     } finally {
-      save.disabled = false;
+      save.disabled = contribution.access?.save?.allowed !== true;
     }
   });
 }
 
 function renderDeclarativeContribution(parent, contribution) {
+  if (contribution.access?.read && !contribution.access.read.allowed) {
+    parent.append(textElement("p", t(`api.error.${contribution.access.read.denyReason}`), "muted"));
+    return;
+  }
   const kind = String(contribution.kind || "card").toLowerCase();
   if (kind === "badge") {
     const wrap = document.createElement("span");

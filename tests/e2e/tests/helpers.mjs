@@ -29,7 +29,7 @@ export const runId = process.env.NEXUS_TEST_RUN_ID?.trim()
   || `standalone-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 export const testHostDir = resolveTestHostDir(projectRoot);
 export const runtimeDir = path.join(resolveTestRunRoot(projectRoot, runId), "ui");
-export const runtimeExe = path.join(runtimeDir, "nexus-pipeline.exe");
+export const runtimeExe = path.join(runtimeDir, "NexusPipeline.exe");
 export const servicePidPath = path.join(runtimeDir, ".nxp", "runtime", "service.pid");
 export const runMarkerPath = path.join(runtimeDir, ".nxp", "test-run-marker.json");
 export const testHostExitFile = resolveTestHostExitFile(
@@ -79,11 +79,11 @@ export async function setupRuntime() {
   fs.mkdirSync(path.join(runtimeDir, "config"), { recursive: true });
   fs.writeFileSync(
     path.join(runtimeDir, "config", "settings.json"),
-    JSON.stringify({ WebPort: webPort, AutoOpenBrowser: false }, null, 2),
+    JSON.stringify({ WebPort: webPort, LightweightMode: true, OpenDesktopOnStartup: false }, null, 2),
     "utf8",
   );
-  const sourceExe = path.join(releaseDir, "nexus-pipeline.exe");
-  if (!fs.existsSync(sourceExe)) throw new Error(`${releaseDir}/nexus-pipeline.exe 不存在，请先运行 node tests/run.mjs integration`);
+  const sourceExe = path.join(releaseDir, "NexusPipeline.exe");
+  if (!fs.existsSync(sourceExe)) throw new Error(`${releaseDir}/NexusPipeline.exe 不存在，请先运行 node tests/run.mjs integration`);
   const repositoryPlugins = path.join(pluginRepositoryRoot(), "plugins");
   const frontendFixture = path.join(__dirname, "fixtures", "frontend-plugin");
   const pluginDirectories = [];

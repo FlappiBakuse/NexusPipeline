@@ -96,13 +96,6 @@ defineExpose({ reload: loadDiagnostics });
 
 <template>
   <div class="diagnostics-section">
-    <div class="row-actions">
-      <NxpButton class="ghost" type="button" data-testid="load-diagnostics" :disabled="loading" @click="loadDiagnostics">
-        {{ t("settings.refresh_diagnostics") }}</NxpButton>
-      <NxpButton class="ghost" type="button" data-testid="export-diagnostics" @click="exportDiagnostics">
-        {{ t("settings.diagnostics.export_help") }}
-      </NxpButton>
-    </div>
     <div id="diagnostics-status" class="diagnostics-status" data-testid="diagnostics-status" aria-live="polite">
       <p v-if="loading" class="muted">{{ t("settings.loading_diagnostics") }}</p>
       <p v-else-if="diagnostics?.error" class="callout callout-warning">{{ diagnostics.error }}</p>
@@ -120,7 +113,7 @@ defineExpose({ reload: loadDiagnostics });
           }}</span>
         </div>
         <div class="diagnostics-table" role="table" :aria-label="t('settings.diagnostics.system_checks')">
-          <div class="diagnostics-table-header" role="row">
+          <div class="sr-only" role="row">
             <span role="columnheader">{{ t("common.check") }}</span
             ><span role="columnheader">{{ t("common.status") }}</span
             ><span role="columnheader">{{ t("settings.diagnostics") }}</span>
@@ -177,6 +170,13 @@ defineExpose({ reload: loadDiagnostics });
           </div>
         </div></template
       >
+    </div>
+    <div class="row-actions diagnostics-actions">
+      <NxpButton class="ghost" type="button" data-testid="load-diagnostics" :disabled="loading" @click="loadDiagnostics">
+        {{ t("settings.refresh_diagnostics") }}</NxpButton>
+      <NxpButton class="ghost" type="button" data-testid="export-diagnostics" @click="exportDiagnostics">
+        {{ t("settings.diagnostics.export_help") }}
+      </NxpButton>
     </div>
   </div>
 </template>

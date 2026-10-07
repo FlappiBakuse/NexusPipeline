@@ -29,8 +29,25 @@ internal static class ApiScriptsHandler
         ScriptQueries queries,
         ConfigEditCommands configEditCommands,
         ScriptSaveValidation validation,
-        ScriptIconService scriptIcons)
+        ScriptIconService scriptIcons,
+        ScriptTypeIconService scriptTypeIcons)
     {
+        if (method == "GET" && seg.Length == 3 && seg[1].Equals("type-icons", StringComparison.OrdinalIgnoreCase))
+        {
+            ScriptTypeIcon? icon = await scriptTypeIcons.GetAsync(seg[2]).ConfigureAwait(false);
+            if (icon is null)
+            {
+                await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);
+                return;
+            }
+            await HttpHelper.WriteBinaryAsync(context, icon.Bytes, icon.ContentType, headers: new Dictionary<string, string>
+            {
+                ["Cache-Control"] = "private, max-age=86400",
+                ["X-Content-Type-Options"] = "nosniff",
+                ["Referrer-Policy"] = "no-referrer",
+            }).ConfigureAwait(false);
+            return;
+        }
         if (method == "GET" && seg.Length == 1)
         {
             List<ScriptInstance> snapshot = queries.ListEffective().ToList();

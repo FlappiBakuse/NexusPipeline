@@ -38,6 +38,10 @@ internal sealed class UpdateService
     private readonly Func<bool> _requestExit;
     private readonly Func<bool> _isWebOnly;
     private readonly Func<string> _restartHandoff;
+    private readonly Func<string, TimeSpan, bool> _stopDesktop;
+    private readonly Func<DesktopResumeIntent> _captureDesktopIntent;
+    private readonly Action<string, DesktopResumeIntent> _abortDesktop;
+    private readonly Func<string, string?, bool, UpdatePayloadIdentity> _freezePayload;
     private readonly Func<(HostMaintenanceLease? Lease, string? Reason)> _acquireMaintenance;
     private readonly OutboundHttpClientProvider _outbound;
     private readonly object _gate = new();
@@ -50,6 +54,10 @@ internal sealed class UpdateService
     private long _generation;
     private UpdateOperation? _operation;
     private string? _readyStagingDir;
+    private UpdatePayloadIdentity? _readyPayload;
+    private string? _readyPackageHash;
+    private string? _readyChecksumHash;
+    private UpdateInventory? _readyInventory;
     private HostMaintenanceLease? _maintenanceLease;
     private bool _hasChecked;
     private bool _discoveryInvalidationPending;
@@ -69,7 +77,11 @@ internal sealed class UpdateService
         Func<(HostMaintenanceLease? Lease, string? Reason)>? acquireMaintenance = null,
         OutboundHttpClientProvider? outbound = null,
         Func<bool>? isWebOnly = null,
-        Func<string>? restartHandoff = null)
+        Func<string>? restartHandoff = null,
+        Func<string, TimeSpan, bool>? stopDesktop = null,
+        Func<string, string?, bool, UpdatePayloadIdentity>? freezePayload = null,
+        Func<DesktopResumeIntent>? captureDesktopIntent = null,
+        Action<string, DesktopResumeIntent>? abortDesktop = null)
     {
         _settings = settings;
         _installDir = installDir;
@@ -77,6 +89,10 @@ internal sealed class UpdateService
         _requestExit = requestExit;
         _isWebOnly = isWebOnly ?? (() => false);
         _restartHandoff = restartHandoff ?? (() => "");
+        _stopDesktop = stopDesktop ?? ((_, _) => true);
+        _captureDesktopIntent = captureDesktopIntent ?? (() => DesktopResumeIntent.FromVisible(false));
+        _abortDesktop = abortDesktop ?? ((_, _) => { });
+        _freezePayload = freezePayload ?? ApplicationPayload.Freeze;
         _outbound = outbound ?? new OutboundHttpClientProvider(() => OutboundProxyOptions.Direct);
         if (acquireMaintenance is not null)
         {
@@ -416,7 +432,7 @@ internal sealed class UpdateService
                     zipPath,
                     shaPath,
                     progress,
-                    operation.Cts.Token).ConfigureAwait(false);
+                    operation.Cts.Token, operation.Artifacts).ConfigureAwait(false);
                 operation.Cts.Token.ThrowIfCancellationRequested();
                 if (!ok)
                 {
@@ -427,14 +443,18 @@ internal sealed class UpdateService
                     throw new IOException(verifyError ?? "SHA256 校验失败");
                 }
                 operation.Cts.Token.ThrowIfCancellationRequested();
-                string? extractError = UpdatePackage.Extract(zipPath, stagingDir);
+                string? extractError = UpdatePackage.ExtractApplication(zipPath, stagingDir, version, _freezePayload, operation.Artifacts);
                 operation.Cts.Token.ThrowIfCancellationRequested();
                 if (extractError is not null)
                 {
                     throw new IOException(extractError);
                 }
-                if (!TrySetReady(operation))
+                var frozenPayload = _freezePayload(stagingDir, version, false);
+                string frozenPackageHash = operation.Artifacts!.FileHash(zipPath);
+                var inventory = operation.Artifacts.Inventory(stagingDir);
+                if (!TrySetReady(operation, frozenPayload, frozenPackageHash, inventory, operation.Artifacts.FileHash(shaPath)))
                 {
+                    CleanupDownloadArtifacts(operation);
                     return;
                 }
                 Audit.Log(auditSource, "更新下载完成", $"v{version}（SHA256 校验通过，已就绪）");
@@ -536,7 +556,7 @@ internal sealed class UpdateService
                     }
                     if (deferVersion != verifiedVersion || deferStagingDir != verifiedStaging)
                         return UpdateApplyResult.Busy("update-changed", "待应用更新已变化，请重新申请");
-                    UpdateTask.Create("defer", deferVersion, deferStagingDir).Write(TaskFile);
+                    FreezeJournal("defer", deferVersion, deferStagingDir).Write(TaskFile);
                     _state = UpdateState.ApplyPending;
                 }
                 Audit.Log(auditSource, "申请下次启动更新", $"v{deferVersion}");
@@ -585,9 +605,9 @@ internal sealed class UpdateService
     }
 
     /// <summary>Explicit same-instance Setup handoff; all runtime admission uses the existing maintenance owner.</summary>
-    internal UpdateApplyResult RequestInstallerApply(string stagingDir, string version, string imageHash, string transactionId, string auditSource)
+    internal UpdateApplyResult RequestInstallerApply(string stagingDir, string version, string imageHash, string transactionId, string auditSource, string packageHash)
     {
-        if (!Guid.TryParseExact(transactionId, "N", out _) || !NexusVersion.TryParse(version, out var target)
+        if (!Guid.TryParseExact(transactionId, "N", out _) || packageHash.Length != 64 || !packageHash.All(char.IsAsciiHexDigitLower) || !NexusVersion.TryParse(version, out var target)
             || !NexusVersion.TryParse(CurrentVersion, out var current) || target.CompareTo(current) < 0)
             return UpdateApplyResult.Busy("installer-input-invalid", "安装器版本或事务参数无效");
         try
@@ -603,8 +623,9 @@ internal sealed class UpdateService
                 if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0) throw new IOException("安装器暂存包含链接");
                 if (string.Equals(path.TrimEnd('\\'), _installDir.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase)) break;
             }
-            if (UpdateApply.ImageHash(Path.Combine(full, "nexus-pipeline.exe")) != imageHash)
+            if (UpdateApply.ImageHash(Path.Combine(full, "NexusPipeline.exe")) != imageHash)
                 throw new InvalidDataException("安装器程序摘要不匹配");
+            _ = _freezePayload(full, version, false);
         }
         catch (Exception ex) { return UpdateApplyResult.Busy("installer-staging-invalid", ex.Message); }
         UpdateApplyResult? policyFailure = VerifyApplyTarget(version);
@@ -618,7 +639,7 @@ internal sealed class UpdateService
             { lease.Dispose(); return UpdateApplyResult.Busy("recovery-pending", "存在活动更新或恢复现场"); }
             _state = UpdateState.Applying; _maintenanceLease = lease;
         }
-        return StartImmediateApply(lease, version, stagingDir, auditSource, transactionId, imageHash);
+        return StartImmediateApply(lease, version, stagingDir, auditSource, transactionId, imageHash, packageHash);
     }
 
     internal UpdateApplyResult? VerifyApplyTarget(string version)
@@ -641,23 +662,33 @@ internal sealed class UpdateService
     }
 
     private UpdateApplyResult StartImmediateApply(HostMaintenanceLease lease, string version, string stagingDir,
-        string auditSource, string? transactionId = null, string? imageHash = null)
+        string auditSource, string? transactionId = null, string? imageHash = null, string? packageHash = null)
     {
-        bool workerLaunched = false;
+        UpdateWorkerLaunch workerLaunch = UpdateWorkerLaunch.NotStarted;
+        bool desktopPrepared = false;
+        bool installer = transactionId is not null;
         UpdateTask? startedJournal = null;
         try
         {
+            transactionId ??= Guid.NewGuid().ToString("N");
+            var journal = FreezeJournal("apply", version, stagingDir, packageHash) with { TransactionId = transactionId,
+                TargetImageHash = imageHash ?? UpdateApply.ImageHash(Path.Combine(stagingDir, "NexusPipeline.exe")),
+                DesktopResumeIntent = _captureDesktopIntent() };
+            journal.Write(TaskFile);
+            startedJournal = journal;
+            if (!_stopDesktop(transactionId, TimeSpan.FromSeconds(8))) throw new IOException("desktop_stop_unconfirmed");
+            desktopPrepared = true;
             string handoffId = _restartHandoff();
-            var journal = UpdateTask.Create("apply", version, stagingDir) with
-            { TransactionId = transactionId, TargetImageHash = imageHash,
+            journal = journal with
+            { DesktopStopped = true,
               RestartHandoffId = Guid.TryParseExact(handoffId, "N", out _) ? handoffId : null };
             journal.Write(TaskFile);
             startedJournal = journal;
-            if (!UpdateApply.LaunchApplyWorker(stagingDir, _isWebOnly()))
+            workerLaunch = UpdateApply.LaunchApplyWorker(stagingDir, _isWebOnly());
+            if (workerLaunch == UpdateWorkerLaunch.NotStarted)
             {
                 throw new InvalidOperationException("apply-update 子进程未能拉起");
             }
-            workerLaunched = true;
             Audit.Log(auditSource, "应用更新", $"v{version}（staging: {stagingDir}）");
             Logger.Info("[更新] apply-update 子进程已确认拉起，正在请求宿主退出。");
             bool exitRequested;
@@ -680,24 +711,47 @@ internal sealed class UpdateService
         catch (Exception ex)
         {
             Logger.Error($"[更新] 应用请求失败：{ex.Message}");
-            if (workerLaunched)
+            if (workerLaunch != UpdateWorkerLaunch.NotStarted)
             {
                 // worker 已经 armed，任何后续通知/退出异常都不能删除它的 journal。
                 return UpdateApplyResult.Ok(false);
+            }
+            try { startedJournal?.Clear(TaskFile); }
+            catch (Exception cleanupError) { Logger.Warn($"[更新] 保留不能确认归属的 journal：{cleanupError.Message}"); }
+            if (desktopPrepared && startedJournal?.DesktopResumeIntent is { } intent)
+            {
+                try { _abortDesktop(transactionId!, intent); }
+                catch (Exception abortError) { Logger.Warn("desktop_update_abort_failed: " + abortError.GetType().Name); }
             }
             lock (_gate)
             {
                 if (_state == UpdateState.Applying)
                 {
-                    _state = transactionId is null ? UpdateState.Ready : UpdateState.Idle;
+                    _state = installer ? UpdateState.Idle : UpdateState.Ready;
                 }
                 _maintenanceLease = null;
             }
             lease.Dispose();
-            try { startedJournal?.Clear(TaskFile); }
-            catch (Exception cleanupError) { Logger.Warn($"[更新] 保留不能确认归属的 journal：{cleanupError.Message}"); }
             return UpdateApplyResult.Busy("worker-launch-failed", $"无法启动更新切换：{ex.Message}");
         }
+    }
+
+    private UpdateTask FreezeJournal(string mode, string version, string staging, string? installerPackageHash = null)
+    {
+        var payload = _freezePayload(staging, version, false);
+        string archive = Path.Combine(UpdateDir, AppPaths.UpdatePackageZipName(version) + Path.GetFileName(staging)[version.Length..]);
+        string packageHash = installerPackageHash ?? UpdateApply.ImageHash(archive);
+        if (installerPackageHash is null && (_readyPayload != payload || _readyPackageHash != packageHash))
+            throw new InvalidDataException("update.ready_payload_changed");
+        string checksum = Path.Combine(UpdateDir, AppPaths.UpdatePackageZipName(version) + ".sha256" + Path.GetFileName(staging)[version.Length..]);
+        var inventory = installerPackageHash is null ? _readyInventory ?? throw new InvalidDataException("update.ready_inventory_missing") : UpdateInventory.Capture(staging);
+        inventory.RequireOwned(staging);
+        if (installerPackageHash is null && (!File.Exists(checksum) || UpdateApply.ImageHash(checksum) != _readyChecksumHash))
+            throw new InvalidDataException("update.ready_checksum_changed");
+        return UpdateTask.Create(mode, version, staging) with { TargetPayload = payload, PackageSha256 = packageHash,
+            StagingInventory = inventory,
+            PackageChecksumSha256 = installerPackageHash is null ? _readyChecksumHash : null,
+            PackageSource = installerPackageHash is null ? "download" : "installer" };
     }
 
     private bool TryGetReadyLocked(
@@ -734,7 +788,7 @@ internal sealed class UpdateService
             return false;
         }
         stagingDir = _readyStagingDir ?? "";
-        if (string.IsNullOrWhiteSpace(stagingDir) || !File.Exists(Path.Combine(stagingDir, "nexus-pipeline.exe")))
+        if (string.IsNullOrWhiteSpace(stagingDir) || !File.Exists(Path.Combine(stagingDir, "NexusPipeline.exe")))
         {
             failure = UpdateApplyResult.Busy("not-ready", "暂存文件不完整，请重新下载");
             return false;
@@ -774,7 +828,7 @@ internal sealed class UpdateService
         }
     }
 
-    private bool TrySetReady(UpdateOperation operation)
+    private bool TrySetReady(UpdateOperation operation, UpdatePayloadIdentity payload, string packageHash, UpdateInventory inventory, string checksumHash)
     {
         lock (_gate)
         {
@@ -784,6 +838,10 @@ internal sealed class UpdateService
             }
             _state = UpdateState.Ready;
             _readyStagingDir = operation.StagingDir;
+            _readyPayload = payload;
+            _readyPackageHash = packageHash;
+            _readyInventory = inventory;
+            _readyChecksumHash = checksumHash;
             _bytesRead = 0;
             _bytesTotal = 0;
             return true;
@@ -842,47 +900,8 @@ internal sealed class UpdateService
         lock (_gate)
         {
             // 每个 generation 使用独立 ZIP/SHA/staging 路径；持有状态锁让取消、启动和清理的归属判断保持一致。
-            TryDeleteFile(operation.ZipPath);
-            TryDeleteFile(operation.ShaPath);
-            TryDeleteDirectory(operation.StagingDir);
-        }
-    }
-
-    private static void TryDeleteFile(string? path)
-    {
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            return;
-        }
-        try
-        {
-            if (File.Exists(path))
-            {
-                File.Delete(path);
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn($"[更新] 清理下载文件失败（{path}）：{ex.Message}");
-        }
-    }
-
-    private static void TryDeleteDirectory(string? path)
-    {
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            return;
-        }
-        try
-        {
-            if (Directory.Exists(path))
-            {
-                Directory.Delete(path, recursive: true);
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn($"[更新] 清理 staging 失败（{path}）：{ex.Message}");
+            try { operation.Artifacts?.Cleanup(); }
+            catch (Exception ex) { Logger.Warn($"[更新] 下载现场归属核验失败，保留文件：{ex.Message}"); }
         }
     }
 
@@ -950,6 +969,7 @@ internal sealed class UpdateService
         public string? ShaPath { get; }
         public string? StagingDir { get; }
         public CancellationTokenSource Cts { get; }
+        public UpdateCreatedArtifacts? Artifacts { get; }
         public TaskCompletionSource<bool> Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public UpdateOperation(
@@ -965,6 +985,7 @@ internal sealed class UpdateService
             ZipPath = zipPath;
             ShaPath = shaPath;
             StagingDir = stagingDir;
+            Artifacts = zipPath is null ? null : new UpdateCreatedArtifacts(Path.GetDirectoryName(zipPath)!);
             Cts = cancellationToken.CanBeCanceled
                 ? CancellationTokenSource.CreateLinkedTokenSource(cancellationToken)
                 : new CancellationTokenSource();

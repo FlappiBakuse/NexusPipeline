@@ -25,6 +25,7 @@ internal sealed class HostRestartCoordinator
     private readonly Action<TimeSpan> _delay;
 
     private readonly TimeSpan _launchDelay;
+    private readonly Action<string> _abortHandoff;
 
     public HostRestartCoordinator(
         Func<(HostMaintenanceLease? Lease, string? Reason)> acquireMaintenance,
@@ -32,7 +33,8 @@ internal sealed class HostRestartCoordinator
         Func<bool> requestExit,
         Action<Action>? schedule = null,
         Action<TimeSpan>? delay = null,
-        TimeSpan? launchDelay = null)
+        TimeSpan? launchDelay = null,
+        Action<string>? abortHandoff = null)
     {
         _acquireMaintenance = acquireMaintenance;
         _launchChild = launchChild;
@@ -40,6 +42,7 @@ internal sealed class HostRestartCoordinator
         _schedule = schedule ?? (work => _ = Task.Run(work));
         _delay = delay ?? (duration => Thread.Sleep(duration));
         _launchDelay = launchDelay ?? TimeSpan.FromSeconds(1);
+        _abortHandoff = abortHandoff ?? (_ => { });
     }
 
     public RestartRequestResult Request(string auditSource, int newPort)
@@ -117,6 +120,8 @@ internal sealed class HostRestartCoordinator
             // 子进程已拉起后租约随旧进程退出释放，继续保留更安全。
             if (!childLaunched)
             {
+                try { _abortHandoff(handoffId); }
+                catch (Exception exception) { Logger.Warn("desktop_restart_abort_failed: " + exception.GetType().Name); }
                 lease.Dispose();
             }
         }

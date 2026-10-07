@@ -7,6 +7,7 @@
 | Capability | Web | CLI | MCP |
 |---|---|---|---|
 | 脚本读取 | `GET /api/scripts` | `script list/get` | `list_scripts` |
+| 脚本类型图标 | `GET /api/scripts/type-icons/{typeId}` | 由 Web 承担 | 由 Web 承担 |
 | 脚本写入 | 脚本 CRUD API（新建/更新专项脚本实例的响应顶层附带 `validation`：script-save 语境的配置校验结果，含角落通知；通用脚本或插件无校验器时缺省） | `script create/update/delete`（不附带校验） | `create_script` / `update_script`（删除走 CLI） |
 | 专项配置探测 | `POST /api/scripts/probe`（专项插件按根目录 + `pluginInputs` 用户输入推导，响应含插件声明的 inputs 表单 schema） | 由 Web 承担 | 由 CLI/Web 承担 |
 | 用户读取 | `GET /api/users` | `user list/get` | `list_users` |
@@ -27,7 +28,7 @@
 | 插件用户设置 | 贡献接口 | `plugin user-settings ...` | 由 CLI/Web 承担 |
 | 设置读取 | 设置 API | `settings get` | `get_settings`（密钥脱敏） |
 | 设置写入 | 设置 API | `settings update` | `安全白名单外的写入走 CLI/Web` |
-| 系统诊断 | `GET /api/diagnostics`；`POST /api/diagnostics/export`（仅回环） | `doctor`、`doctor export` | `get_diagnostics` |
+| 系统诊断 | `GET /api/diagnostics`；`POST /api/diagnostics/export`；受管 artifact 下载 | `doctor`、`doctor export --output <新文件>` | `get_diagnostics` |
 | 通知截图开关 | 设置 API（`webhookScreenshotEnabled` / `smtpScreenshotEnabled`） | `settings update` | `get_settings` 只读返回开关状态 |
 | 更新 | 更新 API | `update check/download/apply` | `get_update_status` |
 
@@ -44,6 +45,8 @@ GameCheckIn v0.3.1 的独立签到页面由插件导航注册；状态读取位�
 - 三端复用 Application Command、核心服务和共享投影；矩阵记录入口差异，不复制领域规则。
 - 运行计划解释复用真实执行的冻结计划构建器与 `ExecutionStateStore` 准入评估，不创建运行登记、资源租约、历史记录、配置交换或系统操作。
 - 系统诊断检查本地运行状态，不自动修复、不改变用户数据、不默认发起网络请求、不读取设置密钥；安装目录写权限检查使用受控临时探针并在检查后清理。支持包限制为 8 MiB，最近日志尾部限制为 2 MiB，并在写入 ZIP 前执行敏感信息 canary。
+- Host 只向本实例受管 staging 生成诊断 ZIP。导出响应提供短期 artifact ID、长度与 SHA256；`GET /api/diagnostics/artifacts/<id>` 按服务端登记的文件提供内容。CLI 下载并核验这个 artifact，再用 CreateNew 写入调用者明确指定的本机文件，已有目标、链接或缺失父目录均拒绝。Web 的任意 `outputPath` 或 `isCli` 不提供调用者文件写权限。
+- 带 Origin 的 HTTP 管理请求要求相同的 HTTP scheme、主机与实际端口。NAT/外部域名入口还要求真实非回环对端、当前 remote bound 和通过 Bearer 认证；伪转发头不改变连接来源。回环地址及本机 LAN 地址继续遵守本机来源校验，跨端口例外仅用于只读 status 探测。
 - `run_queue` 提交执行前经 `McpPolicy.ValidateQueueExecution` 复核队列快照的完成操作，任何非 `none` 动作返回 `dangerous_completion_action`。
 - `get_settings` 对 Webhook、SMTP 和访问令牌只返回空值或 `enc:***` 占位符。
 - 通知截图开关按渠道全局生效；脚本通知可携带所选运行截图，队列汇总通知不附图；Webhook 协议能力存在差异时由发送器记录兼容性警告。
@@ -59,7 +62,9 @@ GameCheckIn v0.3.1 的独立签到页面由插件导航注册；状态读取位�
 - 插件批量更新只选择官方 catalog 中已安装、与当前宿主兼容、存在新版本且没有待处理事务的插件，按顺序登记更新；插件是否由官方商店登记不影响候选资格。单项失败会进入汇总结果并继续处理后续插件，完成后由用户按页面提示重启宿主。
 - 插件启用、禁用与商店单插件安装、更新、卸载响应都返回 `restartRequired: true`；批量更新在至少一项登记成功时返回同一字段，页面据此显示重启入口。
 - 插件管理与详情投影包含 `minHostVersion`。运行时发现宿主版本过低时保留插件元数据并返回 `state=Incompatible`、`runtimeErrorCode=plugin_incompatible_host`；插件商店将 `host_version_too_low`、`plugin_api_incompatible` 和 `invalid_version` 分别投影为 `compatibilityCode`，只有已安装插件存在更高且宿主不兼容的新版本时使用 `status=update-requires-host-upgrade`，其余兼容性失败使用 `status=incompatible` 并禁止安装或更新。
+- `lightweightMode` 在两种模式的设置读取与状态中保持原字段，设置写入接口拒绝修改；只能停机修改配置文件后重启。轻量模式提供 Web UI、后台服务和托盘，不启用 Electron；`openDesktopOnStartup` 控制轻量模式冷启动打开浏览器及普通模式登录自启动显示桌面。显式后台和轻量模式重启不自动打开，主动激活与现有 `web` 命令仍可打开网页。
 - `/api/status` 返回进程实例标识 `instanceId`、本次重启交接标识 `restartHandoffId` 与实际监听端口 `actualPort`；`POST /api/settings/restart` 返回候选端口 `newPort`、本次交接标识 `handoffId` 与旧实例 `instanceId`。管理页面据此确认新实例已经接管再跳转；只读的 `GET /api/status` 放行同主机的其他端口并返回可读 CORS 应答，其余接口保持同源要求。
+- `GET /api/settings` 的 `status.remote` 区分已保存开关 `allowed` 与当前监听策略 `bound`，并返回 `internalAddress`、`publicAddress` 和实际 `port`；每类地址至多一个，未检测到时为 null。虚拟网卡和保留 IPv4 不作为公网入口，NAT 出口不从本机网卡推断。令牌始终通过 `secretKey/accessToken` 密钥事务保存，响应仅返回是否设置及掩码。
 - 外观设置中的二级表面透明度开关仅影响 Modal、选择器、时间/日期弹层和同类浮层；关闭后这些表面使用不透明背景，一级页面表面保持原有外观设置。
 
 ## 维护规则
@@ -69,3 +74,9 @@ GameCheckIn v0.3.1 的独立签到页面由插件导航注册；状态读取位�
 新增能力时先实现 Web/CLI 入口与 Application Command，再评估 Agent 场景是否需要 MCP 工具；保持核心子集克制，避免工具面向全量 API 膨胀。本表为信息性记录，不设强制校验测试。
 
 专项任务查询、运行快照与历史深链接见[专项任务控制面](reference/plugin-api/task-protocol.md#控制面)。
+
+## 脚本类型图标
+
+`GET /api/scripts/type-icons/{typeId}` 返回图像二进制，沿用 Control API 认证。`general` 返回宿主内嵌项目 ICO；其他类型由已启用且兼容的专项插件或执行 provider 的 `scriptTypeIcon` 声明来源，固定上游完整 SHA 与图标 SHA-256。已知类型未声明图标时使用项目图标；未知或未启用类型返回 404，客户端不能提供下载 URL。
+
+宿主加载插件后以最多三个并行下载在后台预取类型图标，不等待弹窗打开，不阻塞启动；停止宿主时取消预取并等待清理。Scripts 服务使用宿主代理下载，仅允许完整 SHA 固定的 HTTPS raw 来源并拒绝重定向，大小上限为 2 MiB、超时 10 秒。经摘要验证的图像缓存于 `.nxp/cache/script-type-icons/`，缓存命中无需联网；并发下载共享任务，单个客户端取消不影响其他请求。网络或校验失败使用项目图标，后续弹窗请求可以重试；缓存写入失败仍返回已经验证的图像。上游图标字节不包含在源码和发行包中。

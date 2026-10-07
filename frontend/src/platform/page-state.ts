@@ -1,3 +1,4 @@
+import { serviceTrafficPaused,onServiceTrafficChanged } from './service-traffic';
 export interface PageState {
   page: string;
   routeToken: number;
@@ -36,7 +37,7 @@ export function isCurrent(page: string, token: number): boolean {
 export function schedule(callback: () => void, delay: number, page: string = state.page, token: number = state.routeToken): ReturnType<typeof setTimeout> {
   const timer = setTimeout(() => {
     state.timers.delete(timer);
-    if (isCurrent(page, token)) callback();
+    if (isCurrent(page, token) && !serviceTrafficPaused()) callback();
   }, delay);
   state.timers.add(timer);
   return timer;
@@ -65,3 +66,4 @@ export function disposePage(): void {
   state.controllers.forEach(controller => controller.abort());
   state.controllers.clear();
 }
+onServiceTrafficChanged(paused=>{if(paused){state.controllers.forEach(controller=>controller.abort());state.controllers.clear();}});

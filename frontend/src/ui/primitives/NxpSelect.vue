@@ -169,7 +169,7 @@ onBeforeUnmount(() => {
   width: 100%;
 }
 .nxp-select { position: relative; min-width: 0; }
-.nxp-select-trigger { display: flex; width: 100%; min-width: 0; height: 40px; align-items: center; justify-content: space-between; gap: 10px; padding: 0 12px; border: 1px solid var(--content-control-border, var(--nx-color-border)); border-radius: 8px; background: var(--content-control, transparent); color: var(--nx-color-text); font: inherit; font-size: 13px; font-weight: 400; text-align: left; }
+.nxp-select-trigger { display: flex; width: 100%; min-width: 0; height: var(--control-height, var(--nx-control-height, 40px)); min-height: var(--control-height, var(--nx-control-height, 40px)); align-items: center; justify-content: space-between; gap: 10px; padding: 0 12px; border: 1px solid var(--content-control-border, var(--nx-color-border)); border-radius: 8px; background: var(--content-control, transparent); color: var(--nx-color-text); font: inherit; font-size: 13px; font-weight: 400; text-align: left; }
 .nxp-select-trigger:hover, .nxp-select-trigger[aria-expanded="true"] { border-color: var(--accent, var(--nx-color-accent)); background: var(--content-control-hover, transparent); }
 .nxp-select-trigger:disabled { cursor: not-allowed; opacity: .45; }
 .nxp-select-trigger > [data-nxp-select-label] { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -272,7 +272,7 @@ onBeforeUnmount(() => {
 
 <template>
   <p v-if="unsupportedCount" role="status">{{ t("history.unsupported_records", { count: unsupportedCount }) }}</p>
-  <main id="view" ref="historyRoot" class="view-root history-page" data-testid="main-view">
+  <main id="view" ref="historyRoot" class="view-root workspace-page page-history history-page" data-testid="main-view">
     <NxpPageHeader
       :eyebrow="t('shell.history')"
       :title="t('shell.history')"

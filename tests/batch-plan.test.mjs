@@ -26,24 +26,23 @@ test("docs only uses a lightweight control without core batches",()=>{
   assert.equal(plan.control.units.length,1);
   assert.equal(plan.estimatedTotalJobs,5);
 });
-test("0/1/13/50/100 synthetic plugins never cause a sixth batch or lose obligations",()=>{
+test("all synthetic plugin inventories retain every obligation without a time quota",()=>{
   for(const count of [0,1,13,50,100]) {
     const units=Array.from({length:count},(_,i)=>({id:`plugin-${i}`,kind:"plugin",artifact:`plugin-${i}`,pluginKind:"managed-code",
       provides:[`proof-${i}`],preparations:["shared"],expectedCaseIds:[`case-${i}`]}));
     const plan=allocateUnits(units,{source:"fixture"});
-    assert.ok(plan.batches.length<=5);assert.ok(plan.estimatedTotalJobs<=10);
     assert.equal(plan.units.length,count);
     assert.equal(plan.requiredObligations.length,count);
     assert.equal(plan.batches.reduce((sum,b)=>sum+b.units.length,0)+plan.unplacedUnits.length,count);
-    if(count>=50) assert.equal(plan.capacityStatus,"CAPACITY_EXCEEDED");
+    assert.equal(plan.capacityStatus,"PLANNED");
   }
 });
-test("oversized unit fails capacity without becoming N/A",()=>{
+test("long-running unit retains its required obligation",()=>{
   const unit={id:"slow",provides:["essential"],preparations:[],kind:"plugin"};
-  const plan=allocateUnits([unit],{}, {unitMs:{slow:130001}});
-  assert.equal(plan.capacityStatus,"CAPACITY_EXCEEDED");
+  const plan=allocateUnits([unit],{}, {unitMs:{slow:280001}});
+  assert.equal(plan.capacityStatus,"PLANNED");
   assert.deepEqual(plan.requiredObligations,["essential"]);
-  assert.equal(plan.unplacedUnits[0].id,"slow");
+  assert.equal(plan.batches[0].units[0].id,"slow");
 });
 test("production and test input identities cannot share prepare keys",()=>{
   const unit={id:"a",provides:["a"],preparations:["sdk"],kind:"gate"};

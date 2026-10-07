@@ -67,11 +67,14 @@ internal static class CliTransport
                     "[错误] 无法确定 NexusPipeline 程序路径");
                 return null;
             }
-            Process.Start(new ProcessStartInfo(exePath)
+            var serviceStart = new ProcessStartInfo(exePath)
             {
                 UseShellExecute = false,
                 CreateNoWindow = true,
-            });
+            };
+            serviceStart.ArgumentList.Add("service");
+            serviceStart.ArgumentList.Add("--background");
+            Process.Start(serviceStart);
         }
         catch (Exception ex)
         {

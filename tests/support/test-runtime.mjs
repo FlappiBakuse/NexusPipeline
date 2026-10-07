@@ -128,7 +128,7 @@ function copySafe(source, target, root) {
 }
 
 function isRuntimeFile(name) {
-  return name === "nexus-pipeline.exe"
+  return name === "NexusPipeline.exe"
     || /\.(?:dll|deps\.json|runtimeconfig\.json)$/iu.test(name);
 }
 
@@ -137,18 +137,18 @@ function isRuntimeFile(name) {
  * 不复制 config/data/history/logs/.nxp、压缩包、校验文件或未知旁车文件。
  */
 export function copyReleaseArtifacts(releaseDir, runtimeDir, { pluginDirectories = [] } = {}) {
-  const sourceExe = path.join(releaseDir, "nexus-pipeline.exe");
+  const sourceExe = path.join(releaseDir, "NexusPipeline.exe");
   if (!fs.existsSync(sourceExe)) {
-    throw new Error(`${releaseDir}/nexus-pipeline.exe 不存在（runtime 缺构建产物）。`);
+    throw new Error(`${releaseDir}/NexusPipeline.exe 不存在（runtime 缺构建产物）。`);
   }
   fs.mkdirSync(runtimeDir, { recursive: true });
   for (const entry of fs.readdirSync(releaseDir, { withFileTypes: true })) {
     const source = path.join(releaseDir, entry.name);
-    if (entry.isDirectory() && entry.name === "wwwroot") {
-      copySafe(source, path.join(runtimeDir, "wwwroot"), releaseDir);
+    if (entry.isDirectory() && entry.name === "resources") {
+      copySafe(source, path.join(runtimeDir, "resources"), releaseDir);
       continue;
     }
-    if (entry.isFile() && isRuntimeFile(entry.name)) {
+    if (entry.isFile() && (isRuntimeFile(entry.name) || entry.name === "README.md")) {
       copySafe(source, path.join(runtimeDir, entry.name), releaseDir);
       continue;
     }

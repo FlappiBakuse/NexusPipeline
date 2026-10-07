@@ -30,6 +30,7 @@ internal sealed class HostLifecycleBridge
         => Require().TryAcquireUpdateMaintenanceLease();
 
     public bool TryRequestCompletionExit() => Require().TryRequestCompletionExit();
+    public bool TryRequestDirectExit() => Require().TryRequestDirectExit();
 
     public RestartRequestResult RequestRestart(string auditSource) => Require().RequestRestart(auditSource);
 

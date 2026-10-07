@@ -1,4 +1,6 @@
+import { shallowRef } from "vue";
 const STORAGE_KEY = "nexus-locale";
+import {desktopBridge} from './desktop';
 const DEFAULT_LOCALE = "zh-CN";
 const ENGLISH_LOCALE = "en-US";
 
@@ -20,8 +22,8 @@ let localeRegistry: LocaleRegistry = {
   names: { [DEFAULT_LOCALE]: DEFAULT_LOCALE, [ENGLISH_LOCALE]: ENGLISH_LOCALE },
 };
 let currentLocale = readStoredLocale() || detectLocale();
-let messages: LocaleMessages = Object.create(null);
-let defaultMessages: LocaleMessages = Object.create(null);
+const messages = shallowRef<LocaleMessages>(Object.create(null));
+const defaultMessages = shallowRef<LocaleMessages>(Object.create(null));
 let registryLoaded = false;
 const explicitTextValues = new WeakMap<Element, string>();
 const explicitAttributeValues = new WeakMap<Element, Record<string, string>>();
@@ -127,17 +129,23 @@ export async function loadLocale(value: unknown = currentLocale): Promise<boolea
     }
   };
   const loadedMessages = await loadResource(currentLocale);
-  if (loadedMessages) messages = loadedMessages;
+  if (loadedMessages) messages.value = loadedMessages;
   const loadedDefault = currentLocale === localeRegistry.default
     ? loadedMessages
     : await loadResource(localeRegistry.default);
   if (loadedDefault) {
-    defaultMessages = loadedDefault;
+    defaultMessages.value = loadedDefault;
   }
   const loaded = Boolean(loadedMessages);
   syncDocumentLocale();
   applyTranslations();
   return loaded;
+}
+
+const localeListeners = new Set<() => void>();
+export function onLocaleChanged(listener: () => void): () => void {
+  localeListeners.add(listener);
+  return () => { localeListeners.delete(listener); };
 }
 
 export async function setLocale(value: unknown): Promise<string> {
@@ -146,16 +154,18 @@ export async function setLocale(value: unknown): Promise<string> {
     localStorage.setItem(STORAGE_KEY, next);
   } catch {
   }
-  if (next !== currentLocale || !Object.keys(messages).length) await loadLocale(next);
+  if (next !== currentLocale || !Object.keys(messages.value).length) await loadLocale(next);
   else {
     syncDocumentLocale();
     applyTranslations();
   }
+  if(['zh-CN','en-US'].includes(currentLocale))void desktopBridge()?.setClientPreferences({locale:currentLocale as 'zh-CN'|'en-US'}).catch(()=>{});
+  for (const listener of localeListeners) listener();
   return currentLocale;
 }
 
 export function t(key: string, args: Record<string, unknown> = {}, fallback = ""): string {
-  let value: string | undefined = messages[key] ?? defaultMessages[key];
+  let value: string | undefined = messages.value[key] ?? defaultMessages.value[key];
   if (value === undefined || value === null) value = fallback || key;
   let result = String(value);
   for (const [name, replacement] of Object.entries(args || {})) {

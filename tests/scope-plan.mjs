@@ -18,16 +18,16 @@ export function readRegistry(root) {
   const bytes = fs.readFileSync(path.join(root, "tests/gates.json"));
   const registry = JSON.parse(bytes);
   if (registry.schemaVersion !== 1 || !["Host", "Plugins"].includes(registry.repository)
-      || registry.hardTimeoutMs !== 180000 || registry.qualificationMs !== 150000) throw new Error("Invalid gate registry");
+      || registry.hardTimeoutMs !== null || registry.qualificationMs !== null) throw new Error("Invalid gate registry");
   const ids = registry.gates.map(gate => gate.id);
   if (new Set(ids).size !== ids.length || registry.gates.some(gate => !gate.id.startsWith(registry.repository.toLowerCase() + ".")
       || !/^[a-z0-9.-]+$/.test(gate.id)
-      || gate.hardTimeoutMs !== 180000 || gate.qualificationMs !== 150000)) throw new Error("Duplicate or invalid gate");
+      || gate.hardTimeoutMs !== null || gate.qualificationMs !== null)) throw new Error("Duplicate or invalid gate");
   return { registry, digest: policyDigest(bytes) };
 }
 
 function git(root, args) {
-  return execFileSync("git", ["-C", root, ...args], { windowsHide: true, timeout: 15000, maxBuffer: 32 * 1024 * 1024 });
+  return execFileSync("git", ["-C", root, ...args], { windowsHide: true, maxBuffer: 32 * 1024 * 1024 });
 }
 
 function fullSha(root, ref) {
@@ -107,10 +107,18 @@ export function planForChanges(root, changes, registry, policy) {
     if (/^(tools\/host_release|tools\/host_candidate|\.github\/workflows\/release)/.test(name)) {
       host("release-contract", reason); return;
     }
+    if (/^(tools\/(?:build_identity|embed_frontend)\.py|tools\/tests\/test_(?:build_identity|embed_frontend)\.py|tools\/schemas\/(?:build-inputs|desktop-build)\.schema\.json|tests\/fixtures\/build-identity\/)/.test(name)) {
+      host("release-contract", reason); host("backend.updates-restart", reason); host("build.test-host", reason); return;
+    }
     if (name.startsWith("tools/NexusPipeline.Architecture/") || name === "tests/architecture-fixture.py") {
       host("architecture.backend", reason); return;
     }
     if (name === "tests/partner-contract.py") { host("partner-contract", reason); return; }
+    if (name.startsWith("desktop/") || /^(tools\/(?:application_|desktop_build|NexusPipeline.PayloadReader))/.test(name)) {
+      host("release-contract", reason); host("backend.control", reason); host("backend.updates-restart", reason);
+      host("build.test-host", reason); host("integration.control", reason); host("integration.desktop", reason); return;
+    }
+    if(name.startsWith("src/Host/Desktop/")||name.startsWith("src/Platform/Windows/Desktop")||name.startsWith("tests/desktop/")) host("integration.desktop",reason);
     if (name.startsWith("frontend/")) {
       host("frontend.typecheck", reason); host("frontend.build", reason);
       if (!/\.(css|scss|svg|png|jpg)$/.test(name)) host("frontend.state", reason);

@@ -41,12 +41,21 @@ internal static partial class CliCommandRouter
         {
             return CliExitCodes.For("invalid_arguments");
         }
-        JsonNode? body = args.Get("output") is string output && !string.IsNullOrWhiteSpace(output)
-            ? Object(("outputPath", output))
-            : null;
-        return ReturnApi(
-            client.Post("/api/diagnostics/export", body),
-            CliText.Get("success.diagnostics_exported", "诊断包已导出"));
+        string? destination = args.Get("output");
+        try
+        {
+            if (destination is not null) destination = CliArtifactOutput.ValidateDestination(destination);
+            CliApiResponse response = client.Post("/api/diagnostics/export");
+            if (response.Succeeded && destination is not null)
+                response = response with { Body = client.CopyDiagnosticArtifact(response.Body ?? throw new InvalidDataException("诊断包回执缺失"), destination) };
+            return ReturnApi(response, CliText.Get("success.diagnostics_exported", "诊断包已导出"));
+        }
+        catch (UnauthorizedAccessException)
+        { return CliOutput.WriteFailure("operation_forbidden", "无权写入诊断包输出目标"); }
+        catch (Exception exception) when (exception is IOException or ArgumentException or NotSupportedException)
+        { return CliOutput.WriteFailure("validation_error", exception.Message); }
+        catch (Exception exception) when (exception is HttpRequestException or OperationCanceledException)
+        { return CliOutput.WriteFailure("diagnostics_export_failed", "诊断包下载失败"); }
     }
 
 }

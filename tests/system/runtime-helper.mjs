@@ -38,10 +38,11 @@ export { executionMode };
 export const runId = process.env.NEXUS_TEST_RUN_ID?.trim()
   || `standalone-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 export const testHostDir = resolveTestHostDir(projectRoot);
-export const releaseDir = testHostDir;
+export const releaseDir = process.env.NEXUS_SYSTEM_RUNTIME_NAME === 'update-runtime' && process.env.NEXUS_SYSTEM_UPDATE_BASELINE_DIR
+  ? process.env.NEXUS_SYSTEM_UPDATE_BASELINE_DIR : testHostDir;
 export function updateReleaseDirectory() {
   const supplied = process.env.NEXUS_SYSTEM_UPDATE_RELEASE_DIR;
-  if (!supplied || !fs.existsSync(path.join(supplied, "nexus-pipeline.exe")) || !fs.existsSync(path.join(supplied, ".complete.json")))
+  if (!supplied || !fs.existsSync(path.join(supplied, "NexusPipeline.exe")) || !fs.existsSync(supplied + ".complete.json"))
     throw new Error("Update tests require the runner's actual versioned candidate Test Host build.");
   return supplied;
 }
@@ -55,7 +56,7 @@ if (!/^[A-Za-z0-9_-]+$/.test(runtimeName)) {
   throw new Error(`非法 NEXUS_SYSTEM_RUNTIME_NAME：${runtimeName}`);
 }
 export const runtimeDir = path.join(resolveTestRunRoot(projectRoot, runId), runtimeName);
-export const runtimeExe = path.join(runtimeDir, "nexus-pipeline.exe");
+export const runtimeExe = path.join(runtimeDir, "NexusPipeline.exe");
 export const servicePidPath = path.join(runtimeDir, ".nxp", "runtime", "service.pid");
 export const runMarkerPath = path.join(runtimeDir, ".nxp", "test-run-marker.json");
 export const testHostExitFile = resolveTestHostExitFile(
@@ -88,15 +89,15 @@ export function serviceUrl() {
 
 export async function prepareRuntime() {
   await ensureOwnedRuntimeDirectory(runtimeDir, runMarkerPath, servicePidPath);
-  const sourceExe = path.join(releaseDir, "nexus-pipeline.exe");
+  const sourceExe = path.join(releaseDir, "NexusPipeline.exe");
   if (!fs.existsSync(sourceExe)) {
-    throw new Error(`${releaseDir}/nexus-pipeline.exe 不存在，请先运行 node tests/run.mjs ${executionMode} system`);
+    throw new Error(`${releaseDir}/NexusPipeline.exe 不存在，请先运行 node tests/run.mjs ${executionMode} system`);
   }
   copyReleaseArtifacts(releaseDir, runtimeDir);
   fs.mkdirSync(path.join(runtimeDir, "config"), { recursive: true });
   fs.writeFileSync(
     path.join(runtimeDir, "config", "settings.json"),
-    JSON.stringify({ WebPort: systemWebPort, HostLocale: "zh-CN", AutoOpenBrowser: false }),
+    JSON.stringify({ WebPort: systemWebPort, HostLocale: "zh-CN", LightweightMode: true, OpenDesktopOnStartup: false }),
     "utf8",
   );
 

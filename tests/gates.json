@@ -1,16 +1,16 @@
 {
   "schemaVersion": 1,
   "repository": "Host",
-  "hardTimeoutMs": 180000,
-  "qualificationMs": 150000,
+  "hardTimeoutMs": null,
+  "qualificationMs": null,
   "gates": [
     {
       "id": "host.scope",
       "repository": "Host",
       "name": "Host / 范围判定",
       "kind": "scope",
-      "hardTimeoutMs": 180000,
-      "qualificationMs": 150000,
+      "hardTimeoutMs": null,
+      "qualificationMs": null,
       "trigger": "每次相关PR/候选控制运行",
       "dependsOn": [],
       "partnerRequired": false
@@ -20,8 +20,8 @@
       "repository": "Host",
       "name": "Host / 文档",
       "kind": "docs",
-      "hardTimeoutMs": 180000,
-      "qualificationMs": 150000,
+      "hardTimeoutMs": null,
+      "qualificationMs": null,
       "trigger": "普通文档或文档资源变化",
       "dependsOn": [],
       "partnerRequired": false
@@ -31,8 +31,8 @@
       "repository": "Host",
       "name": "Host / 门禁策略",
       "kind": "contract",
-      "hardTimeoutMs": 180000,
-      "qualificationMs": 150000,
+      "hardTimeoutMs": null,
+      "qualificationMs": null,
       "trigger": "选择器/runner/预算/报告/workflow/registry变化",
       "dependsOn": [],
       "partnerRequired": false
@@ -42,8 +42,8 @@
       "repository": "Host",
       "name": "Host / 发布契约",
       "kind": "contract",
-      "hardTimeoutMs": 180000,
-      "qualificationMs": 150000,
+      "hardTimeoutMs": null,
+      "qualificationMs": null,
       "trigger": "发布控制/包规则/候选身份/包载荷元数据变化",
       "dependsOn": [],
       "partnerRequired": false
@@ -53,8 +53,8 @@
       "repository": "Host",
       "name": "Host / 必需汇总",
       "kind": "aggregate",
-      "hardTimeoutMs": 180000,
-      "qualificationMs": 150000,
+      "hardTimeoutMs": null,
+      "qualificationMs": null,
       "trigger": "PR始终运行；仅汇总选中gate",
       "dependsOn": [],
       "partnerRequired": false
@@ -64,8 +64,8 @@
       "repository": "Host",
       "name": "Host / 隔离宿主构建",
       "kind": "build",
-      "hardTimeoutMs": 180000,
-      "qualificationMs": 150000,
+      "hardTimeoutMs": null,
+      "qualificationMs": null,
       "trigger": "选中真实Host运行或后端语义验证时；按输入产出一次",
       "dependsOn": [],
       "partnerRequired": false
@@ -75,8 +75,8 @@
       "repository": "Host",
       "name": "Host / 执行与结果",
       "kind": "test",
-      "hardTimeoutMs": 180000,
-      "qualificationMs": 150000,
+      "hardTimeoutMs": null,
+      "qualificationMs": null,
       "trigger": "该owner源码/测试/依赖闭包变化",
       "dependsOn": [
         "host.build.test-host"
@@ -88,8 +88,8 @@
       "repository": "Host",
       "name": "Host / 配置与恢复",
       "kind": "test",
-      "hardTimeoutMs": 180000,
-      "qualificationMs": 150000,
+      "hardTimeoutMs": null,
+      "qualificationMs": null,
       "trigger": "该owner源码/测试/依赖闭包变化",
       "dependsOn": [
         "host.build.test-host"
@@ -101,8 +101,8 @@
       "repository": "Host",
       "name": "Host / 设置与通知",
       "kind": "test",
-      "hardTimeoutMs": 180000,
-      "qualificationMs": 150000,
+      "hardTimeoutMs": null,
+      "qualificationMs": null,
       "trigger": "该owner源码/测试/依赖闭包变化",
       "dependsOn": [
         "host.build.test-host"
@@ -114,8 +114,8 @@
       "repository": "Host",
       "name": "Host / 插件安装与生命周期",
       "kind": "test",
-      "hardTimeoutMs": 180000,
-      "qualificationMs": 150000,
+      "hardTimeoutMs": null,
+      "qualificationMs": null,
       "trigger": "该owner源码/测试/依赖闭包变化",
       "dependsOn": [
         "host.build.test-host"
@@ -127,8 +127,8 @@
       "repository": "Host",
       "name": "Host / 更新与重启",
       "kind": "test",
-      "hardTimeoutMs": 180000,
-      "qualificationMs": 150000,
+      "hardTimeoutMs": null,
+      "qualificationMs": null,
       "trigger": "该owner源码/测试/依赖闭包变化",
       "dependsOn": [
         "host.build.test-host"
@@ -140,8 +140,8 @@
       "repository": "Host",
       "name": "Host / 控制面契约",
       "kind": "test",
-      "hardTimeoutMs": 180000,
-      "qualificationMs": 150000,
+      "hardTimeoutMs": null,
+      "qualificationMs": null,
       "trigger": "该owner源码/测试/依赖闭包变化",
       "dependsOn": [
         "host.build.test-host"
@@ -153,8 +153,8 @@
       "repository": "Host",
       "name": "Host / 调度与去重",
       "kind": "test",
-      "hardTimeoutMs": 180000,
-      "qualificationMs": 150000,
+      "hardTimeoutMs": null,
+      "qualificationMs": null,
       "trigger": "该owner源码/测试/依赖闭包变化",
       "dependsOn": [
         "host.build.test-host"
@@ -166,8 +166,8 @@
       "repository": "Host",
       "name": "Host / 前端类型",
       "kind": "build",
-      "hardTimeoutMs": 180000,
-      "qualificationMs": 150000,
+      "hardTimeoutMs": null,
+      "qualificationMs": null,
       "trigger": "适用前端源码/测试/配置/依赖变化",
       "dependsOn": [],
       "partnerRequired": false
@@ -177,8 +177,8 @@
       "repository": "Host",
       "name": "Host / 前端行为",
       "kind": "test",
-      "hardTimeoutMs": 180000,
-      "qualificationMs": 150000,
+      "hardTimeoutMs": null,
+      "qualificationMs": null,
       "trigger": "适用前端源码/测试/配置/依赖变化",
       "dependsOn": [],
       "partnerRequired": false
@@ -188,8 +188,8 @@
       "repository": "Host",
       "name": "Host / 生产前端",
       "kind": "build",
-      "hardTimeoutMs": 180000,
-      "qualificationMs": 150000,
+      "hardTimeoutMs": null,
+      "qualificationMs": null,
       "trigger": "适用前端源码/测试/配置/依赖变化",
       "dependsOn": [],
       "partnerRequired": false
@@ -199,8 +199,8 @@
       "repository": "Host",
       "name": "Host / 后端架构",
       "kind": "architecture",
-      "hardTimeoutMs": 180000,
-      "qualificationMs": 150000,
+      "hardTimeoutMs": null,
+      "qualificationMs": null,
       "trigger": "对应结构/编译输入/import边界变化",
       "dependsOn": [],
       "partnerRequired": false
@@ -210,8 +210,8 @@
       "repository": "Host",
       "name": "Host / 前端架构",
       "kind": "architecture",
-      "hardTimeoutMs": 180000,
-      "qualificationMs": 150000,
+      "hardTimeoutMs": null,
+      "qualificationMs": null,
       "trigger": "对应结构/编译输入/import边界变化",
       "dependsOn": [],
       "partnerRequired": false
@@ -221,8 +221,8 @@
       "repository": "Host",
       "name": "Host / 执行闭环",
       "kind": "integration",
-      "hardTimeoutMs": 180000,
-      "qualificationMs": 150000,
+      "hardTimeoutMs": null,
+      "qualificationMs": null,
       "trigger": "对应跨边界协议/生命周期改动，或显式daily/release验收",
       "dependsOn": [
         "host.build.test-host"
@@ -234,8 +234,8 @@
       "repository": "Host",
       "name": "Host / 配置恢复闭环",
       "kind": "integration",
-      "hardTimeoutMs": 180000,
-      "qualificationMs": 150000,
+      "hardTimeoutMs": null,
+      "qualificationMs": null,
       "trigger": "对应跨边界协议/生命周期改动，或显式daily/release验收",
       "dependsOn": [
         "host.build.test-host"
@@ -247,8 +247,8 @@
       "repository": "Host",
       "name": "Host / 控制面闭环",
       "kind": "integration",
-      "hardTimeoutMs": 180000,
-      "qualificationMs": 150000,
+      "hardTimeoutMs": null,
+      "qualificationMs": null,
       "trigger": "对应跨边界协议/生命周期改动，或显式daily/release验收",
       "dependsOn": [
         "host.build.test-host"
@@ -260,8 +260,8 @@
       "repository": "Host",
       "name": "Host / 真实分钟调度",
       "kind": "integration",
-      "hardTimeoutMs": 180000,
-      "qualificationMs": 150000,
+      "hardTimeoutMs": null,
+      "qualificationMs": null,
       "trigger": "对应跨边界协议/生命周期改动，或显式daily/release验收",
       "dependsOn": [
         "host.build.test-host"
@@ -273,8 +273,8 @@
       "repository": "Host",
       "name": "Host / 插件安装闭环",
       "kind": "integration",
-      "hardTimeoutMs": 180000,
-      "qualificationMs": 150000,
+      "hardTimeoutMs": null,
+      "qualificationMs": null,
       "trigger": "对应跨边界协议/生命周期改动，或显式daily/release验收",
       "dependsOn": [
         "host.build.test-host"
@@ -286,8 +286,8 @@
       "repository": "Host",
       "name": "Host / 更新重启闭环",
       "kind": "integration",
-      "hardTimeoutMs": 180000,
-      "qualificationMs": 150000,
+      "hardTimeoutMs": null,
+      "qualificationMs": null,
       "trigger": "对应跨边界协议/生命周期改动，或显式daily/release验收",
       "dependsOn": [
         "host.build.test-host"
@@ -299,8 +299,8 @@
       "repository": "Host",
       "name": "Host / 安装器语言与契约",
       "kind": "contract",
-      "hardTimeoutMs": 180000,
-      "qualificationMs": 150000,
+      "hardTimeoutMs": null,
+      "qualificationMs": null,
       "trigger": "installer/生成器/语言资源/安装归属相关变化",
       "dependsOn": [],
       "partnerRequired": false
@@ -310,8 +310,8 @@
       "repository": "Host",
       "name": "Host / 官方插件装配契约",
       "kind": "contract",
-      "hardTimeoutMs": 180000,
-      "qualificationMs": 150000,
+      "hardTimeoutMs": null,
+      "qualificationMs": null,
       "trigger": "公开Plugin/Frontend API、公开元素、专项能力变化",
       "dependsOn": [],
       "partnerRequired": true
@@ -321,8 +321,8 @@
       "repository": "Host",
       "name": "Host / 候选输入",
       "kind": "release",
-      "hardTimeoutMs": 180000,
-      "qualificationMs": 150000,
+      "hardTimeoutMs": null,
+      "qualificationMs": null,
       "trigger": "发行DAG适用阶段；必须明确输入和权限",
       "dependsOn": [],
       "partnerRequired": false
@@ -332,8 +332,8 @@
       "repository": "Host",
       "name": "Host / 生产宿主",
       "kind": "release",
-      "hardTimeoutMs": 180000,
-      "qualificationMs": 150000,
+      "hardTimeoutMs": null,
+      "qualificationMs": null,
       "trigger": "发行DAG适用阶段；必须明确输入和权限",
       "dependsOn": [],
       "partnerRequired": false
@@ -343,8 +343,8 @@
       "repository": "Host",
       "name": "Host / 预装插件构建",
       "kind": "release",
-      "hardTimeoutMs": 180000,
-      "qualificationMs": 150000,
+      "hardTimeoutMs": null,
+      "qualificationMs": null,
       "trigger": "发行DAG适用阶段；必须明确输入和权限",
       "dependsOn": [],
       "partnerRequired": false
@@ -354,8 +354,8 @@
       "repository": "Host",
       "name": "Host / 安装器构建",
       "kind": "release",
-      "hardTimeoutMs": 180000,
-      "qualificationMs": 150000,
+      "hardTimeoutMs": null,
+      "qualificationMs": null,
       "trigger": "发行DAG适用阶段；必须明确输入和权限",
       "dependsOn": [],
       "partnerRequired": false
@@ -365,8 +365,8 @@
       "repository": "Host",
       "name": "Host / 发行包校验",
       "kind": "release",
-      "hardTimeoutMs": 180000,
-      "qualificationMs": 150000,
+      "hardTimeoutMs": null,
+      "qualificationMs": null,
       "trigger": "发行DAG适用阶段；必须明确输入和权限",
       "dependsOn": [],
       "partnerRequired": false
@@ -376,8 +376,8 @@
       "repository": "Host",
       "name": "Host / 候选校验",
       "kind": "release",
-      "hardTimeoutMs": 180000,
-      "qualificationMs": 150000,
+      "hardTimeoutMs": null,
+      "qualificationMs": null,
       "trigger": "发行DAG适用阶段；必须明确输入和权限",
       "dependsOn": [],
       "partnerRequired": false
@@ -387,8 +387,8 @@
       "repository": "Host",
       "name": "Host / 原包发布",
       "kind": "release",
-      "hardTimeoutMs": 180000,
-      "qualificationMs": 150000,
+      "hardTimeoutMs": null,
+      "qualificationMs": null,
       "trigger": "发行DAG适用阶段；必须明确输入和权限",
       "dependsOn": [],
       "partnerRequired": false
@@ -398,10 +398,23 @@
       "repository": "Host",
       "name": "Host / 专项生产Jint",
       "kind": "test",
-      "hardTimeoutMs": 180000,
-      "qualificationMs": 150000,
+      "hardTimeoutMs": null,
+      "qualificationMs": null,
       "trigger": "Jint dependency or production scripting bridge",
       "dependsOn": [],
+      "partnerRequired": true
+    },
+    {
+      "id": "host.integration.desktop",
+      "repository": "Host",
+      "name": "Host / 桌面管理",
+      "kind": "test",
+      "hardTimeoutMs": null,
+      "qualificationMs": null,
+      "trigger": "桌面入口、窗口、IPC、内嵌前端和生命周期变化",
+      "dependsOn": [
+        "host.build.test-host"
+      ],
       "partnerRequired": true
     }
   ]

@@ -31,6 +31,7 @@ namespace NexusPipeline.ControlPlane.Http.Services;
 /// </summary>
 internal interface IHttpRouteBindings
 {
+    NexusPipeline.ControlPlane.Http.Static.IFrontendAssetProvider FrontendAssets { get; }
     IReadOnlyDictionary<string, ApiRouteCatalog.BoundRoute> Routes { get; }
 
     SettingsCommands SettingsCommands { get; }
@@ -88,6 +89,8 @@ internal interface IHttpRouteBindings
     OutboundHttpClientProvider OutboundHttp { get; }
 
     ScriptIconService ScriptIcons { get; }
+
+    ScriptTypeIconService ScriptTypeIcons { get; }
 
     ScriptFileBrowser ScriptFileBrowser { get; }
     NexusPipeline.Modules.Users.Contracts.ITaskQueryProjection TaskQueries { get; }

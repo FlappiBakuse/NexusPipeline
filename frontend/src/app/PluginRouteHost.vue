@@ -1,5 +1,5 @@
 <script lang="ts">
-import { computed, defineComponent, h, onBeforeUnmount, onMounted, watch } from "vue";
+import { computed, defineComponent, h, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import { disposePage, enterPage, state } from "../platform/page-state";
 import {
@@ -30,9 +30,19 @@ export default defineComponent({
 
     let previousHash = "";
     let mounted = false;
+    const container = ref<HTMLElement | null>(null);
+    let surfaceController: AbortController | null = null;
+    let routeGeneration = 0;
+
+    function releaseSurface() {
+      surfaceController?.abort(); surfaceController = null;
+      container.value?.replaceChildren();
+    }
 
     const renderRoute = async () => {
       if (!mounted) return;
+      const generation = ++routeGeneration;
+      releaseSurface();
       const current = segments.value.map(String);
       const hash = current.join("/");
       if (previousHash && previousHash !== hash) {
@@ -43,14 +53,20 @@ export default defineComponent({
       previousHash = hash;
       const token = enterPage(current[0] || "plugin");
       await initPluginRuntime();
+      if (!mounted || generation !== routeGeneration || !container.value) return;
       const handler = resolvePluginRoute(current);
       if (!handler) {
         location.hash = "#/dashboard";
         return;
       }
-      await handler(token, current);
-      await notifyPluginPageEnter({ hash, page: current[0] || "plugin", segments: current, token, container: document.querySelector("#view") });
-      await notifyPluginPageUpdated({ hash, page: current[0] || "plugin", segments: current, token, container: document.querySelector("#view") });
+      const element = document.createElement("div");
+      container.value.append(element);
+      const controller = new AbortController(); surfaceController = controller;
+      try { await handler({ element, token, segments: current, signal: controller.signal }); }
+      catch { if (controller.signal.aborted) return; releaseSurface(); location.hash = "#/dashboard"; return; }
+      if (controller.signal.aborted || generation !== routeGeneration) return;
+      await notifyPluginPageEnter({ hash, page: current[0] || "plugin", segments: current, token, container: element });
+      await notifyPluginPageUpdated({ hash, page: current[0] || "plugin", segments: current, token, container: element });
     };
 
     onMounted(() => {
@@ -59,6 +75,7 @@ export default defineComponent({
     });
     onBeforeUnmount(async () => {
       mounted = false;
+      routeGeneration++; releaseSurface();
       const previous = previousHash;
       previousHash = "";
       disposePage();
@@ -72,7 +89,7 @@ export default defineComponent({
     });
     watch(segments, () => void renderRoute());
 
-    return () => h("main", { id: "view", class: "view-root", tabindex: "-1", "data-testid": "main-view" });
+    return () => h("main", { ref: container, id: "view", class: "view-root", tabindex: "-1", "data-testid": "main-view" });
   },
 });
 </script>

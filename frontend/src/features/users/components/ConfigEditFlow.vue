@@ -6,6 +6,9 @@ import NxpButton from "../../../ui/primitives/NxpButton.vue";
 import NxpModal from "../../../ui/primitives/NxpModal.vue";
 import { editConfig, getEditConfigStatus, listEditSessions, listUsers, listScripts } from "../services/usersApi";
 import { useConfigEditFlow } from "../composables/useConfigEditFlow";
+import { getCapabilities } from "../../../platform/client-capabilities";
+import { useOperationAccess, accessReason } from "../../../platform/operation-access";
+const { allowed: nativeEditAllowed, reason: nativeEditReason } = useOperationAccess("nativeConfigEditor");
 
 /** 配置编辑事务的唯一 owner：首次编辑入口（choose/candidate）、锁定编辑弹窗、
  *  done/cancel 与刷新后会话恢复都在此收敛；事务状态机在 useConfigEditFlow 中实现。 */
@@ -13,10 +16,14 @@ import { useConfigEditFlow } from "../composables/useConfigEditFlow";
 const emit = defineEmits<{ changed: [userId: string] }>();
 const controller = new AbortController();
 let disposed = false;
+async function requireNative() {
+  const decision = (await getCapabilities(controller.signal)).operations.nativeConfigEditor;
+  if (!decision.allowed) throw new Error(accessReason(decision.denyReason!));
+}
 
 const flow = useConfigEditFlow({
   getStatus: (userId, scriptId) => getEditConfigStatus(userId, scriptId) as Promise<{ hasSnapshot?: boolean } | null>,
-  start: (userId, scriptId, request) => editConfig(userId, scriptId, request, controller.signal),
+  start: async (userId, scriptId, request) => { await requireNative(); return editConfig(userId, scriptId, request, controller.signal); },
   finish: (userId, scriptId, action) => editConfig(userId, scriptId, { action }, controller.signal) as Promise<{ validation?: { toasts?: Array<{ message?: string; kind?: string }> } } | null>,
   listSessions: () => listEditSessions(controller.signal),
   notify: (message, kind) => {
@@ -32,7 +39,7 @@ const { configEdit, configChooser, configCandidates, finishingAction, isOpen } =
 async function restoreActiveSession() {
   try {
     const [users, scripts] = await Promise.all([listUsers(controller.signal), listScripts(controller.signal)]);
-    await flow.restoreExisting(users, scripts, () => !disposed && !isOpen.value);
+    await flow.restoreExisting(users, scripts, () => !disposed && !isOpen.value && nativeEditAllowed.value);
   } catch {
     // Host 会话仍持有事务；读取失败不发起第二次编辑或自动取消。
   }
@@ -41,7 +48,7 @@ onMounted(() => { void restoreActiveSession(); });
 onBeforeUnmount(() => { disposed = true; controller.abort(); });
 
 defineExpose({
-  open: flow.open,
+  open: async (...args: Parameters<typeof flow.open>) => { try { await requireNative(); await flow.open(...args); } catch (error) { toast(String((error as Error).message), "error"); } },
   restore: flow.restore,
   restoreExisting: flow.restoreExisting,
   finish: flow.finish,
@@ -102,7 +109,7 @@ defineExpose({
     :aria-label="t('users.config.edit_progress')"
     panel-class="secondary-surface"
     :close-label="t('common.close')"
-    @close="flow.finish('cancel')"
+    @close="nativeEditAllowed && flow.finish('cancel')"
   >
     <template v-if="configEdit">
       <p class="modal-copy">{{ configEdit.mode === "fresh" ? t("users.config.edit_new_help") : configEdit.mode === "reuse" ? t("users.config.edit_existing_help") : t("users.config.edit_manual_help", { user: configEdit.userName, script: configEdit.scriptName }) }}</p>

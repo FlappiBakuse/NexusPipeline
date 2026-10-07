@@ -175,6 +175,7 @@ internal sealed class WebServer : IDisposable
                 var type when type == typeof(UserAssetService) => routeBindings.UserAssets,
                 var type when type == typeof(OutboundHttpClientProvider) => routeBindings.OutboundHttp,
                 var type when type == typeof(ScriptIconService) => routeBindings.ScriptIcons,
+                var type when type == typeof(ScriptTypeIconService) => routeBindings.ScriptTypeIcons,
                 var type when type == typeof(ScriptFileBrowser) => routeBindings.ScriptFileBrowser,
                 var type when type == typeof(NexusPipeline.Modules.Users.Contracts.ITaskQueryProjection) => routeBindings.TaskQueries,
                 _ => body,
@@ -221,7 +222,6 @@ internal sealed class WebServer : IDisposable
         _port = port;
         Current = this;
         _options = options ?? WebServerOptions.FromSettings(
-            _settings.Current.LightweightMode,
             _settings.Current.AllowRemoteAccess);
         bool remote = _options.AllowRemoteAccess;
         RemoteAccessBound = remote;
@@ -438,7 +438,7 @@ internal sealed class WebServer : IDisposable
             {
                 if (_options.ServeWebUi)
                 {
-                    HttpHelper.ServeFile(context, Path.Combine(AppPaths.WwwRootDir, "index.html"));
+                    await HttpHelper.ServeFrontendAsync(context, _routeBindings.FrontendAssets, path).ConfigureAwait(false);
                 }
                 else
                 {
@@ -482,20 +482,12 @@ internal sealed class WebServer : IDisposable
             }
             if (path.StartsWith("/api/", StringComparison.OrdinalIgnoreCase))
             {
-                if (!IsAllowedOrigin(context, method, path, out string? originDetail, out string? allowedOrigin))
+                OriginDecision preflight = RequestOriginPolicy.Decide(context.Request, method, path, RemoteAccessBound, false);
+                if (method == "OPTIONS" && preflight.Allowed && preflight.CorsOrigin is { } preflightOrigin)
                 {
-                    Logger.Debug($"[安全] 拒绝跨源请求：{originDetail}");
-                    await HttpHelper.ErrorAsync(context, "origin_forbidden", 403).ConfigureAwait(false);
+                    ApplyCorsHeaders(context, preflightOrigin);
+                    await HttpHelper.NoContentAsync(context, CorsPreflightHeaders()).ConfigureAwait(false);
                     return;
-                }
-                if (allowedOrigin is not null)
-                {
-                    ApplyCorsHeaders(context, allowedOrigin);
-                    if (method.Equals("OPTIONS", StringComparison.OrdinalIgnoreCase))
-                    {
-                        await HttpHelper.NoContentAsync(context, CorsPreflightHeaders()).ConfigureAwait(false);
-                        return;
-                    }
                 }
                 if (!AuthorizeRequest(context, out string? authDetail))
                 {
@@ -503,6 +495,22 @@ internal sealed class WebServer : IDisposable
                     context.Response.Headers["X-Nexus-Auth"] = "required";
                     await HttpHelper.ErrorAsync(context, "auth_required", 401).ConfigureAwait(false);
                     return;
+                }
+                OriginDecision origin = RequestOriginPolicy.Decide(context.Request, method, path, RemoteAccessBound, true);
+                if (!origin.Allowed)
+                {
+                    Logger.Debug("[安全] 拒绝跨源请求。");
+                    await HttpHelper.ErrorAsync(context, "origin_forbidden", 403).ConfigureAwait(false);
+                    return;
+                }
+                if (origin.CorsOrigin is { } allowedOrigin)
+                {
+                    ApplyCorsHeaders(context, allowedOrigin);
+                    if (method.Equals("OPTIONS", StringComparison.OrdinalIgnoreCase))
+                    {
+                        await HttpHelper.NoContentAsync(context, CorsPreflightHeaders()).ConfigureAwait(false);
+                        return;
+                    }
                 }
                 await HandleApiAsync(context, method, path, token).ConfigureAwait(false);
                 return;
@@ -512,16 +520,7 @@ internal sealed class WebServer : IDisposable
                 await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);
                 return;
             }
-            string filePath = Path.Combine(AppPaths.WwwRootDir, path.TrimStart('/').Replace('/', Path.DirectorySeparatorChar));
-            // 静态文件路径包含校验（，纵深防御）：HttpListener 已规范化拒绝 .. 段，此处兜底防止路径逃逸出 wwwroot。
-            string fullPath = Path.GetFullPath(filePath);
-            string rootFull = Path.GetFullPath(AppPaths.WwwRootDir).TrimEnd('\\', '/') + Path.DirectorySeparatorChar;
-            if (!fullPath.StartsWith(rootFull, StringComparison.OrdinalIgnoreCase))
-            {
-                await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);
-                return;
-            }
-            HttpHelper.ServeFile(context, fullPath);
+            await HttpHelper.ServeFrontendAsync(context, _routeBindings.FrontendAssets, path).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -535,82 +534,6 @@ internal sealed class WebServer : IDisposable
             {
             }
         }
-    }
-
-    /// <summary>跨站请求防护：带 Origin 头的浏览器请求必须来自合法源（回环或本机局域网地址、且与请求 Host 端口一致），
-    /// 阻止任意网页触发的 CSRF 简单请求与 DNS rebinding；无 Origin 的非浏览器请求（CLI/curl）不受限——它们无法自动携带认证凭证。
-    /// 服务重启恢复需要旧页面读取新实例状态：只读的 `/api/status` 额外放行同一主机的其他端口，并返回可读的 CORS 应答；
-    /// 其余接口保持同源要求，避免任一本地端口上的页面触发有副作用的请求。</summary>
-    private static bool IsAllowedOrigin(
-        HttpListenerContext context,
-        string method,
-        string path,
-        out string? detail,
-        out string? allowedOrigin)
-    {
-        allowedOrigin = null;
-        string? origin = context.Request.Headers["Origin"];
-        if (string.IsNullOrEmpty(origin))
-        {
-            detail = null;
-            return true;
-        }
-        string? host = context.Request.Headers["Host"];
-        if (string.IsNullOrEmpty(host))
-        {
-            detail = "缺少 Host 头";
-            return false;
-        }
-        if (!Uri.TryCreate(origin, UriKind.Absolute, out Uri? uri))
-        {
-            detail = $"Origin 非法（{origin}）";
-            return false;
-        }
-        if (uri.Scheme != Uri.UriSchemeHttp)
-        {
-            detail = $"Origin 协议非法（{uri.Scheme}）";
-            return false;
-        }
-        bool hostIsLoopback = uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
-            || IPAddress.TryParse(uri.Host, out IPAddress? ip) && IPAddress.IsLoopback(ip);
-        bool hostIsLan = !hostIsLoopback && NetInfo.ListLanAddresses().Any(address => string.Equals(address, uri.Host, StringComparison.OrdinalIgnoreCase));
-        if (!hostIsLoopback && !hostIsLan)
-        {
-            detail = $"Origin 主机非法（{uri.Host}）";
-            return false;
-        }
-        if (string.Equals(uri.Authority, host, StringComparison.OrdinalIgnoreCase))
-        {
-            detail = null;
-            return true;
-        }
-        if (IsStatusProbe(method, path)
-            && string.Equals(uri.Host, HostNameOf(host), StringComparison.OrdinalIgnoreCase))
-        {
-            allowedOrigin = origin;
-            detail = null;
-            return true;
-        }
-        detail = $"Origin 与 Host 不一致（{origin} vs {host}）";
-        return false;
-    }
-
-    /// <summary>只读状态查询：服务重启恢复用它确认新实例已经接管，请求本身不改变宿主状态。</summary>
-    private static bool IsStatusProbe(string method, string path) =>
-        (method.Equals("GET", StringComparison.OrdinalIgnoreCase) || method.Equals("OPTIONS", StringComparison.OrdinalIgnoreCase))
-        && path.Equals("/api/status", StringComparison.OrdinalIgnoreCase);
-
-    /// <summary>取出 Host 头中的主机名部分（去掉端口，兼容 IPv6 方括号写法）。</summary>
-    private static string HostNameOf(string authority)
-    {
-        string value = authority.Trim();
-        if (value.StartsWith("[", StringComparison.Ordinal))
-        {
-            int end = value.IndexOf(']');
-            return end > 0 ? value[..(end + 1)] : value;
-        }
-        int separator = value.LastIndexOf(':');
-        return separator > 0 ? value[..separator] : value;
     }
 
     private static void ApplyCorsHeaders(HttpListenerContext context, string allowedOrigin)
@@ -634,17 +557,15 @@ internal sealed class WebServer : IDisposable
     {
         AppSettings settings = _settings.Current;
         // 监听器是否绑定通配符是启动时决定的；即使运行中关闭设置但未重启，也必须继续保护远程请求。
-        if (!RemoteAccessBound)
-        {
-            detail = "未开启远程访问";
-            return true;
-        }
         var remote = context.Request.RemoteEndPoint?.Address;
-        if (remote is null || IPAddress.IsLoopback(remote))
+        if (remote is null) { detail = "连接来源不明"; return false; }
+        if (remote.IsIPv4MappedToIPv6) remote = remote.MapToIPv4();
+        if (IPAddress.IsLoopback(remote))
         {
             detail = $"本地请求豁免（{remote}）";
             return true;
         }
+        if (!RemoteAccessBound) { detail = "未开启远程访问"; return false; }
         string ip = remote.ToString();
         long now = DateTime.UtcNow.Ticks;
         PruneAuthFails(now);

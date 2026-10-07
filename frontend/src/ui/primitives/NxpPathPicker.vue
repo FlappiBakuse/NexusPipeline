@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import NxpIcon from "./NxpIcon.vue";
+import { useId } from "vue";
+const reasonId = useId();
 
 const props = withDefaults(
   defineProps<{
@@ -7,6 +9,8 @@ const props = withDefaults(
     modelValue?: string;
     placeholder?: string;
     disabled?: boolean;
+    browseDisabled?: boolean;
+    browseDisabledReason?: string;
     ariaLabel?: string;
     help?: string;
     kind?: "file" | "folder" | "file-or-folder";
@@ -17,6 +21,8 @@ const props = withDefaults(
     modelValue: "",
     placeholder: "",
     disabled: false,
+    browseDisabled: false,
+    browseDisabledReason: "",
     ariaLabel: "路径",
     help: "",
     kind: "file",
@@ -38,6 +44,7 @@ function update(event: Event) {
 function browse(
   kind: "file" | "folder" = props.kind === "folder" ? "folder" : "file",
 ) {
+  if (props.disabled || props.browseDisabled) return;
   emit("browse", kind);
 }
 </script>
@@ -66,7 +73,9 @@ function browse(
         type="button"
         data-path-trigger
         data-testid="path-picker-file"
-        :disabled="props.disabled"
+        :disabled="props.disabled || props.browseDisabled"
+        :aria-describedby="props.browseDisabledReason ? reasonId : undefined"
+        :title="props.browseDisabledReason || undefined"
         :aria-label="`${props.ariaLabel}选择文件`"
         @click="browse('file')"
       >
@@ -77,7 +86,9 @@ function browse(
         type="button"
         data-path-trigger
         data-testid="path-picker-folder"
-        :disabled="props.disabled"
+        :disabled="props.disabled || props.browseDisabled"
+        :aria-describedby="props.browseDisabledReason ? reasonId : undefined"
+        :title="props.browseDisabledReason || undefined"
         :aria-label="`${props.ariaLabel}选择文件夹`"
         @click="browse('folder')"
       >
@@ -90,20 +101,32 @@ function browse(
       type="button"
       data-path-trigger
       data-testid="path-picker"
-      :disabled="props.disabled"
+      :disabled="props.disabled || props.browseDisabled"
+      :aria-describedby="props.browseDisabledReason ? reasonId : undefined"
+      :title="props.browseDisabledReason || undefined"
       :aria-label="`${props.ariaLabel}浏览`"
       @click="browse()"
     >
       <NxpIcon :name="props.kind === 'folder' ? 'folder' : 'file'" class-name="nxp-path-trigger-icon" />
     </button>
+    <span v-if="props.browseDisabledReason" :id="reasonId" class="nxp-path-browse-reason">{{ props.browseDisabledReason }}</span>
   </div>
 </template>
 
 <style>
 .nxp-path {
+  position: relative;
   display: flex;
   min-width: 0;
   align-items: stretch;
+}
+.nxp-path-browse-reason {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 .nxp-path-input {
   min-width: 0;

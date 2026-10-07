@@ -84,6 +84,15 @@ internal static class InstallationOwnership
         using var oldUninstall = Registry.CurrentUser.OpenSubKey(uninstallKey, false);
         if (oldUninstall?.GetValue("InstallLocation") is string location && !string.IsNullOrWhiteSpace(location))
             protectedRoots.Add(location);
+        if (scope is null)
+        {
+            protectedRoots.Add(Path.Combine(local, "NexusPipeline.Generations", "g01615"));
+            using var oldGeneration = Registry.CurrentUser.OpenSubKey(@"Software\NexusPipeline.Generations\g01615\Installer", false);
+            foreach (string name in new[] { "DataRoot", "AppDir" })
+                if (oldGeneration?.GetValue(name) is string path && !string.IsNullOrWhiteSpace(path)) protectedRoots.Add(path);
+            using var oldGenerationUninstall = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\NexusPipeline.PerUser.g01615_is1", false);
+            if (oldGenerationUninstall?.GetValue("InstallLocation") is string oldRoot && !string.IsNullOrWhiteSpace(oldRoot)) protectedRoots.Add(oldRoot);
+        }
         RequireSeparateRoots(root, protectedRoots);
     }
 
@@ -109,10 +118,8 @@ internal static class InstallationOwnership
         return identity;
     }
 
-    private static bool IsApplicationPath(string path) => !Path.IsPathRooted(path) && !path.Contains('\\') && !path.Contains(':')
-        && !path.Any(char.IsControl)
-        && path.Split('/').All(part => part.Length > 0 && part is not ("." or ".."))
-        && (path is "nexus-pipeline.exe" or "README.md" || path.StartsWith("wwwroot/", StringComparison.Ordinal));
+    private static bool IsApplicationPath(string path) => ApplicationPayload.SafePath(path)
+        && (path is "NexusPipeline.exe" or "README.md" or ApplicationPayload.ManifestPath || path.StartsWith("resources/desktop/", StringComparison.Ordinal));
 
     internal static InstallerInstanceIdentity? Read(string root, bool requireActive = false)
     {
@@ -143,13 +150,13 @@ internal static class InstallationOwnership
         Directory.CreateDirectory(ManagerDirectory);
         if (identity.State == "active")
         {
-            string source = Path.Combine(identity.AppRoot, "nexus-pipeline.exe");
+            string source = Path.Combine(identity.AppRoot, "NexusPipeline.exe");
             string helper = Path.Combine(ManagerDirectory, "nexus-installer-helper.exe");
             RequireLinkFree(helper);
             if (File.Exists(helper))
             {
                 var previous = Read(identity.AppRoot);
-                string? expected = previous?.PayloadFiles.SingleOrDefault(file => file.Path == "nexus-pipeline.exe")?.Sha256;
+                string? expected = previous?.PayloadFiles.SingleOrDefault(file => file.Path == "NexusPipeline.exe")?.Sha256;
                 if (expected is null || UpdateApply.ImageHash(helper) != expected)
                     throw new IOException("installer.unknown_helper_preserved");
             }
@@ -167,6 +174,20 @@ internal static class InstallationOwnership
     }
 
     internal static void Register(string root, string version, string manifestPath)
+        => RegisterCore(root, version, manifestPath, (full, targetVersion) =>
+        {
+            _ = ApplicationPayload.Validate(full, targetVersion, installed: true);
+            return CapturePayload(full);
+        });
+
+#if NEXUS_TEST_HOST
+    internal static void RegisterOwnedInventoryForTest(string root, string version, string manifestPath,
+        IReadOnlyList<InstalledPayloadFile> verifiedInventory)
+        => RegisterCore(root, version, manifestPath, (_, _) => verifiedInventory);
+#endif
+
+    private static void RegisterCore(string root, string version, string manifestPath,
+        Func<string, string, IReadOnlyList<InstalledPayloadFile>> inspectApplication)
     {
         string full = Path.GetFullPath(root).TrimEnd('\\');
         RequireLinkFree(full);
@@ -192,22 +213,17 @@ internal static class InstallationOwnership
             RequireLinkFree(file);
             if (!File.Exists(file) || UpdateApply.ImageHash(file) != item.Sha256) throw new IOException("installer.payload_hash");
         }
+        var application = inspectApplication(full, version);
+        if (!payload.OrderBy(file => file.Path, StringComparer.Ordinal).SequenceEqual(application)) throw new IOException("installer.application_inventory");
         Save(existing with { State = "active", Version = version, PayloadFiles = payload });
     }
 
     private static IReadOnlyList<InstalledPayloadFile> CapturePayload(string root)
     {
-        var result = new List<InstalledPayloadFile>();
-        foreach (string name in new[] { "nexus-pipeline.exe", "README.md" })
-        {
-            string path = Path.Combine(root, name); RequireLinkFree(path);
-            if (File.Exists(path)) result.Add(new(name, UpdateApply.ImageHash(path)));
-        }
-        string web = Path.Combine(root, "wwwroot");
-        foreach (string file in EnumerateFiles(web))
-            result.Add(new(Path.GetRelativePath(root, file).Replace('\\', '/'), UpdateApply.ImageHash(file)));
-        if (!result.Any(file => file.Path == "nexus-pipeline.exe")) throw new IOException("installer.payload_missing");
-        return result.OrderBy(file => file.Path, StringComparer.Ordinal).ToArray();
+        _ = ApplicationPayload.Validate(root, installed: true);
+        return ApplicationPayload.Files(root).Select(file => new InstalledPayloadFile(file.Path, file.Sha256))
+            .Append(new(ApplicationPayload.ManifestPath, UpdateApply.ImageHash(Path.Combine(root, ApplicationPayload.ManifestPath))))
+            .OrderBy(file => file.Path, StringComparer.Ordinal).ToArray();
     }
 
     private static IEnumerable<string> EnumerateFiles(string root)
@@ -229,10 +245,12 @@ internal static class InstallationOwnership
 
     internal static void SnapshotForUpdate(string root, string backup)
     {
-        if (Read(root, true) is not { } identity) return;
-        string seal = Seal(identity);
-        File.WriteAllText(Path.Combine(backup, ".installer-identity"), seal, new UTF8Encoding(false));
+        if (SnapshotBytesForUpdate(root) is { } bytes)
+            File.WriteAllBytes(Path.Combine(backup, ".installer-identity"), bytes);
     }
+
+    internal static byte[]? SnapshotBytesForUpdate(string root) => Read(root, true) is null
+        ? null : Encoding.UTF8.GetBytes(File.ReadAllText(IdentityPath).TrimStart('\uFEFF'));
 
     internal static void RefreshAfterUpdate(string root, string version)
     {

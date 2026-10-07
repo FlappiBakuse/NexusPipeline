@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import NxpOverflowText from "../../ui/primitives/NxpOverflowText.vue";
 import { t } from "../../platform/i18n";
 import NxpBadge from "../../ui/primitives/NxpBadge.vue";
 import NxpButton from "../../ui/primitives/NxpButton.vue";
@@ -82,7 +83,7 @@ const emit = defineEmits<{
     </NxpButton>
     <div class="script-main global-user-main">
       <div class="script-name-row">
-        <strong class="global-user-name">{{ user.name }}</strong>
+        <strong class="global-user-name"><NxpOverflowText :label="user.name" /></strong>
       </div>
       <div class="meta-line global-user-meta">
         <NxpBadge role="button" tabindex="0" class="task-summary-action" @click.stop="taskSummary?.recordId ? openRecord(taskSummary.recordId) : emit('manage', user)" @keydown.enter.stop.prevent="taskSummary?.recordId ? openRecord(taskSummary.recordId) : emit('manage', user)" @keydown.space.stop.prevent="taskSummary?.recordId ? openRecord(taskSummary.recordId) : emit('manage', user)" :tone="taskSummary?.tone === 'ok' || taskSummary?.tone === 'warn' || taskSummary?.tone === 'bad' ? taskSummary.tone : 'muted'">

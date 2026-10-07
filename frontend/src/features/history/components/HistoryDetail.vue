@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import NxpOverflowText from "../../../ui/primitives/NxpOverflowText.vue";
 import { computed } from "vue";
 import { t } from "../../../platform/i18n";
 import NxpBadge from "../../../ui/primitives/NxpBadge.vue";
@@ -71,7 +72,7 @@ function recordPath(record: HistoryRecord) {
           <span class="history-entry-bar" aria-hidden="true"></span>
           <span class="history-entry-main">
             <span class="history-entry-title">
-              <strong>{{ formatDateTime(record.startTime) }} · {{ record.scriptName || "-" }}<template v-if="record.queueName"> · {{ record.queueName }}</template></strong>
+              <strong><NxpOverflowText>{{ formatDateTime(record.startTime) }} · {{ record.scriptName || "-" }}<template v-if="record.queueName"> · {{ record.queueName }}</template></NxpOverflowText></strong>
               <NxpBadge :tone="statusTone(record.status)">{{ statusLabel(record.status) }}</NxpBadge>
               <NxpBadge v-for="badge in historyBadges(record)" :key="badge.key" :tone="badge.tone" :title="badge.title">{{ badge.label }}</NxpBadge>
               <span

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import NxpOverflowText from "../../ui/primitives/NxpOverflowText.vue";
 import NxpBadge from "../../ui/primitives/NxpBadge.vue";
 import NxpButton from "../../ui/primitives/NxpButton.vue";
 import NxpEntityIcon from "../../ui/primitives/NxpEntityIcon.vue";
@@ -70,7 +71,7 @@ const emit = defineEmits<{
           })"
           @click.stop="emit('edit', script)"
         >
-          <span class="scroll-text"><span class="scroll-inner">{{ script.name }}</span></span>
+          <NxpOverflowText>{{ script.name }}</NxpOverflowText>
         </NxpButton>
         <div class="meta-line script-meta">
           <NxpBadge v-if="script.requiresReconfiguration" tone="warn">{{ translate("scripts.requires_reconfiguration") }}</NxpBadge>

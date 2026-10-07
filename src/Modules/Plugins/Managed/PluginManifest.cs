@@ -1,6 +1,7 @@
 using System.Text.Json.Nodes;
 using NexusPipeline.Modules.Plugins.Repository;
 using NexusPipeline.Modules.Plugins;
+using NexusPipeline.Modules.Plugins.Contracts;
 
 namespace NexusPipeline.Modules.Plugins.Managed;
 
@@ -25,6 +26,8 @@ internal sealed class PluginManifest
     public string MinHostVersion { get; private init; } = "0.0.0";
 
     public string Kind { get; private init; } = "";
+
+    public PluginScriptTypeIcon? ScriptTypeIcon { get; private init; }
 
     public string ApiVersion { get; private init; } = "";
 
@@ -153,6 +156,13 @@ internal sealed class PluginManifest
             }
             if (!TaskProtocolManifest.TryValidate(root, out error)) return false;
 
+            PluginScriptTypeIcon? scriptTypeIcon = null;
+            if (root.ContainsKey("scriptTypeIcon") && !PluginScriptTypeIcon.TryParse(root["scriptTypeIcon"], out scriptTypeIcon))
+            {
+                error = "scriptTypeIcon 必须声明固定完整 SHA 的 HTTPS raw 图像来源、SHA-256 与匹配的图像类型";
+                return false;
+            }
+
             var result = new PluginManifest
             {
                 SchemaVersion = schemaVersion,
@@ -164,6 +174,7 @@ internal sealed class PluginManifest
                 Version = version,
                 MinHostVersion = minHostVersion,
                 Kind = kind,
+                ScriptTypeIcon = scriptTypeIcon,
                 ApiVersion = root["apiVersion"]?.ToString()?.Trim() ?? "",
                 EntryAssembly = root["entryAssembly"]?.ToString()?.Trim() ?? "",
                 EntryType = root["entryType"]?.ToString()?.Trim() ?? "",

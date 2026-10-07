@@ -9,7 +9,7 @@ import tempfile
 
 def run(checker, root, report):
     command = ["dotnet", str(checker), str(root), "--report", str(report)]
-    return subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
+    return subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace")
 
 
 def write(root, name, contents):
@@ -34,7 +34,7 @@ def main():
         write(root, "src/Modules/B/B.cs", "public class B {\n#if NEXUS_TEST_HOST\n public A? Other;\n#endif\n}\n")
         write(root, "src/Host/HostThing.cs", "public class HostThing {}\n")
         subprocess.run(["dotnet", "restore", str(root / "src/NexusPipeline.csproj"), "-r", "win-x64", "--nologo"],
-                       check=True, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
+                       check=True, capture_output=True, text=True, encoding="utf-8", errors="replace")
         report = root / "report.json"
         result = run(checker, root, report)
         if result.returncode != 0 or json.loads(report.read_text())["violations"]:

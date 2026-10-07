@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "win-x64-en-zh-v1",
+  "locales": ["en-US", "zh-CN"],
+  "fallbackLocale": "en-US",
+  "dependencyFiles": [
+    "@koromix/koffi-win32-x64/index.js",
+    "@koromix/koffi-win32-x64/package.json",
+    "@koromix/koffi-win32-x64/win32_x64/koffi.node",
+    "koffi/LICENSE.txt",
+    "koffi/index.cjs",
+    "koffi/index.js",
+    "koffi/indirect.cjs",
+    "koffi/indirect.js",
+    "koffi/package.json",
+    "koffi/src/koffi/index.cjs",
+    "koffi/src/koffi/index.js",
+    "koffi/src/koffi/indirect.cjs",
+    "koffi/src/koffi/indirect.js",
+    "koffi/src/koffi/src/static.cjs",
+    "koffi/src/koffi/src/static.js"
+  ]
+}

@@ -11,20 +11,30 @@ internal static class FirewallRule
 
     /// <summary>确保实际 Web 端口存在 TCP 入站允许规则（幂等，支持端口漂移）。</summary>
     public static void EnsureAllowInbound(int port)
+        => EnsureAllowInbound(port, RunNetsh);
+
+    internal static void EnsureAllowInbound(int port, Func<string, int> execute)
     {
         if (port is < 1 or > 65535)
         {
             Logger.Warn($"[防火墙] 忽略无效 Web 端口 {port}，未更新入站规则。");
             return;
         }
+#if NEXUS_TEST_HOST
+        if (Environment.GetEnvironmentVariable("NEXUS_SYSTEM_ACTION_DRYRUN") == "1")
+        {
+            Logger.Info($"[Test Host] 已替代 Web TCP 入站规则操作（端口 {port}）。");
+            return;
+        }
+#endif
         try
         {
             string setArgs = BuildSetRuleArguments(port);
-            int code = RunNetsh(setArgs);
+            int code = execute(setArgs);
             if (code != 0)
             {
                 string addArgs = BuildAddRuleArguments(port);
-                code = RunNetsh(addArgs);
+                code = execute(addArgs);
             }
             if (code == 0)
             {

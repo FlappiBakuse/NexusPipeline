@@ -51,13 +51,13 @@ public sealed class UpdateServiceTests : IAsyncLifetime
         _installDir = Path.Combine(_root, "install");
         Directory.CreateDirectory(_installDir);
 
-        // 构造与发布资产同名的 zip：exe + wwwroot + plugins/。
+        // 构造与发布资产同名的 zip：transport fixture with Host, resources and plugins/。
         using (var stream = new MemoryStream())
         {
             using (var archive = new ZipArchive(stream, ZipArchiveMode.Create, leaveOpen: true))
             {
-                AddEntry(archive, "nexus-pipeline.exe", "fake-exe-" + Guid.NewGuid().ToString("N"));
-                AddEntry(archive, "wwwroot/index.js", "// fake");
+                AddEntry(archive, "NexusPipeline.exe", "fake-exe-" + Guid.NewGuid().ToString("N"));
+                AddEntry(archive, "resources/desktop/test.js", "// fake");
             }
             _zipBytes = stream.ToArray();
         }
@@ -243,13 +243,16 @@ public sealed class UpdateServiceTests : IAsyncLifetime
         return (404, "text/plain", Array.Empty<byte>());
     }
 
-    private UpdateService NewService()
+    private UpdateService NewService(Func<DesktopResumeIntent>? capture = null, Func<string, TimeSpan, bool>? stop = null,
+        Action<string, DesktopResumeIntent>? abort = null)
     {
         return new UpdateService(
             () => _settings,
             _installDir!,
             () => _canApply,
-            () => _exited = true);
+            () => _exited = true,
+            freezePayload: (_, _, _) => new(new string('a', 64), new string('b', 64), new string('c', 64), "g0170"),
+            captureDesktopIntent: capture, stopDesktop: stop, abortDesktop: abort);
     }
 
     private static async Task WaitStateAsync(UpdateService service, UpdateState state, int timeoutMs = 15000)
@@ -358,8 +361,8 @@ public sealed class UpdateServiceTests : IAsyncLifetime
         Assert.True(string.IsNullOrEmpty(status.Error));
         string stagingRoot = Path.Combine(_installDir!, ".nxp-update", "staging");
         string staging = Assert.Single(Directory.GetDirectories(stagingRoot, $"{CandidateVersion}.g*", SearchOption.TopDirectoryOnly));
-        Assert.True(File.Exists(Path.Combine(staging, "nexus-pipeline.exe")));
-        Assert.True(File.Exists(Path.Combine(staging, "wwwroot", "index.js")));
+        Assert.True(File.Exists(Path.Combine(staging, "NexusPipeline.exe")));
+        Assert.True(File.Exists(Path.Combine(staging, "resources", "desktop", "test.js")));
     }
 
     [Fact]
@@ -598,6 +601,70 @@ public sealed class UpdateServiceTests : IAsyncLifetime
         {
             UpdateApply.LaunchApplyOverride = null;
         }
+    }
+
+    [Fact]
+    public async Task ApplyWritesIntentBeforeStopAndAbortsOnlyTheUnarmedTransaction()
+    {
+        string? stoppedTransaction = null, abortedTransaction = null;
+        var intent = DesktopResumeIntent.FromVisible(true);
+        var service = NewService(() => intent, (transaction, _) =>
+        {
+            var durable = UpdateTask.Read(Path.Combine(_installDir!, ".nxp-update", "task.json"))!;
+            Assert.Equal(transaction, durable.TransactionId);
+            Assert.Equal(intent, durable.DesktopResumeIntent);
+            Assert.False(durable.DesktopStopped);
+            stoppedTransaction = transaction;
+            return true;
+        }, (transaction, restored) => { Assert.Equal(intent, restored); abortedTransaction = transaction; });
+        await service.CheckAsync("test"); service.StartDownload("test"); await WaitStateAsync(service, UpdateState.Ready);
+        UpdateApply.LaunchApplyOverride = _ => false;
+        try
+        {
+            Assert.False(service.RequestApply(false, "test").Succeeded);
+            Assert.NotNull(stoppedTransaction);
+            Assert.Equal(stoppedTransaction, abortedTransaction);
+            Assert.Equal(UpdateState.Ready, service.State);
+            Assert.False(_exited);
+        }
+        finally { UpdateApply.LaunchApplyOverride = null; }
+    }
+
+    [Fact]
+    public async Task ApplyJournalFailureAfterStopRestoresDesktopAndPreservesTheJournal()
+    {
+        bool aborted = false;
+        string file = Path.Combine(_installDir!, ".nxp-update", "task.json");
+        var service = NewService(() => DesktopResumeIntent.FromVisible(false), (_, _) =>
+        { File.SetAttributes(file, FileAttributes.ReadOnly); return true; }, (_, intent) =>
+        { Assert.Equal("background", intent.Mode); aborted = true; });
+        await service.CheckAsync("test"); service.StartDownload("test"); await WaitStateAsync(service, UpdateState.Ready);
+        try
+        {
+            Assert.False(service.RequestApply(false, "test").Succeeded);
+            Assert.True(aborted);
+            Assert.False(_exited);
+            Assert.Equal(UpdateState.Ready, service.State);
+            Assert.NotNull(UpdateTask.Read(file));
+        }
+        finally { if (File.Exists(file)) File.SetAttributes(file, FileAttributes.Normal); }
+    }
+
+    [Fact]
+    public async Task ApplyUnconfirmedWorkerPreservesJournalAndNeverAbortsDesktop()
+    {
+        bool aborted = false;
+        var service = NewService(() => DesktopResumeIntent.FromVisible(true), (_, _) => true, (_, _) => aborted = true);
+        await service.CheckAsync("test"); service.StartDownload("test"); await WaitStateAsync(service, UpdateState.Ready);
+        UpdateApply.LaunchApplyOverride = _ => throw new IOException("worker creation unconfirmed");
+        try
+        {
+            Assert.True(service.RequestApply(false, "test").Succeeded);
+            Assert.False(aborted);
+            Assert.Equal(UpdateState.Applying, service.State);
+            Assert.NotNull(UpdateTask.Read(Path.Combine(_installDir!, ".nxp-update", "task.json")));
+        }
+        finally { UpdateApply.LaunchApplyOverride = null; }
     }
 
     [Fact]

@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -39,7 +40,7 @@ internal sealed record DiagnosticSnapshot(
     string OverallStatus,
     IReadOnlyList<DiagnosticCheck> Checks);
 
-internal sealed record DiagnosticBundleResult(string Path, long SizeBytes);
+internal sealed record DiagnosticBundleResult(string Path, long SizeBytes, string ArtifactId, string Sha256);
 
 /// <summary>
 /// 环境诊断与脱敏支持包导出。诊断不自动修复、不改变用户数据、不读取设置密钥，也不发起网络请求；
@@ -59,6 +60,8 @@ internal sealed class DiagnosticsService
     private readonly Scheduler _scheduler;
     private readonly UpdateService _updates;
     private readonly IControlPlaneStatusReader _controlPlane;
+    private readonly DiagnosticArtifactStore _artifacts = new(AppPaths.RuntimeStagingDir);
+    internal FileStream OpenSupportBundle(string artifactId) => _artifacts.Open(artifactId);
 
     public DiagnosticsService(
         ISettingsProvider settings,
@@ -195,8 +198,10 @@ internal sealed class DiagnosticsService
             {
                 throw new InvalidOperationException($"诊断包超过大小上限（{BundleMaxBytes / (1024 * 1024)} MiB）");
             }
-            File.Move(temporary, path, overwrite: true);
-            return new DiagnosticBundleResult(path, size);
+            string sha256;
+            using (var file = File.OpenRead(temporary)) sha256 = Convert.ToHexStringLower(SHA256.HashData(file));
+            File.Move(temporary, path, overwrite: false);
+            return _artifacts.Register(path, size, sha256);
         }
         finally
         {
@@ -571,16 +576,21 @@ internal sealed class DiagnosticsService
     {
         if (string.IsNullOrWhiteSpace(requested))
         {
-            Directory.CreateDirectory(AppPaths.RuntimeStagingDir);
-            return Path.Combine(
+            requested = Path.Combine(
                 AppPaths.RuntimeStagingDir,
-                $"nexus-pipeline-diagnostics-{DateTime.Now:yyyyMMdd-HHmmss}.zip");
+                $"nexus-pipeline-diagnostics-{DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}.zip");
         }
         string path = Path.GetFullPath(requested.Trim());
-        if (Path.GetPathRoot(path)?.Equals(path, StringComparison.OrdinalIgnoreCase) == true)
+        string root = Path.GetFullPath(AppPaths.RuntimeStagingDir).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        if (!path.StartsWith(root, StringComparison.OrdinalIgnoreCase) || !path.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)
+            || File.Exists(path) || Directory.Exists(path))
         {
-            throw new InvalidOperationException("诊断包输出路径不能是文件系统根目录");
+            throw new InvalidOperationException("诊断包只能保存到运行态 staging 内的新 ZIP 文件");
         }
+        for (string? current = Path.GetDirectoryName(path); current is not null; current = Path.GetDirectoryName(current))
+            if (Directory.Exists(current) && (File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
+                throw new InvalidOperationException("诊断包路径不能包含链接");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         return path;
     }
 

@@ -9,12 +9,14 @@
  * 平台迁移完成后本文件不再引用前端目录之外的源码。
  */
 import { api, apiBlob, apiUpload, isAbortError } from "../platform/api";
+export { getCapabilities } from "../platform/client-capabilities";
 import {
   formatDate,
   formatList,
   formatNumber,
   formatTime,
   getLocale,
+  onLocaleChanged,
   t,
 } from "../platform/i18n";
 import { clearFieldError, setRequiredFieldError, toast } from "../platform/toast";
@@ -41,6 +43,7 @@ export {
   formatNumber,
   formatTime,
   getLocale,
+  onLocaleChanged,
   t,
   clearFieldError,
   setRequiredFieldError,

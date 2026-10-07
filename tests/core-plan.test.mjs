@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
-import { coreUnits } from "./core-plan.mjs";
+import { coreUnits, requiresPartner, allocateUnits } from "./core-plan.mjs";
 const root = path.resolve(import.meta.dirname, "..");
 const registry = JSON.parse(fs.readFileSync(path.join(root, "tests/gates.json")));
 const policy = JSON.parse(fs.readFileSync(path.join(root, "tests/policy.json")));
@@ -56,4 +56,25 @@ test("finite subsets retain exactly their selected independent scenarios", () =>
     assert.deepEqual(unit.expectedScenarioIds, selected.map(item => policy.integrationScenarios[item.id]).sort());
     assert.equal(unit.preparations.includes("host.browser"), groups.includes("execution"));
   }
+});
+
+test("full application obligations resolve a fixed partner before execution", () => {
+  for (const id of ["host.architecture.backend", "host.integration.desktop", "host.integration.restart-update"]) {
+    const [unit] = coreUnits([{ id }], registry, policy);
+    assert.equal(requiresPartner(unit), true, id);
+    assert.ok(unit.preparations.includes("host.application.inputs"));
+  }
+  const [unit] = coreUnits([{ id: "host.integration.schedule" }], registry, policy);
+  assert.equal(requiresPartner(unit), false);
+});
+
+test("concurrent restart and store observations retain both required providers", () => {
+  const selected = ["host.integration.restart-update", "host.integration.store"].map(id => ({ id }));
+  const units = coreUnits(selected, registry, policy);
+  const plan = allocateUnits(units, {}, policy.ciBatchPolicy);
+  assert.equal(plan.capacityStatus, "PLANNED");
+  assert.equal(plan.batches.length, 1);
+  assert.deepEqual(plan.batches[0].units.flatMap(unit => unit.provides).sort(), selected.map(item => item.id).sort());
+  const separate = units.map(unit => allocateUnits([unit], {}, policy.ciBatchPolicy).batches[0].estimatedMs);
+  assert.ok(plan.batches[0].estimatedMs < separate.reduce((a, b) => a + b, 0));
 });

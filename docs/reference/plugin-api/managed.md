@@ -1,8 +1,8 @@
 # Managed Plugin API
 
-当前 managed 插件精确声明 Plugin API `2.0`，最低 Host `0.16.15`，并以 .NET 10 编译。SDK 包和程序集版本为 `2.0.0`。宿主在激活前检查目标框架、SDK 引用与清单；旧 API、未来 minor、旧运行时程序集和包内复制的宿主 SDK 均拒绝加载。
+当前 managed 插件精确声明 Plugin API `2.1`，最低 Host `0.17.0`，并以 .NET 10 编译。SDK 包和程序集版本为 `2.0.0`。宿主在激活前检查目标框架、SDK 引用与清单；旧 API、未来 minor、旧运行时程序集和包内复制的宿主 SDK 均拒绝加载。
 
-`IPluginHostContext` 直接暴露全部现役端口。插件通过这些明确端口工作，不检查旧接口继承链。`ExecutionProviders` 的冻结计划、配置门禁、worker 与事件协议见[执行 provider](execution-provider.md)。Frontend API 独立维持 `1.5`。
+`IPluginHostContext` 直接暴露全部现役端口。插件通过这些明确端口工作，不检查旧接口继承链。`ExecutionProviders` 的冻结计划、配置门禁、worker 与事件协议见[执行 provider](execution-provider.md)。Frontend API 独立维持 `1.6`。
 
 ```text
 plugins/GameCheckIn/
@@ -19,13 +19,13 @@ plugins/GameCheckIn/
   "description": "提供通用的用户级扩展设置",
   "version": "0.1.0",
   "kind": "managed-code",
-  "apiVersion": "2.0",
-  "minHostVersion": "0.16.15",
+  "apiVersion": "2.1",
+  "minHostVersion": "0.17.0",
   "entryAssembly": "CheckInPlugin.dll",
   "entryType": "CheckInPlugin.EntryPoint",
   "capabilities": ["background-jobs", "ui-contributions", "frontend-module"],
   "frontend": {
-    "apiVersion": "1.5",
+    "apiVersion": "1.6",
     "entry": "web/main.js",
     "styles": ["web/style.css"]
   }
@@ -91,7 +91,7 @@ shell.nav
 
 #### 插件自有 Web API
 
-插件可通过 `context.WebApi.Register(new PluginWebApiRoute("GET", "health", handler))` 注册自己的路由。最终地址为 `/api/plugin-api/{pluginName}/health`，支持 `GET`、`POST`、`PUT`、`PATCH`、`DELETE`。handler 收到 `PluginWebApiRequest`（方法、规范化相对路由、查询字典、可选 JSON body），返回 `PluginWebApiResponse.Json(...)` 或 `PluginWebApiResponse.Empty(204)`。
+插件可通过 `context.WebApi.Register(new PluginWebApiRoute("GET", "health", handler) { Access = PluginWebApiAccess.General })` 注册自己的路由。最终地址为 `/api/plugin-api/{pluginName}/health`，支持 `GET`、`POST`、`PUT`、`PATCH`、`DELETE`。handler 收到 `PluginWebApiRequest`（方法、规范化相对路由、查询字典、可选 JSON body），返回 `PluginWebApiResponse.Json(...)` 或 `PluginWebApiResponse.Empty(204)`。
 
 宿主为每次调用设置 30 秒超时，并限制 JSON 响应为 2 MiB；未知路由、无效状态码、超时、异常和无效 JSON 响应均使用 `{ "ok": false, "code": "plugin_error", "args": {} }` 形式处理。错误响应只包含稳定机器码和机器可读参数，不传递本地化句子或异常文本；前端和调用方根据自身语言资源显示文字。路由只能由注册它的插件访问，路径段拒绝空段、反斜杠及 `.`/`..`。
 
@@ -167,3 +167,13 @@ Generic ADB 与 MuMuManager 保留在宿主。雷电、夜神和 BlueStacks 的�
 ### 通知收件人覆盖
 
 `IPluginHostContext.Notifications` 提供通知收件人覆盖能力。插件调用 `IPluginNotificationService.SendAsync` 时，可以在 `PluginNotification.SmtpTo` 提供可选 SMTP 收件人；空值或空白值继承宿主全局 SMTP 收件人。SMTP 服务器、发件人、凭据与渠道开关仍由宿主管理，Webhook 继续使用宿主全局配置。
+
+## 请求来源与本机交互
+
+Plugin API 2.1 只定义 `General`、`HostFilePicker`、`NativeConfigEditor` 三类访问。每条 `PluginWebApiRoute` 必须显式设置 `Access`；声明式 UI 的读取、保存和每个动作分别显式设置访问类，缺失或未知值使注册失败。`PluginWebApiRequest.ConnectionKind` 由实际传输对端确定为 `Local`、`Remote` 或 `Unknown`，不采信 Host、Origin、Referer 或转发头。General 在三种来源均可用；后两类只允许 Local，在读取参数、请求体或执行回调前拒绝 Remote/Unknown。SDK 包及程序集继续为 2.0.0，与接口 2.1 独立治理。
+
+Frontend API 1.6 的 `host.getCapabilities(signal?)` 返回冻结只读的 schema 1 对象：`connectionKind` 为 local/remote/unknown，`operations` 精确包含 general、hostFilePicker、nativeConfigEditor，每项有 allowed 与 denyReason。拒绝原因分别为 host_file_picker_requires_local、native_config_editor_requires_local、client_origin_unverified。缓存绑定同源、认证和当前 Host 实例；重连或重启使旧读取失效。它用于呈现界面，后端每次操作仍重新判断来源。
+
+原生文件选择只能禁用“浏览”按钮，路径输入仍可编辑并保存。普通账号、脚本、队列、计划、运行、历史、插件安装与诊断是 General；诊断 ZIP 写入宿主受控 staging，返回明确路径。脚本文件读取只在已批准脚本根、配置位置及游戏程序父目录范围内，拒绝链接与路径穿越，不枚举宿主磁盘。
+
+路由处理器接收 `RouteSurface`：`element`、`routeToken`、`segments`、`signal`。必须在 element 内挂载，返回清理函数（或最终返回函数的 Promise）；路由离开、替换或插件停止时先中止 signal，再执行清理。不得查询宿主私有页面容器。公开 18 个 slot 与 39 个元素保持既有名称。

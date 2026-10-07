@@ -326,7 +326,7 @@ onBeforeUnmount(() => {
   <main
     id="view"
     ref="root"
-    class="view-root users-page"
+    class="view-root workspace-page page-users users-page"
     data-testid="main-view"
   >
     <NxpEmptyState v-if="loading" :title="t('common.loading')" />
@@ -338,8 +338,8 @@ onBeforeUnmount(() => {
     />
     <template v-else>
       <NxpPageHeader
-        :eyebrow="t('users.account_management')"
-        :title="t('users.user_management')"
+        :eyebrow="t('users.user_management')"
+        :title="t('shell.users')"
         :description="t('users.page.help')"
       >
         <template #actions>

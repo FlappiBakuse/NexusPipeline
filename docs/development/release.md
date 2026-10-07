@@ -48,13 +48,14 @@ gh workflow run release.yml --ref main -f operation=publish-only -f tag=<已有 
 发布包采用扁平根布局：
 
 ```text
-nexus-pipeline.exe
-wwwroot/
-plugins/
+NexusPipeline.exe
 README.md
+resources/desktop/
+resources/payload-manifest.json
+plugins/
 ```
 
-主程序更新引擎交换 `nexus-pipeline.exe`、`wwwroot/` 和包内提供的 `README.md`，不会覆盖运行时 `plugins/`。包内排除 `config/`、`data/`、`history/` 和 `logs/`。更新引擎支持当前发布包布局，并拒绝绝对路径、`..` 路径和重复目录条目。已发行 v0.16.8 的旧 worker 及 README 收尾限制见[自动更新](../architecture/update.md)。
+主程序更新引擎交换 `NexusPipeline.exe`、`resources/desktop/`、`resources/payload-manifest.json` 和包内提供的 `README.md`，不会覆盖运行时 `plugins/`。包内排除 `config/`、`data/`、`history/` 和 `logs/`。更新引擎支持当前发布包布局，并拒绝绝对路径、`..` 路径和重复目录条目。四项应用资产作为同一事务交换、校验和回滚；插件和用户数据不纳入应用事务。
 
 ### 安装器运行时依赖
 
@@ -97,12 +98,14 @@ Get-FileHash $zip -Algorithm SHA256 | ForEach-Object { $_.Hash.ToLower() } |
 ```json
 {
   "version": "0.17.0",
-  "code": "installation-layout-v2",
-  "migrationUrl": "https://github.com/FlappiBakuse/NexusPipeline/releases/tag/v0.17.0"
+  "code": "desktop-shell-embedded-ui",
+  "migrationUrl": "https://github.com/FlappiBakuse/NexusPipeline/blob/main/docs/user/README.md"
 }
 ```
 
 版本必须使用当前受限格式，`code` 使用小写字母、数字、点、下划线或连字符，`migrationUrl` 使用 HTTPS。宿主从桥接版本开始检查当前版本到目标版本之间的所有屏障；命中后保留更新发现结果，禁止内置下载、启动前自动应用、下次启动应用和闲时自动应用，页面显示手动下载安装包与迁移配置的指引。策略文件使用独立的 policy URI 安全域：默认源固定为官方仓库 main 分支的 `update-policy.json`，自定义源使用同源地址，重定向继续按 policy 规则校验。策略文件无法验证时同样禁止内置下载，页面显示策略暂不可验证。仓库根目录策略文件由生产解析器校验。barrier 历史只追加，既有记录不删除、不修改、不重排。发布破坏性版本前需先提交策略文件，再发布对应版本，并在 Release Notes 写明迁移步骤。
+
+v0.17.0 的 `desktop-shell-embedded-ui` 屏障必须在公开 ZIP、Setup 及 SHA 资产前从官方 main 策略入口回读，记录实际 source SHA 和原文摘要。屏障和新目录安装指南经过受保护 PR 合入后，使用隔离的真实 v0.16.15 发布物确认跨入 v0.17.0、跳到 v0.17.1 均返回 `manualUpdateRequired`、`breaking-update`、`barrierVersion=0.17.0` 和迁移说明，并拒绝下载和应用。保留旧目录及原始用户数据；v0.17.0 到同代后续补丁仍支持普通更新。候选构建、tag 和资产发布依此顺序推进，不把本地策略测试当作公开入口已生效。
 
 ### Release Notes 格式
 

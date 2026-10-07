@@ -1,4 +1,5 @@
 import { t } from "./i18n";
+import {desktopBridge} from './desktop';
 
 export type ThemeValue = string;
 
@@ -135,6 +136,7 @@ export function applyThemeValue(name: string): ThemeValue {
   baseTheme = ["light", "dark", "system"].includes(key) || themes.has(key) ? key : "system";
   safeStorageSet(THEME_KEY, baseTheme);
   applyBaseTheme();
+  if(['light','dark','system'].includes(baseTheme))void desktopBridge()?.setClientPreferences({theme:baseTheme as 'light'|'dark'|'system'}).catch(()=>{});
   return baseTheme;
 }
 

@@ -20,11 +20,7 @@ internal static class ApiNativeDialogHandler
             await HttpHelper.MethodNotAllowedAsync(context).ConfigureAwait(false);
             return;
         }
-        if (!HttpHelper.IsLoopback(context))
-        {
-            await HttpHelper.ErrorAsync(context, "local_only", 403).ConfigureAwait(false);
-            return;
-        }
+        if (!await RequestAccessPolicy.RequireAsync(context, NexusPipeline.Plugin.Abstractions.PluginOperationAccess.HostFilePicker).ConfigureAwait(false)) return;
 
         NativePathPickerPayload? payload = HttpHelper.ParseBody<NativePathPickerPayload>(body);
         string kind = (payload?.Kind ?? "file").Trim().ToLowerInvariant();

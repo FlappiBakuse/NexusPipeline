@@ -12,7 +12,7 @@ public sealed class HostTestScope : IAsyncLifetime
 
     public HostTestScope()
     {
-        _runtime = HostCompositionRoot.Create(new AppSettings { AutoOpenBrowser = false });
+        _runtime = HostCompositionRoot.Create(new AppSettings { LightweightMode = true, OpenDesktopOnStartup = false });
     }
 
     internal HostCompositionRoot Composition => _runtime.Composition;

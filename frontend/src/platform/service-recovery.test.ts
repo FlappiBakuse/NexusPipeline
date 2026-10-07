@@ -78,14 +78,15 @@ describe("application service recovery", () => {
   });
 
   it("keeps unsaved inputs until the user explicitly chooses to refresh", async () => {
-    const { shell, reload } = setup();
+    const { shell, reload, fetchMock } = setup();
     releaseGuard = registerRecoveryDirtyGuard(() => true);
     await vi.waitFor(() => expect(shell.hostInstanceId).toBe(oldInstance));
     await beginServiceRecovery();
     expect(shell.recoveryPhase).toBe("dirty-blocked");
     expect(reload).not.toHaveBeenCalled();
+    expect(fetchMock.mock.calls.filter(([input]) => String(input) === "/api/settings/restart")).toHaveLength(0);
     resumeServiceRecovery(true);
-    expect(reload).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
   });
 
   it("reuses the pending handoff after a timeout without another restart request", async () => {

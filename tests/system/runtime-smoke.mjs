@@ -2,6 +2,7 @@ import { controlServiceName } from "../../tools/installation-generation.mjs";
 import test, { after, before } from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import http from "node:http";
 import net from "node:net";
 import fs from "node:fs";
@@ -159,6 +160,22 @@ test("正式 CLI 的 --json 输出保持单 envelope 与稳定退出码", { skip
   const failure = JSON.parse(invalid.stdout.trim());
   assert.equal(failure.ok, false);
   assert.equal(failure.code, "validation_error");
+
+  const output = path.join(resolveTestRunRoot(projectRoot,runId), '诊断 导出.zip');
+  const exported = runCli(['doctor','export','--output',output,'--json']);
+  assert.equal(exported.status,0,exported.stdout+exported.stderr);
+  assert.equal(exported.stdout.trim().split(/\r?\n/).length,1);
+  const receipt = JSON.parse(exported.stdout.trim());
+  assert.equal(receipt.ok,true);
+  assert.equal(receipt.data.path,output);
+  const bytes = fs.readFileSync(output);
+  assert.equal(bytes.length,receipt.data.sizeBytes);
+  assert.equal(createHash('sha256').update(bytes).digest('hex'),receipt.data.sha256);
+  assert.equal(bytes.readUInt32LE(0),0x04034b50);
+  const repeated = runCli(['doctor','export','--output',output,'--json']);
+  assert.equal(repeated.status,2,repeated.stdout+repeated.stderr);
+  assert.equal(JSON.parse(repeated.stdout.trim()).code,'validation_error');
+  assert.deepEqual(fs.readFileSync(output),bytes);
 });
 
 test("status 与 limits API 在同一服务实例可用", { skip }, async () => {
@@ -300,5 +317,5 @@ test("System Smoke runtime 位于隔离目录", { skip }, () => {
   const marker = readRunMarker(runMarkerPath);
   assert.equal(marker?.runId, runId);
   assert.equal(path.resolve(marker?.executablePath || ""), path.resolve(runtimeExe));
-  assert.ok(fs.existsSync(path.join(runtimeDir, "nexus-pipeline.exe")));
+  assert.ok(fs.existsSync(path.join(runtimeDir, "NexusPipeline.exe")));
 });

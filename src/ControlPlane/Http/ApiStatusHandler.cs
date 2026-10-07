@@ -50,6 +50,9 @@ internal static class ApiStatusHandler
         actualPort = WebServer.Current?.Port ?? settings.WebPort,
         version = UpdateService.CurrentVersion,
         frontendBuildId = HostInstance.FrontendBuildId,
+        desktopBuildId = HostInstance.DesktopBuildId,
+        bootstrapProtocolVersion = 1,
+        installationGeneration = "g0170",
     };
 
     private static object BuildStatus(
@@ -78,6 +81,9 @@ internal static class ApiStatusHandler
             restartHandoffId = HostInstance.RestartHandoffId,
             ready = HostInstance.Ready,
             frontendBuildId = HostInstance.FrontendBuildId,
+            desktopBuildId = HostInstance.DesktopBuildId,
+            bootstrapProtocolVersion = 1,
+            installationGeneration = "g0170",
             time = DateTime.Now,
             lightweightMode = settings.LightweightMode,
             webPort = settings.WebPort,

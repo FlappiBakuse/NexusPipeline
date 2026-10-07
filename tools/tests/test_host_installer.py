@@ -29,9 +29,10 @@ class HostInstallerTests(unittest.TestCase):
             root = Path(temporary)
             payload = root / "production"
             source = {
-                "nexus-pipeline.exe": b"exe",
+                "NexusPipeline.exe": b"exe",
                 "README.md": b"readme",
-                "wwwroot/index.html": b"page",
+                "resources/payload-manifest.json": b"manifest",
+                "resources/desktop/NexusPipeline.Desktop.exe": b"desktop",
                 "plugins/EmulatorSupport/plugin.json": b"one",
                 "plugins/LiveScreenshot/plugin.json": b"two",
             }
@@ -39,7 +40,7 @@ class HostInstallerTests(unittest.TestCase):
                 path = payload / name
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(data)
-            metadata = {"version": "0.16.9", "payloadFiles": [
+            metadata = {"sha256": "a" * 64, "version": "0.17.0", "payloadFiles": [
                 {"path": name, "sizeBytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
                 for name, data in source.items()]}
             files = verified_payload(payload, metadata)
@@ -52,12 +53,12 @@ class HostInstallerTests(unittest.TestCase):
             self.assertIn("onlyifdoesntexist", script)
             manifest_line = next(line for line in script.splitlines() if line.startswith('[{"Path":'))
             inventory = json.loads(manifest_line)
-            self.assertEqual({item["Path"] for item in inventory}, {"nexus-pipeline.exe", "README.md", "wwwroot/index.html"})
+            self.assertEqual({item["Path"] for item in inventory}, {"NexusPipeline.exe", "README.md", "resources/payload-manifest.json", "resources/desktop/NexusPipeline.Desktop.exe"})
             self.assertEqual(next(item["Sha256"] for item in inventory if item["Path"] == "README.md"),
                              hashlib.sha256(source["README.md"]).hexdigest())
             self.assertIn("VerifyStagedFile('README.md'", script)
-            self.assertIn("DestDir: \"{app}\\.nxp-update\\staging\\0.16.9\"", script)
-            self.assertNotIn("staging\\0.16.9\\plugins", script)
+            self.assertIn("DestDir: \"{app}\\.nxp-update\\staging\\0.17.0\"", script)
+            self.assertNotIn("staging\\0.17.0\\plugins", script)
 
             (payload / "plugins/LiveScreenshot/plugin.json").write_bytes(b"changed")
             with self.assertRaisesRegex(HostReleaseError, "字节不同"):

@@ -229,13 +229,13 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <main id="view" class="view-root plugin-page" data-testid="main-view">
+  <main id="view" class="view-root workspace-page page-plugins plugin-page" data-testid="main-view">
     <NxpPageHeader
       class="plugin-page-head"
       :description="activeTab === 'store' ? t('plugins.page.help') : t('plugins.installed.help')"
     >
       <template #eyebrow>{{ t("common.plugin") }}</template>
-      <template #title>{{ t("common.plugin") }}</template>
+      <template #title>{{ t("shell.plugins") }}</template>
       <template #actions>
         <NxpTabs
           class="plugin-page-tabs"

@@ -6,12 +6,35 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { collectChanges, parseNameStatus, planForChanges, readRegistry } from "./scope-plan.mjs";
 import { defaultPartner } from "./ci-inputs.mjs";
+import {workingTreeSha} from './control-inputs.mjs';
 
 const root = path.resolve(import.meta.dirname, "..");
 const { registry } = readRegistry(root);
 const policy = JSON.parse(fs.readFileSync(path.join(root, "tests/policy.json"), "utf8"));
 const ids = changes => planForChanges(root, changes, registry, policy).selected.map(item => item.id);
 const change = name => [{ status: "M", path: name }];
+
+test('uncommitted build tree matches Git objects without changing its real index',()=>{
+  const directory=fs.mkdtempSync(path.join(os.tmpdir(),'nxp-build-tree-'));
+  const git=(...args)=>execFileSync('git',['-C',directory,...args],{encoding:'utf8'}).trim();
+  try {
+    git('init','--quiet');
+    fs.writeFileSync(path.join(directory,'.gitattributes'),'* text=auto\n*.cmd text eol=crlf\n');
+    fs.writeFileSync(path.join(directory,'README.md'),'first\n');
+    fs.writeFileSync(path.join(directory,'build.cmd'),'build\r\n');
+    fs.mkdirSync(path.join(directory,'assets'));
+    fs.writeFileSync(path.join(directory,'assets','blob.bin'),Buffer.from([0,255,13,10]));
+    git('add','.');
+    const first=git('write-tree');
+    assert.equal(workingTreeSha(directory),first);
+    fs.writeFileSync(path.join(directory,'README.md'),'second\n');
+    const changed=workingTreeSha(directory);
+    assert.notEqual(changed,first);
+    assert.equal(git('write-tree'),first);
+    git('add','.');
+    assert.equal(changed,git('write-tree'));
+  } finally {fs.rmSync(directory,{recursive:true});}
+});
 
 test("default partner input requires the official main policy", () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "nxp-default-partner-"));
@@ -52,6 +75,14 @@ test("unknown backend source widens selection and identifies policy owner", () =
   assert.ok(selected.includes("host.ci-policy"));
   assert.ok(selected.includes("host.architecture.backend"));
   assert.ok(selected.includes("host.backend.execution"));
+});
+
+test("frozen build identity selects both producer and runtime validation", () => {
+  for (const file of ["tools/build_identity.py", "tools/tests/test_build_identity.py",
+    "tools/schemas/build-inputs.schema.json", "tools/schemas/desktop-build.schema.json",
+    "tests/fixtures/build-identity/build-inputs.example.json"])
+    for (const id of ["host.release-contract", "host.backend.updates-restart", "host.build.test-host"])
+      assert.ok(ids(change(file)).includes(id), `${file}: ${id}`);
 });
 
 test("git name-status parser retains both rename paths and deletions", () => {

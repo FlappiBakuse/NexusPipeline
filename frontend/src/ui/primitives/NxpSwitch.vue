@@ -23,7 +23,7 @@ function toggle() { if (props.disabled) return; const value = !props.modelValue;
   align-items: center;
   justify-content: center;
   padding: 0 2px;
-  border: 1px solid var(--content-control-border, var(--nx-color-border));
+  border: 0;
   border-radius: 999px;
   background: var(--content-control, var(--nx-color-surface));
   color: transparent;

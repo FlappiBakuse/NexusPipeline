@@ -1,16 +1,3 @@
-function applyHoverScroll(el: HTMLElement, inner: HTMLElement, enabled = true): void {
-  const width = inner.scrollWidth;
-  if (!enabled || width <= el.clientWidth + 1) {
-    inner.style.removeProperty("width");
-    el.style.removeProperty("--hover-scroll-x");
-    el.classList.remove("is-overflowing");
-    return;
-  }
-  inner.style.width = `${width}px`;
-  el.style.setProperty("--hover-scroll-x", `${el.clientWidth - width}px`);
-  el.classList.add("is-overflowing");
-}
-
 /** 滚动提示浮层显隐：输入框有值或聚焦时隐藏（原生 placeholder 无法滚动，改用浮层；:placeholder-shown 对无 placeholder 属性的输入框不可靠）。 */
 function initInputHints(root: HTMLElement): void {
   root.querySelectorAll<HTMLElement>(".input-scroll").forEach(wrap => {
@@ -40,16 +27,6 @@ export function initAutoScroll(root: HTMLElement | null = document.querySelector
       el.classList.remove("scrolling", "is-overflowing");
       el.style.removeProperty("--scroll-x");
     }
-  });
-  root.querySelectorAll<HTMLElement>(".plugin-name-scroll").forEach(el => {
-    const inner = el.querySelector<HTMLElement>(":scope > .plugin-name-scroll-inner");
-    if (inner) applyHoverScroll(el, inner);
-  });
-  root.querySelectorAll<HTMLElement>(".plugin-detail-name-scroll").forEach(el => {
-    const inner = el.querySelector<HTMLElement>(":scope > .plugin-detail-name-scroll-inner");
-    if (!inner) return;
-    const narrowViewport = window.matchMedia?.("(max-width: 767px)")?.matches ?? true;
-    applyHoverScroll(el, inner, narrowViewport && el.clientWidth > 0);
   });
   initInputHints(root);
 }

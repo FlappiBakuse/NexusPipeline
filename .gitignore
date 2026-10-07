@@ -25,6 +25,7 @@ scheduler-state.json
 .nxp-update-worker-*.exe
 tests/e2e/node_modules/
 **/node_modules/
+desktop/out/
 tests/.artifacts/
 playwright-report/
 .build-src-hash

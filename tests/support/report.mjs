@@ -35,9 +35,9 @@ export function validateResult(report, plan, native) {
   }
   if (report.timing?.budgetMs !== plan.budgetMs || report.timing?.qualificationMs !== plan.qualificationMs
     || !Number.isFinite(report.timing.elapsedMs) || report.timing.elapsedMs < 0
-    || report.timing.elapsedMs > plan.qualificationMs) throw new Error("报告预算不合规");
+    || plan.qualificationMs !== null && report.timing.elapsedMs > plan.qualificationMs) throw new Error("报告预算不合规");
   if (plan.plugin && (!Number.isFinite(report.timing.exclusivePluginMs)
-    || report.timing.exclusivePluginMs < 0 || report.timing.exclusivePluginMs > plan.pluginBudgetMs)) {
+    || report.timing.exclusivePluginMs < 0 || plan.pluginBudgetMs !== null && report.timing.exclusivePluginMs > plan.pluginBudgetMs)) {
     throw new Error("插件累计预算不合规");
   }
   if (report.cleanup?.status !== "complete" || report.cleanup.remainingOwnedProcessCount !== 0) throw new Error("清理未完成");

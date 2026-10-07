@@ -15,13 +15,13 @@
 - `doctor` 与 `doctor export` 通过同一诊断服务检查宿主权限、监听器、更新/配置恢复现场、执行/调度状态、插件和外部依赖；安装目录写权限项使用受控临时探针并在检查后清理，支持包只写入脱敏后的诊断事实、插件/运行时状态与最近日志尾部。
 - `run script/queue --dry-run` 以及对应的 Control API 只构建当前冻结计划并调用执行状态的共享准入评估，返回用户状态、资源、任务、完成操作和稳定失败码，不登记运行或触发副作用。
 
-轻量模式仍启动 Control API，监听地址固定为 `127.0.0.1`，仅关闭静态 Web UI 与浏览器自动打开。这样命令行自动拉起服务、脚本化调用和本机管理菜单在轻量模式下仍共享同一运行时状态。
+轻量模式运行常驻服务、托盘、Control API 和静态 Web UI，不创建或恢复 Electron 会话。两种模式均按 `AllowRemoteAccess` 选择监听地址，并共享现役认证、来源校验和实际端口防火墙策略。轻量模式冷启动的默认浏览器由 `OpenDesktopOnStartup` 控制；显式后台和重启不自动打开，重复双击与托盘激活则主动打开实际监听端口。
 
 
 
 ## MCP Agent 控制面
 
-宿主在同一个 `nexus-pipeline.exe` 进程内嵌 MCP Server。现有 `HttpListener` 继续承载 Web UI 与 Control API，MCP 使用官方 `ModelContextProtocol.AspNetCore` 的 Streamable HTTP transport，端点为：
+宿主在同一个 `NexusPipeline.exe` 进程内嵌 MCP Server。现有 `HttpListener` 继续承载 Web UI 与 Control API，MCP 使用官方 `ModelContextProtocol.AspNetCore` 的 Streamable HTTP transport，端点为：
 
 ```text
 http://127.0.0.1:<McpPort>/mcp
@@ -31,7 +31,7 @@ MCP 的启动条件和运行语义如下：
 
 - `McpEnabled` 默认关闭；关闭时进程不创建 MCP Kestrel listener。
 - `McpPort` 默认 `58732`，有效范围为 `1024–65535`。端口是 Agent 配置的一部分，发生占用时记录错误并保持 MCP 不可用，Control API 继续工作，端口不会自动漂移。
-- `LightweightMode` 保留 Control API；MCP 是否启动仍由 `McpEnabled` 独立决定，Web UI 继续关闭。
+- `LightweightMode` 保留 Control API 和 Web UI；MCP 是否启动仍由 `McpEnabled` 独立决定。
 - 宿主停止时按 MCP → Scheduler/恢复任务 → Web → 插件的顺序执行清理；MCP 停止异常只记录诊断，不阻断其余清理步骤。
 
 MCP 只保留面向 Agent 的核心子集（22 个工具）：只读工具覆盖状态、诊断、运行计划解释、脚本、用户、队列、运行、历史、插件、脱敏设置和更新状态；常规变更工具覆盖运行/取消、脚本与用户的创建、绑定管理和取消系统操作。删除类、密钥、插件安装/开关、商店、服务重启和更新应用等高风险或低频运维操作不进入 MCP 工具面，由本地 CLI 与管理页面承担。工具元数据和调用前的应用策略同时参与风险控制，队列完成后的休眠、重启、关机、退出等系统操作保持由本地管理路径配置。
@@ -81,6 +81,6 @@ MCP 位于同一主进程的协议适配层。`McpHost` 只在 `McpEnabled` 时�
 
 重启请求从 Web handler 或 CLI 进入 `Bootstrap.RequestRestart`，再由 `HostRestartCoordinator` 取得 `DispatchCenter` 提供的 `HostMaintenanceLease`。租约与 `ExecutionStateStore` 的执行、编辑、宿主配置变更协调锁共享同一准入域；CLI 通过 `/api/settings/restart` 复用该入口。`run_queue` 额外使用 `McpPolicy.ValidateQueueExecution` 复核已有队列的完成操作，因此队列创建来源不会改变 MCP 执行护栏。
 
-重启恢复使用实例身份协议：`HostInstance` 为每个进程生成一次 `instanceId`，接受重启的旧实例生成 `handoffId` 并随 `nexus-pipeline.exe restart --handoff <id>` 交给子进程，子进程在 `StartupPipeline.RunRestart` 中接管。`GET /api/status` 暴露 `instanceId`、`restartHandoffId` 与 `actualPort`，`POST /api/settings/restart` 返回 `newPort`、`handoffId` 与旧实例 `instanceId`。控制面前端按配置端口与宿主顺延端口逐个读取 `/api/status`，只接受携带本次 `handoffId` 且 `instanceId` 不同于旧实例的应答，再跳转到 `actualPort`；无关 HTTP 服务、仍在应答的旧实例与超时都不会触发跳转。只读的 `GET /api/status` 因此放行同主机的其他端口并返回可读 CORS 应答，其余接口保持同源要求。
+重启恢复使用实例身份协议：`HostInstance` 为每个进程生成一次 `instanceId`，接受重启的旧实例生成 `handoffId` 并随 `NexusPipeline.exe restart --handoff <id>` 交给子进程，子进程在 `StartupPipeline.RunRestart` 中接管。`GET /api/status` 暴露 `instanceId`、`restartHandoffId` 与 `actualPort`，`POST /api/settings/restart` 返回 `newPort`、`handoffId` 与旧实例 `instanceId`。控制面前端按配置端口与宿主顺延端口逐个读取 `/api/status`，只接受携带本次 `handoffId` 且 `instanceId` 不同于旧实例的应答，再跳转到 `actualPort`；无关 HTTP 服务、仍在应答的旧实例与超时都不会触发跳转。只读的 `GET /api/status` 因此放行同主机的其他端口并返回可读 CORS 应答，其余接口保持同源要求。
 
 运行观察的 SSE 连接沿用同一 Origin 与 Bearer 认证边界，浏览器因远程 Bearer 头限制而通过 `fetch` + `ReadableStream` 消费事件。服务端不接受查询字符串令牌、不实现 `Last-Event-ID` 重放；`stream.ready` 与 `stream.missed` 只触发当前页面重新读取 `/api/status`，网络错误按 500ms、1s、2s、5s、10s 的上限退避重连，4xx 认证/请求错误交给页面重新认证或维持轮询。运行日志在内存中最多保留每个运行 500 行，旧行淘汰时以截断标记提示页面。

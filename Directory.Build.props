@@ -1,10 +1,10 @@
 <Project>
   <PropertyGroup>
-    <NexusInstallationGeneration>g01615</NexusInstallationGeneration>
+    <NexusInstallationGeneration>g0170</NexusInstallationGeneration>
     <RuntimeFrameworkVersion>10.0.12</RuntimeFrameworkVersion>
     <RollForward>LatestPatch</RollForward>
   </PropertyGroup>
-  <Target Name="GenerateInstallationGeneration" BeforeTargets="CoreCompile" Condition="'$(MSBuildProjectName)' == 'NexusPipeline'">
+  <Target Name="GenerateInstallationGeneration" BeforeTargets="CoreCompile" Condition="'$(MSBuildProjectName)' == 'NexusPipeline' or '$(NexusGenerateInstallationGeneration)' == 'true'">
     <PropertyGroup>
       <_GenerationSource>$(IntermediateOutputPath)InstallationGeneration.g.cs</_GenerationSource>
     </PropertyGroup>
