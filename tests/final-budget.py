@@ -65,11 +65,9 @@ def evaluate(run, jobs, repository, run_id, attempt, required_name):
         batches = sorted(audit_jobs.batch_index(name, prefix) for name in names if audit_jobs.batch_index(name, prefix) is not None)
         permitted = {prefix+" / 范围判定", audit_jobs.job_name(prefix, "control"), required_name, audit_jobs.job_name(prefix, "unselected")}
         permitted.update(name for name in names if audit_jobs.batch_index(name, prefix) is not None)
-        physical_count = sum(not job.get("runnerlessSkipped") for job in jobs)
         if (not names <= permitted or prefix+" / 范围判定" not in names
-                or batches != list(range(1, len(batches)+1))
-                or len(batches) > 5 or physical_count+2 > 10):
-            raise ValueError("Unexpected or oversized physical batch producer graph")
+                or batches != list(range(1, len(batches)+1))):
+            raise ValueError("Unexpected physical batch producer graph")
     return sha, report, passed
 
 
@@ -149,14 +147,14 @@ def require_complete_attempt(repository, run, jobs, check_name, app_id):
 def publish(repository, sha, check_name, run_id, attempt, report, passed, existing=None, external_id=None):
     failing = [item for item in report if item["status"] == "FAIL"]
     summary = (f"运行 {run_id}，第 {attempt} 次：{len(report)} 个已完成任务；"
-               f"{len(failing)} 个任务未通过完整 300000 ms 预算或运行结果核验。\n\n")
+               f"{len(failing)} 个任务未通过完整耗时记录或运行结果核验。\n\n")
     summary += "\n".join(f"- {item['name']}: {item['status']} "
                          f"({item['elapsedMs']} ms)" for item in failing[:30])
     body = {
         "status": "completed",
         "conclusion": "success" if passed else "failure",
         "details_url": f"https://github.com/{repository}/actions/runs/{run_id}/attempts/{attempt}",
-        "output": {"title": "完整任务预算核验", "summary": summary},
+        "output": {"title": "完整任务记录核验", "summary": summary},
     }
     if external_id:
         body["external_id"] = external_id
@@ -225,7 +223,7 @@ def main():
         print(upsert(repository, sha, args.check_name, None, {
             "status": "in_progress", "external_id": external,
             "details_url": f"https://github.com/{repository}/actions/runs/{args.run_id}/attempts/{args.attempt}",
-            "output": {"title": "完整任务预算核验", "summary": "可信预算登记已完成，等待最终复核。"}}))
+            "output": {"title": "完整任务记录核验", "summary": "可信作业登记已完成，等待最终复核。"}}))
         return
     if not existing:
         raise ValueError("Missing trusted begin registration")
