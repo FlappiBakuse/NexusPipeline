@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import NxpOverflowText from "../../../ui/primitives/NxpOverflowText.vue";
 import { computed, nextTick, ref, watch } from "vue";
 import { getLocale, t } from "../../../platform/i18n";
 import NxpBadge from "../../../ui/primitives/NxpBadge.vue";
@@ -132,7 +133,7 @@ function configSettingHint(check: TaskConfigCheck) {
         <ol class="task-steps">
           <li v-for="(task, index) in businessTasks" :key="task.id" :data-task-id="task.id" class="task-step">
             <span class="task-marker" :data-status="status(task.id)" aria-hidden="true">{{ index + 1 }}</span>
-            <span class="task-step-name" :title="taskName(task)">{{ taskName(task) }}</span>
+            <span class="task-step-name"><NxpOverflowText :label="taskName(task)" /></span>
             <NxpBadge class="task-step-status" :tone="tone(status(task.id))">{{ taskStatusLabel(status(task.id), report) }}</NxpBadge>
           </li>
         </ol>
@@ -163,6 +164,7 @@ function configSettingHint(check: TaskConfigCheck) {
 <style scoped>
 .task-report { display: grid; gap: 8px; min-width: 0; overflow-wrap: anywhere; }
 .task-admission-blocked, .task-config-assessment { margin: 0; padding: 12px; border: 1px solid var(--nx-color-border); border-radius: var(--radius-lg, var(--nx-radius-lg)); background: var(--content-card-soft); }
+.task-config-assessment { padding-inline: var(--space-5, var(--nx-space-5)); }
 .task-admission-blocked { display: grid; gap: 4px; color: var(--bad); }
 .task-admission-blocked span { color: var(--nx-color-muted); font-size: 12px; }
 .task-config-header, .task-config-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }

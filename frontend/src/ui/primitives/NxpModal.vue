@@ -111,7 +111,7 @@ onBeforeUnmount(() => {
   <Transition name="nxp-modal" appear>
     <div v-if="props.open" ref="root" v-bind="attrs" class="nxp-modal" role="dialog" aria-modal="true" tabindex="-1" :aria-label="props.ariaLabel || props.title || undefined">
       <div v-if="props.closeable" class="nxp-modal-backdrop" aria-hidden="true" @pointerdown="preventBackdropFocus" @click="onBackdropClick"></div>
-      <section ref="panel" class="nxp-modal-panel" :class="[props.panelClass, { 'nxp-modal-panel--wide': props.size === 'wide', 'is-secondary': props.surface === 'secondary', 'nxp-modal-panel--with-footer': props.footer || Boolean($slots.footer) }]" tabindex="-1" :data-locked="props.locked ? '' : undefined">
+      <section ref="panel" class="nxp-modal-panel secondary-surface" :class="[props.panelClass, { 'nxp-modal-panel--wide': props.size === 'wide', 'is-secondary': props.surface === 'secondary', 'nxp-modal-panel--with-footer': props.footer || Boolean($slots.footer) }]" tabindex="-1" :data-locked="props.locked ? '' : undefined">
         <header v-if="title || closeable || $slots.header" class="nxp-modal-header">
           <slot name="header"><h2 v-if="title" class="nxp-modal-title">{{ title }}</h2></slot>
           <button v-if="closeable" class="icon-button nxp-modal-close" type="button" :aria-label="props.closeLabel" @click="emit('close')"><NxpIcon name="close" class-name="nxp-modal-close-icon" /></button>

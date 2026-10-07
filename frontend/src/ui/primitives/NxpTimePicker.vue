@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import NxpIcon from "./NxpIcon.vue";
 import { nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { bindFloatingReposition, positionFloatingOverlay } from "../floating";
 
@@ -82,12 +83,12 @@ onBeforeUnmount(() => {
 
 <template>
   <div ref="root" class="nxp-time">
-    <div ref="anchor" class="nxp-time-input-wrap"><input :id="props.id || undefined" class="nxp-time-value" type="text" readonly :value="value()" :disabled="disabled" :aria-label="ariaLabel" aria-haspopup="dialog" :aria-expanded="open" :aria-controls="popoverId" @click="toggle"><button class="nxp-time-trigger" type="button" :disabled="disabled" :aria-label="`${ariaLabel}选择`" :aria-expanded="open" @click="toggle">⌄</button></div>
+    <div ref="anchor" class="nxp-time-input-wrap"><input :id="props.id || undefined" class="nxp-time-value" type="text" readonly :value="value()" :disabled="disabled" :aria-label="ariaLabel" aria-haspopup="dialog" :aria-expanded="open" :aria-controls="popoverId" @click="toggle"><button class="nxp-time-trigger" type="button" :disabled="disabled" :aria-label="`${ariaLabel}选择`" :aria-expanded="open" @click="toggle"><NxpIcon name="chevronDown" class-name="nxp-time-chevron" /></button></div>
     <Teleport to="body">
       <div ref="popover" v-show="open" :id="popoverId" class="nxp-time-popover secondary-surface" role="dialog" :aria-label="ariaLabel">
         <div class="nxp-time-columns">
-          <div class="nxp-time-wheel" role="group" aria-label="小时"><button class="nxp-time-step" type="button" aria-label="减少小时" @click="adjust('hour', -1)">⌃</button><div class="nxp-time-viewport" role="listbox" aria-label="小时"><button v-for="offset in [-1, 0, 1]" :key="`h-${offset}`" class="nxp-time-option" :aria-selected="offset === 0" type="button" @click="choose('hour', (hour + offset + 24) % 24)">{{ text((hour + offset + 24) % 24) }}</button></div><button class="nxp-time-step" type="button" aria-label="增加小时" @click="adjust('hour', 1)">⌄</button></div>
-          <div class="nxp-time-wheel" role="group" aria-label="分钟"><button class="nxp-time-step" type="button" aria-label="减少分钟" @click="adjust('minute', -1)">⌃</button><div class="nxp-time-viewport" role="listbox" aria-label="分钟"><button v-for="offset in [-1, 0, 1]" :key="`m-${offset}`" class="nxp-time-option" :aria-selected="offset === 0" type="button" @click="choose('minute', (minute + offset + 60) % 60)">{{ text((minute + offset + 60) % 60) }}</button></div><button class="nxp-time-step" type="button" aria-label="增加分钟" @click="adjust('minute', 1)">⌄</button></div>
+          <div class="nxp-time-wheel" role="group" aria-label="小时"><button class="nxp-time-step" type="button" aria-label="减少小时" @click="adjust('hour', -1)">⌃</button><div class="nxp-time-viewport" role="listbox" aria-label="小时"><button v-for="offset in [-1, 0, 1]" :key="`h-${offset}`" class="nxp-time-option" :aria-selected="offset === 0" type="button" @click="choose('hour', (hour + offset + 24) % 24)">{{ text((hour + offset + 24) % 24) }}</button></div><button class="nxp-time-step" type="button" aria-label="增加小时" @click="adjust('hour', 1)"><NxpIcon name="chevronDown" class-name="nxp-time-chevron" /></button></div>
+          <div class="nxp-time-wheel" role="group" aria-label="分钟"><button class="nxp-time-step" type="button" aria-label="减少分钟" @click="adjust('minute', -1)">⌃</button><div class="nxp-time-viewport" role="listbox" aria-label="分钟"><button v-for="offset in [-1, 0, 1]" :key="`m-${offset}`" class="nxp-time-option" :aria-selected="offset === 0" type="button" @click="choose('minute', (minute + offset + 60) % 60)">{{ text((minute + offset + 60) % 60) }}</button></div><button class="nxp-time-step" type="button" aria-label="增加分钟" @click="adjust('minute', 1)"><NxpIcon name="chevronDown" class-name="nxp-time-chevron" /></button></div>
         </div>
       </div>
     </Teleport>
@@ -112,4 +113,10 @@ onBeforeUnmount(() => {
 .nxp-time-option:hover, .nxp-time-option:focus-visible { background: var(--content-control-hover, transparent); color: var(--nx-color-text); }
 .nxp-time-option[aria-selected="true"] { background: var(--accent-soft, transparent); color: var(--accent, var(--nx-color-accent)); font-weight: 750; box-shadow: inset 0 1px 0 var(--accent, currentColor), inset 0 -1px 0 var(--accent, currentColor); }
 .nxp-time-popover { position: fixed !important; z-index: 1000; }
+</style>
+
+<style>
+.nxp-time-trigger { display: grid; place-items: center; }
+.nxp-time-chevron { width: 16px; height: 16px; transition: transform .15s ease; }
+.nxp-time-trigger[aria-expanded="true"] .nxp-time-chevron { transform: rotate(180deg); }
 </style>

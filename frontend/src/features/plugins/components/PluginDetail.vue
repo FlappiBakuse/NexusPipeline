@@ -71,15 +71,14 @@ function hasPendingAction() {
         <div class="plugin-detail-head">
           <div class="plugin-detail-title">
             <div>
-              <NxpBadge :tone="pluginKindTone(plugin)">{{ pluginKindLabel(plugin, t) }}</NxpBadge>
-              <NxpBadge :tone="pluginStatusView(plugin, tab, t).tone">{{ pluginStatusView(plugin, tab, t).label }}</NxpBadge>
+              <NxpBadge wrap :tone="pluginKindTone(plugin)">{{ pluginKindLabel(plugin, t) }}</NxpBadge>
+              <NxpBadge wrap :tone="pluginStatusView(plugin, tab, t).tone">{{ pluginStatusView(plugin, tab, t).label }}</NxpBadge>
             </div>
-            <h3 class="plugin-detail-name-scroll" tabindex="0" :title="plugin.displayName || plugin.name">
-              <span class="plugin-detail-name-scroll-inner">{{ plugin.displayName || plugin.name }}</span>
-            </h3>
+            <h3>{{ plugin.displayName || plugin.name }}</h3>
           </div>
           <div class="plugin-detail-actions">
             <NxpButton
+              wrap
               v-if="tab === 'local'"
               class="tertiary"
               :busy="isActionBusy(plugin.configuredEnabled ? 'disable' : 'enable', String(plugin.name))"
@@ -91,6 +90,7 @@ function hasPendingAction() {
             <template v-else>
               <span v-if="storeActionNotice(plugin, t)" class="muted">{{ storeActionNotice(plugin, t) }}</span>
               <NxpButton
+                wrap
                 v-for="item in actions(plugin)"
                 :key="item.action"
                 :class="item.tone"
@@ -127,7 +127,7 @@ function hasPendingAction() {
             <dt>{{ t("plugins.tags") }}</dt>
             <dd>
               <span v-if="pluginTags(plugin).length" class="plugin-detail-tags">
-                <NxpBadge v-for="tag in pluginTags(plugin)" :key="tag" tone="muted">{{ tag }}</NxpBadge>
+                <NxpBadge v-for="tag in pluginTags(plugin)" :key="tag" tone="muted" wrap>{{ tag }}</NxpBadge>
               </span>
               <span v-else class="muted">{{ t("plugins.not_provided") }}</span>
             </dd>

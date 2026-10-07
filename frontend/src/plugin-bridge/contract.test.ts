@@ -14,6 +14,8 @@ const blobCalls: string[] = [];
 const uploadCalls: Array<{ method: string; path: string; contentType: string }> = [];
 const appearanceCalls: string[] = [];
 let apiResponder: (method: string, path: string, body: unknown) => unknown = () => null;
+let currentLocale = "zh-CN";
+const localeListeners = new Set<() => void>();
 
 vi.mock("./host-adapter", () => ({
   getCapabilities: async () => ({ schemaVersion: 1, connectionKind: "local", operations: { general: { allowed: true, denyReason: null }, hostFilePicker: { allowed: true, denyReason: null }, nativeConfigEditor: { allowed: true, denyReason: null } } }),
@@ -34,7 +36,8 @@ vi.mock("./host-adapter", () => ({
   formatList: (values: unknown) => (Array.isArray(values) ? values.join("、") : String(values ?? "")),
   formatNumber: (value: unknown) => String(value ?? ""),
   formatTime: (value: unknown) => String(value ?? ""),
-  getLocale: () => "zh-CN",
+  getLocale: () => currentLocale,
+  onLocaleChanged: (listener: () => void) => { localeListeners.add(listener); return () => localeListeners.delete(listener); },
   t: (key: string, args: Record<string, unknown> = {}, fallback = "") => {
     const template = fallback || key;
     return Object.entries(args || {}).reduce(
@@ -289,8 +292,10 @@ describe("Frontend API 1.6 contract", () => {
   it("registers navigation items, syncs active state, and removes them on dispose", () => {
     installFixtureNav();
     const descriptor = descriptorFixture();
+    Object.assign(descriptor.localization.locales, { "zh-CN": { greeting: "占位文案 {name}", navigation: "报表" }, "en-US": { navigation: "Reports" } });
+    currentLocale = "zh-CN";
     const host = createPluginHost(descriptor) as Host;
-    const nav = host.nav.register({ id: "reports", title: "报表", route: "reports", icon: "check", order: 2 });
+    const nav = host.nav.register({ id: "reports", title: "报表", titleKey: "navigation", route: "reports", icon: "check", order: 2 });
 
     const link = document.querySelector<HTMLAnchorElement>("[data-plugin-nav]");
     expect(link).not.toBeNull();
@@ -305,6 +310,12 @@ describe("Frontend API 1.6 contract", () => {
     expect(link!.classList.contains("active")).toBe(false);
     expect(link!.hasAttribute("aria-current")).toBe(false);
 
+    currentLocale = "en-US";
+    for (const listener of localeListeners) listener();
+    expect(document.querySelector("[data-plugin-nav]")!.textContent).toContain("Reports");
+    currentLocale = "zh-CN";
+    for (const listener of localeListeners) listener();
+
     const legacyNav = host.nav.register({ id: "legacy", title: "旧图标", route: "legacy", icon: "✓" });
     const legacyLink = document.querySelector<HTMLAnchorElement>(`[data-plugin-nav*="legacy"]`);
     expect(legacyLink?.querySelector("nxp-icon")).toBeNull();
@@ -314,6 +325,7 @@ describe("Frontend API 1.6 contract", () => {
     nav.dispose();
     legacyNav.dispose();
     expect(document.querySelector("[data-plugin-nav]")).toBeNull();
+    expect(localeListeners.size).toBe(0);
   });
 
   it("routes plugin api calls into the plugin namespace with all http verbs", async () => {

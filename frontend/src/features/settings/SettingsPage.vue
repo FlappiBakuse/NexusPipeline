@@ -54,6 +54,22 @@ const secretDraft = reactive<Record<string, string>>({
 });
 const saving = ref(false);
 const root = ref<HTMLElement | null>(null);
+const pluginCategories = ref<{ id: string; label: string }[]>([]);
+const panelOrder = ref<string[]>([]);
+const builtInPanels = [
+  ["service", "settings.service_behavior"], ["notifications", "settings.notification_channels"],
+  ["remote-mcp", "settings.remote_access.mcp"], ["network", "settings.network_proxy"],
+  ["advanced", "settings.advanced"], ["updates", "settings.update_settings"],
+  ["diagnostics", "settings.system_diagnostics"],
+];
+const categories = computed(() => {
+  const positions = new Map(panelOrder.value.map((id, index) => [id, index]));
+  return [
+    ...builtInPanels.map(([id, key]) => ({ id, label: t(key) })),
+    ...pluginCategories.value,
+  ].sort((left, right) => (positions.get(left.id) ?? Infinity) - (positions.get(right.id) ?? Infinity));
+});
+let pluginCategoryObserver: MutationObserver | null = null;
 const updatesSection = ref<InstanceType<typeof SettingsUpdatesSection> | null>(null);
 const settingsPanelToggleEvent = "nxp-settings-panel-toggle";
 const settingsPanelStateEvent = "nxp-settings-panel-state";
@@ -350,6 +366,35 @@ async function disposePluginSlots() {
   for (const slot of slots) await disposePluginSlot(slot);
 }
 
+function syncPluginCategories() {
+  if (disposed) return;
+  const ids = new Set(builtInPanels.map(([id]) => id));
+  const next: { id: string; label: string }[] = [];
+  root.value?.querySelectorAll<HTMLElement>('[data-plugin-slot="settings.cards"] nxp-collapsible-card[data-settings-panel]').forEach(card => {
+    const id = card.dataset.settingsPanel?.trim();
+    const label = card.title.trim();
+    if (!id || !label || ids.has(id)) return;
+    ids.add(id);
+    next.push({ id, label });
+  });
+  if (JSON.stringify(next) !== JSON.stringify(pluginCategories.value)) pluginCategories.value = next;
+  const order = [...new Set(Array.from(root.value?.querySelectorAll<HTMLElement>("[data-settings-panel]") || [])
+    .map(card => card.dataset.settingsPanel?.trim() || "").filter(id => ids.has(id)))];
+  if (JSON.stringify(order) !== JSON.stringify(panelOrder.value)) panelOrder.value = order;
+  if (openPanel.value && !ids.has(openPanel.value)) {
+    openPanel.value = null;
+    publishSettingsPanelState();
+  }
+}
+
+function observePluginCategories() {
+  if (disposed) return;
+  if (!root.value) return;
+  pluginCategoryObserver = new MutationObserver(syncPluginCategories);
+  pluginCategoryObserver.observe(root.value, { childList: true, subtree: true, attributes: true, attributeFilter: ["title", "data-settings-panel"] });
+  syncPluginCategories();
+}
+
 onMounted(async () => {
   disposed = false;
   unregisterDirtyGuard = registerRecoveryDirtyGuard(() =>
@@ -370,6 +415,7 @@ onMounted(async () => {
     loaded.value = true;
     loading.value = false;
     await paintPluginSlots();
+    observePluginCategories();
     publishSettingsPanelState();
   } catch (reason) {
     if (!isAbortError(reason)) {
@@ -380,6 +426,8 @@ onMounted(async () => {
 });
 onBeforeUnmount(() => {
   disposed = true;
+  pluginCategoryObserver?.disconnect();
+  pluginCategoryObserver = null;
   unregisterDirtyGuard?.();
   unregisterDirtyGuard = null;
   window.removeEventListener(settingsPanelToggleEvent, handleExternalSettingsPanelToggle);
@@ -404,7 +452,7 @@ onBeforeUnmount(() => {
       />
       <ServiceRestartNotice :before-restart="beforeRestart" />
       <nav class="settings-categories" :aria-label="t('settings.categories')">
-        <button v-for="[id, key] in [['service','settings.service_behavior'],['notifications','settings.notification_channels'],['remote-mcp','settings.remote_access.mcp'],['network','settings.network'],['updates','settings.update_settings'],['advanced','settings.advanced'],['diagnostics','settings.system_diagnostics']]" :key="id" type="button" :aria-pressed="panelExpanded(id)" @click="togglePanel(id)">{{ t(key) }}</button>
+        <button v-for="category in categories" :key="category.id" type="button" :aria-pressed="panelExpanded(category.id)" @click="togglePanel(category.id)">{{ category.label }}</button>
       </nav>
       <div class="settings-cards" data-testid="settings-cards">
         <SettingsServiceSection

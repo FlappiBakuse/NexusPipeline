@@ -142,6 +142,12 @@ export async function loadLocale(value: unknown = currentLocale): Promise<boolea
   return loaded;
 }
 
+const localeListeners = new Set<() => void>();
+export function onLocaleChanged(listener: () => void): () => void {
+  localeListeners.add(listener);
+  return () => { localeListeners.delete(listener); };
+}
+
 export async function setLocale(value: unknown): Promise<string> {
   const next = canonicalLocale(value);
   try {
@@ -154,6 +160,7 @@ export async function setLocale(value: unknown): Promise<string> {
     applyTranslations();
   }
   if(['zh-CN','en-US'].includes(currentLocale))void desktopBridge()?.setClientPreferences({locale:currentLocale as 'zh-CN'|'en-US'}).catch(()=>{});
+  for (const listener of localeListeners) listener();
   return currentLocale;
 }
 

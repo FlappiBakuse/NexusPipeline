@@ -13,6 +13,7 @@ import {
   createAppearanceHost,
   getCapabilities,
   getLocale,
+  onLocaleChanged,
   t,
   toast,
 } from "./host-adapter";
@@ -51,6 +52,7 @@ export function verifyPluginApiVersion(value) {
 const plugins = new Map();
 const routes = new Map();
 const navItems = new Map();
+let stopNavLocale = null;
 const slotRenderers = new Map();
 const lifecycle = new Map([
   ["onPageEnter", []],
@@ -112,7 +114,7 @@ function renderPluginNav() {
   const navs = document.querySelectorAll('[data-plugin-slot="shell.nav"], [data-plugin-anchor="shell.nav"]');
   navs.forEach(nav => {
     nav.querySelectorAll("[data-plugin-nav]").forEach(item => item.remove());
-    const items = Array.from(navItems.values())
+    const items = Array.from(navItems.values()).map(item => ({ ...item, title: item.resolveTitle() }))
       .sort((left, right) => (left.order - right.order) || left.title.localeCompare(right.title, "zh-CN"));
     items.forEach(item => {
       const link = document.createElement("a");
@@ -139,25 +141,30 @@ function renderPluginNav() {
   syncPluginNavActive(location.hash);
 }
 
-function registerNav(descriptor, item = {}) {
+function registerNav(descriptor, item = {}, host) {
   const id = String(item.id || item.route || "item").trim();
-  const title = String(item.title || "").trim();
+  const fallback = String(item.title || "").trim();
+  const titleKey = String(item.titleKey || "").trim();
+  const resolveTitle = () => titleKey ? host.i18n.t(titleKey, {}, fallback || titleKey) : fallback;
+  const title = resolveTitle();
   const route = normalizeRoute(item.route || id);
   if (!title || !route || !/^[^#?]+$/.test(route)) throw new TypeError(t("common.plugin_navigation_invalid"));
   const key = pluginKey(descriptor.name, id);
   if (navItems.has(key)) throw new Error(t("common.plugin_navigation_duplicate", { id }));
   const value = {
     key,
-    title,
+    resolveTitle,
     order: Number.isFinite(Number(item.order)) ? Number(item.order) : 0,
     icon: String(item.icon || "•"),
     href: `#/plugin/${encodeURIComponent(descriptor.name)}/${route.split("/").map(encodeURIComponent).join("/")}`,
     element: null,
   };
   navItems.set(key, value);
+  stopNavLocale ||= onLocaleChanged(renderPluginNav);
   renderPluginNav();
   return disposable(() => {
     navItems.delete(key);
+    if (!navItems.size) { stopNavLocale?.(); stopNavLocale = null; }
     renderPluginNav();
   });
 }
@@ -241,7 +248,7 @@ export function createPluginHost(descriptor) {  const host = {
       register: (route, handler) => registerRoute(descriptor, route, handler, host),
     },
     nav: {
-      register: item => registerNav(descriptor, item),
+      register: item => registerNav(descriptor, item, host),
     },
     slots: {
       register: (slot, renderer) => {
@@ -469,6 +476,7 @@ export function resetPluginRuntimeForTests() {
   plugins.clear();
   routes.clear();
   navItems.clear();
+  stopNavLocale?.(); stopNavLocale = null;
   slotRenderers.clear();
   lifecycle.forEach(list => { list.length = 0; });
   renderPluginNav();

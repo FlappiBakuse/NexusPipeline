@@ -30,7 +30,7 @@ export function formatHistoryDate(value: string) {
 /** 用于紧凑趋势标签的日期键展示，不包含年份。 */
 export function formatHistoryShortDate(value: string) {
   const parsed = new Date(`${value}T00:00:00`);
-  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleDateString(getLocale(), { month: "short", day: "numeric" });
+  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleDateString(getLocale(), { month: "numeric", day: "numeric" });
 }
 
 export function historyTodayValue(now: Date = new Date()) {

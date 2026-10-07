@@ -20,7 +20,7 @@
 - `host.api.blob(route, { query?, signal? })`：以 `GET` 读取二进制响应，返回 `Blob`；查询参数经 `query` 传入；
 - `host.api.upload(route, body, { method?, contentType?, query?, signal? })`：发送二进制请求体并读取 JSON 响应；`method` 缺省 `POST`，`contentType` 缺省取 `body.type`，再回退到 `application/octet-stream`；
 - `host.routes.register(route, handler)`：注册 `#/plugin/<name>/<route>` 页面路由；
-- `host.nav.register({ id, title, route, icon, order })`：向 `shell.nav` 增加导航项；
+- `host.nav.register({ id, title, titleKey, route, icon, order })`：向 `shell.nav` 增加导航项；可选 `titleKey` 从插件词典读取并随界面语言变化更新，`title` 作为回退文案；
 - `host.slots.register(slot, renderer)`：接入稳定 UI slot。renderer 接收 `{ element, context }`，在自己的 surface 中挂载内容并返回清理函数；
 - `host.ui.query/save/action(...)`：使用声明式 UI 贡献接口；`host.ui.toast(message, tone)` 显示宿主提示；
 - `host.lifecycle.onPageEnter/onPageLeave/onPageUpdated/onDispose(...)`：订阅页面生命周期；
@@ -44,6 +44,8 @@
 - `nxp-schedule-card`：props 为 `item-id`、`panel-id`、`summary-label`、`summary-meta`、`days-label`、`days-aria-label`、`time-label`、`expanded`、`drag-label` 和 `drag-title`；`days`、`time`、`actions` 具名 slot 由组件统一排布；点击摘要发出 `toggle`，新展开状态位于 `CustomEvent.detail[0]`，`item-id` 同时用于排序身份。
 
 设置页的折叠卡片由宿主统一协调，插件可以接入同一协议：插件展开自己的卡片时向 window 派发 `nxp-settings-panel-toggle`（`detail` 为 `{ panelId }`，收起时 `panelId` 为 `null`），并监听 `nxp-settings-panel-state`（`detail` 为 `{ panelId }`）以收起其它卡片。字段帮助文案使用宿主工具提示约定：在控件容器上设置 `data-help="说明文字"`。
+
+`settings.cards` 中的 `nxp-collapsible-card` 设置非空 `data-settings-panel` 和 `title` 后，宿主自动加入对应设置分类按钮，使用卡片的当前标题。所有分类按钮按下方卡片的实际顺序排列，沿用上述面板事件协议；卡片移除时入口一起移除，标题或位置变化时同步更新。面板标识须在设置页内唯一，不能与宿主内置标识重复。
 
 前端资源必须位于插件目录的 `web/` 下；宿主只允许 `GET`/`HEAD` 访问 `/plugin-assets/{plugin}/{relative}`，执行路径包含校验、扩展名白名单和文件存在校验，不提供目录浏览。允许的文件类型为 JS/MJS、CSS、JSON、SVG、PNG、JPG/JPEG、WEBP、GIF、ICO、WOFF/WOFF2。`plugin.json`、配置、密钥、程序集和调试符号不属于公开资源。
 

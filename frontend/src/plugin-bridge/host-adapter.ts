@@ -16,6 +16,7 @@ import {
   formatNumber,
   formatTime,
   getLocale,
+  onLocaleChanged,
   t,
 } from "../platform/i18n";
 import { clearFieldError, setRequiredFieldError, toast } from "../platform/toast";
@@ -42,6 +43,7 @@ export {
   formatNumber,
   formatTime,
   getLocale,
+  onLocaleChanged,
   t,
   clearFieldError,
   setRequiredFieldError,

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import NxpOverflowText from "../../../ui/primitives/NxpOverflowText.vue";
 import { t } from "../../../platform/i18n";
 import NxpBadge from "../../../ui/primitives/NxpBadge.vue";
 import NxpButton from "../../../ui/primitives/NxpButton.vue";
@@ -80,7 +81,7 @@ function usersOf(date: string) {
             >
               <span class="history-user-avatar" aria-hidden="true"><NxpIcon name="user" /></span>
               <span class="history-user-main">
-                <strong>{{ user.userName || t("history.no_user_specified") }}</strong>
+                <strong><NxpOverflowText>{{ user.userName || t("history.no_user_specified") }}</NxpOverflowText></strong>
                 <span v-if="user.userId" class="history-user-id">{{ user.userId }}</span>
                 <span class="history-user-badges">
                   <NxpBadge v-if="user.count != null" tone="muted">{{ t("history.summary.runs_short", { count: user.count }) }}</NxpBadge>

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import NxpOverflowText from "../../../ui/primitives/NxpOverflowText.vue";
 import { t } from "../../../platform/i18n";
 import NxpBadge from "../../../ui/primitives/NxpBadge.vue";
 import NxpButton from "../../../ui/primitives/NxpButton.vue";
@@ -72,11 +73,9 @@ function description(plugin: PluginViewPlugin) {
       >
         <span class="plugin-list-item-main">
           <span class="plugin-name-line">
-            <strong class="plugin-name-scroll" tabindex="0" :title="plugin.displayName || plugin.name">
-              <span class="plugin-name-scroll-inner">{{ plugin.displayName || plugin.name }}</span>
-            </strong>
+            <strong><NxpOverflowText>{{ plugin.displayName || plugin.name }}</NxpOverflowText></strong>
           </span>
-          <span class="muted plugin-list-description">{{ description(plugin) }}</span>
+          <span class="muted plugin-list-description"><NxpOverflowText :label="description(plugin)" /></span>
         </span>
         <span class="plugin-list-item-meta">
           <NxpBadge :tone="pluginKindTone(plugin)">{{ pluginKindLabel(plugin, t) }}</NxpBadge>

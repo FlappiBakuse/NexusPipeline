@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import { Comment, Text, useSlots } from "vue";
+import NxpOverflowText from "./NxpOverflowText.vue";
+const slots = useSlots();
+function textOnlySlot() { return !slots.default || slots.default().every(node => node.type === Text || node.type === Comment); }
 withDefaults(defineProps<{
   tone?: "default" | "primary" | "success" | "warning" | "danger";
   variant?: "solid" | "ghost";
@@ -9,7 +13,8 @@ withDefaults(defineProps<{
   busy?: boolean;
   /** 按钮文案；自定义元素消费方优先使用该属性，插槽内容作为替代写法。 */
   label?: string;
-}>(), { tone: "default", variant: "solid", size: "md", type: "button", disabled: false, busy: false, label: "" });
+  wrap?: boolean;
+}>(), { tone: "default", variant: "solid", size: "md", type: "button", disabled: false, busy: false, label: "", wrap: false });
 </script>
 
 <template>
@@ -19,7 +24,7 @@ withDefaults(defineProps<{
     :type="type"
     :disabled="disabled || busy"
     :aria-busy="busy ? 'true' : undefined"
-  ><slot>{{ label }}</slot></button>
+  ><NxpOverflowText v-if="textOnlySlot()" :label="label" :wrap="wrap"><slot>{{ label }}</slot></NxpOverflowText><slot v-else>{{ label }}</slot></button>
 </template>
 
 <style>
@@ -47,4 +52,8 @@ nxp-button > .nxp-button { flex: 1 1 auto; min-width: 0; }
   background: var(--nx-button-pressed-background, var(--accent-soft, var(--nx-color-accent-soft)));
   color: var(--nx-button-pressed-color, var(--accent, var(--nx-color-accent)));
 }
+</style>
+
+<style>
+.nxp-button > .nxp-overflow-text { min-width: 0; max-width: 100%; flex: 1 1 auto; }
 </style>

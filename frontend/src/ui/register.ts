@@ -1,5 +1,6 @@
 import { defineCustomElement, inject } from "vue";
 import Button from "./primitives/NxpButton.vue";
+import OverflowText from "./primitives/NxpOverflowText.vue";
 import Badge from "./primitives/NxpBadge.vue";
 import Card from "./primitives/NxpCard.vue";
 import Field from "./primitives/NxpField.vue";
@@ -43,6 +44,7 @@ import { PUBLIC_SLOT_PRESENCE } from "./slots";
 export const NEXUS_PUBLIC_ELEMENTS = {
   "nxp-button": Button,
   "nxp-badge": Badge,
+  "nxp-overflow-text": OverflowText,
   "nxp-card": Card,
   "nxp-field": Field,
   "nxp-text-input": TextInput,

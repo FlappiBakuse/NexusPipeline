@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import NxpOverflowText from "../../ui/primitives/NxpOverflowText.vue";
 import NxpBadge from "../../ui/primitives/NxpBadge.vue";
 import NxpEntityIcon from "../../ui/primitives/NxpEntityIcon.vue";
 import NxpButton from "../../ui/primitives/NxpButton.vue";
@@ -47,13 +48,12 @@ const emit = defineEmits<{
           :aria-label="translate('queues.editor.title', { name: queue.name })"
           @click="emit('edit', queue)"
         >
-          <span class="scroll-text"><span class="scroll-inner">{{ queue.name }}</span></span>
+          <NxpOverflowText>{{ queue.name }}</NxpOverflowText>
         </NxpButton>
         <div class="meta-line queue-meta">
           <NxpBadge tone="muted" data-testid="queue-card-tasks-badge">{{ translate("common.unit.tasks", { count: queue.tasks?.length || 0 }) }}</NxpBadge>
           <NxpBadge tone="muted" data-testid="queue-card-completion-badge">{{ queue.completionAction && queue.completionAction !== "none" ? translate("queues.completion.label", { action: queue.completionAction }) : translate("queues.completion.none") }}</NxpBadge>
           <NxpBadge v-if="pluginIssue" :tone="pluginIssue.tone" :title="pluginIssue.title">{{ pluginIssue.label }}</NxpBadge>
-          <NxpBadge v-if="queue.autoRunMode === 'none'" tone="blue" data-testid="queue-card-manual-badge">{{ translate("queues.manual_only") }}</NxpBadge>
           <NxpBadge tone="blue" data-testid="queue-next">{{ nextLabel }}</NxpBadge>
           <NxpBadge :tone="queue.notifyEnabled ? 'ok' : 'muted'" data-testid="queue-card-notify-badge">{{ queue.notifyEnabled ? translate("queues.notification.enabled") : translate("queues.notification.disabled") }}</NxpBadge>
           <div

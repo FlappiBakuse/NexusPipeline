@@ -14,6 +14,7 @@
 ## 选型原则
 
 - 普通动作使用 `nxp-button`，图标动作使用 `nxp-icon-button`；异步动作通过 `busy` 与 `disabled` 表达，组件负责阻止重复点击。
+- 卡片名称、按钮及徽章的紧凑长文字使用 `nxp-overflow-text`，保持单行并在悬停或聚焦时滚动；正文保持正常换行。详情区按钮或徽章可使用 `wrap=true` 正常换行。
 - 输入值使用受控 `modelValue`；调用方消费 `update:modelValue` 和 `change`，并为真实输入提供可访问名称。
 - 日期范围使用 `nxp-date-range-picker`，日期格式为 `YYYY-MM-DD`；组件维护未提交草稿，调用方在 `apply` 后保存范围。
 - 列表排序使用 `nxp-sortable-list` 配合 `nxp-drag-handle`；调用方保存完整的新 key 顺序并处理持久化错误。

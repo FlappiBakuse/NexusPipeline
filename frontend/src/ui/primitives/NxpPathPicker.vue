@@ -102,22 +102,31 @@ function browse(
       data-path-trigger
       data-testid="path-picker"
       :disabled="props.disabled || props.browseDisabled"
-        :aria-describedby="props.browseDisabledReason ? reasonId : undefined"
-        :title="props.browseDisabledReason || undefined"
+      :aria-describedby="props.browseDisabledReason ? reasonId : undefined"
+      :title="props.browseDisabledReason || undefined"
       :aria-label="`${props.ariaLabel}浏览`"
       @click="browse()"
     >
       <NxpIcon :name="props.kind === 'folder' ? 'folder' : 'file'" class-name="nxp-path-trigger-icon" />
     </button>
-    <span v-if="props.browseDisabledReason" :id="reasonId" class="visually-hidden">{{ props.browseDisabledReason }}</span>
+    <span v-if="props.browseDisabledReason" :id="reasonId" class="nxp-path-browse-reason">{{ props.browseDisabledReason }}</span>
   </div>
 </template>
 
 <style>
 .nxp-path {
+  position: relative;
   display: flex;
   min-width: 0;
   align-items: stretch;
+}
+.nxp-path-browse-reason {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 .nxp-path-input {
   min-width: 0;

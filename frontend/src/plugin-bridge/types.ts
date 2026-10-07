@@ -57,6 +57,7 @@ export interface PluginLifecyclePayload {
 export interface PluginNavItem {
   id?: string;
   title?: string;
+  titleKey?: string;
   route?: string;
   order?: number;
   icon?: string;
