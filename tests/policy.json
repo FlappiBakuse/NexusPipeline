@@ -684,6 +684,7 @@
       "host.browser": 5000
     },
     "unitMs": {
+      "host.integration.restart-update": 210000,
       "host.architecture.backend": 60000,
       "host.architecture.frontend": 5000,
       "host.frontend": 20000,
