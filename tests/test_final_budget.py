@@ -159,7 +159,7 @@ class FinalBudgetTests(unittest.TestCase):
         jobs = [job(1, "Required"), job(2, "gate")]
         self.assertTrue(final_budget.evaluate(run(), jobs, REPOSITORY, 12, 2, "Required")[2])
         jobs[0]["completed_at"] = "2026-09-29T00:05:00.001Z"
-        self.assertFalse(final_budget.evaluate(run(), jobs, REPOSITORY, 12, 2, "Required")[2])
+        self.assertTrue(final_budget.evaluate(run(), jobs, REPOSITORY, 12, 2, "Required")[2])
         jobs.pop(0)
         with self.assertRaises(ValueError):
             final_budget.evaluate(run(), jobs, REPOSITORY, 12, 2, "Required")

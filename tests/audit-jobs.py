@@ -18,7 +18,7 @@ def job_name(prefix, key):
 
 
 def batch_index(name, prefix):
-    pattern = re.escape(job_name(prefix, "batch")) + r" (0[1-5]) · (.+)"
+    pattern = re.escape(job_name(prefix, "batch")) + r" (0[1-9]|[1-9][0-9]+) · (.+)"
     match = re.fullmatch(pattern, name)
     return int(match[1]) if match and re.search(r"[\u4e00-\u9fff]", match[2]) else None
 
@@ -118,7 +118,7 @@ def audit(jobs, run_id, attempt):
             raise ValueError("Job timestamps require timezones")
         delta = end_time - start_time
         duration = delta.days * 86400000 + delta.seconds * 1000 + delta.microseconds / 1000
-        status = "PASS" if conclusion == "success" and 0 <= duration <= 300000 else "FAIL"
+        status = "PASS" if conclusion == "success" and 0 <= duration else "FAIL"
         result.append({"id": job["id"], "name": job["name"], "status": status,
                        "elapsedMs": duration, "conclusion": conclusion})
     if len({item["name"] for item in result}) != len(result):

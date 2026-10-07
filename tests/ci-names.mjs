@@ -15,11 +15,11 @@ export function obligationNames(batch, registry) {
 }
 
 export function batchName(batch, registry) {
-  if (!/^batch-0[1-5]$/.test(batch.id) || !batch.units.length) throw new Error("Invalid named batch");
+  if (!/^batch-(?:0[1-9]|[1-9][0-9]+)$/.test(batch.id) || !batch.units.length) throw new Error("Invalid named batch");
   const prefix = registry.repository;
   const labels = [...new Set(obligationNames(batch, registry).map(name => name.replace(`${prefix} / `, "")))];
   const title = labels.slice(0, 3).join("、") + (labels.length > 3 ? `等 ${labels.length} 项` : "");
-  return `${prefix} / ${names.batch} ${batch.id.slice(-2)} · ${title}`;
+  return `${prefix} / ${names.batch} ${batch.id.slice(6)} · ${title}`;
 }
 
 export function producerNames(plan, registry) {

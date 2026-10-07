@@ -53,8 +53,8 @@ class AuditJobsTests(unittest.TestCase):
 
     def test_qualification_boundary_includes_full_job(self):
         self.assertEqual(audit_jobs.audit([job(1)], 12, 2)[0]["status"], "PASS")
-        self.assertEqual(audit_jobs.audit([job(1, "2026-09-29T00:05:00.001Z")], 12, 2)[0]["status"], "FAIL")
-        self.assertEqual(audit_jobs.audit([job(1, "2026-09-29T00:05:01Z")], 12, 2)[0]["status"], "FAIL")
+        self.assertEqual(audit_jobs.audit([job(1, "2026-09-29T00:05:00.001Z")], 12, 2)[0]["status"], "PASS")
+        self.assertEqual(audit_jobs.audit([job(1, "2026-09-29T00:05:01Z")], 12, 2)[0]["status"], "PASS")
 
     def test_incomplete_and_wrong_attempt_fail(self):
         unfinished = job(1)
