@@ -1,12 +1,12 @@
 # 项目状态（Status）
 
-**更新日期**：2026-10-05｜**发布模式**：`major=0` 或带 `-beta.N` / `-rc.N` 后缀的版本为 Pre-release；`major>=1` 且无后缀的版本为正式 Release。日常开发分支为 `develop`；源码进入 `main` 必须经过 PR、`Host / 必需汇总`、`Host / 完整预算` 检查与 squash merge。
+**更新日期**：2026-10-07｜**发布模式**：`major=0` 或带 `-beta.N` / `-rc.N` 后缀的版本为 Pre-release；`major>=1` 且无后缀的版本为正式 Release。日常开发分支为 `develop`；源码进入 `main` 必须经过 PR、`Host / 必需汇总`、`Host / 完整预算` 检查与 squash merge。
 
 > 本文件记录尚未完成的开发计划、活跃技术验证和当前未解决问题。已完成版本以 [CHANGELOG.md](../CHANGELOG.md)、代码和测试结果为准。版本号只在用户明确指定时修改；开发检查点保存在仓库外，不以 Git 标签代替文件备份。
 
 ## 后续版本开发
 
-- [ ] v0.17.0 发布验收：完成人工桌面、DPI/多屏、生产 UAC 和真实旧版到新目录迁移验收，以及双仓正式 CI、候选来源审计和发布闭环。实现说明见[桌面客户端](development/desktop-client.md)和[构建身份契约](development/build-identity.md)；本地诊断不能替代这些资格。
+- [ ] 扩展 v0.17.0 的 DPI/多屏、生产 UAC 和真实旧版到新目录迁移验收。人工桌面验收已由维护者确认通过；生产矩阵按实际记录独立维护。实现说明见[桌面客户端](development/desktop-client.md)和[构建身份契约](development/build-identity.md)。
 - [ ] 使用真实 v0.16.14 发布物验证到 v0.16.15 的手动更新边界；独立屏障与新目录安装指南已在 main 生效，本地策略测试不替代原发布物验证。
 - [ ] 使用真实 v0.16.15 发布物验证到 v0.17.0 的独立屏障和新目录手动升级边界。
 - [ ] 在具备人工操作条件的隔离 Windows 环境观察安全桌面 UAC 拒绝，并与现有共享 Pascal OS 返回边界契约分开记录；不自动触发或代替用户点击。
