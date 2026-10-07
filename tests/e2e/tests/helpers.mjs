@@ -79,7 +79,7 @@ export async function setupRuntime() {
   fs.mkdirSync(path.join(runtimeDir, "config"), { recursive: true });
   fs.writeFileSync(
     path.join(runtimeDir, "config", "settings.json"),
-    JSON.stringify({ WebPort: webPort, OpenDesktopOnStartup: false }, null, 2),
+    JSON.stringify({ WebPort: webPort, LightweightMode: true, OpenDesktopOnStartup: false }, null, 2),
     "utf8",
   );
   const sourceExe = path.join(releaseDir, "NexusPipeline.exe");

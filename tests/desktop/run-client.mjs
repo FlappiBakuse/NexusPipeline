@@ -9,7 +9,7 @@ const report=path.join(base,'client-report.json'),exitFile=path.join(base,'host.
 if(fs.existsSync(report)||fs.existsSync(marker))throw new Error('Existing test evidence');
 const port=await findAvailablePort(),nonce=randomUUID(),runId=path.basename(base);
 fs.mkdirSync(path.join(root,'config'),{recursive:true});
-fs.writeFileSync(path.join(root,'config/settings.json'),JSON.stringify({WebPort:port,OpenDesktopOnStartup:false,UpdateCheckEnabled:false}));
+fs.writeFileSync(path.join(root,'config/settings.json'),JSON.stringify({WebPort:port,LightweightMode:false,OpenDesktopOnStartup:false,UpdateCheckEnabled:false}));
 fs.mkdirSync(path.join(root,'.nxp/state/desktop'),{recursive:true});
 fs.writeFileSync(path.join(root,'.nxp/state/desktop/client-preferences.json'),JSON.stringify({schemaVersion:1,preferences:{locale:'en-US',theme:'light'}}));
 const env={...process.env,NEXUS_TEST_MODE:'test-host',NEXUS_TEST_HOST:'1',NEXUS_TEST_RUN_ID:runId,
@@ -41,7 +41,7 @@ try {
   }while(Date.now()<stateDeadline);
   if(session.main.pid!==result.pid||session.windowState!=='hidden')throw new Error('Authenticated session state disagrees');
   desktopFamily=session.family;
-  fs.writeFileSync(path.join(base,'host-client-evidence.json'),JSON.stringify({schemaVersion:1,status:'PASS',classification:'LOCAL_DIAGNOSTIC',hostIdentity:identity,client:result,sessionId:session.sessionId,real:['Electron window','eight business routes','embedded Vue','authenticated IPC','client preferences','validated clipboard IPC','hide on close','Host restart retains unsaved input','explicit discard navigation','renderer crash recovery'],substituted:['instrumented test ASAR','native dialog acknowledgement','system clipboard write']},null,2));
+  fs.writeFileSync(path.join(base,'host-client-evidence.json'),JSON.stringify({schemaVersion:1,status:'PASS',classification:'LOCAL_DIAGNOSTIC',modeException:'Normal desktop lifecycle requires LightweightMode=false',hostIdentity:identity,client:result,sessionId:session.sessionId,real:['Electron window','eight business routes','embedded Vue','authenticated IPC','client preferences','validated clipboard IPC','hide on close','Host restart retains unsaved input','explicit discard navigation','renderer crash recovery'],substituted:['instrumented test ASAR','native dialog acknowledgement','system clipboard write']},null,2));
   console.log('Authenticated real desktop and eight business routes PASS');
 }finally {
   fs.writeFileSync(path.join(base,'host-output.txt'),output);

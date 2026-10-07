@@ -222,7 +222,6 @@ internal sealed class WebServer : IDisposable
         _port = port;
         Current = this;
         _options = options ?? WebServerOptions.FromSettings(
-            _settings.Current.LightweightMode,
             _settings.Current.AllowRemoteAccess);
         bool remote = _options.AllowRemoteAccess;
         RemoteAccessBound = remote;

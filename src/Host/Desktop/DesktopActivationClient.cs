@@ -26,7 +26,10 @@ internal static class DesktopActivationClient
             await DesktopPipeTransport.WriteAsync(pipe, new { type = "window.show", requestId = "activate", data = new { } }, timeout.Token);
             JsonElement result = await DesktopPipeTransport.ReadAsync(pipe, timeout.Token);
             DesktopSupervisorProtocol.Fields(result, "type", "requestId", "data");
-            return result.GetProperty("type").GetString() == "window.show-result";
+            DesktopSupervisorProtocol.Fields(result.GetProperty("data"), "accepted");
+            return result.GetProperty("type").GetString() == "window.show-result"
+                && result.GetProperty("requestId").GetString() == "activate"
+                && result.GetProperty("data").GetProperty("accepted").GetBoolean();
         }
         catch { return false; }
     }

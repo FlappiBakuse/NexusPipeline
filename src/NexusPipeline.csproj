@@ -32,6 +32,7 @@
 
   <ItemGroup Condition="'$(NexusTestHost)' == 'true'">
     <Compile Include="..\tests\host\TestHostTransport.cs" Link="Host\Composition\TestHostTransport.cs" />
+    <Compile Include="..\tests\host\TestHostBrowser.cs" Link="Host\Composition\TestHostBrowser.cs" />
   </ItemGroup>
 
   <PropertyGroup Condition="'$(NexusInstallerMetadataHelper)' == 'true'">

@@ -10,7 +10,7 @@ using NexusPipeline.Shared.Logging;
 
 namespace NexusPipeline.Host.Desktop;
 
-internal sealed class DesktopCoordinator(Func<bool> requestExit) : IDesktopHost, IAsyncDisposable
+internal sealed class DesktopCoordinator(Func<bool> requestExit, bool lightweight, Func<Uri, bool> openBrowser) : IDesktopHost, IAsyncDisposable
 {
     private readonly object _state = new();
     private readonly CancellationTokenSource _stop = new();
@@ -32,12 +32,17 @@ internal sealed class DesktopCoordinator(Func<bool> requestExit) : IDesktopHost,
     internal bool RestoredVisible => _session?.WindowState == "visible";
     public DesktopResumeIntent CaptureResumeIntent()
     {
-        lock (_state) return DesktopResumeIntent.FromVisible(_pendingShow || RestoredVisible);
+        lock (_state) return DesktopResumeIntent.FromVisible(!lightweight && (_pendingShow || RestoredVisible));
     }
 
     public void Start()
     {
         if (_listener is not null) return;
+        if (lightweight)
+        {
+            _listener = ListenAsync();
+            return;
+        }
         var saved = _store.Load();
         if (saved is { } owned)
         {
@@ -70,7 +75,15 @@ internal sealed class DesktopCoordinator(Func<bool> requestExit) : IDesktopHost,
         bool startAttempted = false;
         try
         {
-            if (_stopping || _unowned || HostInstance.Identity is null) return false;
+            if (_stopping || _hostExiting) return false;
+            if (lightweight)
+            {
+                _pendingShow = false;
+                bool opened = openBrowser(new Uri($"http://127.0.0.1:{_port}/"));
+                if (!opened) Logger.Warn("browser_launch_failed");
+                return opened;
+            }
+            if (_unowned || HostInstance.Identity is null) return false;
             if (_session?.Main.IsAlive() == true)
             {
                 if (_desktopPipe is not null) { await SendAsync("window.show", new { reason }, token).ConfigureAwait(false);_pendingShow = false; }
@@ -184,7 +197,7 @@ internal sealed class DesktopCoordinator(Func<bool> requestExit) : IDesktopHost,
             }
         }
         finally { _create.Release(); }
-        return intent.Mode != "show" || await ShowAsync("update-abort", token).ConfigureAwait(false);
+        return lightweight || intent.Mode != "show" || await ShowAsync("update-abort", token).ConfigureAwait(false);
     }
     public async Task StopForHostExitAsync(CancellationToken token = default)
     {
@@ -288,7 +301,7 @@ internal sealed class DesktopCoordinator(Func<bool> requestExit) : IDesktopHost,
                 bool shown = await ShowAsync("user", handshake.Token);
                 await DesktopPipeTransport.WriteAsync(pipe, new { type = "window.show-result", requestId, data = new { accepted = shown } }, handshake.Token);return;
             }
-            if (role != "desktop" || _session is null || _key is null || peer != _session.Main || hello.GetProperty("sessionId").GetString() != _session.SessionId) return;
+            if (lightweight || role != "desktop" || _session is null || _key is null || peer != _session.Main || hello.GetProperty("sessionId").GetString() != _session.SessionId) return;
             string clientNonce = hello.GetProperty("clientNonce").GetString()!, hostNonce = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
             if (clientNonce.Length != 64 || !clientNonce.All(char.IsAsciiHexDigitLower)) return;
             await DesktopPipeTransport.WriteAsync(pipe, new { type = "challenge", requestId, data = new { hostNonce, instanceId = HostInstance.Id, buildId = HostInstance.DesktopBuildId, hostPid = host.Pid, hostStartFileTime = host.StartFileTime, proof = DesktopSupervisorProtocol.Proof(_key, "host", _rootHash, _session.SessionId, clientNonce, hostNonce, HostInstance.Id, HostInstance.DesktopBuildId) } }, handshake.Token);

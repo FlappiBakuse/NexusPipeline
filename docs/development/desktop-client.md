@@ -1,6 +1,8 @@
 # 桌面管理与应用载荷
 
-根 `NexusPipeline.exe` 是 Host、CLI 和启动入口。普通服务默认只运行后台与托盘；无参数启动、托盘显示、CLI ui 或前端显式打开都激活同一桌面窗口。`resources/desktop/NexusPipeline.Desktop.exe` 是固定 Electron 44.5.1 运行时；业务 Vue 从 Host 内嵌资源通过实际 localhost 端口提供。用户安装无需 Node、npm 或 SDK，.NET Desktop 与 ASP.NET Core Runtime 10 x64 仍为运行依赖。
+根 `NexusPipeline.exe` 是 Host、CLI 和启动入口。普通服务默认只运行后台与托盘；无参数启动和托盘显示激活同一桌面窗口；登录任务使用 `service` 入口并遵循 `OpenDesktopOnStartup`。`resources/desktop/NexusPipeline.Desktop.exe` 是固定 Electron 44.5.1 运行时；业务 Vue 从 Host 内嵌资源通过实际 localhost 端口提供。用户安装无需 Node、npm 或 SDK，.NET Desktop 与 ASP.NET Core Runtime 10 x64 仍为运行依赖。
+
+轻量模式保留服务、托盘及命名管道激活入口，关闭桌面会话恢复和进程监控。首次启动根据 `OpenDesktopOnStartup` 决定是否在服务就绪后打开默认浏览器，显式后台与重启抑制自动打开；重复双击及托盘主动打开。`web` 命令保留控制台生命周期和主动打开网页，重启不会重复弹出浏览器。浏览器 URL 只含实际 localhost 端口，不带访问令牌，Host 不管理用户浏览器生命周期。轻量模式仅通过停机编辑配置启用，正式默认值保持关闭。
 
 窗口 X 隐藏；托盘退出或更新才停止桌面。服务行为中的界面语言、侧边栏的主题偏好与窗口位置分别持久化在当前实例私有运行目录，不改变 Host 通知语言。标准业务尺寸为 1280×720 DIP，另加 40 DIP 标题安全区；初始尺寸按工作区物理像素档位计算并夹紧，恢复时重新验证显示器、DPI 和最大化状态。工作区无法容纳最小界面时由用户选择继续打开、仅后台或取消打开。
 
@@ -20,7 +22,9 @@ Koffi 依赖按 profile 的逐文件白名单装配；native 文件仍位于 `re
 
 ## 构建与验证
 
-Test Host 在现役 runner 设置 `NEXUS_SYSTEM_ACTION_DRYRUN=1` 时替代防火墙命令；原生适配器契约验证参数、有限的创建规则回退和未调用系统命令的效果。生产构建不读取该替代开关，实际入站连通性仍由生产环境验收。
+通用测试及验收软件显式设置 `LightweightMode=true`、`OpenDesktopOnStartup=false`；桌面、模式切换和自动打开专项可显式使用例外配置并在报告记录。Test Host 的浏览器适配器只在拥有的退出标记旁记录打开请求和结果，不启动真实浏览器；生产软件不包含此适配器。
+
+Test Host 在现役 runner 设置 `NEXUS_SYSTEM_ACTION_DRYRUN=1` 时替代防火墙和登录任务命令；原生适配器契约验证参数、有限的创建规则回退和未调用系统命令的效果。生产构建不读取该替代开关，实际入站连通性仍由生产环境验收。
 
 所有本机产物应放在外部目录。设置 `NEXUS_TEST_ARTIFACT_ROOT` 和 `NEXUS_PARTNER_ROOT` 后执行 `node tests/run.mjs release`，现役 runner 隔离源码、构建 Vue、冻结输入、装配 Electron、内嵌 Host 身份并生成完整应用 manifest。`NEXUS_ELECTRON_ARCHIVE` 可指向已固定摘要的官方 ZIP；未指定时从精确官方地址下载并校验。构建输出路径由 runner 报告。
 

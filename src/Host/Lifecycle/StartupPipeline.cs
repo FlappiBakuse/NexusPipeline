@@ -28,9 +28,10 @@ internal static class StartupPipeline
         }
         DesktopCoordinator desktop = runtime.Get<DesktopCoordinator>();
         desktop.Start();
-        bool showDesktop = !runtime.Settings.LightweightMode
-            && (launch ?? new DesktopLaunchOptions("from-settings")).ShouldShow(runtime.Settings.OpenDesktopOnStartup, desktop.RestoredVisible);
-        if (showDesktop) desktop.ShowAsync("startup").GetAwaiter().GetResult();
+        bool showDesktop = (launch ?? new DesktopLaunchOptions("from-settings")).ShouldShow(
+            runtime.Settings.LightweightMode, runtime.Settings.OpenDesktopOnStartup, desktop.RestoredVisible);
+        if (showDesktop && !runtime.Settings.LightweightMode)
+            desktop.ShowAsync("startup").GetAwaiter().GetResult();
         if (!PrepareHostedStart(runtime))
         {
             // 更新 worker 必须等当前进程真正终止后才能替换宿主 EXE。
@@ -73,7 +74,6 @@ internal static class StartupPipeline
             runtime.Start();
 
             WebServerOptions webOptions = WebServerOptions.FromSettings(
-                runtime.Settings.LightweightMode,
                 runtime.Settings.AllowRemoteAccess);
             WebServer? web = runtime.Bootstrap.StartWebWithRetry(runtime.Settings.WebPort, webOptions);
             if (web is not null)
@@ -81,10 +81,6 @@ internal static class StartupPipeline
                 runtime.Bootstrap.AfterWebStarted(web);
             }
             McpHost? mcp = web is null ? null : runtime.Bootstrap.StartMcp();
-            if (!webOptions.ServeWebUi)
-            {
-                Logger.Info("轻量运行模式：Control API 已启动并仅绑定 127.0.0.1，不提供 Web UI 与浏览器。");
-            }
             if (web is null)
             {
                 Logger.Error("[错误] Control API 启动失败，服务无法提供控制面。");
@@ -100,7 +96,7 @@ internal static class StartupPipeline
             { runtime.Stop(web, mcp); ClearServicePid(); return; }
             HostInstance.MarkReady();
             desktop.MarkReady(web.Port);
-            if (webOptions.ServeWebUi && showDesktop)
+            if (showDesktop)
                 desktop.ShowAsync("startup").GetAwaiter().GetResult();
 
 #if NEXUS_TEST_HOST
@@ -240,16 +236,16 @@ internal static class StartupPipeline
         {
             RunWebOnly(runtime, keepWebOnlyAlive
                 ? new[] { ApplicationHost.KeepWebOnlyAliveArgument }
-                : Array.Empty<string>());
+                : Array.Empty<string>(), isRestart: true);
         }
         else
         {
-            RunService(runtime, new DesktopLaunchOptions(resumeIntent?.Mode ?? "restore"));
+            RunService(runtime, new DesktopLaunchOptions(resumeIntent?.Mode ?? "restore", IsRestart: true));
         }
         return 0;
     }
 
-    internal static int RunWebOnly(HostRuntime runtime, string[] args)
+    internal static int RunWebOnly(HostRuntime runtime, string[] args, bool isRestart = false)
     {
         ApplicationHost.IsWebOnly = true;
         ApplicationHost.KeepWebOnlyAlive = args.Any(argument =>
@@ -262,7 +258,7 @@ internal static class StartupPipeline
             if (existingPort is not null)
             {
                 Logger.Info($"检测到已有 NexusPipeline 服务，复用 Web 端口 {existingPort.Value}。");
-                TrayApp.OpenWeb(existingPort.Value);
+                if (!isRestart) TrayApp.OpenWeb(existingPort.Value);
                 return 0;
             }
             Logger.Warn("[错误] 检测到 NexusPipeline 已在运行，但未能发现其 Web 端口；本次网页模式退出。");
@@ -302,7 +298,7 @@ internal static class StartupPipeline
         runtime.Start();
         WebServer? web = runtime.Bootstrap.StartWebWithRetry(
             runtime.Settings.WebPort,
-            new WebServerOptions(ServeWebUi: !runtime.Settings.LightweightMode, AllowRemoteAccess: runtime.Settings.AllowRemoteAccess));
+            WebServerOptions.FromSettings(runtime.Settings.AllowRemoteAccess));
         if (web is null)
         {
             ClearServicePid();
@@ -318,22 +314,9 @@ internal static class StartupPipeline
         if (qualifyUpdate && RunStartupUpdateGate(runtime) != StartupUpdateDisposition.ContinueStartup)
         { runtime.Stop(web, mcp); ClearServicePid(); return 1; }
         HostInstance.MarkReady();
+        runtime.Get<IDesktopHost>().MarkReady(web.Port);
         Console.WriteLine(CliText.Get("startup.web_started", "Web 界面：http://127.0.0.1:{port}/（按回车停止）", ("port", web.Port)));
-#if !NEXUS_TEST_HOST
-        {
-            try
-            {
-                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo($"http://127.0.0.1:{web.Port}/")
-                {
-                    UseShellExecute = true,
-                });
-            }
-            catch (Exception ex)
-            {
-                Logger.Warn($"自动打开浏览器失败：{ex.Message}");
-            }
-        }
-#endif
+        if (!isRestart) TrayApp.OpenWeb(web.Port);
         WaitForWebOnlyStop(ApplicationHost.KeepWebOnlyAlive);
         ShutdownHosted(runtime, web, mcp);
         return 0;

@@ -119,7 +119,7 @@ PR 范围计划映射逻辑义务到可选 control 与最多五个 Windows batch
 |---|---|
 | 启动即退出 | 正式程序确认管理员上下文；Test Host 测试检查隔离 runtime、启动日志和 exit code |
 | 检测到已在运行 | 检查任务管理器中的残留进程；确认单实例互斥体没有被其他服务占用 |
-| Web 打不开 | 确认服务正在运行、端口正确，轻量模式不会启动 Web |
+| Web 打不开 | 确认服务正在运行、实际监听端口正确；轻量模式同样提供 Web UI |
 | 重构建失败或 exe 被锁定 | 停止对应服务进程后重新构建 |
 | 测试出现级联失败 | 检查对应 suite 的隔离 runtime 和残留进程，按[测试命令](../testing/commands.md)清理 |
 | 配置还原异常 | 检查 `data/{脚本Id}/{UserId}/` 下的 `.session`、`original/` 和 `swap-backup/`，保留现场后再进行恢复操作 |

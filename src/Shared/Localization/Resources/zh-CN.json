@@ -578,8 +578,6 @@
   "tasks.outcome.unverified": "流程已结束 · 有 {count} 项未核验",
   "tray.cli_menu": "命令行管理菜单",
   "tray.exit": "退出 NexusPipeline",
-  "tray.lightweight_open_failed": "轻量运行模式未启动 Web 服务，无法打开管理页面（请使用命令行管理菜单）。",
-  "tray.lightweight_tooltip": "轻量运行模式未启动 Web 服务，请使用「命令行管理菜单」",
   "tray.open_browser_failed": "打开浏览器失败：{detail}",
   "tray.open_console_failed": "打开命令行窗口失败：{detail}",
   "tray.open_web": "打开管理页面",

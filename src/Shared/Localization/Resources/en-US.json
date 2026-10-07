@@ -578,8 +578,6 @@
   "tasks.outcome.unverified": "Run ended · {count} item(s) unverified",
   "tray.cli_menu": "Command-line management",
   "tray.exit": "Exit NexusPipeline",
-  "tray.lightweight_open_failed": "Lightweight mode did not start the Web service, so the management page cannot be opened.",
-  "tray.lightweight_tooltip": "Lightweight mode did not start the Web service. Use command-line management.",
   "tray.open_browser_failed": "Could not open the browser: {detail}",
   "tray.open_console_failed": "Could not open the command-line window: {detail}",
   "tray.open_web": "Open management page",

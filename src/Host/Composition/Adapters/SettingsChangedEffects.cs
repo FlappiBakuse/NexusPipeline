@@ -26,8 +26,8 @@ internal sealed class SettingsChangedEffects : ISettingsChangedEffects
     internal static void ApplyWindowsChanges(AppSettings previous, AppSettings current,
         Action<int> ensureInbound, Action<bool> syncStartup)
     {
-        if (current.AllowRemoteAccess && !current.LightweightMode
-            && (!previous.AllowRemoteAccess || previous.LightweightMode || previous.WebPort != current.WebPort))
+        if (current.AllowRemoteAccess
+            && (!previous.AllowRemoteAccess || previous.WebPort != current.WebPort))
             ensureInbound(current.WebPort);
         if (previous.AutoStart != current.AutoStart) syncStartup(current.AutoStart);
     }

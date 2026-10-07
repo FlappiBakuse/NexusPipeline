@@ -46,7 +46,7 @@ node tests/run.mjs gate --id host.ci-policy
 
 ## 隔离与运行输出
 
-测试不提权或降权，使用当前终端权限。可设置 `NEXUS_TEST_ARTIFACT_ROOT` 为本次专用的绝对路径；目录内 `.nxp-test-artifact-root.json` 内容如下，`directory` 必须填写该目录的实际绝对路径：
+测试不提权或降权，使用当前终端权限。通用运行目录显式使用 `LightweightMode=true`、`OpenDesktopOnStartup=false`；桌面、模式切换和自动打开专项显式记录配置例外。浏览器启动通过 Test Host 适配器记录请求，不能弹出用户浏览器。可设置 `NEXUS_TEST_ARTIFACT_ROOT` 为本次专用的绝对路径；目录内 `.nxp-test-artifact-root.json` 内容如下，`directory` 必须填写该目录的实际绝对路径：
 
 ```json
 {"schemaVersion":1,"owner":"NexusPipeline.Tests","directory":"<absolute test root>"}

@@ -90,7 +90,8 @@ internal class HostCompositionRoot
         ServiceCollection collection = new();
         collection.AddSingleton(_entityState);
         collection.AddSingleton(_settingsState);
-        collection.AddSingleton(new NexusPipeline.Host.Desktop.DesktopCoordinator(() => _lifecycle.TryRequestDirectExit()));
+        collection.AddSingleton(new NexusPipeline.Host.Desktop.DesktopCoordinator(
+            () => _lifecycle.TryRequestDirectExit(), initialSettings.LightweightMode, NexusPipeline.Host.Desktop.ManagementBrowser.Open));
         collection.AddSingleton<NexusPipeline.Host.Desktop.IDesktopHost>(provider => provider.GetRequiredService<NexusPipeline.Host.Desktop.DesktopCoordinator>());
         collection.AddSingleton(_admissionBridge);
         collection.AddSingleton<ISettingsMutationGate>(_admissionBridge);

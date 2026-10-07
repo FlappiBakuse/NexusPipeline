@@ -97,7 +97,7 @@ export async function prepareRuntime() {
   fs.mkdirSync(path.join(runtimeDir, "config"), { recursive: true });
   fs.writeFileSync(
     path.join(runtimeDir, "config", "settings.json"),
-    JSON.stringify({ WebPort: systemWebPort, HostLocale: "zh-CN", OpenDesktopOnStartup: false }),
+    JSON.stringify({ WebPort: systemWebPort, HostLocale: "zh-CN", LightweightMode: true, OpenDesktopOnStartup: false }),
     "utf8",
   );
 

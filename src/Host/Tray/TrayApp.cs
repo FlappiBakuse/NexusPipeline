@@ -45,19 +45,10 @@ internal class TrayApp : ApplicationContext
     private ContextMenuStrip BuildMenu()
     {
         var menu = new ContextMenuStrip();
-        // （P11）：轻量模式未启动 Web 服务，禁用「打开管理页面」避免打开 404 页面
         var openWebItem = new ToolStripMenuItem(
             HostLocalization.TranslateNamed("tray.open_web", "打开管理页面", locale: LocaleCatalog.HostLocale),
             null,
             (_, _) => OpenManagedWeb());
-        if (_runtime.Settings.LightweightMode)
-        {
-            openWebItem.Enabled = false;
-            openWebItem.ToolTipText = HostLocalization.TranslateNamed(
-                "tray.lightweight_tooltip",
-                "轻量运行模式未启动 Web 服务，请使用命令行管理菜单",
-                locale: LocaleCatalog.HostLocale);
-        }
         menu.Items.Add(openWebItem);
         menu.Items.Add(
             HostLocalization.TranslateNamed("tray.cli_menu", "命令行管理菜单", locale: LocaleCatalog.HostLocale),
@@ -83,19 +74,6 @@ internal class TrayApp : ApplicationContext
 
     private void OpenManagedWeb()
     {
-        // （P11）：轻量模式防御（双击图标同样走此入口）
-        if (_runtime.Settings.LightweightMode)
-        {
-            Logger.Warn(HostLocalization.TranslateNamed(
-                "tray.lightweight_open_failed",
-                "轻量运行模式未启动 Web 服务，无法打开管理页面（请使用命令行管理菜单）。",
-                locale: LocaleCatalog.HostLocale));
-            return;
-        }
-        // 用实际监听端口（设置页改端口未重启 / 启动时端口冲突自动 +1 时与 Settings.WebPort 不一致）。
-        int port = WebServer.Current?.Port
-            ?? CliTransport.FindServicePort(_runtime.Settings.WebPort)
-            ?? _runtime.Settings.WebPort;
         _runtime.Get<NexusPipeline.Host.Desktop.IDesktopHost>().ShowAsync("tray").GetAwaiter().GetResult();
     }
 
@@ -110,21 +88,9 @@ internal class TrayApp : ApplicationContext
 
     public static void OpenWeb(int port)
     {
-        try
-        {
-            Process.Start(new ProcessStartInfo($"http://127.0.0.1:{port}/")
-            {
-                UseShellExecute = true,
-            });
-        }
-        catch (Exception ex)
-        {
-            Logger.Warn(HostLocalization.TranslateNamed(
-                "tray.open_browser_failed",
-                $"打开浏览器失败：{ex.Message}",
-                new Dictionary<string, object?> { ["detail"] = ex.Message },
-                LocaleCatalog.HostLocale));
-        }
+        if (!NexusPipeline.Host.Desktop.ManagementBrowser.Open(new Uri($"http://127.0.0.1:{port}/")))
+            Logger.Warn(HostLocalization.TranslateNamed("tray.open_browser_failed", "打开浏览器失败：{detail}",
+                new Dictionary<string, object?> { ["detail"] = "browser_launch_failed" }, LocaleCatalog.HostLocale));
     }
 
     private static void OpenConsole(string args)

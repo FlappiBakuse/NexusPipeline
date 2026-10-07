@@ -29,6 +29,7 @@ public sealed class SettingsChangedEffectsTests
         previous.AllowRemoteAccess = false;
         SettingsChangedEffects.ApplyWindowsChanges(previous, current, ports.Add, startup.Add);
         Assert.Equal(new[] { 58733, 58733 }, ports);
+        previous = current.Clone();
         current.LightweightMode = true;
         SettingsChangedEffects.ApplyWindowsChanges(previous, current, ports.Add, startup.Add);
         Assert.Equal(2, ports.Count);
