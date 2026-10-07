@@ -442,6 +442,7 @@ internal static class UpdateApply
         {
             try
             {
+                RequireWorkerExit(pending);
                 CleanupAfterRollback();
             }
             catch (Exception ex)
@@ -730,13 +731,19 @@ internal static class UpdateApply
 
     private static bool HasFailedBeforeBackup(UpdateTask task)
     {
-        if (task.TransactionId is null || task.WorkerIdentity is null
-            || ObserveWorker(task.WorkerIdentity) != false || HasBackupData(AppPaths.UpdateBackupDir)) return false;
+        if (task.TransactionId is null || task.WorkerIdentity is null || HasBackupData(AppPaths.UpdateBackupDir)) return false;
         string path = TransactionResultPath(task.TransactionId);
         if (!File.Exists(path)) return false;
         if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0 || new FileInfo(path).Length > 64 * 1024)
             throw new InvalidDataException("update failure proof ownership");
-        using var document = JsonDocument.Parse(File.ReadAllText(path));
+        if (!IsFailedTransactionResult(task, File.ReadAllText(path))) return false;
+        RequireWorkerExit(task);
+        return true;
+    }
+
+    internal static bool IsFailedTransactionResult(UpdateTask task, string json)
+    {
+        using var document = JsonDocument.Parse(json);
         var value = document.RootElement;
         if (value.ValueKind != JsonValueKind.Object || value.EnumerateObject().Count() != 6
             || value.GetProperty("TransactionId").GetString() != task.TransactionId
@@ -745,7 +752,20 @@ internal static class UpdateApply
             || string.IsNullOrWhiteSpace(value.GetProperty("Code").GetString())
             || value.GetProperty("AtUtc").GetDateTimeOffset() < task.CreatedAt)
             throw new InvalidDataException("update failure proof identity");
+        var intent = value.GetProperty("DesktopResumeIntent");
+        if (intent.ValueKind != JsonValueKind.Object || intent.EnumerateObject().Count() != 2
+            || intent.GetProperty("SchemaVersion").GetInt32() != task.DesktopResumeIntent?.SchemaVersion
+            || intent.GetProperty("Mode").GetString() != task.DesktopResumeIntent?.Mode)
+            throw new InvalidDataException("update failure proof desktop intent");
         return !value.GetProperty("Succeeded").GetBoolean();
+    }
+
+    private static void RequireWorkerExit(UpdateTask task)
+    {
+        // A terminal worker starts the preserved Host before its own process exits.
+        DateTime deadline = DateTime.UtcNow.AddSeconds(10);
+        while (ObserveWorker(task.WorkerIdentity) == true && DateTime.UtcNow < deadline) Thread.Sleep(100);
+        if (ObserveWorker(task.WorkerIdentity) != false) throw new IOException("update cleanup worker exit or identity unconfirmed");
     }
 
     private static bool HasBackupData(string backup)

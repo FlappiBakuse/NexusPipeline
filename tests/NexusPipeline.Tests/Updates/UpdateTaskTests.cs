@@ -7,6 +7,38 @@ namespace NexusPipeline.Tests.Updates;
 public sealed class UpdateTaskTests
 {
     [Fact]
+    public void FailureResultRequiresTheTransactionAndPreservedDesktopIntent()
+    {
+        var task = MakeTask("apply", "0.17.1", Path.GetTempPath()) with
+        {
+            TransactionId = Guid.NewGuid().ToString("N"),
+        };
+        var result = System.Text.Json.Nodes.JsonNode.Parse(System.Text.Json.JsonSerializer.Serialize(new
+        {
+            task.TransactionId, task.Version, Succeeded = false, Code = "policy-unavailable",
+            AtUtc = DateTimeOffset.UtcNow, task.DesktopResumeIntent,
+        }))!.AsObject();
+        Assert.True(UpdateApply.IsFailedTransactionResult(task, result.ToJsonString()));
+        result["Succeeded"] = true;
+        Assert.False(UpdateApply.IsFailedTransactionResult(task, result.ToJsonString()));
+        result["Succeeded"] = false;
+        foreach (string field in new[] { "TransactionId", "Version", "DesktopResumeIntent", "AtUtc" })
+        {
+            var changed = result.DeepClone().AsObject();
+            changed[field] = field switch
+            {
+                "TransactionId" => System.Text.Json.Nodes.JsonValue.Create(Guid.NewGuid().ToString("N")),
+                "Version" => System.Text.Json.Nodes.JsonValue.Create("0.17.2"),
+                "AtUtc" => System.Text.Json.Nodes.JsonValue.Create(task.CreatedAt!.Value.AddSeconds(-1)),
+                _ => System.Text.Json.Nodes.JsonNode.Parse("{\"SchemaVersion\":1,\"Mode\":\"show\"}"),
+            };
+            Assert.Throws<InvalidDataException>(() => UpdateApply.IsFailedTransactionResult(task, changed.ToJsonString()));
+        }
+        result.Remove("DesktopResumeIntent");
+        Assert.Throws<InvalidDataException>(() => UpdateApply.IsFailedTransactionResult(task, result.ToJsonString()));
+    }
+
+    [Fact]
     public void DesktopIntentIsStrictImmutableAndIndependentOfRestartHandoff()
     {
         string root = Path.Combine(Path.GetTempPath(), "nxp-update-intent-" + Guid.NewGuid().ToString("N"));

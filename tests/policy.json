@@ -566,6 +566,7 @@
         "NexusPipeline.Tests.Updates.UpdateTaskTests.CommittedCleanupKeepsJournalUntilEveryOwnedResourceIsRemoved",
         "NexusPipeline.Tests.Updates.UpdateTaskTests.CreatedDownloadCleanupPreservesUnknownAndChangedBytesAndRejectsExistingStaging",
         "NexusPipeline.Tests.Updates.UpdateTaskTests.DesktopIntentIsStrictImmutableAndIndependentOfRestartHandoff",
+        "NexusPipeline.Tests.Updates.UpdateTaskTests.FailureResultRequiresTheTransactionAndPreservedDesktopIntent",
         "NexusPipeline.Tests.Updates.UpdateTaskTests.InterruptedRollbackPreservationReusesOnlyItsExactReceiptAndCompleteFields",
         "NexusPipeline.Tests.Updates.UpdateTaskTests.InvalidRestartHandoffIsNotAdopted",
         "NexusPipeline.Tests.Updates.UpdateTaskTests.InventoryDeletionRechecksBytesAndPreservesUnknownDirectories",

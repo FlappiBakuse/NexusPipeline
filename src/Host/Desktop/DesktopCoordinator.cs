@@ -234,7 +234,7 @@ internal sealed class DesktopCoordinator(Func<bool> requestExit, bool lightweigh
             return true;
         }
         catch (Exception exception) when (exception is IOException or System.ComponentModel.Win32Exception or UnauthorizedAccessException or OperationCanceledException)
-        { _stopping = false; Logger.Warn("desktop_stop_unconfirmed"); return false; }
+        { _stopping = false; Logger.Warn($"desktop_stop_unconfirmed: {exception.GetType().Name}: {exception.Message}"); return false; }
     }
     private void CaptureFamily()
     {
