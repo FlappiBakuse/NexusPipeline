@@ -25,6 +25,32 @@ public sealed class ApplicationBuildIdentityTests
     }
 
     [Fact]
+    public void ProfiledSharedVectorRejectsMissingUnknownAndMistypedProfileInputs()
+    {
+        using JsonDocument inputs = JsonDocument.Parse(Fixture("ProfileInputs"));
+        ApplicationBuildIdentity record = ApplicationBuildIdentity.Parse(Fixture("ProfileRecord"));
+        Assert.Equal(Fixture("ProfileCanonical"), ApplicationBuildIdentity.CanonicalBytes(inputs.RootElement));
+        Assert.Equal(record.BuildId, ApplicationBuildIdentity.ComputeBuildId(inputs.RootElement));
+        foreach (string key in new[] { "runtimeProfileId", "runtimeProfileSha256", "runtimeInventorySha256" })
+        {
+            JsonObject changed = JsonNode.Parse(Fixture("ProfileInputs"))!.AsObject();
+            changed[key] = key == "runtimeProfileId" ? "another-profile" : new string('1', 64);
+            using JsonDocument different = JsonDocument.Parse(changed.ToJsonString());
+            Assert.NotEqual(record.BuildId, ApplicationBuildIdentity.ComputeBuildId(different.RootElement));
+            changed.Remove(key);
+            using JsonDocument missing = JsonDocument.Parse(changed.ToJsonString());
+            Assert.Throws<InvalidDataException>(() => ApplicationBuildIdentity.ComputeBuildId(missing.RootElement));
+        }
+        foreach (JsonNode? version in new JsonNode?[] { JsonValue.Create("2"), JsonValue.Create(3), JsonValue.Create(true) })
+        {
+            JsonObject changed = JsonNode.Parse(Fixture("ProfileInputs"))!.AsObject();
+            changed["schemaVersion"] = version;
+            using JsonDocument invalid = JsonDocument.Parse(changed.ToJsonString());
+            Assert.Throws<InvalidDataException>(() => ApplicationBuildIdentity.ComputeBuildId(invalid.RootElement));
+        }
+    }
+
+    [Fact]
     public void ReorderedKeysAndPrintableEscapesKeepCanonicalMeaning()
     {
         JsonObject original = JsonNode.Parse(Fixture("Inputs"))!.AsObject();

@@ -14,6 +14,7 @@ INPUT_FIELDS = {
     "frontendPackageLockSha256", "desktopPackageLockSha256", "electronVersion",
     "electronArchiveSha256", "bootstrapProtocolVersion", "toolchain",
 }
+PROFILE_FIELDS = {'runtimeProfileId', 'runtimeProfileSha256', 'runtimeInventorySha256'}
 TOOLCHAIN_FIELDS = {
     "dotnetSdkVersion", "dotnetRuntimeVersion", "nodeVersion", "npmVersion",
     "pythonVersion", "innoSetupVersion", "innoCompilerSha256", "innoDistributionSha256",
@@ -98,9 +99,13 @@ def _string(value: object, pattern: str, name: str) -> None:
 
 def validate_inputs(inputs: dict) -> None:
     canonical_json(inputs)
-    _fields(inputs, INPUT_FIELDS, "buildInputs")
-    _require(type(inputs["schemaVersion"]) is int and inputs["schemaVersion"] == 1,
+    _fields(inputs, INPUT_FIELDS | (PROFILE_FIELDS if inputs.get('schemaVersion') == 2 else set()), "buildInputs")
+    _require(type(inputs["schemaVersion"]) is int and inputs["schemaVersion"] in (1, 2),
              "Invalid schemaVersion")
+    if inputs['schemaVersion'] == 2:
+        _string(inputs['runtimeProfileId'], r'[a-z0-9][a-z0-9-]{0,63}', 'runtimeProfileId')
+        for key in ('runtimeProfileSha256', 'runtimeInventorySha256'):
+            _string(inputs[key], r'[0-9a-f]{64}', key)
     _require(type(inputs["bootstrapProtocolVersion"]) is int and inputs["bootstrapProtocolVersion"] == 1,
              "Invalid bootstrapProtocolVersion")
     _require(inputs["generation"] == "g0170" and inputs["rid"] == "win-x64", "Invalid target")

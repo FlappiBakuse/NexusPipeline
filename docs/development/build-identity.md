@@ -4,6 +4,10 @@ Host 与桌面载荷使用一份冻结输入身份。`tools/build_identity.py` �
 
 `buildInputs` 固定 Host source/tree、Plugins source、构建控制器 SHA、两个 npm lock 的字节摘要、Electron 精确版本和原始下载包摘要，以及实际工具链。安装代际为 `g0170`，RID 为 `win-x64`，bootstrap 协议为整数 1。版本使用受限 Nexus 格式；字段集合必须精确匹配 schema。
 
+产品版本以 `src/NexusPipeline.csproj` 的 `Version` 为真源。桌面 package 与 lock 的根版本必须与之相同，冲突在创建输出或下载前拒绝。同代补丁使用各自的实际版本，安装代际继续保持 `g0170`。
+
+当前 `buildInputs.schemaVersion=2` 另固定 `runtimeProfileId`、`runtimeProfileSha256` 与 `runtimeInventorySha256`；后两个字段分别摘要 `desktop/runtime-profile.json` 和 `runtime-files.json` 的原始字节。payload 的 desktop 投影与 Host 内嵌清单逐项核对这三个字段。Python、C#、Electron 和 schema 仅接受完整的旧格式 1 或完整的 profile 格式 2，旧格式不能携带新字段，新格式不能缺失字段。身份记录和 payload 的外层 schema 仍为 1。
+
 `frontendHash` 是最终 `index.html` 原始字节的 SHA256，不做换行、BOM 或 HTML 序列化修正。`buildId` 是规范 `buildInputs` 字节的 SHA256，二者均为小写 64 位十六进制。HTTP 投影名称分别是 `frontendBuildId` 与 `desktopBuildId`。先冻结前端字节，再生成身份记录；输出 EXE、ASAR、payload manifest、run ID、时间和绝对路径不进入冻结输入。
 
 规范 JSON 递归按 ASCII ordinal 键排序，以紧密逗号和冒号连接对象。字符串只接受可打印 ASCII，只转义双引号和反斜线；整数使用最短非负十进制表示。编码为 UTF-8，无 BOM、无末尾换行。解析拒绝重复键、未知字段、数组、布尔、null、浮点、负数和不可打印字符；身份记录最多 64 KiB，整数不超过 JavaScript 安全整数范围。

@@ -7,6 +7,8 @@ import {readBuild,verifyHttp,HostState} from "./host-identity";
 import {Supervisor} from "./supervisor";
 import {WindowManager} from "./window-manager";
 import {ConnectionCandidate,ConnectionState} from "../shared/contracts";
+import {runtimeLocale} from "../shared/runtime-locale";
+app.commandLine.appendSwitch('lang', runtimeLocale(app.getPreferredSystemLanguages()[0] ?? ''));
 protocol.registerSchemesAsPrivileged([{scheme:'nxp-desktop',privileges:{standard:true,secure:true,supportFetchAPI:true}}]);
 async function start() {
   const argumentsMap=new Map<string,string>();
@@ -119,7 +121,7 @@ async function start() {
     const window=businessWindow(),url=`http://127.0.0.1:${host.actualPort}/${currentRoute()}`;
     const loaded=window.webContents.getURL();
     if(!currentInstance||loaded.startsWith('nxp-desktop:')||!loaded){origin=new URL(url).origin;currentInstance=host.instanceId;await window.loadURL(url);state('ready');if(intent==='show')await manager.show();return;}
-    if(currentInstance===host.instanceId){state('ready');return;}
+    if(currentInstance===host.instanceId){expectedHandoff='';state('ready');return;}
     const planned=expectedHandoff!=='';
     if(planned?host.handoffId!==expectedHandoff:host.previousInstanceId!==currentInstance){state('disconnected');return;}
     const value: ConnectionCandidate=Object.freeze({candidateId:crypto.randomUUID(),reason:planned?'host-restart':'host-recovery',instanceId:host.instanceId,frontendBuildId:build.frontendHash,desktopBuildId:build.buildId});

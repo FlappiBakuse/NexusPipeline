@@ -6,8 +6,10 @@ from pathlib import Path
 import re
 try:
     from .build_identity import validate_record
+    from .runtime_profile import frozen as frozen_profile
 except ImportError:
     from build_identity import validate_record
+    from runtime_profile import frozen as frozen_profile
 
 MAX_FILES=4096
 MAX_BYTES=512*1024*1024
@@ -18,6 +20,7 @@ ASAR='resources/desktop/resources/app.asar'
 NATIVE='resources/desktop/resources/app.asar.unpacked/node_modules/@koromix/koffi-win32-x64/win32_x64/koffi.node'
 FIELDS={'schemaVersion','product','productVersion','installationGeneration','rid','sourceSha','sourceTreeSha','buildId','frontendHash','desktop','files'}
 DESKTOP_FIELDS={'entryPoint','appArchive','electronVersion','electronArchiveSha256','packageLockSha256','bootstrapProtocolVersion'}
+PROFILE_FIELDS={'runtimeProfileId','runtimeProfileSha256','runtimeInventorySha256'}
 RESERVED={'con','prn','aux','nul',*(f'com{i}' for i in '123456789¹²³'),*(f'lpt{i}' for i in '123456789¹²³')}
 
 def safe_path(value: object) -> str:
@@ -72,18 +75,27 @@ def create(directory: Path,record: dict,root: Path) -> dict:
     value.update(sourceSha=inputs['sourceSha'],sourceTreeSha=inputs['sourceTreeSha'],desktop={
         'entryPoint':ENTRY,'appArchive':ASAR,'electronVersion':inputs['electronVersion'],'electronArchiveSha256':inputs['electronArchiveSha256'],
         'packageLockSha256':inputs['desktopPackageLockSha256'],'bootstrapProtocolVersion':1},files=inventory(directory,runtime_files(root)))
+    if inputs['schemaVersion']==2:
+        profile=frozen_profile(root)
+        if any(inputs[key]!=profile[key] for key in PROFILE_FIELDS):raise ValueError('Frozen application runtime profile mismatch')
+        value['desktop'].update(profile)
     target=directory/MANIFEST_PATH;target.parent.mkdir(parents=True,exist_ok=True)
     target.write_bytes(json.dumps(value,sort_keys=True,separators=(',',':')).encode('utf-8'))
     return value
 
 def validate(directory: Path,value: dict,record: dict,root: Path) -> dict:
     validate_record(record)
-    if type(value) is not dict or set(value)!=FIELDS or type(value['desktop']) is not dict or set(value['desktop'])!=DESKTOP_FIELDS:raise ValueError('Invalid application manifest fields')
+    inputs=record['buildInputs']
+    if type(value) is not dict or set(value)!=FIELDS or type(value['desktop']) is not dict or set(value['desktop'])!=DESKTOP_FIELDS|(PROFILE_FIELDS if inputs['schemaVersion']==2 else set()):raise ValueError('Invalid application manifest fields')
     for key in ('schemaVersion','product','productVersion','installationGeneration','rid','buildId','frontendHash'):
         if value[key]!=record[key]:raise ValueError('Application identity mismatch: '+key)
     inputs=record['buildInputs']
     if value['sourceSha']!=inputs['sourceSha'] or value['sourceTreeSha']!=inputs['sourceTreeSha']:raise ValueError('Application source mismatch')
     expected={'entryPoint':ENTRY,'appArchive':ASAR,'electronVersion':inputs['electronVersion'],'electronArchiveSha256':inputs['electronArchiveSha256'],'packageLockSha256':inputs['desktopPackageLockSha256'],'bootstrapProtocolVersion':1}
+    if inputs['schemaVersion']==2:
+        profile=frozen_profile(root)
+        if any(inputs[key]!=profile[key] for key in PROFILE_FIELDS):raise ValueError('Frozen application runtime profile mismatch')
+        expected.update(profile)
     if value['desktop']!=expected or type(value['files']) is not list or value['files']!=inventory(directory,runtime_files(root)):raise ValueError('Application manifest byte or file set mismatch')
     return value
 

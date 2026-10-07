@@ -12,15 +12,29 @@ try:
     from .build_identity import canonical_json,create_record
     from .embed_frontend import generate
     from .desktop_build import build as build_desktop
+    from .runtime_profile import frozen as frozen_profile
 except ImportError:
     from build_identity import canonical_json,create_record
     from embed_frontend import generate
     from desktop_build import build as build_desktop
+    from runtime_profile import frozen as frozen_profile
 
 def command(*args: str) -> str:return subprocess.check_output(args,text=True,encoding='utf-8').strip()
 def sha(file: Path) -> str:
     with file.open('rb') as stream:return hashlib.file_digest(stream,'sha256').hexdigest()
 def prepare(root: Path,output: Path,*,source_sha: str,source_tree_sha: str,partner_sha: str,workflow_sha: str,electron_archive: Path|None=None) -> dict:
+    try:
+        from .host_release import project_version, normalized_tag
+    except ImportError:
+        from host_release import project_version, normalized_tag
+    version = project_version(root)
+    if normalized_tag(version)[1:] != version:
+        raise ValueError('Host product version is not canonical')
+    desktop_package = json.loads((root/'desktop'/'package.json').read_bytes())
+    desktop_lock = json.loads((root/'desktop'/'package-lock.json').read_bytes())
+    if desktop_package.get('version') != version or desktop_lock.get('version') != version or desktop_lock.get('packages', {}).get('', {}).get('version') != version:
+        raise ValueError('Host and desktop product versions disagree')
+    profile = frozen_profile(root)
     if output.exists():raise ValueError('Application inputs output already exists')
     output.mkdir(parents=True)
     runtime=json.loads((root/'desktop'/'electron-runtime.json').read_text(encoding='utf-8'))
@@ -33,9 +47,9 @@ def prepare(root: Path,output: Path,*,source_sha: str,source_tree_sha: str,partn
         'npmVersion':command(npm,'--version'),'pythonVersion':platform.python_version(),'innoSetupVersion':'6.7.3',
         'innoCompilerSha256':'0a8757031b33777e4c9cbffee40f11a5062b36d25cbe144c1db73b6102b80ad7','innoDistributionSha256':'9c73c3bae7ed48d44112a0f48e66742c00090bdb5bef71d9d3c056c66e97b732'}
     if 'Microsoft.NETCore.App 10.0.12 ' not in command('dotnet','--list-runtimes'):raise ValueError('Required .NET runtime is missing')
-    inputs={'schemaVersion':1,'productVersion':'0.17.0','generation':'g0170','rid':'win-x64','sourceSha':source_sha,'sourceTreeSha':source_tree_sha,'partnerSha':partner_sha,'workflowSha':workflow_sha,
+    inputs={'schemaVersion':2,'productVersion':version,'generation':'g0170','rid':'win-x64','sourceSha':source_sha,'sourceTreeSha':source_tree_sha,'partnerSha':partner_sha,'workflowSha':workflow_sha,
         'frontendHash':index['frontendHash'],'frontendPackageLockSha256':sha(root/'frontend'/'package-lock.json'),'desktopPackageLockSha256':sha(root/'desktop'/'package-lock.json'),
-        'electronVersion':runtime['version'],'electronArchiveSha256':sha(electron_archive),'bootstrapProtocolVersion':1,'toolchain':toolchain}
+        'electronVersion':runtime['version'],'electronArchiveSha256':sha(electron_archive),'bootstrapProtocolVersion':1,'toolchain':toolchain,**profile}
     record=create_record(inputs)
     identity=output/'desktop-build.json';identity.write_bytes(canonical_json(record))
     (output/'build-inputs.json').write_bytes(canonical_json(inputs))

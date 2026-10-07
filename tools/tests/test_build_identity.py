@@ -4,6 +4,9 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import hashlib
+import json
+from unittest.mock import patch
 
 from tools.build_identity import BuildIdentityError, build_id, canonical_json, create_record, parse_json, validate_record
 
@@ -23,6 +26,25 @@ class BuildIdentityTests(unittest.TestCase):
         self.assertEqual(create_record(self.inputs), record)
         self.assertEqual(build_id(dict(reversed(list(self.inputs.items())))), EXPECTED_ID)
         self.assertEqual(canonical_json({"z": '/<>& " \\', "a": 1}), b'{"a":1,"z":"/<>& \\" \\\\"}')
+
+    def test_profile_vector_is_strict_and_every_profile_field_changes_identity(self):
+        inputs = parse_json((FIXTURES / 'build-inputs.profile.json').read_bytes())
+        record = parse_json((FIXTURES / 'desktop-build.profile.json').read_bytes())
+        self.assertEqual(canonical_json(inputs), (FIXTURES / 'build-inputs.profile.canonical.json').read_bytes())
+        self.assertEqual(create_record(inputs), record)
+        for key in ('runtimeProfileId', 'runtimeProfileSha256', 'runtimeInventorySha256'):
+            changed = copy.deepcopy(inputs)
+            changed[key] = 'another-profile' if key == 'runtimeProfileId' else '1' * 64
+            self.assertNotEqual(build_id(changed), record['buildId'])
+            changed = copy.deepcopy(inputs); del changed[key]
+            with self.assertRaises(BuildIdentityError): build_id(changed)
+            changed = copy.deepcopy(inputs); changed[key] = None
+            with self.assertRaises(BuildIdentityError): build_id(changed)
+        for version in ('2', 3, True):
+            changed = copy.deepcopy(inputs); changed['schemaVersion'] = version
+            with self.assertRaises(BuildIdentityError): build_id(changed)
+        changed = copy.deepcopy(inputs); changed['schemaVersion'] = 1
+        with self.assertRaises(BuildIdentityError): build_id(changed)
 
     def test_each_frozen_input_changes_identity(self):
         for key in ("productVersion", "sourceSha", "sourceTreeSha", "partnerSha", "workflowSha", "frontendHash",
@@ -88,3 +110,35 @@ class BuildIdentityTests(unittest.TestCase):
                                       capture_output=True, text=True, timeout=10)
             self.assertEqual(rejected.returncode, 1)
             self.assertFalse((Path(directory) / "rejected.json").exists())
+
+    def test_application_build_uses_product_version_and_rejects_conflicts_before_download(self):
+        from tools import application_build
+        with tempfile.TemporaryDirectory(prefix='application-version-') as directory:
+            root = Path(directory)
+            (root / 'src').mkdir(); (root / 'desktop').mkdir(); (root / 'frontend').mkdir()
+            archive = root / 'electron.zip'; archive.write_bytes(b'frozen archive fixture')
+            (root / 'desktop/electron-runtime.json').write_text(json.dumps({'version':'44.5.1','archiveSha256':hashlib.sha256(archive.read_bytes()).hexdigest()}))
+            (root / 'frontend/package-lock.json').write_text('{}')
+            ids = []
+            for version in ('0.17.0', '0.17.1'):
+                (root / 'src/NexusPipeline.csproj').write_text(f'<Project><PropertyGroup><Version>{version}</Version></PropertyGroup></Project>')
+                (root / 'desktop/package.json').write_text(json.dumps({'version':version}))
+                (root / 'desktop/package-lock.json').write_text(json.dumps({'version':version,'packages':{'':{'version':version}}}))
+                output = root / version
+                with patch.object(application_build, 'generate', return_value={'frontendHash':'a'*64}), \
+                     patch.object(application_build, 'frozen_profile', return_value={'runtimeProfileId':'fixture', 'runtimeProfileSha256':'b'*64, 'runtimeInventorySha256':'c'*64}), \
+                     patch.object(application_build, 'command', side_effect=lambda *args: 'Microsoft.NETCore.App 10.0.12 [fixture]' if '--list-runtimes' in args else '24.0.1'), \
+                     patch.object(application_build, 'build_desktop', return_value={'bundle':'fixture-desktop'}) as desktop:
+                    result = application_build.prepare(root, output, source_sha='1'*40, source_tree_sha='2'*40,
+                        partner_sha='3'*40, workflow_sha='4'*40, electron_archive=archive)
+                    record = parse_json(Path(result['identity']).read_bytes()); validate_record(record)
+                    self.assertEqual(record['productVersion'], version)
+                    self.assertEqual(record['buildInputs']['productVersion'], version)
+                    self.assertEqual(record['installationGeneration'], 'g0170')
+                    self.assertEqual(desktop.call_args.args[2], Path(result['identity']))
+                    ids.append(record['buildId'])
+            self.assertNotEqual(ids[0], ids[1])
+            (root / 'desktop/package.json').write_text('{"version":"0.17.0"}')
+            with patch.object(application_build.urllib.request, 'urlretrieve') as download, self.assertRaisesRegex(ValueError, 'versions disagree'):
+                application_build.prepare(root, root/'conflict', source_sha='1'*40, source_tree_sha='2'*40, partner_sha='3'*40, workflow_sha='4'*40)
+            download.assert_not_called(); self.assertFalse((root/'conflict').exists())

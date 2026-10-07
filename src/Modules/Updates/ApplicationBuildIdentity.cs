@@ -57,8 +57,14 @@ internal sealed record ApplicationBuildIdentity(
     internal static string ComputeBuildId(JsonElement inputs)
     {
         byte[] canonical = CanonicalBytes(inputs);
-        RequireFields(inputs, InputFields);
-        Require(inputs.GetProperty("schemaVersion").GetRawText() == "1", "Invalid schemaVersion");
+        string schema = inputs.GetProperty("schemaVersion").GetRawText();
+        Require(schema is "1" or "2", "Invalid schemaVersion");
+        RequireFields(inputs, schema == "2" ? [.. InputFields, "runtimeProfileId", "runtimeProfileSha256", "runtimeInventorySha256"] : InputFields);
+        if (schema == "2")
+        {
+            RequirePattern(String(inputs, "runtimeProfileId"), "[a-z0-9][a-z0-9-]{0,63}");
+            foreach (string key in new[] { "runtimeProfileSha256", "runtimeInventorySha256" }) RequirePattern(String(inputs, key), "[0-9a-f]{64}");
+        }
         Require(inputs.GetProperty("bootstrapProtocolVersion").GetRawText() == "1", "Invalid bootstrap protocol");
         Require(String(inputs, "generation") == "g0170" && String(inputs, "rid") == "win-x64", "Invalid target");
         string version = String(inputs, "productVersion");

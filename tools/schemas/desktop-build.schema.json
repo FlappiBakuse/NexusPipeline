@@ -45,7 +45,7 @@
       "const": 1
     },
     "buildInputs": {
-      "$ref": "urn:nexuspipeline:schemas:build-inputs:1"
+      "$ref": "urn:nexuspipeline:schemas:build-inputs:2"
     }
   }
 }

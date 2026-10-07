@@ -43,7 +43,11 @@ internal static class ApplicationPayload
         }) if (manifest.GetProperty(item.Key).GetString() != item.Value) throw new InvalidDataException("Payload identity mismatch: " + item.Key);
         if (manifest.GetProperty("schemaVersion").GetRawText() != "1") throw new InvalidDataException("Payload schema mismatch");
         JsonElement desktop = manifest.GetProperty("desktop");
-        Fields(desktop, ["entryPoint", "appArchive", "electronVersion", "electronArchiveSha256", "packageLockSha256", "bootstrapProtocolVersion"]);
+        bool profiled = identity.BuildInputs.GetProperty("schemaVersion").GetRawText() == "2";
+        string[] profileFields = ["runtimeProfileId", "runtimeProfileSha256", "runtimeInventorySha256"];
+        Fields(desktop, ["entryPoint", "appArchive", "electronVersion", "electronArchiveSha256", "packageLockSha256", "bootstrapProtocolVersion", .. profiled ? profileFields : []]);
+        if (profiled && profileFields.Any(field => desktop.GetProperty(field).GetString() != identity.BuildInputs.GetProperty(field).GetString()))
+            throw new InvalidDataException("Desktop runtime profile mismatch");
         if (desktop.GetProperty("entryPoint").GetString() != DesktopEntry || desktop.GetProperty("appArchive").GetString() != DesktopArchive
             || desktop.GetProperty("bootstrapProtocolVersion").GetRawText() != "1"
             || desktop.GetProperty("electronVersion").GetString() != identity.BuildInputs.GetProperty("electronVersion").GetString()
@@ -68,8 +72,12 @@ internal static class ApplicationPayload
         byte[] runtimeBytes = BundleResourceReader.Read(Path.Combine(root, "NexusPipeline.exe"), "NexusPipeline.dll", "NexusPipeline.Desktop.RuntimeFiles", 2 * 1024 * 1024);
         using var runtimeDocument = JsonDocument.Parse(runtimeBytes);
         var runtime = runtimeDocument.RootElement;
-        Fields(runtime, ["schemaVersion", "electronVersion", "electronArchiveSha256", "files"]);
-        if (runtime.GetProperty("schemaVersion").GetRawText() != "1"
+        Fields(runtime, ["schemaVersion", "electronVersion", "electronArchiveSha256", "files", .. profiled ? new[] { "runtimeProfileId", "runtimeProfileSha256" } : []]);
+        if (profiled && (runtime.GetProperty("runtimeProfileId").GetString() != desktop.GetProperty("runtimeProfileId").GetString()
+            || runtime.GetProperty("runtimeProfileSha256").GetString() != desktop.GetProperty("runtimeProfileSha256").GetString()
+            || Convert.ToHexStringLower(SHA256.HashData(runtimeBytes)) != desktop.GetProperty("runtimeInventorySha256").GetString()))
+            throw new InvalidDataException("Embedded runtime profile mismatch");
+        if (runtime.GetProperty("schemaVersion").GetRawText() != (profiled ? "2" : "1")
             || runtime.GetProperty("electronVersion").GetString() != desktop.GetProperty("electronVersion").GetString()
             || runtime.GetProperty("electronArchiveSha256").GetString() != desktop.GetProperty("electronArchiveSha256").GetString())
             throw new InvalidDataException("Runtime inventory identity mismatch");

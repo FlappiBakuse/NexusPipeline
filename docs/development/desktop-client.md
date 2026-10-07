@@ -14,12 +14,16 @@ Host 重启保留桌面 renderer，准备状态暂停轮询和写操作，dirty 
 
 桌面窗口、任务栏和桌面 EXE 图标统一来自 `src/NexusPipeline.ico`。构建使用 Windows 资源 API 替换桌面 EXE 的图标组与图像，保留其他资源及原执行权限清单；窗口使用同一 ICO 的独立载荷文件。运行时文件索引固定替换后的 EXE 和 ICO 字节。
 
+生产 profile `win-x64-en-zh-v1` 保留 en-US、zh-CN 的运行时语言包及全部非语言运行文件、Electron/Chromium/Koffi 许可。ready 前读取首选系统语言：中文别名映射到 zh-CN，其余映射到 en-US；业务语言仍由现役服务设置管理。[Electron app 文档](https://www.electronjs.org/docs/latest/api/app)与[命令行开关](https://www.electronjs.org/docs/latest/api/command-line-switches)说明对应原生语言接口及 `--lang`。锁定运行时的实际行为须继续由桌面验收确认。
+
+Koffi 依赖按 profile 的逐文件白名单装配；native 文件仍位于 `resources/app.asar.unpacked/node_modules/@koromix/koffi-win32-x64/win32_x64/koffi.node`。解压后先验证 runtime 的精确集合、长度和 SHA256，再装配 ASAR 和完整 payload。类型、测试、文档与构建脚本留在源工程，构建输出只收录运行时白名单。
+
 ## 构建与验证
 
 Test Host 在现役 runner 设置 `NEXUS_SYSTEM_ACTION_DRYRUN=1` 时替代防火墙命令；原生适配器契约验证参数、有限的创建规则回退和未调用系统命令的效果。生产构建不读取该替代开关，实际入站连通性仍由生产环境验收。
 
 所有本机产物应放在外部目录。设置 `NEXUS_TEST_ARTIFACT_ROOT` 和 `NEXUS_PARTNER_ROOT` 后执行 `node tests/run.mjs release`，现役 runner 隔离源码、构建 Vue、冻结输入、装配 Electron、内嵌 Host 身份并生成完整应用 manifest。`NEXUS_ELECTRON_ARCHIVE` 可指向已固定摘要的官方 ZIP；未指定时从精确官方地址下载并校验。构建输出路径由 runner 报告。
 
-`node tests/run.mjs gate --id host.integration.restart-update` 使用 asInvoker 完整软件验证整包交换、启动凭据、恢复和用户字节保全。`host.integration.desktop` 执行四项原生 TypeScript 用例、八项真实载荷只读校验以及真实 Electron 中的页面、偏好、重启草稿保留、明确刷新、renderer 崩溃恢复和隐藏行为。原生提示的确认动作在自动化中由受控替代记录；DPI、多屏和生产 UAC 继续人工验收。生产软件清单要求 requireAdministrator，自动化不触发 UAC。
+`node tests/run.mjs gate --id host.integration.restart-update` 使用 asInvoker 完整软件验证整包交换、启动凭据、恢复和用户字节保全。该 runner 构建隔离的 0.17.0 全清单与 0.17.1 精简清单，验证不同补丁及文件集合的更新、损坏回滚和未知文件保全；夹具不改变产品目标版本。`host.integration.desktop` 执行五项原生 TypeScript 用例、八项真实载荷只读校验以及真实 Electron 中的页面、偏好、重启草稿保留、明确刷新、renderer 崩溃恢复和隐藏行为。原生提示的确认动作在自动化中由受控替代记录；DPI、多屏和生产 UAC 继续人工验收。生产软件清单要求 requireAdministrator，自动化不触发 UAC。
 
 载荷资源与 canonical buildInputs 见[构建身份](build-identity.md)，访问能力见[Plugin API](../reference/plugin-api/managed.md)，人工与远端未验证范围见[状态](../STATUS.md)。
