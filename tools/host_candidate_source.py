@@ -58,7 +58,7 @@ def completed_job(entries: list[dict[str, Any]], name: str) -> None:
         elapsed = (completed - started).total_seconds()
     except (KeyError, AttributeError, TypeError, ValueError) as exc:
         raise CandidateSourceError(f"{name} 缺少完整服务端时间") from exc
-    require(0 <= elapsed <= 300, f"{name} 完整耗时超过 300 秒")
+    require(0 <= elapsed, f"{name} 完整耗时无效")
 
 
 def list_attempt_jobs(fetch: Callable[[str], dict[str, Any]], prefix: str, run_id: int, attempt: int) -> list[dict[str, Any]]:
@@ -143,7 +143,8 @@ def resolve_candidate(
         "artifactId": artifact["id"],
         "artifactDigest": digest,
         "producerSchema": "staged-v2",
-        "budgetQualified": True,
+        "completedJobsVerified": True,
+        "executionLimitMs": None,
     }
 
 

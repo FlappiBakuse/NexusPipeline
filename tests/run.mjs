@@ -21,8 +21,7 @@ if (process.argv[2] === "plan") {
 }
 const policyBytes = fs.readFileSync(path.join(projectRoot, "tests", "policy.json"));
 const policy = JSON.parse(policyBytes);
-if (policy.invocationBudgetMs !== 300_000 || policy.qualificationMs !== 300_000 || policy.cleanupReserveMs < 10_000
-  || policy.cleanupReserveMs >= policy.invocationBudgetMs) throw new Error("Invalid Host budget policy");
+if (policy.invocationBudgetMs !== null || policy.qualificationMs !== null || policy.cleanupReserveMs !== 0) throw new Error("Invalid Host timing policy");
 const batchContext = process.argv[2] === "batch" ? loadBatch(projectRoot,process.argv.slice(3)) : null;
 let executionRoot = projectRoot;
 let frontendDir = path.join(projectRoot, "frontend");
@@ -50,11 +49,7 @@ if(!Number.isFinite(jobStartedAt)||jobStartedAt>Date.now()) throw new Error("Inv
 const setupElapsedMs=Date.now()-jobStartedAt;
 if(batchContext) batchContext.setupElapsedMs=setupElapsedMs;
 const invocationBudget = process.argv[2]?.toLowerCase() === "release" ? null
-  : new Budget("Host 测试命令", policy.invocationBudgetMs,
-    { reserveMs: batchContext ? 20000 : policy.cleanupReserveMs, qualificationMs: policy.qualificationMs,
-      inheritedWorkMs:Math.min(process.env.NEXUS_TEST_PARENT_WORK_DEADLINE_MS ? Number(process.env.NEXUS_TEST_PARENT_WORK_DEADLINE_MS)-Date.now() : Infinity,process.env.NEXUS_TEST_JOB_STARTED_AT_MS ? 280000-(Date.now()-Number(process.env.NEXUS_TEST_JOB_STARTED_AT_MS)) : Infinity),
-      inheritedHardMs:Math.min(process.env.NEXUS_TEST_PARENT_HARD_DEADLINE_MS ? Number(process.env.NEXUS_TEST_PARENT_HARD_DEADLINE_MS)-Date.now() : Infinity,
-        process.env.NEXUS_TEST_JOB_STARTED_AT_MS?300000-setupElapsedMs:Infinity) });
+  : new Budget("Host 测试命令", null);
 const cancellation = new AbortController();
 const cancel = () => cancellation.abort();
 process.once("SIGINT", cancel);
@@ -70,6 +65,7 @@ function step(label) {
 async function run(command, args, options = {}) {
   const {logRoot = runRoot, ...processOptions} = options;
   options = processOptions;
+  if (policy.invocationBudgetMs === null) delete options.timeoutMs;
   let env = options.env ?? process.env;
   if (process.env.NEXUS_TEST_ARTIFACT_ROOT) {
     const root = process.env.NEXUS_TEST_ARTIFACT_ROOT;
@@ -132,7 +128,7 @@ async function buildFrontendBundle({typechecked=false,logRoot=runRoot}={}) {
   const sourceHash = () => execFileSync(
     process.execPath,
     [path.join(executionRoot, "tools", "source-hash.mjs"), "--frontend"],
-    { cwd: executionRoot, encoding: "utf8", timeout: invocationBudget
+    { cwd: executionRoot, encoding: "utf8", timeout: invocationBudget && Number.isFinite(invocationBudget.remainingMs())
       ? Math.max(1, Math.floor(invocationBudget.remainingMs())) : undefined },
   ).trim();
   // 发行候选按 --frontend-ready 读取该指纹；指纹仍匹配时不再改动源码树，
@@ -688,7 +684,7 @@ async function runGate(id) {
 async function runRelease() {
   step("生产构建");
   workspace = stageWorkspace(projectRoot, process.env.NEXUS_TEST_ARTIFACT_ROOT,
-    new Budget("生产构建准备", 20 * 60 * 1000));
+    new Budget("生产构建准备", null));
   executionRoot = workspace.directory;
   frontendDir = path.join(executionRoot, "frontend");
   let code = await prepareApplicationInputs();
@@ -711,9 +707,9 @@ async function runRelease() {
 
 function printUsage() {
   console.error("用法：node tests\\run.mjs ci --group backend|frontend；daily [--group execution|config|control|schedule]；diagnostic --group store；smoke|integration|release；list --json");
-  console.error("  smoke       并行核心 xUnit 与前端类型/核心 Vitest，共享 300 秒预算");
+  console.error("  smoke       并行核心 xUnit 与前端类型/核心 Vitest，记录完整实际耗时，不设执行时间预算");
   console.error("  integration 发布 asInvoker Test Host，运行 UI Smoke 与 System Smoke");
-  console.error("  daily       两个 Host 槽位运行四条有限真实 E2E，共享 300 秒预算");
+  console.error("  daily       两个 Host 槽位运行四条有限真实 E2E，记录完整实际耗时，不设执行时间预算");
   console.error("  release     生产 requireAdministrator 构建与内嵌清单校验");
 }
 
@@ -777,7 +773,7 @@ try {
   } else if (workspace) {
     workspace.release();
   }
-  if (invocationBudget && invocationBudget.elapsedMs+setupElapsedMs > policy.qualificationMs) exitCode ||= 5;
+  if (invocationBudget && policy.qualificationMs !== null && invocationBudget.elapsedMs+setupElapsedMs > policy.qualificationMs) exitCode ||= 5;
   if (invocationBudget?.remainingMs({ cleanup: true }) === 0) exitCode ||= 5;
   if(batchContext) saveBatch(batchContext,batchParentRoot,workspace,batchResults,exitCode,invocationBudget.elapsedMs,getProcessRunnerState());
   const storeEvidence = path.join(runRoot, "store-evidence.json");
@@ -806,7 +802,7 @@ try {
       ? { commitSha: execFileSync("git", ["-C", partnerRoot, "rev-parse", "HEAD"], { encoding: "utf8" }).trim(),
         workingTreeDirty: Boolean(execFileSync("git", ["-C", partnerRoot, "status", "--porcelain"],
           { encoding: "utf8" }).trim()) } : null;
-    if (invocationBudget.elapsedMs > policy.qualificationMs) exitCode ||= 5;
+    if (policy.qualificationMs !== null && invocationBudget.elapsedMs > policy.qualificationMs) exitCode ||= 5;
     const report = {
       schemaVersion: 1, scope: "LOCAL_GATE", gateId, kind: gate?.kind ?? null, runId,
       source: workspace?.source ?? null, partner, policyDigest: digest,

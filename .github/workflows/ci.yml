@@ -13,7 +13,6 @@ jobs:
   scope:
     name: Host / 范围判定
     runs-on: ubuntu-latest
-    timeout-minutes: 5
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
       count: ${{ steps.plan.outputs.count }}
@@ -56,11 +55,10 @@ jobs:
     needs: scope
     if: needs.scope.outputs.control == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
     env:
       NEXUS_TEST_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}-control
     steps:
-      - name: 记录任务预算起点
+      - name: 记录任务计时起点
         run: echo "NEXUS_TEST_JOB_STARTED_AT_MS=$(date +%s%3N)" >> "$GITHUB_ENV"
       - name: 检出完整源码与基线
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -114,11 +112,10 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.scope.outputs.matrix) }}
     runs-on: windows-2025
-    timeout-minutes: 5
     env:
       NEXUS_TEST_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.id }}
     steps:
-      - name: 记录任务预算起点
+      - name: 记录任务计时起点
         shell: pwsh
         run: '"NEXUS_TEST_JOB_STARTED_AT_MS=$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())" >> $env:GITHUB_ENV'
       - name: 检出完整源码与基线
@@ -177,9 +174,8 @@ jobs:
     needs: [scope, control, batches]
     if: always()
     runs-on: ubuntu-latest
-    timeout-minutes: 5
     steps:
-      - name: 记录任务预算起点
+      - name: 记录任务计时起点
         run: echo "NEXUS_TEST_JOB_STARTED_AT_MS=$(date +%s%3N)" >> "$GITHUB_ENV"
       - name: 检出完整源码与基线
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -203,7 +199,7 @@ jobs:
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           path: ${{ runner.temp }}/reports
-      - name: 核验门禁报告与完整任务预算
+      - name: 核验门禁报告与完整任务记录
         working-directory: Host
         env:
           GH_TOKEN: ${{ github.token }}

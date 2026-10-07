@@ -83,3 +83,17 @@ test("child cleanup uses the parent hard window without restarting work or quali
   time = 150001; assert.throws(() => child.assertWithinBudget());
   time = 180000; assert.equal(child.remainingMs({cleanup:true}), 0);
 });
+
+test("unlimited timing records elapsed work and imposes no child deadline",()=>{
+ let time=0;const root=new Budget("invocation",null,{clock:()=>time});
+ const child=root.child("desktop",null);time=3_600_000;
+ assert.equal(root.elapsedMs,3_600_000);assert.equal(child.remainingMs(),Infinity);
+ root.check();child.assertWithinBudget();
+});
+
+test("unlimited command preserves the real child result past a supplied execution timeout",async()=>{
+ const {runProcess}=await import("./process-runner.mjs");
+ assert.equal(await runProcess(process.execPath,["-e","setTimeout(()=>process.exit(7),40)"],{
+  budget:new Budget("desktop build",null),timeoutMs:1
+ }),7);
+});

@@ -41,7 +41,7 @@ export function runProcess(command, args, options = {}) {
     if (options.signal?.aborted) return resolve(130);
     const available = options.budget?.remainingMs() ?? Infinity;
     if (available <= 0) return resolve(options.timeoutCode ?? 5);
-    const requested = positiveTimeout(options.timeoutMs, Infinity);
+    const requested = options.budget?.limitMs === null ? Infinity : positiveTimeout(options.timeoutMs, Infinity);
     const bounded = Math.min(available, requested);
     const timeoutMs = Number.isFinite(bounded) ? Math.max(1, Math.floor(bounded)) : null;
     const timeoutCode = options.timeoutCode ?? 5;
@@ -57,6 +57,7 @@ export function runProcess(command, args, options = {}) {
       if (key.toUpperCase().startsWith("NEXUS_CI_")) delete childEnv[key];
     }
     const label = [command, ...args].join(" ");
+    const startedAt = performance.now();
     const spawn = options.spawnImpl || defaultSpawn;
     const killProcessTree = options.killProcessTreeImpl || ((pid, remainingMs) => new Promise(resolve => {
       // Only the still-live ChildProcess may authorize this numeric PID.
@@ -91,6 +92,10 @@ export function runProcess(command, args, options = {}) {
         // or a surviving child keep this failed runner alive indefinitely.
         for (const stream of [child.stdin, child.stdout, child.stderr]) stream?.destroy?.();
         child.unref?.();
+      }
+      if (options.budget) {
+        const timing = "[耗时] "+label+": "+Math.round(performance.now()-startedAt)+"ms; exit "+code+"\n";
+        console.error(timing.trimEnd());options.onOutput?.(timing);
       }
       resolve(code);
     };

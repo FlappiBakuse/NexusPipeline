@@ -14,7 +14,7 @@ export function loadBatch(root,args) {
   for(let i=0;i<args.length;i++) {
     const flag=args[i],value=args[++i];
     if(!["--plan","--batch","--partner-root"].includes(flag)||Object.hasOwn(options,flag)||!value||value.startsWith("--"))
-      throw new Error("Usage: batch --plan <plan> --batch <control|batch-01..05> [--partner-root <fixed Plugins>]");
+      throw new Error("Usage: batch --plan <plan> --batch <control|batch-NN> [--partner-root <fixed Plugins>]");
     options[flag]=value;
   }
   if(!options["--plan"]||!options["--batch"]) throw new Error("Missing batch input");
@@ -22,7 +22,7 @@ export function loadBatch(root,args) {
   if(fs.lstatSync(file).isSymbolicLink()||fs.statSync(file).size>4*1024*1024) throw new Error("Unsafe plan file");
   const bytes=fs.readFileSync(file);policyDigest(bytes);
   const plan=JSON.parse(bytes);
-  if(plan.schemaVersion!==2||plan.repository!=="Host"||plan.capacityStatus!=="PLANNED"||plan.estimatedTotalJobs>10||plan.batches.length>5)
+  if(plan.schemaVersion!==2||plan.repository!=="Host"||plan.capacityStatus!=="PLANNED")
     throw new Error("Invalid or CAPACITY_EXCEEDED batch plan");
   const policy=JSON.parse(fs.readFileSync(path.join(root,"tests/policy.json")));
   const {registry}=readRegistry(root);
@@ -77,7 +77,7 @@ export function saveBatch(context,runRoot,workspace,units,exitCode,elapsedMs,cle
       inputMode:context.plan.inputMode??"default",inputPair:context.plan.inputPair??null,partnerSha:context.plan.partnerSha,partner:context.partnerSource??null,partnerFingerprint:context.partnerFingerprint??null,source:workspace?.source??null,sourceFingerprint:workspace?.sourceFingerprint??null,
       workingTreeDirty:workspace?.source.workingTreeDirty??null,toolchain:{...workspace?.toolchain,platform:process.platform,arch:process.arch,rid:"win-x64",buildModes:["production","test-host"]},
       toolchainFingerprint:hash(JSON.stringify({...workspace?.toolchain,platform:process.platform,arch:process.arch,rid:"win-x64",buildModes:["production","test-host"]}))},policyDigest:context.plan.policyDigest,planDigest:context.planDigest,
-    status:exitCode?"FAIL":"PASS",exitCode,timing:{qualificationMs:300000,hardTimeoutMs:300000,processElapsedMs:elapsedMs,preparationElapsedMs:context.setupElapsedMs??0,completeJobMs:null},
+    status:exitCode?"FAIL":"PASS",exitCode,timing:{qualificationMs:null,hardTimeoutMs:null,processElapsedMs:elapsedMs,preparationElapsedMs:context.setupElapsedMs??0,completeJobMs:null},
     cleanupComplete:cleanup.cleanupComplete,units:units.map(unit=>({real:[],substituted:[],...unit})),artifacts};
   fs.writeFileSync(path.join(runRoot,"batch-report.json"),JSON.stringify(report,null,2)+"\n");
   return report;

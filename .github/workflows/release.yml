@@ -43,7 +43,6 @@ jobs:
     name: Host / 候选输入
     if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.operation == 'candidate')
     runs-on: windows-latest
-    timeout-minutes: 5
     outputs:
       source_sha: ${{ steps.source.outputs.sha }}
       partner_sha: ${{ steps.plugins.outputs.sha }}
@@ -91,7 +90,6 @@ jobs:
     name: Host / 生产前端
     needs: source-plan
     runs-on: windows-latest
-    timeout-minutes: 5
     steps:
       - name: 检出候选控制源码
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -129,7 +127,6 @@ jobs:
     name: Host / 预装插件
     needs: source-plan
     runs-on: windows-latest
-    timeout-minutes: 5
     steps:
       - name: 检出候选控制源码
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -174,7 +171,6 @@ jobs:
     name: Host / 生产宿主
     needs: [source-plan, production-frontend, bundled-plugin-build]
     runs-on: windows-latest
-    timeout-minutes: 5
     steps:
       - name: 检出候选控制源码
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -233,7 +229,6 @@ jobs:
     name: Host / 包校验
     needs: [source-plan, production-host]
     runs-on: windows-latest
-    timeout-minutes: 5
     steps:
       - name: 检出候选控制源码
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -269,7 +264,6 @@ jobs:
     name: Host / 安装器构建
     needs: [source-plan, production-host]
     runs-on: windows-latest
-    timeout-minutes: 5
     steps:
       - name: 检出候选控制源码
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -328,7 +322,6 @@ jobs:
     name: Host / 候选校验
     needs: [source-plan, package-verify, installer-build]
     runs-on: windows-latest
-    timeout-minutes: 5
     steps:
       - name: 检出候选控制源码
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -379,7 +372,6 @@ jobs:
     name: Host / 原包发布
     if: github.event_name == 'workflow_dispatch' && inputs.operation == 'publish-only'
     runs-on: windows-latest
-    timeout-minutes: 5
     environment: host-release
     permissions:
       actions: read

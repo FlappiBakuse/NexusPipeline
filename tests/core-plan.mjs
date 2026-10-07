@@ -119,9 +119,7 @@ export function coreUnits(selected, registry, policy, partnerPolicy = null) {
 }
 
 export function allocateUnits(units, identity, limits = {}) {
-  const workMs = limits.workMs ?? 280000;
-  const maxBatches = limits.maxBatches ?? 5;
-  if (workMs !== 280000 || maxBatches !== 5) throw new Error("Unregistered batch limits");
+  if (limits.workMs !== undefined && limits.workMs !== null) throw new Error("Execution time caps are disabled");
   const prepareCost = name => limits.preparationMs?.[name] ?? (name === "source" ? 500 : 10000);
   const executionCost = unit => limits.unitMs?.[unit.id] ?? (unit.kind === "plugin" ? unit.artifact === "MaaFrameworkDriver" ? 45000
     : unit.pluginKind === "data-specialized" ? 6000 : 15000 : unit.kind === "backend" ? 6000 : unit.kind === "frontend" ? 8000
@@ -140,21 +138,24 @@ export function allocateUnits(units, identity, limits = {}) {
       + unique(items.flatMap(item => item.preparations)).reduce((sum, name) => sum + prepareCost(name), 0);
   };
   const unplaced = [];
-  for (const unit of enriched.filter(unit => !unit.control).sort((a,b) => cost([b]) - cost([a]) || a.id.localeCompare(b.id, "en"))) {
+  const lane = unit => unit.pluginKind === "data-specialized" ? "specialized"
+    : unit.artifact === "MaaFrameworkDriver" ? "native"
+    : unit.pluginKind === "managed-code" || unit.kind === "plugin" ? "managed"
+    : ["host.integration.desktop","host.integration.restart-update","host.integration.store"].includes(unit.id) ? "desktop"
+    : unit.kind === "frontend" || unit.id === "host.architecture.frontend" ? "frontend" : "backend";
+  const groups = new Map();
+  for (const unit of enriched.filter(unit => !unit.control)) {
     if (!Number.isSafeInteger(unit.estimatedMs) || unit.estimatedMs <= 0) throw new Error("Missing positive unit cost");
-    const fits = batches.filter(batch => cost([...batch.units, unit]) <= workMs)
-      .sort((a,b) => (cost([...a.units,unit])-a.estimatedMs) - (cost([...b.units,unit])-b.estimatedMs) || a.id.localeCompare(b.id,"en"));
-    let batch = fits[0];
-    if (!batch && batches.length < maxBatches && cost([unit]) <= workMs) {
-      batch = {id:`batch-${String(batches.length+1).padStart(2,"0")}`,units:[],estimatedMs:0}; batches.push(batch);
-    }
-    if (!batch) { unplaced.push(unit); continue; }
-    batch.units.push(unit); batch.estimatedMs = cost(batch.units);
+    const name = lane(unit);
+    if (!groups.has(name)) groups.set(name, []);
+    groups.get(name).push(unit);
   }
+  for (const [, items] of [...groups].sort(([a],[b]) => a.localeCompare(b,"en")))
+    batches.push({id:"batch-"+String(batches.length+1).padStart(2,"0"),units:items,estimatedMs:cost(items)});
   for (const batch of batches) batch.units.sort((a,b) => a.id.localeCompare(b.id,"en"));
   return {control: {id:"control",units:control,estimatedMs:cost(control)}, batches,
     requiredObligations: unique(units.flatMap(unit => unit.provides)), units:enriched,
     estimatedTotalJobs: 5 + batches.length, unplacedUnits:unplaced,
-    capacityStatus: unplaced.length || cost(control) > workMs ? "CAPACITY_EXCEEDED" : "PLANNED",
-    costBasis:"conservative local baseline estimates; setup/upload/post reserve 20000ms; not Actions qualification"};
+    capacityStatus: "PLANNED",
+    costBasis:"observational estimates; preparation lanes have no execution time cap"};
 }

@@ -37,7 +37,7 @@ class BatchRequiredTests(unittest.TestCase):
                      "identity":{"repository":"FlappiBakuse/NexusPipeline","prNumber":7,"baseSha":"b"*40,"headSha":"c"*40,"mergeBaseSha":"d"*40,"testedSha":"a"*40,
                                  "runId":"12","attempt":"2","partnerSha":None,"source":{"commitSha":"a"*40,"workingTreeDirty":False},"sourceFingerprint":"e"*64},
                      "policyDigest":"f"*64,"status":"PASS","exitCode":0,"cleanupComplete":True,"units":[self.actual],"artifacts":[],
-                     "timing":{"qualificationMs":300000,"hardTimeoutMs":300000,"processElapsedMs":100,"completeJobMs":None}}
+                     "timing":{"qualificationMs":None,"hardTimeoutMs":None,"processElapsedMs":100,"completeJobMs":None}}
         toolchain={"node":"v24.20.0","dotnet":None,"platform":"linux","arch":"x64","rid":"win-x64","buildModes":["production","test-host"]}
         self.report["identity"]["toolchain"]=toolchain
         self.report["identity"]["toolchainFingerprint"]=required.digest(json.dumps(toolchain,separators=(",",":")).encode())
@@ -140,10 +140,9 @@ class BatchRequiredTests(unittest.TestCase):
         self.report=copy.deepcopy(original);self.report["artifacts"][0]["sizeBytes"]=2**30
         with self.assertRaises(ValueError):self.check()
 
-    def test_150000_inclusive_150001_and_server_time_substitution_fail(self):
+    def test_long_work_is_accepted_but_server_time_substitution_fails(self):
         self.report["timing"]["processElapsedMs"]=300000;self.check()
-        self.report["timing"]["processElapsedMs"]=300001
-        with self.assertRaises(ValueError):self.check()
+        self.report["timing"]["processElapsedMs"]=3600000;self.check()
         self.report["timing"]["processElapsedMs"]=1;self.report["timing"]["completeJobMs"]=1
         with self.assertRaises(ValueError):self.check()
 

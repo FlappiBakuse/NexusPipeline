@@ -9,7 +9,7 @@ export function stageWorkspace(sourceRoot, artifactRoot, budget, directoryName =
   const git = (...args) => {
     budget.check();
     return execFileSync("git", ["-C", sourceRoot, ...args], {
-      encoding: "utf8", windowsHide: true, timeout: Math.max(1, Math.floor(budget.remainingMs())),
+      encoding: "utf8", windowsHide: true, timeout: Number.isFinite(budget.remainingMs()) ? Math.max(1, Math.floor(budget.remainingMs())) : undefined,
       maxBuffer: 16 * 1024 * 1024,
     });
   };
@@ -29,7 +29,7 @@ export function stageWorkspace(sourceRoot, artifactRoot, budget, directoryName =
   const dotnet = dotnetRequired ? execFileSync("dotnet", ["--version"], {
     env: {...process.env, DOTNET_CLI_HOME: process.env.DOTNET_CLI_HOME || path.join(artifactRoot,"cache/dotnet"),
       DOTNET_CLI_TELEMETRY_OPTOUT:"1", DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE:"true", DOTNET_NOLOGO:"1"},
-    encoding: "utf8", windowsHide: true, timeout: Math.max(1, Math.floor(budget.remainingMs())),
+    encoding: "utf8", windowsHide: true, timeout: Number.isFinite(budget.remainingMs()) ? Math.max(1, Math.floor(budget.remainingMs())) : undefined,
   }).trim() : null;
   const fingerprint = sha256(`${sourceFingerprint}\0${process.version}\0${process.platform}\0${process.arch}\0${dotnet}`);
   const destination = path.join(artifactRoot, "cache", fingerprint.slice(0, 16), directoryName);

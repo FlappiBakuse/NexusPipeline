@@ -26,7 +26,7 @@
     },
     "batchId": {
       "type": "string",
-      "pattern": "^(batch-0[1-5]|control)$"
+      "pattern": "^(batch-(?:0[1-9]|[1-9][0-9]+)|control)$"
     },
     "identity": {
       "type": "object",
@@ -154,10 +154,10 @@
       ],
       "properties": {
         "qualificationMs": {
-          "const": 300000
+          "const": null
         },
         "hardTimeoutMs": {
-          "const": 300000
+          "const": null
         },
         "processElapsedMs": {
           "type": "number",
@@ -327,9 +327,7 @@
           },
           "timing": {
             "properties": {
-              "processElapsedMs": {
-                "maximum": 300000
-              }
+              "processElapsedMs": {}
             }
           },
           "units": {

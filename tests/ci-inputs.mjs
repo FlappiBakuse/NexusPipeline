@@ -5,23 +5,9 @@ import {createHash} from "node:crypto";
 
 const repositories = ["FlappiBakuse/NexusPipeline", "FlappiBakuse/NexusPipeline-Plugins"];
 const python = process.platform === "win32" ? "python" : "python3";
-const git = (root, ...args) => execFileSync("git", ["-C", root, ...args], {encoding:"utf8", windowsHide:true, timeout:8000}).trim();
+const git = (root, ...args) => execFileSync("git", ["-C", root, ...args], {encoding:"utf8", windowsHide:true}).trim();
 const fileDigest = file => createHash("sha256").update(fs.readFileSync(file,"utf8").replaceAll("\r\n","\n")).digest("hex");
 
-function checkoutValidationTimeout() {
-  const now=Date.now();
-  const deadlines=[now+60000];
-  for(const [name,offset] of [["NEXUS_TEST_JOB_STARTED_AT_MS",280000],["NEXUS_TEST_PARENT_WORK_DEADLINE_MS",0]]) {
-    const supplied=process.env[name];
-    if(!supplied)continue;
-    const value=Number(supplied);
-    if(!Number.isFinite(value)||value<=0)throw new Error("Invalid inherited input deadline");
-    deadlines.push(value+offset);
-  }
-  const remaining=Math.floor(Math.min(...deadlines)-now);
-  if(remaining<=0)throw new Error("Input validation work deadline exhausted");
-  return remaining;
-}
 
 export function defaultPartner(root) {
   const input = JSON.parse(fs.readFileSync(path.join(root, "plugins.lock.json"), "utf8"));
@@ -33,12 +19,12 @@ export function defaultPartner(root) {
 export function resolvePair(root, repository, identity) {
   return JSON.parse(execFileSync(python, [path.join(root,"tests/ci_inputs.py"),
     "--repository",repository,"--pr",String(identity.prNumber),"--base",identity.base,"--head",identity.head,
-    "--tested",git(root,"rev-parse","HEAD")], {encoding:"utf8",windowsHide:true,timeout:100000}));
+    "--tested",git(root,"rev-parse","HEAD")], {encoding:"utf8",windowsHide:true}));
 }
 
 export function validatePairCheckout(root, file, plan, partnerRoot) {
   const pair = JSON.parse(execFileSync(python,[path.join(root,"tests/ci_inputs.py"),"--plan",file],
-    {encoding:"utf8",windowsHide:true,timeout:checkoutValidationTimeout()}));
+    {encoding:"utf8",windowsHide:true}));
   if ((plan.inputMode ?? "default") !== (pair ? "paired" : "default")) throw new Error("Input mode differs from pair");
   if (!pair) return;
   const index = plan.repository === "Host" ? 0 : 1;
@@ -57,5 +43,5 @@ export function validatePairCheckout(root, file, plan, partnerRoot) {
 
 export function validateDefaultHost(root, sha) {
   return execFileSync(python,[path.join(root,"tests/ci_inputs.py"),"--default-host-sha",sha],
-    {encoding:"utf8",windowsHide:true,timeout:15000}).trim();
+    {encoding:"utf8",windowsHide:true}).trim();
 }

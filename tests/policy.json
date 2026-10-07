@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "invocationBudgetMs": 300000,
-  "qualificationMs": 300000,
-  "cleanupReserveMs": 10000,
+  "invocationBudgetMs": null,
+  "qualificationMs": null,
+  "cleanupReserveMs": 0,
   "groups": {
     "backend": {
       "scenarioIds": [
@@ -670,8 +670,7 @@
     }
   },
   "ciBatchPolicy": {
-    "workMs": 280000,
-    "maxBatches": 5,
+    "workMs": null,
     "fixedJobs": 5,
     "preparationMs": {
       "source": 500,

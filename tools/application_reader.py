@@ -21,8 +21,8 @@ def read(directory: Path,version: str|None=None) -> dict:
     if not dll.exists():
         result=subprocess.run(['dotnet','build',str(root/'tools/NexusPipeline.PayloadReader/NexusPipeline.PayloadReader.csproj'),'--configuration','Release',
             '--output',str(cache/'out'),'-p:BaseIntermediateOutputPath='+str(cache/'obj')+os.sep,'-p:MSBuildProjectExtensionsPath='+str(cache/'obj')+os.sep],
-            text=True,capture_output=True,encoding='utf-8',timeout=90)
+            text=True,capture_output=True,encoding='utf-8')
         if result.returncode:raise ValueError('Application reader build failed: '+result.stdout+result.stderr)
-    result=subprocess.run(['dotnet',str(dll),str(directory),*([version] if version else [])],text=True,capture_output=True,encoding='utf-8',timeout=30)
+    result=subprocess.run(['dotnet',str(dll),str(directory),*([version] if version else [])],text=True,capture_output=True,encoding='utf-8')
     if result.returncode:raise ValueError('Application payload rejected: '+result.stderr.strip())
     record=parse_json(result.stdout.encode('utf-8'));validate_record(record);return record

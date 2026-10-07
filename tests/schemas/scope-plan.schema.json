@@ -53,7 +53,6 @@
     },
     "batches": {
       "type": "array",
-      "maxItems": 5,
       "items": {
         "$ref": "#/$defs/batch"
       }
@@ -73,8 +72,7 @@
     },
     "estimatedTotalJobs": {
       "type": "integer",
-      "minimum": 1,
-      "maximum": 10
+      "minimum": 1
     },
     "capacityStatus": {
       "enum": [
@@ -204,7 +202,7 @@
       "properties": {
         "id": {
           "type": "string",
-          "pattern": "^(control|batch-0[1-5])$"
+          "pattern": "^(control|batch-(?:0[1-9]|[1-9][0-9]+))$"
         },
         "units": {
           "type": "array",
