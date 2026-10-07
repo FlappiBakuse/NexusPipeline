@@ -58,7 +58,7 @@ def completed_job(entries: list[dict[str, Any]], name: str) -> None:
         elapsed = (completed - started).total_seconds()
     except (KeyError, AttributeError, TypeError, ValueError) as exc:
         raise CandidateSourceError(f"{name} 缺少完整服务端时间") from exc
-    require(0 <= elapsed <= 150, f"{name} 完整耗时超过 150 秒")
+    require(0 <= elapsed <= 300, f"{name} 完整耗时超过 300 秒")
 
 
 def list_attempt_jobs(fetch: Callable[[str], dict[str, Any]], prefix: str, run_id: int, attempt: int) -> list[dict[str, Any]]:

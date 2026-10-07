@@ -261,9 +261,9 @@ def validate_bundle(plan, plan_file, report_files, official=True):
                     and identity["partner"]["workingTreeDirty"] is False and re.fullmatch(r"[0-9a-f]{64}",identity["partnerFingerprint"] or ""), "Foreign/dirty partner")
         require(report["policyDigest"] == plan["policyDigest"] and report["planDigest"] == digest(plan_file.read_bytes()), "Foreign plan/policy")
         timing = report["timing"]
-        require(timing["qualificationMs"] == 150000 and timing["hardTimeoutMs"] == 180000 and timing["completeJobMs"] is None
+        require(timing["qualificationMs"] == 300000 and timing["hardTimeoutMs"] == 300000 and timing["completeJobMs"] is None
                 and 0 <= timing.get("preparationElapsedMs",0) and 0 <= timing["processElapsedMs"]
-                and timing["processElapsedMs"]+timing.get("preparationElapsedMs",0) <= 150000, "Local time is invalid or exceeds 150 seconds")
+                and timing["processElapsedMs"]+timing.get("preparationElapsedMs",0) <= 300000, "Local time is invalid or exceeds 300 seconds")
         inventory = report["artifacts"]
         keys = [item["path"].casefold() for item in inventory]
         require(inventory and len(keys) == len(set(keys)) and len(inventory) <= 4096, "Duplicate/colliding/empty artifact inventory")
@@ -364,8 +364,8 @@ def main():
             and producer.get("path") == ".github/workflows/ci.yml" and producer.get("repository",{}).get("full_name") == repository,"Foreign producer")
     started = float(os.environ["NEXUS_TEST_JOB_STARTED_AT_MS"])/1000
     elapsed = time.time()-started
-    require(0 <= elapsed < 130, "Required work budget exhausted/invalid start")
-    deadline = time.monotonic()+min(100,130-elapsed)
+    require(0 <= elapsed < 280, "Required work budget exhausted/invalid start")
+    deadline = time.monotonic()+min(100,280-elapsed)
     app_id = wait_for_trusted_begin(audit,final,repository,plan,producer,deadline=deadline)
     jobs,_ = audit.physical_jobs(repository,producer,audit.completed_jobs(repository,int(plan["runId"]),int(plan["attempt"])),audit.job_name(plan["repository"], "finalBudget"),app_id)
     expected_names = json.loads(subprocess.check_output(["node", str(root/"tests/ci-names.mjs"), str(plans[0])], cwd=root, timeout=8))

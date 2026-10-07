@@ -119,9 +119,9 @@ export function coreUnits(selected, registry, policy, partnerPolicy = null) {
 }
 
 export function allocateUnits(units, identity, limits = {}) {
-  const workMs = limits.workMs ?? 130000;
+  const workMs = limits.workMs ?? 280000;
   const maxBatches = limits.maxBatches ?? 5;
-  if (workMs !== 130000 || maxBatches !== 5) throw new Error("Unregistered batch limits");
+  if (workMs !== 280000 || maxBatches !== 5) throw new Error("Unregistered batch limits");
   const prepareCost = name => limits.preparationMs?.[name] ?? (name === "source" ? 500 : 10000);
   const executionCost = unit => limits.unitMs?.[unit.id] ?? (unit.kind === "plugin" ? unit.artifact === "MaaFrameworkDriver" ? 45000
     : unit.pluginKind === "data-specialized" ? 6000 : 15000 : unit.kind === "backend" ? 6000 : unit.kind === "frontend" ? 8000

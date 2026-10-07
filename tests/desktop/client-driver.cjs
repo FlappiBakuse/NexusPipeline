@@ -40,11 +40,11 @@ app.on('browser-window-created',(_event,window)=>{
       const deadline=Date.now()+10000;
       let page;
       do{
-        page=await window.webContents.executeJavaScript(`({shell:!!document.querySelector('main'),navigation:['dashboard','dispatch','queues','scripts','users','history','plugins','settings'].filter(route=>document.querySelector('a[href="#/'+route+'"]')).length,bridge:window.nexusDesktop?.bootstrapProtocolVersion,origin:location.origin})`);
-        if(page.shell&&page.navigation===8)break;
+        page=await window.webContents.executeJavaScript(`({shell:!!document.querySelector('main'),ready:!!document.querySelector('[data-testid="dashboard-state"]'),navigation:['dashboard','dispatch','queues','scripts','users','history','plugins','settings'].filter(route=>document.querySelector('a[href="#/'+route+'"]')).length,bridge:window.nexusDesktop?.bootstrapProtocolVersion,origin:location.origin})`);
+        if(page.shell&&page.ready&&page.navigation===8)break;
         await new Promise(resolve=>setTimeout(resolve,50));
       }while(Date.now()<deadline);
-      if(!page.shell||page.navigation!==8||page.bridge!==1)throw new Error('Real Vue shell did not bootstrap');
+      if(!page.shell||!page.ready||page.navigation!==8||page.bridge!==1)throw new Error('Real Vue shell did not bootstrap');
       const initialPreferences=await window.webContents.executeJavaScript(`window.nexusDesktop.getClientPreferences()`);
       if(initialPreferences.locale!=='en-US'||initialPreferences.theme!=='light')throw new Error('Stored client preferences were not restored');
       const preferences=await window.webContents.executeJavaScript(`window.nexusDesktop.setClientPreferences({locale:'en-US',theme:'dark'}).then(()=>window.nexusDesktop.getClientPreferences())`);
@@ -92,9 +92,20 @@ app.on('browser-window-created',(_event,window)=>{
       progress('navigation-finished');
       await waitClient(window,`location.hash==='#/settings'&&!!document.getElementById('st-retention')&&document.getElementById('st-retention').value!==${JSON.stringify(draft)}`);
       const rendererBeforeCrash=window.webContents.getOSProcessId();
+      const recovered=new Promise((resolve,reject)=>{
+        const contents=window.webContents;
+        const cleanup=()=>{clearTimeout(timer);contents.removeListener('did-finish-load',loaded);};
+        const loaded=()=>{
+          if(contents.getURL()!==page.origin+'/#/dashboard'||contents.getOSProcessId()===rendererBeforeCrash)return;
+          cleanup();resolve();
+        };
+        const timer=setTimeout(()=>{cleanup();reject(new Error('Renderer recovery did not load the verified Host'));},15000);
+        contents.on('did-finish-load',loaded);
+      });
       window.webContents.forcefullyCrashRenderer();
       progress('renderer-crashed');
-      await new Promise(resolve=>setTimeout(resolve,250));
+      // A script sent to the crashed frame can remain pending across replacement navigation.
+      await recovered;
       await waitClient(window,`location.hash==='#/dashboard'&&!!document.querySelector('[data-testid="dashboard-state"]')`);
       const afterCrash=await window.webContents.executeJavaScript(`fetch('/api/status?view=identity').then(response=>response.json())`);
       if(afterCrash.instanceId!==afterRestart.instanceId||window.webContents.getOSProcessId()===rendererBeforeCrash||!nativeNotices.some(value=>value.includes('未保存的输入已丢失')))throw new Error('Renderer crash recovery changed Host or omitted the loss notice');

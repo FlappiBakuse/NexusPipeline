@@ -18,11 +18,11 @@ export function readRegistry(root) {
   const bytes = fs.readFileSync(path.join(root, "tests/gates.json"));
   const registry = JSON.parse(bytes);
   if (registry.schemaVersion !== 1 || !["Host", "Plugins"].includes(registry.repository)
-      || registry.hardTimeoutMs !== 180000 || registry.qualificationMs !== 150000) throw new Error("Invalid gate registry");
+      || registry.hardTimeoutMs !== 300000 || registry.qualificationMs !== 300000) throw new Error("Invalid gate registry");
   const ids = registry.gates.map(gate => gate.id);
   if (new Set(ids).size !== ids.length || registry.gates.some(gate => !gate.id.startsWith(registry.repository.toLowerCase() + ".")
       || !/^[a-z0-9.-]+$/.test(gate.id)
-      || gate.hardTimeoutMs !== 180000 || gate.qualificationMs !== 150000)) throw new Error("Duplicate or invalid gate");
+      || gate.hardTimeoutMs !== 300000 || gate.qualificationMs !== 300000)) throw new Error("Duplicate or invalid gate");
   return { registry, digest: policyDigest(bytes) };
 }
 

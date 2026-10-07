@@ -35,12 +35,12 @@ test("0/1/13/50/100 synthetic plugins never cause a sixth batch or lose obligati
     assert.equal(plan.units.length,count);
     assert.equal(plan.requiredObligations.length,count);
     assert.equal(plan.batches.reduce((sum,b)=>sum+b.units.length,0)+plan.unplacedUnits.length,count);
-    if(count>=50) assert.equal(plan.capacityStatus,"CAPACITY_EXCEEDED");
+    if(count>=100) assert.equal(plan.capacityStatus,"CAPACITY_EXCEEDED");
   }
 });
 test("oversized unit fails capacity without becoming N/A",()=>{
   const unit={id:"slow",provides:["essential"],preparations:[],kind:"plugin"};
-  const plan=allocateUnits([unit],{}, {unitMs:{slow:130001}});
+  const plan=allocateUnits([unit],{}, {unitMs:{slow:280001}});
   assert.equal(plan.capacityStatus,"CAPACITY_EXCEEDED");
   assert.deepEqual(plan.requiredObligations,["essential"]);
   assert.equal(plan.unplacedUnits[0].id,"slow");

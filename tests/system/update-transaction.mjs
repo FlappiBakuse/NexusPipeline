@@ -18,6 +18,15 @@ function receivedPayload(directory) {
   const manifest=readJson(manifestPath);
   return {ManifestSha256:hash(manifestPath),BuildId:manifest.buildId,FrontendHash:manifest.frontendHash,Generation:manifest.installationGeneration};
 }
+function preserveFailedTransaction(label,journal) {
+  if(!fs.existsSync(journal))return;
+  const directory=path.join(root,label+'-failure');
+  fs.mkdirSync(directory,{recursive:true});
+  for(const relative of ['.nxp-update/task.json','.nxp/state/updates','logs']) {
+    const source=path.join(runtime.runtimeDir,relative);
+    if(fs.existsSync(source))fs.cpSync(source,path.join(directory,relative.replaceAll('/','-')),{recursive:true});
+  }
+}
 function stageApplication(staging, readme) {
   fs.mkdirSync(staging,{recursive:true});
   for(const asset of ["NexusPipeline.exe","README.md","resources"]) fs.cpSync(path.join(runtime.updateReleaseDirectory(),asset),path.join(staging,asset),{recursive:true});
@@ -157,7 +166,7 @@ test("failed policy proof aborts only its exited worker and cannot repeat the ap
     const exchanges = fs.readFileSync(plan + ".receipts.jsonl", "utf8").trim().split("\n").map(JSON.parse);
     assert.equal(exchanges.length, 1);
     assert.equal(exchanges[0].matched, true);
-  } finally { await runtime.stopRuntime(); }
+  } finally { preserveFailedTransaction('failed-policy',journal);await runtime.stopRuntime(); }
 });
 
 for(const phase of ['BackupReady','SwapReady'])test(`whole application rollback preserves frozen old assets after ${phase} corruption`,async()=>{
@@ -202,6 +211,7 @@ for(const phase of ['BackupReady','SwapReady'])test(`whole application rollback 
     assert.ok(results.some(result=>result.Succeeded===false&&result.Code==='apply_failed'));
     fs.writeFileSync(path.join(root,`rollback-${phase}-evidence.json`),JSON.stringify({schemaVersion:1,status:'PASS',phase,oldPayload,restoredAssets:originalAssets,userBytesPreserved:true,results},null,2));
   }finally{
+    preserveFailedTransaction('rollback-'+phase,journal);
     if(fs.existsSync(journal))fs.copyFileSync(journal,path.join(root,`rollback-${phase}-retained-journal.json`));
     if(fs.existsSync(pause))fs.unlinkSync(pause);
     await runtime.stopRuntime();

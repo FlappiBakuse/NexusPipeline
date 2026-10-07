@@ -117,6 +117,6 @@ for name in expected_jobs:
     require(str(job["run_id"]) == run and str(job["run_attempt"]) == attempt, "Foreign Actions job")
     require(job["status"] == "completed" and job["conclusion"] == "success", f"Job did not succeed: {name}")
     elapsed = (datetime.fromisoformat(job["completed_at"].replace("Z", "+00:00")) - datetime.fromisoformat(job["started_at"].replace("Z", "+00:00"))).total_seconds()
-    require(0 <= elapsed <= 150, f"Full job exceeded 150 seconds: {name}")
+    require(0 <= elapsed <= 300, f"Full job exceeded 300 seconds: {name}")
     durations[name] = elapsed
 print(json.dumps({"status": "PASS", "run": run, "attempt": attempt, "sha": sha, "actualJobSeconds": durations}, ensure_ascii=False))

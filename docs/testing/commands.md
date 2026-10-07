@@ -25,11 +25,13 @@ node tests/run.mjs gate --id host.ci-policy
 
 `ci` 必须指定一个已知分组。backend 选择真实后端规则、文件事务、执行与调度窄测试；frontend 运行类型检查及核心状态、用户配置请求与公开桥接测试。`tests/policy.json` 中的预期用例与实际原生报告严格匹配。新增或更名选中用例时同步清单，不能删除失败用例以绕过验证。
 
-正式 PR 门禁由 `plan` 把逻辑 gate 义务转换为执行单元，再分配到可选 control 和最多五个 batch；容量不足报告 CAPACITY_EXCEEDED，不缩减义务。`gate --id` 保留为显式诊断。batch 从首次受控步骤继承父截止，工作窗口 130 秒、硬截止 180 秒，最后 50 秒用于清理及证据收尾；准备与子命令不重置预算。本地过程加准备耗时上限 150 秒，只证明本地预算。`smoke` 与两条 `ci` 是本地聚合诊断入口，使用同一核心执行器并共享 180 秒父预算，最后 10 秒预留收尾。输入识别、隔离复制、必要增量构建、依赖准备、测试、报告和清理均计入预算。失败保留原退出码；超时返回 5，清理失败返回 6，主动取消返回 130。报告不完整返回 4。未知命令或参数返回 2。
+正式 PR 门禁由 `plan` 把逻辑 gate 义务转换为执行单元，再分配到可选 control 和最多五个 batch；容量不足报告 CAPACITY_EXCEEDED，不缩减义务。`gate --id` 保留为显式诊断。batch 从首次受控步骤继承父截止，工作窗口 280 秒、硬截止 300 秒，最后 20 秒用于清理及证据收尾；准备与子命令不重置预算。本地过程加准备耗时上限 300 秒，只证明本地预算。`smoke` 与两条 `ci` 是本地聚合诊断入口，使用同一核心执行器并共享 300 秒父预算，最后 10 秒预留收尾。输入识别、隔离复制、必要增量构建、依赖准备、测试、报告和清理均计入预算。失败保留原退出码；超时返回 5，清理失败返回 6，主动取消返回 130。报告不完整返回 4。未知命令或参数返回 2。
 
-`daily` 使用两个独立 Host 槽位，先启动真实分钟调度，另一槽运行执行和配置，空闲槽接续控制面；共享准备、四组工作及清理合计 180 秒。支持 `--group execution|config|control|schedule` 进行明确的单组诊断。每组保留 `evidence.json`，父级 `daily-evidence.json` 只有全部预期组及清理通过才成功。
+`daily` 使用两个独立 Host 槽位，先启动真实分钟调度，另一槽运行执行和配置，空闲槽接续控制面；共享准备、四组工作及清理合计 300 秒。支持 `--group execution|config|control|schedule` 进行明确的单组诊断。每组保留 `evidence.json`，父级 `daily-evidence.json` 只有全部预期组及清理通过才成功。
 
 批次中的 execution、config、control 按实际选中集合共享 Test Host 构建和两个运行槽位，每组使用独立进程、端口、数据和运行身份。分钟调度单独分配；不需要浏览器的批次只准备 API Test Host。必需汇总 逐份核对 `finite-H-E01.json`、`finite-H-E02.json`、`finite-H-E03.json` 中对应选中场景的原生结果与清理证据。
+
+完整应用批次共用一次前端与 Electron 准备。计划已包含独立 `host.frontend.typecheck` 提供者时，其他应用构建复用该义务，必需汇总仍核验其真实原生收据；独立 gate 和 release 继续自行类型检查。后端和架构同批时，架构工具及桌面输入在独立输出图中提前准备，原生后端先完成自己的引用图，随后执行两种模式的 Roslyn 检查。桌面观察与新旧应用夹具各用独立目录，并行准备；全部子任务、原生报告和清理继承同一父截止，超时或任一失败均使批次失败。
 
 | 场景 | 真实证明 | 外部替代 |
 |---|---|---|
@@ -94,9 +96,9 @@ python -m unittest discover -s tools/tests -p test_pe_manifest.py
 
 固定对端插件的编辑用例由其 `tests/policy.json` 声明的 `editorCaseIds` 约束，保留旧版 BetterGI/ZZZ 的两项编辑用例。MaaStellaSora 的旧 MXU 协议没有编辑入口；新版 MFA 协议要求真实编辑脚本的选择、保留无关设置与重复执行证据，入口读取实际 manifest，缺少声明或文件即失败。
 
-批次内部报告使用 schemaVersion 2，包含精确预期义务、原生 TRX/Vitest/TAP/场景文件及其 hash。必需汇总 从固定源码重新推导计划，拒绝缺失、重复、skip、错 attempt、错 partner/policy、路径逃逸或规范化与原生报告不一致。完整资格上限为每物理 job 150 秒（含 checkout、工具/依赖准备、上传和 post-action），合计最多十个 job：scope + 可选 control + 五批 + 必需汇总 + begin + finalize。必需汇总 自身和 finalize 收尾仍须用完成后的只读服务端记录验收。
+批次内部报告使用 schemaVersion 2，包含精确预期义务、原生 TRX/Vitest/TAP/场景文件及其 hash。必需汇总 从固定源码重新推导计划，拒绝缺失、重复、skip、错 attempt、错 partner/policy、路径逃逸或规范化与原生报告不一致。完整资格上限为每物理 job 300 秒（含 checkout、工具/依赖准备、上传和 post-action），合计最多十个 job：scope + 可选 control + 五批 + 必需汇总 + begin + finalize。必需汇总 自身和 finalize 收尾仍须用完成后的只读服务端记录验收。
 
-必需汇总 只等待仍在排队或运行中的可信 main begin 登记，最多 100 秒，并受自身 130 秒工作截止约束；登记身份错误或已完成失败立即拒绝。API 中带 runner 选择标签、但从未分配 runner 且没有 steps 的已知可选 skipped job 不计为物理作业；已分配 runner、实际 steps 和未知作业继续严格审计。
+必需汇总 只等待仍在排队或运行中的可信 main begin 登记，最多 100 秒，并受自身 280 秒工作截止约束；登记身份错误或已完成失败立即拒绝。API 中带 runner 选择标签、但从未分配 runner 且没有 steps 的已知可选 skipped job 不计为物理作业；已分配 runner、实际 steps 和未知作业继续严格审计。
 
 ### 同 SHA 完整重跑
 

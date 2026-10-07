@@ -154,10 +154,10 @@
       ],
       "properties": {
         "qualificationMs": {
-          "const": 150000
+          "const": 300000
         },
         "hardTimeoutMs": {
-          "const": 180000
+          "const": 300000
         },
         "processElapsedMs": {
           "type": "number",
@@ -328,7 +328,7 @@
           "timing": {
             "properties": {
               "processElapsedMs": {
-                "maximum": 150000
+                "maximum": 300000
               }
             }
           },

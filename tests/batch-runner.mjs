@@ -77,7 +77,7 @@ export function saveBatch(context,runRoot,workspace,units,exitCode,elapsedMs,cle
       inputMode:context.plan.inputMode??"default",inputPair:context.plan.inputPair??null,partnerSha:context.plan.partnerSha,partner:context.partnerSource??null,partnerFingerprint:context.partnerFingerprint??null,source:workspace?.source??null,sourceFingerprint:workspace?.sourceFingerprint??null,
       workingTreeDirty:workspace?.source.workingTreeDirty??null,toolchain:{...workspace?.toolchain,platform:process.platform,arch:process.arch,rid:"win-x64",buildModes:["production","test-host"]},
       toolchainFingerprint:hash(JSON.stringify({...workspace?.toolchain,platform:process.platform,arch:process.arch,rid:"win-x64",buildModes:["production","test-host"]}))},policyDigest:context.plan.policyDigest,planDigest:context.planDigest,
-    status:exitCode?"FAIL":"PASS",exitCode,timing:{qualificationMs:150000,hardTimeoutMs:180000,processElapsedMs:elapsedMs,preparationElapsedMs:context.setupElapsedMs??0,completeJobMs:null},
+    status:exitCode?"FAIL":"PASS",exitCode,timing:{qualificationMs:300000,hardTimeoutMs:300000,processElapsedMs:elapsedMs,preparationElapsedMs:context.setupElapsedMs??0,completeJobMs:null},
     cleanupComplete:cleanup.cleanupComplete,units:units.map(unit=>({real:[],substituted:[],...unit})),artifacts};
   fs.writeFileSync(path.join(runRoot,"batch-report.json"),JSON.stringify(report,null,2)+"\n");
   return report;

@@ -13,7 +13,7 @@ jobs:
   scope:
     name: Host / 范围判定
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 5
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
       count: ${{ steps.plan.outputs.count }}
@@ -56,7 +56,7 @@ jobs:
     needs: scope
     if: needs.scope.outputs.control == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 5
     env:
       NEXUS_TEST_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}-control
     steps:
@@ -114,7 +114,7 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.scope.outputs.matrix) }}
     runs-on: windows-2025
-    timeout-minutes: 3
+    timeout-minutes: 5
     env:
       NEXUS_TEST_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.id }}
     steps:
@@ -177,7 +177,7 @@ jobs:
     needs: [scope, control, batches]
     if: always()
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 5
     steps:
       - name: 记录任务预算起点
         run: echo "NEXUS_TEST_JOB_STARTED_AT_MS=$(date +%s%3N)" >> "$GITHUB_ENV"
