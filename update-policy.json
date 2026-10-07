@@ -9,7 +9,7 @@
     },
     {
       "version": "0.17.0",
-      "code": "desktop-g0170",
+      "code": "desktop-shell-embedded-ui",
       "migrationUrl": "https://github.com/FlappiBakuse/NexusPipeline/blob/main/docs/user/README.md"
     }
   ]

@@ -17,7 +17,7 @@ public sealed class UpdatePolicyTests
         const string bothBarriers = """
             {"schemaVersion":1,"repository":"FlappiBakuse/NexusPipeline","barriers":[
               {"version":"0.16.15","code":"net10-plugin-api2-cleanup"},
-              {"version":"0.17.0","code":"global-refactor"}
+              {"version":"0.17.0","code":"desktop-shell-embedded-ui","migrationUrl":"https://github.com/FlappiBakuse/NexusPipeline/blob/main/docs/user/README.md"}
             ]}
             """;
         (string Json, string Current, string Target, string? Expected)[] cases =
@@ -28,6 +28,7 @@ public sealed class UpdatePolicyTests
             (firstBarrier, "0.16.15", "0.16.16", null),
             (firstBarrier, "0.16.15", "0.17.0", null),
             (bothBarriers, "0.16.15", "0.17.0", "0.17.0"),
+            (bothBarriers, "0.16.15", "0.17.1", "0.17.0"),
             (bothBarriers, "0.17.0", "0.17.1", null),
             (firstBarrier, "0.16.14", "0.16.15-beta.1", null),
             (bothBarriers, "0.16.15", "0.16.15", null),
@@ -38,7 +39,13 @@ public sealed class UpdatePolicyTests
             Assert.True(UpdatePolicy.TryParse(item.Json, out var policy, out var error), error);
             Assert.True(NexusVersion.TryParse(item.Current, out var current));
             Assert.True(NexusVersion.TryParse(item.Target, out var target));
-            Assert.Equal(item.Expected, UpdatePolicy.FindBarrier(policy!, current, target)?.Version.ToString());
+            var barrier = UpdatePolicy.FindBarrier(policy!, current, target);
+            Assert.Equal(item.Expected, barrier?.Version.ToString());
+            if (item.Expected == "0.17.0")
+            {
+                Assert.Equal("desktop-shell-embedded-ui", barrier!.Code);
+                Assert.Equal("https://github.com/FlappiBakuse/NexusPipeline/blob/main/docs/user/README.md", barrier.MigrationUrl);
+            }
         }
     }
 }
