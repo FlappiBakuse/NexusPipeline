@@ -149,7 +149,7 @@ def require_complete_attempt(repository, run, jobs, check_name, app_id):
 def publish(repository, sha, check_name, run_id, attempt, report, passed, existing=None, external_id=None):
     failing = [item for item in report if item["status"] == "FAIL"]
     summary = (f"运行 {run_id}，第 {attempt} 次：{len(report)} 个已完成任务；"
-               f"{len(failing)} 个任务未通过完整 150000 ms 预算或运行结果核验。\n\n")
+               f"{len(failing)} 个任务未通过完整 300000 ms 预算或运行结果核验。\n\n")
     summary += "\n".join(f"- {item['name']}: {item['status']} "
                          f"({item['elapsedMs']} ms)" for item in failing[:30])
     body = {

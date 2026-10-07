@@ -34,7 +34,7 @@ jobs:
   audit:
     name: Host / 完整预算回写
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 5
     steps:
       - name: 检出受信控制器
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1

@@ -28,7 +28,7 @@ def run():
                 "head": {"sha": SHA}}]}
 
 
-def job(index, name, end="2026-09-29T00:02:30Z"):
+def job(index, name, end="2026-09-29T00:05:00Z"):
     return {"id": index, "name": name, "run_id": 12, "run_attempt": 2,
             "status": "completed", "conclusion": "success",
             "started_at": "2026-09-29T00:00:00Z", "completed_at": end}
@@ -158,7 +158,7 @@ class FinalBudgetTests(unittest.TestCase):
     def test_complete_job_boundary_and_required(self):
         jobs = [job(1, "Required"), job(2, "gate")]
         self.assertTrue(final_budget.evaluate(run(), jobs, REPOSITORY, 12, 2, "Required")[2])
-        jobs[0]["completed_at"] = "2026-09-29T00:02:30.001Z"
+        jobs[0]["completed_at"] = "2026-09-29T00:05:00.001Z"
         self.assertFalse(final_budget.evaluate(run(), jobs, REPOSITORY, 12, 2, "Required")[2])
         jobs.pop(0)
         with self.assertRaises(ValueError):
