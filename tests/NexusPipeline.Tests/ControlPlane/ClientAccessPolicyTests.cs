@@ -23,6 +23,38 @@ namespace NexusPipeline.Tests.ControlPlane;
 public sealed class ClientAccessPolicyTests
 {
     [Fact]
+    public void NatOriginsRequireAuthenticatedRemoteTransportAndExactHttpAuthority()
+    {
+        WebRequest Request(string host, string? origin, string? address)
+        {
+            var headers = new NameValueCollection { ["Host"] = host, ["X-Forwarded-For"] = "127.0.0.1" };
+            if (origin is not null) headers["Origin"] = origin;
+            return new(new Uri("http://" + host + "/api/settings"), "POST", new(), headers, Stream.Null, 0, null, Encoding.UTF8, false,
+                address is null ? null : new(IPAddress.Parse(address), 1000));
+        }
+        foreach (string host in new[] { "nexus.example:58000", "203.0.113.8:58000", "[2001:db8::8]:58000" })
+        {
+            var request = Request(host, "http://" + host, "192.0.2.9");
+            Assert.True(RequestOriginPolicy.Decide(request, "POST", "/api/settings", true, true).Allowed);
+            Assert.False(RequestOriginPolicy.Decide(request, "POST", "/api/settings", true, false).Allowed);
+            Assert.False(RequestOriginPolicy.Decide(request, "POST", "/api/settings", false, true).Allowed);
+            Assert.False(RequestOriginPolicy.Decide(Request(host, "http://" + host, "127.0.0.1"), "POST", "/api/settings", true, true).Allowed);
+            Assert.False(RequestOriginPolicy.Decide(Request(host, "http://" + host, null), "POST", "/api/settings", true, true).Allowed);
+        }
+        foreach (string invalid in new[] { "", "null", "https://nexus.example:58000", "http://nexus.example:58001", "http://nexus.example.evil:58000",
+            "http://user@nexus.example:58000", "http://nexus.example:58000/", "http://nexus.example:58000/path", "http://nexus.example:58000?x=1",
+            "http://nexus.example:58000#x", "http://nexus.example:58000, http://nexus.example:58000", "http://nexus.example:0" })
+            Assert.False(RequestOriginPolicy.Decide(Request("nexus.example:58000", invalid, "192.0.2.9"), "POST", "/api/settings", true, true).Allowed);
+        var multiple = Request("nexus.example:58000", "http://nexus.example:58000", "192.0.2.9");
+        multiple.Headers.Add("Origin", "http://nexus.example:58000");
+        Assert.False(RequestOriginPolicy.Decide(multiple, "POST", "/api/settings", true, true).Allowed);
+        Assert.True(RequestOriginPolicy.Decide(Request("localhost:58000", "http://localhost:58000", "::ffff:127.0.0.1"), "POST", "/api/settings", false, false).Allowed);
+        var recovery = Request("localhost:58001", "http://localhost:58000", "127.0.0.1");
+        Assert.Equal("http://localhost:58000", RequestOriginPolicy.Decide(recovery, "GET", "/api/status", false, false).CorsOrigin);
+        Assert.False(RequestOriginPolicy.Decide(recovery, "POST", "/api/settings", false, false).Allowed);
+    }
+
+    [Fact]
     public void ScriptBrowserListsOnlyDeclaredRootsAndCannotEscapeToSiblingOrLinkedDirectories()
     {
         string root=Path.Combine(Path.GetTempPath(),"nxp-browser-"+Guid.NewGuid().ToString("N"));

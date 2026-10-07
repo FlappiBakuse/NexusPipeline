@@ -17,9 +17,30 @@ internal static class ApiDiagnosticsHandler
         string body,
         DiagnosticsService diagnostics)
     {
-        if (seg.Length >= 2 && seg[1].Equals("export", StringComparison.OrdinalIgnoreCase))
+        if (seg.Length == 3 && seg[1] == "artifacts")
+        {
+            if (method != "GET") { await HttpHelper.MethodNotAllowedAsync(context).ConfigureAwait(false); return; }
+            try
+            {
+                using var file = diagnostics.OpenSupportBundle(seg[2]);
+                context.Response.ContentType = "application/zip";
+                context.Response.ContentLength64 = file.Length;
+                context.Response.Headers["Cache-Control"] = "no-store";
+                await file.CopyToAsync(context.Response.OutputStream).ConfigureAwait(false);
+                context.Response.OutputStream.Close();
+            }
+            catch (FileNotFoundException) { await HttpHelper.NotFoundAsync(context).ConfigureAwait(false); }
+            catch (InvalidDataException) { await HttpHelper.ErrorAsync(context, "diagnostics_artifact_changed", 409).ConfigureAwait(false); }
+            return;
+        }
+        if (seg.Length == 2 && seg[1].Equals("export", StringComparison.OrdinalIgnoreCase))
         {
             await HandleExportAsync(context, method, body, diagnostics).ConfigureAwait(false);
+            return;
+        }
+        if (seg.Length != 1)
+        {
+            await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);
             return;
         }
         if (method != "GET")
@@ -53,6 +74,8 @@ internal static class ApiDiagnosticsHandler
                 ok = true,
                 path = result.Path,
                 sizeBytes = result.SizeBytes,
+                artifactId = result.ArtifactId,
+                sha256 = result.Sha256,
             }).ConfigureAwait(false);
         }
         catch (Exception ex)

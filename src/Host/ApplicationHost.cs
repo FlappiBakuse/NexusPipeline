@@ -134,7 +134,8 @@ internal static class ApplicationHost
                         runtime,
                         ReadRestartHandoff(args),
                         ReadRestartWebOnly(args),
-                        ReadRestartKeepWebOnlyAlive(args));
+                        ReadRestartKeepWebOnlyAlive(args),
+                        ReadUpdateResumeIntent(args));
                 case "apply-update":
                     return RunUpdateApplyCli(args.Skip(1).ToArray(), runtime.UpdateService);
                 case "installer-update":
@@ -173,6 +174,16 @@ internal static class ApplicationHost
 
     internal static bool ReadRestartWebOnly(string[] args) => args.Any(argument =>
         argument.Equals("--web", StringComparison.OrdinalIgnoreCase));
+
+    internal static DesktopResumeIntent? ReadUpdateResumeIntent(string[] args)
+    {
+        int modeIndex = Array.IndexOf(args, "--desktop-intent"), transactionIndex = Array.IndexOf(args, "--update-transaction");
+        if (modeIndex < 0 && transactionIndex < 0) return null;
+        if (modeIndex < 0 || transactionIndex < 0 || modeIndex + 1 >= args.Length || transactionIndex + 1 >= args.Length
+            || args.Count(value => value == "--desktop-intent") != 1 || args.Count(value => value == "--update-transaction") != 1)
+            throw new InvalidDataException("update.launch_arguments_invalid");
+        return UpdateApply.ReadLaunchIntent(args[transactionIndex + 1], args[modeIndex + 1]);
+    }
 
     internal static bool ReadRestartKeepWebOnlyAlive(string[] args) =>
         ReadRestartWebOnly(args)

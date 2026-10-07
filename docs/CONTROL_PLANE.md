@@ -27,7 +27,7 @@
 | 插件用户设置 | 贡献接口 | `plugin user-settings ...` | 由 CLI/Web 承担 |
 | 设置读取 | 设置 API | `settings get` | `get_settings`（密钥脱敏） |
 | 设置写入 | 设置 API | `settings update` | `安全白名单外的写入走 CLI/Web` |
-| 系统诊断 | `GET /api/diagnostics`；`POST /api/diagnostics/export`（仅回环） | `doctor`、`doctor export` | `get_diagnostics` |
+| 系统诊断 | `GET /api/diagnostics`；`POST /api/diagnostics/export`；受管 artifact 下载 | `doctor`、`doctor export --output <新文件>` | `get_diagnostics` |
 | 通知截图开关 | 设置 API（`webhookScreenshotEnabled` / `smtpScreenshotEnabled`） | `settings update` | `get_settings` 只读返回开关状态 |
 | 更新 | 更新 API | `update check/download/apply` | `get_update_status` |
 
@@ -44,6 +44,8 @@ GameCheckIn v0.3.1 的独立签到页面由插件导航注册；状态读取位�
 - 三端复用 Application Command、核心服务和共享投影；矩阵记录入口差异，不复制领域规则。
 - 运行计划解释复用真实执行的冻结计划构建器与 `ExecutionStateStore` 准入评估，不创建运行登记、资源租约、历史记录、配置交换或系统操作。
 - 系统诊断检查本地运行状态，不自动修复、不改变用户数据、不默认发起网络请求、不读取设置密钥；安装目录写权限检查使用受控临时探针并在检查后清理。支持包限制为 8 MiB，最近日志尾部限制为 2 MiB，并在写入 ZIP 前执行敏感信息 canary。
+- Host 只向本实例受管 staging 生成诊断 ZIP。导出响应提供短期 artifact ID、长度与 SHA256；`GET /api/diagnostics/artifacts/<id>` 按服务端登记的文件提供内容。CLI 下载并核验这个 artifact，再用 CreateNew 写入调用者明确指定的本机文件，已有目标、链接或缺失父目录均拒绝。Web 的任意 `outputPath` 或 `isCli` 不提供调用者文件写权限。
+- 带 Origin 的 HTTP 管理请求要求相同的 HTTP scheme、主机与实际端口。NAT/外部域名入口还要求真实非回环对端、当前 remote bound 和通过 Bearer 认证；伪转发头不改变连接来源。回环地址及本机 LAN 地址继续遵守本机来源校验，跨端口例外仅用于只读 status 探测。
 - `run_queue` 提交执行前经 `McpPolicy.ValidateQueueExecution` 复核队列快照的完成操作，任何非 `none` 动作返回 `dangerous_completion_action`。
 - `get_settings` 对 Webhook、SMTP 和访问令牌只返回空值或 `enc:***` 占位符。
 - 通知截图开关按渠道全局生效；脚本通知可携带所选运行截图，队列汇总通知不附图；Webhook 协议能力存在差异时由发送器记录兼容性警告。

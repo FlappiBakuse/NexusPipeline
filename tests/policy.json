@@ -169,7 +169,10 @@
         "NexusPipeline.Tests.ControlPlane.DesktopProtocolTests.UpdateAbortRequiresTheSameTransactionAndRestoresPendingShow",
         "NexusPipeline.Tests.ControlPlane.DesktopSessionStoreTests.FailedLaunchTicketRemovalOnlyDeletesTheKeyCreatedByThisAttempt",
         "NexusPipeline.Tests.Updates.UpdateTaskTests.CreatedDownloadCleanupPreservesUnknownAndChangedBytesAndRejectsExistingStaging",
-        "NexusPipeline.Tests.Updates.UpdateTaskTests.InterruptedRollbackPreservationReusesOnlyItsExactReceiptAndCompleteFields"
+        "NexusPipeline.Tests.Updates.UpdateTaskTests.InterruptedRollbackPreservationReusesOnlyItsExactReceiptAndCompleteFields",
+        "NexusPipeline.Tests.ControlPlane.ClientAccessPolicyTests.NatOriginsRequireAuthenticatedRemoteTransportAndExactHttpAuthority",
+        "NexusPipeline.Tests.ControlPlane.DiagnosticArtifactTests.CliArtifactOutputSupportsChinesePathsAndNeverOverwritesAnExistingTarget",
+        "NexusPipeline.Tests.ControlPlane.DiagnosticArtifactTests.ManagedArtifactRejectsUnknownIdsOutsidePathsAndChangedBytes"
       ],
       "boundaries": {
         "real": [
@@ -592,7 +595,10 @@
         "NexusPipeline.Tests.ControlPlane.DesktopProtocolTests.UpdateAbortRequiresTheSameTransactionAndRestoresPendingShow",
         "NexusPipeline.Tests.ControlPlane.DesktopSessionStoreTests.FailedLaunchTicketRemovalOnlyDeletesTheKeyCreatedByThisAttempt",
         "NexusPipeline.Tests.Updates.UpdateTaskTests.CreatedDownloadCleanupPreservesUnknownAndChangedBytesAndRejectsExistingStaging",
-        "NexusPipeline.Tests.Updates.UpdateTaskTests.InterruptedRollbackPreservationReusesOnlyItsExactReceiptAndCompleteFields"
+        "NexusPipeline.Tests.Updates.UpdateTaskTests.InterruptedRollbackPreservationReusesOnlyItsExactReceiptAndCompleteFields",
+        "NexusPipeline.Tests.ControlPlane.ClientAccessPolicyTests.NatOriginsRequireAuthenticatedRemoteTransportAndExactHttpAuthority",
+        "NexusPipeline.Tests.ControlPlane.DiagnosticArtifactTests.CliArtifactOutputSupportsChinesePathsAndNeverOverwritesAnExistingTarget",
+        "NexusPipeline.Tests.ControlPlane.DiagnosticArtifactTests.ManagedArtifactRejectsUnknownIdsOutsidePathsAndChangedBytes"
       ],
       "boundaries": {
         "real": [
