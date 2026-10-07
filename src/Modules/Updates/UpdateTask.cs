@@ -12,6 +12,15 @@ internal sealed record UpdateFileRead<T>(UpdateFileState State, T? Value, string
 
 internal sealed record UpdateTask(string Mode, string Version, string StagedDir, string Phase, DateTimeOffset? CreatedAt)
 {
+    public int JournalSchemaVersion { get; init; } = 1;
+    public DesktopResumeIntent? DesktopResumeIntent { get; init; }
+    public string? WorkerPath { get; init; }
+    public bool WorkerLaunchPending { get; init; }
+    public UpdateInventory? StagingInventory { get; init; }
+    public UpdateInventory? BackupInventory { get; init; }
+    public string? WorkerSha256 { get; init; }
+    public string? PackageChecksumSha256 { get; init; }
+    public UpdatePreservation? Preservation { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? TransactionId { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -46,15 +55,35 @@ internal sealed record UpdateTask(string Mode, string Version, string StagedDir,
             try { attributes = File.GetAttributes(file); }
             catch (FileNotFoundException) { return new(UpdateFileState.Missing, null); }
             catch (DirectoryNotFoundException) { return new(UpdateFileState.Missing, null); }
-            if ((attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0 || new FileInfo(file).Length > 64 * 1024)
+            if ((attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0 || new FileInfo(file).Length > 2 * 1024 * 1024)
                 throw new InvalidDataException("invalid update journal file");
             using var document = JsonDocument.Parse(File.ReadAllText(file));
             CheckMembers(document.RootElement);
             foreach (string required in new[] { nameof(Mode), nameof(Version), nameof(StagedDir), nameof(Phase), nameof(CreatedAt),
-                nameof(PayloadSchemaVersion), nameof(TargetPayload), nameof(PreviousPayload), nameof(PackageSha256), nameof(PackageSource), nameof(DesktopStopped), nameof(SwappedAssetCount) })
+                nameof(PayloadSchemaVersion), nameof(TargetPayload), nameof(PreviousPayload), nameof(PackageSha256), nameof(PackageSource), nameof(DesktopStopped), nameof(SwappedAssetCount),
+                nameof(JournalSchemaVersion), nameof(StagingInventory), nameof(BackupInventory), nameof(WorkerSha256), nameof(PackageChecksumSha256), nameof(Preservation),
+                nameof(DesktopResumeIntent), nameof(WorkerPath), nameof(WorkerLaunchPending) })
                 if (!document.RootElement.TryGetProperty(required, out _)) throw new InvalidDataException("missing update journal field: " + required);
             var task = JsonSerializer.Deserialize<UpdateTask>(document.RootElement, CurrentOptions)
                 ?? throw new InvalidDataException("null update journal");
+            if (task.DesktopResumeIntent is not null)
+                RequireFields(document.RootElement.GetProperty(nameof(DesktopResumeIntent)), "SchemaVersion", "Mode");
+            foreach (string name in new[] { nameof(StagingInventory), nameof(BackupInventory) })
+                if (document.RootElement.GetProperty(name) is { ValueKind: JsonValueKind.Object } inventory)
+                {
+                    RequireFields(inventory, "Entries");
+                    foreach (var entry in inventory.GetProperty("Entries").EnumerateArray())
+                        RequireFields(entry, "Path", "IsDirectory", "SizeBytes", "Sha256");
+                }
+            if (document.RootElement.GetProperty(nameof(Preservation)) is { ValueKind: JsonValueKind.Object } preservation)
+            {
+                RequireFields(preservation, "Files");
+                foreach (var item in preservation.GetProperty("Files").EnumerateArray())
+                {
+                    RequireFields(item, "Area", "File");
+                    RequireFields(item.GetProperty("File"), "Path", "IsDirectory", "SizeBytes", "Sha256");
+                }
+            }
             task.Validate();
             return new(UpdateFileState.Current, task);
         }
@@ -71,13 +100,24 @@ internal sealed record UpdateTask(string Mode, string Version, string StagedDir,
 
     private static void CheckMembers(JsonElement value)
     {
+        if (value.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in value.EnumerateArray()) CheckMembers(item);
+            return;
+        }
         if (value.ValueKind != JsonValueKind.Object) throw new InvalidDataException("update journal object required");
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var member in value.EnumerateObject())
         {
             if (!names.Add(member.Name)) throw new InvalidDataException("duplicate update journal field");
-            if (member.Value.ValueKind == JsonValueKind.Object) CheckMembers(member.Value);
+            if (member.Value.ValueKind is JsonValueKind.Object or JsonValueKind.Array) CheckMembers(member.Value);
         }
+    }
+
+    private static void RequireFields(JsonElement value, params string[] fields)
+    {
+        if (value.ValueKind != JsonValueKind.Object || fields.Any(field => !value.TryGetProperty(field, out _)))
+            throw new InvalidDataException("update journal required field missing");
     }
 
     internal void Validate()
@@ -90,6 +130,20 @@ internal sealed record UpdateTask(string Mode, string Version, string StagedDir,
             || Mode != (Phase == UpdatePhase.Deferred ? "defer" : Phase == UpdatePhase.Committed ? "completed" : "apply"))
             throw new InvalidDataException("unsupported_update_journal: invalid phase, time or identity");
         bool frozen = Phase is not (UpdatePhase.Deferred or UpdatePhase.ApplyRequested);
+        if (Phase != UpdatePhase.Deferred && DesktopResumeIntent is null
+            || Phase == UpdatePhase.Deferred && DesktopResumeIntent is not null
+            || WorkerPath is not null && (!Path.IsPathFullyQualified(WorkerPath) || !UpdateInventory.Hash(WorkerSha256))
+            || WorkerLaunchPending && WorkerPath is null)
+            throw new InvalidDataException("unsupported_update_journal: preparation missing");
+        DesktopResumeIntent?.Validate();
+        if (JournalSchemaVersion != 1 || StagingInventory is null || frozen && BackupInventory is null
+            || WorkerIdentity is not null && !UpdateInventory.Hash(WorkerSha256)
+            || WorkerSha256 is not null && !UpdateInventory.Hash(WorkerSha256)
+            || PackageChecksumSha256 is not null && !UpdateInventory.Hash(PackageChecksumSha256))
+            throw new InvalidDataException("unsupported_update_journal: ownership missing");
+        StagingInventory.Validate();
+        BackupInventory?.Validate();
+        Preservation?.Validate();
         static bool Hash(string? value) => value is { Length: 64 } && value.All(c => char.IsAsciiHexDigit(c) && !char.IsUpper(c));
         static bool Payload(UpdatePayloadIdentity? value) => value is not null && Hash(value.ManifestSha256) && Hash(value.BuildId)
             && Hash(value.FrontendHash) && value.Generation == InstallationGeneration.Id;
@@ -119,10 +173,16 @@ internal sealed record UpdateTask(string Mode, string Version, string StagedDir,
             throw new InvalidDataException("update_journal_identity_changed");
         if (previous is not null && (previous.TargetPayload != TargetPayload || previous.PackageSha256 != PackageSha256 || previous.PackageSource != PackageSource
             || previous.PreviousPayload is not null && previous.PreviousPayload != PreviousPayload
+            || previous.StagingInventory != StagingInventory || previous.PackageChecksumSha256 != PackageChecksumSha256
+            || previous.DesktopResumeIntent is not null && previous.DesktopResumeIntent != DesktopResumeIntent
+            || previous.BackupInventory is not null && previous.BackupInventory != BackupInventory
+            || previous.Preservation is not null && (Preservation is null || previous.Preservation.Files.Any(entry => !Preservation.Files.Contains(entry)))
             || SwappedAssetCount < previous.SwappedAssetCount))
             throw new InvalidDataException("update_journal_payload_changed");
         Directory.CreateDirectory(Path.GetDirectoryName(file)!);
-        JsonUtil.WriteAtomic(file, JsonSerializer.Serialize(this, JsonOpts.Indented));
+        string bytes = JsonSerializer.Serialize(this, JsonOpts.Indented);
+        if (System.Text.Encoding.UTF8.GetByteCount(bytes) > 2 * 1024 * 1024) throw new InvalidDataException("update.journal_limit");
+        JsonUtil.WriteAtomic(file, bytes);
     }
 
     internal void Clear(string? path = null)
@@ -131,6 +191,8 @@ internal sealed record UpdateTask(string Mode, string Version, string StagedDir,
         var previous = Read(file);
         if (previous is null) return;
         if (previous != this) throw new InvalidDataException("update_journal_identity_changed");
-        File.Delete(file);
+        byte[] bytes = File.ReadAllBytes(file);
+        if (Read(file) != this) throw new InvalidDataException("update_journal_identity_changed");
+        VerifiedFileDeletion.Delete(file, bytes.Length, Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bytes)));
     }
 }

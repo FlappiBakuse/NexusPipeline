@@ -2,6 +2,7 @@ using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
 using NexusPipeline.ControlPlane.Http;
+using NexusPipeline.Platform.Storage;
 
 namespace NexusPipeline.Modules.Updates;
 
@@ -35,7 +36,8 @@ internal static class UpdatePackage
         string destZip,
         string destSha,
         IProgress<UpdateDownloadProgress>? progress,
-        CancellationToken token)
+        CancellationToken token,
+        UpdateCreatedArtifacts? artifacts = null)
     {
         if (!Uri.TryCreate(zipUrl, UriKind.Absolute, out Uri? zipUri)
             || !Uri.TryCreate(shaUrl, UriKind.Absolute, out Uri? shaUri))
@@ -79,25 +81,42 @@ internal static class UpdatePackage
                 progress?.Report(new UpdateDownloadProgress(0, declared ?? 0));
                 byte[] buffer = new byte[64 * 1024];
                 await using Stream source = await response.Content.ReadAsStreamAsync(token).ConfigureAwait(false);
-                Directory.CreateDirectory(Path.GetDirectoryName(destZip)!);
-                await using var output = new FileStream(destZip, FileMode.Create, FileAccess.Write, FileShare.None);
-                while (true)
+                PayloadPathSafety.RequireLinkFree(destZip);
+                if (artifacts is null) Directory.CreateDirectory(Path.GetDirectoryName(destZip)!);
+                else artifacts.EnsureDirectory(Path.GetDirectoryName(destZip)!);
+                await using var output = new FileStream(destZip, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+                using var produced = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+                long written = 0;
+                try
                 {
-                    int read = await source.ReadAsync(buffer, token).ConfigureAwait(false);
-                    if (read == 0)
+                    while (true)
                     {
-                        break;
+                        int read = await source.ReadAsync(buffer, token).ConfigureAwait(false);
+                        if (read == 0)
+                        {
+                            break;
+                        }
+                        total += read;
+                        if (total > UpdateCatalog.MaxDownloadBytes)
+                        {
+                            return (false, $"更新包超过尺寸上限（{UpdateCatalog.MaxDownloadBytes / 1024 / 1024} MB）");
+                        }
+                        await output.WriteAsync(buffer.AsMemory(0, read), token).ConfigureAwait(false);
+                        produced.AppendData(buffer, 0, read); written += read;
+                        progress?.Report(new UpdateDownloadProgress(total, declared ?? 0));
                     }
-                    total += read;
-                    if (total > UpdateCatalog.MaxDownloadBytes)
-                    {
-                        return (false, $"更新包超过尺寸上限（{UpdateCatalog.MaxDownloadBytes / 1024 / 1024} MB）");
-                    }
-                    await output.WriteAsync(buffer.AsMemory(0, read), token).ConfigureAwait(false);
-                    progress?.Report(new UpdateDownloadProgress(total, declared ?? 0));
                 }
+                finally { artifacts?.FileCreated(destZip, written, Convert.ToHexStringLower(produced.GetHashAndReset())); }
             }
-            await File.WriteAllTextAsync(destSha, shaText + Environment.NewLine, Encoding.ASCII, token).ConfigureAwait(false);
+            PayloadPathSafety.RequireLinkFree(destSha);
+            byte[] checksum = Encoding.ASCII.GetBytes(shaText + Environment.NewLine);
+            await using (var output = new FileStream(destSha, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                bool written = false;
+                try { await output.WriteAsync(checksum, token).ConfigureAwait(false); written = true; }
+                finally { artifacts?.FileCreated(destSha, written ? checksum.Length : 0,
+                    Convert.ToHexStringLower(SHA256.HashData(written ? checksum : []))); }
+            }
             return (true, null);
         }
         catch (OperationCanceledException)
@@ -168,17 +187,16 @@ internal static class UpdatePackage
 
     /// <summary>
     /// 解压 ZIP 到 staging：条目路径白名单与归档资源上限。
-    /// 必须存在根层 NexusPipeline.exe；失败时尽力删除当前 staging。
+    /// 必须存在根层 NexusPipeline.exe；失败时仅清理具有创建收据且字节未改变的内容。
     /// </summary>
-    public static string? Extract(string zipPath, string stagingDir)
+    public static string? Extract(string zipPath, string stagingDir, UpdateCreatedArtifacts? artifacts = null)
     {
+        var created = artifacts ?? new UpdateCreatedArtifacts(stagingDir);
         try
         {
-            if (Directory.Exists(stagingDir))
-            {
-                Directory.Delete(stagingDir, recursive: true);
-            }
-            Directory.CreateDirectory(stagingDir);
+            PayloadPathSafety.RequireLinkFree(stagingDir);
+            if (File.Exists(stagingDir) || Directory.Exists(stagingDir)) throw new IOException("update.staging_exists");
+            created.EnsureDirectory(stagingDir);
             using var archive = ZipFile.OpenRead(zipPath);
             var normalized = new List<(string TargetRelative, ZipArchiveEntry Entry)>();
             int archiveEntryCount = 0;
@@ -241,8 +259,8 @@ internal static class UpdatePackage
                 {
                     throw new InvalidDataException($"zip 条目与目录冲突：{rel}");
                 }
-                Directory.CreateDirectory(Path.GetDirectoryName(full)!);
-                extracted = ExtractEntry(entry, full, extracted);
+                created.EnsureDirectory(Path.GetDirectoryName(full)!);
+                extracted = ExtractEntry(entry, full, extracted, created);
             }
             if (!File.Exists(Path.Combine(stagingDir, "NexusPipeline.exe")))
             {
@@ -252,12 +270,12 @@ internal static class UpdatePackage
         }
         catch (InvalidDataException ex)
         {
-            TryDeleteStaging(stagingDir);
+            TryCleanup(created);
             return ex.Message;
         }
         catch (Exception ex)
         {
-            TryDeleteStaging(stagingDir);
+            TryCleanup(created);
             return $"解压失败：{ex.Message}";
         }
     }
@@ -271,50 +289,54 @@ internal static class UpdatePackage
         }
     }
 
-    internal static string? ExtractApplication(string zipPath, string stagingDir, string version, Func<string, string?, bool, UpdatePayloadIdentity>? freeze = null)
+    internal static string? ExtractApplication(string zipPath, string stagingDir, string version, Func<string, string?, bool, UpdatePayloadIdentity>? freeze = null, UpdateCreatedArtifacts? artifacts = null)
     {
-        string? error = Extract(zipPath, stagingDir);
+        string? error = Extract(zipPath, stagingDir, artifacts);
         if (error is not null) return error;
         try { _ = (freeze ?? ApplicationPayload.Freeze)(stagingDir, version, false); return null; }
         catch (Exception failure) { return "Application payload rejected: " + failure.Message; }
     }
 
-    private static long ExtractEntry(ZipArchiveEntry entry, string target, long extracted)
+    private static long ExtractEntry(ZipArchiveEntry entry, string target, long extracted, UpdateCreatedArtifacts artifacts)
     {
         long entryBytes = 0;
         using Stream input = entry.Open();
         using var output = new FileStream(target, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+        using var produced = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        long written = 0;
         byte[] buffer = new byte[64 * 1024];
-        while (true)
+        try
         {
-            int read = input.Read(buffer, 0, buffer.Length);
-            if (read == 0)
+            while (true)
             {
-                break;
+                int read = input.Read(buffer, 0, buffer.Length);
+                if (read == 0)
+                {
+                    break;
+                }
+                entryBytes += read;
+                extracted += read;
+                if (entryBytes > MaxSingleEntryBytes || extracted > MaxExtractedBytes)
+                {
+                    throw new InvalidDataException("zip 解压内容超过资源上限");
+                }
+                output.Write(buffer, 0, read);
+                produced.AppendData(buffer, 0, read); written += read;
             }
-            entryBytes += read;
-            extracted += read;
-            if (entryBytes > MaxSingleEntryBytes || extracted > MaxExtractedBytes)
+            if (entryBytes != entry.Length)
             {
-                throw new InvalidDataException("zip 解压内容超过资源上限");
+                throw new InvalidDataException($"zip 条目长度校验失败：{entry.FullName}");
             }
-            output.Write(buffer, 0, read);
+            return extracted;
         }
-        if (entryBytes != entry.Length)
-        {
-            throw new InvalidDataException($"zip 条目长度校验失败：{entry.FullName}");
-        }
-        return extracted;
+        finally { artifacts.FileCreated(target, written, Convert.ToHexStringLower(produced.GetHashAndReset())); }
     }
 
-    private static void TryDeleteStaging(string stagingDir)
+    private static void TryCleanup(UpdateCreatedArtifacts artifacts)
     {
         try
         {
-            if (Directory.Exists(stagingDir))
-            {
-                Directory.Delete(stagingDir, recursive: true);
-            }
+            artifacts.Cleanup();
         }
         catch
         {

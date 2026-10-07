@@ -2,12 +2,48 @@ using System.IO.Pipes;
 using System.Runtime.InteropServices;
 using NexusPipeline.Host.Desktop;
 using NexusPipeline.Platform.Windows;
+using NexusPipeline.Modules.Updates;
 using Xunit;
 
 namespace NexusPipeline.Tests.ControlPlane;
 
 public sealed class DesktopProtocolTests
 {
+    [Fact]
+    public async Task UpdateAbortRequiresTheSameTransactionAndRestoresPendingShow()
+    {
+        await using var desktop = new DesktopCoordinator(() => false);
+        string first = Guid.NewGuid().ToString("N"), second = Guid.NewGuid().ToString("N");
+        Assert.Equal("background", desktop.CaptureResumeIntent().Mode);
+        Assert.True(await desktop.ShowAsync("startup"));
+        var intent = desktop.CaptureResumeIntent();
+        Assert.Equal("show", intent.Mode);
+        Assert.True(await desktop.PrepareAssetReplacementAsync(first, TimeSpan.FromSeconds(1)));
+        Assert.False(await desktop.ShowAsync("user"));
+        Assert.False(await desktop.AbortAssetReplacementAsync(second, intent));
+        Assert.False(await desktop.ShowAsync("user"));
+        Assert.True(await desktop.AbortAssetReplacementAsync(first, intent));
+        Assert.True(await desktop.AbortAssetReplacementAsync(first, intent));
+        Assert.True(await desktop.ShowAsync("user"));
+        Assert.True(await desktop.PrepareAssetReplacementAsync(second, TimeSpan.FromSeconds(1)));
+        await desktop.StopForHostExitAsync();
+        Assert.False(await desktop.AbortAssetReplacementAsync(second, intent));
+        Assert.False(await desktop.ShowAsync("user"));
+    }
+
+    [Fact]
+    public async Task RestartAbortMatchesTheHandoffAndAllowsLaterAssetReplacement()
+    {
+        await using var desktop = new DesktopCoordinator(() => false);
+        string handoff = Guid.NewGuid().ToString("N"), transaction = Guid.NewGuid().ToString("N");
+        await desktop.PrepareHostRestartAsync(handoff);
+        await desktop.AbortHostRestartAsync(Guid.NewGuid().ToString("N"));
+        Assert.False(await desktop.PrepareAssetReplacementAsync(transaction, TimeSpan.FromSeconds(1)));
+        await desktop.AbortHostRestartAsync(handoff);
+        Assert.True(await desktop.PrepareAssetReplacementAsync(transaction, TimeSpan.FromSeconds(1)));
+        Assert.True(await desktop.AbortAssetReplacementAsync(transaction, DesktopResumeIntent.FromVisible(false)));
+    }
+
     [Fact]
     public void ProcessIdentityIsStableBeforeTheImageLoaderRuns()
     {

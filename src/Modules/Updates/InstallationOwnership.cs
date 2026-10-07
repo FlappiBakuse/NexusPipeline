@@ -245,10 +245,12 @@ internal static class InstallationOwnership
 
     internal static void SnapshotForUpdate(string root, string backup)
     {
-        if (Read(root, true) is not { } identity) return;
-        string seal = Seal(identity);
-        File.WriteAllText(Path.Combine(backup, ".installer-identity"), seal, new UTF8Encoding(false));
+        if (SnapshotBytesForUpdate(root) is { } bytes)
+            File.WriteAllBytes(Path.Combine(backup, ".installer-identity"), bytes);
     }
+
+    internal static byte[]? SnapshotBytesForUpdate(string root) => Read(root, true) is null
+        ? null : Encoding.UTF8.GetBytes(File.ReadAllText(IdentityPath).TrimStart('\uFEFF'));
 
     internal static void RefreshAfterUpdate(string root, string version)
     {

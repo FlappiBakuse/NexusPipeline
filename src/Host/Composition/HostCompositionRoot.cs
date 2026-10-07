@@ -290,7 +290,9 @@ internal class HostCompositionRoot
             provider.GetRequiredService<OutboundHttpClientProvider>(),
             () => ApplicationHost.IsWebOnly,
             () => HostInstance.RestartHandoffId,
-            (transaction, remaining) => desktop.PrepareAssetReplacementAsync(transaction, remaining).GetAwaiter().GetResult());
+            (transaction, remaining) => desktop.PrepareAssetReplacementAsync(transaction, remaining).GetAwaiter().GetResult(),
+            captureDesktopIntent: desktop.CaptureResumeIntent,
+            abortDesktop: (transaction, intent) => desktop.AbortAssetReplacementAsync(transaction, intent).GetAwaiter().GetResult());
         });
         collection.AddSingleton<AutoUpdateIdlePolicy>(provider => new AutoUpdateIdlePolicy(
             provider.GetRequiredService<ExecutionDispatcher>(),

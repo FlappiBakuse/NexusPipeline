@@ -350,7 +350,8 @@ internal sealed class Bootstrap
                     ? _requestWebOnlyExit()
                     : RequestRestartExit(),
                 delay: duration => Thread.Sleep(TestHooks.ScaledMs((int)Math.Max(1, duration.TotalMilliseconds))),
-                launchDelay: TimeSpan.FromSeconds(1));
+                launchDelay: TimeSpan.FromSeconds(1),
+                abortHandoff: handoff => _runtime.Get<NexusPipeline.Host.Desktop.IDesktopHost>().AbortHostRestartAsync(handoff).GetAwaiter().GetResult());
             return _restartCoordinator;
         }
     }
@@ -378,7 +379,9 @@ internal sealed class Bootstrap
             startInfo.ArgumentList.Add(argument);
         }
         Process? child = Process.Start(startInfo);
-        return child is not null;
+        if (child is null) return false;
+        child.Dispose();
+        return true;
     }
 
     private bool RequestRestartExit()

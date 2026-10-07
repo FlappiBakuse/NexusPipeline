@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Security.Principal;
 using System.Text.Json;
 using NexusPipeline.Platform.Windows;
+using NexusPipeline.Platform.Storage;
 
 namespace NexusPipeline.Host.Desktop;
 
@@ -17,7 +18,7 @@ internal sealed class DesktopSessionStore(string directory, string rootHash)
     private readonly object _gate = new();
     private string RecordPath => Path.Combine(directory, "session.json");
     private string KeyPath => Path.Combine(directory, "session.key");
-    internal bool HasFiles => File.Exists(RecordPath) || File.Exists(KeyPath);
+    internal bool HasFiles => File.Exists(RecordPath) || File.Exists(KeyPath) || Directory.Exists(RecordPath) || Directory.Exists(KeyPath);
     internal (DesktopSessionRecord Record, byte[] Key)? Load()
     {
         lock (_gate)
@@ -63,7 +64,13 @@ internal sealed class DesktopSessionStore(string directory, string rootHash)
         SafeDirectory();
         byte[] key = RandomNumberGenerator.GetBytes(32);
         using (var stream = new FileStream(KeyPath, FileMode.CreateNew, FileAccess.Write, FileShare.None)) stream.Write(key);
-        PrivateFile(KeyPath);
+        try { PrivateFile(KeyPath); }
+        catch
+        {
+            try { RemoveCreatedKey(key); }
+            finally { CryptographicOperations.ZeroMemory(key); }
+            throw;
+        }
         return key;
             }
     }
@@ -88,6 +95,17 @@ internal sealed class DesktopSessionStore(string directory, string rootHash)
         if (File.Exists(RecordPath)) RejectLink(RecordPath);
         File.Move(temporary, RecordPath, true);
             }
+    }
+    internal void RemoveCreatedKey(byte[] key)
+    {
+        lock (_gate)
+        {
+            GuardDirectory();
+            if (File.Exists(RecordPath) || Directory.Exists(RecordPath) || Directory.Exists(KeyPath))
+                throw new IOException("desktop_ticket_unowned");
+            if (!File.Exists(KeyPath)) return;
+            VerifiedFileDeletion.Delete(KeyPath, key.Length, Convert.ToHexStringLower(SHA256.HashData(key)));
+        }
     }
     internal void RemoveOwned(DesktopSessionRecord record, byte[] key)
     {

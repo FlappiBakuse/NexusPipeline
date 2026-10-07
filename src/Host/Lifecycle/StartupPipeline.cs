@@ -28,6 +28,9 @@ internal static class StartupPipeline
         }
         DesktopCoordinator desktop = runtime.Get<DesktopCoordinator>();
         desktop.Start();
+        bool showDesktop = !runtime.Settings.LightweightMode
+            && (launch ?? new DesktopLaunchOptions("from-settings")).ShouldShow(runtime.Settings.OpenDesktopOnStartup, desktop.RestoredVisible);
+        if (showDesktop) desktop.ShowAsync("startup").GetAwaiter().GetResult();
         if (!PrepareHostedStart(runtime))
         {
             // 更新 worker 必须等当前进程真正终止后才能替换宿主 EXE。
@@ -97,7 +100,7 @@ internal static class StartupPipeline
             { runtime.Stop(web, mcp); ClearServicePid(); return; }
             HostInstance.MarkReady();
             desktop.MarkReady(web.Port);
-            if (webOptions.ServeWebUi && (launch ?? new DesktopLaunchOptions("from-settings")).ShouldShow(runtime.Settings.OpenDesktopOnStartup, desktop.RestoredVisible))
+            if (webOptions.ServeWebUi && showDesktop)
                 desktop.ShowAsync("startup").GetAwaiter().GetResult();
 
 #if NEXUS_TEST_HOST
@@ -197,7 +200,8 @@ internal static class StartupPipeline
     /// <summary>自动重启分支：等待旧进程释放单实例互斥体（旧进程收到退出指令后 ~1 秒退出并释放，
     /// 强杀残留的遗弃互斥体视为已获得），随后进入常驻服务模式。
     /// 交接标识来自拉起本进程的旧进程，控制面前端据此确认新实例已经接管服务。</summary>
-    internal static int RunRestart(HostRuntime runtime, string? handoffId = null, bool webOnly = false, bool keepWebOnlyAlive = false)
+    internal static int RunRestart(HostRuntime runtime, string? handoffId = null, bool webOnly = false, bool keepWebOnlyAlive = false,
+        DesktopResumeIntent? resumeIntent = null)
     {
         HostInstance.AdoptRestartHandoff(handoffId);
         Logger.Info("[重启] 正在等待旧进程退出...");
@@ -240,7 +244,7 @@ internal static class StartupPipeline
         }
         else
         {
-            RunService(runtime, new DesktopLaunchOptions("restore"));
+            RunService(runtime, new DesktopLaunchOptions(resumeIntent?.Mode ?? "restore"));
         }
         return 0;
     }
@@ -345,7 +349,9 @@ internal static class StartupPipeline
         var desktop = runtime.Get<IDesktopHost>();
         desktop.Start();
         if (UpdateApply.RunStartupFinalization(runtime.UpdateService.VerifyApplyTarget, ApplicationHost.IsWebOnly, SingleInstanceMutexName, HostInstance.RestartHandoffId,
-            transaction => desktop.PrepareAssetReplacementAsync(transaction, TimeSpan.FromSeconds(8)).GetAwaiter().GetResult()))
+            transaction => desktop.PrepareAssetReplacementAsync(transaction, TimeSpan.FromSeconds(8)).GetAwaiter().GetResult(),
+            desktop.CaptureResumeIntent,
+            (transaction, intent) => desktop.AbortAssetReplacementAsync(transaction, intent).GetAwaiter().GetResult()))
         {
             return false;
         }

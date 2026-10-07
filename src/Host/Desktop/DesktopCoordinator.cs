@@ -3,6 +3,7 @@ using System.IO.Pipes;
 using System.Security.Cryptography;
 using System.Text.Json;
 using NexusPipeline.Host.Lifecycle;
+using NexusPipeline.Modules.Updates;
 using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Windows;
 using NexusPipeline.Shared.Logging;
@@ -22,12 +23,17 @@ internal sealed class DesktopCoordinator(Func<bool> requestExit) : IDesktopHost,
     private NamedPipeServerStream? _desktopPipe;
     private Task? _listener;
     private Task? _monitor;
-    private bool _unowned, _pendingShow, _handoff, _stopping;
+    private bool _unowned, _pendingShow, _stopping, _hostExiting;
+    private string? _handoff, _updateTransaction, _abortedUpdate;
     private int _port, _ready;
     private string _previousInstance = "";
     private Process? _launchedProcess;
     private int _disposed;
     internal bool RestoredVisible => _session?.WindowState == "visible";
+    public DesktopResumeIntent CaptureResumeIntent()
+    {
+        lock (_state) return DesktopResumeIntent.FromVisible(_pendingShow || RestoredVisible);
+    }
 
     public void Start()
     {
@@ -52,9 +58,16 @@ internal sealed class DesktopCoordinator(Func<bool> requestExit) : IDesktopHost,
     }
     public async Task<bool> ShowAsync(string reason, CancellationToken token = default)
     {
-        _pendingShow = true;
+        lock (_state)
+        {
+            if (_stopping || _hostExiting) return false;
+            _pendingShow = true;
+        }
         if (Volatile.Read(ref _ready) == 0) return true;
         await _create.WaitAsync(token).ConfigureAwait(false);
+        byte[]? createdKey = null;
+        Process? createdProcess = null;
+        bool startAttempted = false;
         try
         {
             if (_stopping || _unowned || HostInstance.Identity is null) return false;
@@ -71,11 +84,14 @@ internal sealed class DesktopCoordinator(Func<bool> requestExit) : IDesktopHost,
             }
             if (!File.Exists(AppPaths.DesktopExecutablePath)) { Logger.Warn("desktop_bundle_missing");return false; }
             byte[] key = _store.CreateKey();
+            createdKey = key;
             string sessionId = Guid.NewGuid().ToString("N");
             var start = new ProcessStartInfo(AppPaths.DesktopExecutablePath) { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = AppPaths.AppRoot, RedirectStandardOutput = true, RedirectStandardError = true };
             foreach (string value in new[] { "--supervisor-pipe", DesktopSupervisorProtocol.PipeName(_rootHash), "--desktop-session", sessionId, "--install-root-hash", _rootHash, "--launch-intent", "show" }) start.ArgumentList.Add(value);
             start.Environment["NEXUS_DESKTOP_SESSION_KEY"] = Convert.ToHexString(key).ToLowerInvariant();
-            Process process = Process.Start(start) ?? throw new IOException("Desktop launch failed");
+            startAttempted = true;
+            Process process = Process.Start(start) ?? throw new System.ComponentModel.Win32Exception("Desktop launch failed");
+            createdProcess = process;
             _launchedProcess = process;
             process.OutputDataReceived += (_, _) => { };process.ErrorDataReceived += (_, _) => { };process.BeginOutputReadLine();process.BeginErrorReadLine();
             int restartCount = reason == "main-crash" ? 1 : _session?.MainRestartCount ?? 0;
@@ -86,12 +102,29 @@ internal sealed class DesktopCoordinator(Func<bool> requestExit) : IDesktopHost,
             }
             return true;
         }
-        catch (Exception exception) when (exception is not OperationCanceledException) { Logger.Warn("desktop_launch_failed: " + exception.GetType().Name);return false; }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            if (createdKey is not null && createdProcess is null
+                && (!startAttempted || exception is System.ComponentModel.Win32Exception))
+            {
+                try { _store.RemoveCreatedKey(createdKey); }
+                catch (Exception cleanup) when (cleanup is IOException or UnauthorizedAccessException) { _unowned = true; }
+                CryptographicOperations.ZeroMemory(createdKey);
+            }
+            else if (createdKey is not null && _session is null) _unowned = true;
+            Logger.Warn("desktop_launch_failed: " + exception.GetType().Name);return false;
+        }
         finally { _create.Release(); }
     }
     public async Task PrepareHostRestartAsync(string handoffId, CancellationToken token = default)
     {
-        _handoff = true;
+        if (!Guid.TryParseExact(handoffId, "N", out _)) throw new InvalidDataException("desktop_handoff_invalid");
+        lock (_state)
+        {
+            if (_hostExiting || _stopping || _handoff is not null && _handoff != handoffId)
+                throw new IOException("desktop_handoff_busy");
+            _handoff = handoffId;
+        }
         if (_session is null || _key is null) return;
         lock (_state)
         {
@@ -100,12 +133,64 @@ internal sealed class DesktopCoordinator(Func<bool> requestExit) : IDesktopHost,
         }
         if (_desktopPipe is not null) await SendAsync("host.restart-preparing", new { handoffId }, token).ConfigureAwait(false);
     }
-    public Task<bool> PrepareAssetReplacementAsync(string transactionId, TimeSpan remaining, CancellationToken token = default)
-        => StopDesktopAsync("update", transactionId, remaining, token);
+    public async Task AbortHostRestartAsync(string handoffId, CancellationToken token = default)
+    {
+        lock (_state)
+        {
+            if (_hostExiting || _handoff != handoffId) return;
+            if (_session is not null && _key is not null)
+            {
+                if (_session.HandoffId != handoffId) return;
+                _session = _session with { HandoffId = "" };
+                _store.Save(_session, _key);
+            }
+            _handoff = null;
+        }
+        if (_desktopPipe is not null) await SendStateAsync().ConfigureAwait(false);
+    }
+    public async Task<bool> PrepareAssetReplacementAsync(string transactionId, TimeSpan remaining, CancellationToken token = default)
+    {
+        if (!Guid.TryParseExact(transactionId, "N", out _)) throw new InvalidDataException("desktop_transaction_invalid");
+        await _create.WaitAsync(token).ConfigureAwait(false);
+        try
+        {
+            lock (_state)
+            {
+                if (_hostExiting || _handoff is not null || _updateTransaction is not null && _updateTransaction != transactionId) return false;
+                _updateTransaction = transactionId;
+                _abortedUpdate = null;
+                _stopping = true;
+            }
+            bool stopped = await StopDesktopAsync("update", transactionId, remaining, token).ConfigureAwait(false);
+            if (!stopped) lock (_state) { _updateTransaction = null; _stopping = false; }
+            return stopped;
+        }
+        finally { _create.Release(); }
+    }
+    public async Task<bool> AbortAssetReplacementAsync(string transactionId, DesktopResumeIntent intent, CancellationToken token = default)
+    {
+        intent.Validate();
+        await _create.WaitAsync(token).ConfigureAwait(false);
+        try
+        {
+            lock (_state)
+            {
+                if (_hostExiting || _handoff is not null) return false;
+                if (_updateTransaction is null) return _abortedUpdate == transactionId;
+                if (_updateTransaction != transactionId) return false;
+                _updateTransaction = null;
+                _abortedUpdate = transactionId;
+                _stopping = false;
+            }
+        }
+        finally { _create.Release(); }
+        return intent.Mode != "show" || await ShowAsync("update-abort", token).ConfigureAwait(false);
+    }
     public async Task StopForHostExitAsync(CancellationToken token = default)
     {
         // Host shutdown waits on the STA after its message loop has stopped.
-        if (!_handoff) await StopDesktopAsync("host-exit", "", TimeSpan.FromSeconds(5), token).ConfigureAwait(false);
+        lock (_state) _hostExiting = true;
+        if (_handoff is null) await StopDesktopAsync("host-exit", "", TimeSpan.FromSeconds(5), token).ConfigureAwait(false);
     }
     private async Task<bool> StopDesktopAsync(string reason, string transactionId, TimeSpan remaining, CancellationToken token)
     {
@@ -127,7 +212,13 @@ internal sealed class DesktopCoordinator(Func<bool> requestExit) : IDesktopHost,
                 await Task.Delay(50, deadline.Token).ConfigureAwait(false);
             }
             _store.RemoveOwned(_session, _key);
-            return !_store.HasFiles;
+            if (_store.HasFiles) return false;
+            lock (_state)
+            {
+                CryptographicOperations.ZeroMemory(_key);
+                _key = null; _session = null; _pendingShow = false;
+            }
+            return true;
         }
         catch (Exception exception) when (exception is IOException or System.ComponentModel.Win32Exception or UnauthorizedAccessException or OperationCanceledException)
         { _stopping = false; Logger.Warn("desktop_stop_unconfirmed"); return false; }
@@ -149,7 +240,7 @@ internal sealed class DesktopCoordinator(Func<bool> requestExit) : IDesktopHost,
         {
             while (await timer.WaitForNextTickAsync(_stop.Token))
             {
-                if (_stopping || _handoff || _session is null) continue;
+                if (_stopping || _handoff is not null || _session is null) continue;
                 if (_session.Main.IsAlive()) { CaptureFamily(); continue; }
                 if (_session.MainRestartCount == 0 && _session.WindowState == "visible" && !_session.Family.Any(identity => !identity.HasExited()))
                     await ShowAsync("main-crash", _stop.Token);

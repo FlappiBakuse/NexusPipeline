@@ -243,14 +243,16 @@ public sealed class UpdateServiceTests : IAsyncLifetime
         return (404, "text/plain", Array.Empty<byte>());
     }
 
-    private UpdateService NewService()
+    private UpdateService NewService(Func<DesktopResumeIntent>? capture = null, Func<string, TimeSpan, bool>? stop = null,
+        Action<string, DesktopResumeIntent>? abort = null)
     {
         return new UpdateService(
             () => _settings,
             _installDir!,
             () => _canApply,
             () => _exited = true,
-            freezePayload: (_, _, _) => new(new string('a', 64), new string('b', 64), new string('c', 64), "g0170"));
+            freezePayload: (_, _, _) => new(new string('a', 64), new string('b', 64), new string('c', 64), "g0170"),
+            captureDesktopIntent: capture, stopDesktop: stop, abortDesktop: abort);
     }
 
     private static async Task WaitStateAsync(UpdateService service, UpdateState state, int timeoutMs = 15000)
@@ -599,6 +601,70 @@ public sealed class UpdateServiceTests : IAsyncLifetime
         {
             UpdateApply.LaunchApplyOverride = null;
         }
+    }
+
+    [Fact]
+    public async Task ApplyWritesIntentBeforeStopAndAbortsOnlyTheUnarmedTransaction()
+    {
+        string? stoppedTransaction = null, abortedTransaction = null;
+        var intent = DesktopResumeIntent.FromVisible(true);
+        var service = NewService(() => intent, (transaction, _) =>
+        {
+            var durable = UpdateTask.Read(Path.Combine(_installDir!, ".nxp-update", "task.json"))!;
+            Assert.Equal(transaction, durable.TransactionId);
+            Assert.Equal(intent, durable.DesktopResumeIntent);
+            Assert.False(durable.DesktopStopped);
+            stoppedTransaction = transaction;
+            return true;
+        }, (transaction, restored) => { Assert.Equal(intent, restored); abortedTransaction = transaction; });
+        await service.CheckAsync("test"); service.StartDownload("test"); await WaitStateAsync(service, UpdateState.Ready);
+        UpdateApply.LaunchApplyOverride = _ => false;
+        try
+        {
+            Assert.False(service.RequestApply(false, "test").Succeeded);
+            Assert.NotNull(stoppedTransaction);
+            Assert.Equal(stoppedTransaction, abortedTransaction);
+            Assert.Equal(UpdateState.Ready, service.State);
+            Assert.False(_exited);
+        }
+        finally { UpdateApply.LaunchApplyOverride = null; }
+    }
+
+    [Fact]
+    public async Task ApplyJournalFailureAfterStopRestoresDesktopAndPreservesTheJournal()
+    {
+        bool aborted = false;
+        string file = Path.Combine(_installDir!, ".nxp-update", "task.json");
+        var service = NewService(() => DesktopResumeIntent.FromVisible(false), (_, _) =>
+        { File.SetAttributes(file, FileAttributes.ReadOnly); return true; }, (_, intent) =>
+        { Assert.Equal("background", intent.Mode); aborted = true; });
+        await service.CheckAsync("test"); service.StartDownload("test"); await WaitStateAsync(service, UpdateState.Ready);
+        try
+        {
+            Assert.False(service.RequestApply(false, "test").Succeeded);
+            Assert.True(aborted);
+            Assert.False(_exited);
+            Assert.Equal(UpdateState.Ready, service.State);
+            Assert.NotNull(UpdateTask.Read(file));
+        }
+        finally { if (File.Exists(file)) File.SetAttributes(file, FileAttributes.Normal); }
+    }
+
+    [Fact]
+    public async Task ApplyUnconfirmedWorkerPreservesJournalAndNeverAbortsDesktop()
+    {
+        bool aborted = false;
+        var service = NewService(() => DesktopResumeIntent.FromVisible(true), (_, _) => true, (_, _) => aborted = true);
+        await service.CheckAsync("test"); service.StartDownload("test"); await WaitStateAsync(service, UpdateState.Ready);
+        UpdateApply.LaunchApplyOverride = _ => throw new IOException("worker creation unconfirmed");
+        try
+        {
+            Assert.True(service.RequestApply(false, "test").Succeeded);
+            Assert.False(aborted);
+            Assert.Equal(UpdateState.Applying, service.State);
+            Assert.NotNull(UpdateTask.Read(Path.Combine(_installDir!, ".nxp-update", "task.json")));
+        }
+        finally { UpdateApply.LaunchApplyOverride = null; }
     }
 
     [Fact]

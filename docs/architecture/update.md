@@ -26,6 +26,12 @@ Setup 使用本实例事务互斥体，将现役 Host 复制到同根 `.nxp/runt
 
 主程序更新事务固定交换四项应用资产：`NexusPipeline.exe`、`resources/desktop/`、`README.md` 和 `resources/payload-manifest.json`。Vue 以资源形式内嵌在 Host 中。用户 `plugins/`、`config/`、`data/`、`history/`、`logs/`、`.nxp/state/desktop/` 和未知同级文件均不参与交换；官方插件仓库不参与宿主自动更新流程。
 
+停止桌面前，当前事务冻结 schema 1 的 `DesktopResumeIntent`，Mode 仅接受 `show` 或 `background`。尚未创建窗口的根启动 Show 请求也进入冻结意图；恢复不依赖历史 handoff 或被删除的 session。明确未启动 worker 的失败由同事务 Desktop owner 撤销停止状态并恢复该意图；已启动或无法确认的 worker 保留租约、journal 与停止状态。普通重启未启动子进程时只撤销匹配的 handoff，当前 renderer 恢复 ready 并保留草稿。
+
+journal 记录 staging、backup 的文件和目录精确清单、每文件长度及 SHA256，以及 worker、原包和 checksum 侧文件摘要。清理先核验所有资源，再通过独占文件句柄复核和删除对应字节；目录仅允许非递归空目录删除。中断后可继续清理已缺失的已确认资源，新增、变形、链接或变化的未知字节保留现场。交换和回滚共用这些清单；已确认路径上的损坏候选先写保护记录并移入 `.nxp/state/updates/<事务>.preserved/`，随后恢复完整旧载荷。未知新增候选文件阻断回滚并保留 immutable backup 与 journal。
+
+下载和解压只创建新文件，拒绝覆盖已有 staging。网络操作按实际写入的字节记录长度与摘要，并记录由本操作创建的目录；取消或失败先核验完整创建集合，出现未知子项或改变字节时保留现场。就绪后的暂存清单和 checksum 摘要沿用创建收据，申请应用时重新核验，不重新认领后来加入的内容。
+
 候选下载及 staging 先按 SHA256、精确文件清单、规范构建身份、原始前端 index 摘要和 ASAR 内的身份记录执行只读校验，不运行候选 EXE。journal 冻结目标清单摘要、buildId、frontendHash、代际和原包摘要；交换前重新核对，交换后及启动回执提交前再次核对完整应用。每项资产交换进度单调落盘；回滚恢复同一冻结备份并核对旧载荷。桌面退出通知和已捕获的完整 Electron 家族退出证明必须先完成，文件锁或未知进程身份均保留现场并阻断替换。
 
 v0.17.0 使用独立安装代际 `g0170`，不接管 `g01615` 的目录、注册表登记及管理辅助程序。`update-policy.json` 的 `0.17.0` 独立屏障要求旧版用户按新目录安装指南迁移；旧目录和配置原地保留。同路径 Setup 升级只接收当前代际、本 Windows 用户已登记且身份匹配的安装目录。文件归属清单包含 Host、桌面完整运行时及载荷清单自身；安装、更新和卸载使用同一应用边界。

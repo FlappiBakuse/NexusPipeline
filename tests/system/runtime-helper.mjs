@@ -38,10 +38,11 @@ export { executionMode };
 export const runId = process.env.NEXUS_TEST_RUN_ID?.trim()
   || `standalone-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 export const testHostDir = resolveTestHostDir(projectRoot);
-export const releaseDir = testHostDir;
+export const releaseDir = process.env.NEXUS_SYSTEM_RUNTIME_NAME === 'update-runtime' && process.env.NEXUS_SYSTEM_UPDATE_BASELINE_DIR
+  ? process.env.NEXUS_SYSTEM_UPDATE_BASELINE_DIR : testHostDir;
 export function updateReleaseDirectory() {
   const supplied = process.env.NEXUS_SYSTEM_UPDATE_RELEASE_DIR;
-  if (!supplied || !fs.existsSync(path.join(supplied, "NexusPipeline.exe")) || !fs.existsSync(path.join(supplied, ".complete.json")))
+  if (!supplied || !fs.existsSync(path.join(supplied, "NexusPipeline.exe")) || !fs.existsSync(supplied + ".complete.json"))
     throw new Error("Update tests require the runner's actual versioned candidate Test Host build.");
   return supplied;
 }

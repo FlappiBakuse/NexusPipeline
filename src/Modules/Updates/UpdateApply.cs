@@ -92,16 +92,20 @@ internal static class UpdateApply
             }
 
             string installDir = AppPaths.AppRoot;
+            if (journal.WorkerSha256 != ImageHash(Environment.ProcessPath!) || journal.WorkerPath is not null
+                && !string.Equals(journal.WorkerPath, Environment.ProcessPath, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("update.worker_bytes_changed");
+            journal.StagingInventory!.RequireOwned(stagedDir);
             journal = journal with { TransactionId = journal.TransactionId ?? Guid.NewGuid().ToString("N"),
                 TargetImageHash = journal.TargetImageHash ?? ImageHash(Path.Combine(stagedDir, "NexusPipeline.exe")),
-                WorkerIdentity = ProcessIdentity.Capture(Process.GetCurrentProcess()) };
+                WorkerIdentity = ProcessIdentity.Capture(Process.GetCurrentProcess()), WorkerLaunchPending = false };
             journal.Write();
             UpdateApplyResult? policyFailure = verifyTarget(targetVersion);
             if (policyFailure is not null)
             {
                 Logger.Error($"[更新] 应用前策略核验失败，保留事务：{policyFailure.Code} {policyFailure.Error}");
                 WriteTransactionResult(journal, false, policyFailure.Code ?? "policy-unavailable");
-                LaunchService(installDir, webOnly, journal.RestartHandoffId).Dispose();
+                LaunchService(installDir, webOnly, journal).Dispose();
                 return 1;
             }
             if (ConfigUpdateAdmission.HasPendingRecovery(AppPaths.DataDir))
@@ -129,11 +133,16 @@ internal static class UpdateApply
             }
             var previous = ApplicationPayload.Freeze(installDir, installed: true);
             RequireDesktopFilesReleased(installDir);
-            journal = journal with { PreviousPayload = previous, DesktopStopped = true };
+            var backupInventory = UpdateInventory.Capture(installDir, ApplicationAssets)
+                .WithFile(BackupReadyMarker, System.Text.Encoding.UTF8.GetBytes(journal.TransactionId + Environment.NewLine));
+            if (InstallationOwnership.SnapshotBytesForUpdate(installDir) is { } installerBytes)
+                backupInventory = backupInventory.WithFile(".installer-identity", installerBytes);
+            journal = journal with { PreviousPayload = previous, DesktopStopped = true, BackupInventory = backupInventory };
             EnsureNoStaleBackup(backup);
             journal = journal with { Mode = "apply", Phase = UpdatePhase.BackupPreparing };
             journal.Write();
-            CreateBackupSnapshot(installDir, backup);
+            CreateBackupSnapshot(installDir, backup, journal.TransactionId!);
+            journal.BackupInventory.RequireOwned(backup);
             ApplicationPayload.VerifyFrozen(backup, journal.PreviousPayload!, installed: true);
             backupComplete = true;
             journal = journal with { Phase = UpdatePhase.BackupReady };
@@ -145,8 +154,10 @@ internal static class UpdateApply
             journal = journal with { Phase = UpdatePhase.SwapInProgress };
             journal.Write();
             foreach (string asset in ApplicationAssets)
+                journal.BackupInventory.RequireOwned(installDir, asset);
+            foreach (string asset in ApplicationAssets)
             {
-                SwapInto(Path.Combine(stagedDir, asset), Path.Combine(installDir, asset));
+                SwapInto(stagedDir, installDir, asset, journal);
                 journal = journal with { SwappedAssetCount = journal.SwappedAssetCount + 1 };
                 journal.Write();
             }
@@ -157,7 +168,7 @@ internal static class UpdateApply
 
             journal = journal with { Phase = UpdatePhase.AwaitingStartup };
             journal.Write();
-            candidateProcess = LaunchService(installDir, webOnly, journal.RestartHandoffId);
+            candidateProcess = LaunchService(installDir, webOnly, journal);
             candidateIdentity = CaptureCandidateIdentity(candidateProcess, oldExe);
             if (candidateIdentity is null) throw new IOException("新宿主启动身份无法确认");
             WaitForStartupReceipt(journal, candidateProcess, candidateIdentity.Value);
@@ -223,7 +234,7 @@ internal static class UpdateApply
                     try
                     {
                         Logger.Warn("[更新] 正在重新拉起回滚后的宿主版本。");
-                        LaunchService(AppPaths.AppRoot, webOnly, journal.RestartHandoffId).Dispose();
+                        LaunchService(AppPaths.AppRoot, webOnly, journal).Dispose();
                     }
                     catch (Exception launchEx)
                     {
@@ -239,7 +250,7 @@ internal static class UpdateApply
                     try
                     {
                         Logger.Warn("[更新] 文件交换前更新失败，正在重新拉起现有宿主版本。");
-                        LaunchService(AppPaths.AppRoot, webOnly, journal.RestartHandoffId).Dispose();
+                        LaunchService(AppPaths.AppRoot, webOnly, journal).Dispose();
                     }
                     catch (Exception launchEx)
                     {
@@ -256,10 +267,13 @@ internal static class UpdateApply
     /// 新实例启动收尾：完成 commit 后只在所有临时项清理成功时删除 version marker；
     /// apply/defer 启动失败保留 journal，rollback 失败保留 backup 与 journal。
     /// </summary>
-    public static bool RunStartupFinalization(Func<string, UpdateApplyResult?> verifyTarget, bool webOnly = false, string? mutexName = null, string? restartHandoffId = null, Func<string, bool>? stopDesktop = null)
+    public static bool RunStartupFinalization(Func<string, UpdateApplyResult?> verifyTarget, bool webOnly = false, string? mutexName = null, string? restartHandoffId = null,
+        Func<string, bool>? stopDesktop = null, Func<DesktopResumeIntent>? captureDesktopIntent = null,
+        Action<string, DesktopResumeIntent>? abortDesktop = null)
     {
         Volatile.Write(ref _startupRecoveryUnsafe, 0);
-        try { return FinalizeCurrentTransaction(verifyTarget, webOnly, mutexName, restartHandoffId, stopDesktop ?? (_ => true)); }
+        try { return FinalizeCurrentTransaction(verifyTarget, webOnly, mutexName, restartHandoffId, stopDesktop ?? (_ => true),
+            captureDesktopIntent ?? (() => DesktopResumeIntent.FromVisible(false)), abortDesktop ?? ((_, _) => { })); }
         catch (Exception ex)
         {
             Volatile.Write(ref _startupRecoveryUnsafe, 1);
@@ -268,7 +282,8 @@ internal static class UpdateApply
         }
     }
 
-    private static bool FinalizeCurrentTransaction(Func<string, UpdateApplyResult?> verifyTarget, bool webOnly, string? mutexName, string? restartHandoffId, Func<string, bool> stopDesktop)
+    private static bool FinalizeCurrentTransaction(Func<string, UpdateApplyResult?> verifyTarget, bool webOnly, string? mutexName, string? restartHandoffId,
+        Func<string, bool> stopDesktop, Func<DesktopResumeIntent> captureDesktopIntent, Action<string, DesktopResumeIntent> abortDesktop)
     {
         string? appliedVersion = ReadVersionFile();
         UpdateTask? pending = UpdateTask.Read();
@@ -278,6 +293,7 @@ internal static class UpdateApply
                 throw new InvalidDataException("update recovery proof missing");
             return false;
         }
+        if (pending.WorkerLaunchPending) throw new IOException("update worker launch ownership unconfirmed");
         if (appliedVersion is not null)
         {
             if (pending.Version != appliedVersion || pending.Phase is not (UpdatePhase.Committed or UpdatePhase.AwaitingStartup))
@@ -342,7 +358,7 @@ internal static class UpdateApply
             return false;
         }
 
-        if (pending.Mode == "defer" || pending.Phase == UpdatePhase.Deferred)
+        if (pending.Phase is UpdatePhase.Deferred or UpdatePhase.ApplyRequested && !HasBackupData(AppPaths.UpdateBackupDir))
         {
             if (ConfigUpdateAdmission.HasPendingRecovery(AppPaths.DataDir))
             {
@@ -354,19 +370,27 @@ internal static class UpdateApply
                 Logger.Error("[更新] defer staging 无效，保留 journal 供人工处理。");
                 return false;
             }
+            pending.StagingInventory!.RequireOwned(pending.StagedDir);
+            ApplicationPayload.VerifyFrozen(pending.StagedDir, pending.TargetPayload!, pending.Version);
             Logger.Info("[更新] 检测到「下次启动更新」标记，开始应用。");
             Audit.Log(Audit.System, "更新应用", $"v{pending.Version}（defer 启动）");
             string transaction = pending.TransactionId ?? Guid.NewGuid().ToString("N");
-            if (!stopDesktop(transaction)) throw new IOException("desktop_stop_unconfirmed");
-            UpdateTask apply = pending with { Mode = "apply", Phase = UpdatePhase.ApplyRequested, DesktopStopped = true,
-                TransactionId = transaction, TargetImageHash = ImageHash(Path.Combine(pending.StagedDir, "NexusPipeline.exe")) };
+            UpdateTask apply = pending with { Mode = "apply", Phase = UpdatePhase.ApplyRequested,
+                TransactionId = transaction, TargetImageHash = pending.TargetImageHash ?? ImageHash(Path.Combine(pending.StagedDir, "NexusPipeline.exe")),
+                DesktopResumeIntent = pending.DesktopResumeIntent ?? captureDesktopIntent() };
+            bool desktopPrepared = false;
+            UpdateWorkerLaunch launch = UpdateWorkerLaunch.NotStarted;
             try
             {
                 apply.Write();
-                if (!LaunchApplyWorker(pending.StagedDir, webOnly))
+                if (!stopDesktop(transaction)) throw new IOException("desktop_stop_unconfirmed");
+                desktopPrepared = true;
+                apply = apply with { DesktopStopped = true };
+                apply.Write();
+                launch = LaunchApplyWorker(pending.StagedDir, webOnly);
+                if (launch == UpdateWorkerLaunch.NotStarted)
                 {
-                    Logger.Error("[更新] defer 启动时无法拉起 apply-update，保留 defer journal，当前进程继续运行。");
-                    pending.Write();
+                    Logger.Error("[更新] 启动时无法拉起 apply-update，保留本事务 journal，当前进程继续运行。");
                     return false;
                 }
                 return true;
@@ -375,6 +399,12 @@ internal static class UpdateApply
             {
                 Logger.Error($"[更新] defer 启动失败（保留 journal）：{ex.Message}");
                 return false;
+            }
+            finally
+            {
+                if (desktopPrepared && launch == UpdateWorkerLaunch.NotStarted)
+                    try { abortDesktop(transaction, apply.DesktopResumeIntent!); }
+                    catch (Exception exception) { Logger.Warn("desktop_update_abort_failed: " + exception.GetType().Name); }
             }
         }
 
@@ -385,24 +415,12 @@ internal static class UpdateApply
                 Logger.Warn("[更新] 配置恢复尚未完成，保留版本切换与回滚现场。");
                 return false;
             }
-            if (pending.Phase is UpdatePhase.ApplyRequested or UpdatePhase.Deferred
-                && !HasBackupData(AppPaths.UpdateBackupDir))
-            {
-                // worker 可能在 launch 后、建立 backup 前崩溃；重试仍然安全。
-                if (!stopDesktop(pending.TransactionId ?? Guid.NewGuid().ToString("N"))) throw new IOException("desktop_stop_unconfirmed");
-                if (LaunchApplyWorker(pending.StagedDir, webOnly))
-                {
-                    return true;
-                }
-                Logger.Error("[更新] 未完成 apply 无法重新拉起 worker，保留 journal。");
-                return false;
-            }
-
             Logger.Warn($"[更新] 检测到未完成的更新切换（phase={pending.Phase}），启动时回滚。");
             Audit.Log(Audit.System, "更新失败已回滚", $"v{pending.Version}（切换未完成）");
             if (HasBackupExecutable(AppPaths.UpdateBackupDir))
             {
-                if (LaunchRecoveryWorker(webOnly))
+                if (!stopDesktop(pending.TransactionId!)) throw new IOException("desktop_stop_unconfirmed");
+                if (LaunchRecoveryWorker(webOnly) != UpdateWorkerLaunch.NotStarted)
                 {
                     return true;
                 }
@@ -445,6 +463,18 @@ internal static class UpdateApply
     /// </summary>
     public static int RunRecoveryWorker(bool webOnly = false, string? mutexName = null)
     {
+        using var transactionMutex = new Mutex(false, TransactionMutexName);
+        bool acquired;
+        try { acquired = transactionMutex.WaitOne(0); }
+        catch (AbandonedMutexException) { acquired = true; }
+        if (!acquired) { Logger.Error("[更新] 已有更新 worker 持有本实例事务。"); return 1; }
+        try { return RunRecoveryTransaction(webOnly, mutexName); }
+        catch (Exception exception) { Logger.Error("[更新] recovery 事务保持原状：" + exception.Message); return 1; }
+        finally { transactionMutex.ReleaseMutex(); }
+    }
+
+    private static int RunRecoveryTransaction(bool webOnly, string? mutexName)
+    {
         Logger.Info("[更新] recovery worker 启动，等待当前宿主退出...");
         UpdateTask? pending = UpdateTask.Read();
         if (pending is null || !HasBackupExecutable(AppPaths.UpdateBackupDir))
@@ -465,9 +495,12 @@ internal static class UpdateApply
         }
         try
         {
+            if (pending.WorkerSha256 != ImageHash(Environment.ProcessPath!) || pending.WorkerPath is not null
+                && !string.Equals(pending.WorkerPath, Environment.ProcessPath, StringComparison.OrdinalIgnoreCase))
+                throw new IOException("update.worker_identity_unconfirmed");
             Rollback(pending with { Mode = "apply", Phase = UpdatePhase.RollbackPending,
-                WorkerIdentity = ProcessIdentity.Capture(Process.GetCurrentProcess()) });
-            LaunchService(AppPaths.AppRoot, webOnly, pending.RestartHandoffId).Dispose();
+                WorkerIdentity = ProcessIdentity.Capture(Process.GetCurrentProcess()), WorkerLaunchPending = false });
+            LaunchService(AppPaths.AppRoot, webOnly, pending).Dispose();
             return 0;
         }
         catch (Exception ex)
@@ -570,7 +603,7 @@ internal static class UpdateApply
 
     private static readonly string[] ApplicationAssets = ["NexusPipeline.exe", "resources/desktop", "README.md", ApplicationPayload.ManifestPath];
 
-    private static void CreateBackupSnapshot(string installDir, string backup)
+    private static void CreateBackupSnapshot(string installDir, string backup, string transactionId)
     {
         foreach (string asset in ApplicationAssets)
         {
@@ -578,7 +611,7 @@ internal static class UpdateApply
             CopySnapshotItem(Path.Combine(installDir, asset), Path.Combine(backup, asset));
         }
         InstallationOwnership.SnapshotForUpdate(installDir, backup);
-        WriteRequiredText(Path.Combine(backup, BackupReadyMarker), DateTimeOffset.UtcNow.ToString("O"));
+        WriteRequiredText(Path.Combine(backup, BackupReadyMarker), transactionId);
     }
 
     private static void EnsureOptionalAssetTargetIsSafe(string path)
@@ -605,13 +638,17 @@ internal static class UpdateApply
         }
     }
 
-    private static void SwapInto(string source, string target)
+    private static void SwapInto(string staging, string installation, string asset, UpdateTask journal)
     {
+        string source = UpdateInventory.Resolve(staging, asset), target = UpdateInventory.Resolve(installation, asset);
         if (!Directory.Exists(source) && !File.Exists(source))
         {
             throw new FileNotFoundException("更新 staging 缺少交换项", source);
         }
-        DeletePathRequired(target);
+        void Guard() { if (UpdateTask.Read() != journal) throw new InvalidDataException("update journal changed during swap"); }
+        journal.StagingInventory!.RequireOwned(staging, asset);
+        journal.BackupInventory!.DeleteOwned(installation, Guard, asset);
+        Guard();
         Directory.CreateDirectory(Path.GetDirectoryName(target)!);
         if (Directory.Exists(source))
         {
@@ -632,8 +669,13 @@ internal static class UpdateApply
         }
         string installDir = AppPaths.AppRoot;
         ApplicationPayload.VerifyFrozen(backup, journal.PreviousPayload!, installed: true);
+        journal.BackupInventory!.RequireOwned(backup);
+        journal.Write();
+        journal = UpdateRollbackProtection.Prepare(journal, installDir, AppPaths.UpdateTaskFile, ApplicationAssets);
         foreach (string asset in ApplicationAssets)
-            RestoreFromBackup(Path.Combine(backup, asset), Path.Combine(installDir, asset));
+            _ = UpdateRollbackProtection.CurrentOwned(journal, installDir, asset);
+        foreach (string asset in ApplicationAssets)
+            RestoreFromBackup(backup, installDir, asset, journal);
         ApplicationPayload.VerifyFrozen(installDir, journal.PreviousPayload!, installed: true);
         InstallationOwnership.RestoreAfterRollback(installDir, backup);
         UpdateTask confirmed = journal with { Mode = "apply", Phase = UpdatePhase.RollbackConfirmed };
@@ -641,39 +683,17 @@ internal static class UpdateApply
         Audit.Log(Audit.System, "更新回滚完成", "旧版本文件已从 immutable backup 还原");
     }
 
-    private static void RestoreFromBackup(string backupItem, string target)
+    private static void RestoreFromBackup(string backup, string installation, string asset, UpdateTask journal)
     {
+        string backupItem = UpdateInventory.Resolve(backup, asset), target = UpdateInventory.Resolve(installation, asset);
         if (!Directory.Exists(backupItem) && !File.Exists(backupItem))
         {
             return;
         }
-        string temp = target + ".recovery-" + Guid.NewGuid().ToString("N");
-        try
-        {
-            if (Directory.Exists(backupItem))
-            {
-                CopyDirectory(backupItem, temp);
-            }
-            else
-            {
-                Directory.CreateDirectory(Path.GetDirectoryName(temp)!);
-                File.Copy(backupItem, temp, overwrite: false);
-            }
-            DeletePathRequired(target);
-            if (Directory.Exists(temp))
-            {
-                RetryRequired(() => Directory.Move(temp, target), $"恢复目录 {temp} → {target}");
-            }
-            else
-            {
-                RetryRequired(() => File.Move(temp, target), $"恢复文件 {temp} → {target}");
-            }
-        }
-        catch
-        {
-            TryDeletePath(temp);
-            throw;
-        }
+        var current = UpdateRollbackProtection.CurrentOwned(journal, installation, asset);
+        current.DeleteOwned(installation, () => UpdateRollbackProtection.Guard(journal, AppPaths.UpdateTaskFile), asset);
+        UpdateRollbackProtection.Guard(journal, AppPaths.UpdateTaskFile);
+        CopySnapshotItem(backupItem, target);
     }
 
     private static void ValidateCommitProof(UpdateTask task)
@@ -718,7 +738,7 @@ internal static class UpdateApply
             throw new InvalidDataException("update failure proof ownership");
         using var document = JsonDocument.Parse(File.ReadAllText(path));
         var value = document.RootElement;
-        if (value.ValueKind != JsonValueKind.Object || value.EnumerateObject().Count() != 5
+        if (value.ValueKind != JsonValueKind.Object || value.EnumerateObject().Count() != 6
             || value.GetProperty("TransactionId").GetString() != task.TransactionId
             || value.GetProperty("Version").GetString() != task.Version
             || value.GetProperty("Succeeded").ValueKind is not (JsonValueKind.True or JsonValueKind.False)
@@ -867,21 +887,6 @@ internal static class UpdateApply
 #endif
     }
 
-    private static void DeletePathRequired(string path)
-    {
-        RetryRequired(() =>
-        {
-            if (Directory.Exists(path))
-            {
-                Directory.Delete(path, recursive: true);
-            }
-            else if (File.Exists(path))
-            {
-                File.Delete(path);
-            }
-        }, $"删除 {path}");
-    }
-
     private static void RetryRequired(Action action, string description)
     {
         Exception? last = null;
@@ -909,24 +914,6 @@ internal static class UpdateApply
         throw new IOException($"{description}重试失败", last);
     }
 
-    private static void TryDeletePath(string path)
-    {
-        try
-        {
-            if (Directory.Exists(path))
-            {
-                Directory.Delete(path, recursive: true);
-            }
-            else if (File.Exists(path))
-            {
-                File.Delete(path);
-            }
-        }
-        catch
-        {
-        }
-    }
-
     private static void TryDeleteEmptyDirectory(string path)
     {
         try
@@ -948,21 +935,32 @@ internal static class UpdateApply
     }
 
     /// <summary>拉起 apply-update 子进程，Process.Start 返回 null 也视为失败。</summary>
-    public static bool LaunchApplyWorker(string stagedDir, bool webOnly)
+    public static UpdateWorkerLaunch LaunchApplyWorker(string stagedDir, bool webOnly)
     {
         if (LaunchApplyOverride is not null)
         {
-            return LaunchApplyOverride(stagedDir);
+            try { return LaunchApplyOverride(stagedDir) ? UpdateWorkerLaunch.Started : UpdateWorkerLaunch.NotStarted; }
+            catch { return UpdateWorkerLaunch.Unconfirmed; }
         }
         string? ownedWorker = null;
+        string? ownedHash = null;
+        bool armed = false;
+        bool startAttempted = false;
+        UpdateTask? journal = null;
         try
         {
             string sourceExe = Environment.ProcessPath ?? Path.Combine(AppPaths.AppRoot, "NexusPipeline.exe");
+            journal = UpdateTask.Read() ?? throw new InvalidDataException("update worker journal missing");
+            if (journal.WorkerLaunchPending || journal.WorkerIdentity is not null && ObserveWorker(journal.WorkerIdentity) != false)
+                return UpdateWorkerLaunch.Unconfirmed;
+            RetireExitedWorker(journal);
             Directory.CreateDirectory(AppPaths.UpdateWorkersDir);
             PayloadPathSafety.RequireLinkFree(AppPaths.UpdateWorkersDir);
             string workerExe = Path.Combine(AppPaths.UpdateWorkersDir, $"{WorkerImagePrefix}{Guid.NewGuid():N}.exe");
             File.Copy(sourceExe, workerExe, overwrite: false);
             ownedWorker = workerExe;
+            ownedHash = ImageHash(workerExe);
+            (journal with { WorkerSha256 = ownedHash, WorkerPath = workerExe, WorkerLaunchPending = true }).Write();
             var startInfo = new ProcessStartInfo(workerExe)
             {
                 UseShellExecute = false,
@@ -977,39 +975,56 @@ internal static class UpdateApply
             {
                 startInfo.ArgumentList.Add("--web");
             }
-            Process? process = Process.Start(startInfo);
+            startAttempted = true;
+            using Process? process = Process.Start(startInfo);
             if (process is null)
             {
-                throw new InvalidOperationException("Process.Start 未返回子进程");
+                throw new System.ComponentModel.Win32Exception("Process.Start 未返回子进程");
             }
-            process.Dispose();
+            armed = true;
+            (journal with { WorkerIdentity = ProcessIdentity.Capture(process) ?? throw new IOException("update.worker_identity_unconfirmed"),
+                WorkerSha256 = ownedHash, WorkerPath = workerExe, WorkerLaunchPending = false }).Write();
             Logger.Info($"[更新] 已拉起独立 apply-update worker：{Path.GetFileName(workerExe)}。");
-            return true;
+            return UpdateWorkerLaunch.Started;
         }
         catch (Exception ex)
         {
             Logger.Error($"[更新] 拉起 apply-update 子进程失败：{ex.Message}");
-            if (ownedWorker is not null) TryDeletePath(ownedWorker);
-            return false;
+            if (armed || startAttempted && ex is not System.ComponentModel.Win32Exception) return UpdateWorkerLaunch.Unconfirmed;
+            if (ownedWorker is not null && ownedHash is not null) TryDeleteOwnedWorker(ownedWorker, ownedHash);
+            try { journal?.Write(); }
+            catch (Exception failure) { Logger.Warn("update_worker_preparation_preserved: " + failure.GetType().Name); }
+            return UpdateWorkerLaunch.NotStarted;
         }
     }
 
     /// <summary>启动独立 recovery worker，避免当前新版本进程锁住待还原的 exe。</summary>
-    public static bool LaunchRecoveryWorker(bool webOnly)
+    public static UpdateWorkerLaunch LaunchRecoveryWorker(bool webOnly)
     {
         if (LaunchRecoveryOverride is not null)
         {
-            return LaunchRecoveryOverride();
+            try { return LaunchRecoveryOverride() ? UpdateWorkerLaunch.Started : UpdateWorkerLaunch.NotStarted; }
+            catch { return UpdateWorkerLaunch.Unconfirmed; }
         }
         string? ownedWorker = null;
+        string? ownedHash = null;
+        bool armed = false;
+        bool startAttempted = false;
+        UpdateTask? journal = null;
         try
         {
             string sourceExe = Environment.ProcessPath ?? Path.Combine(AppPaths.AppRoot, "NexusPipeline.exe");
+            journal = UpdateTask.Read() ?? throw new InvalidDataException("update recovery journal missing");
+            if (journal.WorkerLaunchPending || journal.WorkerIdentity is not null && ObserveWorker(journal.WorkerIdentity) != false)
+                return UpdateWorkerLaunch.Unconfirmed;
+            RetireExitedWorker(journal);
             Directory.CreateDirectory(AppPaths.UpdateWorkersDir);
             PayloadPathSafety.RequireLinkFree(AppPaths.UpdateWorkersDir);
             string workerExe = Path.Combine(AppPaths.UpdateWorkersDir, $"{WorkerImagePrefix}{Guid.NewGuid():N}.exe");
             File.Copy(sourceExe, workerExe, overwrite: false);
             ownedWorker = workerExe;
+            ownedHash = ImageHash(workerExe);
+            (journal with { WorkerSha256 = ownedHash, WorkerPath = workerExe, WorkerLaunchPending = true }).Write();
             var startInfo = new ProcessStartInfo(workerExe)
             {
                 UseShellExecute = false,
@@ -1022,21 +1037,45 @@ internal static class UpdateApply
             {
                 startInfo.ArgumentList.Add("--web");
             }
-            Process? process = Process.Start(startInfo);
+            startAttempted = true;
+            using Process? process = Process.Start(startInfo);
             if (process is null)
             {
-                throw new InvalidOperationException("Process.Start 未返回 recovery 子进程");
+                throw new System.ComponentModel.Win32Exception("Process.Start 未返回 recovery 子进程");
             }
-            process.Dispose();
+            armed = true;
+            (journal with { WorkerIdentity = ProcessIdentity.Capture(process) ?? throw new IOException("update.worker_identity_unconfirmed"),
+                WorkerSha256 = ownedHash, WorkerPath = workerExe, WorkerLaunchPending = false }).Write();
             Logger.Info($"[更新] 已拉起独立 recovery worker：{Path.GetFileName(workerExe)}。");
-            return true;
+            return UpdateWorkerLaunch.Started;
         }
         catch (Exception ex)
         {
             Logger.Error($"[更新] 拉起 recovery worker 失败：{ex.Message}");
-            if (ownedWorker is not null) TryDeletePath(ownedWorker);
-            return false;
+            if (armed || startAttempted && ex is not System.ComponentModel.Win32Exception) return UpdateWorkerLaunch.Unconfirmed;
+            if (ownedWorker is not null && ownedHash is not null) TryDeleteOwnedWorker(ownedWorker, ownedHash);
+            try { journal?.Write(); }
+            catch (Exception failure) { Logger.Warn("update_worker_preparation_preserved: " + failure.GetType().Name); }
+            return UpdateWorkerLaunch.NotStarted;
         }
+    }
+
+    private static void RetireExitedWorker(UpdateTask journal)
+    {
+        if (journal.WorkerIdentity is not { } identity) return;
+        if (ObserveWorker(identity) != false || !UpdateInventory.Hash(journal.WorkerSha256))
+            throw new IOException("update previous worker ownership unconfirmed");
+        string root = Path.GetFullPath(AppPaths.UpdateWorkersDir).TrimEnd(Path.DirectorySeparatorChar);
+        if (!string.Equals(Path.GetDirectoryName(identity.ImageName), root, StringComparison.OrdinalIgnoreCase))
+            throw new IOException("update worker path unconfirmed");
+        if (File.Exists(identity.ImageName)) VerifiedFileDeletion.Delete(identity.ImageName, new FileInfo(identity.ImageName).Length, journal.WorkerSha256!);
+    }
+
+    private static void TryDeleteOwnedWorker(string path, string hash)
+    {
+        try { VerifiedFileDeletion.Delete(path, new FileInfo(path).Length, hash); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        { Logger.Warn("update failed worker preserved: " + error.GetType().Name); }
     }
 
     /// <summary>测试注入点：L2 单测替换真实子进程拉起。</summary>
@@ -1045,7 +1084,50 @@ internal static class UpdateApply
     /// <summary>测试注入点：L2 单测替换 recovery worker 拉起。</summary>
     internal static Func<bool>? LaunchRecoveryOverride;
 
-    private static Process LaunchService(string installDir, bool webOnly, string? restartHandoffId = null)
+    internal static string[] BuildServiceArguments(UpdateTask journal, bool webOnly)
+    {
+        journal.Validate();
+        if (journal.DesktopResumeIntent is null || journal.TransactionId is null)
+            throw new InvalidDataException("update.launch_intent_missing");
+        var arguments = new List<string> { "restart" };
+        if (webOnly) { arguments.Add("--web"); arguments.Add("--keep-alive"); }
+        if (journal.RestartHandoffId is { } handoff) { arguments.Add("--handoff"); arguments.Add(handoff); }
+        arguments.Add("--update-transaction"); arguments.Add(journal.TransactionId);
+        arguments.Add("--desktop-intent"); arguments.Add(journal.DesktopResumeIntent.Mode);
+        return arguments.ToArray();
+    }
+
+    internal static DesktopResumeIntent ReadLaunchIntent(string transaction, string mode)
+    {
+        if (!Guid.TryParseExact(transaction, "N", out _)) throw new InvalidDataException("update.launch_transaction_invalid");
+        var intent = new DesktopResumeIntent(1, mode);
+        intent.Validate();
+        var task = UpdateTask.Read();
+        if (task is not null)
+        {
+            if (task.TransactionId == transaction && task.DesktopResumeIntent == intent) return intent;
+            throw new InvalidDataException("update.launch_transaction_mismatch");
+        }
+        string result = TransactionResultPath(transaction);
+        PayloadPathSafety.RequireLinkFree(result);
+        if (!File.Exists(result) || new FileInfo(result).Length > 64 * 1024) throw new InvalidDataException("update.launch_receipt_missing");
+        using var document = JsonDocument.Parse(File.ReadAllBytes(result));
+        var value = document.RootElement;
+        string[] fields = ["TransactionId", "Version", "Succeeded", "Code", "AtUtc", "DesktopResumeIntent"];
+        if (value.ValueKind != JsonValueKind.Object || !value.EnumerateObject().Select(property => property.Name).Order().SequenceEqual(fields.Order())
+            || value.GetProperty("TransactionId").GetString() != transaction
+            || value.GetProperty("Succeeded").ValueKind is not (JsonValueKind.True or JsonValueKind.False)
+            || !value.GetProperty("AtUtc").TryGetDateTimeOffset(out _)
+            || value.GetProperty("Version").ValueKind != JsonValueKind.String || value.GetProperty("Code").ValueKind != JsonValueKind.String)
+            throw new InvalidDataException("update.launch_receipt_mismatch");
+        JsonElement saved = value.GetProperty("DesktopResumeIntent");
+        if (saved.ValueKind != JsonValueKind.Object || !saved.EnumerateObject().Select(property => property.Name).Order().SequenceEqual(new[] { "Mode", "SchemaVersion" })
+            || saved.GetProperty("SchemaVersion").GetRawText() != "1" || saved.GetProperty("Mode").GetString() != mode)
+            throw new InvalidDataException("update.launch_receipt_intent_mismatch");
+        return intent;
+    }
+
+    private static Process LaunchService(string installDir, bool webOnly, UpdateTask journal)
     {
         string exePath = Path.Combine(installDir, "NexusPipeline.exe");
         var startInfo = new ProcessStartInfo(exePath)
@@ -1053,22 +1135,7 @@ internal static class UpdateApply
             UseShellExecute = false,
             CreateNoWindow = true,
         };
-        if (!string.IsNullOrEmpty(restartHandoffId))
-        {
-            startInfo.ArgumentList.Add("restart");
-            if (webOnly)
-            {
-                startInfo.ArgumentList.Add("--web");
-                startInfo.ArgumentList.Add("--keep-alive");
-            }
-            startInfo.ArgumentList.Add("--handoff");
-            startInfo.ArgumentList.Add(restartHandoffId);
-        }
-        else if (webOnly)
-        {
-            startInfo.ArgumentList.Add("web");
-            startInfo.ArgumentList.Add("--keep-alive");
-        }
+        foreach (string argument in BuildServiceArguments(journal, webOnly)) startInfo.ArgumentList.Add(argument);
         Process? process = Process.Start(startInfo);
         if (process is null)
         {
@@ -1210,6 +1277,6 @@ internal static class UpdateApply
         if (task.TransactionId is null) return;
         Directory.CreateDirectory(Path.GetDirectoryName(TransactionResultPath(task.TransactionId))!);
         JsonUtil.WriteAtomic(TransactionResultPath(task.TransactionId), JsonSerializer.Serialize(new
-        { task.TransactionId, task.Version, Succeeded = succeeded, Code = code, AtUtc = DateTimeOffset.UtcNow }));
+        { task.TransactionId, task.Version, Succeeded = succeeded, Code = code, AtUtc = DateTimeOffset.UtcNow, task.DesktopResumeIntent }));
     }
 }
