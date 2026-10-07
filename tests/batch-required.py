@@ -184,11 +184,12 @@ def validate_unit(expected, actual, files, base):
                 require(re.search(r"^# "+name+r" 0\r?$",native,re.M),"Failed/skipped TAP counters")
             require(re.search(r"^# tests [1-9]\d*\r?$",native,re.M),"Zero TAP tests")
             if expected["id"] == "host.integration.restart-update":
-                require(re.search(r"^# tests 11\r?$", native, re.M), "Missing update transaction cases")
+                require(re.search(r"^# tests 12\r?$", native, re.M), "Missing update transaction cases")
                 for case in ["current update worker commits only after actual services are ready and preserves user files",
                              "failed policy proof aborts only its exited worker and cannot repeat the apply loop",
                              "whole application rollback preserves frozen old assets after BackupReady corruption",
-                             "whole application rollback preserves frozen old assets after SwapReady corruption"]:
+                             "whole application rollback preserves frozen old assets after SwapReady corruption",
+                             "unknown nested candidate bytes preserve the immutable backup and recovery journal"]:
                     require(re.search(r"^ok \d+ - " + re.escape(case) + r"\r?$", native, re.M), "Missing native update transaction: " + case)
         if expected["id"].startswith("plugins.plugin.package:"):
             built = load(one("package-report.json"))
@@ -199,8 +200,9 @@ def validate_unit(expected, actual, files, base):
         if expected["id"] == "host.integration.desktop":
             native=one("desktop-native.tap").read_text(encoding="utf-8")
             require(not re.search(r"^\s*not ok\b",native,re.M),"Failed desktop native cases")
-            for name,count in {"tests":4,"pass":4,"fail":0,"cancelled":0,"skipped":0,"todo":0}.items():
+            for name,count in {"tests":5,"pass":5,"fail":0,"cancelled":0,"skipped":0,"todo":0}.items():
                 require(re.search(r"^# "+name+" "+str(count)+r"\r?$",native,re.M),"Missing desktop native counters")
+            require(re.search(r"^ok \d+ - legacy and profiled shared vectors use the same canonical identity\r?$",native,re.M),"Missing desktop shared identity vectors")
             reader=load(one("reader-report.json"))
             require(reader["status"] == "PASS" and reader["candidateExecuted"] is False
                     and reader["counts"] == {"testsRun":8,"failures":0,"skipped":0}

@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { runProcess, getProcessRunnerState, resetProcessRunnerState } from "./support/process-runner.mjs";
 import { findAvailablePort, resolveTestRunRoot } from "./support/test-runtime.mjs";
@@ -176,6 +177,21 @@ async function assembleApplication(directory) {
   fs.copyFileSync(path.join(executionRoot,"README.md"),path.join(directory,"README.md"));
   return run(pythonCommand,["tools/application_payload.py","--directory",directory,"--identity",applicationInputs.identity,"--root",executionRoot]);
 }
+let updateFixtures = null;
+async function prepareUpdateFixtures(directory) {
+  if (updateFixtures) return updateFixtures;
+  const partner=execFileSync('git',['-C',process.env.NEXUS_PARTNER_ROOT,'rev-parse','HEAD'],{encoding:'utf8'}).trim();
+  const archive=process.env.NEXUS_ELECTRON_ARCHIVE??path.join(path.dirname(applicationInputs.identity),JSON.parse(fs.readFileSync(path.join(executionRoot,'desktop/electron-runtime.json'))).archive);
+  updateFixtures = Promise.allSettled([['update-baseline','0.17.0',true],['update-patch','0.17.1',false]].map(async ([name,version,full]) => {
+    const code=await run(pythonCommand,['tests/desktop/patch-application.py','--source',executionRoot,'--repository',projectRoot,'--output',path.join(directory,name),'--version',version,'--partner-sha',partner,'--electron-archive',archive,...full?['--full-locales','--full-dependencies',path.join(path.dirname(applicationInputs.identity),'desktop/source/node_modules')]:[]],{logRoot:directory});
+    return {code,directory:path.join(directory,name,'application')};
+  })).then(outcomes=>{
+    const failure=outcomes.find(outcome=>outcome.status==='rejected');
+    if(failure)throw failure.reason;
+    return {code:outcomes.find(outcome=>outcome.value.code)?.value.code??0,baseline:outcomes[0].value.directory,candidate:outcomes[1].value.directory};
+  });
+  return updateFixtures;
+}
 async function publishTestHost({ withFrontend = true, withApplication = false } = {}) {
   if (publishedTestHost) {
     if((!withFrontend||publishedFrontend)&&(!withApplication||publishedApplication)) return 0;
@@ -212,6 +228,7 @@ async function publishTestHost({ withFrontend = true, withApplication = false } 
 
 const batchResults=[];
 const batchParentId=runId, batchParentRoot=runRoot;
+const batchUnitId = unit => `${batchParentId}-${createHash('sha256').update(unit).digest('hex').slice(0,8)}`;
 async function runBatch() {
   if(batchContext.partnerRoot) process.env.NEXUS_PARTNER_ROOT=batchContext.partnerRoot;
   workspace=stageWorkspace(projectRoot,process.env.NEXUS_TEST_ARTIFACT_ROOT,invocationBudget,"Host",{
@@ -224,7 +241,7 @@ async function runBatch() {
     batchResults.push(result);
     try {
       invocationBudget.check();
-      runId=`${batchParentId}-${unit.id.replaceAll(/[.:]/g,"-")}`;runRoot=resolveTestRunRoot(projectRoot,runId);
+      runId=batchUnitId(unit.id);runRoot=resolveTestRunRoot(projectRoot,runId);
       fs.mkdirSync(runRoot,{recursive:true});
       let code=0;
       if(unit.kind==="backend") {
@@ -294,11 +311,20 @@ async function runBatch() {
           if(!code) result.completedScenarioIds=unit.expectedScenarioIds;
         } finally {if(getProcessRunnerState().cleanupComplete) staged.release();}
       } else {
-        if (unit.id === "host.integration.restart-update"
+        if (unit.id === "host.integration.desktop" && batchContext.batch.units.some(item=>item.id==='host.integration.restart-update')) {
+          const prepared=await publishTestHost({withApplication:true});
+          if(prepared)throw Object.assign(new Error('Test Host preparation failed'),{exitCode:prepared});
+          const directory=resolveTestRunRoot(projectRoot,batchUnitId('host.integration.restart-update'));
+          fs.mkdirSync(directory,{recursive:true});
+          const outcomes=await Promise.allSettled([runGate(unit.id),prepareUpdateFixtures(directory)]);
+          const failure=outcomes.find(outcome=>outcome.status==='rejected');
+          if(failure)throw failure.reason;
+          code=outcomes[0].value||outcomes[1].value.code;
+        } else if (unit.id === "host.integration.restart-update"
           && batchContext.batch.units.some(item => item.id === "host.integration.store")) {
           const prepared = await publishTestHost({withApplication:true});
           if (prepared) throw Object.assign(new Error("Test Host preparation failed"), {exitCode:prepared});
-          const storeRunId = `${batchParentId}-host-integration-store`;
+          const storeRunId = batchUnitId('host.integration.store');
           const storeRunRoot = resolveTestRunRoot(projectRoot, storeRunId);
           fs.mkdirSync(storeRunRoot, {recursive:true});
           const outcomes = await Promise.allSettled([runGate(unit.id),
@@ -343,7 +369,7 @@ async function runBatch() {
         for(const entry of fs.readdirSync(source,{withFileTypes:true})) {
           const from=path.join(source,entry.name),to=path.join(target,entry.name);
           if(entry.isSymbolicLink()) throw new Error("Linked native output");
-          if(entry.isDirectory()&&!["test-host","architecture-bin","architecture-obj","runtime","resources","software","client-fixture","application-inputs","plugins"].includes(entry.name)) copy(from,to);
+          if(entry.isDirectory()&&!["test-host","architecture-bin","architecture-obj","runtime","update-runtime","resources","software","client-fixture","application-inputs","plugins","source","inputs","application","bin","obj",".git"].includes(entry.name)) copy(from,to);
           else if(entry.isFile()&&/\.(json|trx|tap|log|txt)$/.test(entry.name)) {
             fs.copyFileSync(from,to);result.rawEvidence.push(path.relative(batchParentRoot,to).replaceAll("\\","/"));
           }
@@ -617,7 +643,11 @@ async function runGate(id) {
   if (id === "host.integration.store") return runStoreDiagnostic();
   if (id === "host.integration.restart-update") {
     const code = await publishTestHost({ withApplication: true });
-    return code || runSystemSuite({ file: "tests/system/runtime-smoke.mjs", files: ["tests/system/runtime-smoke.mjs", "tests/system/update-transaction.mjs"], runtimeName: "runtime" });
+    if(code)return code;
+    const fixtures=await prepareUpdateFixtures(runRoot);if(fixtures.code)return fixtures.code;
+    process.env.NEXUS_SYSTEM_UPDATE_BASELINE_DIR=fixtures.baseline;
+    process.env.NEXUS_SYSTEM_UPDATE_RELEASE_DIR=fixtures.candidate;
+    return runSystemSuite({ file: "tests/system/runtime-smoke.mjs", files: ["tests/system/runtime-smoke.mjs", "tests/system/update-transaction.mjs"], runtimeName: "runtime" });
   }
   const finite = {
     "host.integration.execution": "execution", "host.integration.config": "config",
