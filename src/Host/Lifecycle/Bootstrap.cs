@@ -18,6 +18,7 @@ using NexusPipeline.Shared.Localization;
 using NexusPipeline.Shared.Logging;
 using NexusPipeline.Modules.Configuration.Editing;
 using NexusPipeline.Modules.Configuration.Recovery;
+using NexusPipeline.Modules.Scripts;
 
 namespace NexusPipeline.Host.Lifecycle;
 
@@ -32,6 +33,7 @@ internal sealed class Bootstrap
     private readonly HostRuntime _runtime;
     private readonly PluginAutoUpdateService _pluginAutoUpdateService;
     private readonly UpdateAutomationService _updates;
+    private readonly ScriptTypeIconService _scriptTypeIcons;
     private readonly IPluginActivationPreferences _activationPreferences;
     private readonly Func<bool> _requestServiceExit;
     private readonly Func<bool> _requestWebOnlyExit;
@@ -45,6 +47,7 @@ internal sealed class Bootstrap
         HostRuntime runtime,
         PluginAutoUpdateService pluginAutoUpdateService,
         UpdateAutomationService updates,
+        ScriptTypeIconService scriptTypeIcons,
         IPluginActivationPreferences activationPreferences,
         Func<bool> requestServiceExit,
         Func<bool> requestWebOnlyExit)
@@ -52,6 +55,7 @@ internal sealed class Bootstrap
         _runtime = runtime;
         _pluginAutoUpdateService = pluginAutoUpdateService;
         _updates = updates;
+        _scriptTypeIcons = scriptTypeIcons;
         _activationPreferences = activationPreferences;
         _requestServiceExit = requestServiceExit;
         _requestWebOnlyExit = requestWebOnlyExit;
@@ -94,6 +98,7 @@ internal sealed class Bootstrap
             _pluginAutoUpdateService.OnStartupInstallRecoveryCompleted();
         }
         _runtime.Plugins.LoadAll();
+        _scriptTypeIcons.StartWarmup(_runtime.Plugins.GetScriptTypeIcons());
         _runtime.History.Cleanup(_runtime.Settings.HistoryRetentionDays);
         _runtime.Scheduler.Start();
         ConfigRecoveryService.StartRecoveryRetry();
@@ -437,6 +442,7 @@ internal sealed class Bootstrap
         Guarded("桌面停止", () => _runtime.Get<NexusPipeline.Host.Desktop.IDesktopHost>().StopForHostExitAsync().GetAwaiter().GetResult());
         Guarded("更新自动化停止", _updates.Stop);
         Guarded("调度器停止", _runtime.Scheduler.Stop);
+        Guarded("脚本类型图标停止", () => _scriptTypeIcons.StopWarmupAsync().GetAwaiter().GetResult());
         Guarded("配置恢复重试停止", ConfigRecoveryService.StopRecoveryRetry);
         Guarded("Web 服务停止", () => web?.Stop());
         Guarded("MCP 服务停止", () => mcp?.Stop());

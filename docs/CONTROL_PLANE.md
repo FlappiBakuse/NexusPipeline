@@ -7,6 +7,7 @@
 | Capability | Web | CLI | MCP |
 |---|---|---|---|
 | 脚本读取 | `GET /api/scripts` | `script list/get` | `list_scripts` |
+| 脚本类型图标 | `GET /api/scripts/type-icons/{typeId}` | 由 Web 承担 | 由 Web 承担 |
 | 脚本写入 | 脚本 CRUD API（新建/更新专项脚本实例的响应顶层附带 `validation`：script-save 语境的配置校验结果，含角落通知；通用脚本或插件无校验器时缺省） | `script create/update/delete`（不附带校验） | `create_script` / `update_script`（删除走 CLI） |
 | 专项配置探测 | `POST /api/scripts/probe`（专项插件按根目录 + `pluginInputs` 用户输入推导，响应含插件声明的 inputs 表单 schema） | 由 Web 承担 | 由 CLI/Web 承担 |
 | 用户读取 | `GET /api/users` | `user list/get` | `list_users` |
@@ -72,3 +73,9 @@ GameCheckIn v0.3.1 的独立签到页面由插件导航注册；状态读取位�
 新增能力时先实现 Web/CLI 入口与 Application Command，再评估 Agent 场景是否需要 MCP 工具；保持核心子集克制，避免工具面向全量 API 膨胀。本表为信息性记录，不设强制校验测试。
 
 专项任务查询、运行快照与历史深链接见[专项任务控制面](reference/plugin-api/task-protocol.md#控制面)。
+
+## 脚本类型图标
+
+`GET /api/scripts/type-icons/{typeId}` 返回图像二进制，沿用 Control API 认证。`general` 返回宿主内嵌项目 ICO；其他类型由已启用且兼容的专项插件或执行 provider 的 `scriptTypeIcon` 声明来源，固定上游完整 SHA 与图标 SHA-256。已知类型未声明图标时使用项目图标；未知或未启用类型返回 404，客户端不能提供下载 URL。
+
+宿主加载插件后以最多三个并行下载在后台预取类型图标，不等待弹窗打开，不阻塞启动；停止宿主时取消预取并等待清理。Scripts 服务使用宿主代理下载，仅允许完整 SHA 固定的 HTTPS raw 来源并拒绝重定向，大小上限为 2 MiB、超时 10 秒。经摘要验证的图像缓存于 `.nxp/cache/script-type-icons/`，缓存命中无需联网；并发下载共享任务，单个客户端取消不影响其他请求。网络或校验失败使用项目图标，后续弹窗请求可以重试；缓存写入失败仍返回已经验证的图像。上游图标字节不包含在源码和发行包中。

@@ -90,6 +90,8 @@ internal interface IHttpRouteBindings
 
     ScriptIconService ScriptIcons { get; }
 
+    ScriptTypeIconService ScriptTypeIcons { get; }
+
     ScriptFileBrowser ScriptFileBrowser { get; }
     NexusPipeline.Modules.Users.Contracts.ITaskQueryProjection TaskQueries { get; }
 }

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import ScriptTypeIcon from "./ScriptTypeIcon.vue";
+import NxpOverflowText from "../../ui/primitives/NxpOverflowText.vue";
 import {
   computed,
   nextTick,
@@ -229,13 +231,11 @@ onBeforeUnmount(() => {
             type="button"
             @click.stop="openEditor(null, '')"
           >
-            <strong>{{ t("scripts.general_script") }}</strong>
-            <span class="muted">{{ t("scripts.editor.manual_config_help") }}</span>
+            <ScriptTypeIcon type-id="general" /><span class="chooser-copy"><strong><NxpOverflowText :label="t('scripts.general_script')" /></strong><NxpOverflowText class="muted" :label="t('scripts.editor.manual_config_help')" /></span>
           </NxpButton>
           <NxpButton v-for="provider in executionProviders" :key="provider.executionProviderId" class="chooser-card"
             type="button" @click.stop="openEditor(null, 'provider:' + provider.executionProviderId)">
-            <strong>{{ provider.displayName || provider.name }}</strong>
-            <span class="muted">{{ t('scripts.driver_independent_profile', {}, '独立配置 · 显式导入 · 使用现有队列') }}</span>
+            <ScriptTypeIcon :type-id="provider.name || 'general'" /><span class="chooser-copy"><strong><NxpOverflowText :label="provider.displayName || provider.name" /></strong><NxpOverflowText class="muted" :label="t('scripts.driver_independent_profile', {}, '独立配置 · 显式导入 · 使用现有队列')" /></span>
           </NxpButton>
           <hr v-if="specializedPlugins.length" class="chooser-divider" />
           <NxpButton
@@ -245,14 +245,7 @@ onBeforeUnmount(() => {
             type="button"
             @click.stop="openEditor(null, plugin.name || '')"
           >
-            <strong class="scroll-text">
-              <span class="scroll-inner">
-                {{ t("scripts.action.create_specialized", {
-                  plugin: plugin.displayName || plugin.name || "",
-                }) }}
-              </span>
-            </strong>
-            <span class="muted">{{ t("scripts.plugin.config_auto") }}</span>
+            <ScriptTypeIcon :type-id="plugin.name || 'general'" /><span class="chooser-copy"><strong><NxpOverflowText :label="t('scripts.action.create_specialized', { plugin: plugin.displayName || plugin.name || '' })" /></strong><NxpOverflowText class="muted" :label="t('scripts.plugin.config_auto')" /></span>
           </NxpButton>
         </div>
       <template #footer>
@@ -295,3 +288,9 @@ onBeforeUnmount(() => {
     </NxpModal>
   </main>
 </template>
+
+<style>
+.new-script-chooser .chooser-card { display: flex; align-items: center; gap: 14px; text-align: left; }
+.chooser-copy { display: flex; flex: 1 1 auto; min-width: 0; flex-direction: column; gap: 5px; }
+.chooser-copy strong, .chooser-copy .nxp-overflow-text { min-width: 0; width: 100%; }
+</style>

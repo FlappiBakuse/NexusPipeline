@@ -60,6 +60,7 @@ internal sealed class HttpRouteBindings : IHttpRouteBindings
         UserAssetService userAssets,
         OutboundHttpClientProvider outboundHttp,
         ScriptIconService scriptIcons,
+        ScriptTypeIconService scriptTypeIcons,
         ScriptFileBrowser scriptFileBrowser,
         NexusPipeline.Modules.Users.Contracts.ITaskQueryProjection taskQueries,
         NexusPipeline.ControlPlane.Http.Static.IFrontendAssetProvider frontendAssets)
@@ -94,6 +95,7 @@ internal sealed class HttpRouteBindings : IHttpRouteBindings
         UserAssets = userAssets;
         OutboundHttp = outboundHttp;
         ScriptIcons = scriptIcons;
+        ScriptTypeIcons = scriptTypeIcons;
         ScriptFileBrowser = scriptFileBrowser;
         TaskQueries = taskQueries;
     }
@@ -155,6 +157,8 @@ internal sealed class HttpRouteBindings : IHttpRouteBindings
     public OutboundHttpClientProvider OutboundHttp { get; }
 
     public ScriptIconService ScriptIcons { get; }
+
+    public ScriptTypeIconService ScriptTypeIcons { get; }
 
     public ScriptFileBrowser ScriptFileBrowser { get; }
     public NexusPipeline.Modules.Users.Contracts.ITaskQueryProjection TaskQueries { get; }

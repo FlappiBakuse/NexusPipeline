@@ -55,6 +55,7 @@ NexusPipeline-Plugins/plugins/
 | `artifactName` | 源码、宿主安装、发行目录和 ZIP 的正式物理身份；ASCII 字母/数字，首字符为字母且至少包含一个大写字母，大小写必须与目录和文件名完全一致 |
 | `displayName` / `gameName` | 列表显示名 / 中文游戏名（脚本卡片徽章「{gameName}专项」） |
 | `description` / `version` | 插件说明 / 受限 Nexus 版本（插件页展示） |
+| `scriptTypeIcon` | 可选的新建脚本类型图标来源声明；`url` 使用 HTTPS `raw.githubusercontent.com/<owner>/<repo>/<完整40位SHA>/<路径>`，`sha256` 为图像字节的64位十六进制摘要，`contentType` 为与文件扩展名匹配的 `image/x-icon` 或 `image/png`。宿主 v0.17.0 启动加载后后台预取，图像仅进入运行缓存，未声明或下载失败使用项目图标 |
 | `minHostVersion` | 可选的最低宿主版本；使用同一受限格式，缺省按 `0.0.0` 处理。宿主版本低于该值时保留插件元数据并标记为不兼容，不解析配置、能力或 managed-code 程序集 |
 | `resolve` | 推导配置文件（相对插件目录） |
 | `judgeScript` | 判断脚本文件（扩展名决定语言：`.js` → javascript / `.py` → python） |

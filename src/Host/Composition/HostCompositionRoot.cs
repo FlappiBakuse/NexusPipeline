@@ -73,6 +73,7 @@ internal class HostCompositionRoot
             runtime,
             composition.Get<PluginAutoUpdateService>(),
             composition.Get<UpdateAutomationService>(),
+            composition.Get<ScriptTypeIconService>(),
             new PluginActivationPreferencesAdapter(composition._settingsState),
             StartupPipeline.TryRequestServiceExit,
             StartupPipeline.TryRequestWebOnlyExit);
@@ -103,6 +104,12 @@ internal class HostCompositionRoot
         collection.AddSingleton<ScriptIconService>(provider => new ScriptIconService(
             provider.GetRequiredService<ScriptQueries>(),
             provider.GetRequiredService<ExecutableIconReader>()));
+        collection.AddSingleton<ScriptTypeIconService>(provider =>
+        {
+            var http = provider.GetRequiredService<OutboundHttpClientProvider>();
+            return new ScriptTypeIconService(Path.Combine(AppPaths.InternalDir, "cache", "script-type-icons"),
+                uri => http.CreateClient(uri, TimeSpan.FromSeconds(10)));
+        });
         collection.AddSingleton<FileBrowser>();
         collection.AddSingleton<ScriptFileBrowser>(provider => new ScriptFileBrowser(
             provider.GetRequiredService<ScriptQueries>(),
@@ -347,6 +354,7 @@ internal class HostCompositionRoot
             provider.GetRequiredService<UserAssetService>(),
             provider.GetRequiredService<OutboundHttpClientProvider>(),
             provider.GetRequiredService<ScriptIconService>(),
+            provider.GetRequiredService<ScriptTypeIconService>(),
             provider.GetRequiredService<ScriptFileBrowser>(),
             provider.GetRequiredService<NexusPipeline.Modules.Users.Contracts.ITaskQueryProjection>(),
             provider.GetRequiredService<NexusPipeline.ControlPlane.Http.Static.IFrontendAssetProvider>()));

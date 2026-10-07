@@ -161,6 +161,16 @@
         "NexusPipeline.Tests.Scheduling.SchedulerTests.ScheduledTrigger_DoesNotBackfillOccurrenceAfterRestartWithStaleWatermark",
         "NexusPipeline.Tests.Scheduling.SchedulerTests.ScheduledTrigger_DurableWatermarkPreventsCompletedMinuteReplay",
         "NexusPipeline.Tests.Scheduling.SchedulerTests.StartupTrigger_RemainsPendingAfterTransientAdmissionConflict",
+        "NexusPipeline.Tests.Scripts.ScriptTypeIconTests.CancellingOneClientKeepsOtherClientsSharedDownloadAlive",
+        "NexusPipeline.Tests.Scripts.ScriptTypeIconTests.ChangedCacheBytesAreReplacedOnlyByMatchingUpstreamBytes",
+        "NexusPipeline.Tests.Scripts.ScriptTypeIconTests.ConcurrentRequestsShareDownloadAndPersistVerifiedOfflineCache",
+        "NexusPipeline.Tests.Scripts.ScriptTypeIconTests.FailedOrChangedDownloadsFallBackWithoutPersistingUnverifiedBytes",
+        "NexusPipeline.Tests.Scripts.ScriptTypeIconTests.GeneralAndUnknownTypesNeverRequestRemoteResources",
+        "NexusPipeline.Tests.Scripts.ScriptTypeIconTests.OptionalCacheWriteFailureStillReturnsVerifiedDownloadedIcon",
+        "NexusPipeline.Tests.Scripts.ScriptTypeIconTests.PluginIconDeclarationAcceptsOnlyImmutableValidatedImageSources",
+        "NexusPipeline.Tests.Scripts.ScriptTypeIconTests.RedirectsAndOversizedBodiesCannotBecomeCachedArtwork",
+        "NexusPipeline.Tests.Scripts.ScriptTypeIconTests.ShutdownCancelsStartupDownloadsAndLeavesNoUnverifiedCache",
+        "NexusPipeline.Tests.Scripts.ScriptTypeIconTests.StartupWarmupPrimesPluginCacheWithBoundedSharedDownloads",
         "NexusPipeline.Tests.Settings.SettingsCommandTests.DurableSaveFailureDoesNotPublishSettingsOrNotify",
         "NexusPipeline.Tests.Settings.SettingsCommandTests.DurableSavePublishesOneStateAndNotifiesOnce",
         "NexusPipeline.Tests.Settings.SettingsCommandTests.FileOnlyAndRetiredNotificationFieldsRejectWholePatch",
@@ -168,8 +178,6 @@
         "NexusPipeline.Tests.Settings.SettingsFormatTests.CurrentChannelsRoundTripWithoutRewritingDuringLoad",
         "NexusPipeline.Tests.Settings.SettingsFormatTests.DesktopStartupDefaultAppliesOnlyWhenFieldIsAbsent",
         "NexusPipeline.Tests.Settings.SettingsFormatTests.UnsupportedNotificationInputsAreRejectedWithoutChangingOriginalFiles",
-        "NexusPipeline.Tests.Updates.UpdateTaskTests.CreatedDownloadCleanupPreservesUnknownAndChangedBytesAndRejectsExistingStaging",
-        "NexusPipeline.Tests.Updates.UpdateTaskTests.InterruptedRollbackPreservationReusesOnlyItsExactReceiptAndCompleteFields",
         "NexusPipeline.Tests.Users.UserBindingOverrideTests.Resolve_AppliesEffectiveValuesWithoutChangingRawBinding",
         "NexusPipeline.Tests.Users.UserBindingOverrideTests.RunDaysWriter_UsesGlobalRunDaysWhenGeneralSyncIsEnabled",
         "NexusPipeline.Tests.Users.UserBindingOverrideTests.RuntimeRepository_UsesEffectiveBindingForExecutionSelection"
@@ -298,7 +306,7 @@
       "scenarioIds": [
         "host.backend.execution"
       ],
-      "filter": "FullyQualifiedName~NexusPipeline.Tests.Execution.|FullyQualifiedName~NexusPipeline.Tests.Host.|FullyQualifiedName~NexusPipeline.Tests.History.",
+      "filter": "FullyQualifiedName~NexusPipeline.Tests.Execution.|FullyQualifiedName~NexusPipeline.Tests.Host.|FullyQualifiedName~NexusPipeline.Tests.History.|FullyQualifiedName~NexusPipeline.Tests.Scripts.",
       "caseIds": [
         "NexusPipeline.Tests.Execution.CoordinatorTests.CompletionIsArmedOnlyWhenLastExecutionReleases",
         "NexusPipeline.Tests.Execution.CoordinatorTests.CoordinatorException_ProducesSyntheticFailedHistoryRecord",
@@ -338,7 +346,17 @@
         "NexusPipeline.Tests.Host.AutomationDefinitionStateTests.ExecutionSnapshots_ContainOneConsistentEntityMoment",
         "NexusPipeline.Tests.Host.AutomationDefinitionStateTests.FindUser_IsCaseInsensitiveButReturnsClone",
         "NexusPipeline.Tests.Host.AutomationDefinitionStateTests.Mutate_UpdatesOwnedStateAtomicallyForConcurrentCallers",
-        "NexusPipeline.Tests.Host.AutomationDefinitionStateTests.Snapshots_AreDeepCopiesAndCannotMutateOwnedState"
+        "NexusPipeline.Tests.Host.AutomationDefinitionStateTests.Snapshots_AreDeepCopiesAndCannotMutateOwnedState",
+        "NexusPipeline.Tests.Scripts.ScriptTypeIconTests.CancellingOneClientKeepsOtherClientsSharedDownloadAlive",
+        "NexusPipeline.Tests.Scripts.ScriptTypeIconTests.ChangedCacheBytesAreReplacedOnlyByMatchingUpstreamBytes",
+        "NexusPipeline.Tests.Scripts.ScriptTypeIconTests.ConcurrentRequestsShareDownloadAndPersistVerifiedOfflineCache",
+        "NexusPipeline.Tests.Scripts.ScriptTypeIconTests.FailedOrChangedDownloadsFallBackWithoutPersistingUnverifiedBytes",
+        "NexusPipeline.Tests.Scripts.ScriptTypeIconTests.GeneralAndUnknownTypesNeverRequestRemoteResources",
+        "NexusPipeline.Tests.Scripts.ScriptTypeIconTests.OptionalCacheWriteFailureStillReturnsVerifiedDownloadedIcon",
+        "NexusPipeline.Tests.Scripts.ScriptTypeIconTests.PluginIconDeclarationAcceptsOnlyImmutableValidatedImageSources",
+        "NexusPipeline.Tests.Scripts.ScriptTypeIconTests.RedirectsAndOversizedBodiesCannotBecomeCachedArtwork",
+        "NexusPipeline.Tests.Scripts.ScriptTypeIconTests.ShutdownCancelsStartupDownloadsAndLeavesNoUnverifiedCache",
+        "NexusPipeline.Tests.Scripts.ScriptTypeIconTests.StartupWarmupPrimesPluginCacheWithBoundedSharedDownloads"
       ],
       "boundaries": {
         "real": [

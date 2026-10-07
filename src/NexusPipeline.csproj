@@ -57,6 +57,7 @@
   <ItemGroup>
     <EmbeddedResource Include="Shared\Localization\Resources\*.json" />
     <EmbeddedResource Include="Modules\Plugins\Repository\BundledPlugins.json" />
+    <EmbeddedResource Include="NexusPipeline.ico" LogicalName="NexusPipeline.ScriptTypeIcon" />
     <EmbeddedResource Include="..\desktop\runtime-files.json" LogicalName="NexusPipeline.Desktop.RuntimeFiles" />
   </ItemGroup>
 

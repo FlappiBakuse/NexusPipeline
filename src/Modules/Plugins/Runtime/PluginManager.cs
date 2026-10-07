@@ -188,6 +188,17 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
     public IReadOnlyList<EmulatorSupportProviderDescriptor> GetEmulatorSupportProviders() =>
         _emulatorSupport.Snapshot(IsRuntimeEnabled);
 
+    internal IReadOnlyDictionary<string, PluginScriptTypeIcon?> GetScriptTypeIcons()
+    {
+        var sources = new Dictionary<string, PluginScriptTypeIcon?>(StringComparer.OrdinalIgnoreCase);
+        foreach (DataSpecializedPlugin plugin in _dataPlugins.Where(plugin => IsRuntimeEnabled(plugin.Name)))
+            sources.Add(plugin.Name, plugin.ScriptTypeIcon);
+        foreach (ManagedPluginDescriptor plugin in _managedPlugins.Where(plugin => IsRuntimeEnabled(plugin.Manifest.Name)
+            && _executionProviders.Resolve(plugin.Manifest.Name, IsRuntimeEnabled) is not null))
+            sources.Add(plugin.Manifest.Name, plugin.Manifest.ScriptTypeIcon);
+        return sources;
+    }
+
     /// <summary>调用数据化专项插件按根目录推导配置快照；代码插件只有声明能力，不直接暴露宿主领域模型。</summary>
     public string ConfigurationRevision(string pluginName) =>
         (_capabilities.Get<IProfileResolver>(pluginName.Trim(), IsRuntimeEnabled) as DataSpecializedPlugin)?.ConfigurationRevision ?? "";
