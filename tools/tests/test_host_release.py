@@ -238,7 +238,9 @@ class HostReleaseTests(unittest.TestCase):
             self.assertEqual(Path(first["sha"]).name, "NexusPipeline-v1.2.3-win-x64.zip.sha256")
             self.assertEqual(Path(first["sha"]).read_bytes(), first["metadata"]["sha256"].encode("ascii"))
             first_bytes = Path(first["zip"]).read_bytes()
-            second = archive_production(production, output, "v1.2.3", source_sha="a" * 40, manifest_path=root / "src" / "app.manifest")
+            with self.assertRaisesRegex(HostReleaseError, "已存在"):
+                archive_production(production, output, "v1.2.3", source_sha="a" * 40, manifest_path=root / "src" / "app.manifest")
+            second = archive_production(production, root / "out-again", "v1.2.3", source_sha="a" * 40, manifest_path=root / "src" / "app.manifest")
             self.assertEqual(first_bytes, Path(second["zip"]).read_bytes())
             with zipfile.ZipFile(second["zip"]) as archive:
                 self.assertEqual(archive.namelist(), ["NexusPipeline.exe", "plugins/EmulatorSupport/plugin.json", "plugins/LiveScreenshot/plugin.json", "README.md", "resources/desktop/NexusPipeline.Desktop.exe", "resources/payload-manifest.json"])

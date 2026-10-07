@@ -155,17 +155,18 @@ def archive_production(
     sdk_sha: str = "",
     build_tool: str = "host_release.py",
     manifest_path: Path | None = None,
+    zip_compression_level: int = 9,
 ) -> dict[str, Any]:
     production_root = production_root.resolve()
     output_dir = output_dir.resolve()
     _require(production_root.is_dir(), f"production 输出目录不存在：{production_root}")
+    _require(type(zip_compression_level) is int and zip_compression_level in (6, 9), "ZIP 压缩级别不支持")
     ensure_source_manifest((manifest_path or production_root.parent / "src" / "app.manifest").resolve())
     tag = normalized_tag(tag)
     version = tag[1:]
     output_dir.mkdir(parents=True, exist_ok=True)
     zip_path = output_dir / f"NexusPipeline-{tag}-win-x64.zip"
-    if zip_path.exists():
-        zip_path.unlink()
+    _require(not zip_path.exists(), "生产 ZIP 已存在，拒绝覆盖")
     files = []
     for path in production_root.rglob("*"):
         if not path.is_file() or path == zip_path:
@@ -190,16 +191,19 @@ def archive_production(
         from application_payload import validate as validate_application
     validate_application(production_root, json.loads((production_root / "resources/payload-manifest.json").read_bytes()), application, Path(__file__).resolve().parents[1])
     payload_files = []
-    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
+    with zipfile.ZipFile(zip_path, "x", compression=zipfile.ZIP_DEFLATED, compresslevel=zip_compression_level) as archive:
         for relative, path in files:
             info = zipfile.ZipInfo(relative, date_time=(1980, 1, 1, 0, 0, 0))
             info.create_system = 0
             info.external_attr = 0o644 << 16
             info.compress_type = zipfile.ZIP_DEFLATED
-            data = path.read_bytes()
-            payload_files.append({"path": relative, "sizeBytes": len(data), "sha256": hashlib.sha256(data).hexdigest()})
-            archive.writestr(info, data)
-    digest = hashlib.sha256(zip_path.read_bytes()).hexdigest()
+            info.compress_level = zip_compression_level
+            digest = hashlib.sha256(); size = 0
+            with path.open('rb') as source, archive.open(info, 'w') as target:
+                while chunk := source.read(1024 * 1024):
+                    size += len(chunk); digest.update(chunk); target.write(chunk)
+            payload_files.append({"path": relative, "sizeBytes": size, "sha256": digest.hexdigest()})
+    with zip_path.open('rb') as stream: digest = hashlib.file_digest(stream, 'sha256').hexdigest()
     sha_path = output_dir / f"{zip_path.name}.sha256"
     sha_path.write_bytes(digest.encode("ascii"))
     metadata = {
@@ -220,7 +224,7 @@ def archive_production(
         "payloadFiles": payload_files,
     }
     (output_dir / "build-metadata.json").write_text(json.dumps(metadata, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
-    _require(hashlib.sha256(zip_path.read_bytes()).hexdigest() == digest, "生产 ZIP 二次 SHA256 校验失败")
+    with zip_path.open('rb') as stream: _require(hashlib.file_digest(stream, 'sha256').hexdigest() == digest, "生产 ZIP 二次 SHA256 校验失败")
     return {"zip": str(zip_path), "sha": str(sha_path), "metadata": metadata}
 
 
