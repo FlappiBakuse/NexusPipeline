@@ -4,6 +4,12 @@ export const digest = value => createHash("sha256").update(JSON.stringify(value)
 const unique = values => [...new Set(values)].sort();
 const controlKinds = new Set(["docs", "contract", "architecture"]);
 
+export const requiresPartner = unit => unit.preparations.includes("host.application.inputs")
+  || unit.kind === "partner-jint" || unit.id === "host.partner-contract"
+  || unit.pluginKind === "data-specialized" && unit.kind === "plugin"
+  || unit.pluginKind === "managed-code" && (unit.expectedMethodIds.length || unit.expectedScenarioIds.length
+    || unit.id.startsWith("plugins.plugin.package:"));
+
 export function coreUnits(selected, registry, policy, partnerPolicy = null) {
   const units = new Map();
   function unit(id, kind, obligation, details = {}) {
@@ -89,7 +95,8 @@ export function coreUnits(selected, registry, policy, partnerPolicy = null) {
       if(policy.integrationScenarios?.[id]) item.expectedScenarioIds.push(policy.integrationScenarios[id]);
       item.control = controlKinds.has(gate.kind) && !id.includes("architecture") && !gate.partnerRequired;
       if (id === "host.architecture.frontend") item.preparations.push("host.frontend.dependencies");
-      if (id === "host.architecture.backend") item.preparations.push("host.frontend.dependencies", "host.application.inputs");
+      if (["host.architecture.backend", "host.integration.desktop", "host.integration.restart-update"].includes(id))
+        item.preparations.push("host.frontend.dependencies", "host.application.inputs");
       item.preparations.push(id.startsWith("host.integration.") || id === "host.build.test-host"
         ? "host.runtime.test-build" : "source");
     }
@@ -124,8 +131,14 @@ export function allocateUnits(units, identity, limits = {}) {
     .sort((a,b) => a.id.localeCompare(b.id,"en"));
   const control = enriched.filter(unit => unit.control);
   const batches = [];
-  const cost = items => items.reduce((sum, item) => sum + item.estimatedMs, 0)
-    + unique(items.flatMap(item => item.preparations)).reduce((sum, name) => sum + prepareCost(name), 0);
+  const cost = items => {
+    const restart = items.find(item => item.id === "host.integration.restart-update");
+    const store = items.find(item => item.id === "host.integration.store");
+    // The runner observes store downloads alongside the restart/update suite in distinct owned runtimes.
+    const overlap = restart && store ? Math.min(restart.estimatedMs, store.estimatedMs) : 0;
+    return items.reduce((sum, item) => sum + item.estimatedMs, 0) - overlap
+      + unique(items.flatMap(item => item.preparations)).reduce((sum, name) => sum + prepareCost(name), 0);
+  };
   const unplaced = [];
   for (const unit of enriched.filter(unit => !unit.control).sort((a,b) => cost([b]) - cost([a]) || a.id.localeCompare(b.id, "en"))) {
     if (!Number.isSafeInteger(unit.estimatedMs) || unit.estimatedMs <= 0) throw new Error("Missing positive unit cost");

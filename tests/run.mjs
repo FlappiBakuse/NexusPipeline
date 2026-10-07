@@ -159,9 +159,9 @@ let publishedTestHost=false, publishedFrontend=false, publishedApplication=false
 let applicationInputs=null;
 async function prepareApplicationInputs() {
   if(applicationInputs) return 0;
-  const built=await buildFrontendBundle(); if(built) return built;
   const partner=process.env.NEXUS_PARTNER_ROOT;
   if(!partner||!path.isAbsolute(partner)) throw new Error("Full application build requires NEXUS_PARTNER_ROOT");
+  const built=await buildFrontendBundle(); if(built) return built;
   const git=(root,ref)=>execFileSync("git",["-C",root,"rev-parse",ref],{encoding:"utf8"}).trim();
   const output=path.join(runRoot,"application-inputs");
   const args=["tools/application_build.py","--root",executionRoot,"--output",output,
@@ -458,7 +458,8 @@ async function runIntegration() {
 }
 
 async function prepareTestHostUi() {
-  const codes = await Promise.all([buildFrontendBundle(), publishTestHost({ withFrontend: false })]);
+  const codes = await Promise.all([buildFrontendBundle(), run("dotnet", ["restore", "src/NexusPipeline.csproj",
+    "-r", "win-x64", "-p:NexusTestHost=true", "--nologo"])]);
   if (codes.some(code => code)) return codes.find(code => code);
   return publishTestHost({ withFrontend: true });
 }
