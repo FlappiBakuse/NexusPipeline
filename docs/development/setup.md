@@ -24,9 +24,9 @@ $env:NEXUS_TEST_RUN_ID = '<本次唯一ID>'
 build.cmd
 ```
 
-`build.cmd` 调用唯一生产构建实现 `node tests/run.mjs release`。该实现复制当前源码到外部隔离副本，安装并校验前端依赖、构建静态网页，再发布框架依赖的单文件程序并验证嵌入的 requireAdministrator 清单。输出位于 `<外部构建根>/runs/<本次唯一ID>/production/`，包含 `NexusPipeline.exe`、`README.md`、`wwwroot/` 和空 `plugins/`；缓存和中间输出也位于外部构建根。输出已存在则失败，请使用新的 ID。
+`build.cmd` 调用唯一生产构建实现 `node tests/run.mjs release`。该实现复制当前源码到外部隔离副本，安装并校验前端依赖、构建静态网页，再发布框架依赖的单文件程序并验证嵌入的 requireAdministrator 清单。输出位于 `<外部构建根>/runs/<本次唯一ID>/production/`，根目录包含 `NexusPipeline.exe`、`README.md`，`resources/desktop/` 与 `resources/payload-manifest.json` 为受管应用载荷；业务前端以只读资源内嵌 Host；缓存和中间输出也位于外部构建根。输出已存在则失败，请使用新的 ID。
 
-生产构建不会安装或启动程序。插件由独立的 NexusPipeline-Plugins 仓库构建；正式候选按[发行指南](release.md)核验预装包。前端唯一源码入口为 `frontend/`；普通测试使用另一份 asInvoker Test Host。
+生产构建不会安装或启动程序。外部插件安装到 `plugins/`，由独立的 NexusPipeline-Plugins 仓库构建。普通 release runner 只生成应用载荷；正式候选按[发行指南](release.md)装配并核验 EmulatorSupport 与 LiveScreenshot，首次默认禁用。本机个人验收装配实际构建并启用全部 13 个现役插件。前端唯一源码入口为 `frontend/`；普通测试使用另一份 asInvoker Test Host。
 
 ## 运行程序
 
