@@ -591,5 +591,18 @@
   "api.error.host_file_picker_requires_local": "The host file picker is available only on the host computer. You can still enter a known path.",
   "api.error.native_config_editor_requires_local": "Native configuration editing must be completed on the host computer.",
   "api.error.client_origin_unverified": "The connection could not be verified for this local operation.",
-  "api.error.operation_requires_local": "This operation requires a local connection."
+  "api.error.operation_requires_local": "This operation requires a local connection.",
+  "tray.lightweight": "Lightweight mode",
+  "tray.reload_page": "Reload page",
+  "tray.lightweight_confirm": "Enable lightweight mode and close the desktop window? Unsaved inputs will be lost; background tasks continue.",
+  "tray.reload_confirm": "Reload the current management page? Unsaved inputs will be lost.",
+  "tray.page_result.busy": "The page is writing or the Host is under maintenance. Try again after it finishes.",
+  "tray.page_result.no-page": "No management page is connected. Open it first.",
+  "tray.page_result.expired": "The request expired. Try again.",
+  "tray.page_result.disconnected": "The management page is disconnected. The operation did not complete.",
+  "tray.page_result.stale": "The page changed. Try again.",
+  "tray.page_result.save-failed": "The mode could not be saved. The window remains open.",
+  "tray.page_result.close-unconfirmed": "Desktop process exit could not be confirmed. Try again.",
+  "tray.page_result.compensation-failed": "Desktop exit and mode recovery could not be confirmed. The menu shows the saved mode. Check the configuration and try again.",
+  "tray.page_result.unowned": "Desktop process ownership could not be confirmed."
 }

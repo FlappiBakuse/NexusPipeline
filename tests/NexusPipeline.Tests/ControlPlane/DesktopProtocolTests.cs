@@ -9,10 +9,20 @@ namespace NexusPipeline.Tests.ControlPlane;
 
 public sealed class DesktopProtocolTests
 {
+    private static DesktopCoordinator CreateDesktop(bool lightweight, Func<Uri, bool> browser)
+    {
+        var settings = new NexusPipeline.Modules.Settings.SettingsState(new NexusPipeline.Modules.Settings.AppSettings { LightweightMode = lightweight });
+        var commands = new NexusPipeline.Modules.Settings.UseCases.DesktopModeSettingsCommands(settings, new AllowMutation());
+        return new(() => false, lightweight, browser, commands, new ManagementPageRefresh());
+    }
+    private sealed class AllowMutation : NexusPipeline.Modules.Settings.Contracts.ISettingsMutationGate
+    {
+        public bool TryExecute(Action action, out string? code) { code = null; action(); return true; }
+    }
     [Fact]
     public async Task UpdateAbortRequiresTheSameTransactionAndRestoresPendingShow()
     {
-        await using var desktop = new DesktopCoordinator(() => false, false, _ => false);
+        await using var desktop = CreateDesktop(false, _ => false);
         string first = Guid.NewGuid().ToString("N"), second = Guid.NewGuid().ToString("N");
         Assert.Equal("background", desktop.CaptureResumeIntent().Mode);
         Assert.True(await desktop.ShowAsync("startup"));
@@ -32,9 +42,60 @@ public sealed class DesktopProtocolTests
     }
 
     [Fact]
+    public async Task ManagementRefreshFreezesCurrentConnectionsWithoutReplay()
+    {
+        var refresh = new ManagementPageRefresh();
+        Assert.Equal(0, refresh.Request());
+        using var first = refresh.Subscribe();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        var firstRead = first.ReadAsync(timeout.Token).AsTask();
+        Assert.False(firstRead.IsCompleted);
+        Assert.Equal(1, refresh.Request());
+        using var second = refresh.Subscribe();
+        var secondRead = second.ReadAsync(timeout.Token).AsTask();
+        Assert.False(secondRead.IsCompleted);
+        var request = await firstRead;
+        Assert.InRange(request.ExpiresAt, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), DateTimeOffset.UtcNow.AddSeconds(10).ToUnixTimeMilliseconds());
+        Assert.Equal(2, refresh.Request());
+        var next = await first.ReadAsync(timeout.Token);
+        var other = await secondRead;
+        Assert.Equal(next, other);
+        Assert.NotEqual(request.RequestId, next.RequestId);
+        second.Dispose();
+        Assert.Equal(1, refresh.Request());
+    }
+
+    [Fact]
+    public async Task ModeSwitchWithoutDesktopPersistsAndDisablingRemainsLazy()
+    {
+        Directory.CreateDirectory(NexusPipeline.Platform.Storage.AppPaths.ConfigDir);
+        string path = NexusPipeline.Platform.Storage.AppPaths.ConfigPath;
+        byte[]? original = File.Exists(path) ? File.ReadAllBytes(path) : null;
+        int browserCalls = 0;
+        var state = new NexusPipeline.Modules.Settings.SettingsState(new NexusPipeline.Modules.Settings.AppSettings { OpenDesktopOnStartup = true });
+        var commands = new NexusPipeline.Modules.Settings.UseCases.DesktopModeSettingsCommands(state, new AllowMutation());
+        await using var desktop = new DesktopCoordinator(() => false, false, _ => { browserCalls++; return false; }, commands, new ManagementPageRefresh());
+        try
+        {
+            Assert.Equal("saved", await desktop.SetLightweightModeAsync(true));
+            Assert.True(desktop.SavedLightweightMode);
+            Assert.True(state.Current.OpenDesktopOnStartup);
+            Assert.Equal("no-page", await desktop.ReloadPageAsync());
+            Assert.Equal("saved", await desktop.SetLightweightModeAsync(false));
+            Assert.False(desktop.SavedLightweightMode);
+            Assert.Equal(0, browserCalls);
+        }
+        finally
+        {
+            if (original is null) File.Delete(path);
+            else File.WriteAllBytes(path, original);
+        }
+    }
+
+    [Fact]
     public async Task RestartAbortMatchesTheHandoffAndAllowsLaterAssetReplacement()
     {
-        await using var desktop = new DesktopCoordinator(() => false, false, _ => false);
+        await using var desktop = CreateDesktop(false, _ => false);
         string handoff = Guid.NewGuid().ToString("N"), transaction = Guid.NewGuid().ToString("N");
         await desktop.PrepareHostRestartAsync(handoff);
         await desktop.AbortHostRestartAsync(Guid.NewGuid().ToString("N"));
@@ -151,7 +212,7 @@ public sealed class DesktopProtocolTests
     {
         var addresses = new List<Uri>();
         bool succeeds = true;
-        await using var host = new DesktopCoordinator(() => false, true, address => { addresses.Add(address); return succeeds; });
+        await using var host = CreateDesktop(true, address => { addresses.Add(address); return succeeds; });
         Assert.True(await host.ShowAsync("user"));
         Assert.Empty(addresses);
         Assert.Equal("background", host.CaptureResumeIntent().Mode);

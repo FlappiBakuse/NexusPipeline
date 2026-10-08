@@ -1355,5 +1355,9 @@
   "dashboard.history.hours": "Hours",
   "dashboard.history.minutes": "Minutes",
   "dashboard.history.seconds": "Seconds",
-  "dashboard.history.count_unit": "Runs"
+  "dashboard.history.count_unit": "Runs",
+  "shell.page_refresh.title": "Reload page",
+  "shell.page_refresh.confirm": "The tray requested a reload of this management page. Unsaved inputs will be lost; background tasks continue. This request expires automatically.",
+  "shell.page_refresh.reload": "Reload page",
+  "shell.page_refresh.busy": "A page write is pending. Finish it and request a reload again from the tray."
 }

@@ -81,6 +81,7 @@ internal interface IHttpRouteBindings
     IHostRestartPort Restart { get; }
 
     IAccessTokenPort AccessToken { get; }
+    IManagementPageRefreshPort ManagementRefresh { get; }
 
     INativePathPicker NativePathPicker { get; }
 

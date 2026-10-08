@@ -169,6 +169,7 @@ internal sealed class WebServer : IDisposable
                 var type when type == typeof(ISettingsProvider) => routeBindings.Settings,
                 var type when type == typeof(IHostRestartPort) => routeBindings.Restart,
                 var type when type == typeof(IAccessTokenPort) => routeBindings.AccessToken,
+                var type when type == typeof(IManagementPageRefreshPort) => routeBindings.ManagementRefresh,
                 var type when type == typeof(UpdateService) => routeBindings.Updates,
                 var type when type == typeof(UpdateAutomationService) => routeBindings.UpdateAutomation,
                 var type when type == typeof(INativePathPicker) => routeBindings.NativePathPicker,

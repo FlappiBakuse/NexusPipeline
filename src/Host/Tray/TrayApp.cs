@@ -12,6 +12,8 @@ internal class TrayApp : ApplicationContext
 {
     private readonly NotifyIcon _icon;
     private readonly HostRuntime _runtime;
+    private ToolStripMenuItem? _lightweightItem;
+    private bool _changing;
 
     public TrayApp(HostRuntime runtime)
     {
@@ -50,14 +52,17 @@ internal class TrayApp : ApplicationContext
             null,
             (_, _) => OpenManagedWeb());
         menu.Items.Add(openWebItem);
-        menu.Items.Add(
-            HostLocalization.TranslateNamed("tray.cli_menu", "命令行管理菜单", locale: LocaleCatalog.HostLocale),
-            null,
-            (_, _) => OpenConsole("manage"));
-        menu.Items.Add(
-            HostLocalization.TranslateNamed("tray.status", "查看状态", locale: LocaleCatalog.HostLocale),
-            null,
-            (_, _) => OpenConsole("status"));
+        _lightweightItem = new ToolStripMenuItem(Text("tray.lightweight", "轻量模式")) { Checked = _runtime.Desktop.SavedLightweightMode };
+        _lightweightItem.Click += async (_, _) => await ChangeLightweightModeAsync();
+        menu.Items.Add(_lightweightItem);
+        menu.Items.Add(Text("tray.reload_page", "重启页面"), null, async (_, _) =>
+        {
+            if (_changing) return;
+            if (!_runtime.Desktop.SavedLightweightMode && !Confirm("tray.reload_confirm", "重启当前管理页面会丢失未保存的输入。继续吗？")) return;
+            string result = await _runtime.Desktop.ReloadPageAsync();
+            if (result is not ("reloading" or "requested")) ShowFailure(result);
+        });
+        menu.Opening += (_, _) => _lightweightItem.Checked = _runtime.Desktop.SavedLightweightMode;
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(
             HostLocalization.TranslateNamed("tray.exit", "退出 NexusPipeline", locale: LocaleCatalog.HostLocale),
@@ -74,7 +79,7 @@ internal class TrayApp : ApplicationContext
 
     private void OpenManagedWeb()
     {
-        _runtime.Get<NexusPipeline.Host.Desktop.IDesktopHost>().ShowAsync("tray").GetAwaiter().GetResult();
+        _ = _runtime.Desktop.ShowAsync("tray");
     }
 
     public static void OpenWeb()
@@ -93,25 +98,29 @@ internal class TrayApp : ApplicationContext
                 new Dictionary<string, object?> { ["detail"] = "browser_launch_failed" }, LocaleCatalog.HostLocale));
     }
 
-    private static void OpenConsole(string args)
+    private async Task ChangeLightweightModeAsync()
     {
+        if (_changing || _lightweightItem is null) return;
+        bool value = !_runtime.Desktop.SavedLightweightMode;
+        if (value && !Confirm("tray.lightweight_confirm", "启用轻量模式会关闭当前桌面窗口并丢失未保存的输入；后端任务继续运行。继续吗？")) return;
+        _changing = true;
+        _lightweightItem.Enabled = false;
         try
         {
-            string exe = Process.GetCurrentProcess().MainModule?.FileName ?? "NexusPipeline.exe";
-            Process.Start(new ProcessStartInfo("cmd.exe", $"/c \"\"{exe}\" {args}\"")
-            {
-                UseShellExecute = true,
-            });
+            string result = await _runtime.Desktop.SetLightweightModeAsync(value);
+            if (result != "saved") ShowFailure(result);
         }
-        catch (Exception ex)
+        finally
         {
-            Logger.Warn(HostLocalization.TranslateNamed(
-                "tray.open_console_failed",
-                $"打开命令行窗口失败：{ex.Message}",
-                new Dictionary<string, object?> { ["detail"] = ex.Message },
-                LocaleCatalog.HostLocale));
+            _lightweightItem.Checked = _runtime.Desktop.SavedLightweightMode;
+            _lightweightItem.Enabled = true;
+            _changing = false;
         }
     }
+
+    private static string Text(string key, string fallback) => HostLocalization.TranslateNamed(key, fallback, locale: LocaleCatalog.HostLocale);
+    private static bool Confirm(string key, string fallback) => MessageBox.Show(Text(key, fallback), "NexusPipeline", MessageBoxButtons.OKCancel, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) == DialogResult.OK;
+    private static void ShowFailure(string result) => MessageBox.Show(Text("tray.page_result." + result, "操作未完成，请稍后重试。"), "NexusPipeline", MessageBoxButtons.OK, MessageBoxIcon.Warning);
 
     protected override void Dispose(bool disposing)
     {

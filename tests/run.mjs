@@ -654,7 +654,7 @@ async function runGate(id) {
     const native=path.join(runRoot,"desktop-native.tap");
     code=await run(process.execPath,["--test","--test-reporter=tap",`--test-reporter-destination=${native}`,"out/tests/*.test.js"],{cwd:path.join(path.dirname(applicationInputs.identity),"desktop/source"),env:{...process.env,NEXUS_BUILD_IDENTITY_FIXTURES:path.join(executionRoot,"tests/fixtures/build-identity")}});if(code)return code;
     const tap=fs.readFileSync(native,"utf8");
-    for(const [counter,count] of Object.entries({tests:5,pass:5,fail:0,cancelled:0,skipped:0,todo:0}))
+    for(const [counter,count] of Object.entries({tests:9,pass:9,fail:0,cancelled:0,skipped:0,todo:0}))
       if(!new RegExp(`^# ${counter} ${count}\\r?$`,"m").test(tap))return 4;
     return run(process.execPath,["tests/desktop/run-client.mjs",directory]);
   }

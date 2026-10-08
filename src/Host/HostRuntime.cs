@@ -47,6 +47,7 @@ internal sealed class HostRuntime : IAsyncDisposable
     public UpdateAutomationService UpdateAutomation => _composition.UpdateAutomation;
     public UserCommands UserCommands => _composition.UserCommands;
     internal HttpRouteBindings HttpRoutes => _composition.HttpRoutes;
+    internal NexusPipeline.Host.Desktop.IDesktopHost Desktop => _composition.Desktop;
     internal AutomationDefinitionState EntityState => _composition.EntityState;
     internal SettingsState SettingsState => _composition.SettingsState;
 

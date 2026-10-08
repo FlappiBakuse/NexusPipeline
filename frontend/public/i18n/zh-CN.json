@@ -1355,5 +1355,9 @@
   "dashboard.history.hours": "小时",
   "dashboard.history.minutes": "分钟",
   "dashboard.history.seconds": "秒",
-  "dashboard.history.count_unit": "次"
+  "dashboard.history.count_unit": "次",
+  "shell.page_refresh.title": "重启页面",
+  "shell.page_refresh.confirm": "托盘请求重启此管理页面。未保存的输入会丢失；后端任务继续运行。请求会自动过期。",
+  "shell.page_refresh.reload": "重启页面",
+  "shell.page_refresh.busy": "正在保存或执行页面写入，请完成后从托盘重新请求。"
 }

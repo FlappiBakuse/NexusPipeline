@@ -90,11 +90,15 @@ internal class HostCompositionRoot
         ServiceCollection collection = new();
         collection.AddSingleton(_entityState);
         collection.AddSingleton(_settingsState);
-        collection.AddSingleton(new NexusPipeline.Host.Desktop.DesktopCoordinator(
-            () => _lifecycle.TryRequestDirectExit(), initialSettings.LightweightMode, NexusPipeline.Host.Desktop.ManagementBrowser.Open));
+        collection.AddSingleton<NexusPipeline.Host.Desktop.ManagementPageRefresh>();
+        collection.AddSingleton<IManagementPageRefreshPort>(provider => provider.GetRequiredService<NexusPipeline.Host.Desktop.ManagementPageRefresh>());
+        collection.AddSingleton<NexusPipeline.Host.Desktop.DesktopCoordinator>(provider => new(
+            () => _lifecycle.TryRequestDirectExit(), initialSettings.LightweightMode, NexusPipeline.Host.Desktop.ManagementBrowser.Open,
+            provider.GetRequiredService<DesktopModeSettingsCommands>(), provider.GetRequiredService<NexusPipeline.Host.Desktop.ManagementPageRefresh>()));
         collection.AddSingleton<NexusPipeline.Host.Desktop.IDesktopHost>(provider => provider.GetRequiredService<NexusPipeline.Host.Desktop.DesktopCoordinator>());
         collection.AddSingleton(_admissionBridge);
         collection.AddSingleton<ISettingsMutationGate>(_admissionBridge);
+        collection.AddSingleton<DesktopModeSettingsCommands>();
         collection.AddSingleton<IPluginConfigurationMutationGate>(_admissionBridge);
         collection.AddSingleton<IScriptMutationAdmission>(_admissionBridge);
         collection.AddSingleton<IScriptConfigGate, ScriptConfigGateAdapter>();
@@ -351,6 +355,7 @@ internal class HostCompositionRoot
             provider.GetRequiredService<UpdateAutomationService>(),
             provider.GetRequiredService<IHostRestartPort>(),
             provider.GetRequiredService<IAccessTokenPort>(),
+            provider.GetRequiredService<IManagementPageRefreshPort>(),
             provider.GetRequiredService<INativePathPicker>(),
             provider.GetRequiredService<UserAssetService>(),
             provider.GetRequiredService<OutboundHttpClientProvider>(),
@@ -400,6 +405,7 @@ internal class HostCompositionRoot
     internal UserCommands UserCommands => Resolve<UserCommands>();
 
     internal HttpRouteBindings HttpRoutes => Resolve<HttpRouteBindings>();
+    internal NexusPipeline.Host.Desktop.IDesktopHost Desktop => Resolve<NexusPipeline.Host.Desktop.IDesktopHost>();
 
     /// <summary>由 Host 组合根一次性组装 MCP 的显式只读/命令依赖集合。</summary>
     internal McpToolContext CreateMcpToolContext(Func<bool>? requestRestart)

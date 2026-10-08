@@ -9,6 +9,13 @@ export interface ConnectionCandidate {
   readonly desktopBuildId: string;
 }
 export interface ShutdownNotice { readonly reason: "asset-update"; readonly transactionId: string; readonly remainingMs: number; readonly unsavedInputsWillBeSaved: false; }
+export interface PageCommand {
+  readonly kind: "reload" | "close-prepare" | "close-consume" | "close-release";
+  readonly requestId: string;
+  readonly leaseId: string;
+  readonly expiresAt: number;
+}
+export type PageCommandResult = "ready" | "closing" | "released" | "reloading" | "no-page" | "busy" | "expired" | "disconnected" | "stale";
 export interface NexusDesktopBridge {
   readonly bootstrapProtocolVersion: 1;
   getWindowState(): Promise<PublicWindowState>;
@@ -23,4 +30,6 @@ export interface NexusDesktopBridge {
   onConnectionCandidate(listener: (candidate: ConnectionCandidate) => void): () => void;
   confirmConnectionNavigation(candidateId: string): Promise<"accepted" | "stale" | "unavailable">;
   onShutdownNotice(listener: (notice: ShutdownNotice) => void): () => void;
+  onPageCommand(listener: (command: PageCommand) => void): () => void;
+  reportPageCommand(requestId: string, result: PageCommandResult): void;
 }

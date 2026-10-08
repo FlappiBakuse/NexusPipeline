@@ -49,6 +49,15 @@ export class Supervisor extends EventEmitter {
         case 'window.show': fields(message.data,['reason']);this.emit('show');break;
         case 'host.restart-preparing': fields(message.data,['handoffId']);this.emit('restart',message.data.handoffId);break;
         case 'desktop.prepare-stop': fields(message.data,['reason','transactionId','remainingMs']);this.emit('stop',Object.freeze({...message.data}));break;
+        case 'page.command': {
+          fields(message.data,['kind','requestId','leaseId','expiresAt']);
+          const value=message.data;
+          if(!['reload','close-prepare','close-consume','close-release'].includes(String(value.kind))
+            ||typeof value.requestId!=='string'||!/^[0-9a-f]{32}$/.test(value.requestId)
+            ||typeof value.leaseId!=='string'||(value.kind==='reload'?value.leaseId!=='':!/^[0-9a-f]{32}$/.test(value.leaseId))
+            ||typeof value.expiresAt!=='number'||!Number.isSafeInteger(value.expiresAt)||value.expiresAt>Date.now()+11000)throw new Error('Invalid page command');
+          this.emit('page-command',Object.freeze({...value}));break;
+        }
         case 'ping': fields(message.data,[]);await this.send('pong');break;
         default: throw new Error('Unknown supervisor message');
       }

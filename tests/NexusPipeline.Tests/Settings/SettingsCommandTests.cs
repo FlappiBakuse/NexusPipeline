@@ -116,6 +116,64 @@ public sealed class SettingsCommandTests
         Assert.Equal(0, effects.Calls);
     }
 
+    [Fact]
+    public void DesktopModePersistsOnlyItsFieldAndRejectsStaleCompensation()
+    {
+        Directory.CreateDirectory(AppPaths.ConfigDir);
+        byte[]? original = File.Exists(AppPaths.ConfigPath) ? File.ReadAllBytes(AppPaths.ConfigPath) : null;
+        try
+        {
+            var state = new SettingsState(new AppSettings { OpenDesktopOnStartup = true, HistoryRetentionDays = 17 });
+            var commands = new DesktopModeSettingsCommands(state, new AllowMutation());
+            Assert.True(commands.SetLightweightMode(false, true).Succeeded);
+            var loaded = AppSettingsStore.Load(ConfigLoadMode.ReadOnly);
+            Assert.True(loaded.LightweightMode);
+            Assert.True(loaded.OpenDesktopOnStartup);
+            Assert.Equal(17, loaded.HistoryRetentionDays);
+            byte[] saved = File.ReadAllBytes(AppPaths.ConfigPath);
+            Assert.False(commands.SetLightweightMode(false, false).Succeeded);
+            Assert.Equal(saved, File.ReadAllBytes(AppPaths.ConfigPath));
+            Assert.True(commands.SetLightweightMode(true, false).Succeeded);
+            Assert.False(AppSettingsStore.Load(ConfigLoadMode.ReadOnly).LightweightMode);
+            Assert.True(state.Current.OpenDesktopOnStartup);
+        }
+        finally
+        {
+            if (original is null) File.Delete(AppPaths.ConfigPath);
+            else File.WriteAllBytes(AppPaths.ConfigPath, original);
+        }
+    }
+
+    [Fact]
+    public void DesktopModeAndTokenClearSaveFailureKeepPublishedState()
+    {
+        Directory.CreateDirectory(AppPaths.ConfigDir);
+        byte[]? original = File.Exists(AppPaths.ConfigPath) ? File.ReadAllBytes(AppPaths.ConfigPath) : null;
+        if (original is not null) File.Delete(AppPaths.ConfigPath);
+        Directory.CreateDirectory(AppPaths.ConfigPath);
+        try
+        {
+            var settings = new AppSettings { AllowRemoteAccess = true, AccessToken = NexusPipeline.Platform.Security.SecretStore.Encrypt("synthetic-token") };
+            var state = new SettingsState(settings);
+            var mode = new DesktopModeSettingsCommands(state, new AllowMutation());
+            Assert.Equal("settings_save_failed", mode.SetLightweightMode(false, true).ErrorCode);
+            Assert.False(state.Current.LightweightMode);
+            var effects = new TestEffects();
+            var commands = new SettingsCommands(state, new AllowMutation(), effects);
+            Assert.False(commands.Update(new JsonObject { ["secretKey"] = "accessToken", ["secretValue"] = "" }).Success);
+            Assert.Same(settings, state.Current);
+            Assert.True(state.Current.AllowRemoteAccess);
+            Assert.True(NexusPipeline.Platform.Security.SecretStore.TryDecrypt(state.Current.AccessToken, out string? token));
+            Assert.Equal("synthetic-token", token);
+            Assert.Equal(0, effects.Calls);
+        }
+        finally
+        {
+            Directory.Delete(AppPaths.ConfigPath);
+            if (original is not null) File.WriteAllBytes(AppPaths.ConfigPath, original);
+        }
+    }
+
     private sealed class AllowMutation : ISettingsMutationGate
     {
         public bool TryExecute(Action mutation, out string? failureCode)

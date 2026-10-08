@@ -1,8 +1,31 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { disposePage, enterPage, state } from "./page-state";
-import { openEventStream, parseSseChunks } from "./events";
+import { openEventStream, parseSseChunks, startApplicationEventStream } from "./events";
 
 describe("realtime SSE transport", () => {
+  it("keeps one application stream across settings and plugin navigation", async () => {
+    let source!: ReadableStreamDefaultController<Uint8Array>;
+    const fetchMock=vi.spyOn(globalThis,'fetch').mockResolvedValue(new Response(new ReadableStream<Uint8Array>({start(controller){source=controller;}})));
+    const management=vi.fn(),ready=vi.fn();
+    const stop=startApplicationEventStream(management);
+    const first=openEventStream({onReady:ready});
+    let second: ReturnType<typeof openEventStream>|null=null;
+    try {
+      await Promise.resolve();await Promise.resolve();
+      source.enqueue(new TextEncoder().encode('event: stream.ready\ndata: {"data":{}}\n\n'));
+      await Promise.resolve();await Promise.resolve();await Promise.resolve();
+      enterPage('settings');
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock.mock.calls[0][1]?.signal?.aborted).toBe(false);
+      enterPage('plugins');
+      second=openEventStream({onReady:ready});
+      source.enqueue(new TextEncoder().encode('event: management.page-refresh\ndata: {"data":{"requestId":"current"}}\n\n'));
+      for(let step=0;step<12;step++)await Promise.resolve();
+      expect(management).toHaveBeenCalledTimes(1);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      second.close();
+    } finally {second?.close();first.close();stop();await first.done;}
+  });
   beforeEach(() => {
     vi.useFakeTimers();
     enterPage("dispatch");
@@ -109,7 +132,7 @@ describe("realtime SSE transport", () => {
     await handle.done;
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(callbacks).toEqual(["disconnected"]);
-    expect(state.timers.size).toBe(1);
+    expect(state.timers.size).toBe(0);
 
     await vi.advanceTimersByTimeAsync(499);
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -133,7 +156,7 @@ describe("realtime SSE transport", () => {
     await handle.done;
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(disconnected).toHaveBeenCalledTimes(1);
-    expect(state.timers.size).toBe(1);
+    expect(state.timers.size).toBe(0);
     handle.close();
     await vi.runOnlyPendingTimersAsync();
     expect(fetchMock).toHaveBeenCalledTimes(1);

@@ -2,7 +2,7 @@
 
 根 `NexusPipeline.exe` 是 Host、CLI 和启动入口。普通服务默认只运行后台与托盘；无参数启动和托盘显示激活同一桌面窗口；登录任务使用 `service` 入口并遵循 `OpenDesktopOnStartup`。`resources/desktop/NexusPipeline.Desktop.exe` 是固定 Electron 44.5.1 运行时；业务 Vue 从 Host 内嵌资源通过实际 localhost 端口提供。用户安装无需 Node、npm 或 SDK，.NET Desktop 与 ASP.NET Core Runtime 10 x64 仍为运行依赖。
 
-轻量模式保留服务、托盘及命名管道激活入口，关闭桌面会话恢复和进程监控。首次启动根据 `OpenDesktopOnStartup` 决定是否在服务就绪后打开默认浏览器，显式后台与重启抑制自动打开；重复双击及托盘主动打开。`web` 命令保留控制台生命周期和主动打开网页，重启不会重复弹出浏览器。浏览器 URL 只含实际 localhost 端口，不带访问令牌，Host 不管理用户浏览器生命周期。轻量模式仅通过停机编辑配置启用，正式默认值保持关闭。
+轻量模式保留服务、托盘及命名管道激活入口，关闭桌面会话恢复和进程监控。首次启动根据 `OpenDesktopOnStartup` 决定是否在服务就绪后打开默认浏览器，显式后台与重启抑制自动打开；重复双击及托盘主动打开。`web` 命令保留控制台生命周期和主动打开网页，重启不会重复弹出浏览器。浏览器 URL 只含实际 localhost 端口，不带访问令牌，Host 不管理用户浏览器生命周期。托盘通过 `DesktopCoordinator` 串行切换轻量模式；仅 `DesktopModeSettingsCommands` 写入该字段，保存完成再退出受信任桌面，停止失败时补偿该字段并重新读取实际状态。关闭轻量模式保持惰性打开，`OpenDesktopOnStartup` 不随切换修改，正式默认值保持关闭。
 
 窗口 X 隐藏；托盘退出或更新才停止桌面。服务行为中的界面语言、侧边栏的主题偏好与窗口位置分别持久化在当前实例私有运行目录，不改变 Host 通知语言。标准业务尺寸为 1280×720 DIP，另加 40 DIP 标题安全区；初始尺寸按工作区物理像素档位计算并夹紧，恢复时重新验证显示器、DPI 和最大化状态。工作区无法容纳最小界面时由用户选择继续打开、仅后台或取消打开。
 

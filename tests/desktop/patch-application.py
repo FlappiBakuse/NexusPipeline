@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import zipfile
+import xml.etree.ElementTree as ET
 
 
 def main():
@@ -25,8 +26,9 @@ def main():
     shutil.copytree(args.source,source,dirs_exist_ok=True,ignore=shutil.ignore_patterns('.git','bin','obj','node_modules','out','.nxp-cache-identity','.nxp-test-lease.json','.generated'))
     project=source/'src/NexusPipeline.csproj'
     text=project.read_text(encoding='utf-8')
-    if text.count('<Version>0.17.0</Version>')!=1:raise ValueError('Fixture source version mismatch')
-    project.write_text(text.replace('<Version>0.17.0</Version>',f'<Version>{args.version}</Version>'),encoding='utf-8',newline='\n')
+    current_version=ET.fromstring(text).findtext('PropertyGroup/Version')
+    if not current_version or text.count(f'<Version>{current_version}</Version>')!=1:raise ValueError('Fixture source version mismatch')
+    project.write_text(text.replace(f'<Version>{current_version}</Version>',f'<Version>{args.version}</Version>'),encoding='utf-8',newline='\n')
     for name in ('package.json','package-lock.json'):
         file=source/'desktop'/name;value=json.loads(file.read_bytes())
         value['version']=args.version

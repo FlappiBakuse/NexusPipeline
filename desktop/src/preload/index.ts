@@ -22,5 +22,7 @@ const bridge: NexusDesktopBridge={
   onConnectionCandidate:(listener)=>subscribe("desktop.connection-candidate",listener),
   confirmConnectionNavigation:(id)=>ipcRenderer.invoke("desktop.confirm-navigation",id),
   onShutdownNotice:(listener)=>subscribe("desktop.shutdown-notice",listener),
+  onPageCommand:(listener)=>subscribe("desktop.page-command",listener),
+  reportPageCommand:(requestId,result)=>ipcRenderer.send("desktop.page-command-result",{requestId,result}),
 };
 contextBridge.exposeInMainWorld("nexusDesktop",Object.freeze(bridge));

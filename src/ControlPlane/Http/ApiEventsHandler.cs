@@ -4,6 +4,8 @@ using System.Text.Json;
 using NexusPipeline.Modules.Execution.Realtime;
 using NexusPipeline.Shared.Serialization;
 using NexusPipeline.Platform.Storage;
+using NexusPipeline.ControlPlane.Http.Services;
+using NexusPipeline.Plugin.Abstractions;
 
 namespace NexusPipeline.ControlPlane.Http;
 
@@ -16,7 +18,8 @@ internal static class ApiEventsHandler
         HttpListenerContext context,
         string method,
         CancellationToken cancellationToken,
-        RealtimeEventBus bus)
+        RealtimeEventBus bus,
+        IManagementPageRefreshPort managementRefresh)
     {
         if (!method.Equals("GET", StringComparison.OrdinalIgnoreCase))
         {
@@ -30,6 +33,9 @@ internal static class ApiEventsHandler
         context.Response.Headers["X-Content-Type-Options"] = "nosniff";
 
         using RealtimeEventSubscription subscription = bus.Subscribe();
+        using ManagementPageRefreshSubscription? management = RequestAccessPolicy.Connection(context.Request) == PluginClientConnectionKind.Local
+            ? managementRefresh.Subscribe() : null;
+        using var reads = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         try
         {
             await WriteEventAsync(
@@ -41,12 +47,13 @@ internal static class ApiEventsHandler
                 }),
                 cancellationToken).ConfigureAwait(false);
 
-            Task<RealtimeEventDelivery?> readTask = subscription.ReadAsync(cancellationToken).AsTask();
+            Task<RealtimeEventDelivery?> readTask = subscription.ReadAsync(reads.Token).AsTask();
+            Task<ManagementPageRefreshRequest>? managementRead = management?.ReadAsync(reads.Token).AsTask();
             while (!cancellationToken.IsCancellationRequested)
             {
                 using var heartbeatCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 Task heartbeatTask = Task.Delay(HeartbeatInterval, heartbeatCancellation.Token);
-                Task completed = await Task.WhenAny(readTask, heartbeatTask).ConfigureAwait(false);
+                Task completed = await Task.WhenAny(managementRead is null ? [readTask, heartbeatTask] : [readTask, managementRead, heartbeatTask]).ConfigureAwait(false);
                 if (completed == heartbeatTask)
                 {
                     await WriteCommentAsync(context, "heartbeat", cancellationToken).ConfigureAwait(false);
@@ -54,6 +61,14 @@ internal static class ApiEventsHandler
                 }
 
                 heartbeatCancellation.Cancel();
+                if (completed == managementRead)
+                {
+                    ManagementPageRefreshRequest request = await managementRead!.ConfigureAwait(false);
+                    if (request.ExpiresAt > DateTimeOffset.UtcNow.ToUnixTimeMilliseconds())
+                        await WriteEventAsync(context, "management.page-refresh", new { data = new { request.RequestId, request.ExpiresAt } }, cancellationToken).ConfigureAwait(false);
+                    managementRead = management!.ReadAsync(reads.Token).AsTask();
+                    continue;
+                }
                 RealtimeEventDelivery? delivery = await readTask.ConfigureAwait(false);
                 if (delivery is null)
                 {
@@ -74,7 +89,7 @@ internal static class ApiEventsHandler
                 {
                     await WriteEventAsync(context, item.Type, item.Envelope, cancellationToken).ConfigureAwait(false);
                 }
-                readTask = subscription.ReadAsync(cancellationToken).AsTask();
+                readTask = subscription.ReadAsync(reads.Token).AsTask();
             }
         }
         catch (IOException)
@@ -95,6 +110,7 @@ internal static class ApiEventsHandler
         }
         finally
         {
+            reads.Cancel();
             context.Response.Close();
         }
     }
@@ -102,7 +118,7 @@ internal static class ApiEventsHandler
     private static async Task WriteEventAsync(
         HttpListenerContext context,
         string type,
-        RealtimeEventEnvelope envelope,
+        object envelope,
         CancellationToken cancellationToken)
     {
         string json = JsonSerializer.Serialize(envelope, JsonOpts.Web);

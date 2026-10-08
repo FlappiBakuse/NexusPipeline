@@ -1,6 +1,7 @@
 import { apiStream, isAbortError, type ApiError } from "./api";
 import { t } from "./i18n";
-import { isCurrent, schedule, state, trackController, releaseController } from "./page-state";
+import { isCurrent, state, trackController, releaseController } from "./page-state";
+import {onServiceTrafficChanged,serviceTrafficPaused} from './service-traffic';
 
 export interface ParsedSseEvent {
   event: string;
@@ -122,115 +123,104 @@ export function parseSseChunks(chunks: Iterable<string>): ParsedSseEvent[] {
 }
 
 const RETRY_DELAYS = [500, 1000, 2000, 5000, 10000];
+type Subscriber = {options: EventStreamOptions; usable: ()=>boolean; close: ()=>void};
+const subscribers=new Set<Subscriber>();
+let owners=0;
+let managementListener: ((event: RealtimeSseEvent)=>void)|null=null;
+let transport: SharedTransport|null=null;
+let stopTrafficObserver: (()=>void)|null=null;
 
-/**
- * 创建页面范围的 SSE 连接。连接控制器由 page-state 托管，路由离开时会自动中止；
- * 断线使用有限指数退避，认证失败和其他 4xx 直接交给页面处理。
- */
-export function openEventStream(options: EventStreamOptions): EventStreamHandle {
-  const page = options.page || state.page;
-  const token = options.token ?? state.routeToken;
-  const controller = trackController(new AbortController());
-  let closed = false;
-  let retryIndex = 0;
-  let retryTimer: ReturnType<typeof setTimeout> | null = null;
-  let externalAbortListener: (() => void) | null = null;
-
-  if (options.signal) {
-    externalAbortListener = () => controller.abort();
-    if (options.signal.aborted) controller.abort();
-    else options.signal.addEventListener("abort", externalAbortListener, { once: true });
+class SharedTransport {
+  private readonly controller=new AbortController();
+  private retryIndex=0;
+  private retryTimer: ReturnType<typeof setTimeout>|null=null;
+  ready: RealtimeSseEvent|null=null;
+  readonly done: Promise<void>;
+  constructor() {this.done=Promise.resolve().then(()=>this.connect());}
+  stop(): void {this.controller.abort();if(this.retryTimer)clearTimeout(this.retryTimer);this.retryTimer=null;this.ready=null;}
+  private async dispatch(event: RealtimeSseEvent): Promise<void> {
+    if(this.controller.signal.aborted)return;
+    if(event.type==='management.page-refresh'){managementListener?.(event);return;}
+    if(event.type==='stream.ready'){this.ready=event;this.retryIndex=0;}
+    await Promise.all([...subscribers].map(async subscriber=>{
+      if(!subscriber.usable())return;
+      const options=subscriber.options;
+      if(event.type==='stream.ready')await options.onReady?.(event);
+      else if(event.type==='stream.missed')await options.onMissed?.(event);
+      else await options.onEvent?.(event);
+    }));
   }
-
-  const isUsable = () => !closed && !controller.signal.aborted && isCurrent(page, token);
-
-  const close = () => {
-    if (closed) return;
-    closed = true;
-    if (retryTimer) {
-      clearTimeout(retryTimer);
-      state.timers.delete(retryTimer);
-      retryTimer = null;
-    }
-    controller.abort();
-    if (options.signal && externalAbortListener) options.signal.removeEventListener("abort", externalAbortListener);
-    releaseController(controller);
-  };
-
-  const handleEvent = async (event: RealtimeSseEvent) => {
-    if (!isUsable()) return;
-    if (event.type === "stream.ready") {
-      retryIndex = 0;
-      await options.onReady?.(event);
-      return;
-    }
-    if (event.type === "stream.missed") {
-      await options.onMissed?.(event);
-      return;
-    }
-    await options.onEvent?.(event);
-  };
-
-  const consume = async (response: Response) => {
-    if (!response.body) throw new Error(t("api.error.stream_body_unavailable"));
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let dispatchChain = Promise.resolve();
-    const parser = new SseParser(event => {
+  private async consume(response: Response): Promise<void> {
+    if(!response.body)throw new Error(t('api.error.stream_body_unavailable'));
+    const reader=response.body.getReader(),decoder=new TextDecoder();
+    let chain=Promise.resolve();
+    const parser=new SseParser(event=>{
       let payload: RealtimeEventEnvelope;
-      try {
-        payload = JSON.parse(event.data) as RealtimeEventEnvelope;
-      } catch {
-        return;
-      }
-      dispatchChain = dispatchChain.then(() => handleEvent({ type: event.event, ...payload }));
+      try {payload=JSON.parse(event.data) as RealtimeEventEnvelope;}catch{return;}
+      if(event.event==='management.page-refresh')void this.dispatch({...payload,type:event.event});
+      else chain=chain.then(()=>this.dispatch({...payload,type:event.event}));
     });
+    const abort=()=>{void reader.cancel().catch(()=>{});};
+    this.controller.signal.addEventListener('abort',abort,{once:true});
     try {
-      while (isUsable()) {
-        const result = await reader.read();
-        if (result.done) break;
-        parser.push(decoder.decode(result.value, { stream: true }));
-      }
-      parser.push(decoder.decode());
-      parser.finish();
-      await dispatchChain;
-    } finally {
-      reader.releaseLock();
-    }
-  };
-
-  const scheduleRetry = () => {
-    if (!isUsable()) return;
-    const delay = RETRY_DELAYS[Math.min(retryIndex, RETRY_DELAYS.length - 1)];
-    retryIndex = Math.min(retryIndex + 1, RETRY_DELAYS.length - 1);
-    retryTimer = schedule(() => {
-      retryTimer = null;
-      void connect();
-    }, delay, page, token);
-  };
-
-  const connect = async (): Promise<void> => {
-    if (!isUsable()) return;
+      while(!this.controller.signal.aborted){const next=await reader.read();if(next.done)break;parser.push(decoder.decode(next.value,{stream:true}));}
+      parser.push(decoder.decode());parser.finish();await chain;
+    } finally {this.controller.signal.removeEventListener('abort',abort);reader.releaseLock();}
+  }
+  private async connect(): Promise<void> {
+    if(this.controller.signal.aborted)return;
     try {
-      const response = await apiStream(options.path || "/api/events", controller.signal);
-      if (!isUsable()) return;
-      await consume(response);
-      if (!isUsable()) return;
-      options.onDisconnected?.();
-      scheduleRetry();
-    } catch (reason) {
-      if (!isUsable() || controller.signal.aborted || isAbortError(reason)) return;
-      const status = (reason as Partial<ApiError>)?.status;
-      if (typeof status === "number" && status >= 400 && status < 500) {
-        options.onFatal?.(reason);
-        close();
-        return;
+      const response=await apiStream('/api/events',this.controller.signal);
+      if(this.controller.signal.aborted){await response.body?.cancel();return;}
+      await this.consume(response);
+    } catch(reason) {
+      if(this.controller.signal.aborted||isAbortError(reason))return;
+      const status=(reason as Partial<ApiError>)?.status;
+      if(typeof status==='number'&&status>=400&&status<500){
+        for(const subscriber of [...subscribers]){if(subscriber.usable())subscriber.options.onFatal?.(reason);subscriber.close();}
+        this.stop();if(transport===this)transport=null;return;
       }
-      options.onDisconnected?.();
-      scheduleRetry();
     }
-  };
+    if(this.controller.signal.aborted)return;
+    this.ready=null;
+    for(const subscriber of subscribers)if(subscriber.usable())subscriber.options.onDisconnected?.();
+    const delay=RETRY_DELAYS[Math.min(this.retryIndex++,RETRY_DELAYS.length-1)];
+    this.retryTimer=setTimeout(()=>{this.retryTimer=null;void this.connect();},delay);
+  }
+}
+function ensureTransport(): SharedTransport|null {
+  if(!stopTrafficObserver)stopTrafficObserver=onServiceTrafficChanged(paused=>{
+    if(paused){transport?.stop();transport=null;}
+    else if(owners||subscribers.size)ensureTransport();
+  });
+  return serviceTrafficPaused()?null:transport??(transport=new SharedTransport());
+}
+function stopIfUnused(): void {
+  if(!owners&&!subscribers.size){transport?.stop();transport=null;stopTrafficObserver?.();stopTrafficObserver=null;}
+}
 
-  const done = connect().then(() => undefined);
-  return { close, done };
+export function startApplicationEventStream(onManagement: (event: RealtimeSseEvent)=>void): ()=>void {
+  owners++;managementListener=onManagement;ensureTransport();
+  let active=true;
+  return ()=>{if(!active)return;active=false;owners--;if(!owners)managementListener=null;stopIfUnused();};
+}
+
+export function openEventStream(options: EventStreamOptions): EventStreamHandle {
+  if(options.path&&options.path!=='/api/events')throw new Error('unsupported_event_stream');
+  const page=options.page||state.page,token=options.token??state.routeToken;
+  const controller=trackController(new AbortController());
+  let closed=false;
+  const close=()=>{
+    if(closed)return;
+    closed=true;subscribers.delete(subscriber);controller.abort();releaseController(controller);
+    options.signal?.removeEventListener('abort',close);stopIfUnused();
+  };
+  const subscriber: Subscriber={options,close,usable:()=>!closed&&!controller.signal.aborted&&isCurrent(page,token)};
+  subscribers.add(subscriber);
+  controller.signal.addEventListener('abort',close,{once:true});
+  options.signal?.addEventListener('abort',close,{once:true});
+  if(options.signal?.aborted)close();
+  const shared=closed?null:ensureTransport();
+  if(shared?.ready)void Promise.resolve().then(()=>{if(subscriber.usable())return options.onReady?.(shared.ready!);});
+  return {close,done:shared?.done??Promise.resolve()};
 }

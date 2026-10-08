@@ -19,6 +19,9 @@ import NxpIcon from "../ui/primitives/NxpIcon.vue";
 import NxpScrollArea from "../ui/primitives/NxpScrollArea.vue";
 import NxpEmptyState from "../ui/primitives/NxpEmptyState.vue";
 import {desktopBridge} from '../platform/desktop';
+import {startApplicationEventStream} from '../platform/events';
+import {browserPageRefresh,receiveBrowserPageRefresh,startPageRefresh,dismissPageRefresh,confirmBrowserPageRefresh} from '../platform/page-refresh';
+import NxpConfirmDialog from '../ui/composites/NxpConfirmDialog.vue';
 
 import ConfigEditFlow from "../features/users/components/ConfigEditFlow.vue";
 import { configEditContextKey } from "../features/users/composables/configEditContext";
@@ -53,6 +56,8 @@ const preferencesUnavailable = document.documentElement.dataset.desktopPreferenc
 let autoScrollObserver: MutationObserver | null = null;
 let autoScrollFrame: number | null = null;
 let stopServiceObserver: (() => void) | null = null;
+let stopEvents: (()=>void)|null=null;
+let stopRefresh: (()=>void)|null=null;
 const localAddress = computed(() => shell.actualPort > 0
   ? t("service.with_host", { host: location.hostname, port: shell.actualPort })
   : t("service.label"));
@@ -94,6 +99,7 @@ watch(() => route.fullPath, () => {
 });
 
 onBeforeUnmount(() => {
+  stopEvents?.();stopRefresh?.();
   stopShutdownNotice?.();
   stopServiceObserver?.();
   stopServiceObserver = null;
@@ -132,6 +138,8 @@ onMounted(async () => {
       applyTranslations();
       scheduleAutoScroll();
       stopServiceObserver = startServiceObserver(shell);
+      stopRefresh=startPageRefresh();
+      stopEvents=startApplicationEventStream(event=>receiveBrowserPageRefresh(event.data));
     }
   } catch (error) {
     if (!isAbortError(error)) shell.markBootError(error);
@@ -204,4 +212,7 @@ function openNav() {
   />
   <ConfigEditFlow v-if="shell.booted" ref="configFlow" @changed="configurationChanged" />
   <TokenPrompt :open="shell.tokenPromptOpen" @close="shell.tokenPromptOpen = false" />
+  <NxpConfirmDialog :open="!!browserPageRefresh" :title="t('shell.page_refresh.title')" :message="t('shell.page_refresh.confirm')"
+    :confirm-label="t('shell.page_refresh.reload')" :cancel-label="t('common.cancel')" confirm-tone="danger"
+    @close="dismissPageRefresh" @cancel="dismissPageRefresh" @confirm="confirmBrowserPageRefresh" />
 </template>
