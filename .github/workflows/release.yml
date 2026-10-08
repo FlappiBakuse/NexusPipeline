@@ -1,8 +1,6 @@
 name: Host 发布
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
     inputs:
       operation:
@@ -41,7 +39,7 @@ concurrency:
 jobs:
   source-plan:
     name: Host / 候选输入
-    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.operation == 'candidate')
+    if: github.event_name == 'workflow_dispatch' && inputs.operation == 'candidate'
     runs-on: windows-latest
     outputs:
       source_sha: ${{ steps.source.outputs.sha }}
@@ -50,8 +48,8 @@ jobs:
       - name: 校验候选操作参数
         shell: pwsh
         env:
-          OPERATION: ${{ inputs.operation || 'candidate' }}
-          SOURCE_REF: ${{ inputs.source_ref || github.sha }}
+          OPERATION: ${{ inputs.operation }}
+          SOURCE_REF: ${{ inputs.source_ref }}
           CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
           CANDIDATE_ARTIFACT_ID: ${{ inputs.candidate_artifact_id }}
           RELEASE_TAG: ${{ inputs.tag }}
@@ -62,7 +60,7 @@ jobs:
       - name: 检出候选源码
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: ${{ github.event_name == 'push' && github.sha || inputs.source_ref }}
+          ref: ${{ inputs.source_ref }}
           path: NexusPipeline
           fetch-depth: 0
           persist-credentials: false

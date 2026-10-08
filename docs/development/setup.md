@@ -47,7 +47,7 @@ build.cmd
 
 测试分层与归属见[测试索引](../testing/README.md)和[测试政策](../testing/policy.md)，三个入口命令、隔离 Test Host 与运行输出见[测试命令](../testing/commands.md)。统一入口为 `node tests\run.mjs smoke`、`integration` 或 `release`：本地改动先跑 `smoke`；涉及进程、端口、解释器、模拟器、插件或更新事务时再跑 `integration`。
 
-PR 范围计划映射逻辑义务到可选 control 与按准备依赖划分的 Windows batch，按准备依赖选择工具链；必需汇总 汇总原生证据，可信 main 的 完整预算 审计完整 attempt。两项 required 检查均须成功。所有物理 job 记录完整实际耗时，不设项目执行时间上限，实际远端启用状态见 [STATUS](../STATUS.md)。合并后的发行工作流独立构建、验收生产候选。
+GitHub PR 使用固定 `Host / 构建检查`，十分钟内按生产影响闭包编译及静态检查，不运行测试。本机按改动执行必要测试。完整候选和发布通过 `release.yml` 分别手动选择 `candidate` / `publish-only`，main push 不触发完整构建。
 
 
 
