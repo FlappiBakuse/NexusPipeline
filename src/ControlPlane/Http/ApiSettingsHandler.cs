@@ -26,10 +26,23 @@ internal static class ApiSettingsHandler
         SettingsCommands settingsCommands,
         ISettingsProvider settingsProvider,
         OutboundHttpClientProvider outboundHttp,
-        IHostRestartPort restartPort)
+        IHostRestartPort restartPort,
+        IAccessTokenPort accessToken)
     {
         AppSettings settings = settingsProvider.Current;
-        if (method == "GET")
+        if (method == "GET" && seg.Length == 2 && seg[1] == "access-token")
+        {
+            bool configured = !string.IsNullOrWhiteSpace(settings.AccessToken);
+            string? value = null;
+            if (configured && !accessToken.TryDecrypt(settings.AccessToken, out value))
+            {
+                await HttpHelper.WriteJsonAsync(context, new { code = "access_token_read_failed" }, 500, "no-store").ConfigureAwait(false);
+                return;
+            }
+            await HttpHelper.WriteJsonAsync(context, new { configured, value = configured ? value : null }, cacheControl: "no-store").ConfigureAwait(false);
+            return;
+        }
+        if (method == "GET" && seg.Length == 1)
         {
             RemoteAccessAddresses addresses = settings.AllowRemoteAccess
                 ? NetInfo.GetRemoteAccessAddresses() : new(null, null);
@@ -131,7 +144,8 @@ internal static class ApiSettingsHandler
             }).ConfigureAwait(false);
             return;
         }
-        await HttpHelper.MethodNotAllowedAsync(context).ConfigureAwait(false);
+        if (seg.Length > 1) await HttpHelper.NotFoundAsync(context).ConfigureAwait(false);
+        else await HttpHelper.MethodNotAllowedAsync(context).ConfigureAwait(false);
     }
 
     internal static object MaskedSettings(AppSettings settings)

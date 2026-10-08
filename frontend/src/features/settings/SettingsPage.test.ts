@@ -28,14 +28,15 @@ beforeEach(() => {
   secret = "";
   fixture.api.mockImplementation(async (method: string, url: string, payload?: Record<string, unknown>) => {
     if (url === "/api/status") return { lightweightMode: false };
+    if (url === "/api/settings/access-token") return { configured: Boolean(secret), value: secret || null };
     if (method === "PUT") {
       if (payload?.secretKey === "accessToken") secret = String(payload.secretValue);
       else Object.assign(stored, payload);
     }
-    return { settings: { ...stored, accessToken: secret ? "enc:***" : "" }, status: { remote: { internalAddress: null, publicAddress: null, port: 58731 } } };
+    return { ok: true, settings: { ...stored, accessToken: secret ? "enc:***" : "" }, status: { remote: { internalAddress: null, publicAddress: null, port: 58731 } } };
   });
 });
-afterEach(() => { wrapper?.unmount(); document.body.innerHTML = ""; vi.unstubAllGlobals(); });
+afterEach(() => { wrapper?.unmount(); document.body.innerHTML = ""; vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 async function setup() {
   wrapper = mount(SettingsPage, { attachTo: document.body, global: {
@@ -47,7 +48,7 @@ async function setup() {
 }
 
 describe("remote settings persistence", () => {
-  it("saves a typed token without blur and copies through the desktop bridge", async () => {
+  it("saves a typed token without blur", async () => {
     await setup();
     (wrapper.get("#st-token").element as HTMLInputElement).value = "owned-token";
     await wrapper.get("#st-token").trigger("input");
@@ -55,9 +56,61 @@ describe("remote settings persistence", () => {
     expect(secret).toBe("owned-token");
     expect(fixture.api).toHaveBeenCalledWith("PUT", "/api/settings", { secretKey: "accessToken", secretValue: "owned-token" });
     expect(fixture.dirty?.()).toBe(false);
-    await wrapper.getComponent(SettingsRemoteAccessSection).props("copyToken")();
-    expect(fixture.clipboard).toHaveBeenCalledWith("owned-token");
-    expect(fixture.toast).toHaveBeenLastCalledWith("settings.access_token_copied");
+    expect(fixture.clipboard).not.toHaveBeenCalled();
+  });
+
+  it("reads the saved token without writing it or changing authentication storage", async () => {
+    secret = "saved-owned-token";
+    localStorage.setItem("nexus-token", "existing-auth");
+    await setup();
+    expect(wrapper.get("#st-token").element).toHaveProperty("value", secret);
+    expect(wrapper.get("#st-token").attributes("type")).toBe("password");
+    expect(fixture.api.mock.calls.filter(args => args[0] === "PUT")).toHaveLength(0);
+    expect(localStorage.getItem("nexus-token")).toBe("existing-auth");
+    expect(fixture.dirty?.()).toBe(false);
+  });
+
+  it("invalidates queued token saves and waits for the active save before revocation", async () => {
+    stored.allowRemoteAccess = true;
+    localStorage.setItem("nexus-token", "original-auth");
+    await setup();
+    const response = fixture.api.getMockImplementation()!;
+    let release!: () => void;
+    fixture.api.mockImplementationOnce(async (...args: unknown[]) => {
+      await new Promise<void>(resolve => { release = resolve; });
+      return response(...args);
+    });
+    await wrapper.get("#st-token").setValue("active-token");
+    await flushPromises();
+    await wrapper.get("#st-token").setValue("queued-old-token");
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const clear = wrapper.getComponent(SettingsRemoteAccessSection).props("clearToken")();
+    await flushPromises();
+    expect(fixture.api.mock.calls.some(args => (args[2] as any)?.secretValue === "")).toBe(false);
+    release();
+    await clear;
+    await flushPromises();
+    expect(secret).toBe("");
+    expect(stored.allowRemoteAccess).toBe(true);
+    expect(localStorage.getItem("nexus-token")).toBeNull();
+    expect(fixture.api.mock.calls.some(args => (args[2] as any)?.secretValue === "queued-old-token")).toBe(false);
+    expect(wrapper.get("#st-token").element).toHaveProperty("value", "");
+  });
+
+  it("cancels revocation without side effects and reports uncertain writes", async () => {
+    secret = "saved-token";
+    await setup();
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    await wrapper.getComponent(SettingsRemoteAccessSection).props("clearToken")();
+    expect(secret).toBe("saved-token");
+    expect(fixture.api.mock.calls.filter(args => args[0] === "PUT")).toHaveLength(0);
+    confirm.mockReturnValue(true);
+    fixture.api.mockRejectedValueOnce(new Error("response-lost"));
+    await wrapper.getComponent(SettingsRemoteAccessSection).props("clearToken")();
+    await flushPromises();
+    expect(wrapper.getComponent(SettingsRemoteAccessSection).props("tokenError")).toBe("settings.remote_access.clear_unconfirmed");
+    expect(wrapper.get("#st-token").attributes()).toHaveProperty("disabled");
+    expect(secret).toBe("saved-token");
   });
 
   it("waits for the latest remote save before requesting restart", async () => {

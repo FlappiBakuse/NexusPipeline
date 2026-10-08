@@ -85,6 +85,8 @@ MCP 位于同一主进程的协议适配层。`McpHost` 只在 `McpEnabled` 时�
 
 运行观察的 SSE 连接沿用同一 Origin 与 Bearer 认证边界，浏览器因远程 Bearer 头限制而通过 `fetch` + `ReadableStream` 消费事件。服务端不接受查询字符串令牌、不实现 `Last-Event-ID` 重放；`stream.ready` 与 `stream.missed` 只触发当前页面重新读取 `/api/status`，网络错误按 500ms、1s、2s、5s、10s 的上限退避重连，4xx 认证/请求错误交给页面重新认证或维持轮询。运行日志在内存中最多保留每个运行 500 行，旧行淘汰时以截断标记提示页面。
 
-## 当前页管理
+## 专用秘密读取与页面管理
+
+`GET /api/settings/access-token` 仅回读访问令牌，沿用正常鉴权；已认证远端可读，本机仍按既有本机规则。业务响应显式 `no-store`，已配置但解密失败返回 `access_token_read_failed`。普通设置 DTO 保持脱敏，未知设置子路由返回 404。插件 JSON 代理的正常与错误响应统一 `no-store`，SDK 响应模型不增加 Headers 属性。
 
 `ManagementPageRefresh` 仅持有当前 loopback SSE 订阅，托盘请求冻结当前订阅集合，发送独立 `management.page-refresh` 事件与十秒到期时间，不使用执行事件序列或历史重放。非 loopback 不注册此订阅。Host/桌面仍经受信任的类型化 IPC 请求当前 frame 的刷新或关闭许可，不通过通用 URL 或脚本命令。
