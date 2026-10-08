@@ -218,7 +218,8 @@
         "src/features/users/composables/useConfigEditFlow.test.ts",
         "src/features/scripts/utils/scriptTypes.test.ts",
         "src/platform/client-capabilities.test.ts",
-        "src/features/settings/SettingsPage.test.ts"
+        "src/features/settings/SettingsPage.test.ts",
+        "src/platform/page-writes.test.ts"
       ],
       "caseIds": [
         "Frontend API 1.6 contract aborts a route before cleaning it exactly once when its registration is disposed",
@@ -284,7 +285,6 @@
         "remote settings persistence preserves the token draft and blocks restart after a failed save",
         "remote settings persistence reads the saved token without writing it or changing authentication storage",
         "remote settings persistence saves a typed token without blur",
-        "remote settings persistence saves a typed token without blur and copies through the desktop bridge",
         "remote settings persistence waits for the latest remote save before requesting restart",
         "service restart orchestration accepts only the instance launched by this restart",
         "service restart orchestration covers the ports the host may fall back to",
@@ -642,9 +642,7 @@
         "NexusPipeline.Tests.Platform.OutboundHttpTests.ControlledTransportEnforcesIdentityRequestsAndRestartReceipts",
         "NexusPipeline.Tests.Platform.OutboundHttpTests.InjectedTransportPreservesUriAndReadsCurrentProxyOptions",
         "NexusPipeline.Tests.Platform.RemoteAccessAddressTests.NatAndReservedAddressesCannotInventAPublicEndpoint",
-        "NexusPipeline.Tests.Platform.RemoteAccessAddressTests.PreferredGatewayProducesOneInternalAndOnePublicAddress",
-        "NexusPipeline.Tests.Updates.UpdateTaskTests.CreatedDownloadCleanupPreservesUnknownAndChangedBytesAndRejectsExistingStaging",
-        "NexusPipeline.Tests.Updates.UpdateTaskTests.InterruptedRollbackPreservationReusesOnlyItsExactReceiptAndCompleteFields"
+        "NexusPipeline.Tests.Platform.RemoteAccessAddressTests.PreferredGatewayProducesOneInternalAndOnePublicAddress"
       ],
       "boundaries": {
         "real": [

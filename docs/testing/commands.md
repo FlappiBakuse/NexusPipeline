@@ -42,7 +42,7 @@ node tests/run.mjs gate --id host.ci-policy
 | H-E03 control | 真实 CLI、MCP HTTP 初始化与运行观察、合法包安装更新、坏 hash 阻断、两次重启交接 | 官方 HTTPS 响应和合成测试插件 |
 | H-E04 schedule | 真实分钟计时产生队列执行、结果归属、持久化水位与重启去重 | 拥有的外部目标程序 |
 
-`integration` 保留已有 UI Smoke/System Smoke 诊断，部分 UI 响应由夹具提供；它不是 `daily` 的替代。`release` 在外部隔离源副本构建生产 requireAdministrator EXE，输出到 `runs/<runId>/production/`，不写项目 release 目录。更新事务诊断同时验证独立 worker、真实新实例启动收据及用户文件保全。
+`integration` 使用 `NEXUS_PARTNER_ROOT` 指定的 Plugins 检出，准备完整桌面应用及实际版本为 0.17.0/0.17.1 的 asInvoker 更新夹具，再运行 UI Smoke/System Smoke。浏览器插件来源默认使用同一显式检出，也可用 `NEXUS_OFFICIAL_PLUGINS_ROOT` 指定。部分 UI 响应由夹具提供；它不是 `daily` 的替代。`release` 在外部隔离源副本构建生产 requireAdministrator EXE，输出到 `runs/<runId>/production/`，不写项目 release 目录。更新事务诊断同时验证独立 worker、真实新实例启动收据及用户文件保全。
 
 `diagnostic --group store` 构建实际 Test Host 和合成 managed fixture，访问官方 HTTPS catalog/package 地址，由 Test Host 的传输夹具返回固定响应。它验证坏 hash 拒绝、安装事务、新安装后自动启用、重复重启保持启用、显式禁用、插件加载和卸载。商店 gate 只准备 API Host；更新重启 gate 构建内嵌 Vue、完整 Electron 与精确应用清单，真实验证四项资产的交换和启动证明。原生 TAP 与 `store-evidence.json` 位于本次运行目录；这是 H-C09 的安装生命周期诊断，不代表浏览器交互、全部商店恢复矩阵或四组 daily 已完成。
 

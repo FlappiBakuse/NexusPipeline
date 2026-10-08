@@ -436,6 +436,7 @@ async function runUiSmoke() {
     exitFile: path.join(runRoot, "ui", ".nxp", "test-host.exit"),
   });
   env.NEXUS_E2E_BASE_URL = `http://127.0.0.1:${webPort}/`;
+  env.NEXUS_OFFICIAL_PLUGINS_ROOT ??= process.env.NEXUS_PARTNER_ROOT;
   // Playwright 产物放在本次运行目录内，源码树保持干净。
   env.NEXUS_E2E_OUTPUT_DIR = path.join(runRoot, "ui", "playwright");
   return run(process.execPath, [path.join(e2eDir, "node_modules", "playwright", "cli.js"), "test"], { cwd: e2eDir, env, timeoutMs: 15 * 60 * 1000 });
@@ -454,6 +455,10 @@ async function runSystemSuite(suite) {
 
 async function runSystemSmoke() {
   step("System Smoke");
+  const fixtures = await prepareUpdateFixtures(runRoot);
+  if (fixtures.code) return fixtures.code;
+  process.env.NEXUS_SYSTEM_UPDATE_BASELINE_DIR = fixtures.baseline;
+  process.env.NEXUS_SYSTEM_UPDATE_RELEASE_DIR = fixtures.candidate;
   for (const suite of [
     { file: "tests/system/runtime-smoke.mjs", files: ["tests/system/runtime-smoke.mjs", "tests/system/update-transaction.mjs"], runtimeName: "runtime" },
     { file: "tests/system/judge-smoke.mjs", runtimeName: "judge-runtime" },
@@ -471,7 +476,7 @@ async function runIntegration() {
   e2eDir = path.join(executionRoot, "tests", "e2e");
   let code = await buildFrontendBundle();
   if (code !== 0) return code;
-  code = await publishTestHost();
+  code = await publishTestHost({ withApplication: true });
   if (code !== 0) return code;
   code = await runUiSmoke();
   if (code !== 0) return code;
