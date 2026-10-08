@@ -23,6 +23,8 @@ internal static class InstallationOwnership
         : @"Software\Microsoft\Windows\CurrentVersion\Uninstall\NexusPipeline.PerUser." + InstallationGeneration.Id + "_is1";
     internal static string ManagerDirectory => TestScope() is { } scope ? Path.Combine(scope.Root, "manager")
         : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "NexusPipeline.Generations", InstallationGeneration.Id, "installer");
+    private static string RegistrationRecoveryDirectory => TestScope() is { } scope ? Path.Combine(scope.Root, "registration-recovery")
+        : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "NexusPipeline.Generations", InstallationGeneration.Id, "registration-recovery");
     private static (string Id, string Root)? TestScope()
     {
 #if NEXUS_TEST_HOST
@@ -67,11 +69,9 @@ internal static class InstallationOwnership
 
     private static void RequireGenerationDestination(string root)
     {
-        var protectedRoots = new List<string> { ManagerDirectory };
+        var protectedRoots = new List<string> { ManagerDirectory, RegistrationRecoveryDirectory };
         var scope = TestScope();
         string local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        protectedRoots.Add(scope is { } test ? Path.Combine(test.Root, "old-manager")
-            : Path.Combine(local, "NexusPipeline"));
         protectedRoots.Add(scope is { } fixture ? Path.Combine(fixture.Root, "old-app")
             : Path.Combine(local, "Programs", "NexusPipeline"));
         string legacyKey = scope is { } registry ? @"Software\NexusPipeline\Tests\LegacyInstaller\" + registry.Id
@@ -121,10 +121,64 @@ internal static class InstallationOwnership
     private static bool IsApplicationPath(string path) => ApplicationPayload.SafePath(path)
         && (path is "NexusPipeline.exe" or "README.md" or ApplicationPayload.ManifestPath || path.StartsWith("resources/desktop/", StringComparison.Ordinal));
 
+    internal static bool HasAbandonedEmptyRegistration()
+    {
+        try
+        {
+            using var key = Registry.CurrentUser.OpenSubKey(CurrentRegistryPath, false);
+            if (key is null || key.GetValue("AppDir") is not null || key.GetSubKeyNames().Length != 0
+                || key.GetValueNames().Any(name => name is not ("DataRoot" or "InstanceId" or "IdentityDigest"))
+                || key.GetValue("DataRoot") is not string root || !Path.IsPathFullyQualified(root)
+                || root.StartsWith(@"\\", StringComparison.Ordinal)
+                || new DriveInfo(Path.GetPathRoot(root)!).DriveType != DriveType.Fixed) return false;
+            using var uninstall = Registry.CurrentUser.OpenSubKey(CurrentUninstallRegistryPath, false);
+            if (uninstall is not null) return false;
+            RequireGenerationDestination(root);
+            RequireLinkFree(ManagerDirectory);
+            return IsAbsentOrEmptyDirectory(root) && IsAbsentOrEmptyDirectory(ManagerDirectory);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException or System.Security.SecurityException)
+        {
+            return false;
+        }
+    }
+
+    private static bool IsAbsentOrEmptyDirectory(string path) => !File.Exists(path)
+        && (!Directory.Exists(path) || !Directory.EnumerateFileSystemEntries(path).Any());
+
+    internal static bool ReleaseAbandonedEmptyRegistration(string root)
+    {
+        RequireGenerationDestination(root);
+        if (!IsAbsentOrEmptyDirectory(root) || !HasAbandonedEmptyRegistration()) return false;
+        string snapshot;
+        using (var key = Registry.CurrentUser.OpenSubKey(CurrentRegistryPath, false))
+            snapshot = JsonSerializer.Serialize(key!.GetValueNames().Order(StringComparer.Ordinal)
+                .ToDictionary(name => name, name => new { Kind = key.GetValueKind(name), Value = key.GetValue(name) }));
+        // Keep the original anchor outside the new installer's metadata transaction.
+        RequireLinkFree(RegistrationRecoveryDirectory);
+        Directory.CreateDirectory(RegistrationRecoveryDirectory);
+        string backup = Path.Combine(RegistrationRecoveryDirectory, Digest(snapshot) + ".protected");
+        RequireLinkFree(backup);
+        if (File.Exists(backup))
+        {
+            string restored = Encoding.UTF8.GetString(ProtectedData.Unprotect(Convert.FromBase64String(File.ReadAllText(backup)), null, DataProtectionScope.CurrentUser));
+            if (restored != snapshot) throw new IOException("installer.abandoned_registration_backup");
+        }
+        else JsonUtil.WriteAtomic(backup, Convert.ToBase64String(ProtectedData.Protect(Encoding.UTF8.GetBytes(snapshot), null, DataProtectionScope.CurrentUser)));
+        if (!HasAbandonedEmptyRegistration()) throw new IOException("installer.registration_changed");
+        using (var key = Registry.CurrentUser.OpenSubKey(CurrentRegistryPath, false))
+            if (JsonSerializer.Serialize(key!.GetValueNames().Order(StringComparer.Ordinal)
+                .ToDictionary(name => name, name => new { Kind = key.GetValueKind(name), Value = key.GetValue(name) })) != snapshot)
+                throw new IOException("installer.registration_changed");
+        Registry.CurrentUser.DeleteSubKey(CurrentRegistryPath, false);
+        return true;
+    }
+
     internal static InstallerInstanceIdentity? Read(string root, bool requireActive = false)
     {
         RequireGenerationDestination(root);
         RequireLinkFree(root); RequireLinkFree(ManagerDirectory); RequireLinkFree(IdentityPath);
+        if (HasAbandonedEmptyRegistration()) return null;
         using var key = Registry.CurrentUser.OpenSubKey(CurrentRegistryPath, false);
         if (key?.GetValue("DataRoot") is string registeredRoot
             && !string.Equals(Path.GetFullPath(registeredRoot).TrimEnd('\\'), Path.GetFullPath(root).TrimEnd('\\'), StringComparison.OrdinalIgnoreCase))
@@ -286,12 +340,34 @@ internal static class InstallationOwnership
             RequireLinkFree(path);
             if (File.Exists(path) && UpdateApply.ImageHash(path) == item.Sha256) File.Delete(path);
         }
+        var directories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var item in identity.PayloadFiles)
+            for (string? path = Path.GetDirectoryName(Path.Combine(full, item.Path.Replace('/', Path.DirectorySeparatorChar)));
+                 path is not null && !string.Equals(path, full, StringComparison.OrdinalIgnoreCase);
+                 path = Path.GetDirectoryName(path))
+                directories.Add(path);
+        foreach (string path in directories.OrderByDescending(path => path.Length))
+        {
+            RequireLinkFree(path);
+            if (Directory.Exists(path) && !Directory.EnumerateFileSystemEntries(path).Any()) Directory.Delete(path);
+        }
         if (deleteData)
             foreach (string name in dataPaths)
             {
                 string path = Path.Combine(full, name); RequireLinkFree(path);
                 if (Directory.Exists(path)) Directory.Delete(path, true);
             }
-        Save(identity with { State = "retained-data" });
+        if (!deleteData)
+        {
+            Save(identity with { State = "retained-data" });
+            return;
+        }
+        if (Read(full, true)?.InstanceId != identity.InstanceId) throw new IOException("installer.registration_changed");
+        File.Delete(IdentityPath);
+        using (var key = Registry.CurrentUser.OpenSubKey(CurrentRegistryPath, true))
+            foreach (string name in new[] { "DataRoot", "AppDir", "IdentityDigest", "InstanceId" }) key!.DeleteValue(name, false);
+        using (var key = Registry.CurrentUser.OpenSubKey(CurrentRegistryPath, false))
+            if (key!.GetValueNames().Length != 0 || key.GetSubKeyNames().Length != 0) return;
+        Registry.CurrentUser.DeleteSubKey(CurrentRegistryPath, false);
     }
 }

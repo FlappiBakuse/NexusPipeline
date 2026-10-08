@@ -1,12 +1,19 @@
-; Generated from this template and one frozen production payload by host_installer.py.
+; Generated from this template and one verified frozen application payload by host_installer.py.
 [Setup]
 AppId=NexusPipeline.PerUser.@@GENERATION@@
 AppName=NexusPipeline
 AppVersion=@@VERSION@@
+AppVerName=NexusPipeline v@@VERSION@@
+UninstallDisplayName=NexusPipeline v@@VERSION@@
+UninstallDisplayIcon={app}\NexusPipeline.exe
+SetupIconFile=@@ICON_FILE@@
+WizardImageFile=@@WIZARD_IMAGE@@
+WizardSmallImageFile=@@WIZARD_SMALL_IMAGE@@
+UninstallLogMode=append
 AppPublisher=FlappiBakuse
-DefaultDirName={localappdata}\NexusPipeline.Generations\@@GENERATION@@\app
-DefaultGroupName=NexusPipeline @@GENERATION@@
-UninstallFilesDir={localappdata}\NexusPipeline.Generations\@@GENERATION@@\installer
+DefaultDirName={localappdata}\NexusPipeline
+DefaultGroupName=NexusPipeline
+UninstallFilesDir={app}
 PrivilegesRequired=lowest
 MinVersion=10.0.22000
 ArchitecturesAllowed=x64
@@ -16,6 +23,8 @@ AllowNetworkDrive=no
 CloseApplications=no
 RestartApplications=no
 UsePreviousAppDir=no
+DirExistsWarning=no
+UsePreviousGroup=no
 DisableProgramGroupPage=yes
 OutputDir=@@OUTPUT_DIR@@
 OutputBaseFilename=NexusPipeline-v@@VERSION@@-win-x64-setup
@@ -37,10 +46,12 @@ Name: "zh_ui"; MessagesFile: "@@CHINESE_ISL@@,@@CHINESE_UI_ISL@@"
 
 [Tasks]
 Name: desktopicon; Description: "{cm:DesktopIcon}"; Flags: unchecked
+Name: bundledplugins; Description: "{cm:BundledPlugins}"
 
 [Icons]
-Name: "{autoprograms}\NexusPipeline @@GENERATION@@"; Filename: "{app}\NexusPipeline.exe"
-Name: "{autodesktop}\NexusPipeline @@GENERATION@@"; Filename: "{app}\NexusPipeline.exe"; Tasks: desktopicon
+Name: "{group}\NexusPipeline v@@VERSION@@"; Filename: "{app}\NexusPipeline.exe"; IconFilename: "{app}\NexusPipeline.exe"
+Name: "{group}\NexusPipeline Uninstall"; Filename: "{uninstallexe}"; IconFilename: "{app}\NexusPipeline.exe"
+Name: "{autodesktop}\NexusPipeline v@@VERSION@@"; Filename: "{app}\NexusPipeline.exe"; IconFilename: "{app}\NexusPipeline.exe"; Tasks: desktopicon
 
 [Files]
 @@FILES@@
@@ -49,25 +60,28 @@ Name: "{autodesktop}\NexusPipeline @@GENERATION@@"; Filename: "{app}\NexusPipeli
 var
   UpgradeMode: Boolean;
   RetainedMode: Boolean;
+  FirstInstall: Boolean;
+  SpaceLabel: TNewStaticText;
+  SpaceSummary: String;
   SetupMutex: Integer;
   TransactionId: String;
   MetadataHelperPath: String;
   DependencyDownloadPage: TDownloadWizardPage;
   InstallationQualified: Boolean;
   DeleteInstanceData: Boolean;
-
-procedure InitializeWizard;
-begin
-  DependencyDownloadPage := CreateDownloadPage(CustomMessage('RuntimeDownloadTitle'),
-    CustomMessage('RuntimeDownloadDescription'), nil);
-  DependencyDownloadPage.ShowBaseNameInsteadOfUrl := True;
-end;
+  UninstallQualified: Boolean;
+  UninstallHelperHash: String;
 
 function CreateMutexW(Attributes: Integer; InitialOwner: Boolean; Name: String): Integer;
   external 'CreateMutexW@kernel32.dll stdcall';
 
+procedure UpdateSpaceDisplay(Sender: TObject); forward;
+
 procedure CurPageChanged(CurPageID: Integer);
 begin
+  if (CurPageID = wpSelectDir) or (CurPageID = wpSelectTasks) then UpdateSpaceDisplay(nil);
+  if CurPageID = wpFinished then
+    WizardForm.NextButton.Left := WizardForm.CancelButton.Left + WizardForm.CancelButton.Width - WizardForm.NextButton.Width;
   if (CurPageID = wpFinished) and not InstallationQualified then begin
     WizardForm.FinishedHeadingLabel.Caption := CustomMessage('InstallIncompleteTitle');
     WizardForm.FinishedLabel.Caption := CustomMessage('InstallIncompleteDetail');
@@ -123,11 +137,14 @@ begin
   end;
 end;
 
+@@SPACE_CODE@@
+
 function IsEmptyDirectory(const Path: String): Boolean;
 var
   Entry: TFindRec;
 begin
   Result := True;
+  if FileExists(Path) then begin Result := False; Exit; end;
   if not DirExists(Path) then Exit;
   if FindFirst(AddBackslash(Path) + '*', Entry) then begin
     try
@@ -140,22 +157,36 @@ begin
     finally
       FindClose(Entry);
     end;
-  end;
+  end else Result := False;
 end;
 
 function ProtectedInstanceState(const Path: String; CheckHelper: Boolean): String;
 var
-  Script, Params, ResultFile: String;
+  Script, Params, ResultFile, Identity, Digest, InstanceId, RegisteredRoot, ProbeKey: String;
   Code: Integer;
-  State: AnsiString;
 begin
   Result := '';
+  Identity := ExpandConstant('{localappdata}\NexusPipeline.Generations\@@GENERATION@@\installer\identity.protected');
+  if not FileExists(Identity) or
+     not RegQueryStringValue(HKCU, 'Software\NexusPipeline.Generations\@@GENERATION@@\Installer', 'IdentityDigest', Digest) or
+     not RegQueryStringValue(HKCU, 'Software\NexusPipeline.Generations\@@GENERATION@@\Installer', 'InstanceId', InstanceId) or
+     not RegQueryStringValue(HKCU, 'Software\NexusPipeline.Generations\@@GENERATION@@\Installer', 'DataRoot', RegisteredRoot) then begin
+    InstanceProbeKey := '';
+    InstanceOldCoreBytes := 0;
+    InstanceOldAllocatedBytes := 0;
+    Exit;
+  end;
   if HasLinkInPath(Path) or HasLinkInPath(ExpandConstant('{localappdata}\NexusPipeline.Generations\@@GENERATION@@\installer')) then Exit;
+  ProbeKey := Lowercase(RemoveBackslashUnlessRoot(ExpandFileName(Path))) + '|' + Digest + '|' + InstanceId + '|' + RegisteredRoot + '|' + GetSHA256OfFile(Identity);
+  if not CheckHelper and (InstanceProbeKey = ProbeKey) then begin Result := InstanceProbeState; Exit; end;
+  InstanceProbeKey := '';
+  InstanceOldCoreBytes := 0;
+  InstanceOldAllocatedBytes := 0;
   Script := ExpandConstant('{tmp}\nxp-instance-check.ps1');
   ResultFile := ExpandConstant('{tmp}\nxp-instance-check.result');
   if FileExists(ResultFile) and not DeleteFile(ResultFile) then Exit;
   if not SaveStringToFile(Script,
-    'param([string]$Root,[string]$CheckHelper,[string]$ResultFile)' + #13#10 +
+    'param([string]$Root,[string]$CheckHelper,[string]$ResultFile,[long]$AllocationUnit)' + #13#10 +
     '$ErrorActionPreference = ''Stop''' + #13#10 +
     'try {' + #13#10 +
     'Add-Type -AssemblyName System.Security' + #13#10 +
@@ -167,20 +198,33 @@ begin
     '$b = [Security.Cryptography.ProtectedData]::Unprotect([Convert]::FromBase64String($s),$null,[Security.Cryptography.DataProtectionScope]::CurrentUser)' + #13#10 +
     '$i = [Text.Encoding]::UTF8.GetString($b) | ConvertFrom-Json' + #13#10 +
     'if ($i.SchemaVersion -ne 1 -or $i.InstanceId -ne $k.InstanceId -or $i.WindowsUserId -ne [Security.Principal.WindowsIdentity]::GetCurrent().User.Value -or [IO.Path]::GetFullPath($i.AppRoot).TrimEnd(''\'') -ne [IO.Path]::GetFullPath($Root).TrimEnd(''\'') -or $i.State -notin @(''active'',''retained-data'')) { exit 1 }' + #13#10 +
+    '$oldBytes=0L; $oldAllocated=0L; $seen=@{}' + #13#10 +
+    'if (@($i.PayloadFiles).Count -gt 20000 -or $AllocationUnit -le 0) { exit 1 }' + #13#10 +
+    'foreach ($f in $i.PayloadFiles) {' + #13#10 +
+    'if ($f.Path -notmatch ''^(NexusPipeline\.exe|README\.md|resources/payload-manifest\.json|resources/desktop/[^:]+)$'' -or $f.Path -match ''(^|/)\.\.(/|$)|[\\\x00-\x1f]'' -or $f.Sha256 -notmatch ''^[0-9a-fA-F]{64}$'' -or $seen.ContainsKey($f.Path)) { exit 1 }; $seen[$f.Path]=$true' + #13#10 +
+    '$p=[IO.Path]::GetFullPath((Join-Path $Root $f.Path)); if (-not $p.StartsWith([IO.Path]::GetFullPath($Root).TrimEnd(''\'')+''\'',[StringComparison]::OrdinalIgnoreCase)) { exit 1 }' + #13#10 +
+    'for ($part=$p; $part; $part=[IO.Path]::GetDirectoryName($part)) { if ((Test-Path -LiteralPath $part) -and ((Get-Item -LiteralPath $part -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) { exit 1 } }' + #13#10 +
+    'if ($i.State -eq ''active'' -and [IO.File]::Exists($p)) { $n=([IO.FileInfo]$p).Length; $oldBytes+=$n; $oldAllocated += ($n+$AllocationUnit-1)-(($n+$AllocationUnit-1)%$AllocationUnit) }' + #13#10 +
+    '}' + #13#10 +
     'if ($CheckHelper -eq ''true'') {' + #13#10 +
     '$exe = Join-Path $m ''nexus-installer-helper.exe''' + #13#10 +
     'if ((Get-Item -LiteralPath $exe).Attributes -band [IO.FileAttributes]::ReparsePoint) { exit 1 }' + #13#10 +
     '$expected = @($i.PayloadFiles | Where-Object Path -eq ''NexusPipeline.exe'')' + #13#10 +
     'if ($expected.Count -ne 1 -or (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash -ne $expected[0].Sha256) { exit 1 }' + #13#10 +
-    '}' + #13#10 + '[IO.File]::WriteAllText($ResultFile,$i.State,[Text.Encoding]::ASCII)' + #13#10 + '} catch { exit 1 }' + #13#10, False) then Exit;
+    '}' + #13#10 + '[IO.File]::WriteAllText($ResultFile,"[instance]`r`nstate=$($i.State)`r`noldCoreBytes=$oldBytes`r`noldAllocatedBytes=$oldAllocated`r`n",[Text.Encoding]::ASCII)' + #13#10 + '} catch { exit 1 }' + #13#10, False) then Exit;
   Params := '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + Script + '" -Root "' + Path + '" -CheckHelper ';
   if CheckHelper then Params := Params + 'true' else Params := Params + 'false';
-  Params := Params + ' -ResultFile "' + ResultFile + '"';
+  Params := Params + ' -ResultFile "' + ResultFile + '" -AllocationUnit ' + IntToStr(AllocationUnit(Path));
   try
     if Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
       Params, '', SW_HIDE, ewWaitUntilTerminated, Code) and (Code = 0) and
-      LoadStringFromFile(ResultFile, State) and
-      ((State = 'active') or (State = 'retained-data')) then Result := State;
+      FileExists(ResultFile) then begin
+      Result := GetIniString('instance', 'state', '', ResultFile);
+      InstanceOldCoreBytes := StrToInt64Def(GetIniString('instance', 'oldCoreBytes', '', ResultFile), -1);
+      InstanceOldAllocatedBytes := StrToInt64Def(GetIniString('instance', 'oldAllocatedBytes', '', ResultFile), -1);
+      if ((Result <> 'active') and (Result <> 'retained-data')) or (InstanceOldCoreBytes < 0) or (InstanceOldAllocatedBytes < 0) then Result := '';
+      if not CheckHelper and (Result <> '') then begin InstanceProbeKey := ProbeKey; InstanceProbeState := Result; end;
+    end;
   except
     Result := '';
   end;
@@ -206,10 +250,10 @@ var
   OldRoot: String;
 begin
   Result := False;
-  if RootsOverlap(Path, ExpandConstant('{localappdata}\NexusPipeline')) or
-     RootsOverlap(Path, ExpandConstant('{localappdata}\Programs\NexusPipeline')) or
+  if RootsOverlap(Path, ExpandConstant('{localappdata}\Programs\NexusPipeline')) or
      RootsOverlap(Path, ExpandConstant('{localappdata}\NexusPipeline.Generations\g01615')) or
-     RootsOverlap(Path, ExpandConstant('{localappdata}\NexusPipeline.Generations\@@GENERATION@@\installer')) then Exit;
+     RootsOverlap(Path, ExpandConstant('{localappdata}\NexusPipeline.Generations\@@GENERATION@@\installer')) or
+     RootsOverlap(Path, ExpandConstant('{localappdata}\NexusPipeline.Generations\@@GENERATION@@\registration-recovery')) then Exit;
   if RegQueryStringValue(HKCU, 'Software\NexusPipeline\Installer', 'DataRoot', OldRoot) then
     if RootsOverlap(Path, OldRoot) then Exit;
   if RegQueryStringValue(HKCU, 'Software\NexusPipeline\Installer', 'AppDir', OldRoot) then
@@ -220,6 +264,28 @@ begin
     if RootsOverlap(Path, OldRoot) then Exit;
   if RegQueryStringValue(HKCU, 'Software\NexusPipeline.Generations\g01615\Installer', 'DataRoot', OldRoot) then
     if RootsOverlap(Path, OldRoot) then Exit;
+  Result := True;
+end;
+
+function AbandonedEmptyRegistration(const RegisteredRoot: String): Boolean;
+var
+  Manager, Drive: String;
+  Names: TArrayOfString;
+  I: Integer;
+begin
+  Result := False;
+  Manager := ExpandConstant('{localappdata}\NexusPipeline.Generations\@@GENERATION@@\installer');
+  Drive := ExtractFileDrive(RegisteredRoot);
+  if (Length(Drive) <> 2) or (GetDriveTypeW(Drive + '\') <> 3) or
+     HasLinkInPath(RegisteredRoot) or HasLinkInPath(Manager) or not GenerationDestination(RegisteredRoot) or
+     not IsEmptyDirectory(RegisteredRoot) or not IsEmptyDirectory(Manager) or
+     RegValueExists(HKCU, 'Software\NexusPipeline.Generations\@@GENERATION@@\Installer', 'AppDir') or
+     RegKeyExists(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Uninstall\NexusPipeline.PerUser.@@GENERATION@@_is1') then Exit;
+  if not RegGetValueNames(HKCU, 'Software\NexusPipeline.Generations\@@GENERATION@@\Installer', Names) then Exit;
+  for I := 0 to GetArrayLength(Names) - 1 do
+    if (Names[I] <> 'DataRoot') and (Names[I] <> 'InstanceId') and (Names[I] <> 'IdentityDigest') then Exit;
+  if not RegGetSubkeyNames(HKCU, 'Software\NexusPipeline.Generations\@@GENERATION@@\Installer', Names) or
+     (GetArrayLength(Names) <> 0) then Exit;
   Result := True;
 end;
 
@@ -235,7 +301,7 @@ begin
   HasRegisteredRoot := RegQueryStringValue(HKCU, 'Software\NexusPipeline.Generations\@@GENERATION@@\Installer', 'DataRoot', RegisteredRoot);
   if not HasRegisteredRoot then
     HasRegisteredRoot := RegQueryStringValue(HKCU, 'Software\NexusPipeline.Generations\@@GENERATION@@\Installer', 'AppDir', RegisteredRoot);
-  if HasRegisteredRoot then begin
+  if HasRegisteredRoot and not AbandonedEmptyRegistration(RegisteredRoot) then begin
     // Registration owns one per-user root, including retained data after uninstall.
     // Refuse before writing payload; Register must not be the first ownership check.
     if CompareText(RemoveBackslashUnlessRoot(ExpandFileName(RegisteredRoot)),
@@ -369,18 +435,92 @@ begin
     Result := FmtMessage(CustomMessage('RuntimeStillMissing'), [Description]);
 end;
 
+procedure InvalidateSpaceDisplay(Sender: TObject);
+begin
+  SpaceSummary := '';
+  SpaceLabel.Caption := '';
+  WizardForm.DiskSpaceLabel.Caption := '';
+end;
+
+procedure UpdateSpaceDisplay(Sender: TObject);
+var
+  Started: Cardinal;
+begin
+  Started := NativeTickCount;
+  SpaceSummary := '';
+  SpaceLabel.Caption := '';
+  WizardForm.DiskSpaceLabel.Caption := '';
+  if not ValidDestination(WizardDirValue) then Exit;
+  FirstInstall := ProtectedInstanceState(WizardDirValue, False) = '';
+  if WizardForm.TasksList.Items.Count > 1 then begin
+    WizardForm.TasksList.ItemEnabled[1] := FirstInstall;
+    if not FirstInstall then WizardForm.TasksList.Checked[1] := False;
+  end;
+  try
+    if not SpaceDependenciesChecked then begin
+      SpaceDownloadBytes := 0;
+      if not HasFramework('Microsoft.WindowsDesktop.App') then SpaceDownloadBytes := SpaceDownloadBytes + @@DESKTOP_SIZE@@;
+      if not HasFramework('Microsoft.AspNetCore.App') then SpaceDownloadBytes := SpaceDownloadBytes + @@ASPNET_SIZE@@;
+      SpaceDependenciesChecked := True;
+    end;
+    CalculateSpace;
+  except
+    Log('installer space failed: ' + GetExceptionMessage);
+    SpaceSummary := '';
+  end;
+  if (SpaceSummary <> '') and not FirstInstall then SpaceSummary := CustomMessage('PluginsPreserved') + #13#10 + SpaceSummary;
+  SpaceLabel.Caption := SpaceSummary;
+  WizardForm.DiskSpaceLabel.Caption := SpaceSummary;
+  Log('installer space milliseconds=' + IntToStr(NativeTickCount - Started));
+end;
+
+procedure InitializeWizard;
+var
+  RegisteredRoot: String;
+begin
+  DependencyDownloadPage := CreateDownloadPage(CustomMessage('RuntimeDownloadTitle'), CustomMessage('RuntimeDownloadDescription'), nil);
+  DependencyDownloadPage.ShowBaseNameInsteadOfUrl := True;
+  SpaceLabel := TNewStaticText.Create(WizardForm);
+  SpaceLabel.Parent := WizardForm.SelectTasksPage;
+  SpaceLabel.Left := WizardForm.TasksList.Left;
+  WizardForm.TasksList.Height := WizardForm.TasksList.Height - ScaleY(56);
+  SpaceLabel.Top := WizardForm.TasksList.Top + WizardForm.TasksList.Height + ScaleY(4);
+  SpaceLabel.Width := WizardForm.TasksList.Width;
+  SpaceLabel.Height := ScaleY(48);
+  SpaceLabel.WordWrap := True;
+  WizardForm.DiskSpaceLabel.WordWrap := True;
+  WizardForm.DiskSpaceLabel.Top := WizardForm.DiskSpaceLabel.Top - ScaleY(32);
+  WizardForm.DiskSpaceLabel.Height := ScaleY(48);
+  if RegQueryStringValue(HKCU, 'Software\NexusPipeline.Generations\@@GENERATION@@\Installer', 'DataRoot', RegisteredRoot) then
+    if ProtectedInstanceState(RegisteredRoot, False) <> '' then WizardForm.DirEdit.Text := RegisteredRoot;
+  WizardForm.DirEdit.OnChange := @InvalidateSpaceDisplay;
+  WizardForm.TasksList.OnClickCheck := @UpdateSpaceDisplay;
+end;
+
+function UpdateReadyMemo(Space, NewLine, MemoUserInfoInfo, MemoDirInfo, MemoTypeInfo, MemoComponentsInfo, MemoGroupInfo, MemoTasksInfo: String): String;
+begin
+  UpdateSpaceDisplay(nil);
+  Result := MemoDirInfo + NewLine + MemoTasksInfo + NewLine + SpaceSummary + NewLine + CustomMessage('RuntimeSpaceSeparate');
+end;
+
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   Path: String;
+  Code: Integer;
+  OwnerStarted: Boolean;
 begin
   Result := '';
   UpgradeMode := False;
+  // Preview may reuse a DPAPI proof; deployment always rechecks ownership and free space.
+  InstanceProbeKey := '';
+  SpaceDependenciesChecked := False;
   if not ValidDestination(WizardDirValue) then begin
     Result := CustomMessage('DestinationLog');
     Exit;
   end;
   Path := WizardDirValue;
   RetainedMode := ProtectedInstanceState(Path, False) = 'retained-data';
+  FirstInstall := ProtectedInstanceState(Path, False) = '';
   if RetainedMode then begin
     if WizardSilent then begin Result := CustomMessage('RetainedSilent'); Exit; end;
     if MsgBox(CustomMessage('RetainedPrompt'), mbConfirmation, MB_YESNO) <> IDYES then begin
@@ -396,6 +536,9 @@ begin
       Result := CustomMessage('ConcurrentSetup'); Exit;
     end;
   end;
+  UpdateSpaceDisplay(nil);
+  if SpaceSummary = '' then begin Result := CustomMessage('SpaceUnavailable'); Exit; end;
+  if GetIniInt('space', 'enough', 0, 0, 1, ExpandConstant('{tmp}\nxp-space.ini')) <> 1 then begin Result := CustomMessage('SpaceInsufficient'); Exit; end;
   Result := InstallFramework('Microsoft.WindowsDesktop.App', '.NET Desktop Runtime 10 x64',
     '@@DESKTOP_URL@@', 'windowsdesktop-runtime-10.0.12-win-x64.exe', '@@DESKTOP_SHA256@@', NeedsRestart);
   if Result <> '' then Exit;
@@ -414,15 +557,31 @@ begin
     Result := CustomMessage('RecoveryPending');
     Exit;
   end;
+  if UpgradeMode then begin
+    Code := 0;
+    OwnerStarted := ShellExec('runas', MetadataHelperPath,
+      'installer-state ensure-owning-service --root "' + Path + '"', Path,
+      SW_HIDE, ewWaitUntilTerminated, Code);
+    if not OwnerStarted or (Code <> 0) then begin
+      Result := InstallerLaunchFailure(OwnerStarted, Code);
+      Exit;
+    end;
+  end;
   if UpgradeMode then
     RequireInstallerMetadata('begin', ' --version @@VERSION@@ --image-hash @@EXE_SHA256@@ --upgrade true')
   else
     RequireInstallerMetadata('begin', ' --version @@VERSION@@ --image-hash @@EXE_SHA256@@ --upgrade false');
+  RequireInstallerMetadata('preposition', '');
 end;
 
 function IsFreshInstall: Boolean;
 begin
   Result := not UpgradeMode;
+end;
+
+function ShouldInstallBundledPlugins: Boolean;
+begin
+  Result := FirstInstall and not UpgradeMode and not RetainedMode and WizardIsTaskSelected('bundledplugins');
 end;
 
 function IsTrustedUpgrade: Boolean;
@@ -515,12 +674,12 @@ begin
   if CheckForMutexes('NexusPipeline.SingleInstance') then begin
     MsgBox(CustomMessage('UninstallHostRunning'), mbError, MB_OK); Exit;
   end;
-  Choice := IDNO;
+  Choice := IDYES;
   if not UninstallSilent then
-    Choice := MsgBox(CustomMessage('UninstallDeleteDataPrompt'),
-      mbConfirmation, MB_YESNOCANCEL or MB_DEFBUTTON2);
+    Choice := MsgBox(CustomMessage('UninstallKeepDataPrompt'),
+      mbConfirmation, MB_YESNOCANCEL or MB_DEFBUTTON1);
   if Choice = IDCANCEL then Exit;
-  DeleteInstanceData := Choice = IDYES;
+  DeleteInstanceData := Choice = IDNO;
   Result := True;
 end;
 
@@ -529,14 +688,30 @@ var
   Path, Helper, Params: String;
   Code: Integer;
 begin
+  if CurUninstallStep = usPostUninstall then begin
+    if UninstallQualified and DeleteInstanceData then begin
+      Helper := ExpandConstant('{localappdata}\NexusPipeline.Generations\@@GENERATION@@\installer\nexus-installer-helper.exe');
+      if FileExists(Helper) and not HasLinkInPath(Helper) and
+         (CompareText(GetSHA256OfFile(Helper), UninstallHelperHash) = 0) then
+        if not DeleteFile(Helper) then Log('Owned uninstall helper could not be removed: ' + Helper);
+    end;
+    // Inno removes its own executable and log after the ownership helper returns.
+    Path := ExpandConstant('{app}');
+    if UninstallQualified and DeleteInstanceData and not HasLinkInPath(Path) and
+       DirExists(Path) and IsEmptyDirectory(Path) then
+      if not RemoveDir(Path) then Log('Empty instance directory could not be removed: ' + Path);
+    Exit;
+  end;
   if CurUninstallStep <> usUninstall then Exit;
   Path := ExpandConstant('{app}');
   if (ProtectedInstanceState(Path, True) <> 'active') or
      CheckForMutexes('NexusPipeline.SingleInstance') then
     RaiseException(CustomMessage('UninstallStateChanged'));
   Helper := ExpandConstant('{localappdata}\NexusPipeline.Generations\@@GENERATION@@\installer\nexus-installer-helper.exe');
+  UninstallHelperHash := GetSHA256OfFile(Helper);
   Params := 'installer-state uninstall --root "' + Path + '" --delete-data ';
   if DeleteInstanceData then Params := Params + 'true' else Params := Params + 'false';
   if not ShellExec('runas', Helper, Params, Path, SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then
     RaiseException(CustomMessage('UninstallFailed'));
+  UninstallQualified := True;
 end;

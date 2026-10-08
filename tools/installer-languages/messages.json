@@ -1,46 +1,202 @@
 {
-  "DesktopIcon": ["Create a desktop shortcut", "创建桌面快捷方式"],
-  "RuntimeDownloadTitle": ["Download required runtimes", "下载必需的运行时"],
-  "RuntimeDownloadDescription": ["Download and verify dependencies from Microsoft. You can cancel and try again.", "从微软官方地址下载并验证依赖。可以取消下载后重新尝试。"],
-  "InstallIncompleteTitle": ["NexusPipeline setup did not finish", "NexusPipeline 安装未完成"],
-  "InstallIncompleteDetail": ["Installation ownership or the upgrade transaction was not verified. Keep the logs and recovery state, then repair and run setup again.", "安装归属登记或升级事务未通过。请保留日志和恢复现场，修复后再安装。"],
-  "DestinationLog": ["The destination is not a trusted empty local directory or a registered instance.", "目标目录不是可信的本地空目录或已登记实例。"],
-  "DestinationError": ["Choose a writable empty local directory or this user's registered matching installation directory. Setup will not take over unknown, network, or linked directories.", "请选择可写的本地空目录，或此用户已登记且身份匹配的安装目录；不会接管不明旧目录、网络盘或链接目录。"],
-  "RuntimeMissingSilent": ["%1 is missing. Run setup interactively and confirm dependency installation.", "缺少 %1；请交互运行安装器并确认依赖安装。"],
-  "RuntimeInstallPrompt": ["%1 is missing. Download the locked x64 package from Microsoft and run it?", "缺少 %1。将从微软官方地址下载已锁定的 x64 安装包并运行，是否继续？"],
-  "RuntimeInstallCancelled": ["Installation of %1 was cancelled.", "用户取消了 %1 依赖安装。"],
-  "RuntimeDownloadCancelled": ["Download of %1 was cancelled.", "用户取消了 %1 依赖下载。"],
-  "RuntimeDownloadFailed": ["Download or hash verification of %1 failed: %2", "%1 下载或摘要校验失败：%2"],
-  "RuntimeSignatureFailed": ["The Microsoft digital signature of %1 could not be verified.", "%1 的微软数字签名无法确认。"],
-  "RuntimeLaunchFailed": ["The %1 installer could not start: %2", "%1 安装器无法启动：%2"],
-  "RuntimeNeedsRestart": ["Installing %1 requires a restart. Restart Windows, then run this setup again.", "%1 安装需要重启；请自行重启后重新运行本安装器。"],
-  "RuntimeExitFailed": ["Installing %1 failed with exit code %2.", "%1 安装失败，退出码 %2。"],
-  "RuntimeStillMissing": ["A suitable x64 framework was not detected after installing %1.", "%1 安装后仍未检测到适用的 x64 框架。"],
-  "RetainedSilent": ["Reinstalling with retained data requires interactive confirmation.", "保留数据重装需要交互确认。"],
-  "RetainedPrompt": ["Reinstall using this instance's retained data? Existing plugins and user settings will be kept.", "使用本实例保留的数据重新安装？已有插件和用户配置将保留。"],
-  "RetainedCancelled": ["Reinstallation with retained data was cancelled.", "已取消保留数据重装。"],
-  "ConcurrentSetup": ["Another installer is working on this instance. Wait for it to finish.", "另一个安装器正在处理此实例，请等待其完成。"],
-  "RecoveryPending": ["An update or recovery state already exists. Finish recovery in the original instance before proceeding.", "已有更新或恢复现场；请先在原实例完成恢复，不覆盖现场。"],
-  "StagedVerificationFailed": ["Staged payload verification failed: %1", "暂存载荷校验失败：%1"],
-  "HandoffCopyFailed": ["A separate installer handoff copy could not be created in the same root. Staging is retained.", "无法建立同根独立安装器交接副本；保留 staging。"],
-  "HandoffHashFailed": ["The installer handoff copy hash does not match.", "安装器交接副本摘要不匹配。"],
-  "OwnershipCreateFailed": ["The installation ownership record could not be created.", "无法创建此实例的安装归属记录。"],
-  "ManifestWriteFailed": ["The frozen payload manifest could not be written.", "无法写入冻结载荷清单。"],
-  "OwnershipRegisterFailed": ["Instance ownership registration failed. Program files and data are retained for diagnosis.", "实例归属登记未通过；保留程序与数据供诊断。"],
-  "CompensationUnconfirmed": ["%1 Registration compensation was not confirmed; the checkpoint is retained.", "%1；登记补偿未确认，检查点保留。"],
-  "UninstallOwnershipUnknown": ["This instance's ownership or current uninstaller payload could not be verified. Program files and data are retained.", "无法确认本实例归属或当前卸载程序载荷；程序与数据均保留。"],
-  "UninstallHostRunning": ["The Host is still running. Exit normally and wait for tasks and configuration recovery to finish before uninstalling.", "宿主仍在运行。请先正常退出，等待任务和配置恢复完成，再卸载。"],
-  "UninstallDeleteDataPrompt": ["Also delete this instance's config, data, history, logs, .nxp, plugins, outputs, and user-assets?%nChoose No to remove only verified application files and retain data. Choose Cancel to stop uninstalling. External or linked paths will not be followed.", "是否同时删除本实例的 config、data、history、logs、.nxp、plugins、outputs 和 user-assets？%n选择“否”仅移除已核验的应用文件并保留数据；选择“取消”退出卸载。不会跟随外部路径或链接。"],
-  "UninstallStateChanged": ["Instance ownership or running state changed. Program files and data are retained.", "实例归属或运行状态已变化；程序与数据均保留。"],
-  "UninstallFailed": ["Uninstall ownership, recovery state, or file handling could not be verified. Unknown files and recovery evidence are retained; verify or recover them first.", "卸载归属、恢复状态或文件处理未通过。保留未知文件与恢复证据，请先核对或恢复。"],
-  "MetadataFailed": ["Installation metadata %1 did not verify. The checkpoint is retained; error code %2.", "安装元数据 %1 未通过；保留检查点，错误码 %2。"],
-  "MetadataCompensationFailed": ["The installation metadata compensation process did not start. The checkpoint is retained; system error %1.", "安装元数据补偿进程未启动；保留检查点，原生错误 %1。"],
-  "ElevationCancelled": ["The elevation request was cancelled", "授权请求已取消"],
-  "AccessDenied": ["Access was denied", "访问被拒绝"],
-  "HandoffMissing": ["The handoff program was not found", "交接程序不存在"],
-  "HandoffBusy": ["The handoff program is in use", "交接程序被占用"],
-  "HandoffSystemError": ["The handoff program could not start; system error %1", "交接程序无法启动，系统错误 %1"],
-  "HandoffExitCode": ["The handoff process exited with code %1", "交接进程退出码 %1"],
-  "HandoffRetained": ["%1 Staging and transaction state are retained.", "%1；保留 staging 和事务现场。"],
-  "UpgradeMetadataMismatch": ["The upgrade result does not match committed metadata. The checkpoint is retained.", "升级结果与已提交的元数据不一致；保留检查点。"]
+  "DesktopIcon": [
+    "Create a desktop shortcut",
+    "创建桌面快捷方式"
+  ],
+  "RuntimeDownloadTitle": [
+    "Download required runtimes",
+    "下载必需的运行时"
+  ],
+  "RuntimeDownloadDescription": [
+    "Download and verify dependencies from Microsoft. You can cancel and try again.",
+    "从微软官方地址下载并验证依赖。可以取消下载后重新尝试。"
+  ],
+  "InstallIncompleteTitle": [
+    "NexusPipeline setup did not finish",
+    "NexusPipeline 安装未完成"
+  ],
+  "InstallIncompleteDetail": [
+    "Installation ownership or the upgrade transaction was not verified. Keep the logs and recovery state, then repair and run setup again.",
+    "安装归属登记或升级事务未通过。请保留日志和恢复现场，修复后再安装。"
+  ],
+  "DestinationLog": [
+    "The destination is not a trusted empty local directory or a registered instance.",
+    "目标目录不是可信的本地空目录或已登记实例。"
+  ],
+  "DestinationError": [
+    "Choose a writable empty local directory or this user's registered matching installation directory. Setup will not take over unknown, network, or linked directories.",
+    "请选择可写的本地空目录，或此用户已登记且身份匹配的安装目录；不会接管不明旧目录、网络盘或链接目录。"
+  ],
+  "RuntimeMissingSilent": [
+    "%1 is missing. Run setup interactively and confirm dependency installation.",
+    "缺少 %1；请交互运行安装器并确认依赖安装。"
+  ],
+  "RuntimeInstallPrompt": [
+    "%1 is missing. Download the locked x64 package from Microsoft and run it?",
+    "缺少 %1。将从微软官方地址下载已锁定的 x64 安装包并运行，是否继续？"
+  ],
+  "RuntimeInstallCancelled": [
+    "Installation of %1 was cancelled.",
+    "用户取消了 %1 依赖安装。"
+  ],
+  "RuntimeDownloadCancelled": [
+    "Download of %1 was cancelled.",
+    "用户取消了 %1 依赖下载。"
+  ],
+  "RuntimeDownloadFailed": [
+    "Download or hash verification of %1 failed: %2",
+    "%1 下载或摘要校验失败：%2"
+  ],
+  "RuntimeSignatureFailed": [
+    "The Microsoft digital signature of %1 could not be verified.",
+    "%1 的微软数字签名无法确认。"
+  ],
+  "RuntimeLaunchFailed": [
+    "The %1 installer could not start: %2",
+    "%1 安装器无法启动：%2"
+  ],
+  "RuntimeNeedsRestart": [
+    "Installing %1 requires a restart. Restart Windows, then run this setup again.",
+    "%1 安装需要重启；请自行重启后重新运行本安装器。"
+  ],
+  "RuntimeExitFailed": [
+    "Installing %1 failed with exit code %2.",
+    "%1 安装失败，退出码 %2。"
+  ],
+  "RuntimeStillMissing": [
+    "A suitable x64 framework was not detected after installing %1.",
+    "%1 安装后仍未检测到适用的 x64 框架。"
+  ],
+  "RetainedSilent": [
+    "Reinstalling with retained data requires interactive confirmation.",
+    "保留数据重装需要交互确认。"
+  ],
+  "RetainedPrompt": [
+    "Reinstall using this instance's retained data? Existing plugins and user settings will be kept.",
+    "使用本实例保留的数据重新安装？已有插件和用户配置将保留。"
+  ],
+  "RetainedCancelled": [
+    "Reinstallation with retained data was cancelled.",
+    "已取消保留数据重装。"
+  ],
+  "ConcurrentSetup": [
+    "Another installer is working on this instance. Wait for it to finish.",
+    "另一个安装器正在处理此实例，请等待其完成。"
+  ],
+  "RecoveryPending": [
+    "An update or recovery state already exists. Finish recovery in the original instance before proceeding.",
+    "已有更新或恢复现场；请先在原实例完成恢复，不覆盖现场。"
+  ],
+  "StagedVerificationFailed": [
+    "Staged payload verification failed: %1",
+    "暂存载荷校验失败：%1"
+  ],
+  "HandoffCopyFailed": [
+    "A separate installer handoff copy could not be created in the same root. Staging is retained.",
+    "无法建立同根独立安装器交接副本；保留 staging。"
+  ],
+  "HandoffHashFailed": [
+    "The installer handoff copy hash does not match.",
+    "安装器交接副本摘要不匹配。"
+  ],
+  "OwnershipCreateFailed": [
+    "The installation ownership record could not be created.",
+    "无法创建此实例的安装归属记录。"
+  ],
+  "ManifestWriteFailed": [
+    "The frozen payload manifest could not be written.",
+    "无法写入冻结载荷清单。"
+  ],
+  "OwnershipRegisterFailed": [
+    "Instance ownership registration failed. Program files and data are retained for diagnosis.",
+    "实例归属登记未通过；保留程序与数据供诊断。"
+  ],
+  "CompensationUnconfirmed": [
+    "%1 Registration compensation was not confirmed; the checkpoint is retained.",
+    "%1；登记补偿未确认，检查点保留。"
+  ],
+  "UninstallOwnershipUnknown": [
+    "This instance's ownership or current uninstaller payload could not be verified. Program files and data are retained.",
+    "无法确认本实例归属或当前卸载程序载荷；程序与数据均保留。"
+  ],
+  "UninstallHostRunning": [
+    "The Host is still running. Exit normally and wait for tasks and configuration recovery to finish before uninstalling.",
+    "宿主仍在运行。请先正常退出，等待任务和配置恢复完成，再卸载。"
+  ],
+  "UninstallKeepDataPrompt": [
+    "Keep your configuration and data?",
+    "是否保留配置及数据？"
+  ],
+  "UninstallStateChanged": [
+    "Instance ownership or running state changed. Program files and data are retained.",
+    "实例归属或运行状态已变化；程序与数据均保留。"
+  ],
+  "UninstallFailed": [
+    "Uninstall ownership, recovery state, or file handling could not be verified. Unknown files and recovery evidence are retained; verify or recover them first.",
+    "卸载归属、恢复状态或文件处理未通过。保留未知文件与恢复证据，请先核对或恢复。"
+  ],
+  "MetadataFailed": [
+    "Installation metadata %1 did not verify. The checkpoint is retained; error code %2.",
+    "安装元数据 %1 未通过；保留检查点，错误码 %2。"
+  ],
+  "MetadataCompensationFailed": [
+    "The installation metadata compensation process did not start. The checkpoint is retained; system error %1.",
+    "安装元数据补偿进程未启动；保留检查点，原生错误 %1。"
+  ],
+  "ElevationCancelled": [
+    "The elevation request was cancelled",
+    "授权请求已取消"
+  ],
+  "AccessDenied": [
+    "Access was denied",
+    "访问被拒绝"
+  ],
+  "HandoffMissing": [
+    "The handoff program was not found",
+    "交接程序不存在"
+  ],
+  "HandoffBusy": [
+    "The handoff program is in use",
+    "交接程序被占用"
+  ],
+  "HandoffSystemError": [
+    "The handoff program could not start; system error %1",
+    "交接程序无法启动，系统错误 %1"
+  ],
+  "HandoffExitCode": [
+    "The handoff process exited with code %1",
+    "交接进程退出码 %1"
+  ],
+  "HandoffRetained": [
+    "%1 Staging and transaction state are retained.",
+    "%1；保留 staging 和事务现场。"
+  ],
+  "UpgradeMetadataMismatch": [
+    "The upgrade result does not match committed metadata. The checkpoint is retained.",
+    "升级结果与已提交的元数据不一致；保留检查点。"
+  ],
+  "BundledPlugins": [
+    "Install default bundled plugins",
+    "安装默认内置插件"
+  ],
+  "PluginsPreserved": [
+    "Existing plugins are preserved.",
+    "保留现有插件。"
+  ],
+  "SpaceUnavailable": [
+    "Cannot verify required disk space.",
+    "无法核验所需磁盘空间。"
+  ],
+  "SpaceInsufficient": [
+    "Not enough free disk space for this installation.",
+    "可用磁盘空间不足，无法完成本次安装。"
+  ],
+  "RuntimeSpaceSeparate": [
+    "Shared .NET runtime installation has separate system space requirements.",
+    "共享 .NET 运行时安装另有系统磁盘空间要求。"
+  ],
+  "SpaceSummary": [
+    "Program files: %1 MiB. Additional free space: %2",
+    "程序文件：%1 MiB。安装过程中至少需要的可用空间：%2"
+  ]
 }

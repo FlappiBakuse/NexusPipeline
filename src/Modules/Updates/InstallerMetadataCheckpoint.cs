@@ -10,58 +10,22 @@ namespace NexusPipeline.Modules.Updates;
 internal sealed record InstallerRegistryValue(string Name, RegistryValueKind Kind, string? Text,
     string[]? Lines, string? Binary, long? Number);
 internal sealed record InstallerRegistrySnapshot(bool Exists, InstallerRegistryValue[] Values);
-internal sealed record InstallerMetadataFile(string Name, string Sha256);
+internal sealed record InstallerMetadataFile(string Name, string Sha256, string? Location = null);
 internal sealed record InstallerMetadataSnapshot(InstallerRegistrySnapshot Uninstall,
     InstallerRegistrySnapshot Ownership, InstallerMetadataFile[] UninstallFiles,
-    string? IdentityHash, string? HelperHash);
+    string? IdentityHash, string? HelperHash, InstallerMetadataFile[]? Shortcuts = null);
 internal sealed record InstallerMetadataState(int SchemaVersion, string TransactionId, string Root,
     string TargetVersion, string TargetImageHash, bool Upgrade, string? SourceVersion, string? SourceImageHash,
     InstallerMetadataSnapshot Before, InstallerMetadataSnapshot? After, string Status,
-    DateTimeOffset CreatedAtUtc);
+    DateTimeOffset CreatedAtUtc, InstallerMetadataSnapshot? Prepositioned = null);
 
 /// <summary>Owns the narrow ARP and uninstaller checkpoint taken before Inno changes either one.</summary>
-internal static class InstallerMetadataCheckpoint
+internal static class LegacyInstallerMetadataCheckpoint
 {
     private const string CheckpointName = "metadata-checkpoint";
     private static string DirectoryPath => Path.Combine(InstallationOwnership.ManagerDirectory, CheckpointName);
     private static string StatePath => Path.Combine(DirectoryPath, "state.protected");
     private static string BackupPath => Path.Combine(DirectoryPath, "uninstaller-backup");
-
-    internal static void Begin(string root, string transactionId, string version, string imageHash, bool upgrade)
-    {
-        ValidateArguments(root, transactionId, version, imageHash);
-        root = Normalize(root);
-        InstallationOwnership.RequireLinkFree(root);
-        InstallationOwnership.RequireLinkFree(InstallationOwnership.ManagerDirectory);
-        InstallationOwnership.RequireLinkFree(DirectoryPath);
-        if (Directory.Exists(DirectoryPath) || File.Exists(DirectoryPath))
-            throw new IOException("installer.metadata_checkpoint_pending");
-        var identity = InstallationOwnership.Read(root);
-        var before = Capture();
-        if (identity is null && (before.Uninstall.Exists || before.Ownership.Exists
-            || before.UninstallFiles.Length != 0 || before.IdentityHash is not null || before.HelperHash is not null))
-            throw new IOException("installer.metadata_unknown_preexisting");
-        string? sourceImage = File.Exists(Path.Combine(root, "NexusPipeline.exe"))
-            ? UpdateApply.ImageHash(Path.Combine(root, "NexusPipeline.exe")) : null;
-        if (identity is not null && (identity.State is not ("active" or "retained-data")
-            || identity.State == "active" && sourceImage is null))
-            throw new IOException("installer.metadata_source_invalid");
-        if (upgrade && identity?.State != "active") throw new IOException("installer.metadata_upgrade_identity");
-        if (!upgrade && identity?.State == "active") throw new IOException("installer.metadata_registration_identity");
-        Directory.CreateDirectory(DirectoryPath);
-        Directory.CreateDirectory(BackupPath);
-        foreach (var file in before.UninstallFiles)
-        {
-            string source = Path.Combine(InstallationOwnership.ManagerDirectory, file.Name);
-            string backup = Path.Combine(BackupPath, file.Name);
-            InstallationOwnership.RequireLinkFree(source);
-            File.Copy(source, backup, false);
-            if (UpdateApply.ImageHash(backup) != file.Sha256)
-                throw new IOException("installer.metadata_backup_changed");
-        }
-        Write(new(1, transactionId, root, version, imageHash, upgrade, identity?.Version, sourceImage,
-            before, null, "Prepared", DateTimeOffset.UtcNow));
-    }
 
     internal static string RecoverPending(string root)
     {
@@ -86,12 +50,6 @@ internal static class InstallerMetadataCheckpoint
         if (state.Status != "InnoWritten")
             throw new IOException("installer.metadata_recovery_phase_unknown: checkpoint retained");
         return Resolve(root, state.TransactionId, true, 1, !state.Upgrade);
-    }
-
-    internal static void Observe(string root, string transactionId)
-    {
-        var state = Read(root, transactionId);
-        ObserveState(state, true);
     }
 
     private static void ObserveState(InstallerMetadataState state, bool requireTargetRegistration)
@@ -142,7 +100,7 @@ internal static class InstallerMetadataCheckpoint
         return outcome;
     }
 
-    private static void Archive(InstallerMetadataState state)
+    internal static void Archive(InstallerMetadataState state)
     {
         Write(state);
         string archived = Path.Combine(InstallationOwnership.ManagerDirectory,
@@ -152,7 +110,7 @@ internal static class InstallerMetadataCheckpoint
         Directory.Move(DirectoryPath, archived);
     }
 
-    private static string Classify(InstallerMetadataState state, bool launched, int childExit, bool registration)
+    internal static string Classify(InstallerMetadataState state, bool launched, int childExit, bool registration)
     {
         InstallerInstanceIdentity? identity;
         try { identity = InstallationOwnership.Read(state.Root); }
@@ -252,7 +210,7 @@ internal static class InstallerMetadataCheckpoint
         return File.Exists(path) ? UpdateApply.ImageHash(path) : null;
     }
 
-    private static InstallerRegistrySnapshot CaptureRegistry(string path)
+    internal static InstallerRegistrySnapshot CaptureRegistry(string path)
     {
         using var key = Registry.CurrentUser.OpenSubKey(path, false);
         if (key is null) return new(false, []);
@@ -326,7 +284,7 @@ internal static class InstallerMetadataCheckpoint
         }
     }
 
-    private static void RestoreRegistry(string path, InstallerRegistrySnapshot before, InstallerRegistrySnapshot after)
+    internal static void RestoreRegistry(string path, InstallerRegistrySnapshot before, InstallerRegistrySnapshot after)
     {
         var current = CaptureRegistry(path);
         if (RegistryEqual(current, before)) return;
@@ -372,7 +330,7 @@ internal static class InstallerMetadataCheckpoint
         return state;
     }
 
-    private static InstallerMetadataState ReadState()
+    internal static InstallerMetadataState ReadState()
     {
         InstallationOwnership.RequireLinkFree(DirectoryPath);
         InstallationOwnership.RequireLinkFree(StatePath);
@@ -381,13 +339,13 @@ internal static class InstallerMetadataCheckpoint
             DataProtectionScope.CurrentUser);
         var state = JsonSerializer.Deserialize<InstallerMetadataState>(bytes)
             ?? throw new IOException("installer.metadata_empty");
-        if (state.SchemaVersion != 1 || !Guid.TryParseExact(state.TransactionId, "N", out _)
+        if (state.SchemaVersion is not (1 or 2) || !Guid.TryParseExact(state.TransactionId, "N", out _)
             || state.Before is null || state.CreatedAtUtc == default)
             throw new IOException("installer.metadata_identity");
         return state;
     }
 
-    private static void Write(InstallerMetadataState state)
+    internal static void Write(InstallerMetadataState state)
     {
         string json = JsonSerializer.Serialize(state);
         string seal = Convert.ToBase64String(ProtectedData.Protect(Encoding.UTF8.GetBytes(json), null,
@@ -396,7 +354,7 @@ internal static class InstallerMetadataCheckpoint
     }
 
     private static string Normalize(string root) => Path.GetFullPath(root).TrimEnd('\\');
-    private static void ValidateArguments(string root, string transactionId, string version, string imageHash)
+    internal static void ValidateArguments(string root, string transactionId, string version, string imageHash)
     {
         if (!Path.IsPathFullyQualified(root) || !Guid.TryParseExact(transactionId, "N", out _)
             || !NexusVersion.TryParse(version, out _) || imageHash.Length != 64

@@ -533,6 +533,7 @@
         "NexusPipeline.Tests.Updates.ApplicationBuildIdentityTests.RecordProjectionCannotOverrideItsFrozenInputs",
         "NexusPipeline.Tests.Updates.ApplicationBuildIdentityTests.ReorderedKeysAndPrintableEscapesKeepCanonicalMeaning",
         "NexusPipeline.Tests.Updates.ApplicationBuildIdentityTests.SharedVectorProducesTheSameCanonicalBytesAndIdentity",
+        "NexusPipeline.Tests.Updates.InstallationGenerationTests.AbandonedRegistrationReleasesOnlyEmptyUninstalledRootsAndPreservesTheAnchor",
         "NexusPipeline.Tests.Updates.InstallationGenerationTests.GenerationIsSharedAndOverlappingOldRootsStayUntouched",
         "NexusPipeline.Tests.Updates.InstallationGenerationTests.RegisterAndUninstallUseOnlyOwnedGenerationMetadata",
         "NexusPipeline.Tests.Updates.UpdatePolicyTests.BreakingVersions_RequireSeparateBarriersAndPreserveOrdinaryUpdates",
