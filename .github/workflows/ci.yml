@@ -5,207 +5,72 @@ on:
     types: [opened, synchronize, reopened, ready_for_review, edited]
 permissions:
   contents: read
-  actions: read
 concurrency:
-  group: host-ci-${{ github.event.pull_request.number }}
+  group: Host-ci-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 jobs:
-  scope:
-    name: Host / 范围判定
-    runs-on: ubuntu-latest
-    outputs:
-      matrix: ${{ steps.plan.outputs.matrix }}
-      count: ${{ steps.plan.outputs.count }}
-      control: ${{ steps.plan.outputs.control }}
-      partnerSha: ${{ steps.plan.outputs.partnerSha }}
+  production-check:
+    name: Host / 构建检查
+    runs-on: windows-2025
+    timeout-minutes: 10
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
     steps:
       - name: 检出完整源码与基线
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          path: Host
+          path: Source
           fetch-depth: 0
           persist-credentials: false
-      - name: 准备 Node 工具链
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
-        with:
-          node-version: "24"
-      - name: 准备配对输入工具链
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+      - name: 准备 Python 工具链
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: "3.13"
-      - name: 选择受影响门禁
+      - name: 固定生产检查范围
         id: plan
-        working-directory: Host
+        working-directory: Source
+        shell: pwsh
         env:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          SCOPE_RESULT: ${{ runner.temp }}/scope.json
-          GITHUB_TOKEN: ${{ github.token }}
-        run: node tests/ci-scope.mjs
-      - name: 保存范围计划
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        with:
-          name: scope-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/scope.json
-          if-no-files-found: error
-          retention-days: 7
-  control:
-    name: Host / 控制检查
-    needs: scope
-    if: needs.scope.outputs.control == 'true'
-    runs-on: ubuntu-latest
-    env:
-      NEXUS_TEST_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}-control
-    steps:
-      - name: 记录任务计时起点
-        run: echo "NEXUS_TEST_JOB_STARTED_AT_MS=$(date +%s%3N)" >> "$GITHUB_ENV"
-      - name: 检出完整源码与基线
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          path: Host
-          fetch-depth: 0
-          persist-credentials: false
-      - name: 检出固定插件源码
-        if: needs.scope.outputs.partnerSha != ''
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        run: |
+          python tools/ci_check.py plan --base $env:PR_BASE_SHA --head $env:PR_HEAD_SHA --checkout $env:GITHUB_SHA --report "$env:RUNNER_TEMP/production-plan.json"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: 检出固定对端生产输入
+        if: steps.plan.outputs.partnerRequired == 'true'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           repository: FlappiBakuse/NexusPipeline-Plugins
-          ref: ${{ needs.scope.outputs.partnerSha }}
-          path: Plugins
+          ref: ${{ steps.plan.outputs.partnerSha }}
+          path: Partner
           persist-credentials: false
       - name: 准备 Node 工具链
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        if: steps.plan.outputs.nodeRequired == 'true'
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: "24"
-      - name: 准备 Python 工具链
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
-        with:
-          python-version: "3.13"
-      - name: 下载范围计划
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          name: scope-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/scope
-      - name: 执行选中控制检查
-        working-directory: Host
-        env:
-          NEXUS_PARTNER_ROOT: ${{ needs.scope.outputs.partnerSha != '' && format('{0}/Plugins', github.workspace) || '' }}
-        run: node tests/run.mjs batch --plan '${{ runner.temp }}/scope/scope.json' --batch control
-      - name: 保存原生报告与清理证据
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
-        with:
-          name: host-${{ github.run_id }}-${{ github.run_attempt }}-control
-          include-hidden-files: true
-          path: |
-            ${{ runner.temp }}/NexusPipeline.Tests/runs/${{ env.NEXUS_TEST_RUN_ID }}/batch-report.json
-            ${{ runner.temp }}/NexusPipeline.Tests/runs/${{ env.NEXUS_TEST_RUN_ID }}/commands.log
-            ${{ runner.temp }}/NexusPipeline.Tests/runs/${{ env.NEXUS_TEST_RUN_ID }}/evidence/
-          if-no-files-found: error
-          retention-days: 7
-  batches:
-    name: ${{ matrix.name || 'Host / 验证批次（未选中）' }}
-    needs: scope
-    if: needs.scope.outputs.count != '0'
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.scope.outputs.matrix) }}
-    runs-on: windows-2025
-    env:
-      NEXUS_TEST_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.id }}
-    steps:
-      - name: 记录任务计时起点
-        shell: pwsh
-        run: '"NEXUS_TEST_JOB_STARTED_AT_MS=$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())" >> $env:GITHUB_ENV'
-      - name: 检出完整源码与基线
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          path: Host
-          fetch-depth: 0
-          persist-credentials: false
-      - name: 检出固定插件源码
-        if: matrix.partnerRequired
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          repository: FlappiBakuse/NexusPipeline-Plugins
-          ref: ${{ needs.scope.outputs.partnerSha }}
-          path: Plugins
-          persist-credentials: false
-      - name: 准备 Node 工具链
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
-        with:
-          node-version: "24"
-      - name: 准备 Python 工具链
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
-        with:
-          python-version: "3.13"
       - name: 准备 .NET 工具链
-        if: matrix.dotnetRequired
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
+        if: steps.plan.outputs.dotnetRequired == 'true'
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
         with:
-          global-json-file: Host/global.json
-      - name: 下载范围计划
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          name: scope-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/scope
-      - name: 执行选中验证批次
-        working-directory: Host
+          global-json-file: Source/global.json
+      - name: 执行生产检查
+        working-directory: Source
         shell: pwsh
         run: |
-          $arguments = @('tests/run.mjs', 'batch', '--plan', "$env:RUNNER_TEMP/scope/scope.json", '--batch', '${{ matrix.id }}')
-          if ('${{ matrix.partnerRequired }}' -eq 'true') { $arguments += @('--partner-root', "$env:GITHUB_WORKSPACE/Plugins") }
-          node @arguments
-      - name: 保存原生报告与清理证据
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+          $arguments = @('tools/ci_check.py', 'run', '--plan', "$env:RUNNER_TEMP/production-plan.json", '--output', "$env:RUNNER_TEMP/production-check")
+          if ('${{ steps.plan.outputs.partnerRequired }}' -eq 'true') { $arguments += @('--plugins-root', "$env:GITHUB_WORKSPACE/Partner") }
+          python @arguments
+          exit $LASTEXITCODE
+      - name: 保存范围和生产检查证据
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: host-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.id }}
-          include-hidden-files: true
+          name: production-check-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
-            ${{ runner.temp }}/NexusPipeline.Tests/runs/${{ env.NEXUS_TEST_RUN_ID }}/batch-report.json
-            ${{ runner.temp }}/NexusPipeline.Tests/runs/${{ env.NEXUS_TEST_RUN_ID }}/commands.log
-            ${{ runner.temp }}/NexusPipeline.Tests/runs/${{ env.NEXUS_TEST_RUN_ID }}/evidence/
+            ${{ runner.temp }}/production-plan.json
+            ${{ runner.temp }}/production-check/report.json
+            ${{ runner.temp }}/production-check/*.json
+            ${{ runner.temp }}/production-check/*.log
           if-no-files-found: error
           retention-days: 7
-  required:
-    name: Host / 必需汇总
-    needs: [scope, control, batches]
-    if: always()
-    runs-on: ubuntu-latest
-    steps:
-      - name: 记录任务计时起点
-        run: echo "NEXUS_TEST_JOB_STARTED_AT_MS=$(date +%s%3N)" >> "$GITHUB_ENV"
-      - name: 检出完整源码与基线
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          path: Host
-          fetch-depth: 0
-          persist-credentials: false
-      - name: 检出固定插件源码
-        if: needs.scope.outputs.partnerSha != ''
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          repository: FlappiBakuse/NexusPipeline-Plugins
-          ref: ${{ needs.scope.outputs.partnerSha }}
-          path: Plugins
-          persist-credentials: false
-      - name: 准备 Node 工具链
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
-        with:
-          node-version: "24"
-      - name: 下载本次全部验证报告
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
-        with:
-          path: ${{ runner.temp }}/reports
-      - name: 核验门禁报告与完整任务记录
-        working-directory: Host
-        env:
-          GH_TOKEN: ${{ github.token }}
-          CI_NEEDS: ${{ toJSON(needs) }}
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          NEXUS_PARTNER_ROOT: ${{ needs.scope.outputs.partnerSha != '' && format('{0}/Plugins', github.workspace) || '' }}
-        run: python tests/gate-required.py . '${{ runner.temp }}/reports'

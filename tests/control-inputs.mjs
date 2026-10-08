@@ -4,7 +4,7 @@ import {execFileSync} from "node:child_process";
 import {createHash} from "node:crypto";
 const hash=bytes=>createHash("sha256").update(bytes).digest("hex");
 export function controlManifest(root) {
-  const files=[".github/workflows/ci.yml",".github/workflows/final-budget.yml"];
+  const files=[".github/workflows/ci.yml"];
   const visit=(directory,recursive)=>{
     for(const entry of fs.readdirSync(path.join(root,directory),{withFileTypes:true})) {
       if(entry.isSymbolicLink()) throw new Error("Linked control input");

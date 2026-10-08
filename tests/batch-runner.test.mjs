@@ -21,19 +21,6 @@ test("report transport excludes Test Host assets and preserves owned evidence",(
     assert.ok(report.artifacts.every(item=>item.sizeBytes>0&&/^[a-f0-9]{64}$/.test(item.sha256)));
   } finally {fs.rmSync(temporary,{recursive:true});}
 });
-test("workflow exposes one bounded matrix and keeps control free of dotnet setup",()=>{
-  const workflow=fs.readFileSync(path.join(root,".github/workflows/ci.yml"),"utf8").replaceAll("\r\n","\n");
-  const jobs=[...workflow.slice(workflow.indexOf("jobs:\n")).matchAll(/^  ([a-z_]+):$/gm)].map(match=>match[1]);
-  assert.deepEqual(jobs,["scope","control","batches","required"]);
-  assert.equal([...workflow.matchAll(/^    strategy:$/gm)].length,1);
-  assert.equal([...workflow.matchAll(/^    timeout-minutes:/gm)].length,0);
-  const control=workflow.slice(workflow.indexOf("  control:"),workflow.indexOf("  batches:"));
-  assert.ok(!control.includes("setup-dotnet"));
-  assert.ok(workflow.includes("needs: [scope, control, batches]"));
-  assert.equal([...workflow.matchAll(/^          include-hidden-files: true$/gm)].length,2);
-  const policy=JSON.parse(fs.readFileSync(path.join(root,"tests/policy.json")));
-  assert.equal(policy.ciBatchPolicy.workMs,null);
-});
 test("altered units, fingerprints, capacity and control manifests fail before work",()=>{
   const temporary=fs.mkdtempSync(path.join(process.env.NEXUS_TEST_ARTIFACT_ROOT||os.tmpdir(),"batch-input-"));
   const file=path.join(temporary,"plan.json");

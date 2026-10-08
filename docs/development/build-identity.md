@@ -2,6 +2,8 @@
 
 Host 与桌面载荷使用一份冻结输入身份。`tools/build_identity.py` 负责生成和验证规范记录，`src/Modules/Updates/ApplicationBuildIdentity.cs` 负责 C# 读取和重新计算。结构定义为仓内的 `tools/schemas/build-inputs.schema.json` 与 `desktop-build.schema.json`，读取器还须检查跨字段一致性。
 
+`application_build.prepare_compilation` 生成真实嵌入前端和冻结编译身份，供生产 PR 编译使用。未装配 Electron 时，运行时字段记录声明的精确锁定要求，不能作为实际运行时字节已验证的证据。完整发行继续使用 `prepare`，核对实际 Electron archive SHA256 后构建桌面；两条入口复用同一身份规范。
+
 `buildInputs` 固定 Host source/tree、Plugins source、构建控制器 SHA、两个 npm lock 的字节摘要、Electron 精确版本和原始下载包摘要，以及实际工具链。安装代际为 `g0170`，RID 为 `win-x64`，bootstrap 协议为整数 1。版本使用受限 Nexus 格式；字段集合必须精确匹配 schema。
 
 产品版本以 `src/NexusPipeline.csproj` 的 `Version` 为真源。桌面 package 与 lock 的根版本必须与之相同，冲突在创建输出或下载前拒绝。同代补丁使用各自的实际版本，安装代际继续保持 `g0170`。
