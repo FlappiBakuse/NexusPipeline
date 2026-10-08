@@ -48,7 +48,7 @@ async function confirmRestart() {
   <section
     v-if="shell.restartRequired"
     id="service-restart-notice"
-    class="dashboard-system-note service-restart-notice"
+    class="callout callout-warning callout-actions"
     role="status"
     aria-live="polite"
     data-testid="service-restart-notice"
@@ -77,7 +77,3 @@ async function confirmRestart() {
     @close="confirmationOpen = false"
   />
 </template>
-
-<style>
-.dashboard-system-note.service-restart-notice { padding: var(--space-4); border: 1px solid var(--content-card-border); border-radius: var(--radius-lg); background: var(--content-card); }
-</style>

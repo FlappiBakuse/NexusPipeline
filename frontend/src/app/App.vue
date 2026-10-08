@@ -42,6 +42,7 @@ const segments = computed(() => {
   const path = String(route.path || "/dashboard").replace(/^\/+|\/+$/g, "");
   return (path || "dashboard").split("/").filter(Boolean);
 });
+const fillPage = computed(() => ["history", "plugins"].includes(segments.value[0]));
 const navigation = [
   ["dashboard", "dashboard", "shell.dashboard"],
   ["dispatch", "dispatch", "shell.dispatch"],
@@ -182,10 +183,10 @@ function openNav() {
     <div class="nav-backdrop" @click.capture="closeNav"><button type="button" :aria-label="t('shell.close_navigation')" data-i18n-aria-label="shell.close_navigation" @pointerdown="closeNav" @click.stop="closeNav"></button></div>
     <div class="page-shell">
       <header class="topbar"><NxpIconButton class="menu-button" :label="t('shell.open_navigation')" data-i18n-aria-label="shell.open_navigation" :expanded="shell.navOpen" aria-controls="sidebar" @click="openNav"><NxpIcon name="menu" /></NxpIconButton><div class="topbar-context"><span class="topbar-product" data-i18n="shell.product"></span><span id="topbar-title" class="sr-only" data-i18n="shell.dashboard"></span></div><div class="topbar-actions"><NxpIconButton :label="t('shell.theme_toggle')" data-i18n-aria-label="shell.theme_toggle" @click="cycleTheme"><span id="theme-icon" data-theme-icon aria-hidden="true"><NxpIcon name="theme" /></span></NxpIconButton></div></header>
-      <NxpScrollArea class="page-main-scroll" :aria-label="t('shell.main_content')">
+      <NxpScrollArea class="page-main-scroll" :class="{ 'page-main-scroll-fill': fillPage }" :aria-label="t('shell.main_content')">
         <p v-if="preferencesUnavailable" class="desktop-preferences-warning" role="status">{{ t('shell.desktop.preferences_unavailable') }}</p>
         <RouterView v-if="shell.booted" v-slot="{ Component, route: viewRoute }">
-          <div :key="viewRoute.fullPath" class="app-page">
+          <div :key="viewRoute.fullPath" class="app-page" :class="{ 'app-page-fill': fillPage }">
             <component :is="Component" />
           </div>
         </RouterView>

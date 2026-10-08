@@ -4,7 +4,6 @@
   --radius-md: 10px;
   --radius-lg: 16px;
   --content-max: 1520px;
-  --nx-browser-panel-height: clamp(520px, calc(100dvh - 220px), 760px);
 }
 body { font-size: 14px; line-height: 1.55; }
 .sidebar { padding: 18px 12px 14px; gap: 0; }
@@ -34,6 +33,15 @@ body { font-size: 14px; line-height: 1.55; }
 .desktop-titlebar { padding-left: max(18px, env(titlebar-area-x, 0px)); padding-right: max(150px, calc(100% - env(titlebar-area-width, 100%))); }
 .desktop-shell .sidebar { top: 40px; }
 .desktop-shell .page-shell { height: calc(100dvh - 40px); }
+.page-main-scroll-fill > .nxp-scroll-viewport { display: flex; flex-direction: column; overflow: hidden; }
+.app-page-fill { display: flex; flex: 1 1 0; min-height: 0; flex-direction: column; }
+.app-page-fill > #view { display: flex; flex: 1 1 0; min-height: 0; flex-direction: column; }
+.app-page-fill .nxp-page-header { flex: 0 0 auto; }
+@media (max-height: 480px) {
+  .page-main-scroll-fill > .nxp-scroll-viewport { overflow: auto; }
+  .app-page-fill { flex: 0 0 auto; }
+  .app-page-fill :is(.plugin-browser, .history-browser) { flex: 0 0 auto; min-height: 320px; }
+}
 
 .desktop-preferences-warning { margin: 12px 20px; padding: 12px; border: 1px solid var(--warn); border-radius: 10px; color: var(--warn); }
 @media (max-width: 767px) {
