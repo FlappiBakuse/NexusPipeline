@@ -14,7 +14,7 @@
 | 参与者或阶段 | 提交路径 |
 |---|---|
 | 外部贡献者 | fork 或工作分支 → Pull Request |
-| 项目维护者 | 本地 `develop` → Pull Request；`Host / 必需汇总` 与 `Host / 完整预算` 成功后 squash 合入 `main`，禁止普通直推或 force push |
+| 项目维护者 | 本地 `develop` → Pull Request；`Host / 构建检查` 成功后 squash 合入 `main`，禁止普通直推或 force push |
 
 如需开分支，使用 `feat/`、`fix/`、`docs/`、`refactor/`、`test/` 或 `chore/` 前缀。Release 分类遵循[发布专题](release.md)的宿主项目发布策略。
 

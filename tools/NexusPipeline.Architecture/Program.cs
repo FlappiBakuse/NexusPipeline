@@ -13,17 +13,29 @@ internal static class Program
 
     private static async Task<int> Main(string[] args)
     {
+        var modes = new[] { "production", "test-host" };
+        var modeIndex = Array.IndexOf(args, "--mode");
+        if (modeIndex >= 0)
+        {
+            if (modeIndex != args.Length - 2 || args[modeIndex + 1] is not ("production" or "both"))
+            {
+                Console.Error.WriteLine("Invalid architecture mode: use production or both");
+                return 2;
+            }
+            if (args[modeIndex + 1] == "production") modes = ["production"];
+            args = args[..modeIndex];
+        }
         if (args.Length is not (3 or 7) || args[1] != "--report"
             || args.Length == 7 && (args[3] != "--frontend-props" || args[5] != "--build-identity"))
         {
-            Console.Error.WriteLine("Usage: NexusPipeline.Architecture <Host root> --report <external JSON path> [--frontend-props <frozen props> --build-identity <frozen identity>]");
+            Console.Error.WriteLine("Usage: NexusPipeline.Architecture <Host root> --report <external JSON path> [--frontend-props <frozen props> --build-identity <frozen identity>] [--mode production|both]");
             return 2;
         }
         var root = Path.GetFullPath(args[0]);
         var report = Path.GetFullPath(args[2]);
         MSBuildLocator.RegisterDefaults();
         var violations = new List<Violation>();
-        foreach (var mode in new[] { "production", "test-host" })
+        foreach (var mode in modes)
         {
             var properties = new Dictionary<string, string>
             {
@@ -93,7 +105,7 @@ internal static class Program
         {
             schemaVersion = 1, status = distinct.Length == 0 ? "PASS" : "FAIL",
             checkedRules = new[] { "A01", "A02", "A03", "A04" },
-            modes = new[] { "production", "test-host" }, violations = distinct,
+            modes, violations = distinct,
         }, new JsonSerializerOptions { WriteIndented = true }));
         foreach (var violation in distinct.Take(50))
             Console.Error.WriteLine($"{violation.RuleId} {violation.Mode} {violation.File}:{violation.Line} {violation.Target}");

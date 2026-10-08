@@ -22,7 +22,7 @@ except ImportError:
 def command(*args: str) -> str:return subprocess.check_output(args,text=True,encoding='utf-8').strip()
 def sha(file: Path) -> str:
     with file.open('rb') as stream:return hashlib.file_digest(stream,'sha256').hexdigest()
-def prepare(root: Path,output: Path,*,source_sha: str,source_tree_sha: str,partner_sha: str,workflow_sha: str,electron_archive: Path|None=None) -> dict:
+def prepare_compilation(root: Path,output: Path,*,source_sha: str,source_tree_sha: str,partner_sha: str,workflow_sha: str) -> dict:
     try:
         from .host_release import project_version, normalized_tag
     except ImportError:
@@ -38,9 +38,6 @@ def prepare(root: Path,output: Path,*,source_sha: str,source_tree_sha: str,partn
     if output.exists():raise ValueError('Application inputs output already exists')
     output.mkdir(parents=True)
     runtime=json.loads((root/'desktop'/'electron-runtime.json').read_text(encoding='utf-8'))
-    if electron_archive is None:
-        electron_archive=output/runtime['archive'];urllib.request.urlretrieve(runtime['url'],electron_archive)
-    if sha(electron_archive)!=runtime['archiveSha256']:raise ValueError('Electron archive digest mismatch')
     index=generate(root/'frontend'/'dist',output/'frontend')
     npm='npm.cmd' if os.name=='nt' else 'npm'
     toolchain={'dotnetSdkVersion':command('dotnet','--version'),'dotnetRuntimeVersion':'10.0.12','nodeVersion':command('node','--version').removeprefix('v'),
@@ -49,12 +46,20 @@ def prepare(root: Path,output: Path,*,source_sha: str,source_tree_sha: str,partn
     if 'Microsoft.NETCore.App 10.0.12 ' not in command('dotnet','--list-runtimes'):raise ValueError('Required .NET runtime is missing')
     inputs={'schemaVersion':2,'productVersion':version,'generation':'g0170','rid':'win-x64','sourceSha':source_sha,'sourceTreeSha':source_tree_sha,'partnerSha':partner_sha,'workflowSha':workflow_sha,
         'frontendHash':index['frontendHash'],'frontendPackageLockSha256':sha(root/'frontend'/'package-lock.json'),'desktopPackageLockSha256':sha(root/'desktop'/'package-lock.json'),
-        'electronVersion':runtime['version'],'electronArchiveSha256':sha(electron_archive),'bootstrapProtocolVersion':1,'toolchain':toolchain,**profile}
+        'electronVersion':runtime['version'],'electronArchiveSha256':runtime['archiveSha256'],'bootstrapProtocolVersion':1,'toolchain':toolchain,**profile}
     record=create_record(inputs)
     identity=output/'desktop-build.json';identity.write_bytes(canonical_json(record))
     (output/'build-inputs.json').write_bytes(canonical_json(inputs))
-    desktop=build_desktop(root,output/'desktop',identity,electron_archive)
-    return {'identity':str(identity),'frontendProps':str(output/'frontend'/'embedded-frontend.props'),'desktopBundle':desktop['bundle'],'buildId':record['buildId']}
+    return {'identity':str(identity),'frontendProps':str(output/'frontend'/'embedded-frontend.props'),'buildId':record['buildId']}
+
+def prepare(root: Path,output: Path,*,source_sha: str,source_tree_sha: str,partner_sha: str,workflow_sha: str,electron_archive: Path|None=None) -> dict:
+    result=prepare_compilation(root,output,source_sha=source_sha,source_tree_sha=source_tree_sha,partner_sha=partner_sha,workflow_sha=workflow_sha)
+    runtime=json.loads((root/'desktop'/'electron-runtime.json').read_text(encoding='utf-8'))
+    if electron_archive is None:
+        electron_archive=output/runtime['archive'];urllib.request.urlretrieve(runtime['url'],electron_archive)
+    if sha(electron_archive)!=runtime['archiveSha256']:raise ValueError('Electron archive digest mismatch')
+    desktop=build_desktop(root,output/'desktop',Path(result['identity']),electron_archive)
+    return {**result,'desktopBundle':desktop['bundle']}
 
 def main():
     parser=argparse.ArgumentParser(allow_abbrev=False)
