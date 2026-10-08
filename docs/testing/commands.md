@@ -109,3 +109,5 @@ python -m unittest discover -s tools/tests -p test_pe_manifest.py
 ## 本机批次诊断
 
 `plan`、`batch` 和 `gate` 保留为本机按需入口，报告核对实际输入、原生结果、计数、场景和清理。它们不参与 GitHub PR 检查，也不提供远端合并资格。源码配对和服务端作业审计工具仅用于显式诊断。
+
+本机验收软件从双仓未提交源码使用 [local-acceptance](../development/local-acceptance.md) 构建。实际旧 Setup 升级、卸载日志迁移、元数据回滚与进程中断应使用独立 Windows 用户或可恢复虚拟机。功能 Test Host 的 asInvoker 结果不代替正式 Setup 或生产 manifest 的证据。

@@ -1089,6 +1089,30 @@
         "desktop-client"
       ],
       "status": "current"
+    },
+    {
+      "id": "development.local-acceptance",
+      "path": "development/local-acceptance.md",
+      "summary": "冻结双仓未提交源，构建本机验收 Host、桌面、Setup 和全部插件",
+      "topics": [
+        "本机验收",
+        "冻结源",
+        "未提交构建"
+      ],
+      "aliases": [],
+      "codePaths": [
+        "tools/local_acceptance.py",
+        "tools/host_installer.py",
+        "tools/installer-space.iss",
+        "tools/installer_artwork.py"
+      ],
+      "testDomains": [
+        "governanceDomains.docs-links-contracts"
+      ],
+      "authorityFor": [
+        "local-acceptance-build"
+      ],
+      "status": "current"
     }
   ]
 }
