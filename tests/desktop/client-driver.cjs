@@ -1,4 +1,5 @@
-const {app,dialog,clipboard}=require('electron');
+const {app,dialog,clipboard,ipcMain}=require('electron');
+const {PageCommands}=require('./main/page-commands.js');
 const fs=require('node:fs');
 const path=require('node:path');
 const output=process.env.NEXUS_DESKTOP_TEST_REPORT;
@@ -71,6 +72,31 @@ app.on('browser-window-created',(_event,window)=>{
         }
       }
       const security=window.webContents.getLastWebPreferences();
+      progress('typed-page-reload');
+      const reloadTrace=[];
+      let reloadResult;
+      const pageCommands=new PageCommands(()=>window,()=>true,(_id,result)=>{reloadResult=result;reloadTrace.push({event:'result',result});});
+      pageCommands.attach(window);
+      const navigation=(_event,url,inPlace,main)=>{reloadTrace.push({event:'navigation',url,inPlace,main});};
+      const acknowledgment=(event,value)=>{
+        if(event.sender!==window.webContents||event.senderFrame!==window.webContents.mainFrame)return;
+        reloadTrace.push({event:'acknowledgment',value});
+        pageCommands.result(event,value);
+      };
+      window.webContents.on('did-start-navigation',navigation);
+      ipcMain.on('desktop.page-command-result',acknowledgment);
+      const reloadIdentity=await window.webContents.executeJavaScript(`fetch('/api/status?view=identity').then(value=>value.json())`);
+      pageCommands.request({kind:'reload',requestId:'00000000000000000000000000000001',leaseId:'',expiresAt:Date.now()+10000});
+      const reloadDeadline=Date.now()+11000;
+      while(!reloadResult&&Date.now()<reloadDeadline)await new Promise(resolve=>setTimeout(resolve,50));
+      ipcMain.removeListener('desktop.page-command-result',acknowledgment);
+      window.webContents.removeListener('did-start-navigation',navigation);
+      pageCommands.invalidate();
+      fs.writeFileSync(path.join(path.dirname(output),'page-reload-trace.json'),JSON.stringify({result:reloadResult,trace:reloadTrace}));
+      if(reloadResult!=='reloading')throw new Error('Typed page reload failed: '+reloadResult);
+      await waitClient(window,`location.hash==='#/settings'&&!!document.getElementById('st-retention')`);
+      const reloadAfter=await window.webContents.executeJavaScript(`fetch('/api/status?view=identity').then(value=>value.json())`);
+      if(reloadAfter.instanceId!==reloadIdentity.instanceId)throw new Error('Page reload restarted Host');
       if(!security.sandbox||!security.contextIsolation||security.nodeIntegration)throw new Error('Renderer isolation failed');
       await window.webContents.executeJavaScript(`window.nexusDesktop.writeClipboardText('owned-desktop-copy')`);
       const invalidClipboard=await window.webContents.executeJavaScript(`Promise.all([null,42,'x'.repeat(65537),'界'.repeat(21846)].map(value=>window.nexusDesktop.writeClipboardText(value).then(()=>false,()=>true)))`);

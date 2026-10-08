@@ -8,6 +8,7 @@ import {Supervisor} from "./supervisor";
 import {WindowManager} from "./window-manager";
 import {ConnectionCandidate,ConnectionState} from "../shared/contracts";
 import {runtimeLocale} from "../shared/runtime-locale";
+import {PageCommands} from './page-commands';
 app.commandLine.appendSwitch('lang', runtimeLocale(app.getPreferredSystemLanguages()[0] ?? ''));
 protocol.registerSchemesAsPrivileged([{scheme:'nxp-desktop',privileges:{standard:true,secure:true,supportFetchAPI:true}}]);
 async function start() {
@@ -41,6 +42,8 @@ async function start() {
     const state=manager.state();void supervisor.send('window.state',{state:state.minimized?'minimized':state.visible?'visible':'hidden',route:currentRoute()}).catch(()=>{});
   });
   manager.applyTheme(preferences.get().theme);
+  const pageCommands=new PageCommands(()=>manager.window,()=>connection==='ready',
+    (requestId,result)=>{void supervisor.send('page.command-result',{requestId,result}).catch(()=>{});});
   const applyNativeTheme=()=>manager.applyTheme(preferences.get().theme);
   nativeTheme.on('updated',applyNativeTheme);
   function currentRoute() {try {const hash=new URL(manager.window?.webContents.getURL()??'http://localhost').hash;return /^#\/[a-zA-Z0-9_/-]{0,256}$/.test(hash)?hash:'#/dashboard';}catch{return '#/dashboard';}}
@@ -59,6 +62,7 @@ async function start() {
   }
   function businessWindow() {
     const existing=manager.window;const window=manager.create();if(existing===window)return window;
+    pageCommands.attach(window);
     window.webContents.on('will-navigate',(event,url)=>{try{if(new URL(url).origin!==origin)event.preventDefault();}catch{event.preventDefault();}});
     window.webContents.on('will-redirect',(event,url)=>{try{if(new URL(url).origin!==origin)event.preventDefault();}catch{event.preventDefault();}});
     window.webContents.on('did-start-navigation',(_event,_url,_inPlace,isMainFrame)=>{if(isMainFrame){navigationGeneration++;invalidate();}});
@@ -114,6 +118,8 @@ async function start() {
     else if(channel==='desktop.connection-state')event.sender.send(channel,connection);
     else if(channel==='desktop.window-state-changed')event.sender.send(channel,manager.state());
   });
+  ipcMain.on('desktop.page-command-result',(event,value)=>{if(authorized(event))pageCommands.result(event,value);});
+  supervisor.on('page-command',command=>pageCommands.request(command));
   supervisor.on('state',async (host: HostState)=>{
     if(host.state!=='ready'){state(host.state==='restarting'?'restarting':'connecting');return;}
     if(!await verifyHttp(host,build)){state('disconnected');return;}
@@ -130,8 +136,9 @@ async function start() {
   });
   supervisor.on('restart',(handoff: unknown)=>{if(typeof handoff==='string'&&/^[0-9a-f]{32}$/.test(handoff)){expectedHandoff=handoff;invalidate();state('restarting');}});
   supervisor.on('show',()=>{businessWindow();void manager.show().then(result=>supervisor.send('window.show-result',{result})).catch(()=>{});});
-  supervisor.on('disconnected',()=>{invalidate();state('disconnected');});
+  supervisor.on('disconnected',()=>{pageCommands.invalidate();invalidate();state('disconnected');});
   supervisor.on('stop',async notice=>{
+    if(notice.reason==='lightweight'&&!pageCommands.canStop(notice.transactionId))return;
     invalidate();state('stopping');
     if(notice.reason==='update'&&typeof notice.transactionId==='string'&&Number.isFinite(notice.remainingMs)) {
       manager.window?.webContents.send('desktop.shutdown-notice',{reason:'asset-update',transactionId:notice.transactionId,remainingMs:Math.max(0,notice.remainingMs),unsavedInputsWillBeSaved:false});

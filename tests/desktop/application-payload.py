@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import shutil
 import sys
+import xml.etree.ElementTree as ET
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from tools.application_reader import read
@@ -21,13 +22,16 @@ def main():
     shutil.copytree(args.application, root)
     manifest = root / 'resources/payload-manifest.json'
     original = manifest.read_bytes()
+    version = ET.parse(Path(__file__).resolve().parents[2] / 'src/NexusPipeline.csproj').getroot().findtext('PropertyGroup/Version')
+    if not version:
+        raise ValueError('Application test source version missing')
     cases = []
 
     def reject(case_id, mutate):
         restore = mutate()
         try:
             try:
-                read(root, '0.17.0')
+                read(root, version)
             except ValueError as error:
                 cases.append({'id': case_id, 'status': 'PASS', 'rejection': str(error)})
             else:
@@ -52,7 +56,7 @@ def main():
         manifest.write_text(json.dumps(value), encoding='utf-8')
         return lambda: file.write_bytes(saved)
 
-    baseline = read(root, '0.17.0')
+    baseline = read(root, version)
     cases.append({'id': 'real-application-identity', 'status': 'PASS'})
     reject('unknown-manifest-field', lambda: alter_manifest(lambda value: value.update(untrusted=True)))
     reject('negative-file-size', lambda: alter_manifest(lambda value: value['files'][0].update(sizeBytes=-1)))
@@ -70,7 +74,7 @@ def main():
         unknown.write_bytes(b'unknown')
         return unknown.unlink
     reject('unknown-application-resource', add_unknown)
-    if read(root, '0.17.0') != baseline:
+    if read(root, version) != baseline:
         raise AssertionError('Readonly tests changed the frozen application')
     report = {'schemaVersion': 1, 'status': 'PASS', 'classification': 'LOCAL_DIAGNOSTIC',
               'counts': {'testsRun': len(cases), 'failures': 0, 'skipped': 0}, 'caseIds': [case['id'] for case in cases],

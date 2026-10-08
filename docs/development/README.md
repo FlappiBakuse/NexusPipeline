@@ -12,3 +12,5 @@
 | 构建身份 | 冻结输入、规范 JSON、Host/桌面身份记录与跨语言校验 | [build-identity.md](build-identity.md) |
 
 开始一次修改时，同时核对[架构索引](../architecture/README.md)、[插件 API 索引](../reference/plugin-api/README.md)和适用的测试域；版本历史与当前状态分别见[历史索引](../history/README.md)和 [STATUS.md](../STATUS.md)。
+
+未提交源码的本机验收入口见 [local-acceptance.md](local-acceptance.md)。它冻结双仓实际字节并构建完整软件，记录独立源树和产物哈希；正式候选仍要求 clean source 与 Actions 来源资格。

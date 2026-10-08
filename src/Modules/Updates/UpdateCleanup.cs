@@ -47,7 +47,7 @@ internal static class UpdateCleanup
         backupInventory.RequireOwned(backup);
         RequireContainer(stagingParent, [task.StagedDir]);
         RequireContainer(Path.GetDirectoryName(backup)!, [backup]);
-        RequireContainer(update, [journal, stagingParent, Path.Combine(root, package), Path.Combine(root, checksum)]);
+        RequireContainer(update, [journal, stagingParent, UpdateInventory.Resolve(root, package), UpdateInventory.Resolve(root, checksum)]);
         string? worker = task.WorkerIdentity?.ImageName;
         if (worker is not null)
         {

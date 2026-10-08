@@ -11,15 +11,17 @@ const props = defineProps<{
   settings: Settings;
   expanded: boolean;
   token: string;
-  tokenVisible: boolean;
+  tokenBusy: boolean;
+  tokenError: string;
   remoteAddresses: { internalAddress: string | null; publicAddress: string | null; port: number };
   saveWithRestart: () => void;
   onRemoteChange: (value: boolean) => void;
   onMcpChange: (value: boolean) => void;
   generateToken: () => void;
-  copyToken: () => void;
+  clearToken: () => void;
+  readToken: () => void;
 }>();
-const emit = defineEmits<{ toggle: []; "update:token": [value: string]; "update:tokenVisible": [value: boolean] }>();
+const emit = defineEmits<{ toggle: []; "update:token": [value: string] }>();
 </script>
 
 <template>
@@ -51,27 +53,24 @@ const emit = defineEmits<{ toggle: []; "update:token": [value: string]; "update:
             <NxpTextInput
               id="st-token"
               :model-value="props.token"
-              :type="props.tokenVisible ? 'text' : 'password'"
+              type="password"
+              show-password-toggle
+              :show-password-label="t('common.show')"
+              :hide-password-label="t('settings.hide')"
+              :disabled="props.tokenBusy"
               :aria-label="t('settings.access_token')"
               autocomplete="new-password"
               :placeholder="t('common.leave_blank_to_keep')"
               @update:model-value="emit('update:token', $event)"
             />
           </div>
-          <NxpButton
-            class="ghost"
-            type="button"
-            data-testid="toggle-token-visibility"
-            :aria-pressed="props.tokenVisible"
-            @click="emit('update:tokenVisible', !props.tokenVisible)"
-          >
-            {{ props.tokenVisible ? t("settings.hide") : t("common.show") }}
-          </NxpButton>
-          <NxpButton class="ghost" type="button" @click="props.copyToken">{{ t("settings.copy") }}</NxpButton>
-          <NxpButton class="ghost" type="button" data-testid="gen-token" @click="props.generateToken">
+          <NxpButton class="ghost" type="button" data-testid="gen-token" :disabled="props.tokenBusy" @click="props.generateToken">
             {{ t("settings.generate_token") }}
           </NxpButton>
+          <NxpButton type="button" tone="danger" :disabled="props.tokenBusy" @click="props.clearToken">{{ t('settings.remote_access.clear_token') }}</NxpButton>
         </div>
+        <p v-if="props.tokenError" class="callout callout-warning" role="alert">{{ props.tokenError }}</p>
+        <NxpButton v-if="props.tokenError" type="button" @click="props.readToken">{{ t('settings.remote_access.read_retry') }}</NxpButton>
         <div
           id="remote-lan-list"
           class="detail"

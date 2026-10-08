@@ -64,7 +64,7 @@ internal sealed class SettingsCommands
                         }
                         if (field.Equals("lightweightMode", StringComparison.OrdinalIgnoreCase))
                         {
-                            bindError = "轻量模式只能在配置文件中设置，并在重启后生效";
+                            bindError = "轻量模式只能通过托盘菜单切换";
                             break;
                         }
                         if (RetiredDingTalkFields.Contains(field))

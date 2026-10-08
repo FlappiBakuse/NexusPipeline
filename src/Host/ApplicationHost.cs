@@ -76,7 +76,7 @@ internal static class ApplicationHost
         CliOutput.Configure(args);
 #if NEXUS_INSTALLER_METADATA_HELPER
         if (args.Length >= 2 && args[0] == "installer-state"
-            && args[1].StartsWith("metadata-", StringComparison.Ordinal))
+            && (args[1].StartsWith("metadata-", StringComparison.Ordinal) || args[1] is "space-plan" or "ensure-owning-service"))
             return RunInstallerStateCli(args.Skip(1).ToArray());
         return 2;
 #else
@@ -260,6 +260,9 @@ internal static class ApplicationHost
             string root = options["--root"];
             switch (args[0])
             {
+                case "ensure-owning-service":
+                    InstallerServiceHandoff.EnsureOwningService(root);
+                    break;
                 case "register":
                     InstallationOwnership.Register(root, options["--version"], options["--manifest"]); break;
                 case "uninstall":
@@ -278,6 +281,9 @@ internal static class ApplicationHost
                     break;
                 case "metadata-observe":
                     InstallerMetadataCheckpoint.Observe(root, options["--transaction"]);
+                    break;
+                case "metadata-preposition":
+                    InstallerMetadataCheckpoint.Preposition(root, options["--transaction"]);
                     break;
                 case "metadata-resolve":
                     string resolution = InstallerMetadataCheckpoint.Resolve(root, options["--transaction"],

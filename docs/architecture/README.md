@@ -28,7 +28,7 @@
 | [通知与可观测性](observability.md) | 通知渠道、代理出口、诊断和敏感信息边界 | `src/Modules/Notifications`、`src/Platform/Networking`、`src/Modules/Diagnostics`；observability/control |
 | [控制面架构](control.md) | Web、CLI、MCP、实时事件与重启通道 | `src/ControlPlane`、`src/Modules/Execution/Realtime`；control/System |
 | [插件运行与安装](plugins.md) | 插件发现、能力注册、pending 安装事务和生命周期所有权 | `src/Modules/Plugins`、`src/NexusPipeline.Plugin.Abstractions`；plugins/System |
-| [自动更新](update.md) | 更新源、策略、下载校验、替换、重启与闲时应用 | `src/Modules/Updates`、`update-policy.json`；update/System |
+| [自动更新](update.md) | 更新源、载荷校验、Setup 元数据恢复、空间、替换与闲时应用 | `src/Modules/Updates`、`update-policy.json`；update/System |
 | [前端架构](frontend.md) | Vue 分层、宿主平台、桥接、公共元件和插件消费边界 | `frontend/src/app`、`frontend/src/platform`、`frontend/src/ui`；ui/bridge |
 
 专题之间的关系：配置专题描述正常事务，恢复专题描述中断现场；执行专题负责运行编排，判定与日志专题负责一次尝试的输入；插件 API 和公共 UI 的可消费契约分别见[插件 API 索引](../reference/plugin-api/README.md)与[UI 参考](../reference/ui/README.md)。

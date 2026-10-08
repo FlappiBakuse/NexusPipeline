@@ -1,6 +1,7 @@
 import { releaseController, trackController } from "./page-state";
 import { getLocale, t } from "./i18n";
 import { requireServiceTraffic } from "./service-traffic";
+import {beginPageWrite} from './page-writes';
 
 export interface ApiError extends Error {
   code: string | null;
@@ -107,6 +108,7 @@ export async function apiBlob(path: string, signal?: AbortSignal | null): Promis
 
 export async function api<T = unknown>(method: string, path: string, body?: unknown, signal?: AbortSignal | null): Promise<T> {
   requireServiceTraffic();
+  const releaseWrite=/^(GET|HEAD)$/i.test(method)?null:beginPageWrite();
   const controller = signal ? null : trackController(new AbortController());
   const options: RequestInit = { method, headers: {}, signal: signal || controller!.signal };
   try {
@@ -127,6 +129,7 @@ export async function api<T = unknown>(method: string, path: string, body?: unkn
   } catch (reason) {
     throw normalizeAbortError(reason, signal);
   } finally {
+    releaseWrite?.();
     if (controller) releaseController(controller);
   }
 }
@@ -164,6 +167,7 @@ export async function apiUpload<T = unknown>(
   contentType = "application/octet-stream",
   signal?: AbortSignal | null): Promise<T> {
   requireServiceTraffic();
+  const releaseWrite=/^(GET|HEAD)$/i.test(method)?null:beginPageWrite();
   const controller = signal ? null : trackController(new AbortController());
   try {
     const response = await fetch(path, {
@@ -182,6 +186,7 @@ export async function apiUpload<T = unknown>(
   } catch (reason) {
     throw normalizeAbortError(reason, signal);
   } finally {
+    releaseWrite?.();
     if (controller) releaseController(controller);
   }
 }

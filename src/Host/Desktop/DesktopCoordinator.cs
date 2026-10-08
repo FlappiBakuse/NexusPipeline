@@ -3,6 +3,7 @@ using System.IO.Pipes;
 using System.Security.Cryptography;
 using System.Text.Json;
 using NexusPipeline.Host.Lifecycle;
+using NexusPipeline.Modules.Settings.UseCases;
 using NexusPipeline.Modules.Updates;
 using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Windows;
@@ -10,7 +11,7 @@ using NexusPipeline.Shared.Logging;
 
 namespace NexusPipeline.Host.Desktop;
 
-internal sealed class DesktopCoordinator(Func<bool> requestExit, bool lightweight, Func<Uri, bool> openBrowser) : IDesktopHost, IAsyncDisposable
+internal sealed class DesktopCoordinator(Func<bool> requestExit, bool lightweight, Func<Uri, bool> openBrowser, DesktopModeSettingsCommands settingsCommands, ManagementPageRefresh managementRefresh) : IDesktopHost, IAsyncDisposable
 {
     private readonly object _state = new();
     private readonly CancellationTokenSource _stop = new();
@@ -23,7 +24,10 @@ internal sealed class DesktopCoordinator(Func<bool> requestExit, bool lightweigh
     private NamedPipeServerStream? _desktopPipe;
     private Task? _listener;
     private Task? _monitor;
-    private bool _unowned, _pendingShow, _stopping, _hostExiting;
+    private bool _unowned, _pendingShow, _stopping, _hostExiting, _modeChanging;
+    private volatile bool _lightweight = lightweight;
+    private readonly Dictionary<string, (string Session, TaskCompletionSource<string> Completion)> _pageRequests = [];
+    public bool SavedLightweightMode => settingsCommands.SavedLightweightMode;
     private string? _handoff, _updateTransaction, _abortedUpdate;
     private int _port, _ready;
     private string _previousInstance = "";
@@ -32,17 +36,12 @@ internal sealed class DesktopCoordinator(Func<bool> requestExit, bool lightweigh
     internal bool RestoredVisible => _session?.WindowState == "visible";
     public DesktopResumeIntent CaptureResumeIntent()
     {
-        lock (_state) return DesktopResumeIntent.FromVisible(!lightweight && (_pendingShow || RestoredVisible));
+        lock (_state) return DesktopResumeIntent.FromVisible(!_lightweight && (_pendingShow || RestoredVisible));
     }
 
     public void Start()
     {
         if (_listener is not null) return;
-        if (lightweight)
-        {
-            _listener = ListenAsync();
-            return;
-        }
         var saved = _store.Load();
         if (saved is { } owned)
         {
@@ -65,7 +64,7 @@ internal sealed class DesktopCoordinator(Func<bool> requestExit, bool lightweigh
     {
         lock (_state)
         {
-            if (_stopping || _hostExiting) return false;
+            if (_stopping || _hostExiting || _modeChanging) return false;
             _pendingShow = true;
         }
         if (Volatile.Read(ref _ready) == 0) return true;
@@ -75,8 +74,8 @@ internal sealed class DesktopCoordinator(Func<bool> requestExit, bool lightweigh
         bool startAttempted = false;
         try
         {
-            if (_stopping || _hostExiting) return false;
-            if (lightweight)
+            if (_stopping || _hostExiting || _modeChanging) return false;
+            if (_lightweight)
             {
                 _pendingShow = false;
                 bool opened = openBrowser(new Uri($"http://127.0.0.1:{_port}/"));
@@ -129,12 +128,109 @@ internal sealed class DesktopCoordinator(Func<bool> requestExit, bool lightweigh
         }
         finally { _create.Release(); }
     }
+    public async Task<string> ReloadPageAsync(CancellationToken token = default)
+    {
+        await _create.WaitAsync(token).ConfigureAwait(false);
+        try
+        {
+            if (_stopping || _hostExiting || _modeChanging || _handoff is not null || _updateTransaction is not null) return "busy";
+            if (_lightweight) return managementRefresh.Request() > 0 ? "requested" : "no-page";
+            return await PageCommandAsync("reload", "", DateTimeOffset.UtcNow.AddSeconds(10).ToUnixTimeMilliseconds(), token).ConfigureAwait(false);
+        }
+        finally { _create.Release(); }
+    }
+
+    public async Task<string> SetLightweightModeAsync(bool value, CancellationToken token = default)
+    {
+        lock (_state)
+        {
+            if (_modeChanging || _hostExiting || _stopping || _handoff is not null || _updateTransaction is not null) return "busy";
+            _modeChanging = true;
+        }
+        bool acquired = false, saved = false;
+        bool previous = SavedLightweightMode;
+        string leaseId = Guid.NewGuid().ToString("N");
+        long expiresAt = DateTimeOffset.UtcNow.AddSeconds(10).ToUnixTimeMilliseconds();
+        try
+        {
+            await _create.WaitAsync(token).ConfigureAwait(false);
+            acquired = true;
+            if (_hostExiting || _stopping || _handoff is not null || _updateTransaction is not null) return "busy";
+            if (!value)
+            {
+                var result = settingsCommands.SetLightweightMode(previous, false);
+                if (!result.Succeeded) return "save-failed";
+                _lightweight = false;
+                return "saved";
+            }
+            if (_unowned) return "unowned";
+            bool hasPage = _session?.Main.IsAlive() == true;
+            if (hasPage)
+            {
+                string permit = await PageCommandAsync("close-prepare", leaseId, expiresAt, token).ConfigureAwait(false);
+                if (permit != "ready") return permit;
+            }
+            if (_hostExiting || expiresAt <= DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()) return "expired";
+            var commit = settingsCommands.SetLightweightMode(previous, true);
+            if (!commit.Succeeded) return "save-failed";
+            saved = true;
+            _lightweight = true;
+            if (hasPage)
+            {
+                string consumed = await PageCommandAsync("close-consume", leaseId, expiresAt, token).ConfigureAwait(false);
+                if (consumed != "closing") return CompensateMode(previous, consumed);
+            }
+            if (!await StopDesktopAsync("lightweight", leaseId, TimeSpan.FromSeconds(5), token).ConfigureAwait(false))
+                return CompensateMode(previous, "close-unconfirmed");
+            return "saved";
+        }
+        catch (Exception exception) when (exception is IOException or OperationCanceledException or InvalidDataException)
+        { return saved ? CompensateMode(previous, "close-unconfirmed") : "disconnected"; }
+        finally
+        {
+            try { if (_desktopPipe is not null) await PageCommandAsync("close-release", leaseId, expiresAt, CancellationToken.None).ConfigureAwait(false); }
+            catch (Exception exception) when (exception is IOException or OperationCanceledException) { }
+            lock (_state) { _modeChanging = false; if (_updateTransaction is null && !_hostExiting) _stopping = false; }
+            if (acquired) _create.Release();
+        }
+    }
+
+    private string CompensateMode(bool previous, string failure)
+    {
+        var compensation = settingsCommands.SetLightweightMode(true, previous);
+        _lightweight = SavedLightweightMode;
+        return compensation.Succeeded ? failure : "compensation-failed";
+    }
+
+    private async Task<string> PageCommandAsync(string kind, string leaseId, long expiresAt, CancellationToken token)
+    {
+        string id = Guid.NewGuid().ToString("N");
+        var completion = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        lock (_state)
+        {
+            if (_session?.Main.IsAlive() != true) return "no-page";
+            if (_desktopPipe is null) return "disconnected";
+            _pageRequests.Add(id, (_session.SessionId, completion));
+        }
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token, _stop.Token);
+        deadline.CancelAfter(TimeSpan.FromMilliseconds(Math.Max(1, expiresAt - DateTimeOffset.UtcNow.ToUnixTimeMilliseconds())));
+        try
+        {
+            await SendAsync("page.command", new { kind, requestId = id, leaseId, expiresAt }, deadline.Token).ConfigureAwait(false);
+            return await completion.Task.WaitAsync(deadline.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!token.IsCancellationRequested) { return "expired"; }
+        finally { lock (_state) _pageRequests.Remove(id); }
+    }
     public async Task PrepareHostRestartAsync(string handoffId, CancellationToken token = default)
     {
         if (!Guid.TryParseExact(handoffId, "N", out _)) throw new InvalidDataException("desktop_handoff_invalid");
+        await _create.WaitAsync(token).ConfigureAwait(false);
+        try
+        {
         lock (_state)
         {
-            if (_hostExiting || _stopping || _handoff is not null && _handoff != handoffId)
+            if (_hostExiting || _modeChanging || _stopping || _handoff is not null && _handoff != handoffId)
                 throw new IOException("desktop_handoff_busy");
             _handoff = handoffId;
         }
@@ -145,6 +241,8 @@ internal sealed class DesktopCoordinator(Func<bool> requestExit, bool lightweigh
             _store.Save(_session, _key);
         }
         if (_desktopPipe is not null) await SendAsync("host.restart-preparing", new { handoffId }, token).ConfigureAwait(false);
+        }
+        finally { _create.Release(); }
     }
     public async Task AbortHostRestartAsync(string handoffId, CancellationToken token = default)
     {
@@ -169,7 +267,7 @@ internal sealed class DesktopCoordinator(Func<bool> requestExit, bool lightweigh
         {
             lock (_state)
             {
-                if (_hostExiting || _handoff is not null || _updateTransaction is not null && _updateTransaction != transactionId) return false;
+                if (_hostExiting || _modeChanging || _handoff is not null || _updateTransaction is not null && _updateTransaction != transactionId) return false;
                 _updateTransaction = transactionId;
                 _abortedUpdate = null;
                 _stopping = true;
@@ -197,13 +295,15 @@ internal sealed class DesktopCoordinator(Func<bool> requestExit, bool lightweigh
             }
         }
         finally { _create.Release(); }
-        return lightweight || intent.Mode != "show" || await ShowAsync("update-abort", token).ConfigureAwait(false);
+        return _lightweight || intent.Mode != "show" || await ShowAsync("update-abort", token).ConfigureAwait(false);
     }
     public async Task StopForHostExitAsync(CancellationToken token = default)
     {
         // Host shutdown waits on the STA after its message loop has stopped.
         lock (_state) _hostExiting = true;
-        if (_handoff is null) await StopDesktopAsync("host-exit", "", TimeSpan.FromSeconds(5), token).ConfigureAwait(false);
+        await _create.WaitAsync(token).ConfigureAwait(false);
+        try { if (_handoff is null) await StopDesktopAsync("host-exit", "", TimeSpan.FromSeconds(5), token).ConfigureAwait(false); }
+        finally { _create.Release(); }
     }
     private async Task<bool> StopDesktopAsync(string reason, string transactionId, TimeSpan remaining, CancellationToken token)
     {
@@ -253,7 +353,7 @@ internal sealed class DesktopCoordinator(Func<bool> requestExit, bool lightweigh
         {
             while (await timer.WaitForNextTickAsync(_stop.Token))
             {
-                if (_stopping || _handoff is not null || _session is null) continue;
+                if (_lightweight || _modeChanging || _stopping || _hostExiting || _handoff is not null || _session is null) continue;
                 if (_session.Main.IsAlive()) { CaptureFamily(); continue; }
                 if (_session.MainRestartCount == 0 && _session.WindowState == "visible" && !_session.Family.Any(identity => !identity.HasExited()))
                     await ShowAsync("main-crash", _stop.Token);
@@ -301,7 +401,7 @@ internal sealed class DesktopCoordinator(Func<bool> requestExit, bool lightweigh
                 bool shown = await ShowAsync("user", handshake.Token);
                 await DesktopPipeTransport.WriteAsync(pipe, new { type = "window.show-result", requestId, data = new { accepted = shown } }, handshake.Token);return;
             }
-            if (lightweight || role != "desktop" || _session is null || _key is null || peer != _session.Main || hello.GetProperty("sessionId").GetString() != _session.SessionId) return;
+            if (_lightweight || role != "desktop" || _session is null || _key is null || peer != _session.Main || hello.GetProperty("sessionId").GetString() != _session.SessionId) return;
             string clientNonce = hello.GetProperty("clientNonce").GetString()!, hostNonce = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
             if (clientNonce.Length != 64 || !clientNonce.All(char.IsAsciiHexDigitLower)) return;
             await DesktopPipeTransport.WriteAsync(pipe, new { type = "challenge", requestId, data = new { hostNonce, instanceId = HostInstance.Id, buildId = HostInstance.DesktopBuildId, hostPid = host.Pid, hostStartFileTime = host.StartFileTime, proof = DesktopSupervisorProtocol.Proof(_key, "host", _rootHash, _session.SessionId, clientNonce, hostNonce, HostInstance.Id, HostInstance.DesktopBuildId) } }, handshake.Token);
@@ -332,8 +432,15 @@ internal sealed class DesktopCoordinator(Func<bool> requestExit, bool lightweigh
                                 _session = _session with { WindowState = state, Route = route, HostInstanceId = HostInstance.Id };_store.Save(_session, _key);
                             }
                             break;
-                        case "window.show-request": DesktopSupervisorProtocol.Fields(data);await ShowAsync("user", _stop.Token);break;
+                        case "window.show-request": DesktopSupervisorProtocol.Fields(data);_ = ShowAsync("user", _stop.Token);break;
                         case "host.exit-request": DesktopSupervisorProtocol.Fields(data);requestExit();break;
+                        case "page.command-result":
+                            DesktopSupervisorProtocol.Fields(data, "requestId", "result");
+                            string pageId = data.GetProperty("requestId").GetString()!, result = data.GetProperty("result").GetString()!;
+                            if (result is not ("ready" or "closing" or "released" or "reloading" or "no-page" or "busy" or "expired" or "disconnected" or "stale")) return;
+                            lock (_state)
+                                if (_pageRequests.TryGetValue(pageId, out var pending) && pending.Session == _session.SessionId) pending.Completion.TrySetResult(result);
+                            break;
                         case "window.show-result": DesktopSupervisorProtocol.Fields(data, "result");break;
                         case "desktop.stop-ready": case "pong": DesktopSupervisorProtocol.Fields(data);break;
                         default: return;
@@ -343,7 +450,12 @@ internal sealed class DesktopCoordinator(Func<bool> requestExit, bool lightweigh
             finally { heartbeat.Dispose();await pulse.ConfigureAwait(false); }
         }
         catch (Exception exception) when (exception is IOException or InvalidDataException or JsonException or OperationCanceledException or InvalidOperationException or KeyNotFoundException) { }
-        finally { Interlocked.CompareExchange(ref _desktopPipe, null, pipe);pipe.Dispose(); }
+        finally
+        {
+            if (Interlocked.CompareExchange(ref _desktopPipe, null, pipe) == pipe)
+                lock (_state) foreach (var pending in _pageRequests.Values) pending.Completion.TrySetResult("disconnected");
+            pipe.Dispose();
+        }
     }
     private async Task PulseAsync(PeriodicTimer timer)
     {

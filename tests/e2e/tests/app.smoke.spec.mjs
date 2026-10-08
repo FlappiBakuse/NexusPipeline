@@ -4,9 +4,9 @@ import { api, baseUrl } from "./helpers.mjs";
 
 test("连续快速切换导航后仍可打开每个页面", async ({ page }, testInfo) => {
   const pages = [
-    ["dashboard", "仪表盘"], ["users", "用户管理"], ["scripts", "脚本实例"],
-    ["queues", "调度队列"], ["dispatch", "调度中心"], ["history", "历史记录"],
-    ["plugins", "插件"], ["settings", "设置"],
+    ["dashboard", "今日概览"], ["users", "账号与配置"], ["scripts", "脚本库"],
+    ["queues", "计划与队列"], ["dispatch", "运行中心"], ["history", "运行历史"],
+    ["plugins", "插件中心"], ["settings", "设置"],
   ];
   const errors = [];
   const navigation = [];
@@ -45,8 +45,11 @@ test("连续快速切换导航后仍可打开每个页面", async ({ page }, tes
 });
 
 test("主导航：核心页面可以按路由打开", async ({ page }) => {
-  const date = "2026-08-30";
-  const secondDate = "2026-08-29";
+  const today = new Date();
+  const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
+  const calendarDate = value => `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
+  const date = calendarDate(today);
+  const secondDate = calendarDate(yesterday);
   let historyRecordRequests = 0;
   const taskReport = {
     schemaVersion: 2, semanticsVersion: "daily-flow-v1", runId: "history-narrow-smoke", revision: 1, lifecycleOutcome: "completed",
@@ -85,7 +88,7 @@ test("主导航：核心页面可以按路由打开", async ({ page }) => {
         totalDurationMs: 2000,
         averageDurationMs: 1000,
         successRate: 0,
-        daily: [{ date, totalCount: 1, statusCounts: { success: 0, failed: 0, partial: 0, cancelled: 0, skipped: 1 }, totalDurationMs: 1000, averageDurationMs: 1000 }],
+        daily: [date, secondDate].map(day => ({ date: day, totalCount: 1, statusCounts: { success: 0, failed: 0, partial: 0, cancelled: 0, skipped: 1 }, totalDurationMs: 1000, averageDurationMs: 1000 })),
       }),
     });
   });
@@ -126,11 +129,16 @@ test("主导航：核心页面可以按路由打开", async ({ page }) => {
   });
   await page.goto(baseUrl + "#/dashboard", { waitUntil: "domcontentloaded" });
   await expect(page.getByTestId("dashboard-state")).toBeVisible();
-  await expect(page.getByTestId("dashboard-history-summary-statuses")).toBeVisible();
-  await expect(page.locator("[data-testid='dashboard-history-summary-statuses'] [data-status='skipped']")).toContainText("2");
-  await expect(page.getByTestId("dashboard-history-summary-performance")).toBeVisible();
+  const counts = page.getByRole("group", { name: "每日运行次数", exact: true });
+  const duration = page.getByRole("group", { name: "每日运行总时长", exact: true });
+  await expect(counts).toBeVisible();
+  await expect(duration).toBeVisible();
+  await expect(counts.getByRole("button")).toHaveCount(7);
+  await expect(counts.getByRole("button", { name: /总次数: 1 · 成功次数: 0 · 异常次数: 1/ })).toHaveCount(2);
+  await expect(page.getByText("7 天汇总 · 总次数 2 · 成功 0 · 异常 2", { exact: true })).toBeVisible();
+  await expect(page.getByText("7 天累计时长：2 秒", { exact: true })).toBeVisible();
   await expect(page.getByTestId("nav-dashboard")).toHaveAttribute("aria-current", "page");
-  await expect(page.getByRole("heading", { name: "仪表盘", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "今日概览", exact: true })).toBeVisible();
   await expect(page.locator("body")).not.toContainText("signal is aborted without reason");
   for (const route of ["users", "scripts", "queues", "dispatch", "history", "plugins", "settings"]) {
     await page.getByTestId(`nav-${route}`).click();

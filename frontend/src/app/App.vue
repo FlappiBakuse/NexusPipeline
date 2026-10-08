@@ -19,6 +19,9 @@ import NxpIcon from "../ui/primitives/NxpIcon.vue";
 import NxpScrollArea from "../ui/primitives/NxpScrollArea.vue";
 import NxpEmptyState from "../ui/primitives/NxpEmptyState.vue";
 import {desktopBridge} from '../platform/desktop';
+import {startApplicationEventStream} from '../platform/events';
+import {browserPageRefresh,receiveBrowserPageRefresh,startPageRefresh,dismissPageRefresh,confirmBrowserPageRefresh} from '../platform/page-refresh';
+import NxpConfirmDialog from '../ui/composites/NxpConfirmDialog.vue';
 
 import ConfigEditFlow from "../features/users/components/ConfigEditFlow.vue";
 import { configEditContextKey } from "../features/users/composables/configEditContext";
@@ -39,6 +42,7 @@ const segments = computed(() => {
   const path = String(route.path || "/dashboard").replace(/^\/+|\/+$/g, "");
   return (path || "dashboard").split("/").filter(Boolean);
 });
+const fillPage = computed(() => ["history", "plugins"].includes(segments.value[0]));
 const navigation = [
   ["dashboard", "dashboard", "shell.dashboard"],
   ["dispatch", "dispatch", "shell.dispatch"],
@@ -53,6 +57,8 @@ const preferencesUnavailable = document.documentElement.dataset.desktopPreferenc
 let autoScrollObserver: MutationObserver | null = null;
 let autoScrollFrame: number | null = null;
 let stopServiceObserver: (() => void) | null = null;
+let stopEvents: (()=>void)|null=null;
+let stopRefresh: (()=>void)|null=null;
 const localAddress = computed(() => shell.actualPort > 0
   ? t("service.with_host", { host: location.hostname, port: shell.actualPort })
   : t("service.label"));
@@ -94,6 +100,7 @@ watch(() => route.fullPath, () => {
 });
 
 onBeforeUnmount(() => {
+  stopEvents?.();stopRefresh?.();
   stopShutdownNotice?.();
   stopServiceObserver?.();
   stopServiceObserver = null;
@@ -132,6 +139,8 @@ onMounted(async () => {
       applyTranslations();
       scheduleAutoScroll();
       stopServiceObserver = startServiceObserver(shell);
+      stopRefresh=startPageRefresh();
+      stopEvents=startApplicationEventStream(event=>receiveBrowserPageRefresh(event.data));
     }
   } catch (error) {
     if (!isAbortError(error)) shell.markBootError(error);
@@ -174,10 +183,10 @@ function openNav() {
     <div class="nav-backdrop" @click.capture="closeNav"><button type="button" :aria-label="t('shell.close_navigation')" data-i18n-aria-label="shell.close_navigation" @pointerdown="closeNav" @click.stop="closeNav"></button></div>
     <div class="page-shell">
       <header class="topbar"><NxpIconButton class="menu-button" :label="t('shell.open_navigation')" data-i18n-aria-label="shell.open_navigation" :expanded="shell.navOpen" aria-controls="sidebar" @click="openNav"><NxpIcon name="menu" /></NxpIconButton><div class="topbar-context"><span class="topbar-product" data-i18n="shell.product"></span><span id="topbar-title" class="sr-only" data-i18n="shell.dashboard"></span></div><div class="topbar-actions"><NxpIconButton :label="t('shell.theme_toggle')" data-i18n-aria-label="shell.theme_toggle" @click="cycleTheme"><span id="theme-icon" data-theme-icon aria-hidden="true"><NxpIcon name="theme" /></span></NxpIconButton></div></header>
-      <NxpScrollArea class="page-main-scroll" :aria-label="t('shell.main_content')">
+      <NxpScrollArea class="page-main-scroll" :class="{ 'page-main-scroll-fill': fillPage }" :aria-label="t('shell.main_content')">
         <p v-if="preferencesUnavailable" class="desktop-preferences-warning" role="status">{{ t('shell.desktop.preferences_unavailable') }}</p>
         <RouterView v-if="shell.booted" v-slot="{ Component, route: viewRoute }">
-          <div :key="viewRoute.fullPath" class="app-page">
+          <div :key="viewRoute.fullPath" class="app-page" :class="{ 'app-page-fill': fillPage }">
             <component :is="Component" />
           </div>
         </RouterView>
@@ -204,4 +213,7 @@ function openNav() {
   />
   <ConfigEditFlow v-if="shell.booted" ref="configFlow" @changed="configurationChanged" />
   <TokenPrompt :open="shell.tokenPromptOpen" @close="shell.tokenPromptOpen = false" />
+  <NxpConfirmDialog :open="!!browserPageRefresh" :title="t('shell.page_refresh.title')" :message="t('shell.page_refresh.confirm')"
+    :confirm-label="t('shell.page_refresh.reload')" :cancel-label="t('common.cancel')" confirm-tone="danger"
+    @close="dismissPageRefresh" @cancel="dismissPageRefresh" @confirm="confirmBrowserPageRefresh" />
 </template>

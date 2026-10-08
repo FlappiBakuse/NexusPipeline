@@ -41,3 +41,9 @@ v0.17.0 使用独立安装代际 `g0170`，不接管 `g01615` 的目录、注册
 启动恢复发现未完成的 apply journal 且 immutable backup 包含宿主 exe 时，当前启动实例不会直接覆盖自己的映像；它会拉起独立 recovery worker，等待当前实例释放单实例互斥体后还原 backup、写入 `RollbackConfirmed` 并重拉宿主，旧版本启动收尾再删除 backup 与 journal。回滚失败时现场继续保留并由下一次启动重试。
 
 应用准入、下次启动应用、apply worker 与 recovery worker 在切换前由配置模块只读检查 `data/` 内的会话标记及非空恢复工作区。当前或未知格式的任务选择 journal、编辑隔离、配置交换/快照事务均返回 `configuration-recovery-pending` 或保留启动事务并拒绝切换；不解析未知 journal，也不删除现场。重解析点及无法读取的现场同样阻断。配置恢复完成后重新检查即可继续，普通空目录和可重建的脚本工作区不永久阻断更新。
+
+## Setup 元数据与空间
+
+`InstallerMetadataCheckpoint` 使用 schema 2 记录 manager、应用根和可信快捷方式的精确字节；schema 1 现场继续由 `LegacyInstallerMetadataCheckpoint` 恢复。预置前冻结备份，先记录可恢复的 Prepositioning，再复制完整 EXE/DAT/MSG 文件组。Inno 后观察实际 ARP 和卸载文件，凭当前应用身份与更新回执判定提交或回滚；只删除已确认属于本事务的字节，第三方变化保留现场并阻断。提交清理可以在下次恢复时继续。
+
+`tools/installer-space.iss` 从构建时冻结的载荷清单计算核心与首次插件选择，并按目标、manager、临时卷合并新增占用，包含新 staging、真实旧资产复制、卸载预置、记录和已知下载。永久 helper 是 Host 副本，临时元数据程序单独计入临时卷。分配粒度使用实际卷信息，元数据余量随清单路径与记录数增长。预览复用已核对的保护身份，向导和互斥下最终检查共用原生计算；最终检查重新解封归属、检测依赖并读取各卷可用空间。ARP EstimatedSize 沿用 Inno 的实际安装计数，不能写入临时峰值。

@@ -458,12 +458,14 @@ internal sealed class PluginSecretStore : IPluginSecretStore
     {
         cancellationToken.ThrowIfCancellationRequested();
         JsonObject root = ReadRoot();
-        string stored = root[key]?.ToString() ?? "";
+        string stored = root[key] is null ? "" : root[key] is JsonValue value && value.TryGetValue<string>(out string? encrypted)
+            ? encrypted ?? "" : throw new InvalidDataException("plugin_secret_unreadable");
         if (string.IsNullOrWhiteSpace(stored))
         {
             return ValueTask.FromResult<string?>(null);
         }
-        return ValueTask.FromResult(SecretStore.TryDecrypt(stored, out string? plain) ? plain : null);
+        if (!SecretStore.TryDecrypt(stored, out string? plain)) throw new InvalidDataException("plugin_secret_unreadable");
+        return ValueTask.FromResult(plain);
     }
 
     public ValueTask SetAsync(string key, string? value, CancellationToken cancellationToken = default)
@@ -485,7 +487,16 @@ internal sealed class PluginSecretStore : IPluginSecretStore
 
     private JsonObject ReadRoot()
     {
-        return JsonStore.ReadObjectOrEmpty(_path, "插件密钥文件");
+        if (!File.Exists(_path)) return new JsonObject();
+        try
+        {
+            return JsonNode.Parse(File.ReadAllText(_path)) as JsonObject
+                ?? throw new InvalidDataException("plugin_secret_unreadable");
+        }
+        catch (JsonException)
+        {
+            throw new InvalidDataException("plugin_secret_unreadable");
+        }
     }
 }
 

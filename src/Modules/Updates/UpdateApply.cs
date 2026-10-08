@@ -729,10 +729,12 @@ internal static class UpdateApply
         }
     }
 
-    private static bool HasFailedBeforeBackup(UpdateTask task)
+    internal static bool HasFailedBeforeBackup(UpdateTask task, string? root = null)
     {
-        if (task.TransactionId is null || task.WorkerIdentity is null || HasBackupData(AppPaths.UpdateBackupDir)) return false;
-        string path = TransactionResultPath(task.TransactionId);
+        root ??= AppPaths.AppRoot;
+        if (task.TransactionId is null || task.WorkerIdentity is null || HasBackupData(Path.Combine(root, ".nxp-backup", "previous"))) return false;
+        string path = Path.Combine(root, ".nxp", "state", "updates", task.TransactionId + ".result.json");
+        PayloadPathSafety.RequireLinkFree(path);
         if (!File.Exists(path)) return false;
         if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0 || new FileInfo(path).Length > 64 * 1024)
             throw new InvalidDataException("update failure proof ownership");

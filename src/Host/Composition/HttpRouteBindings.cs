@@ -56,6 +56,7 @@ internal sealed class HttpRouteBindings : IHttpRouteBindings
         UpdateAutomationService updateAutomation,
         IHostRestartPort restart,
         IAccessTokenPort accessToken,
+        IManagementPageRefreshPort managementRefresh,
         INativePathPicker nativePathPicker,
         UserAssetService userAssets,
         OutboundHttpClientProvider outboundHttp,
@@ -91,6 +92,7 @@ internal sealed class HttpRouteBindings : IHttpRouteBindings
         UpdateAutomation = updateAutomation;
         Restart = restart;
         AccessToken = accessToken;
+        ManagementRefresh = managementRefresh;
         NativePathPicker = nativePathPicker;
         UserAssets = userAssets;
         OutboundHttp = outboundHttp;
@@ -149,6 +151,7 @@ internal sealed class HttpRouteBindings : IHttpRouteBindings
     public IHostRestartPort Restart { get; }
 
     public IAccessTokenPort AccessToken { get; }
+    public IManagementPageRefreshPort ManagementRefresh { get; }
 
     public INativePathPicker NativePathPicker { get; }
 

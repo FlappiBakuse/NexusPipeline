@@ -135,6 +135,7 @@ public sealed class UpdateTaskTests
     [Fact]
     public void CommittedCleanupKeepsJournalUntilEveryOwnedResourceIsRemoved()
     {
+        foreach (string packageSource in new[] { "installer", "download" })
         foreach (string interruption in new[] { "staging", "downloads", "backup", "worker", "containers", "marker", "journal" })
         {
             string root = Path.Combine(Path.GetTempPath(), "nxp-update-cleanup-" + Guid.NewGuid().ToString("N"));
@@ -149,11 +150,21 @@ public sealed class UpdateTaskTests
             File.WriteAllText(Path.Combine(backup, "NexusPipeline.exe"), "backup");
             JsonUtil.WriteAtomic(Path.Combine(root, ".nxp-version"), "0.16.15" + Environment.NewLine);
             string journal = Path.Combine(update, "task.json");
+            string package = Path.Combine(update, "NexusPipeline-v0.16.15-win-x64.zip.g1");
+            string checksum = Path.Combine(update, "NexusPipeline-v0.16.15-win-x64.zip.sha256.g1");
+            if (packageSource == "download")
+            {
+                File.WriteAllText(package, "downloaded archive");
+                File.WriteAllText(checksum, UpdateApply.ImageHash(package));
+            }
             var task = MakeTask("apply", "0.16.15", staging) with
             {
                 Mode = "completed", Phase = UpdatePhase.Committed, SwappedAssetCount = 4, TransactionId = Guid.NewGuid().ToString("N"),
                 TargetImageHash = new string('a', 64), WorkerIdentity = new(42, DateTime.UtcNow, worker),
                 WorkerSha256 = UpdateApply.ImageHash(worker), StagingInventory = UpdateInventory.Capture(staging), BackupInventory = UpdateInventory.Capture(backup),
+                PackageSource = packageSource,
+                PackageSha256 = packageSource == "download" ? UpdateApply.ImageHash(package) : new string('1', 64),
+                PackageChecksumSha256 = packageSource == "download" ? UpdateApply.ImageHash(checksum) : null,
             };
             task.Write(journal);
             try
@@ -167,6 +178,8 @@ public sealed class UpdateTaskTests
                 }
                 Assert.False(File.Exists(journal));
                 Assert.False(File.Exists(worker));
+                Assert.False(File.Exists(package));
+                Assert.False(File.Exists(checksum));
                 Assert.False(Directory.Exists(staging));
                 Assert.False(Directory.Exists(backup));
                 Assert.False(File.Exists(Path.Combine(root, ".nxp-version")));

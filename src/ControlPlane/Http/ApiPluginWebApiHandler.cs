@@ -150,7 +150,7 @@ internal static class ApiPluginWebApiHandler
             await HttpHelper.NoContentAsync(context).ConfigureAwait(false);
             return;
         }
-        await HttpHelper.WriteJsonAsync(context, response.JsonBody ?? new JsonObject(), response.StatusCode).ConfigureAwait(false);
+        await HttpHelper.WriteJsonAsync(context, response.JsonBody ?? new JsonObject(), response.StatusCode, cacheControl: "no-store").ConfigureAwait(false);
     }
 
     private static async Task<byte[]> ReadRequestBodyAsync(HttpListenerContext context)
@@ -254,5 +254,5 @@ internal static class ApiPluginWebApiHandler
         || contentType.EndsWith("+json", StringComparison.Ordinal);
 
     private static Task PluginErrorAsync(HttpListenerContext context) =>
-        HttpHelper.ErrorAsync(context, "plugin_error", 500);
+        HttpHelper.WriteJsonAsync(context, new { code = "plugin_error" }, 500, "no-store");
 }

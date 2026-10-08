@@ -93,6 +93,7 @@ def render_script(template: str, *, production_root: Path, output_dir: Path,
              "安装器版本无效")
     for path in (production_root, output_dir):
         _require('"' not in str(path) and ';' not in str(path) and "\n" not in str(path), "安装器路径无法安全写入脚本")
+    template = template.replace('@@SPACE_CODE@@', Path(__file__).with_name('installer-space.iss').read_text(encoding='utf-8'))
     if "@@CUSTOM_MESSAGES@@" in template:
         resources = Path(__file__).with_name("installer-languages")
         chinese = resources / "ChineseSimplified.isl"
@@ -135,7 +136,9 @@ def render_script(template: str, *, production_root: Path, output_dir: Path,
         flags = "ignoreversion uninsneveruninstall"
         if relative.startswith("plugins/"):
             flags += " onlyifdoesntexist"
-        file_lines.append(f'Source: "{source}"; DestDir: "{dest}"; Flags: {flags}; Check: IsFreshInstall')
+        check = 'ShouldInstallBundledPlugins' if relative.startswith('plugins/') else 'IsFreshInstall'
+        task = '; Tasks: bundledplugins' if relative.startswith('plugins/') else ''
+        file_lines.append(f'Source: "{source}"; DestDir: "{dest}"; Flags: {flags}; Check: {check}{task}')
         if not relative.startswith("plugins/"):
             stage_parent = "{app}\\.nxp-update\\staging\\" + version
             if dest_parent:
@@ -144,6 +147,16 @@ def render_script(template: str, *, production_root: Path, output_dir: Path,
             stage_checks.append(f"  VerifyStagedFile('{relative.replace('/', chr(92))}', '{item['sha256']}');")
     replacements = {
         "@@GENERATION@@": installation_generation(),
+        "@@ICON_FILE@@": str(Path(__file__).resolve().parents[1] / 'src/NexusPipeline.ico'),
+        "@@WIZARD_IMAGE@@": str(output_dir / 'wizard.png'),
+        "@@WIZARD_SMALL_IMAGE@@": str(output_dir / 'wizard-small.png'),
+        "@@SPACE_FILES@@": '\n'.join(f"  AddPayloadSpace('{item['path'].replace(chr(39), chr(39) * 2)}', {item['sizeBytes']}, {'True' if item['path'].startswith('plugins/') else 'False'});" for item in files),
+        "@@UNINSTALLER_BYTES@@": str(metadata.get('uninstallerBytes', 0)),
+        "@@SETUP_WORK_BYTES@@": str(metadata.get('setupWorkBytes', 0)),
+        "@@CORE_BYTES@@": str(next(item['sizeBytes'] for item in files if item['path'] == 'NexusPipeline.exe')),
+        "@@METADATA_HELPER_BYTES@@": str(metadata_helper.stat().st_size if metadata_helper else 0),
+        "@@DESKTOP_SIZE@@": str(dependencies['Microsoft.WindowsDesktop.App'].get('sizeBytes', 0)),
+        "@@ASPNET_SIZE@@": str(dependencies['Microsoft.AspNetCore.App'].get('sizeBytes', 0)),
         "@@VERSION@@": version,
         "@@OUTPUT_DIR@@": str(output_dir),
         "@@FILES@@": "\n".join(file_lines),
@@ -180,18 +193,29 @@ def build_installer(production_root: Path, metadata_path: Path, dependency_path:
     package = metadata_path.parent / f"NexusPipeline-{metadata['tag']}-win-x64.zip"
     verify_received_package(package, metadata_path,
                             expected_source_sha=metadata["sourceSha"], expected_tag=metadata["tag"])
+    helper = metadata_path.parent / "installer-helper" / "nxp-metadata-helper.exe"
+    return compile_payload(production_root, metadata, dependency_path, compiler, output_dir, template_path, helper)
+
+
+def compile_payload(production_root: Path, metadata: dict, dependency_path: Path, compiler: Path,
+                    output_dir: Path, template_path: Path, helper: Path) -> dict:
+    """Compile verified bytes; callers own production or local provenance validation."""
+    _require(not output_dir.exists(), "安装器输出目录已存在，拒绝覆盖")
+    _require(compiler.is_file() and sha256(compiler) == INNO_COMPILER_SHA256, "Inno Setup 编译器字节不符")
     files = verified_payload(production_root, metadata)
     dependencies = dependency_pair(dependency_path)
     template = template_path.read_text(encoding="utf-8")
-    helper = None
     if "@@LAUNCH_CODE@@" in template:
-        helper = metadata_path.parent / "installer-helper" / "nxp-metadata-helper.exe"
         _require(helper.is_file() and not helper.is_symlink(), "安装器元数据辅助程序缺失")
         verify_embedded_manifest(helper, "asInvoker")
+    output_dir.mkdir(parents=True)
+    from installer_artwork import generate
+    artwork = generate(Path(__file__).resolve().parents[1] / 'src/NexusPipeline.ico', output_dir)
+    metadata = {**metadata, 'uninstallerBytes': (compiler.parent / 'Setup.e32').stat().st_size,
+                'setupWorkBytes': (compiler.parent / 'Setup.e32').stat().st_size * 2}
     script = render_script(template, production_root=production_root,
                            output_dir=output_dir, metadata=metadata, files=files,
                            dependencies=dependencies, metadata_helper=helper)
-    output_dir.mkdir(parents=True)
     script_path = output_dir / "installer.generated.iss"
     script_path.write_text(script, encoding="utf-8")
     command = [str(compiler), "/Q", str(script_path)]
@@ -201,7 +225,7 @@ def build_installer(production_root: Path, metadata_path: Path, dependency_path:
     _require(completed.returncode == 0, f"Inno Setup 编译失败，退出码 {completed.returncode}")
     setup = output_dir / f"NexusPipeline-v{metadata['version']}-win-x64-setup.exe"
     _require(set(path.name for path in output_dir.iterdir()) == {
-        script_path.name, "iscc.stdout.log", "iscc.stderr.log", setup.name,
+        script_path.name, "iscc.stdout.log", "iscc.stderr.log", setup.name, "wizard.png", "wizard-small.png",
     }, "安装器输出文件集合不符")
     digest = sha256(setup)
     sidecar = output_dir / f"{setup.name}.sha256"
@@ -213,6 +237,7 @@ def build_installer(production_root: Path, metadata_path: Path, dependency_path:
               "buildInputs": metadata["buildInputs"], "buildId": metadata["buildId"], "frontendHash": metadata["frontendHash"],
               "compilerDistributionSha256": INNO_DISTRIBUTION_SHA256,
               "dependencies": list(dependencies.values())}
+    (output_dir / "installer-artwork.json").write_text(json.dumps(artwork, sort_keys=True) + "\n", encoding="utf-8")
     (output_dir / "installer-build-metadata.json").write_text(json.dumps(result, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
     return result
 

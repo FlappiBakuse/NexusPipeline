@@ -6,8 +6,10 @@ import {
   onMounted,
   reactive,
   ref,
+  watch,
 } from "vue";
 import { api, isAbortError } from "../../platform/api";
+import {beginPageWrite} from '../../platform/page-writes';
 import { renderPluginSlot } from "@bridge/index";
 import { disposePluginSlot } from "@bridge/index";
 import {
@@ -18,7 +20,6 @@ import { setTopbarTitle } from "../../platform/shell";
 import { registerRecoveryDirtyGuard } from "../../platform/service-recovery";
 import { useShellStore } from "../../stores/shell";
 import { toast } from "../../platform/toast";
-import { desktopBridge } from "../../platform/desktop";
 import type { NxpOption } from "../../ui/primitives/NxpSelect.vue";
 import NxpEmptyState from "../../ui/primitives/NxpEmptyState.vue";
 import NxpPageHeader from "../../ui/composites/NxpPageHeader.vue";
@@ -43,7 +44,14 @@ const openPanel = ref<string | null>("service");
 const shell = useShellStore();
 const token = ref("");
 let savedToken = "";
-const tokenVisible = ref(false);
+const tokenClearing = ref(false);
+const tokenReading = ref(false);
+const tokenUnconfirmed = ref(false);
+const tokenError = ref("");
+let tokenLoaded = false;
+let tokenRevision = 0;
+let tokenWriteEpoch = 0;
+let tokenReadController: AbortController | null = null;
 const secretDraft = reactive<Record<string, string>>({
   webhookUrl: "",
   webhookSecret: "",
@@ -116,20 +124,25 @@ function handleExternalSettingsPanelToggle(event: Event) {
 function markRestart() {
   shell.markRestartRequired("settings");
 }
-function applyResponse(data: any) {
+function applyResponse(data: any, observedTokenRevision = tokenRevision) {
   if (data?.settings) {
-    Object.assign(settings, data.settings);
+    const { accessToken, ...otherSettings } = data.settings;
+    Object.assign(settings, otherSettings);
+    if (observedTokenRevision === tokenRevision && !tokenClearing.value && !tokenUnconfirmed.value)
+      settings.accessToken = accessToken;
     confirmedAllowConfigRepair = data.settings.allowConfigRepair === true;
   }
 }
 function queueSave(action: () => Promise<void>, key = "settings", confirmEdits = true) {
+  let releaseWrite: ()=>void;
+  try {releaseWrite=beginPageWrite();}catch(reason){return Promise.reject(reason);}
   const savedSerial = editSerial;
   const pending = saveChain.then(async () => {
     activeSaveSerial = savedSerial;
     await action();
     saveErrors.delete(key);
     if (confirmEdits && editSerial === savedSerial) confirmedEditSerial = savedSerial;
-  });
+  }).finally(releaseWrite);
   saveChain = pending.catch((reason) => {
     if (key !== "access-token" || token.value.trim()) saveErrors.set(key, reason);
     if (!disposed && !isAbortError(reason))
@@ -147,16 +160,17 @@ async function persist(
   secretKey?: string,
   secretValue?: string,
 ) {
+  const observedTokenRevision = tokenRevision;
   saving.value = true;
   try {
     const data = await api("PUT", "/api/settings", payload);
-    if (editSerial === activeSaveSerial) applyResponse(data);
+    if (editSerial === activeSaveSerial) applyResponse(data, observedTokenRevision);
     if (secretKey && secretValue) {
       const secretData = await api("PUT", "/api/settings", {
         secretKey,
         secretValue,
       });
-      if (editSerial === activeSaveSerial) applyResponse(secretData);
+      if (editSerial === activeSaveSerial) applyResponse(secretData, observedTokenRevision);
     }
   } finally {
     saving.value = false;
@@ -283,16 +297,22 @@ function onUpdateCheck(value: boolean) {
   void saveUpdates();
 }
 function generateToken() {
+  if (tokenClearing.value || tokenUnconfirmed.value) return;
   const bytes = new Uint8Array(24);
   crypto.getRandomValues(bytes);
   token.value = Array.from(bytes, (byte) =>
     byte.toString(16).padStart(2, "0"),
   ).join("");
-  tokenVisible.value = false;
   toast(t("settings.remote_access.token_generated"));
   void saveToken(token.value).then(() => toast(t("settings.access_token_saved"))).catch(() => {});
 }
 function saveToken(value: string) {
+  if (tokenClearing.value || tokenUnconfirmed.value) return Promise.resolve();
+  tokenReadController?.abort();
+  tokenReading.value = false;
+  const revision = ++tokenRevision;
+  const epoch = tokenWriteEpoch;
+  tokenError.value = "";
   token.value = value;
   const secret = value.trim();
   if (!secret) {
@@ -300,12 +320,16 @@ function saveToken(value: string) {
     return Promise.resolve();
   }
   return queueSave(async () => {
+    if (epoch !== tokenWriteEpoch) return;
     saving.value = true;
     try {
       const data = await api<any>("PUT", "/api/settings", { secretKey: "accessToken", secretValue: secret });
-      settings.accessToken = data?.settings?.accessToken || "";
-      savedToken = secret;
       if (localStorage.getItem("nexus-token")) localStorage.setItem("nexus-token", secret);
+      if (epoch === tokenWriteEpoch && revision === tokenRevision && !disposed) {
+        settings.accessToken = data?.settings?.accessToken || "";
+        savedToken = secret;
+        tokenLoaded = true;
+      }
     } finally {
       saving.value = false;
     }
@@ -320,20 +344,69 @@ function applyRemoteAddresses(data: any) {
     port: Number(remote?.port) || Number(settings.webPort) || 58731,
   };
 }
-async function copyToken() {
-  if (!token.value.trim()) {
-    toast(t("settings.there_is_no_token_to_copy"), "error");
-    return;
-  }
+async function readToken() {
+  if (tokenClearing.value || disposed) return;
+  tokenReadController?.abort();
+  const controller = new AbortController();
+  tokenReadController = controller;
+  const revision = ++tokenRevision;
+  tokenReading.value = true;
+  tokenError.value = "";
   try {
-    const bridge = desktopBridge();
-    if (bridge) await bridge.writeClipboardText(token.value.trim());
-    else await navigator.clipboard.writeText(token.value.trim());
-    toast(t("settings.access_token_copied"));
+    await saveChain;
+    if (disposed || controller.signal.aborted || revision !== tokenRevision) return;
+    const result = await api<{ configured: boolean; value: string | null }>("GET", "/api/settings/access-token", undefined, controller.signal);
+    if (disposed || controller.signal.aborted || revision !== tokenRevision) return;
+    if (typeof result?.configured !== "boolean" || (result.configured ? typeof result.value !== "string" : result.value !== null)) throw new Error("access_token_read_failed");
+    token.value = result.value || "";
+    savedToken = token.value;
+    settings.accessToken = result.configured ? "enc:***" : "";
+    tokenLoaded = true;
+    tokenUnconfirmed.value = false;
+    saveErrors.delete("access-token");
   } catch {
-    toast(t("settings.remote_access.copy_failed"), "error");
+    if (!disposed && !controller.signal.aborted && revision === tokenRevision)
+      tokenError.value = t("settings.remote_access.read_failed");
+  } finally {
+    if (revision === tokenRevision) tokenReading.value = false;
   }
 }
+async function clearToken() {
+  if (tokenClearing.value || tokenUnconfirmed.value) return;
+  if (!window.confirm(t("settings.remote_access.clear_confirm"))) return;
+  tokenClearing.value = true;
+  tokenReadController?.abort();
+  tokenReading.value = false;
+  const revision = ++tokenRevision;
+  tokenWriteEpoch++;
+  tokenError.value = "";
+  try {
+    await queueSave(async () => {
+      const data = await api<any>("PUT", "/api/settings", { secretKey: "accessToken", secretValue: "" });
+      if (data?.ok !== true || data.settings?.accessToken !== "") throw new Error("access_token_clear_unconfirmed");
+      localStorage.removeItem("nexus-token");
+      if (!disposed && revision === tokenRevision) {
+        token.value = "";
+        savedToken = "";
+        settings.accessToken = "";
+        tokenLoaded = true;
+        tokenUnconfirmed.value = false;
+        saveErrors.delete("access-token");
+        toast(t("settings.remote_access.cleared"), "info");
+      }
+    }, "access-token", false);
+  } catch {
+    if (!disposed) {
+      tokenUnconfirmed.value = true;
+      tokenError.value = t("settings.remote_access.clear_unconfirmed");
+    }
+  } finally {
+    if (!disposed) tokenClearing.value = false;
+  }
+}
+watch(() => loaded.value && panelExpanded("remote-mcp"), expanded => {
+  if (expanded && !tokenLoaded && !tokenReading.value && !token.value) void readToken();
+});
 async function testNotifications() {
   await saveChain;
   try {
@@ -426,6 +499,10 @@ onMounted(async () => {
 });
 onBeforeUnmount(() => {
   disposed = true;
+  tokenRevision++;
+  tokenReadController?.abort();
+  token.value = "";
+  savedToken = "";
   pluginCategoryObserver?.disconnect();
   pluginCategoryObserver = null;
   unregisterDirtyGuard?.();
@@ -473,7 +550,8 @@ onBeforeUnmount(() => {
         />
         <SettingsRemoteAccessSection
           :token="token"
-          v-model:token-visible="tokenVisible"
+          :token-busy="tokenClearing || tokenReading || tokenUnconfirmed"
+          :token-error="tokenError"
           :settings="settings"
           :expanded="panelExpanded('remote-mcp')"
           :remote-addresses="remoteAddresses"
@@ -481,7 +559,8 @@ onBeforeUnmount(() => {
           :on-remote-change="onRemoteChange"
           :on-mcp-change="onMcpChange"
           :generate-token="generateToken"
-          :copy-token="copyToken"
+          :clear-token="clearToken"
+          :read-token="readToken"
           @update:token="onTokenInput"
           @toggle="togglePanel('remote-mcp')"
         />

@@ -591,5 +591,18 @@
   "api.error.host_file_picker_requires_local": "宿主文件选择器只能在宿主本机使用，仍可输入已知路径。",
   "api.error.native_config_editor_requires_local": "原生配置编辑需要在宿主本机完成。",
   "api.error.client_origin_unverified": "当前连接尚未验证，暂时无法执行本机操作。",
-  "api.error.operation_requires_local": "此操作需要本机连接。"
+  "api.error.operation_requires_local": "此操作需要本机连接。",
+  "tray.lightweight": "轻量模式",
+  "tray.reload_page": "重启页面",
+  "tray.lightweight_confirm": "启用轻量模式会关闭当前桌面窗口并丢失未保存的输入；后端任务继续运行。继续吗？",
+  "tray.reload_confirm": "重启当前管理页面会丢失未保存的输入。继续吗？",
+  "tray.page_result.busy": "页面正在写入或宿主正在维护，请完成后重试。",
+  "tray.page_result.no-page": "没有已连接的管理页面。请先打开管理页面。",
+  "tray.page_result.expired": "请求已过期，请重试。",
+  "tray.page_result.disconnected": "管理页面未连接，操作未完成。",
+  "tray.page_result.stale": "页面状态已改变，请重试。",
+  "tray.page_result.save-failed": "轻量模式保存失败，当前窗口保持打开。",
+  "tray.page_result.close-unconfirmed": "未能确认桌面客户端已退出，请重试。",
+  "tray.page_result.compensation-failed": "桌面关闭和模式回退未能确认。菜单显示已保存的实际模式，请检查配置后重试。",
+  "tray.page_result.unowned": "桌面进程归属未能确认，操作未完成。"
 }
