@@ -195,12 +195,12 @@ jobs:
         with:
           python-version: "3.13"
       - name: 下载前端阶段产物
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: host-frontend-${{ github.run_id }}-${{ github.run_attempt }}
           path: NexusPipeline/.generated/frontend-phase
       - name: 下载预装插件阶段产物
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: host-bundled-${{ github.run_id }}-${{ github.run_attempt }}
           path: NexusPipeline/.generated/bundled-phase
@@ -245,7 +245,7 @@ jobs:
         with:
           python-version: "3.13"
       - name: 下载生产宿主阶段产物
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: host-production-${{ github.run_id }}-${{ github.run_attempt }}
           path: NexusPipeline/.generated/host-phase
@@ -280,7 +280,7 @@ jobs:
         with:
           python-version: "3.13"
       - name: 下载生产宿主阶段产物
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: host-production-${{ github.run_id }}-${{ github.run_attempt }}
           path: NexusPipeline/.generated/host-phase
@@ -338,12 +338,12 @@ jobs:
         with:
           python-version: "3.13"
       - name: 下载生产宿主阶段产物
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: host-production-${{ github.run_id }}-${{ github.run_attempt }}
           path: NexusPipeline/.generated/host-phase
       - name: 下载安装器阶段产物
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: host-installer-${{ github.run_id }}-${{ github.run_attempt }}
           path: NexusPipeline/.generated/installer-phase
