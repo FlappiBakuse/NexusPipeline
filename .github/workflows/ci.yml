@@ -51,7 +51,7 @@ jobs:
           node-version: "24"
       - name: 准备 .NET 工具链
         if: steps.plan.outputs.dotnetRequired == 'true'
-        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68
         with:
           global-json-file: Source/global.json
       - name: 执行生产检查
