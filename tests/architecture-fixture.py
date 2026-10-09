@@ -15,7 +15,7 @@ def run(checker, root, report):
 def write(root, name, contents):
     target = root / name
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(contents, encoding="utf-8")
+    target.write_text("namespace Fixture;\n" + contents if name.endswith(".cs") else contents, encoding="utf-8")
 
 
 def main():
@@ -39,6 +39,18 @@ def main():
         result = run(checker, root, report)
         if result.returncode != 0 or json.loads(report.read_text())["violations"]:
             raise AssertionError(f"False architecture cycle or unused alias: {result.stderr}")
+        baseline = json.loads(report.read_bytes())
+        assert {(item["Mode"], item["From"], item["To"]) for item in baseline["edges"]} == {("production", "Modules.A", "Modules.B"), ("test-host", "Modules.B", "Modules.A")}
+        write(root, "src/Modules/C/C.cs", "public class C { public B? Other; }\n")
+        result = run(checker, root, report)
+        current = json.loads(report.read_bytes())
+        if result.returncode != 0 or current["status"] != "PASS" or not all(current["sourceFingerprints"].values()):
+            raise AssertionError("Legal acyclic dependency must keep architecture PASS")
+        baseline_path = root / "baseline.json"
+        baseline_path.write_text(json.dumps(baseline), encoding="utf-8")
+        tool = Path(__file__).resolve().parents[1] / "tools/governance.mjs"
+        program = "const {architectureDelta}=await import(process.argv[1]);const fs=await import('node:fs');const result=architectureDelta(JSON.parse(fs.readFileSync(process.argv[2])),JSON.parse(fs.readFileSync(process.argv[3])));if(result.status!=='REVIEW'||result.addedEdges.length!==2)throw new Error(JSON.stringify(result));"
+        subprocess.run(["node", "--input-type=module", "-e", program, tool.as_uri(), str(report), str(baseline_path)], check=True)
         write(root, "src/Modules/A/A.cs", "public class A { public B? Other; public HostThing? Host; public System.IServiceProvider? Provider; }\n")
         write(root, "src/Modules/B/B.cs", "public class B { public A? Other; }\n")
         write(root, "src/Modules/Settings/FooStore.cs", "public class FooStore {}\n")
