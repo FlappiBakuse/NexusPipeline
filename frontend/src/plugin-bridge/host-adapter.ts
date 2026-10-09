@@ -1,12 +1,6 @@
 // @ts-nocheck
 /**
- * 插件桥接层的宿主依赖边界。
- *
- * 桥接实现只通过本文件访问宿主平台服务，不直接 import 平台目录、宿主 feature 或
- * 宿主 UI 内部实现。平台模块逐个迁移时只需要改这里的实现来源，桥接层与 Frontend API
- * 1.5 的外部契约保持不变。
- *
- * 平台迁移完成后本文件不再引用前端目录之外的源码。
+ * 平台访问集中在此适配层，避免公共 Frontend API 依赖宿主平台模块的内部布局。
  */
 import { api, apiBlob, apiUpload, isAbortError } from "../platform/api";
 export { getCapabilities } from "../platform/client-capabilities";

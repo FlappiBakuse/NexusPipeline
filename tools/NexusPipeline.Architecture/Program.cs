@@ -10,6 +10,7 @@ internal static class Program
 {
     private sealed record Violation(string RuleId, string Mode, string File, int Line, string Target);
     private sealed record Edge(string From, string To);
+    private sealed record ReportEdge(string Mode, string From, string To);
 
     private static async Task<int> Main(string[] args)
     {
@@ -35,6 +36,8 @@ internal static class Program
         var report = Path.GetFullPath(args[2]);
         MSBuildLocator.RegisterDefaults();
         var violations = new List<Violation>();
+        var reportEdges = new List<ReportEdge>();
+        var sourceFingerprints = new Dictionary<string, string>();
         foreach (var mode in modes)
         {
             var properties = new Dictionary<string, string>
@@ -69,7 +72,8 @@ internal static class Program
                 var syntax = await tree.GetRootAsync();
                 foreach (var name in syntax.DescendantNodes().OfType<SimpleNameSyntax>())
                 {
-                    if (name.Ancestors().Any(node => node is UsingDirectiveSyntax or BaseNamespaceDeclarationSyntax)) continue;
+                    if (name.Ancestors().Any(node => node is UsingDirectiveSyntax)
+                        || name.Ancestors().OfType<BaseNamespaceDeclarationSyntax>().Any(declaration => declaration.Name.Span.Contains(name.Span))) continue;
                     var symbol = semantic.GetSymbolInfo(name).Symbol;
                     if (symbol is IAliasSymbol alias) symbol = alias.Target;
                     if (symbol is null) continue;
@@ -97,6 +101,12 @@ internal static class Program
             }
             foreach (var component in Cycles(edges))
                 violations.Add(new Violation("A02", mode, "src/Modules", 0, string.Join(" -> ", component)));
+            reportEdges.AddRange(edges.Select(edge => new ReportEdge(mode, edge.From, edge.To)));
+            var input = string.Join("\n", compilation.SyntaxTrees
+                .Where(tree => Path.GetRelativePath(root, tree.FilePath).Replace('\\', '/').StartsWith("src/", StringComparison.Ordinal))
+                .Select(tree => Path.GetRelativePath(root, tree.FilePath).Replace('\\', '/') + "\0" + tree.GetText())
+                .Order(StringComparer.Ordinal));
+            sourceFingerprints[mode] = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(input))).ToLowerInvariant();
         }
         Directory.CreateDirectory(Path.GetDirectoryName(report)!);
         var distinct = violations.Distinct().OrderBy(item => item.RuleId).ThenBy(item => item.Mode)
@@ -106,6 +116,8 @@ internal static class Program
             schemaVersion = 1, status = distinct.Length == 0 ? "PASS" : "FAIL",
             checkedRules = new[] { "A01", "A02", "A03", "A04" },
             modes, violations = distinct,
+            edges = reportEdges.Distinct().OrderBy(edge => edge.Mode).ThenBy(edge => edge.From).ThenBy(edge => edge.To),
+            sourceFingerprints,
         }, new JsonSerializerOptions { WriteIndented = true }));
         foreach (var violation in distinct.Take(50))
             Console.Error.WriteLine($"{violation.RuleId} {violation.Mode} {violation.File}:{violation.Line} {violation.Target}");

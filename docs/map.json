@@ -477,7 +477,7 @@
     {
       "id": "plugin-api.managed",
       "path": "reference/plugin-api/managed.md",
-      "summary": "managed-code C# 生命周期、宿主服务与 Plugin API v1.9",
+      "summary": "managed-code C# 生命周期、宿主服务与当前 Plugin API",
       "topics": [
         "managed-code",
         "C#",
@@ -512,7 +512,7 @@
       ],
       "aliases": [
         "Maa worker",
-        "Plugin API 1.9"
+        "Plugin API"
       ],
       "codePaths": [
         "src/NexusPipeline.Plugin.Abstractions/ExecutionProviderApi.cs",
@@ -532,7 +532,7 @@
     {
       "id": "plugin-api.frontend",
       "path": "reference/plugin-api/frontend.md",
-      "summary": "Frontend API 1.5、activate、路由、slot、公共元素与清理",
+      "summary": "当前 Frontend API、activate、路由、slot、公共元素与清理",
       "topics": [
         "Frontend API",
         "activate",
@@ -920,7 +920,10 @@
       ],
       "codePaths": [
         "AGENTS.md",
-        "CONTRIBUTING.md"
+        "CONTRIBUTING.md",
+        "tools/governance.mjs",
+        "tools/doc-contracts.mjs",
+        "tools/governance.test.mjs"
       ],
       "testDomains": [
         "governanceDomains.docs-links-contracts"

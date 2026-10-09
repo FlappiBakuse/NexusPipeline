@@ -66,3 +66,17 @@ refactor(core): 抽取运行会话状态机
 ### 文档治理
 
 一个主题只保留一份完整规则，其他地方用摘要和链接；evergreen 文档不记录已完成版本的流水账、旧验证数字和「当前最新 vX.Y」矩阵。发现代码、测试和 DESIGN 对产品行为的描述不一致时：先确认当前实现与回归测试，再判断 DESIGN 是 intended contract 还是陈旧描述；需要改变产品行为时停止文档范围内的自动修改，向维护者报告并等待决定。
+
+### 开工与完工治理
+
+开工运行 `node tools/governance.mjs preflight --path <目标目录> --keyword <主题>`，按需显式提供 `--partner-root <Plugins路径>`。输出从当前 `AGENTS.md`、`docs/map.json` 和 `NEXUS_PUBLIC_ELEMENTS` 提取文档、测试域及公共 UI 候选；Host 使用内部 Nxp 组件，插件使用公开 nxp-* 元素。新公共 UI 须解释候选为何无法复用，选择 primitive、composite 或 feature-local，语义重复由人工审核。
+
+完工运行 `node tools/governance.mjs check --base <完整基线SHA> --working-tree --owner Tools --owner Docs --owner Tests --partner-root <Plugins路径>`。Owner 使用报告中的名称，可以重复声明；没有文件数或 LOC 上限。纯治理任务加 `--governance-only` 明确禁止产品源码、契约和版本输入的变更。报告可用 `--report <仓库外JSON路径>` 保存。
+
+文件规则只检查 A/R/C 和未跟踪新增文件；已知运行产物拒绝，未知 Owner/JSON 角色及额外 Owner 为 REVIEW。新增 `@ts-nocheck` 为 REVIEW，保留已有豁免。REVIEW 需要解释，退出码 0 只表示没有确定性拒绝，不表示审核完成。版本授权无法从 Git 推断，普通任务中的相关输入变更仅提示审核。
+
+`node tools/check-doc-links.mjs` 保留链接/片段/map 校验，并核对指定现役 API 声明与代码常量。此有限提取不检查任意文档语义；未知表述为 REVIEW，权威提取失败为 NOT_CHECKED 且退出非零。历史和负向测试不扫描旧版本数字。
+
+Roslyn 报告包含分模式的去重 Owner 边及源码文本指纹。用 `--architecture-current <报告> --architecture-baseline <报告>` 比较：非法规则保持 FAIL，合法新增边为 REVIEW；无基线或模式不匹配为 NOT_CHECKED。调用者须记录两次编译的 SHA、引用和构建输入；源码文本指纹不证明引用程序集身份。A04 的存储后缀检测仍有现役静态盲区。该入口不替代 A01–A05、生产 CI 或功能测试，也没有修改必需检查或发布权限。
+
+治理工具自测为 `node --test tools/governance.test.mjs`，先将 `NEXUS_TEST_ARTIFACT_ROOT` 指向已登记的外部隔离根；语义正反向 fixture 仍使用现役架构入口。
