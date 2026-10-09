@@ -17,7 +17,7 @@ jobs:
       PYTHONDONTWRITEBYTECODE: "1"
     steps:
       - name: 检出完整源码与基线
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           path: Source
           fetch-depth: 0
@@ -38,7 +38,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: 检出固定对端生产输入
         if: steps.plan.outputs.partnerRequired == 'true'
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: FlappiBakuse/NexusPipeline-Plugins
           ref: ${{ steps.plan.outputs.partnerSha }}
