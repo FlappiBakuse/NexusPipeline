@@ -42,7 +42,8 @@ try {
       LaunchGame: false, GameExe: process.execPath, MaxAttempts: 1, PluginInputs: {}, ConfigurationRevision: "settings-v1" },
   ]));
   fs.writeFileSync(path.join(runtime.runtimeDir, "config", "users.json"), JSON.stringify([
-    { Id: userId, Name: "Synthetic account", Bindings: [{ ScriptInstanceId: scriptId, ConfigInputs: { instance: "old" } }] },
+    // 未选择实例才能验证候选响应，并在占位 EXE 的启动检查前终止编辑。
+    { Id: userId, Name: "Synthetic account", Bindings: [{ ScriptInstanceId: scriptId, ConfigInputs: {} }] },
   ]));
   const store = path.join(runtime.runtimeDir, "data", scriptId, userId, "store");
   fs.mkdirSync(store, { recursive: true });
