@@ -1,13 +1,16 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { checkContracts, repositoryPath } from "./doc-contracts.mjs";
 
 /**
  * Markdown 内链与片段校验。只检查本仓库内的相对链接；
  * 跨仓库链接（NexusPipeline-Plugins）与外部 URL 不在本入口的判定范围。
  */
 
-const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const options = process.argv.slice(2);
+if (options.length && (options.length !== 2 || options[0] !== "--root")) throw new Error("Usage: check-doc-links.mjs [--root repository]");
+const projectRoot = options.length ? path.resolve(options[1]) : path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 // tests/.artifacts 与 .generated 是运行产物，其中的插件 README 相对链接在 runtime 内必然失效。
 const SKIP_DIRECTORIES = new Set([".git", "node_modules", "bin", "obj", "release", "dist", ".generated", ".artifacts"]);
 const EXTERNAL = /^[a-z][a-z0-9+.-]*:/iu;
@@ -88,10 +91,15 @@ for (const topic of navigation.topics || []) {
   if (!topic.id || topicIds.has(topic.id)) failures.push(`docs/map.json: duplicate/empty topic ${topic.id}`);
   topicIds.add(topic.id);
   for (const [base, relative] of [["docs", topic.path], ...(topic.codePaths || []).map(value => ["", value])]) {
-    const resolved = typeof relative === "string" ? path.resolve(projectRoot, base, relative) : projectRoot;
-    if (typeof relative !== "string" || path.isAbsolute(relative) || path.relative(projectRoot, resolved).startsWith("..")
-        || !fs.existsSync(path.join(projectRoot, base, relative))) failures.push(`docs/map.json: missing/invalid path ${relative}`);
+    try { repositoryPath(projectRoot, base, relative); }
+    catch (error) { failures.push(`GOV-DOC-02 docs/map.json: ${error.message}`); }
   }
+}
+
+const contracts = checkContracts(projectRoot);
+for (const result of contracts) {
+  console.error(JSON.stringify(result));
+  if (["FAIL", "NOT_CHECKED"].includes(result.status)) failures.push(`${result.rule} ${result.file || ""}: ${result.reason || `${result.actual} != ${result.expected}`}`);
 }
 
 if (failures.length > 0) {
@@ -99,5 +107,5 @@ if (failures.length > 0) {
   for (const failure of failures) console.error(`  ${failure}`);
   process.exitCode = 1;
 } else {
-  console.error(`文档内链检查通过：校验 ${checked} 个本地链接`);
+  console.error(`文档内链检查通过：校验 ${checked} 个本地链接；契约 REVIEW=${contracts.filter(result => result.status === "REVIEW").length}（REVIEW 仍需审核）`);
 }
