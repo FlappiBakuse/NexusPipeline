@@ -13,7 +13,8 @@ public sealed class DesktopProtocolTests
     {
         var settings = new NexusPipeline.Modules.Settings.SettingsState(new NexusPipeline.Modules.Settings.AppSettings { LightweightMode = lightweight });
         var commands = new NexusPipeline.Modules.Settings.UseCases.DesktopModeSettingsCommands(settings, new AllowMutation());
-        return new(() => false, lightweight, browser, commands, new ManagementPageRefresh());
+        return new(() => false, lightweight, browser, commands, new ManagementPageRefresh(),
+            new NexusPipeline.Modules.ClientSessions.ClientSessionService(), new NexusPipeline.Modules.BrowserLogin.BrowserLoginService());
     }
     private sealed class AllowMutation : NexusPipeline.Modules.Settings.Contracts.ISettingsMutationGate
     {
@@ -74,7 +75,9 @@ public sealed class DesktopProtocolTests
         int browserCalls = 0;
         var state = new NexusPipeline.Modules.Settings.SettingsState(new NexusPipeline.Modules.Settings.AppSettings { OpenDesktopOnStartup = true });
         var commands = new NexusPipeline.Modules.Settings.UseCases.DesktopModeSettingsCommands(state, new AllowMutation());
-        await using var desktop = new DesktopCoordinator(() => false, false, _ => { browserCalls++; return false; }, commands, new ManagementPageRefresh());
+        using var clientSessions = new NexusPipeline.Modules.ClientSessions.ClientSessionService();
+        using var browserLogin = new NexusPipeline.Modules.BrowserLogin.BrowserLoginService();
+        await using var desktop = new DesktopCoordinator(() => false, false, _ => { browserCalls++; return false; }, commands, new ManagementPageRefresh(), clientSessions, browserLogin);
         try
         {
             Assert.Equal("saved", await desktop.SetLightweightModeAsync(true));
@@ -159,6 +162,16 @@ public sealed class DesktopProtocolTests
         await DesktopPipeTransport.WriteAsync(client, new { type = "ping", requestId = "case", data = new { } }, deadline.Token);
         var frame = await DesktopPipeTransport.ReadAsync(server, deadline.Token);
         Assert.Equal("ping", frame.GetProperty("type").GetString());
+        await DesktopPipeTransport.WriteAsync(client, new { type="browser.complete",requestId="capture",data=new {
+            operationId="owned-operation",capture=new { cookies=new[]{new{domain=".example.com",path="/",name="session",value="synthetic-secret"}},storage=Array.Empty<object>(),capturedAt=DateTimeOffset.UtcNow } } },deadline.Token);
+        frame=await DesktopPipeTransport.ReadAsync(server,deadline.Token);
+        Assert.Equal("synthetic-secret",frame.GetProperty("data").GetProperty("capture").GetProperty("cookies")[0].GetProperty("value").GetString());
+        await DesktopPipeTransport.WriteAsync(client,new {data=new{items=Enumerable.Repeat(0,65).ToArray()}},deadline.Token);
+        await Assert.ThrowsAsync<InvalidDataException>(()=>DesktopPipeTransport.ReadAsync(server,deadline.Token));
+        byte[] duplicate=System.Text.Encoding.UTF8.GetBytes("{\"data\":{\"cookies\":[{\"name\":\"one\",\"name\":\"two\"}]}}");
+        byte[] header=new byte[4];System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(header,duplicate.Length);
+        await client.WriteAsync(header,deadline.Token);await client.WriteAsync(duplicate,deadline.Token);
+        await Assert.ThrowsAsync<InvalidDataException>(()=>DesktopPipeTransport.ReadAsync(server,deadline.Token));
         await client.WriteAsync(new byte[] { 1, 0, 1, 0 }, deadline.Token);
         await Assert.ThrowsAsync<InvalidDataException>(() => DesktopPipeTransport.ReadAsync(server, deadline.Token));
     }

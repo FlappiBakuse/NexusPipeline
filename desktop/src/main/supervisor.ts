@@ -8,12 +8,14 @@ export function proof(key: Buffer,direction: "host"|"client",root: string,sessio
 export class Supervisor extends EventEmitter {
   private pipe: WindowsPipe|null=null;
   private stopped=false;
+  private readonly pending=new Map<string,{resolve:(value:unknown)=>void;reject:(error:Error)=>void;timer:ReturnType<typeof setTimeout>}>();
   constructor(private readonly pipeName: string,private readonly root: string,private readonly rootHash: string,readonly sessionId: string,private readonly key: Buffer,private readonly build: BuildRecord) {super();}
   async run(): Promise<void> {
     let backoff=100;
     while(!this.stopped) {
       try {await this.connect();backoff=100;} catch {this.emit('disconnected');}
       this.pipe?.dispose();this.pipe=null;
+      for(const item of this.pending.values()){clearTimeout(item.timer);item.reject(new Error('desktop_pipe_disconnected'));}this.pending.clear();
       if(!this.stopped) {await new Promise<void>(resolve=>setTimeout(resolve,backoff));backoff=Math.min(5000,backoff*2);}
     }
     this.key.fill(0);
@@ -22,6 +24,15 @@ export class Supervisor extends EventEmitter {
   async send(type: string,data: Record<string,unknown>={}): Promise<void> {
     if(!this.pipe) throw new Error('desktop_pipe_disconnected');
     await this.pipe.send({type,requestId:crypto.randomUUID(),data});
+  }
+  async request(type: 'client.session'|'browser.begin'|'browser.complete'|'browser.cleaned'|'browser.cancel',data: Record<string,unknown>={}): Promise<unknown> {
+    const pipe=this.pipe;if(!pipe)throw new Error('desktop_pipe_disconnected');
+    const requestId=crypto.randomUUID();
+    return new Promise((resolve,reject)=>{
+      const timer=setTimeout(()=>{this.pending.delete(requestId);reject(new Error('desktop_request_timeout'));},type==='browser.complete'?35000:12000);
+      this.pending.set(requestId,{resolve,reject,timer});
+      void pipe.send({type,requestId,data}).catch(()=>{const item=this.pending.get(requestId);if(item){clearTimeout(item.timer);this.pending.delete(requestId);item.reject(new Error('desktop_pipe_disconnected'));}});
+    });
   }
   private async connect() {
     const pipe=new WindowsPipe(this.pipeName,this.root);this.pipe=pipe;
@@ -40,6 +51,16 @@ export class Supervisor extends EventEmitter {
       const message=await pipe.receive(15000);fields(message,['type','requestId','data']);
       if(typeof message.requestId!=='string'||message.requestId.length>64) throw new Error('Invalid request ID');
       switch(message.type) {
+        case 'browser.reply': {
+          fields(message.data,['result','error']);
+          const pending=this.pending.get(message.requestId);if(!pending)break;
+          clearTimeout(pending.timer);this.pending.delete(message.requestId);
+          const error=message.data.error;
+          if(error!==null&&typeof error!=='string')throw new Error('Invalid browser reply');
+          if(error)pending.reject(new Error(String(error)));else pending.resolve(message.data.result);
+          break;
+        }
+        case 'browser.cancel': fields(message.data,['operationId']);if(typeof message.data.operationId!=='string'||!/^[0-9a-f]{32}$/.test(message.data.operationId))throw new Error('Invalid browser cancel');this.emit('browser-cancel',message.data.operationId);break;
         case 'host.state': {
           fields(message.data,['state','actualPort','instanceId','previousInstanceId','handoffId','desktopBuildId','frontendBuildId']);
           const state=message.data as unknown as HostState;

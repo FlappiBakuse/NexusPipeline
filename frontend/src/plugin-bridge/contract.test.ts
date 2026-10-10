@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { cardCleanup } from "./testing/runtime-plugin";
 
 /**
- * Frontend API 1.6 外部契约：精确版本匹配、host.* 能力面（含二进制 api.blob/api.upload）、
+ * Frontend API 1.7 外部契约：精确版本匹配、host.* 能力面（含二进制 api.blob/api.upload）、
  * 18 个公开 slot 白名单、renderer surface context 与清理、生命周期订阅与释放、dispose 后无残留注册。
  *
  * 宿主平台依赖经 host-adapter 注入，测试只替换该边界。
@@ -18,6 +19,9 @@ let currentLocale = "zh-CN";
 const localeListeners = new Set<() => void>();
 
 vi.mock("./host-adapter", () => ({
+  getClientSession: async () => ({ hostSessionId: "host", clientSessionId: "web", clientKind: "web", nativeBrowserAvailable: false }),
+  openBrowserLogin: async () => { throw new Error("client_not_supported"); },
+  openExternal: async () => {},
   getCapabilities: async () => ({ schemaVersion: 1, connectionKind: "local", operations: { general: { allowed: true, denyReason: null }, hostFilePicker: { allowed: true, denyReason: null }, nativeConfigEditor: { allowed: true, denyReason: null } } }),
   api: async (method: string, path: string, body: unknown) => {
     apiCalls.push({ method, path, body });
@@ -79,6 +83,7 @@ import {
   notifyPluginPageLeave,
   notifyPluginPageUpdated,
   queryContributions,
+  pluginRuntimeStatus,
   refreshPluginRuntime,
   renderFrontendSlots,
   resetPluginRuntimeForTests,
@@ -86,6 +91,8 @@ import {
   syncPluginNavActive,
   verifyPluginApiVersion,
 } from "./runtime";
+
+import { renderDashboardCard, disposeDashboardCard } from "./dashboard";
 
 const EXPECTED_SLOTS = [
   "dashboard.cards",
@@ -129,7 +136,7 @@ function installFixtureNav() {
   document.body.innerHTML = '<nav data-plugin-anchor="shell.nav"></nav>';
 }
 
-describe("Frontend API 1.6 contract", () => {
+describe("Frontend API 1.7 contract", () => {
   beforeEach(() => {
     apiCalls.length = 0;
     toasts.length = 0;
@@ -142,12 +149,12 @@ describe("Frontend API 1.6 contract", () => {
     resetPluginRuntimeForTests();
   });
 
-  it("accepts only the exact 1.6 frontend API version", () => {
-    expect(FRONTEND_API_VERSION).toBe("1.6");
-    expect(verifyPluginApiVersion("1.6")).toBe(true);
+  it("accepts only the exact 1.7 frontend API version", () => {
+    expect(FRONTEND_API_VERSION).toBe("1.7");
+    expect(verifyPluginApiVersion("1.7")).toBe(true);
     expect(verifyPluginApiVersion("1.4")).toBe(false);
     expect(verifyPluginApiVersion("1.5")).toBe(false);
-    expect(verifyPluginApiVersion("1.6.0")).toBe(false);
+    expect(verifyPluginApiVersion("1.7.0")).toBe(false);
     expect(verifyPluginApiVersion("")).toBe(false);
     expect(verifyPluginApiVersion(undefined)).toBe(false);
   });
@@ -345,6 +352,8 @@ describe("Frontend API 1.6 contract", () => {
       ["DELETE", `/api/plugin-api/${descriptor.name}/state`],
     ]);
     expect(apiCalls[1].body).toEqual({ value: 1 });
+    await host.api.get("feed", undefined, { gameId: "blue-archive", progressionId: "jp", title: "活动 &x" });
+    expect(apiCalls.at(-1)?.path).toBe(`/api/plugin-api/${descriptor.name}/feed?gameId=blue-archive&progressionId=jp&title=%E6%B4%BB%E5%8A%A8+%26x`);
   });
 
   it("routes plugin binary api calls into the plugin namespace", async () => {
@@ -446,6 +455,30 @@ describe("Frontend API 1.6 contract", () => {
     await notifyPluginPageEnter({ hash: "settings", page: "settings", segments: ["settings"] });
     await notifyPluginDispose({ hash: "settings", page: "settings", segments: ["settings"] });
     expect(seen).toEqual([]);
+  });
+
+  it("preserves plugin registrations across page disposal and revokes them on removal", async () => {
+    cardCleanup.length = 0;
+    const descriptor = { ...descriptorFixture(), entryUrl: "./testing/runtime-plugin.ts" };
+    apiResponder = () => [descriptor];
+    await refreshPluginRuntime();
+    const card = document.createElement("div"), sidecar = document.createElement("div");
+    await renderDashboardCard(card, `plugin:${descriptor.name}:carousel`);
+    expect(card.textContent).toBe("mounted card");
+    disposeDashboardCard(card);
+    expect(cardCleanup).toEqual([true]);
+    await notifyPluginDispose({ page: "dashboard" });
+    expect(pluginRuntimeStatus().map(item => item.name)).toEqual([descriptor.name]);
+    expect(await renderFrontendSlots(sidecar, "dispatch.running.sidecar", {})).toBe(1);
+    expect(sidecar.textContent).toBe("mounted sidecar");
+    await disposePluginSlot(sidecar);
+    await renderDashboardCard(card, `plugin:${descriptor.name}:carousel`);
+    expect(card.textContent).toBe("mounted card");
+    apiResponder = () => [];
+    await refreshPluginRuntime();
+    expect(cardCleanup).toEqual([true, true]);
+    expect(pluginRuntimeStatus()).toEqual([]);
+    expect(await renderFrontendSlots(sidecar, "dispatch.running.sidecar", {})).toBe(0);
   });
 
   it("rejects unknown lifecycle kinds instead of registering silently", () => {

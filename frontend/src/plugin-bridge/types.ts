@@ -98,3 +98,11 @@ export interface PluginUiContribution {
   values?: Record<string, unknown>;
   [key: string]: unknown;
 }
+
+export interface DashboardCardSurface {
+  element: HTMLElement;
+  signal: AbortSignal;
+  cardId: string;
+  context: Readonly<Record<string, unknown>>;
+}
+export type DashboardCardRenderer = (surface: DashboardCardSurface) => void | (() => void) | Promise<void | (() => void)>;

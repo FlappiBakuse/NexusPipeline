@@ -1,13 +1,15 @@
 # 前端架构
 
-## 前端插件运行时（Frontend API 1.6）
+`host.clientSessions.get()` 取得 Host 确认的客户端事实；`host.browserLogin.open(request, signal)` 打开本插件 ready flow，返回完成 Promise 与取消操作，不返回采集原始值。见[网页登录契约](browser-login.md)。
+
+## 前端插件运行时（Frontend API 1.7）
 
 前端扩展与 C# API 独立版本化。manifest 同时声明 `frontend-module` capability 和 `frontend` 对象：
 
 ```json
 "capabilities": ["frontend-module"],
 "frontend": {
-  "apiVersion": "1.6",
+  "apiVersion": "1.7",
   "entry": "web/main.js",
   "styles": ["web/style.css"]
 }
@@ -16,7 +18,8 @@
 入口 ES module 必须导出 `activate(host)`。宿主通过 `GET /api/plugin-runtime/frontend` 发布已启用、API 兼容的安全描述，动态加载入口并按需注入样式。插件 host 提供：
 
 - `host.plugin`：当前插件的 manifest 描述（含 `name`、`displayName`、`version`、`frontendApiVersion`），冻结只读；
-- `host.api.get/post/put/patch/delete(route, body, signal)`：以 JSON 语义访问插件自己的 `/api/plugin-api/` 命名空间；
+- `host.api.get(route, signal?, query?)`：以 JSON 语义读取本插件命名空间；查询参数由独立 `query` 对象编码，不拼进 route。
+- `host.api.post/put/patch/delete(route, body, signal)`：以 JSON 语义写入插件自己的 `/api/plugin-api/` 命名空间；
 - `host.api.blob(route, { query?, signal? })`：以 `GET` 读取二进制响应，返回 `Blob`；查询参数经 `query` 传入；
 - `host.api.upload(route, body, { method?, contentType?, query?, signal? })`：发送二进制请求体并读取 JSON 响应；`method` 缺省 `POST`，`contentType` 缺省取 `body.type`，再回退到 `application/octet-stream`；
 - `host.routes.register(route, handler)`：注册 `#/plugin/<name>/<route>` 页面路由；
@@ -28,9 +31,9 @@
 - `host.executionPreview.capture(runId, signal)`：按宿主当前运行目标读取受控的 PC 游戏客户区或模拟器画面；返回 360p JPEG 或等待状态。该接口用于运行预览，不等同于判断脚本的运行期通知截图。
 - `host.i18n`：读取插件 manifest 中的本地化资源，提供 `locale`、`defaultLocale`、`t(key, args, fallback)` 和本地化日期/时间/数字格式化；资源仅属于当前插件。
 
-稳定的外部契约包括 Frontend API `1.6` 精确版本、上述 `host.*` 能力、18 个公开 slot 名称、renderer surface 与 context 的可观察语义、公开 `nxp-*` 元素、主题 token、light DOM 下的可观察视觉与交互行为，以及 route/nav/slot/lifecycle 的挂载与清理语义。宿主侧桥接实现位于 `frontend/src/plugin-bridge/`，其文件划分、内部函数、宿主平台模块路径和宿主私有 class 都是内部实现，不构成插件公共 API。
+稳定的外部契约包括 Frontend API `1.7` 精确版本、上述 `host.*` 能力、18 个公开 slot 名称、renderer surface 与 context 的可观察语义、公开 `nxp-*` 元素、主题 token、light DOM 下的可观察视觉与交互行为，以及 route/nav/slot/lifecycle 的挂载与清理语义。宿主侧桥接实现位于 `frontend/src/plugin-bridge/`，其文件划分、内部函数、宿主平台模块路径和宿主私有 class 都是内部实现，不构成插件公共 API。
 
-前端模块运行在管理页面同源环境，可以使用 DOM、构建后的 ES module 和 CSS。Frontend API 采用精确版本匹配：只有 `1.6` 被接受，其他主次版本均拒绝加载，不提供兼容桥。启用且兼容的插件会直接加载其前端模块；宿主继续校验运行状态、Frontend API 版本、公开资源路径、扩展名和文件存在性。插件前端应使用 Vue/TypeScript/Vite 或等效构建链生成 `web/` 静态资源，通过公开 `nxp-*` Native Custom Elements 以及 slot surface 与宿主交互，不依赖宿主 Vue 内部实现。
+前端模块运行在管理页面同源环境，可以使用 DOM、构建后的 ES module 和 CSS。Frontend API 采用精确版本匹配：只有 `1.7` 被接受，其他主次版本均拒绝加载，不提供兼容桥。启用且兼容的插件会直接加载其前端模块；宿主继续校验运行状态、Frontend API 版本、公开资源路径、扩展名和文件存在性。插件前端应使用 Vue/TypeScript/Vite 或等效构建链生成 `web/` 静态资源，通过公开 `nxp-*` Native Custom Elements 以及 slot surface 与宿主交互，不依赖宿主 Vue 内部实现。
 
 公开元素注册表位于 frontend/src/ui/register.ts 的 NEXUS_PUBLIC_ELEMENTS，当前包含 39 个元素，完整清单与复合元件契约见[公共 UI 目录](../ui/README.md)。插件使用注册表登记的元素。
 
@@ -59,9 +62,9 @@
 
 ## 请求来源与本机交互
 
-Plugin API 2.1 只定义 `General`、`HostFilePicker`、`NativeConfigEditor` 三类访问。每条 `PluginWebApiRoute` 必须显式设置 `Access`；声明式 UI 的读取、保存和每个动作分别显式设置访问类，缺失或未知值使注册失败。`PluginWebApiRequest.ConnectionKind` 由实际传输对端确定为 `Local`、`Remote` 或 `Unknown`，不采信 Host、Origin、Referer 或转发头。General 在三种来源均可用；后两类只允许 Local，在读取参数、请求体或执行回调前拒绝 Remote/Unknown。SDK 包及程序集继续为 2.0.0，与接口 2.1 独立治理。
+Plugin API 2.2 只定义 `General`、`HostFilePicker`、`NativeConfigEditor` 三类访问。每条 `PluginWebApiRoute` 必须显式设置 `Access`；声明式 UI 的读取、保存和每个动作分别显式设置访问类，缺失或未知值使注册失败。`PluginWebApiRequest.ConnectionKind` 由实际传输对端确定为 `Local`、`Remote` 或 `Unknown`，不采信 Host、Origin、Referer 或转发头。General 在三种来源均可用；后两类只允许 Local，在读取参数、请求体或执行回调前拒绝 Remote/Unknown。SDK 包及程序集继续为 2.0.0，与接口 2.2 独立治理。
 
-Frontend API 1.6 的 `host.getCapabilities(signal?)` 返回冻结只读的 schema 1 对象：`connectionKind` 为 local/remote/unknown，`operations` 精确包含 general、hostFilePicker、nativeConfigEditor，每项有 allowed 与 denyReason。拒绝原因分别为 host_file_picker_requires_local、native_config_editor_requires_local、client_origin_unverified。缓存绑定同源、认证和当前 Host 实例；重连或重启使旧读取失效。它用于呈现界面，后端每次操作仍重新判断来源。
+Frontend API 1.7 的 `host.getCapabilities(signal?)` 返回冻结只读的 schema 1 对象：`connectionKind` 为 local/remote/unknown，`operations` 精确包含 general、hostFilePicker、nativeConfigEditor，每项有 allowed 与 denyReason。拒绝原因分别为 host_file_picker_requires_local、native_config_editor_requires_local、client_origin_unverified。缓存绑定同源、认证和当前 Host 实例；重连或重启使旧读取失效。它用于呈现界面，后端每次操作仍重新判断来源。
 
 原生文件选择只能禁用“浏览”按钮，路径输入仍可编辑并保存。普通账号、脚本、队列、计划、运行、历史、插件安装与诊断是 General；诊断 ZIP 写入宿主受控 staging，返回明确路径。脚本文件读取只在已批准脚本根、配置位置及游戏程序父目录范围内，拒绝链接与路径穿越，不枚举宿主磁盘。
 

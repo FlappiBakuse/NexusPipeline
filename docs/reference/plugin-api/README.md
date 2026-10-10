@@ -5,9 +5,9 @@
 | 契约 | 负责内容 | 入口 |
 |---|---|---|
 | Manifest 与包格式 | `plugin.json`、`store.json`、资源路径、能力声明和发行布局 | [manifest.md](manifest.md) |
-| Managed Plugin API | `INexusPlugin` 生命周期、Plugin API 2.1、用户/数据/通知/模拟器等服务端口 | [managed.md](managed.md) |
+| Managed Plugin API | `INexusPlugin` 生命周期、Plugin API 2.2、用户/数据/通知/模拟器等服务端口 | [managed.md](managed.md) |
 | 执行 provider | 冻结计划、Host worker、结构化事件和既有队列／恢复接入 | [execution-provider.md](execution-provider.md) |
-| Frontend API | Frontend API 1.6、`activate(host)`、路由/导航/slot、公共元素和 dispose | [frontend.md](frontend.md) 与 [UI 参考](../ui/README.md) |
+| Frontend API | Frontend API 1.7、`activate(host)`、路由/导航/slot、公共元素和 dispose | [frontend.md](frontend.md) 与 [UI 参考](../ui/README.md) |
 | Data-specialized | `resolve.json`、judge、只读探针、截图和 `config-restore.json` | [data-specialized.md](data-specialized.md) |
 
 ## 维护边界
@@ -17,3 +17,7 @@
 - 插件安装和加载的宿主所有权见[插件运行与安装](../../architecture/plugins.md)；具体包校验和作者工作流见相邻插件仓库的[文档门户](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/docs/README.md)。
 
 任务级事实与选择重试见[专项任务协议](task-protocol.md)。
+
+## 今日概览与外链
+
+Plugin API 2.2 新增 `IPluginHostContext.DashboardCards`，`Register(PluginDashboardCardDescriptor)` 返回必须释放的句柄。本地 ID 不含 owner/冒号，Host 冻结真实 owner 并拒绝重复。Frontend API 1.7 新增 `host.dashboard.registerCard(localId, renderer)` 与 `host.navigation.openExternal(httpsUrl)`。renderer 返回 cleanup，并响应 surface.signal 取消。[目录、默认偏好和平台语义](../../architecture/dashboard.md)。

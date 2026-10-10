@@ -12,6 +12,7 @@
 | Platform | `src/Platform` | Windows、存储、网络和系统适配 |
 | Shared | `src/Shared` | 与业务无关的共享结果和基础原语 |
 | PluginSdk | `src/NexusPipeline.Plugin.Abstractions` | 对插件公开的稳定 SDK 契约 |
+| ClientSessions / BrowserLogin | `src/Modules/ClientSessions`、`src/Modules/BrowserLogin` | 客户端身份、固定网页登录和候选发布；[契约](../reference/plugin-api/browser-login.md) |
 | Tests/TestFixtures | `tests/NexusPipeline.Tests`、`tests/fixtures` | 宿主测试与隔离夹具 |
 
 ## 专题导航
@@ -32,3 +33,5 @@
 | [前端架构](frontend.md) | Vue 分层、宿主平台、桥接、公共元件和插件消费边界 | `frontend/src/app`、`frontend/src/platform`、`frontend/src/ui`；ui/bridge |
 
 专题之间的关系：配置专题描述正常事务，恢复专题描述中断现场；执行专题负责运行编排，判定与日志专题负责一次尝试的输入；插件 API 和公共 UI 的可消费契约分别见[插件 API 索引](../reference/plugin-api/README.md)与[UI 参考](../reference/ui/README.md)。
+
+- [今日概览卡片、目录与生命周期](dashboard.md)

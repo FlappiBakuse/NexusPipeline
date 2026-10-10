@@ -90,11 +90,18 @@ internal class HostCompositionRoot
         ServiceCollection collection = new();
         collection.AddSingleton(_entityState);
         collection.AddSingleton(_settingsState);
+        collection.AddSingleton<NexusPipeline.Modules.ClientSessions.ClientSessionService>(provider =>
+        {
+            var sessions = new NexusPipeline.Modules.ClientSessions.ClientSessionService(() => _settingsState.Current.AccessToken);
+            sessions.SetAuthority(initialSettings.AccessToken);
+            return sessions;
+        });
         collection.AddSingleton<NexusPipeline.Host.Desktop.ManagementPageRefresh>();
         collection.AddSingleton<IManagementPageRefreshPort>(provider => provider.GetRequiredService<NexusPipeline.Host.Desktop.ManagementPageRefresh>());
         collection.AddSingleton<NexusPipeline.Host.Desktop.DesktopCoordinator>(provider => new(
             () => _lifecycle.TryRequestDirectExit(), initialSettings.LightweightMode, NexusPipeline.Host.Desktop.ManagementBrowser.Open,
-            provider.GetRequiredService<DesktopModeSettingsCommands>(), provider.GetRequiredService<NexusPipeline.Host.Desktop.ManagementPageRefresh>()));
+            provider.GetRequiredService<DesktopModeSettingsCommands>(), provider.GetRequiredService<NexusPipeline.Host.Desktop.ManagementPageRefresh>(),
+            provider.GetRequiredService<NexusPipeline.Modules.ClientSessions.ClientSessionService>(), provider.GetRequiredService<PluginManager>().BrowserLogin));
         collection.AddSingleton<NexusPipeline.Host.Desktop.IDesktopHost>(provider => provider.GetRequiredService<NexusPipeline.Host.Desktop.DesktopCoordinator>());
         collection.AddSingleton(_admissionBridge);
         collection.AddSingleton<ISettingsMutationGate>(_admissionBridge);
@@ -104,6 +111,16 @@ internal class HostCompositionRoot
         collection.AddSingleton<IScriptConfigGate, ScriptConfigGateAdapter>();
         collection.AddSingleton<IQueueMutationAdmission>(_admissionBridge);
         collection.AddSingleton(new RunHistoryService());
+        collection.AddSingleton<NexusPipeline.Modules.Dashboard.IDashboardCardSource, DashboardCardSourceAdapter>();
+        collection.AddSingleton(provider =>
+        {
+            var source = provider.GetRequiredService<NexusPipeline.Modules.Dashboard.IDashboardCardSource>();
+            var events = provider.GetRequiredService<RealtimeEventBus>();
+            return new NexusPipeline.Modules.Dashboard.DashboardService(source,
+                Path.Combine(AppPaths.ConfigDir, "dashboard-layout.json"),
+                publish: change => events.Publish("dashboard." + change.Kind + ".changed",
+                    change.Kind == "layout" ? new { change.LayoutId, change.Revision } : (object)new { change.CatalogRevision }));
+        });
         collection.AddSingleton<NativePathPickerService>();
         collection.AddSingleton<ExecutableIconReader>();
         collection.AddSingleton<ScriptIconService>(provider => new ScriptIconService(
@@ -346,6 +363,7 @@ internal class HostCompositionRoot
             provider.GetRequiredService<QueueQueries>(),
             provider.GetRequiredService<UserQueries>(),
             provider.GetRequiredService<RunHistoryService>(),
+            provider.GetRequiredService<NexusPipeline.Modules.Dashboard.DashboardService>(),
             provider.GetRequiredService<PluginManager>(),
             provider.GetRequiredService<PluginRepositoryService>(),
             provider.GetRequiredService<PluginUserGlobalSettingsService>(),
@@ -363,7 +381,8 @@ internal class HostCompositionRoot
             provider.GetRequiredService<ScriptTypeIconService>(),
             provider.GetRequiredService<ScriptFileBrowser>(),
             provider.GetRequiredService<NexusPipeline.Modules.Users.Contracts.ITaskQueryProjection>(),
-            provider.GetRequiredService<NexusPipeline.ControlPlane.Http.Static.IFrontendAssetProvider>()));
+            provider.GetRequiredService<NexusPipeline.ControlPlane.Http.Static.IFrontendAssetProvider>(),
+            provider.GetRequiredService<NexusPipeline.Modules.ClientSessions.ClientSessionService>()));
         collection.AddSingleton<ExecutionExplainService>();
         collection.AddSingleton<DiagnosticsService>();
         _services = collection.BuildServiceProvider(new ServiceProviderOptions

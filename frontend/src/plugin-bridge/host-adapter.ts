@@ -55,3 +55,7 @@ export {
 export interface PluginBridgeApiClient {
   (method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<unknown>;
 }
+
+export { openExternal } from "../platform/navigation";
+export {getClientSession} from '../platform/client-sessions';
+export {openBrowserLogin} from '../platform/browser-login';

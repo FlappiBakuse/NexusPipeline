@@ -2,12 +2,12 @@ using System.Text.Json.Nodes;
 
 namespace NexusPipeline.Plugin.Abstractions;
 
-/// <summary>稳定的 NexusPipeline managed-code 插件生命周期契约（Plugin API v2.1）。</summary>
+/// <summary>稳定的 NexusPipeline managed-code 插件生命周期契约（Plugin API v2.2）。</summary>
 public static class PluginApiVersion
 {
     public const int Major = 2;
 
-    public const int Minor = 1;
+    public const int Minor = 2;
 }
 
 /// <summary>独立于 C# Plugin API 维护的前端扩展 ABI 版本；要求精确版本匹配。</summary>
@@ -15,9 +15,9 @@ public static class FrontendApiVersion
 {
     public const int Major = 1;
 
-    public const int Minor = 6;
+    public const int Minor = 7;
 
-    public const string Text = "1.6";
+    public const string Text = "1.7";
 
     public static bool IsCompatibleWith(string? value)
     {
@@ -126,6 +126,10 @@ public interface IPluginHostContext
     IPluginEmulatorSupportRegistry EmulatorSupport { get; }
 
     IPluginExecutionProviderRegistry ExecutionProviders { get; }
+
+    IPluginDashboardCardRegistry DashboardCards { get; }
+
+    IPluginBrowserLoginRegistry BrowserLogin { get; }
 }
 
 /// <summary>由 managed-code 插件提供的模拟器识别器。宿主按优先级和插件身份稳定调用。</summary>
@@ -448,6 +452,7 @@ public sealed record PluginWebApiRequest(
     string? JsonBody,
     PluginClientConnectionKind ConnectionKind)
 {
+    public PluginClientSessionContext? ClientSession { get; init; }
     /// <summary>请求 Content-Type（小写、去掉参数）；没有请求体时为空字符串。</summary>
     public string ContentType { get; init; } = "";
 

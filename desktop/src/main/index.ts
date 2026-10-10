@@ -1,4 +1,5 @@
-import {app,dialog,ipcMain,protocol,screen,Menu,nativeTheme,clipboard,IpcMainInvokeEvent,IpcMainEvent,WebFrameMain} from "electron";
+import {normalizeExternalUrl} from "./external-navigation";
+import {app,shell,dialog,ipcMain,protocol,screen,Menu,nativeTheme,clipboard,IpcMainInvokeEvent,IpcMainEvent,WebFrameMain} from "electron";
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
@@ -9,6 +10,8 @@ import {WindowManager} from "./window-manager";
 import {ConnectionCandidate,ConnectionState} from "../shared/contracts";
 import {runtimeLocale} from "../shared/runtime-locale";
 import {PageCommands} from './page-commands';
+import {BrowserLoginWindows} from './browser-login';
+import {BrowserLoginDescriptor} from '../shared/contracts';
 app.commandLine.appendSwitch('lang', runtimeLocale(app.getPreferredSystemLanguages()[0] ?? ''));
 protocol.registerSchemesAsPrivileged([{scheme:'nxp-desktop',privileges:{standard:true,secure:true,supportFetchAPI:true}}]);
 async function start() {
@@ -33,6 +36,7 @@ async function start() {
   if(!app.requestSingleInstanceLock({rootHash,sessionId})){app.quit();return;}
   const preferences=new Preferences(path.join(stateDir,'client-preferences.json'));
   const supervisor=new Supervisor(argumentsMap.get('--supervisor-pipe')!,root,rootHash,sessionId,Buffer.from(keyText,'hex'),build);
+  const loginWindows=new BrowserLoginWindows(supervisor,path.join(__dirname,'..','preload','login.js'),()=>preferences.get().locale);
   let origin='',currentInstance='',expectedHandoff='',navigationGeneration=0,connection: ConnectionState='connecting';
   let candidate: {public: ConnectionCandidate;url: string;generation: number;frame: WebFrameMain;state: HostState}|null=null;
   let crashRetries=0;
@@ -81,6 +85,12 @@ async function start() {
     return window;
   }
   const handlers: Record<string,(arg?: unknown)=>unknown>={
+    'desktop.client-session':async()=>{const value=await supervisor.request('client.session') as {token:string};return value.token;},
+    'desktop.browser-login':async request=>{
+      const value=await supervisor.request('browser.begin',request as Record<string,unknown>) as BrowserLoginDescriptor;
+      try{return await loginWindows.open(value);}catch{await supervisor.request('browser.cancel',{operationId:value.operationId}).catch(()=>{});throw new Error('browser_window_failed');}
+    },
+    'desktop.open-external':value=>shell.openExternal(normalizeExternalUrl(value)),
     'desktop.window-state':()=>manager.state(),'desktop.minimize':()=>manager.window?.minimize(),
     'desktop.toggle-maximize':()=>{if(manager.window?.isMaximized())manager.window.unmaximize();else manager.window?.maximize();},
     'desktop.hide':()=>manager.window?.hide(),'desktop.preferences':()=>preferences.get(),
@@ -136,8 +146,9 @@ async function start() {
   });
   supervisor.on('restart',(handoff: unknown)=>{if(typeof handoff==='string'&&/^[0-9a-f]{32}$/.test(handoff)){expectedHandoff=handoff;invalidate();state('restarting');}});
   supervisor.on('show',()=>{businessWindow();void manager.show().then(result=>supervisor.send('window.show-result',{result})).catch(()=>{});});
-  supervisor.on('disconnected',()=>{pageCommands.invalidate();invalidate();state('disconnected');});
+  supervisor.on('disconnected',()=>{void loginWindows.stop();pageCommands.invalidate();invalidate();state('disconnected');});
   supervisor.on('stop',async notice=>{
+    await loginWindows.stop();
     if(notice.reason==='lightweight'&&!pageCommands.canStop(notice.transactionId))return;
     invalidate();state('stopping');
     if(notice.reason==='update'&&typeof notice.transactionId==='string'&&Number.isFinite(notice.remainingMs)) {
@@ -147,11 +158,18 @@ async function start() {
     manager.stop();await supervisor.send('desktop.stop-ready').catch(()=>{});supervisor.stop();app.quit();
   });
   app.on('second-instance',(_event,_argv,_cwd,data)=>{if(data&&typeof data==='object'&&'rootHash' in data&&'sessionId' in data&&data.rootHash===rootHash&&data.sessionId===sessionId)void supervisor.send('window.show-request').catch(()=>{});});
-  app.on('before-quit',()=>{nativeTheme.removeListener('updated',applyNativeTheme);manager.stop();supervisor.stop();});
+  let quitting=false,cleanupFinished=false;
+  app.on('before-quit',event=>{
+    if(cleanupFinished)return;
+    event.preventDefault();if(quitting)return;quitting=true;
+    void loginWindows.stop().finally(()=>{cleanupFinished=true;nativeTheme.removeListener('updated',applyNativeTheme);manager.stop();supervisor.stop();app.quit();});
+  });
   app.on('window-all-closed',()=>{if(manager.stopping)app.quit();});
   await app.whenReady();
   protocol.handle('nxp-desktop',request=>{
-    const url=new URL(request.url);if(url.host!=='bootstrap'||url.pathname!=='/index.html')return new Response('',{status:404});
+    const url=new URL(request.url);
+    if(url.host==='login') {const html=loginWindows.document(url.pathname.slice(1));return html?new Response(html,{headers:{'Content-Type':'text/html; charset=utf-8'}}):new Response('',{status:404});}
+    if(url.host!=='bootstrap'||url.pathname!=='/index.html')return new Response('',{status:404});
     return new Response(fs.readFileSync(path.join(app.getAppPath(),'bootstrap','index.html')),{headers:{'Content-Type':'text/html; charset=utf-8','Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; script-src 'none'"}});
   });
   Menu.setApplicationMenu(Menu.buildFromTemplate([{label:'NexusPipeline',submenu:[{label:'隐藏窗口',click:()=>manager.window?.hide()},{label:'退出 NexusPipeline',click:()=>{void supervisor.send('host.exit-request').catch(()=>{});}},{label:'关闭此客户端',click:async()=>{

@@ -181,9 +181,9 @@ public sealed class PluginRepositoryCatalogTests
             managed with { MinHostVersion = "not-a-version" },
             UpdateService.CurrentVersion).Code);
 
-        PluginCatalogEntry currentApi = managed with { ApiVersion = "2.1", MinHostVersion = "0.16.15" };
+        PluginCatalogEntry currentApi = managed with { ApiVersion = "2.2", MinHostVersion = "0.16.15" };
         Assert.True(PluginRepositoryCatalog.IsCompatible(currentApi, "0.16.15", out _));
-        foreach (string rejected in new[] { "1.0", "1.9", "2.0", "3.0" })
+        foreach (string rejected in new[] { "1.0", "1.9", "2.0", "2.1", "3.0" })
         {
             Assert.False(PluginRepositoryCatalog.IsCompatible(currentApi with { ApiVersion = rejected }, "0.16.15", out string apiReason));
             Assert.Contains("Plugin API", apiReason);

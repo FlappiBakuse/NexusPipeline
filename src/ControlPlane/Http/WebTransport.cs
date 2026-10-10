@@ -23,6 +23,7 @@ internal sealed class WebContext
     public WebRequest Request { get; }
 
     public WebResponse Response { get; }
+    internal NexusPipeline.Plugin.Abstractions.PluginClientSessionContext? ClientSession { get; set; }
     internal long AcceptedTimestamp { get; }
 
     public static WebContext FromHttpListener(System.Net.HttpListenerContext context)

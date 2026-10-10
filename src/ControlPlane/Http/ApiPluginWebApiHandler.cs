@@ -87,6 +87,7 @@ internal static class ApiPluginWebApiHandler
                 RequestAccessPolicy.Connection(context.Request))
             {
                 ContentType = contentType,
+                ClientSession = context.ClientSession,
                 ContentLength = requestBody.Length,
                 OpenBodyStream = requestBody.Length > 0
                     ? _ => ValueTask.FromResult<Stream>(new MemoryStream(requestBody, writable: false))
@@ -105,7 +106,7 @@ internal static class ApiPluginWebApiHandler
         }
         catch (Exception ex)
         {
-            Logger.Warn($"[插件:{registration.PluginName}] Web API 处理失败：{method} {registration.Route.Route}：{ex.Message}");
+            Logger.Warn($"[插件:{registration.PluginName}] Web API 处理失败：{method} {registration.Route.Route}：{ex.GetType().Name}");
             await PluginErrorAsync(context).ConfigureAwait(false);
             return;
         }

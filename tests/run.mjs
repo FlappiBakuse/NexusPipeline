@@ -661,6 +661,7 @@ async function runGate(id) {
     const tap=fs.readFileSync(native,"utf8");
     for(const [counter,count] of Object.entries({tests:9,pass:9,fail:0,cancelled:0,skipped:0,todo:0}))
       if(!new RegExp(`^# ${counter} ${count}\\r?$`,"m").test(tap))return 4;
+    code=await run(process.execPath,["tests/desktop/run-browser-login.mjs",path.dirname(applicationInputs.identity),path.join(runRoot,"browser-login-observation"),testHostDir]);if(code)return code;
     return run(process.execPath,["tests/desktop/run-client.mjs",directory]);
   }
   if (id === "host.integration.store") return runStoreDiagnostic();

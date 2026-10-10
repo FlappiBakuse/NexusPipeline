@@ -1,8 +1,10 @@
 # Managed Plugin API
 
-当前 managed 插件精确声明 Plugin API `2.1`，最低 Host `0.17.0`，并以 .NET 10 编译。SDK 包和程序集版本为 `2.0.0`。宿主在激活前检查目标框架、SDK 引用与清单；旧 API、未来 minor、旧运行时程序集和包内复制的宿主 SDK 均拒绝加载。
+通用 `BrowserLogin`、可信客户端事实和浏览器生命周期见[客户端会话与网页登录](browser-login.md)。
 
-`IPluginHostContext` 直接暴露全部现役端口。插件通过这些明确端口工作，不检查旧接口继承链。`ExecutionProviders` 的冻结计划、配置门禁、worker 与事件协议见[执行 provider](execution-provider.md)。Frontend API 独立维持 `1.6`。
+当前 managed 插件精确声明 Plugin API `2.2`，最低 Host `0.17.2`，并以 .NET 10 编译。SDK 包和程序集版本为 `2.0.0`。宿主在激活前检查目标框架、SDK 引用与清单；旧 API、未来 minor、旧运行时程序集和包内复制的宿主 SDK 均拒绝加载。
+
+`IPluginHostContext` 直接暴露全部现役端口。插件通过这些明确端口工作，不检查旧接口继承链。`ExecutionProviders` 的冻结计划、配置门禁、worker 与事件协议见[执行 provider](execution-provider.md)。Frontend API 独立维持 `1.7`。
 
 ```text
 plugins/GameCheckIn/
@@ -19,13 +21,13 @@ plugins/GameCheckIn/
   "description": "提供通用的用户级扩展设置",
   "version": "0.1.0",
   "kind": "managed-code",
-  "apiVersion": "2.1",
+  "apiVersion": "2.2",
   "minHostVersion": "0.17.0",
   "entryAssembly": "CheckInPlugin.dll",
   "entryType": "CheckInPlugin.EntryPoint",
   "capabilities": ["background-jobs", "ui-contributions", "frontend-module"],
   "frontend": {
-    "apiVersion": "1.6",
+    "apiVersion": "1.7",
     "entry": "web/main.js",
     "styles": ["web/style.css"]
   }
@@ -170,9 +172,9 @@ Generic ADB 与 MuMuManager 保留在宿主。雷电、夜神和 BlueStacks 的�
 
 ## 请求来源与本机交互
 
-Plugin API 2.1 只定义 `General`、`HostFilePicker`、`NativeConfigEditor` 三类访问。每条 `PluginWebApiRoute` 必须显式设置 `Access`；声明式 UI 的读取、保存和每个动作分别显式设置访问类，缺失或未知值使注册失败。`PluginWebApiRequest.ConnectionKind` 由实际传输对端确定为 `Local`、`Remote` 或 `Unknown`，不采信 Host、Origin、Referer 或转发头。General 在三种来源均可用；后两类只允许 Local，在读取参数、请求体或执行回调前拒绝 Remote/Unknown。SDK 包及程序集继续为 2.0.0，与接口 2.1 独立治理。
+Plugin API 2.2 只定义 `General`、`HostFilePicker`、`NativeConfigEditor` 三类访问。每条 `PluginWebApiRoute` 必须显式设置 `Access`；声明式 UI 的读取、保存和每个动作分别显式设置访问类，缺失或未知值使注册失败。`PluginWebApiRequest.ConnectionKind` 由实际传输对端确定为 `Local`、`Remote` 或 `Unknown`，不采信 Host、Origin、Referer 或转发头。General 在三种来源均可用；后两类只允许 Local，在读取参数、请求体或执行回调前拒绝 Remote/Unknown。SDK 包及程序集继续为 2.0.0，与接口 2.2 独立治理。
 
-Frontend API 1.6 的 `host.getCapabilities(signal?)` 返回冻结只读的 schema 1 对象：`connectionKind` 为 local/remote/unknown，`operations` 精确包含 general、hostFilePicker、nativeConfigEditor，每项有 allowed 与 denyReason。拒绝原因分别为 host_file_picker_requires_local、native_config_editor_requires_local、client_origin_unverified。缓存绑定同源、认证和当前 Host 实例；重连或重启使旧读取失效。它用于呈现界面，后端每次操作仍重新判断来源。
+Frontend API 1.7 的 `host.getCapabilities(signal?)` 返回冻结只读的 schema 1 对象：`connectionKind` 为 local/remote/unknown，`operations` 精确包含 general、hostFilePicker、nativeConfigEditor，每项有 allowed 与 denyReason。拒绝原因分别为 host_file_picker_requires_local、native_config_editor_requires_local、client_origin_unverified。缓存绑定同源、认证和当前 Host 实例；重连或重启使旧读取失效。它用于呈现界面，后端每次操作仍重新判断来源。
 
 原生文件选择只能禁用“浏览”按钮，路径输入仍可编辑并保存。普通账号、脚本、队列、计划、运行、历史、插件安装与诊断是 General；诊断 ZIP 写入宿主受控 staging，返回明确路径。脚本文件读取只在已批准脚本根、配置位置及游戏程序父目录范围内，拒绝链接与路径穿越，不枚举宿主磁盘。
 

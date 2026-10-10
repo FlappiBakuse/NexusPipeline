@@ -47,6 +47,7 @@ internal sealed class HttpRouteBindings : IHttpRouteBindings
         QueueQueries queueQueries,
         UserQueries userQueries,
         RunHistoryService history,
+        NexusPipeline.Modules.Dashboard.DashboardService dashboard,
         PluginManager plugins,
         PluginRepositoryService pluginRepository,
         PluginUserGlobalSettingsService pluginUserGlobalSettings,
@@ -64,9 +65,11 @@ internal sealed class HttpRouteBindings : IHttpRouteBindings
         ScriptTypeIconService scriptTypeIcons,
         ScriptFileBrowser scriptFileBrowser,
         NexusPipeline.Modules.Users.Contracts.ITaskQueryProjection taskQueries,
-        NexusPipeline.ControlPlane.Http.Static.IFrontendAssetProvider frontendAssets)
+        NexusPipeline.ControlPlane.Http.Static.IFrontendAssetProvider frontendAssets,
+        NexusPipeline.Modules.ClientSessions.ClientSessionService clientSessions)
     {
         FrontendAssets = frontendAssets;
+        ClientSessions = clientSessions;
         Routes = ApiRouteCatalog.Bind(typeof(WebServer).Assembly, Array.Empty<object>());
         SettingsCommands = settingsCommands;
         ScriptCommands = scriptCommands;
@@ -83,6 +86,7 @@ internal sealed class HttpRouteBindings : IHttpRouteBindings
         QueueQueries = queueQueries;
         UserQueries = userQueries;
         History = history;
+        Dashboard = dashboard;
         Plugins = plugins;
         PluginRepository = pluginRepository;
         PluginUserGlobalSettings = pluginUserGlobalSettings;
@@ -133,8 +137,10 @@ internal sealed class HttpRouteBindings : IHttpRouteBindings
     public UserQueries UserQueries { get; }
 
     public RunHistoryService History { get; }
+    public NexusPipeline.Modules.Dashboard.DashboardService Dashboard { get; }
 
     public PluginManager Plugins { get; }
+    public NexusPipeline.Modules.ClientSessions.ClientSessionService ClientSessions { get; }
 
     public PluginRepositoryService PluginRepository { get; }
 

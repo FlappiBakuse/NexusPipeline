@@ -25,6 +25,9 @@ export interface NexusDesktopBridge {
   getClientPreferences(): Promise<ClientPreferences>;
   setClientPreferences(patch: Partial<ClientPreferences>): Promise<void>;
   writeClipboardText(text: string): Promise<void>;
+  openExternal(url: string): Promise<void>;
+  getClientSessionToken(): Promise<string>;
+  openBrowserLogin(request: BrowserLoginRequest): Promise<{operationId: string}>;
   onWindowStateChanged(listener: (state: PublicWindowState) => void): () => void;
   onConnectionStateChanged(listener: (state: ConnectionState) => void): () => void;
   onConnectionCandidate(listener: (candidate: ConnectionCandidate) => void): () => void;
@@ -33,3 +36,10 @@ export interface NexusDesktopBridge {
   onPageCommand(listener: (command: PageCommand) => void): () => void;
   reportPageCommand(requestId: string, result: PageCommandResult): void;
 }
+export interface BrowserLoginRequest {flowId:string;editorSessionId:string;fieldGeneration:number;context:Record<string,unknown>}
+export interface BrowserLoginFlow {
+  id:string;title:string;flowVersion:string;startUri:string;navigationOrigins:string[];popupOrigins:string[];
+  cookies:{domain:string;path:string;name:string}[];
+  storage:{origin:string;storage:'localStorage'|'sessionStorage';key:string;jsonPath:string[]}[];ready:boolean;
+}
+export interface BrowserLoginDescriptor {operationId:string;flow:BrowserLoginFlow;expiresAt:string}
