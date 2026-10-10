@@ -224,6 +224,7 @@
         "host.frontend.state"
       ],
       "files": [
+        "src/features/dashboard/layout-editor.test.ts",
         "src/features/history/components/TaskReportPanel.test.ts",
         "src/features/scripts/utils/scriptTypes.test.ts",
         "src/features/settings/SettingsPage.test.ts",
@@ -282,6 +283,14 @@
         "daily report projection keeps partial completion distinct from failure and preserves provider incident evidence",
         "daily report projection rejects missing or mismatched semantics without exposing old task facts",
         "daily report projection shows recovered daily work as completed without resurfacing the recovered incident",
+        "dashboard layout transactions checks hidden record order as well as visible choices when a save is uncertain",
+        "dashboard layout transactions freezes one save and gets a fresh validator after confirmed success",
+        "dashboard layout transactions ignores old notifications and refreshes the baseline after reconnection",
+        "dashboard layout transactions keeps drafts separate from the displayed commit and cancels to the latest confirmed commit",
+        "dashboard layout transactions keeps valid choices and includes newly discovered default cards during rebase",
+        "dashboard layout transactions preserves a rejected draft and requires an explicit rebase before another save",
+        "dashboard layout transactions resolves a lost response by reading the committed result without repeating PUT",
+        "dashboard layout transactions retains an uncertain draft until an explicit read succeeds",
         "dashboard renderer lifecycle aborts before cleanup and disposes late async render results",
         "dashboard renderer lifecycle isolates an aborted asynchronous surface from a replacement registration",
         "dashboard renderer lifecycle preserves a mounted renderer through repeated status paints",
