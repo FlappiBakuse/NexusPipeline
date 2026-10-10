@@ -34,9 +34,11 @@ slot：`label`、`help`、默认字段内容、`description`、`error`。字段�
 
 | 元件 | 属性（类型；默认值） | 事件 detail | 边界 |
 |---|---|---|---|
-| `nxp-text-input` | `id` string；未提供；`modelValue` string；`""`；`placeholder` string；`""`；`disabled` boolean；`false`；`type` string；`text`；`maxlength` number/string；未提供；`readonly` boolean；`false`；`autocomplete` string；未提供；`ariaLabel` string；未提供；`showPasswordToggle` boolean；`false`；`showPasswordLabel`/`hidePasswordLabel` string；英文默认文案 | `update:modelValue`: `[string]`；`change`: `[string]` | 输入和 change 均返回当前字符串。密码切换只在 `type=password`、有值、可编辑时出现；切换会保留焦点。 |
+| `nxp-text-input` | `id` string；未提供；`modelValue` string；`""`；`placeholder` string；`""`；`disabled` boolean；`false`；`type` string；`text`；`maxlength` number/string；未提供；`readonly` boolean；`false`；`autocomplete` string；未提供；`ariaLabel` string；未提供；`showPasswordToggle` boolean；`false`；`showPasswordLabel`/`hidePasswordLabel` string；英文默认文案；`passwordVisibilityControlled`/`passwordVisible`/`secretConfigured` boolean；`false` | `update:modelValue`: `[string]`；`change`: `[string]`；`password-visibility-request`: `[boolean]` | 输入和 change 均返回当前字符串。密码眼睛在 `type=password`、启用切换且未禁用、有值或 `secretConfigured` 时出现；切换保留焦点。受控模式仅请求显示状态，不自行改为明文。 |
 | `nxp-text-area` | `id` string；自动生成；`modelValue` string；`""`；`placeholder` string；`""`；`disabled` boolean；`false`；`rows` number；`4`；`maxlength` number/string；未提供；`readonly` boolean；`false`；`ariaLabel` string；未提供 | `update:modelValue`: `[string]`；`change`: `[string]` | 返回当前字符串；内部滚动条随内容更新，调用方不依赖其内部 DOM。 |
 | `nxp-number-input` | `id` string；空；`modelValue` number/string；空字符串；`min`/`max` number；未提供；`step` number；`1`；`placeholder`/`help`/`ariaLabel` string；空；`disabled` boolean；`false` | `update:modelValue`、`change`: `[number\|string]` | 空文本返回 `""`，其他文本转换为 number。加减按钮按 `min`/`max` 截断并按 `step` 发出；手工文本输入保留调用方的解析责任。 |
+
+需要授权才能读取的秘密使用 `passwordVisibilityControlled=true`：未读取时 `modelValue=""`、`secretConfigured=true`，不能填充假遮罩字符。处理 `password-visibility-request` 后，由调用方确认、请求专用接口并设置 `passwordVisible`；取消确认时仍为空且隐藏。`readonly` 可以保护未回读字段，同时保留眼睛入口。隐藏时调用方负责清除自动来源明文；默认非受控模式继续在元件内部切换已输入值。
 
 ## 文件与路径
 

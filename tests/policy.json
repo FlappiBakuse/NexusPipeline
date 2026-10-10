@@ -241,7 +241,8 @@
         "src/platform/service-restart.test.ts",
         "src/plugin-bridge/contract.test.ts",
         "src/plugin-bridge/dashboard.test.ts",
-        "src/stores/shell.test.ts"
+        "src/stores/shell.test.ts",
+        "src/ui/primitives/NxpTextInput.test.ts"
       ],
       "caseIds": [
         "Frontend API 1.7 contract aborts a route before cleaning it exactly once when its registration is disposed",
@@ -280,6 +281,8 @@
         "client session isolation reacquires native authority only through the bridge after server revocation",
         "client session isolation rejects a late issuance after session invalidation without restoring its token",
         "configuration edit lifecycle selects native candidates from the actual HTTP error envelope and refreshes after save",
+        "controlled credential disclosure preserves ordinary password toggling and protects disabled or read-only fields",
+        "controlled credential disclosure requests disclosure without changing an unread secret or its input type",
         "daily report projection keeps partial completion distinct from failure and preserves provider incident evidence",
         "daily report projection rejects missing or mismatched semantics without exposing old task facts",
         "daily report projection shows recovered daily work as completed without resurfacing the recovered incident",
