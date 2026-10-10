@@ -154,3 +154,5 @@ SOFTWARE.
 ```
 
 专项任务支持只读任务预览、日志证据、受控选择重试和历史报告，详见[专项任务协议](docs/reference/plugin-api/task-protocol.md)。
+
+今日概览的正在运行、历史时长与历史次数分别为独立卡片。活动卡由可选 managed 插件 GameActivities 提供；公开卡片契约见[架构说明](docs/architecture/dashboard.md)。
