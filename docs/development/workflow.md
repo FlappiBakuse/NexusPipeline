@@ -18,6 +18,10 @@
 
 如需开分支，使用 `feat/`、`fix/`、`docs/`、`refactor/`、`test/` 或 `chore/` 前缀。Release 分类遵循[发布专题](release.md)的宿主项目发布策略。
 
+### GitHub Actions 依赖维护
+
+GitHub Actions 依赖由维护者评估上游变更与工作流兼容性后手动更新，并固定到完整提交 SHA；不启用 Dependabot 的 `github-actions` 自动更新。更新通过 Pull Request 和现役必需检查合入。
+
 ### 功能拆分与 UI 测试边界
 
 代码提交按功能边界拆分，每个提交保持范围清晰、可独立验证、可审查和可回退；功能实现、测试治理、文档和 CI 调整分别形成对应变更单元。提交操作仍需维护者明确授权。
