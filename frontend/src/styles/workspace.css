@@ -27,7 +27,9 @@ body { font-size: 14px; line-height: 1.55; }
 .workspace-page .running-execution { min-width: 0; }
 .workspace-page .plugin-browser { gap: 18px; }
 .workspace-page .history-browser { gap: 18px; }
-.settings-categories { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
+.page-settings { display: flex; flex-direction: column; gap: var(--space-5); }
+.page-settings > :is(.nxp-page-header, .callout, .settings-categories, .settings-cards, .plugin-slot) { margin-block: 0; }
+.settings-categories { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .settings-categories button { min-height: 40px; padding: 7px 12px; border: 1px solid var(--content-card-border); border-radius: 9px; background: var(--content-card); color: var(--muted); }
 .settings-categories button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
 .desktop-titlebar { padding-left: max(18px, env(titlebar-area-x, 0px)); padding-right: max(150px, calc(100% - env(titlebar-area-width, 100%))); }
