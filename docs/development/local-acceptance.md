@@ -14,4 +14,6 @@ python tools/local_acceptance.py build --host-root "<Host源码绝对路径>" --
 
 `local-acceptance-receipt.json` 记录实际源树、共享 buildId、编译命令、日志、Setup/ZIP/插件哈希与版本，`status=BUILD_PASS` 只代表构建，不代替本机验证或人工验收。原始源清单、diff、尝试报告和日志可供审查。所有产物标识为 `mode=local-acceptance`、`producer=local`、`publishable=false`，不生成 candidate.json，不上传、发布、提交或启动安装器。正式 publisher 拒绝该来源。
 
+验收摘要的 GameCheckIn 版本取自本次插件构建结果，交付前与 `pluginBuilds` 及验收目录内的 manifest 核对一致。
+
 用户确认后若获得后续授权，从已提交的干净源码按现役手动 candidate/publish-only 流程发行；若行为源或影响行为的构建输入有变化，补相应验证。
