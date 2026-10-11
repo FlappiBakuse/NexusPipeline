@@ -10,6 +10,10 @@ const fixture=path.join(directory,'fixture'),report=path.join(directory,'browser
 if(fs.existsSync(fixture)||fs.existsSync(report))throw new Error('Existing browser diagnostic');
 fs.cpSync(path.join(inputs,'desktop/application'),fixture,{recursive:true});
 fs.copyFileSync(new URL('./browser-login-driver.cjs',import.meta.url),path.join(fixture,'browser-login-driver.cjs'));
+const pluginRoot=process.env.NEXUS_PARTNER_ROOT;
+if(!pluginRoot||!path.isAbsolute(pluginRoot))throw new Error('Explicit plugin root required');
+const pageScripts=Object.fromEntries(['cn','kuro','skland','skport'].map(platform=>[platform,fs.readFileSync(path.join(pluginRoot,'plugins/general/GameCheckIn/src/BrowserLogin/PageScripts',(platform==='cn'?'miyoushe':platform)+'.js'),'utf8')]));
+fs.writeFileSync(path.join(fixture,'page-scripts.json'),JSON.stringify(pageScripts));
 const metadata=JSON.parse(fs.readFileSync(path.join(fixture,'package.json')));metadata.main='browser-login-driver.cjs';fs.writeFileSync(path.join(fixture,'package.json'),JSON.stringify(metadata));
 const {createPackageWithOptions}=await import(pathToFileURL(path.join(inputs,'desktop/source/node_modules/@electron/asar/lib/asar.js')));
 const nativeRoot=path.join(directory,'runtime');fs.cpSync(path.join(application,'resources/desktop'),nativeRoot,{recursive:true});

@@ -1,11 +1,15 @@
 import {BrowserWindow,WebContentsView,ipcMain,IpcMainInvokeEvent,Session,WebContents,session} from 'electron';
 import {BrowserLoginDescriptor} from '../shared/contracts';
 import {Supervisor} from './supervisor';
+import {captureJsonValue} from './browser-login-json';
+import {BrowserPageBootstrap} from './browser-page-bootstrap';
 
 interface LoginWindow {
   descriptor:BrowserLoginDescriptor;window:BrowserWindow;view:WebContentsView;session:Session;
   popups:Set<BrowserWindow>;busy:boolean;closing:boolean;timer:ReturnType<typeof setTimeout>;
   cleanup?:Promise<void>;
+  captureAbort?:AbortController;
+  bootstrap?:BrowserPageBootstrap;
 }
 const bounded=<T>(promise:Promise<T>,ms:number)=>new Promise<T>((resolve,reject)=>{
   const timer=setTimeout(()=>reject(new Error('browser_step_timeout')),ms);
@@ -41,9 +45,15 @@ export class BrowserLoginWindows {
     window.webContents.on('will-navigate',(event,url)=>{if(url!==this.shellUrl(id))event.preventDefault();});
     window.webContents.on('render-process-gone',()=>void this.close(entry,false));
     this.secureContents(entry,view.webContents,false);
+    entry.bootstrap=new BrowserPageBootstrap(descriptor.flow.pageBootstrap,()=>{
+      if(entry.closing||entry.busy||view.webContents.isDestroyed())return null;
+      const frame=view.webContents.mainFrame;
+      return {identity:frame,url:frame.url,run:(code:string)=>view.webContents.executeJavaScriptInIsolatedWorld(1001,[{code}],true)};
+    });
+    view.webContents.on('did-start-navigation',(_event,url,inPlace,main)=>{if(main){if(inPlace)entry.bootstrap?.inPageNavigation(url);else entry.bootstrap?.navigation();}});
     view.webContents.on('did-navigate',()=>this.update(entry));
     view.webContents.on('did-navigate-in-page',()=>this.update(entry));
-    view.webContents.on('did-finish-load',()=>this.update(entry));
+    view.webContents.on('did-finish-load',()=>{this.update(entry);void entry.bootstrap?.loaded();});
     try {
       await window.loadURL(this.shellUrl(id));window.show();
       void view.webContents.loadURL(descriptor.flow.startUri).catch(()=>this.update(entry,'browser_navigation_failed'));
@@ -89,8 +99,9 @@ export class BrowserLoginWindows {
     if(request.action==='forward'){if(external.navigationHistory.canGoForward())external.navigationHistory.goForward();return;}
     if(request.action==='reload'){external.reload();return;}
     if(request.action!=='complete')throw new Error('login_action_invalid');
-    entry.busy=true;this.update(entry);
+    entry.bootstrap?.stop();entry.busy=true;this.update(entry);
     try {
+      entry.captureAbort=new AbortController();
       const capture=await bounded(this.capture(entry),10000);
       if(entry.closing)return;
       const result=await this.supervisor.request('browser.complete',{operationId:entry.descriptor.operationId,capture}) as {success:boolean;error?:string};
@@ -98,6 +109,7 @@ export class BrowserLoginWindows {
       if(!result.success){entry.busy=false;this.update(entry,result.error||'browser_validation_failed');return;}
       await this.close(entry,true);
     }catch{if(!entry.closing){entry.busy=false;this.update(entry,'browser_capture_failed');}}
+    finally {entry.captureAbort?.abort();entry.captureAbort=undefined;}
   }
   private async capture(entry:LoginWindow) {
     const contents=entry.view.webContents;
@@ -117,8 +129,14 @@ export class BrowserLoginWindows {
       if(value!==null&&typeof value!=='string')throw new Error('browser_capture_invalid');
       storage.push({origin:rule.origin,storage:rule.storage,key:rule.key,value});
     }
+    const jsonValues=[];
+    for(const rule of entry.descriptor.flow.jsonRequests??[]) {
+      const signal=AbortSignal.any([entry.captureAbort!.signal,AbortSignal.timeout(8000)]);
+      const value=await captureJsonValue(rule,origin,(input,init)=>entry.session.fetch(input,init),signal);
+      jsonValues.push({id:rule.id,value});
+    }
     if(entry.closing||contents.mainFrame!==frame||new URL(frame.url).origin!==origin)throw new Error('browser_origin_changed');
-    const result={cookies,storage,capturedAt:new Date().toISOString()};
+    const result={cookies,storage,jsonValues,capturedAt:new Date().toISOString()};
     if(Buffer.byteLength(JSON.stringify(result),'utf8')>48000)throw new Error('browser_capture_limit');
     return result;
   }
@@ -127,7 +145,7 @@ export class BrowserLoginWindows {
     entry.cleanup=this.cleanup(entry,completed);return entry.cleanup;
   }
   private async cleanup(entry:LoginWindow,completed:boolean) {
-    entry.closing=true;clearTimeout(entry.timer);
+    entry.closing=true;entry.bootstrap?.stop();clearTimeout(entry.timer);entry.captureAbort?.abort();
     const contents=entry.view.webContents;
     let cleaned=true;
     try {

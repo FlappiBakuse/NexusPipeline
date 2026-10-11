@@ -41,5 +41,7 @@ export interface BrowserLoginFlow {
   id:string;title:string;flowVersion:string;startUri:string;navigationOrigins:string[];popupOrigins:string[];
   cookies:{domain:string;path:string;name:string}[];
   storage:{origin:string;storage:'localStorage'|'sessionStorage';key:string;jsonPath:string[]}[];ready:boolean;
+    jsonRequests?:{id:string;origin:string;uri:string;method:'GET'|'POST';jsonPath:string[]}[];
+  pageBootstrap?:{origin:string;path:string;script:string}|null;
 }
 export interface BrowserLoginDescriptor {operationId:string;flow:BrowserLoginFlow;expiresAt:string}

@@ -53,6 +53,15 @@ public sealed class BrowserLoginTests
         using var other = new BrowserLoginService();using var unavailable = other.Register("owner", Flow(false), Complete, (_, _, _) => ValueTask.CompletedTask, _ => { });
         Assert.Equal("platform_not_ready", Assert.Throws<InvalidOperationException>(() => Begin(other, desktop)).Message);
         Assert.Throws<InvalidDataException>(() => other.Register("bad", Flow() with { StartUri = "http://example.com/" }, Complete, (_, _, _) => ValueTask.CompletedTask, _ => { }));
+        var bootstrap = new PluginBrowserPageBootstrap("https://example.com", "/login", "()=> 'waiting'");
+        using var bootstrapped = other.Register("bootstrap", Flow() with { PageBootstrap = bootstrap }, Complete, (_, _, _) => ValueTask.CompletedTask, _ => { });
+        foreach (var invalid in new[] { bootstrap with { Origin = "https://other.com" }, bootstrap with { Path = "/other" },
+            bootstrap with { Script = "" }, bootstrap with { Script = new string('x', 16385) } })
+            Assert.Throws<InvalidDataException>(() => other.Register("bad", Flow() with { PageBootstrap = invalid }, Complete, (_, _, _) => ValueTask.CompletedTask, _ => { }));
+        var rule = new PluginBrowserJsonRule("token", "https://example.com", "https://api.example.com/token", "GET", ["data", "content"]);
+        foreach (var invalid in new[] { rule with { Origin = "https://other.com" }, rule with { Uri = "http://api.example.com/token" },
+            rule with { Uri = "https://api.example.com/token?secret=x" }, rule with { Method = "DELETE" }, rule with { JsonPath = ["__proto__"] } })
+            Assert.Throws<InvalidDataException>(() => other.Register("bad", Flow() with { JsonRequests = [invalid] }, Complete, (_, _, _) => ValueTask.CompletedTask, _ => { }));
     }
 
     [Fact]
@@ -87,6 +96,7 @@ public sealed class BrowserLoginTests
         release.SetResult();await Task.WhenAll(cleanup, cancellation);
         Assert.Equal("cancelled", Json(service.Status(client, id))["state"]!.GetValue<string>());
         Assert.False(Json(service.Status(client, id))["result"]!["success"]!.GetValue<bool>());
+        Assert.Equal("browser_operation_cancelled", Json(service.Status(client, id))["result"]!["error"]!.GetValue<string>());
         Assert.Equal([PluginBrowserLoginTerminal.Completed, PluginBrowserLoginTerminal.Cancelled], notifications);
     }
 
@@ -103,6 +113,17 @@ public sealed class BrowserLoginTests
         Assert.True((await service.CompleteAsync(client, id, Capture())).Success);await service.CleanedAsync(client, id, true);
         Assert.Equal("browser_activation_failed", Json(service.Status(client, id))["result"]!["error"]!.GetValue<string>());
         Assert.Contains(PluginBrowserLoginTerminal.Cancelled, notifications);
+        using var jsonService = new BrowserLoginService();
+        using var jsonFlow = jsonService.Register("owner", Flow() with { Cookies = [], JsonRequests = [new("token", "https://example.com", "https://api.example.com/token", "GET", ["data", "content"])] },
+            (capture, invocation, token) => { Assert.Equal("private-token", capture.JsonValues.Single().Value); return Complete(capture, invocation, token); },
+            (_, _, _) => ValueTask.CompletedTask, _ => { });
+        string jsonId = Begin(jsonService, client);
+        var jsonCapture = new PluginBrowserCapture([], [], DateTimeOffset.UtcNow) { JsonValues = [new("token", "private-token")] };
+        Assert.False((await jsonService.CompleteAsync(client, jsonId, jsonCapture with { JsonValues = [new("other", "private-token")] })).Success);
+        Assert.False((await jsonService.CompleteAsync(client, jsonId, jsonCapture with { JsonValues = [.. jsonCapture.JsonValues, .. jsonCapture.JsonValues] })).Success);
+        Assert.True((await jsonService.CompleteAsync(client, jsonId, jsonCapture)).Success);
+        await jsonService.CleanedAsync(client, jsonId, true);
+        Assert.DoesNotContain("private-token", Json(jsonService.Status(client, jsonId)).ToJsonString());
         string second = Begin(service, client);await service.CompleteAsync(client, second, Capture());await service.CleanedAsync(client, second, false);
         Assert.Equal("browser_cleanup_failed", Json(service.Status(client, second))["result"]!["error"]!.GetValue<string>());
     }
@@ -115,7 +136,10 @@ public sealed class BrowserLoginTests
         using var registration = service.Register("owner", Flow(), async (_, _, token) => { entered.SetResult();await Task.Delay(Timeout.Infinite, token);return new(false); },
             (_, terminal, token) => { Assert.False(token.IsCancellationRequested);Assert.Equal(PluginBrowserLoginTerminal.Cancelled, terminal);revoked++;return ValueTask.CompletedTask; }, _ => { });
         string id = Begin(service, client);var validation = service.CompleteAsync(client, id, Capture());await entered.Task.WaitAsync(TimeSpan.FromSeconds(3));
-        await service.CancelEditorAsync("owner", client, "editor");Assert.False((await validation).Success);Assert.Equal(1, revoked);
+        await service.CancelEditorAsync("owner", client, "editor");
+        Assert.Equal("credential_editor_closed", (await validation).Error);Assert.Equal(1, revoked);
+        await service.CancelAsync(client, id);
+        Assert.Equal("credential_editor_closed", Json(service.Status(client, id))["result"]!["error"]!.GetValue<string>());
         clients.RevokeDesktop("verified");Assert.Throws<InvalidOperationException>(() => service.Status(client, id));
     }
 }

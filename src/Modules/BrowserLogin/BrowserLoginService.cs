@@ -21,6 +21,7 @@ internal sealed class BrowserLoginService : IDisposable
         internal long Created;
         internal CancellationTokenRegistration Cancellation;
         internal int State, CancelRequested;
+        internal string? CancellationReason;
         internal PluginBrowserLoginResult? Result;
     }
     private readonly object _sync = new();
@@ -44,6 +45,7 @@ internal sealed class BrowserLoginService : IDisposable
         {
             NavigationOrigins = flow.NavigationOrigins.ToArray(), PopupOrigins = flow.PopupOrigins.ToArray(),
             Cookies = flow.Cookies.ToArray(), Storage = flow.Storage.Select(r => r with { JsonPath = r.JsonPath.ToArray() }).ToArray(),
+            JsonRequests = flow.JsonRequests.Select(r => r with { JsonPath = r.JsonPath.ToArray() }).ToArray(),
         }, complete, terminal, validateInvocation);
         lock (_sync) { ObjectDisposedException.ThrowIf(_disposed, this); if (!_flows.TryAdd(key, entry)) throw new InvalidOperationException("browser_flow_duplicate"); }
         return new Registration(() =>
@@ -118,8 +120,8 @@ internal sealed class BrowserLoginService : IDisposable
         }
         catch (OperationCanceledException)
         {
-            await CancelAsync(op, "browser_validation_cancelled").ConfigureAwait(false);
-            return new(false, Error: "browser_validation_cancelled");
+            await CancelAsync(op, "browser_validation_timeout").ConfigureAwait(false);
+            return new(false, Error: op.CancellationReason);
         }
         catch
         {
@@ -136,7 +138,7 @@ internal sealed class BrowserLoginService : IDisposable
         {
             if (op.State >= 4) return;
             if (!cleaned || op.State != 2 || op.CancelRequested != 0 || op.Stop.IsCancellationRequested)
-            { await FinishFailedAsync(op, "browser_cleanup_failed").ConfigureAwait(false); return; }
+            { await FinishFailedAsync(op, op.CancellationReason ?? "browser_cleanup_failed").ConfigureAwait(false); return; }
             op.State = 3;
             using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
             try
@@ -146,9 +148,9 @@ internal sealed class BrowserLoginService : IDisposable
                 {
                     if (op.CancelRequested == 0 && !op.Stop.IsCancellationRequested) { op.State = 4; op.Cancellation.Unregister(); return; }
                 }
-                await FinishFailedAsync(op, "browser_operation_cancelled").ConfigureAwait(false);
+                await FinishFailedAsync(op, op.CancellationReason ?? "browser_operation_cancelled").ConfigureAwait(false);
             }
-            catch { await FinishFailedAsync(op, "browser_activation_failed").ConfigureAwait(false); }
+            catch { await FinishFailedAsync(op, op.CancellationReason ?? "browser_activation_failed").ConfigureAwait(false); }
         }
         finally { op.TerminalGate.Release(); }
     }
@@ -162,11 +164,11 @@ internal sealed class BrowserLoginService : IDisposable
     }
     private async Task CancelAsync(Operation op, string error)
     {
-        lock (_sync) { if (op.State >= 4) return; op.CancelRequested = 1; }
+        lock (_sync) { if (op.State >= 4) return; op.CancelRequested = 1; op.CancellationReason ??= error; }
         op.Stop.Cancel();
         try { CancelRequested?.Invoke(op.Invocation.ClientSession.ClientSessionId, op.Invocation.OperationId); } catch { }
         await op.TerminalGate.WaitAsync().ConfigureAwait(false);
-        try { if (op.State < 4) await FinishFailedAsync(op, error).ConfigureAwait(false); }
+        try { if (op.State < 4) await FinishFailedAsync(op, op.CancellationReason!).ConfigureAwait(false); }
         finally { op.TerminalGate.Release(); }
     }
     private static async Task FinishFailedAsync(Operation op, string error)
@@ -201,7 +203,20 @@ internal sealed class BrowserLoginService : IDisposable
             || flow.NavigationOrigins.Concat(flow.PopupOrigins).Any(o => !Origin(o))
             || !Uri.TryCreate(flow.StartUri, UriKind.Absolute, out var start) || start.Scheme != "https" || start.UserInfo != ""
             || !flow.NavigationOrigins.Contains(start.GetLeftPart(UriPartial.Authority), StringComparer.Ordinal)
-            || flow.Cookies.Count + flow.Storage.Count is < 1 or > 32) throw new InvalidDataException("browser_flow_invalid");
+            || flow.Cookies.Count + flow.Storage.Count + flow.JsonRequests.Count is < 1 or > 32) throw new InvalidDataException("browser_flow_invalid");
+        if (flow.PageBootstrap is { } bootstrap && (!Origin(bootstrap.Origin)
+            || bootstrap.Origin != start.GetLeftPart(UriPartial.Authority) || bootstrap.Path != start.AbsolutePath
+            || bootstrap.Path.Length > 512 || Encoding.UTF8.GetByteCount(bootstrap.Script) is < 1 or > 16384))
+            throw new InvalidDataException("browser_bootstrap_invalid");
+        if (flow.JsonRequests.Count > 4 || flow.JsonRequests.Any(r => r.Id.Length is < 1 or > 64
+                || !r.Id.All(c => char.IsAsciiLetterOrDigit(c) || c == '-')
+                || !Origin(r.Origin) || !flow.NavigationOrigins.Contains(r.Origin)
+                || !Uri.TryCreate(r.Uri, UriKind.Absolute, out var uri) || uri.Scheme != "https" || uri.UserInfo != ""
+                || !uri.IsDefaultPort || uri.Fragment != "" || uri.Query != "" || r.Uri.Length > 512
+                || r.Method is not ("GET" or "POST") || r.JsonPath.Count is < 1 or > 8
+                || r.JsonPath.Any(p => p.Length is < 1 or > 128 || p is "__proto__" or "constructor" or "prototype"))
+            || flow.JsonRequests.Select(r => r.Id).Distinct(StringComparer.Ordinal).Count() != flow.JsonRequests.Count)
+            throw new InvalidDataException("browser_capture_rule_invalid");
         if (flow.Cookies.Any(r => r.Domain.Length is < 1 or > 253 || r.Domain.Any(c => !char.IsAsciiLetterOrDigit(c) && c != '.' && c != '-')
             || !r.Path.StartsWith('/') || r.Path.Length > 256 || r.Name.Length is < 1 or > 80 || r.Name.Any(c => !char.IsAsciiLetterOrDigit(c) && c != '_'))
             || flow.Storage.Any(r => !Origin(r.Origin) || !flow.NavigationOrigins.Contains(r.Origin) || r.Storage is not ("localStorage" or "sessionStorage")
@@ -212,6 +227,9 @@ internal sealed class BrowserLoginService : IDisposable
     private static void ValidateCapture(PluginBrowserLoginFlow flow, PluginBrowserCapture capture)
     {
         if (Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(capture)) > 48 * 1024 || capture.Cookies.Count > flow.Cookies.Count || capture.Storage.Count > flow.Storage.Count
+            || capture.JsonValues.Count > flow.JsonRequests.Count
+            || capture.JsonValues.Any(v => !flow.JsonRequests.Any(r => r.Id == v.Id))
+            || capture.JsonValues.Select(v => v.Id).Distinct(StringComparer.Ordinal).Count() != capture.JsonValues.Count
             || capture.Cookies.Any(c => !flow.Cookies.Contains(new(c.Domain, c.Path, c.Name)))
             || capture.Storage.Any(s => !flow.Storage.Any(r => r.Origin == s.Origin && r.Storage == s.Storage && r.Key == s.Key))
             || capture.Cookies.Select(c => (c.Domain, c.Path, c.Name)).Distinct().Count() != capture.Cookies.Count
