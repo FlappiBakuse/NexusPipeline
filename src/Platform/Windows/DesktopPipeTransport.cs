@@ -32,7 +32,7 @@ internal static class DesktopPipeTransport
         if (count is <= 0 or > 65536) throw new InvalidDataException("Invalid desktop frame size");
         byte[] bytes = new byte[count];
         await stream.ReadExactlyAsync(bytes, token).ConfigureAwait(false);
-        using JsonDocument document = JsonDocument.Parse(bytes, new JsonDocumentOptions { MaxDepth = 5 });
+        using JsonDocument document = JsonDocument.Parse(bytes, new JsonDocumentOptions { MaxDepth = 16 });
         ValidateObject(document.RootElement);
         return document.RootElement.Clone();
     }
@@ -43,9 +43,19 @@ internal static class DesktopPipeTransport
         foreach (JsonProperty property in value.EnumerateObject())
         {
             if (!keys.Add(property.Name)) throw new InvalidDataException("Duplicate desktop frame field");
-            if (property.Value.ValueKind == JsonValueKind.Object) ValidateObject(property.Value);
-            else if (property.Value.ValueKind is not (JsonValueKind.String or JsonValueKind.Number or JsonValueKind.True or JsonValueKind.False)) throw new InvalidDataException("Invalid desktop frame value");
+            ValidateValue(property.Value);
         }
+    }
+    private static void ValidateValue(JsonElement value)
+    {
+        if (value.ValueKind == JsonValueKind.Object) ValidateObject(value);
+        else if (value.ValueKind == JsonValueKind.Array)
+        {
+            if (value.GetArrayLength() > 64) throw new InvalidDataException("Desktop frame collection limit");
+            foreach (var item in value.EnumerateArray()) ValidateValue(item);
+        }
+        else if (value.ValueKind is not (JsonValueKind.String or JsonValueKind.Number or JsonValueKind.True or JsonValueKind.False or JsonValueKind.Null))
+            throw new InvalidDataException("Invalid desktop frame value");
     }
     internal static async Task WriteAsync(Stream stream, object value, CancellationToken token)
     {

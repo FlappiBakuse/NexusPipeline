@@ -162,7 +162,9 @@ internal sealed class WebServer : IDisposable
                 var type when type == typeof(QueueQueries) => routeBindings.QueueQueries,
                 var type when type == typeof(UserQueries) => routeBindings.UserQueries,
                 var type when type == typeof(RunHistoryService) => routeBindings.History,
+                var type when type == typeof(NexusPipeline.Modules.Dashboard.DashboardService) => routeBindings.Dashboard,
                 var type when type == typeof(PluginManager) => routeBindings.Plugins,
+                var type when type == typeof(NexusPipeline.Modules.ClientSessions.ClientSessionService) => routeBindings.ClientSessions,
                 var type when type == typeof(PluginRepositoryService) => routeBindings.PluginRepository,
                 var type when type == typeof(PluginUserGlobalSettingsService) => routeBindings.PluginUserGlobalSettings,
                 var type when type == typeof(Scheduler) => routeBindings.Scheduler,
@@ -513,6 +515,9 @@ internal sealed class WebServer : IDisposable
                         return;
                     }
                 }
+                _routeBindings.ClientSessions.SetAuthority(_settings.Current.AccessToken);
+                context.ClientSession = _routeBindings.ClientSessions.Resolve(context.Request.Headers["X-Nxp-Client-Session"],
+                    RequestAccessPolicy.Connection(context.Request) == NexusPipeline.Plugin.Abstractions.PluginClientConnectionKind.Local);
                 await HandleApiAsync(context, method, path, token).ConfigureAwait(false);
                 return;
             }

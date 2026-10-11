@@ -81,7 +81,7 @@ internal enum PluginRuntimeState
     Shutdown,
 }
 
-internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailability, IUserRunStartingPublisher, IEmulatorSupportProviderResolver, IPluginExecutionProviderResolver
+internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailability, IUserRunStartingPublisher, IEmulatorSupportProviderResolver, IPluginExecutionProviderResolver, IDisposable
 {
     private const int PluginApiMajor = PluginApiVersion.Major;
     private const int PluginApiMinor = PluginApiVersion.Minor;
@@ -109,6 +109,18 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
     private readonly PluginHistoryContributionRegistry _historyContributions = new();
     private readonly PluginEmulatorSupportRegistry _emulatorSupport = new();
     private readonly PluginExecutionProviderRegistry _executionProviders;
+    private readonly PluginDashboardCardRegistry _dashboardCards = new();
+    internal NexusPipeline.Modules.BrowserLogin.BrowserLoginService BrowserLogin { get; } = new();
+
+    public void Dispose() => BrowserLogin.Dispose();
+
+    internal PluginDashboardCardRegistry.Card[] DashboardCards => _dashboardCards.Snapshot().Where(card => IsRuntimeEnabled(card.Owner)).ToArray();
+    internal long DashboardCardRevision => _dashboardCards.Revision;
+    internal event Action? DashboardCardsChanged
+    {
+        add => _dashboardCards.Changed += value;
+        remove => _dashboardCards.Changed -= value;
+    }
     private readonly PluginManagementSnapshotCache _managementSnapshotCache = new();
 
     internal PluginManager(
@@ -391,6 +403,7 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
         _historyContributions.Clear();
         _emulatorSupport.Clear();
         _executionProviders.Clear();
+        _dashboardCards.Clear();
         _dataPlugins.Clear();
         _managedPlugins.Clear();
         _managedRuntimes.Clear();
@@ -497,6 +510,7 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
         _historyContributions.Clear();
         _emulatorSupport.Clear();
         _executionProviders.Clear();
+        _dashboardCards.Clear();
         foreach (DataSpecializedPlugin plugin in _dataPlugins)
         {
             _runtimeStates[plugin.Name] = PluginRuntimeState.Shutdown;
@@ -548,6 +562,8 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
                 _historyContributions,
                 _emulatorSupport,
                 _executionProviders,
+                _dashboardCards,
+                BrowserLogin,
                 ex =>
                 {
                     _runtimeErrors[name] = ex.Message;
@@ -556,6 +572,7 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
             runtime.Start();
             _managedRuntimes[name] = runtime;
             _runtimeStates[name] = PluginRuntimeState.Active;
+            _dashboardCards.AvailabilityChanged();
             Logger.Info($"[插件] 已启用：{descriptor.Manifest.DisplayName} v{descriptor.Manifest.Version}（managed-code）");
         }
         catch (PluginLifecycleTimeoutException ex)

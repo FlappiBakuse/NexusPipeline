@@ -19,6 +19,9 @@ const props = withDefaults(defineProps<{
   showPasswordToggle?: boolean;
   showPasswordLabel?: string;
   hidePasswordLabel?: string;
+  passwordVisibilityControlled?: boolean;
+  passwordVisible?: boolean;
+  secretConfigured?: boolean;
 }>(), {
   id: undefined,
   modelValue: "",
@@ -32,10 +35,14 @@ const props = withDefaults(defineProps<{
   showPasswordToggle: false,
   showPasswordLabel: "Show password",
   hidePasswordLabel: "Hide password",
+  passwordVisibilityControlled: false,
+  passwordVisible: false,
+  secretConfigured: false,
 });
-const emit = defineEmits<{ "update:modelValue": [value: string]; change: [value: string] }>();
+const emit = defineEmits<{ "update:modelValue": [value: string]; change: [value: string]; 'password-visibility-request': [visible: boolean] }>();
 const input = ref<HTMLInputElement | null>(null);
-const passwordVisible = ref(false);
+const internalPasswordVisible = ref(false);
+const effectiveVisible = computed(() => props.passwordVisibilityControlled ? props.passwordVisible : internalPasswordVisible.value);
 
 const inputAttrs = computed(() => {
   const {
@@ -55,13 +62,13 @@ const baseType = computed(() => String(props.type || "text"));
 const isPasswordInput = computed(() => baseType.value.toLowerCase() === "password");
 const passwordToggleEnabled = computed(() => props.showPasswordToggle && isPasswordInput.value);
 const hasPasswordValue = computed(() => String(props.modelValue || "").length > 0);
-const passwordToggleVisible = computed(() => passwordToggleEnabled.value && !props.disabled && !props.readonly && hasPasswordValue.value);
-const inputType = computed(() => passwordToggleEnabled.value && passwordVisible.value ? "text" : baseType.value);
+const passwordToggleVisible = computed(() => passwordToggleEnabled.value && !props.disabled && (props.passwordVisibilityControlled || !props.readonly) && (hasPasswordValue.value || props.secretConfigured));
+const inputType = computed(() => passwordToggleEnabled.value && effectiveVisible.value ? "text" : baseType.value);
 
 watch(
   () => [props.type, props.modelValue, props.disabled, props.readonly, props.showPasswordToggle],
   () => {
-    if (!passwordToggleEnabled.value || !hasPasswordValue.value || props.disabled || props.readonly) passwordVisible.value = false;
+    if (!passwordToggleEnabled.value || !hasPasswordValue.value || props.disabled || props.readonly) internalPasswordVisible.value = false;
   },
 );
 
@@ -69,7 +76,8 @@ function update(event: Event) { const value = (event.target as HTMLInputElement)
 function change(event: Event) { emit("change", (event.target as HTMLInputElement).value); }
 function togglePasswordVisibility() {
   if (!passwordToggleVisible.value) return;
-  passwordVisible.value = !passwordVisible.value;
+  if (props.passwordVisibilityControlled) emit('password-visibility-request', !effectiveVisible.value);
+  else internalPasswordVisible.value = !internalPasswordVisible.value;
   input.value?.focus();
 }
 defineExpose({ focus: () => input.value?.focus() });
@@ -82,12 +90,12 @@ defineExpose({ focus: () => input.value?.focus() });
       v-if="passwordToggleVisible"
       class="nxp-password-toggle"
       type="button"
-      :aria-label="passwordVisible ? props.hidePasswordLabel : props.showPasswordLabel"
-      :aria-pressed="passwordVisible"
+      :aria-label="effectiveVisible ? props.hidePasswordLabel : props.showPasswordLabel"
+      :aria-pressed="effectiveVisible"
       @mousedown.prevent
       @click="togglePasswordVisibility"
     >
-      <NxpIcon :name="passwordVisible ? 'eyeOff' : 'eye'" class-name="nxp-password-toggle-icon" />
+      <NxpIcon :name="effectiveVisible ? 'eyeOff' : 'eye'" class-name="nxp-password-toggle-icon" />
     </button>
   </div>
   <input v-else ref="input" v-bind="inputAttrs" :class="[inputClass, 'nxp-input']" :style="inputStyle" :id="inputId" :type="inputType" :value="props.modelValue" :placeholder="props.placeholder" :disabled="props.disabled" :maxlength="props.maxlength" :readonly="props.readonly" :autocomplete="props.autocomplete" :aria-label="ariaLabel" @input.stop="update" @change.stop="change" />

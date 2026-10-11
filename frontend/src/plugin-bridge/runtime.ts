@@ -1,6 +1,6 @@
 // @ts-nocheck
 /**
- * Frontend API 1.6 插件运行时：同源模块加载、route/nav/slot/lifecycle 注册、
+ * Frontend API 1.7 插件运行时：同源模块加载、route/nav/slot/lifecycle 注册、
  * 插件 Web API（JSON 与二进制）、本地化、外观与运行预览宿主访问。
  *
  * 宿主平台依赖只通过 host-adapter 获取。
@@ -12,11 +12,16 @@ import {
   captureExecutionPreview,
   createAppearanceHost,
   getCapabilities,
+  openExternal,
+  getClientSession,
+  openBrowserLogin,
   getLocale,
   onLocaleChanged,
   t,
   toast,
 } from "./host-adapter";
+
+import { registerDashboardCard, disposeDashboardOwner } from "./dashboard";
 
 export const PLUGIN_SLOT_NAMES = Object.freeze([
   "dashboard.cards",
@@ -42,9 +47,9 @@ export const PLUGIN_SLOT_NAMES = Object.freeze([
 const SLOT_NAMES = new Set(PLUGIN_SLOT_NAMES);
 
 /** Frontend API 的精确版本；只有完全匹配的插件模块才会被加载。 */
-export const FRONTEND_API_VERSION = "1.6";
+export const FRONTEND_API_VERSION = "1.7";
 
-/** 插件可自行校验宿主 Frontend API 版本；非 1.6 一律返回 false。 */
+/** 插件可自行校验宿主 Frontend API 版本；非 1.7 一律返回 false。 */
 export function verifyPluginApiVersion(value) {
   return String(value ?? "") === FRONTEND_API_VERSION;
 }
@@ -228,10 +233,15 @@ function createPluginI18n(descriptor) {
 /** 构造授予插件的 host 对象；`activateDescriptor` 与 contract tests 都经此入口。 */
 export function createPluginHost(descriptor) {  const host = {
     getCapabilities,
+    clientSessions: { get: getClientSession },
+    browserLogin: { open: (request, signal) => {
+      if (!request || typeof request.flowId !== 'string' || request.flowId.includes(':')) throw new TypeError('browser_flow_invalid');
+      return openBrowserLogin({ ...request, flowId: `${descriptor.name}:${request.flowId}` }, signal);
+    } },
     plugin: Object.freeze({ ...descriptor }),
     i18n: createPluginI18n(descriptor),
     api: {
-      get: (route, signal) => api("GET", pluginApiPath(descriptor.name, route), undefined, signal),
+      get: (route, signal, query) => api("GET", pluginApiPath(descriptor.name, route, query), undefined, signal),
       post: (route, body, signal) => api("POST", pluginApiPath(descriptor.name, route), body, signal),
       put: (route, body, signal) => api("PUT", pluginApiPath(descriptor.name, route), body, signal),
       patch: (route, body, signal) => api("PATCH", pluginApiPath(descriptor.name, route), body, signal),
@@ -250,6 +260,8 @@ export function createPluginHost(descriptor) {  const host = {
     nav: {
       register: item => registerNav(descriptor, item, host),
     },
+    dashboard: { registerCard: (localId, renderer) => registerDashboardCard(descriptor.name, localId, renderer) },
+    navigation: { openExternal },
     slots: {
       register: (slot, renderer) => {
         const result = registerSlot(descriptor, slot, renderer);
@@ -302,6 +314,7 @@ async function activateDescriptor(descriptor) {
       dispose: typeof result === "function" ? result : result?.dispose || result?.deactivate,
     });
   } catch (error) {
+    disposeDashboardOwner(descriptor.name);
     console.warn(`[NexusPipeline] ${t("common.plugin_frontend_load_failed", { name: descriptor.name })}`, error);
   }
 }
@@ -328,6 +341,11 @@ export async function refreshPluginRuntime() {
   try {
     const payload = await api("GET", "/api/plugin-runtime/frontend");
     const descriptors = Array.isArray(payload) ? payload : (payload?.plugins || []);
+    const activeNames = new Set(descriptors.map(item => String(item.name).toLowerCase()));
+    for (const [key, plugin] of [...plugins]) if (!activeNames.has(key)) {
+      plugins.delete(key);
+      try { await plugin.dispose?.(); } finally { disposeDashboardOwner(plugin.descriptor.name); }
+    }
     for (const descriptor of descriptors) await activateDescriptor(descriptor);
     renderPluginNav();
     return true;
@@ -473,6 +491,7 @@ export function pluginRuntimeStatus() {
 /** 清空全部插件注册状态；供宿主 contract tests 在用例之间建立干净边界。 */
 export function resetPluginRuntimeForTests() {
   for (const active of [...activeRoutes]) active.dispose();
+  for (const plugin of plugins.values()) disposeDashboardOwner(plugin.descriptor.name);
   plugins.clear();
   routes.clear();
   navItems.clear();

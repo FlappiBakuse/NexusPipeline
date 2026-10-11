@@ -1116,6 +1116,61 @@
         "local-acceptance-build"
       ],
       "status": "current"
+    },
+    {
+      "id": "architecture.dashboard",
+      "path": "architecture/dashboard.md",
+      "summary": "实例级卡片目录、布局事务、编辑预览、条件保存和生命周期",
+      "topics": [
+        "Dashboard",
+        "卡片",
+        "外链"
+      ],
+      "aliases": [],
+      "codePaths": [
+        "src/Modules/Dashboard",
+        "src/Modules/Plugins/Runtime/PluginDashboardCardRegistry.cs",
+        "frontend/src/plugin-bridge/dashboard.ts",
+        "frontend/src/features/dashboard",
+        "src/ControlPlane/Http/ApiDashboardHandler.cs"
+      ],
+      "testDomains": [
+        "backend",
+        "frontend"
+      ],
+      "authorityFor": [
+        "dashboard-cards"
+      ],
+      "status": "current"
+    },
+    {
+      "id": "plugin-api.browser-login",
+      "path": "reference/plugin-api/browser-login.md",
+      "summary": "认证客户端、固定网页登录 flow、限定采集与清理补偿契约",
+      "topics": [
+        "网页登录",
+        "客户端会话",
+        "凭据",
+        "Electron"
+      ],
+      "aliases": [
+        "BrowserLogin",
+        "ClientSessions"
+      ],
+      "codePaths": [
+        "src/NexusPipeline.Plugin.Abstractions/BrowserLogin.cs",
+        "src/Modules/BrowserLogin",
+        "src/Modules/ClientSessions",
+        "desktop/src/main/browser-login.ts",
+        "frontend/src/platform/browser-login.ts"
+      ],
+      "testDomains": [
+        "hostAreas.plugins"
+      ],
+      "authorityFor": [
+        "browser-login-contract"
+      ],
+      "status": "current"
     }
   ]
 }

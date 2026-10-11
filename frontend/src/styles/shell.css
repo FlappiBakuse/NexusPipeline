@@ -235,6 +235,7 @@ body[data-wallpaper="on"] :is(.card, .section-surface, .list-surface, .table-sur
 }
 .card { padding: clamp(18px, 2.2vw, 24px); margin-bottom: var(--space-5); }
 .plugin-slot { display: grid; gap: var(--space-3); margin-bottom: var(--space-5); }
+.plugin-slot[hidden] { display: none; }
 .plugin-contribution-card { margin-bottom: 0; }
 .plugin-contribution-badge { display: inline-flex; flex-wrap: wrap; gap: var(--space-2); margin: var(--space-2) 0; }
 .plugin-contribution-form { display: grid; gap: var(--space-3); }
@@ -704,6 +705,12 @@ body[data-secondary-surface-transparency="off"] :is(.secondary-surface, .overflo
 .dashboard-state h3 { margin: 6px 0 4px; font-size: clamp(18px, 2.4vw, 24px); }
 .dashboard-state p { max-width: 62ch; margin: 0; color: var(--muted); font-size: 13px; line-height: 1.65; }
 .dashboard-content, .dispatch-content { display: grid; min-width: 0; gap: var(--space-4); }
+.dashboard-content { --dashboard-card-gap: var(--space-4); gap: var(--dashboard-card-gap); }
+.dashboard-card-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); min-width: 0; gap: var(--dashboard-card-gap); }
+.dashboard-content .dashboard-card-grid > * { min-width: 0; margin: 0; }
+.dashboard-card-grid > .dashboard-wide-card { grid-column: 1 / -1; }
+.dashboard-card-grid > .dashboard-wide-card > * { margin-block: 0; }
+@media (max-width: 1023px) { .dashboard-card-grid { grid-template-columns: minmax(0, 1fr); } }
 .dashboard-content > .dashboard-state,
 .dashboard-content > .content-section,
 .dashboard-content > .dashboard-system-note,

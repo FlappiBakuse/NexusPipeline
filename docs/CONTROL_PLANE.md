@@ -26,6 +26,8 @@
 | 插件读取 | `GET /api/plugins` | `plugin list/get` | `list_plugins` |
 | 插件商店/安装/开关/批量更新 | 插件页 + Control API（`POST /api/plugins/store/update-all`） | `plugin install/update/uninstall/enable/disable` | 由 CLI/Web 承担 |
 | 插件用户设置 | 贡献接口 | `plugin user-settings ...` | 由 CLI/Web 承担 |
+| 客户端会话 | `POST /api/client-sessions`（Web）；桌面由已验证 IPC 签发 | — | — |
+| 插件网页登录 | 已验证桌面 IPC 发起；`GET /api/browser-login/{operationId}` 查状态、`DELETE` 取消 | — | — |
 | 设置读取 | 设置 API | `settings get` | `get_settings`（密钥脱敏） |
 | 设置写入 | 设置 API | `settings update` | `安全白名单外的写入走 CLI/Web` |
 | 系统诊断 | `GET /api/diagnostics`；`POST /api/diagnostics/export`；受管 artifact 下载 | `doctor`、`doctor export --output <新文件>` | `get_diagnostics` |
@@ -38,7 +40,11 @@
 
 自动更新由设置中的 `UpdateCheckEnabled`、`UpdateAutoApplyEnabled` 与 `PluginAutoUpdateEnabled` 分别控制。前两项同时开启时，程序启动恢复收尾后、宿主服务启动前会检查并尝试下载、应用宿主更新；已验证的 `Ready` 包也会在该阶段应用。检查或下载超时/失败时继续启动当前版本，同一目标自动失败后冷却 12 小时；策略屏障不允许自动下载。`PluginAutoUpdateEnabled` 独立控制插件更新：启动阶段在插件事务恢复及加载前检查并暂存符合条件的已安装插件，运行期间每 12 小时检查更新，并在维护租约空闲时安排安全重启。手动宿主更新和插件商店批量更新入口保持可用。
 
-GameCheckIn v0.3.1 的独立签到页面由插件导航注册；状态读取位于 `GET /api/plugin-api/game-checkin/state`，任务新增、更新和删除使用 `/api/plugin-api/game-checkin/tasks`，排序使用 `PUT /api/plugin-api/game-checkin/tasks/order`，手动执行使用 `POST /api/plugin-api/game-checkin/tasks/run`。每个任务保存自己的计划和平台凭据；通知通过宿主全局渠道发送，任务可覆盖 SMTP 收件人。v0.3.1 使用新的 v2 任务存储，不导入 v0.3.0 任务数据。
+GameCheckIn 的独立签到页面由插件导航注册；状态读取位于 `GET /api/plugin-api/game-checkin/state`，任务新增、更新和删除使用 `/api/plugin-api/game-checkin/tasks`，排序使用 `PUT /api/plugin-api/game-checkin/tasks/order`，手动执行使用 `POST /api/plugin-api/game-checkin/tasks/run`。每个任务保存自己的计划和平台凭据；通知通过宿主全局渠道发送，任务可覆盖 SMTP 收件人。v2 任务存储不导入 v0.3.0 的任务数据。
+
+网页登录使用固定 flow、限定采集字段与独立临时 Electron 会话。外站页面不能调用 Nexus IPC；候选通过只读身份验证及窗口清理后才对当前编辑器生效。`X-Nxp-Client-Session` 由宿主验证并注入插件请求，JSON 中自报客户端身份无效。Web 会话保存在当前页面内存，不能获取 native 能力。详见[网页登录与客户端会话](reference/plugin-api/browser-login.md)。
+
+GameCheckIn 的 `credentials/editors`、`credentials/editors/state`、`credentials/draft`、`credentials/lease` 与 `credentials/login/prepare` 管理本客户端的编辑会话和字段代次。`POST tasks/credential/read` 是唯一明文回读入口；自动来源凭据先经 `POST tasks/credential/reveal/confirm` 主动确认，授权最多 24 小时且随当前 Host/客户端会话失效。普通任务 DTO、候选状态、轮询和诊断保持脱敏；专用响应使用 `no-store`。任务保存引用后端候选句柄，成功提交才消费，取消编辑保留已保存值。
 
 ## 行为护栏
 
@@ -80,3 +86,5 @@ GameCheckIn v0.3.1 的独立签到页面由插件导航注册；状态读取位�
 `GET /api/scripts/type-icons/{typeId}` 返回图像二进制，沿用 Control API 认证。`general` 返回宿主内嵌项目 ICO；其他类型由已启用且兼容的专项插件或执行 provider 的 `scriptTypeIcon` 声明来源，固定上游完整 SHA 与图标 SHA-256。已知类型未声明图标时使用项目图标；未知或未启用类型返回 404，客户端不能提供下载 URL。
 
 宿主加载插件后以最多三个并行下载在后台预取类型图标，不等待弹窗打开，不阻塞启动；停止宿主时取消预取并等待清理。Scripts 服务使用宿主代理下载，仅允许完整 SHA 固定的 HTTPS raw 来源并拒绝重定向，大小上限为 2 MiB、超时 10 秒。经摘要验证的图像缓存于 `.nxp/cache/script-type-icons/`，缓存命中无需联网；并发下载共享任务，单个客户端取消不影响其他请求。网络或校验失败使用项目图标，后续弹窗请求可以重试；缓存写入失败仍返回已经验证的图像。上游图标字节不包含在源码和发行包中。
+
+今日概览布局：`GET /api/dashboard/cards`、`GET /api/dashboard/layout`、`PUT /api/dashboard/layout`（General）。GET layout 的完整语言表示带强 ETag；PUT 正文为 schemaVersion/catalogRevision/visibleCardIds，必须携同语言 If-Match。目录冲突 409 优先于表示冲突 412，缺前置条件 428，非法值 400，超限 413，持久化失败/坏文件 503。成功 PUT 无 ETag，后续 GET 取得新基线。SSE 提供 dashboard.layout.changed 和 dashboard.catalog.changed 失效通知。详见[卡片 owner](architecture/dashboard.md)。

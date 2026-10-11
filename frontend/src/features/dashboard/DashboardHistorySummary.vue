@@ -85,7 +85,7 @@ function move(event: KeyboardEvent, chart: string, index: number) {
 </template>
 
 <style>
-.dashboard-history-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+.dashboard-history-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--dashboard-card-gap, 16px); }
 .dashboard-history-card { display: flex; flex-direction: column; min-width: 0; padding: 20px; border: 1px solid var(--content-card-border); border-radius: var(--radius-lg); background: var(--content-card); }
 .dashboard-history-card-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
 .dashboard-history-card-head h2 { margin: 0; font-size: 16px; }
@@ -110,5 +110,6 @@ function move(event: KeyboardEvent, chart: string, index: number) {
 .chart-day-target:is(:focus, .is-selected) { fill: color-mix(in srgb, var(--accent) 8%, transparent); stroke: var(--accent); stroke-width: 1; stroke-dasharray: 2 4; }
 .dashboard-chart-detail { min-height: 32px; margin: 4px 0 0; font-size: 12px; color: var(--muted); }
 @media (max-width: 1023px) { .dashboard-history-summary { grid-template-columns: minmax(0, 1fr); } }
-@media (max-width: 767px) { .dashboard-history-card { padding: 16px; } .dashboard-line-chart .chart-tick { font-size: 20px; } .dashboard-line-chart .chart-unit { font-size: 18px; } }
+@media (max-width: 767px) {
+.dashboard-history-card { padding: 16px; } .dashboard-line-chart .chart-tick { font-size: 20px; } .dashboard-line-chart .chart-unit { font-size: 18px; } }
 </style>

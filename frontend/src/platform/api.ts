@@ -2,6 +2,7 @@ import { releaseController, trackController } from "./page-state";
 import { getLocale, t } from "./i18n";
 import { requireServiceTraffic } from "./service-traffic";
 import {beginPageWrite} from './page-writes';
+import {clientSessionHeaders} from './client-sessions';
 
 export interface ApiError extends Error {
   code: string | null;
@@ -68,9 +69,10 @@ function authHeaders(): Record<string, string> {
 }
 
 function isAuthFailure(response: Response, data: unknown): boolean {
-  return response.status === 401
+  const code=(data as { code?: string } | null)?.code;
+  return (response.status === 401 && code !== 'client_session_required')
     || response.headers.get("X-Nexus-Auth") === "required"
-    || (data as { code?: string } | null)?.code === "auth_required";
+    || code === "auth_required";
 }
 
 function handleAuthFailure(response: Response, data: unknown): ApiError {
@@ -107,25 +109,32 @@ export async function apiBlob(path: string, signal?: AbortSignal | null): Promis
 }
 
 export async function api<T = unknown>(method: string, path: string, body?: unknown, signal?: AbortSignal | null): Promise<T> {
+  return (await apiResponse<T>(method, path, body, signal)).data;
+}
+
+export async function apiResponse<T = unknown>(method: string, path: string, body?: unknown,
+  signal?: AbortSignal | null, headers: Record<string, string> = {}): Promise<{ data: T; etag: string | null }> {
   requireServiceTraffic();
   const releaseWrite=/^(GET|HEAD)$/i.test(method)?null:beginPageWrite();
   const controller = signal ? null : trackController(new AbortController());
   const options: RequestInit = { method, headers: {}, signal: signal || controller!.signal };
   try {
     // 存储不可用时按无令牌处理（本地访问豁免；远程访问会走 401 令牌层）。
-    Object.assign(options.headers as Record<string, string>, authHeaders());
+    Object.assign(options.headers as Record<string, string>, authHeaders(), clientSessionHeaders());
+    Object.assign(options.headers as Record<string, string>, headers);
+    options.cache = "no-store";
     if (body !== undefined) {
       (options.headers as Record<string, string>)["Content-Type"] = "application/json";
       options.body = JSON.stringify(body);
     }
     const response = await fetch(path, options);
-    if (response.status === 204) return null as T;
+    if (response.status === 204) return { data: null as T, etag: response.headers.get("ETag") };
     const data = await response.json().catch(() => null);
     if (isAuthFailure(response, data)) throw handleAuthFailure(response, data);
     if (!response.ok) {
       throw apiError(formatApiError(data, response.status), response.status, data);
     }
-    return data as T;
+    return { data: data as T, etag: response.headers.get("ETag") };
   } catch (reason) {
     throw normalizeAbortError(reason, signal);
   } finally {

@@ -32,6 +32,8 @@ internal sealed class PluginHostContext : IPluginHostContext
         PluginHistoryContributionRegistry history,
         PluginEmulatorSupportRegistry emulatorSupport,
         PluginExecutionProviderRegistry executionProviders,
+        PluginDashboardCardRegistry dashboardCards,
+        NexusPipeline.Modules.BrowserLogin.BrowserLoginService browserLogin,
         PluginLocalizationManifest localization)
     {
         PluginName = pluginName;
@@ -53,6 +55,8 @@ internal sealed class PluginHostContext : IPluginHostContext
         _emulatorSupport = new PluginEmulatorSupportAdapter(emulatorSupport, pluginName);
         _executionProviders = new PluginExecutionProviderAdapter(executionProviders, pluginName);
         I18n = new PluginLocalizationService(localization);
+        _dashboardCards = new PluginDashboardCardAdapter(dashboardCards, pluginName);
+        _browserLogin = new PluginBrowserLoginAdapter(browserLogin, pluginName);
     }
 
     public string PluginName { get; }
@@ -91,6 +95,10 @@ internal sealed class PluginHostContext : IPluginHostContext
 
     public IPluginEmulatorSupportRegistry EmulatorSupport => _emulatorSupport;
     public IPluginExecutionProviderRegistry ExecutionProviders => _executionProviders;
+    public IPluginDashboardCardRegistry DashboardCards => _dashboardCards;
+    public IPluginBrowserLoginRegistry BrowserLogin => _browserLogin;
+    private readonly PluginBrowserLoginAdapter _browserLogin;
+    private readonly PluginDashboardCardAdapter _dashboardCards;
 
     private readonly PluginUserGlobalManagementAdapter _globalManagement;
 
@@ -108,6 +116,7 @@ internal sealed class PluginHostContext : IPluginHostContext
 
     public void Dispose()
     {
+        _browserLogin.Dispose();
         _executionEvents.Dispose();
         _userListBadges.Dispose();
         _globalManagement.Dispose();
@@ -116,6 +125,7 @@ internal sealed class PluginHostContext : IPluginHostContext
         _history.Dispose();
         _emulatorSupport.Dispose();
         _executionProviders.Dispose();
+        _dashboardCards.Dispose();
         ((PluginJobScheduler)Scheduler).Dispose();
     }
 
@@ -656,6 +666,34 @@ internal sealed class PluginHistoryContributionAdapter : IPluginHistoryContribut
         foreach (IDisposable registration in registrations)
         {
             registration.Dispose();
+        }
+    }
+}
+
+internal sealed class PluginDashboardCardAdapter(PluginDashboardCardRegistry registry, string owner)
+    : IPluginDashboardCardRegistry, IDisposable
+{
+    private readonly object _sync = new();
+    private readonly List<IDisposable> _registrations = new();
+    private bool _disposed;
+    public IDisposable Register(PluginDashboardCardDescriptor descriptor)
+    {
+        lock (_sync)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            var registration = registry.Register(owner, descriptor);
+            _registrations.Add(registration);
+            return new CallbackDisposable(() => { lock (_sync) { registration.Dispose(); _registrations.Remove(registration); } });
+        }
+    }
+    public void Dispose()
+    {
+        lock (_sync)
+        {
+            if (_disposed) return;
+            _disposed = true;
+            foreach (var item in _registrations) item.Dispose();
+            _registrations.Clear();
         }
     }
 }

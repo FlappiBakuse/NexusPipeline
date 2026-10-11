@@ -77,9 +77,14 @@ internal class TrayApp : ApplicationContext
         return menu;
     }
 
-    private void OpenManagedWeb()
+    private async void OpenManagedWeb()
     {
-        _ = _runtime.Desktop.ShowAsync("tray");
+        try { if (!await _runtime.Desktop.ShowAsync("tray")) ShowFailure("open-failed"); }
+        catch (Exception exception)
+        {
+            NexusPipeline.Shared.Logging.Logger.Warn("desktop_tray_open_failed: " + exception.GetType().Name);
+            ShowFailure("open-failed");
+        }
     }
 
     public static void OpenWeb()

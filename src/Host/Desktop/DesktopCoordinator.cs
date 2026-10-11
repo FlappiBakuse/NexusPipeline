@@ -11,7 +11,9 @@ using NexusPipeline.Shared.Logging;
 
 namespace NexusPipeline.Host.Desktop;
 
-internal sealed class DesktopCoordinator(Func<bool> requestExit, bool lightweight, Func<Uri, bool> openBrowser, DesktopModeSettingsCommands settingsCommands, ManagementPageRefresh managementRefresh) : IDesktopHost, IAsyncDisposable
+internal sealed class DesktopCoordinator(Func<bool> requestExit, bool lightweight, Func<Uri, bool> openBrowser, DesktopModeSettingsCommands settingsCommands, ManagementPageRefresh managementRefresh,
+    NexusPipeline.Modules.ClientSessions.ClientSessionService clientSessions,
+    NexusPipeline.Modules.BrowserLogin.BrowserLoginService browserLogin) : IDesktopHost, IAsyncDisposable
 {
     private readonly object _state = new();
     private readonly CancellationTokenSource _stop = new();
@@ -27,6 +29,7 @@ internal sealed class DesktopCoordinator(Func<bool> requestExit, bool lightweigh
     private bool _unowned, _pendingShow, _stopping, _hostExiting, _modeChanging;
     private volatile bool _lightweight = lightweight;
     private readonly Dictionary<string, (string Session, TaskCompletionSource<string> Completion)> _pageRequests = [];
+    private readonly Dictionary<string, (string Session, TaskCompletionSource<string> Completion)> _showRequests = [];
     public bool SavedLightweightMode => settingsCommands.SavedLightweightMode;
     private string? _handoff, _updateTransaction, _abortedUpdate;
     private int _port, _ready;
@@ -42,6 +45,7 @@ internal sealed class DesktopCoordinator(Func<bool> requestExit, bool lightweigh
     public void Start()
     {
         if (_listener is not null) return;
+        browserLogin.CancelRequested += OnBrowserCancelRequested;
         var saved = _store.Load();
         if (saved is { } owned)
         {
@@ -85,11 +89,29 @@ internal sealed class DesktopCoordinator(Func<bool> requestExit, bool lightweigh
             if (_unowned || HostInstance.Identity is null) return false;
             if (_session?.Main.IsAlive() == true)
             {
-                if (_desktopPipe is not null) { await SendAsync("window.show", new { reason }, token).ConfigureAwait(false);_pendingShow = false; }
+                if (_desktopPipe is not null)
+                {
+                    string id = Guid.NewGuid().ToString("N");
+                    var completion = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+                    lock (_state) _showRequests.Add(id, (_session.SessionId, completion));
+                    using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token, _stop.Token);
+                    deadline.CancelAfter(TimeSpan.FromSeconds(5));
+                    try
+                    {
+                        await SendAsync("window.show", new { reason }, deadline.Token, id).ConfigureAwait(false);
+                        string result = await completion.Task.WaitAsync(deadline.Token).ConfigureAwait(false);
+                        _pendingShow = result == "failed";
+                        return result == "shown";
+                    }
+                    catch (OperationCanceledException) when (!token.IsCancellationRequested && !_stop.IsCancellationRequested)
+                    { Logger.Warn("desktop_show_timeout"); return false; }
+                    finally { lock (_state) _showRequests.Remove(id); }
+                }
                 return true;
             }
             if (_session is not null && _key is not null)
             {
+                if (!_session.Main.HasExited()) return false;
                 if (_session.Family.Any(identity => !identity.HasExited())) return false;
                 _store.RemoveOwned(_session, _key);
                 if (_store.HasFiles) return false;
@@ -346,21 +368,15 @@ internal sealed class DesktopCoordinator(Func<bool> requestExit, bool lightweigh
         if (!_session.Family.SequenceEqual(family)) { _session = _session with { Family = family }; _store.Save(_session, _key); }
         }
     }
-    private async Task MonitorAsync()
+    private Task MonitorAsync() => DesktopMonitor.RunAsync(ObserveDesktopAsync,
+        _ => Logger.Warn("desktop_family_unconfirmed"), _stop.Token);
+
+    private async Task ObserveDesktopAsync()
     {
-        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
-        try
-        {
-            while (await timer.WaitForNextTickAsync(_stop.Token))
-            {
-                if (_lightweight || _modeChanging || _stopping || _hostExiting || _handoff is not null || _session is null) continue;
-                if (_session.Main.IsAlive()) { CaptureFamily(); continue; }
-                if (_session.MainRestartCount == 0 && _session.WindowState == "visible" && !_session.Family.Any(identity => !identity.HasExited()))
-                    await ShowAsync("main-crash", _stop.Token);
-            }
-        }
-        catch (OperationCanceledException) { }
-        catch (Exception exception) when (exception is IOException or System.ComponentModel.Win32Exception or UnauthorizedAccessException) { _unowned = true; Logger.Warn("desktop_family_unconfirmed"); }
+        if (_lightweight || _modeChanging || _stopping || _hostExiting || _handoff is not null || _session is null) return;
+        if (_session.Main.IsAlive()) { CaptureFamily(); return; }
+        if (_session.MainRestartCount == 0 && _session.WindowState == "visible" && !_session.Family.Any(identity => !identity.HasExited()))
+            await ShowAsync("main-crash", _stop.Token);
     }
     private async Task ListenAsync()
     {
@@ -408,9 +424,10 @@ internal sealed class DesktopCoordinator(Func<bool> requestExit, bool lightweigh
             JsonElement response = await DesktopPipeTransport.ReadAsync(pipe, handshake.Token);DesktopSupervisorProtocol.Fields(response, "type", "requestId", "data");DesktopSupervisorProtocol.Fields(response.GetProperty("data"), "proof");
             if (response.GetProperty("type").GetString() != "proof" || response.GetProperty("requestId").GetString() != requestId || !DesktopSupervisorProtocol.EqualsProof(response.GetProperty("data").GetProperty("proof").GetString()!, DesktopSupervisorProtocol.Proof(_key, "client", _rootHash, _session.SessionId, clientNonce, hostNonce, HostInstance.Id, HostInstance.DesktopBuildId))) return;
             if (Interlocked.CompareExchange(ref _desktopPipe, pipe, null) is not null) return;
+            string nativeOwner = _session.SessionId;
             await DesktopPipeTransport.WriteAsync(pipe, new { type = "attached", requestId, data = new { } }, handshake.Token);
             await SendStateAsync();
-            if (_pendingShow) await ShowAsync("user", _stop.Token);
+            if (_pendingShow) _ = ShowAsync("user", _stop.Token);
             using var heartbeat = new PeriodicTimer(TimeSpan.FromSeconds(5));
             Task pulse = PulseAsync(heartbeat);
             try
@@ -441,8 +458,18 @@ internal sealed class DesktopCoordinator(Func<bool> requestExit, bool lightweigh
                             lock (_state)
                                 if (_pageRequests.TryGetValue(pageId, out var pending) && pending.Session == _session.SessionId) pending.Completion.TrySetResult(result);
                             break;
-                        case "window.show-result": DesktopSupervisorProtocol.Fields(data, "result");break;
+                        case "window.show-result":
+                            DesktopSupervisorProtocol.Fields(data, "result");
+                            string shown = data.GetProperty("result").GetString()!;
+                            if (shown is not ("shown" or "kept-background" or "open-cancelled" or "failed")) return;
+                            lock (_state)
+                                if (_showRequests.TryGetValue(command.GetProperty("requestId").GetString()!, out var show) && show.Session == nativeOwner)
+                                    show.Completion.TrySetResult(shown);
+                            break;
                         case "desktop.stop-ready": case "pong": DesktopSupervisorProtocol.Fields(data);break;
+                        case "client.session": case "browser.begin": case "browser.complete": case "browser.cleaned": case "browser.cancel":
+                            _ = BrowserCommandAsync(command.GetProperty("type").GetString()!, command.GetProperty("requestId").GetString()!, data.Clone(), nativeOwner);
+                            break;
                         default: return;
                     }
                 }
@@ -453,7 +480,14 @@ internal sealed class DesktopCoordinator(Func<bool> requestExit, bool lightweigh
         finally
         {
             if (Interlocked.CompareExchange(ref _desktopPipe, null, pipe) == pipe)
-                lock (_state) foreach (var pending in _pageRequests.Values) pending.Completion.TrySetResult("disconnected");
+            {
+                if (_session is { } session) clientSessions.RevokeDesktop(session.SessionId);
+                lock (_state)
+                {
+                    foreach (var pending in _pageRequests.Values) pending.Completion.TrySetResult("disconnected");
+                    foreach (var pending in _showRequests.Values) pending.Completion.TrySetResult("failed");
+                }
+            }
             pipe.Dispose();
         }
     }
@@ -463,20 +497,68 @@ internal sealed class DesktopCoordinator(Func<bool> requestExit, bool lightweigh
         catch (Exception exception) when (exception is IOException or OperationCanceledException or ObjectDisposedException) { }
     }
     private Task SendStateAsync() => SendAsync("host.state", new { state = Volatile.Read(ref _ready) != 0 ? "ready" : "starting", actualPort = _port, instanceId = HostInstance.Id, previousInstanceId = _previousInstance, handoffId = HostInstance.RestartHandoffId, desktopBuildId = HostInstance.DesktopBuildId, frontendBuildId = HostInstance.FrontendBuildId }, _stop.Token);
-    private async Task SendAsync(string type, object data, CancellationToken token)
+    private async Task SendAsync(string type, object data, CancellationToken token, string? requestId = null, NamedPipeServerStream? expectedPipe = null)
     {
         NamedPipeServerStream? pipe = Volatile.Read(ref _desktopPipe);if (pipe is null) return;
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);deadline.CancelAfter(TimeSpan.FromSeconds(5));
         await _write.WaitAsync(deadline.Token).ConfigureAwait(false);
-        try { await DesktopPipeTransport.WriteAsync(pipe, new { type, requestId = Guid.NewGuid().ToString("N"), data }, deadline.Token).ConfigureAwait(false); }
+        try { if (expectedPipe is not null && (!ReferenceEquals(expectedPipe, pipe) || !ReferenceEquals(pipe, Volatile.Read(ref _desktopPipe)))) return;
+            await DesktopPipeTransport.WriteAsync(pipe, new { type, requestId = requestId ?? Guid.NewGuid().ToString("N"), data }, deadline.Token).ConfigureAwait(false); }
         finally { _write.Release(); }
     }
     public async ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+        browserLogin.CancelRequested -= OnBrowserCancelRequested;
         await StopForHostExitAsync().ConfigureAwait(false);_stop.Cancel();_desktopPipe?.Dispose();
         if (_listener is not null) { try { await _listener.ConfigureAwait(false); } catch (OperationCanceledException) { } }
         if (_monitor is not null) await _monitor.ConfigureAwait(false);
         if (_key is not null) CryptographicOperations.ZeroMemory(_key);_launchedProcess?.Dispose();_stop.Dispose();_create.Dispose();_write.Dispose();
+    }
+
+    private void OnBrowserCancelRequested(string clientId, string operationId) => _ = SendAsync("browser.cancel", new { operationId }, _stop.Token);
+
+    private async Task BrowserCommandAsync(string type, string requestId, JsonElement data, string owner)
+    {
+        var pipe = Volatile.Read(ref _desktopPipe);
+        object? result = null;
+        string? error = null;
+        try
+        {
+            if (_desktopPipe is null || _session?.SessionId != owner) throw new InvalidOperationException("client_not_supported");
+            var session = clientSessions.CreateDesktop(owner);
+            switch (type)
+            {
+                case "client.session":
+                    DesktopSupervisorProtocol.Fields(data);
+                    result = new { token = session.Token };
+                    break;
+                case "browser.begin":
+                    DesktopSupervisorProtocol.Fields(data, "flowId", "editorSessionId", "fieldGeneration", "context");
+                    result = browserLogin.Begin(session.Context, data.GetProperty("flowId").GetString()!, data.GetProperty("editorSessionId").GetString()!,
+                        data.GetProperty("fieldGeneration").GetInt64(), System.Text.Json.Nodes.JsonNode.Parse(data.GetProperty("context").GetRawText()) as System.Text.Json.Nodes.JsonObject
+                            ?? throw new InvalidDataException());
+                    break;
+                case "browser.complete":
+                    DesktopSupervisorProtocol.Fields(data, "operationId", "capture");
+                    result = await browserLogin.CompleteAsync(session.Context, data.GetProperty("operationId").GetString()!,
+                        data.GetProperty("capture").Deserialize<NexusPipeline.Plugin.Abstractions.PluginBrowserCapture>(new JsonSerializerOptions(JsonSerializerDefaults.Web))
+                            ?? throw new InvalidDataException()).ConfigureAwait(false);
+                    break;
+                case "browser.cleaned":
+                    DesktopSupervisorProtocol.Fields(data, "operationId", "cleaned");
+                    await browserLogin.CleanedAsync(session.Context, data.GetProperty("operationId").GetString()!, data.GetProperty("cleaned").GetBoolean()).ConfigureAwait(false);
+                    result = new { accepted = true };
+                    break;
+                case "browser.cancel":
+                    DesktopSupervisorProtocol.Fields(data, "operationId");
+                    await browserLogin.CancelAsync(session.Context, data.GetProperty("operationId").GetString()!).ConfigureAwait(false);
+                    result = new { accepted = true };
+                    break;
+            }
+        }
+        catch (InvalidOperationException ex) when (ex.Message is "platform_not_ready" or "client_not_supported" or "browser_operation_active" or "browser_operation_not_found" or "client_session_limit") { error = ex.Message; }
+        catch { error = "browser_request_failed"; }
+        try { if (pipe is not null) await SendAsync("browser.reply", new { result, error }, _stop.Token, requestId, pipe).ConfigureAwait(false); } catch { }
     }
 }

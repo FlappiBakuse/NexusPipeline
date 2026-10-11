@@ -1,9 +1,12 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref } from "vue";
-import { api, isAbortError } from "../../platform/api";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowReactive, watch } from "vue";
+import { onBeforeRouteLeave } from "vue-router";
+import { api, apiResponse, isAbortError } from "../../platform/api";
 import { openEventStream, type EventStreamHandle, type RealtimeSseEvent } from "../../platform/events";
 import { registerInterval, state } from "../../platform/page-state";
-import { formatList, t } from "../../platform/i18n";
+import { formatList, getLocale, onLocaleChanged, t } from "../../platform/i18n";
+import { registerRecoveryDirtyGuard } from "../../platform/service-recovery";
+import { onServiceTrafficChanged } from "../../platform/service-traffic";
 import { renderPluginSlot } from "@bridge/index";
 import { disposePluginSlot } from "@bridge/index";
 import { setTopbarTitle } from "../../platform/shell";
@@ -12,8 +15,12 @@ import NxpCard from "../../ui/primitives/NxpCard.vue";
 import NxpEmptyState from "../../ui/primitives/NxpEmptyState.vue";
 import NxpScrollArea from "../../ui/primitives/NxpScrollArea.vue";
 import NxpPageHeader from "../../ui/composites/NxpPageHeader.vue";
+import NxpButton from "../../ui/primitives/NxpButton.vue";
 import SystemActionCard from "./SystemActionCard.vue";
 import DashboardHistorySummary from "./DashboardHistorySummary.vue";
+import DashboardPluginCard from "./DashboardPluginCard.vue";
+import DashboardLayoutModal from "./DashboardLayoutModal.vue";
+import { DashboardLayoutEditor, type DashboardSnapshot } from "./layout-editor";
 import { historyTodayValue } from "../history/utils/historyFormat";
 import type { HistorySummary } from "../history/utils/historyTypes";
 
@@ -37,6 +44,25 @@ interface DashboardStatus {
   plugins?: Array<{ configuredEnabled?: boolean; displayName?: string }>;
   systemAction?: { state?: string; action?: string; deadline?: string; queueName?: string } | null;
 }
+
+const editor = shallowReactive(new DashboardLayoutEditor({
+  read: signal => apiResponse<DashboardSnapshot>("GET", "/api/dashboard/layout", undefined, signal, { "Accept-Language": getLocale() }),
+  write: async (baseline, ids, signal) => (await apiResponse<DashboardSnapshot>("PUT", "/api/dashboard/layout",
+    { schemaVersion: 1, catalogRevision: baseline.data.catalogRevision, visibleCardIds: ids }, signal,
+    { "If-Match": baseline.etag!, "Accept-Language": getLocale() })).data,
+}));
+const visibleCards = computed(() => editor.visibleIds);
+const historyVisible = computed(() => visibleCards.value.includes("core:history-duration"));
+let releaseDirty: (() => void) | undefined;
+let releaseTraffic: (() => void) | undefined;
+let releaseLocale: (() => void) | undefined;
+function wakeLayout() { if (!document.hidden) void editor.refresh(); }
+function beforeUnload(event: BeforeUnloadEvent) { if (editor.editing || editor.saving) { event.preventDefault(); event.returnValue = ""; } }
+onBeforeRouteLeave(() => {
+  if (editor.saving) return false;
+  if (editor.editing && !window.confirm(t("dashboard.layout.discard_confirm"))) return false;
+  editor.cancel(); return true;
+});
 
 const status = ref<DashboardStatus>({ running: [], plugins: [] });
 const loading = ref(true);
@@ -91,6 +117,7 @@ function disabledPlugins() {
   return (status.value.plugins || []).filter(plugin => !plugin.configuredEnabled);
 }
 
+let slotsPainted = false;
 async function paintSlots() {
   await nextTick();
   if (cardsSlot.value) await renderPluginSlot(cardsSlot.value, "dashboard.cards");
@@ -107,7 +134,7 @@ async function load() {
     status.value = { running: [], plugins: [], ...next };
     loading.value = false;
     error.value = "";
-    await paintSlots();
+    if (!slotsPainted) { await paintSlots(); slotsPainted = true; }
   } catch (reason) {
     if (controller.signal.aborted || isAbortError(reason)) return;
     loading.value = false;
@@ -172,6 +199,8 @@ function applyRealtimeEvent(event: RealtimeSseEvent) {
   const data = realtimeData(event);
   if (event.type === "run.status") applyRealtimeRunStatus(data);
   else if (event.type === "system.action") applyRealtimeSystemAction(data);
+  else if (event.type === "dashboard.layout.changed") editor.invalidate("layout", data);
+  else if (event.type === "dashboard.catalog.changed") editor.invalidate("catalog", data);
 }
 
 function startStatusPolling() {
@@ -192,13 +221,15 @@ function startEventStream() {
     onEvent: applyRealtimeEvent,
     onReady: async () => {
       await load();
+      await editor.refresh();
       stopStatusPolling();
     },
     onMissed: async () => {
       await load();
+      await editor.refresh();
     },
-    onDisconnected: startStatusPolling,
-    onFatal: stopStatusPolling,
+    onDisconnected: () => { editor.disconnect(); startStatusPolling(); },
+    onFatal: () => { editor.disconnect(); stopStatusPolling(); },
   });
 }
 
@@ -214,7 +245,7 @@ function normalizeHistorySummary(data: Partial<HistorySummary>): HistorySummary 
 }
 
 async function loadHistorySummary() {
-  if (disposed || historySummaryController) return;
+  if (disposed || historySummaryController || !historyVisible.value) return;
   const range = recentHistoryRange();
   historyFrom.value = range.from;
   historyTo.value = range.to;
@@ -248,6 +279,13 @@ onMounted(() => {
   setTopbarTitle(t("dashboard.dashboard"));
   void load();
   void loadHistorySummary();
+  void editor.refresh();
+  releaseDirty = registerRecoveryDirtyGuard(() => editor.editing || editor.saving || editor.pending);
+  releaseTraffic = onServiceTrafficChanged(paused => { if (paused) editor.pause(); else void editor.refresh(); });
+  releaseLocale = onLocaleChanged(() => { editor.disconnect(); void editor.refresh(); });
+  window.addEventListener("focus", wakeLayout);
+  window.addEventListener("beforeunload", beforeUnload);
+  document.addEventListener("visibilitychange", wakeLayout);
   startStatusPolling();
   historySummaryTimer = registerInterval(setInterval(() => void loadHistorySummary(), 60000));
   startEventStream();
@@ -255,6 +293,10 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   disposed = true;
+  editor.dispose(); releaseDirty?.(); releaseTraffic?.(); releaseLocale?.();
+  window.removeEventListener("focus", wakeLayout);
+  window.removeEventListener("beforeunload", beforeUnload);
+  document.removeEventListener("visibilitychange", wakeLayout);
   stopStatusPolling();
   eventStream?.close();
   eventStream = null;
@@ -269,6 +311,7 @@ onBeforeUnmount(() => {
   if (cardsSlot.value) void disposePluginSlot(cardsSlot.value);
   if (afterRunningSlot.value) void disposePluginSlot(afterRunningSlot.value);
 });
+watch(historyVisible, visible => { if (visible) void loadHistorySummary(); else historySummaryController?.abort(); });
 </script>
 
 <template>
@@ -284,14 +327,18 @@ onBeforeUnmount(() => {
         :eyebrow="t('dashboard.dashboard')"
         :title="t('shell.dashboard')"
         :description="t('dashboard.overview.help')"
-      />
+      ><template #actions><NxpButton tone="primary" :disabled="!editor.etag || editor.reading || editor.editing" @click="editor.begin()">{{ t('dashboard.layout.edit') }}</NxpButton></template></NxpPageHeader>
       <div class="dashboard-content">
         <p v-if="error" class="dashboard-system-note" role="alert">{{ error }}</p>
-        <section id="dashboard-state" class="dashboard-state" :class="(status.running || []).length ? 'running' : 'idle'" data-testid="dashboard-state" aria-live="polite">
+        <div id="system-action-area"><SystemActionCard v-if="status.systemAction && status.systemAction.action !== 'exit'" :action="status.systemAction" @cancelled="load" /></div>
+        <div v-if="editor.error && !editor.editing" class="dashboard-system-note" role="alert"><p>{{ t(`api.error.${editor.error}`) }}</p><NxpButton :busy="editor.reading" @click="editor.refresh()">{{ t('dashboard.layout.read_again') }}</NxpButton></div>
+        <NxpEmptyState v-if="editor.committed && !visibleCards.length" :title="t('dashboard.layout.none')" :description="t('dashboard.layout.empty_help')" />
+        <div v-if="visibleCards.length" class="dashboard-card-grid">
+        <template v-for="cardId in visibleCards" :key="cardId">
+        <section v-if="cardId === 'core:status'" id="dashboard-state" class="dashboard-state dashboard-wide-card" :class="(status.running || []).length ? 'running' : 'idle'" data-testid="dashboard-state" aria-live="polite">
           <div class="dashboard-state-copy"><div class="state-label">{{ (status.running || []).length ? t("common.running") : t("dashboard.system_idle") }}</div><h3>{{ (status.running || []).length ? t("dashboard.task_in_progress") : t("dashboard.everything_is_ready") }}</h3><p>{{ (status.running || []).length ? t("dashboard.running.summary", { count: (status.running || []).length }) : t("dashboard.running.empty_help") }}</p></div>
         </section>
-        <div id="system-action-area"><SystemActionCard v-if="status.systemAction && status.systemAction.action !== 'exit'" :action="status.systemAction" @cancelled="load" /></div>
-        <NxpCard class="content-section list-surface" data-testid="running-panel">
+        <NxpCard v-else-if="cardId === 'core:running'" class="content-section list-surface dashboard-wide-card" data-testid="running-panel">
           <div class="section-heading"><h3>{{ t("common.running") }}</h3><span class="muted">{{ t("dashboard.active_tasks.count", { count: (status.running || []).length }) }}</span></div>
           <NxpEmptyState v-if="!(status.running || []).length" :title="t('dashboard.idle')" :description="t('dashboard.running.empty')" link-href="#/dispatch" :link-label="t('dashboard.go_to_dispatch')" />
           <template v-else>
@@ -299,17 +346,16 @@ onBeforeUnmount(() => {
             <div class="running-records"><article v-for="record in status.running" :key="`mobile-${record.targetName}`" class="running-record"><div class="running-record-head"><strong>{{ record.targetName }}</strong><NxpBadge :tone="tone(record.status)">{{ statusText(record.status) }}</NxpBadge></div><div class="running-record-meta"><span>{{ recordType(record) }}</span><span>{{ recordMode(record) }}</span></div><div class="running-record-progress">{{ record.currentScriptName || "-" }} {{ record.currentStatus || "" }}<br><span class="muted">{{ t("dashboard.running.attempt", { attempt: record.currentAttempt, max: record.currentMaxAttempts }) }}</span><br v-if="record.persistenceWarning"><NxpBadge v-if="record.persistenceWarning" tone="warn">{{ t("dashboard.persistence_warning", { label: t("common.history.persistence_warning"), warning: record.persistenceWarning }) }}</NxpBadge></div></article></div>
           </template>
         </NxpCard>
-        <div ref="afterRunningSlot" class="plugin-slot" data-plugin-slot="dashboard.after-running" data-plugin-anchor="dashboard.after-running" hidden></div>
-        <DashboardHistorySummary
-          :summary="historySummary"
-          :loading="historySummaryLoading"
-          :error="historySummaryError"
-          :from="historyFrom"
-          :to="historyTo"
-        />
-        <div ref="cardsSlot" class="plugin-slot" data-plugin-slot="dashboard.cards" data-plugin-anchor="dashboard.cards" hidden></div>
+          <DashboardHistorySummary v-else-if="cardId === 'core:history-duration'" class="dashboard-wide-card"
+            :summary="historySummary" :loading="historySummaryLoading" :error="historySummaryError" :from="historyFrom" :to="historyTo" />
+          <DashboardPluginCard v-else class="dashboard-wide-card" :card-id="cardId" />
+        </template>
+        </div>
+        <div ref="afterRunningSlot" class="plugin-slot" data-plugin-slot="dashboard.after-running" hidden></div>
+        <div ref="cardsSlot" class="plugin-slot" data-plugin-slot="dashboard.cards" hidden></div>
         <section v-if="disabledPlugins().length" class="callout callout-warning callout-actions" data-testid="plugin-health"><p>{{ t("dashboard.plugins.disabled_summary", { count: disabledPlugins().length, plugins: formatList(disabledPlugins().map(plugin => plugin.displayName || "")) }) }}</p><a class="back-link" href="#/plugins">{{ t("dashboard.view_plugins") }}</a></section>
       </div>
     </template>
   </main>
+  <DashboardLayoutModal :editor="editor" />
 </template>

@@ -63,8 +63,10 @@ internal interface IHttpRouteBindings
     UserQueries UserQueries { get; }
 
     RunHistoryService History { get; }
+    NexusPipeline.Modules.Dashboard.DashboardService Dashboard { get; }
 
     PluginManager Plugins { get; }
+    NexusPipeline.Modules.ClientSessions.ClientSessionService ClientSessions { get; }
 
     PluginRepositoryService PluginRepository { get; }
 

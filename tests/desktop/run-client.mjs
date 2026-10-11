@@ -20,7 +20,7 @@ const child=spawn(exe,[],{cwd:root,env,stdio:['pipe','pipe','pipe'],windowsHide:
 let output='',desktopFamily=[];child.stdout.on('data',bytes=>{output+=bytes;});child.stderr.on('data',bytes=>{output+=bytes;});
 createRunMarker(marker,exe,child,{nonce,identityFile:exitFile+'.identity.json',handoffExecutablePath:exe,runId});
 try {
-  const deadline=Date.now()+60000;
+  const deadline=Date.now()+90000;
   while(Date.now()<deadline&&!fs.existsSync(report)){
     if(fs.existsSync(exitFile+'.identity.json')) {
       const receipt=JSON.parse(fs.readFileSync(exitFile+'.identity.json','utf8').replace(/^\uFEFF/u,''));
@@ -41,7 +41,20 @@ try {
   }while(Date.now()<stateDeadline);
   if(session.main.pid!==result.pid||session.windowState!=='hidden')throw new Error('Authenticated session state disagrees');
   desktopFamily=session.family;
-  fs.writeFileSync(path.join(base,'host-client-evidence.json'),JSON.stringify({schemaVersion:1,status:'PASS',classification:'LOCAL_DIAGNOSTIC',modeException:'Normal desktop lifecycle requires LightweightMode=false',hostIdentity:identity,client:result,sessionId:session.sessionId,real:['Electron window','eight business routes','embedded Vue','authenticated IPC','client preferences','validated clipboard IPC','hide on close','Host restart retains unsaved input','explicit discard navigation','renderer crash recovery'],substituted:['instrumented test ASAR','native dialog acknowledgement','system clipboard write']},null,2));
+  fs.writeFileSync(path.join(base,'reopen-request.json'),JSON.stringify({ownedDesktopPid:result.pid}));
+  const exited=Date.now()+10000;
+  while(Date.now()<exited&&desktopFamily.some(item=>isProcessAlive(item.pid)))await new Promise(resolve=>setTimeout(resolve,100));
+  if(desktopFamily.some(item=>isProcessAlive(item.pid)))throw new Error('Owned desktop family did not exit');
+  const activation=spawn(exe,[],{cwd:root,env,stdio:'ignore',windowsHide:true});
+  const exit=await new Promise((resolve,reject)=>{activation.once('error',reject);activation.once('exit',resolve);});if(exit!==0)throw new Error('Root reactivation failed');
+  const reopenedPath=path.join(base,'reopened-report.json'),reopenDeadline=Date.now()+15000;
+  while(Date.now()<reopenDeadline&&!fs.existsSync(reopenedPath))await new Promise(resolve=>setTimeout(resolve,100));
+  const reopened=JSON.parse(fs.readFileSync(reopenedPath));if(reopened.status!=='PASS'||reopened.pid===result.pid||!reopened.singleWindow)throw new Error('Exited desktop did not reopen');
+  const newSession=JSON.parse(fs.readFileSync(path.join(root,'.nxp/runtime/desktop/session.json'))).record;
+  if(newSession.main.pid!==reopened.pid)throw new Error('Reopened session identity disagrees');
+  desktopFamily=[...desktopFamily,...newSession.family];
+
+  fs.writeFileSync(path.join(base,'host-client-evidence.json'),JSON.stringify({schemaVersion:1,status:'PASS',classification:'LOCAL_DIAGNOSTIC',modeException:'Normal desktop lifecycle requires LightweightMode=false',hostIdentity:identity,client:result,reopened,sessionId:session.sessionId,real:['Electron window','eight business routes','embedded Vue','authenticated IPC','client preferences','validated clipboard IPC','hide on close','Host restart retains unsaved input','explicit discard navigation','renderer crash recovery'],substituted:['instrumented test ASAR','native dialog acknowledgement','system clipboard write']},null,2));
   console.log('Authenticated real desktop and eight business routes PASS');
 }finally {
   fs.writeFileSync(path.join(base,'host-output.txt'),output);

@@ -2,6 +2,19 @@ import { describe, expect, it, vi } from "vitest";
 import { api, apiBlob, isAbortError } from "./api";
 
 describe("host api client", () => {
+  it("keeps management authentication when a client session expires", async () => {
+    const previousFetch=globalThis.fetch;
+    const prompt=vi.fn();(window as Window&{__showTokenPrompt?:()=>void}).__showTokenPrompt=prompt;
+    localStorage.setItem('nexus-token','owned-management-token');
+    try {
+      globalThis.fetch=vi.fn(async()=>new Response(JSON.stringify({code:'client_session_required'}),{status:401})) as unknown as typeof fetch;
+      await expect(api('GET','/api/client-sessions/current')).rejects.toMatchObject({code:'client_session_required',status:401});
+      expect(localStorage.getItem('nexus-token')).toBe('owned-management-token');expect(prompt).not.toHaveBeenCalled();
+      globalThis.fetch=vi.fn(async()=>new Response(JSON.stringify({code:'auth_required'}),{status:401})) as unknown as typeof fetch;
+      await expect(api('GET','/api/status')).rejects.toMatchObject({code:'auth_required'});
+      expect(prompt).toHaveBeenCalledOnce();expect(localStorage.getItem('nexus-token')).toBeNull();
+    }finally{globalThis.fetch=previousFetch;delete (window as Window&{__showTokenPrompt?:()=>void}).__showTokenPrompt;localStorage.clear();}
+  });
   it("sends the bearer token for protected binary resources", async () => {
     const previousFetch = globalThis.fetch;
     const getItem = vi.spyOn(Storage.prototype, "getItem").mockImplementation(function (this: Storage, key: string) {

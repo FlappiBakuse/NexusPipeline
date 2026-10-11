@@ -27,6 +27,8 @@ internal sealed class ManagedPluginRuntime
     private readonly PluginHistoryContributionRegistry _history;
     private readonly PluginEmulatorSupportRegistry _emulatorSupport;
     private readonly PluginExecutionProviderRegistry _executionProviders;
+    private readonly PluginDashboardCardRegistry _dashboardCards;
+    private readonly NexusPipeline.Modules.BrowserLogin.BrowserLoginService _browserLogin;
     private readonly Action<Exception> _reportJobError;
     private PluginLoadContext? _loadContext;
     private INexusPlugin? _plugin;
@@ -46,6 +48,8 @@ internal sealed class ManagedPluginRuntime
         PluginHistoryContributionRegistry history,
         PluginEmulatorSupportRegistry emulatorSupport,
         PluginExecutionProviderRegistry executionProviders,
+        PluginDashboardCardRegistry dashboardCards,
+        NexusPipeline.Modules.BrowserLogin.BrowserLoginService browserLogin,
         Action<Exception> reportJobError)
     {
         _descriptor = descriptor;
@@ -59,6 +63,8 @@ internal sealed class ManagedPluginRuntime
         _history = history;
         _emulatorSupport = emulatorSupport;
         _executionProviders = executionProviders;
+        _dashboardCards = dashboardCards;
+        _browserLogin = browserLogin;
         _reportJobError = reportJobError;
     }
 
@@ -102,6 +108,8 @@ internal sealed class ManagedPluginRuntime
                 _history,
                 _emulatorSupport,
                 _executionProviders,
+                _dashboardCards,
+                _browserLogin,
                 _descriptor.Manifest.Localization);
             AwaitLifecycle(
                 token => plugin.InitializeAsync(_hostContext, token),
