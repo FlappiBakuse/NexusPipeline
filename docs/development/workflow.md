@@ -18,9 +18,9 @@
 
 如需开分支，使用 `feat/`、`fix/`、`docs/`、`refactor/`、`test/` 或 `chore/` 前缀。Release 分类遵循[发布专题](release.md)的宿主项目发布策略。
 
-### GitHub Actions 依赖维护
+### 依赖维护
 
-GitHub Actions 依赖由维护者评估上游变更与工作流兼容性后手动更新，并固定到完整提交 SHA；不启用 Dependabot 的 `github-actions` 自动更新。更新通过 Pull Request 和现役必需检查合入。
+所有依赖（包括 NuGet、npm 和 GitHub Actions）的版本更新与安全修复均由维护者评估上游变更及兼容性后手动实施，不启用 Dependabot 版本更新或安全自动更新。GitHub Actions 依赖固定到完整提交 SHA。依赖变更通过 Pull Request 和现役必需检查合入。
 
 ### 功能拆分与 UI 测试边界
 
