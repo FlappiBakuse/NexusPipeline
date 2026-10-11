@@ -63,7 +63,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Jint" Version="4.16.4" />
+    <PackageReference Include="Jint" Version="4.17.0" />
     <PackageReference Include="YamlDotNet" Version="18.1.0" />
     <PackageReference Include="MailKit" Version="4.17.0" />
     <PackageReference Include="ModelContextProtocol.AspNetCore" Version="2.2.0" />
