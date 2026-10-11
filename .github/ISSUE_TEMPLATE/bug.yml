@@ -1,53 +1,90 @@
-name: Bug report
-description: 报告可复现的产品缺陷
-title: "[Bug] "
+name: 问题反馈
+description: 报告宿主安装、界面、调度、配置或更新中的可复现问题
+title: "[缺陷] "
 labels:
   - bug
 body:
+  - type: markdown
+    attributes:
+      value: |
+        请先检索已有问题，并按下面的字段提供最小复现材料。
+        仅涉及某个官方插件的问题，请到[插件仓库](https://github.com/FlappiBakuse/NexusPipeline-Plugins/issues)反馈。
+        安全漏洞请使用[私密漏洞报告](https://github.com/FlappiBakuse/NexusPipeline/security/advisories/new)，不要在公开问题中披露。
   - type: input
     id: version
     attributes:
       label: NexusPipeline 版本
-      description: 请填写版本号或提交版本。
-      placeholder: 例如：vX.Y.Z 或提交短 SHA
+      description: 请填写软件中显示的完整版本；从源码构建时同时填写提交标识。
+      placeholder: 软件版本；源码提交标识（如适用）
     validations:
       required: true
   - type: input
     id: windows
     attributes:
       label: Windows 版本
-      placeholder: Windows 11 24H2 x64
+      description: 包括系统版本、版本号和处理器架构。
+      placeholder: 例如：Windows 11 24H2，x64
     validations:
       required: true
+  - type: dropdown
+    id: installation
+    attributes:
+      label: 安装来源
+      options:
+        - 官方安装器
+        - 官方便携包
+        - 从源码构建
+        - 其他来源或不确定
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: 相关环境与出现频率
+      description: 按实际情况补充桌面或浏览器访问、浏览器版本、相关插件名称与版本、目标软件或模拟器版本，以及必现或偶发。与问题无关的内容可以省略。
+      placeholder: 例如：桌面客户端；更新后首次启动必现；使用的插件名称与版本……
   - type: textarea
     id: steps
     attributes:
       label: 复现步骤
       description: 请提供最小、可重复的操作步骤和相关配置条件。
+      placeholder: |
+        1. 在……页面中……
+        2. 执行……
+        3. 出现……
     validations:
       required: true
   - type: textarea
     id: expected
     attributes:
       label: 预期行为
+      description: 操作成功时应该发生什么？
     validations:
       required: true
   - type: textarea
     id: actual
     attributes:
       label: 实际行为
+      description: 实际发生了什么？请保留完整错误提示，并说明是否影响已有配置或运行数据。
     validations:
       required: true
   - type: textarea
     id: logs
     attributes:
-      label: 相关日志
-      description: 仅粘贴已脱敏的必要片段，不要上传 token、配置、账号或完整日志。
+      label: 脱敏日志片段
+      description: 仅粘贴与问题直接相关的必要片段，保留时间和错误信息；不要粘贴完整日志、配置文件、访问令牌或账号凭据。
       render: text
+  - type: textarea
+    id: attachments
+    attributes:
+      label: 截图或补充材料
+      description: 可附已脱敏的截图、诊断摘要或最小复现说明。请遮盖账号、个人路径、通知地址和其他敏感信息。
   - type: checkboxes
     id: redaction
     attributes:
-      label: 敏感信息确认
+      label: 提交前确认
       options:
-        - label: 我已移除或脱敏 token、密钥、用户配置、账号和个人路径。
+        - label: 我已检索已有问题，未发现相同反馈，或已说明与现有问题的区别。
+          required: true
+        - label: 我已移除或脱敏访问令牌、密钥、账号凭据、用户配置和个人路径。
           required: true

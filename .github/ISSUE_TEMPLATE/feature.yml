@@ -1,34 +1,46 @@
-name: Feature request
-description: 提议新的产品能力或改进
-title: "[Feature] "
+name: 功能建议
+description: 提议新的使用能力、交互改进或工程改进
+title: "[建议] "
 labels:
   - enhancement
 body:
+  - type: markdown
+    attributes:
+      value: |
+        请先检索已有建议，重点说明使用场景和期望结果。
+        官方插件的功能或专项适配建议，请到[插件仓库](https://github.com/FlappiBakuse/NexusPipeline-Plugins/issues)提交。
   - type: textarea
     id: problem
     attributes:
       label: 使用场景
       description: 请说明当前遇到的问题、使用对象和触发条件。
+      placeholder: 在……场景下，我需要……；目前只能……，带来的问题是……
     validations:
       required: true
   - type: textarea
     id: proposal
     attributes:
-      label: 期望方案
-      description: 请描述期望的用户行为和交互结果。
+      label: 期望结果与建议方案
+      description: 先说明希望完成什么，再描述建议的操作流程；无需预先确定技术实现。
     validations:
       required: true
   - type: textarea
-    id: compatibility
+    id: acceptance
     attributes:
-      label: 兼容性影响
-      description: 请说明对现有 API、配置、插件、运行时数据或测试的影响。
-    validations:
-      required: true
+      label: 完成标准
+      description: 用一两个具体场景说明如何判断建议已得到满足。
+      placeholder: 例如：完成……操作后，可以看到……结果；在……情况下应提示……
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 当前替代方法与影响
+      description: 可说明当前如何处理、遇到的限制，以及是否涉及已有配置、插件或使用流程；不了解的内容可以留空。
   - type: checkboxes
     id: sensitive
     attributes:
-      label: 信息确认
+      label: 提交前确认
       options:
-        - label: 我没有在 Issue 中包含 token、密钥、用户配置或未脱敏日志。
+        - label: 我已检索已有建议，未发现相同请求，或已说明与现有建议的区别。
+          required: true
+        - label: 我没有包含访问令牌、密钥、账号凭据、用户配置或未脱敏材料。
           required: true

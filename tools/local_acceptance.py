@@ -278,7 +278,9 @@ def build(host: Path, plugins: Path, output: Path, compiler: Path | None, cache:
             frontendHash=identity['frontendHash'], zip={'path': str(package), 'sha256': digest(package)},
             setup={'path': str(output/'installer/NexusPipeline-v0.17.2-win-x64-setup.exe'), 'sha256': setup['setupSha256']},
             software=str(acceptance), pluginBuilds=plugin_results)
-        receipt.update(hostVersion='0.17.2', gameCheckInVersion='0.4.2', installationGeneration='g0170',
+        receipt.update(hostVersion='0.17.2',
+            gameCheckInVersion=next(result['version'] for result in plugin_results if result['artifactName'] == 'GameCheckIn'),
+            installationGeneration='g0170',
             baseSourceCommit=host_input['baseSourceCommit'], sourceTreeSha=host_input['sourceTreeSha'],
             hostSourceManifestSha256=host_input['sourceManifestSha256'], pluginsBaseCommit=plugin_input['baseSourceCommit'],
             pluginsSourceManifestSha256=plugin_input['sourceManifestSha256'])
