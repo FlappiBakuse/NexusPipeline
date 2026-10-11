@@ -8,6 +8,10 @@ NexusPipeline 是一个运行在 Windows 11 x64 上的本地游戏自动化脚�
 
 程序常驻托盘，管理页面默认位于 `http://127.0.0.1:58731/`。配置、历史、日志和插件都保存在本机，不需要云平台或数据库。运行程序需要 .NET 10 Desktop Runtime 与 ASP.NET Core Runtime 10.0.12 或后续 10.0 补丁，以及管理员权限。
 
+![NexusPipeline 主界面：中文浅色主题的今日概览](https://raw.githubusercontent.com/FlappiBakuse/NexusPipeline/main/docs/assets/screenshots/main-window-v0.17.png)
+
+主界面截图采集自隔离演示环境，账号和运行统计均为示例数据。
+
 ## 主要功能
 
 - 脚本实例：管理主程序、参数、配置文件、日志路径、判断规则和运行限制。
