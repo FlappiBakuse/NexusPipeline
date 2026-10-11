@@ -21,9 +21,9 @@ export class Supervisor extends EventEmitter {
     this.key.fill(0);
   }
   stop(): void {this.stopped=true;this.pipe?.dispose();}
-  async send(type: string,data: Record<string,unknown>={}): Promise<void> {
+  async send(type: string,data: Record<string,unknown>={},requestId:string=crypto.randomUUID()): Promise<void> {
     if(!this.pipe) throw new Error('desktop_pipe_disconnected');
-    await this.pipe.send({type,requestId:crypto.randomUUID(),data});
+    await this.pipe.send({type,requestId,data});
   }
   async request(type: 'client.session'|'browser.begin'|'browser.complete'|'browser.cleaned'|'browser.cancel',data: Record<string,unknown>={}): Promise<unknown> {
     const pipe=this.pipe;if(!pipe)throw new Error('desktop_pipe_disconnected');
@@ -67,7 +67,7 @@ export class Supervisor extends EventEmitter {
           if(!['starting','ready','restarting','stopping'].includes(state.state)||state.instanceId!==data.instanceId||state.desktopBuildId!==this.build.buildId||state.frontendBuildId!==this.build.frontendHash) throw new Error('Invalid Host state');
           this.emit('state',Object.freeze({...state}));break;
         }
-        case 'window.show': fields(message.data,['reason']);this.emit('show');break;
+        case 'window.show': fields(message.data,['reason']);this.emit('show',message.requestId);break;
         case 'host.restart-preparing': fields(message.data,['handoffId']);this.emit('restart',message.data.handoffId);break;
         case 'desktop.prepare-stop': fields(message.data,['reason','transactionId','remainingMs']);this.emit('stop',Object.freeze({...message.data}));break;
         case 'page.command': {

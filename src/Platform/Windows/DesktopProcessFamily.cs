@@ -7,7 +7,9 @@ internal static class DesktopProcessFamily
     internal static IReadOnlyList<DesktopProcessIdentity> Capture(DesktopProcessIdentity root, string bundle)
     {
         if (!root.IsAlive()) return [];
-        var snapshot = ProcessTree.SnapshotProcesses();
+        IReadOnlyDictionary<int, ProcessTree.ProcessNode> snapshot;
+        try { snapshot = ProcessTree.SnapshotProcesses(); }
+        catch (InvalidOperationException exception) { throw new IOException("desktop_snapshot_unavailable", exception); }
         var result = new List<DesktopProcessIdentity>();
         var owned = new Dictionary<int, DesktopProcessIdentity> { [root.Pid] = root };
         foreach (int pid in ProcessTree.ProcessTreeOrder(root.Pid, snapshot))
@@ -15,7 +17,7 @@ internal static class DesktopProcessFamily
             if (result.Count >= 128) throw new IOException("desktop_family_limit");
             DesktopProcessIdentity identity;
             try { identity = DesktopProcessIdentity.Read(pid); }
-            catch (ArgumentException) { continue; }
+            catch (Exception exception) when (exception is ArgumentException or InvalidOperationException) { continue; }
             if (pid == root.Pid)
             {
                 if (identity != root) throw new IOException("desktop_root_identity_changed");

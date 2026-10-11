@@ -1,5 +1,11 @@
 const {app,dialog,clipboard,ipcMain}=require('electron');
 const {PageCommands}=require('./main/page-commands.js');
+const {Supervisor}=require('./main/supervisor.js');
+const {execFile}=require('node:child_process');
+let liveSupervisor,reconnections=0;
+const emit=Supervisor.prototype.emit;
+Supervisor.prototype.emit=function(event,...args){liveSupervisor=this;if(event==='state'&&args[0].state==='ready')reconnections++;return emit.call(this,event,...args);};
+const activate=()=>new Promise((resolve,reject)=>execFile(path.resolve(process.execPath,'../../..','NexusPipeline.exe'),[],{windowsHide:true,timeout:10000},(error)=>error?reject(error):resolve()));
 const fs=require('node:fs');
 const path=require('node:path');
 const output=process.env.NEXUS_DESKTOP_TEST_REPORT;
@@ -37,6 +43,10 @@ app.on('browser-window-created',(_event,window)=>{
   window.webContents.on('did-finish-load',async()=>{
     if(observed||!window.webContents.getURL().startsWith('http://127.0.0.1:'))return;
     observed=true;
+    if(fs.existsSync(path.join(path.dirname(output),'reopen-request.json'))){
+      try{await waitClient(window,`!!document.querySelector('[data-testid="dashboard-state"]')`);window.close();fs.writeFileSync(path.join(path.dirname(output),'reopened-report.json'),JSON.stringify({status:'PASS',pid:process.pid,singleWindow:require('electron').BrowserWindow.getAllWindows().length===1}));}catch(error){fs.writeFileSync(path.join(path.dirname(output),'reopened-report.json'),JSON.stringify({status:'FAIL',error:String(error)}));}
+      return;
+    }
     try{
       const deadline=Date.now()+10000;
       let page;
@@ -135,9 +145,24 @@ app.on('browser-window-created',(_event,window)=>{
       await waitClient(window,`location.hash==='#/dashboard'&&!!document.querySelector('[data-testid="dashboard-state"]')`);
       const afterCrash=await window.webContents.executeJavaScript(`fetch('/api/status?view=identity').then(response=>response.json())`);
       if(afterCrash.instanceId!==afterRestart.instanceId||window.webContents.getOSProcessId()===rendererBeforeCrash||!nativeNotices.some(value=>value.includes('未保存的输入已丢失')))throw new Error('Renderer crash recovery changed Host or omitted the loss notice');
+      progress('hidden-activation');
+      await window.webContents.executeJavaScript(`document.querySelector('a[href="#/settings"]').click()`);
+      await waitClient(window,`!!document.getElementById('st-retention')`);
+      const hiddenDraft=await window.webContents.executeJavaScript(`(()=>{const input=document.getElementById('st-retention');input.value=String(Number(input.value)+2);input.dispatchEvent(new Event('input',{bubbles:true}));return input.value;})()`);
+      const rendererHidden=window.webContents.getOSProcessId();
+      for(let cycle=0;cycle<3;cycle++){
+        window.close();if(window.isDestroyed()||window.isVisible())throw new Error('Window close did not hide');
+        await new Promise(resolve=>setTimeout(resolve,3000));
+        if(cycle===1){const ready=reconnections;liveSupervisor.pipe.dispose();await activate();const until=Date.now()+10000;while(reconnections===ready&&Date.now()<until)await new Promise(resolve=>setTimeout(resolve,50));if(reconnections===ready)throw new Error('Supervisor did not reconnect');}
+        else {if(cycle===2)window.minimize();await activate();}
+        const visibleDeadline=Date.now()+5000;while((!window.isVisible()||window.isMinimized())&&Date.now()<visibleDeadline)await new Promise(resolve=>setTimeout(resolve,25));
+        await waitClient(window,`location.hash==='#/settings'&&document.getElementById('st-retention')?.value===${JSON.stringify(hiddenDraft)}`);
+        if(!window.isVisible()||window.isMinimized()||window.webContents.getOSProcessId()!==rendererHidden||require('electron').BrowserWindow.getAllWindows().length!==1)throw new Error('Activation did not preserve single window and draft');
+      }
       window.close();
+      const exitWatch=setInterval(()=>{if(fs.existsSync(path.join(path.dirname(output),'reopen-request.json'))){clearInterval(exitWatch);app.exit(0);}},50);
       if(window.isDestroyed()||window.isVisible())throw new Error('Window close did not hide');
-      fs.writeFileSync(output,JSON.stringify({schemaVersion:1,status:'PASS',page,pages,preferences,security:{sandbox:security.sandbox,contextIsolation:security.contextIsolation,nodeIntegration:security.nodeIntegration},clipboard:{authenticatedWrite:true,invalidValuesRejected:true,systemClipboard:'substituted'},restart:{before:beforeRestart.instanceId,after:afterRestart.instanceId,handoff:restart,rendererRetained:true,draftRetained:true,explicitDiscard:true},rendererCrash:{hostPreserved:true,rendererReplaced:true,lossNotice:true},nativeDialogAcknowledgement:'substituted',closeHides:true,pid:process.pid}),{flag:'wx'});
+      fs.writeFileSync(output,JSON.stringify({schemaVersion:1,status:'PASS',page,pages,preferences,security:{sandbox:security.sandbox,contextIsolation:security.contextIsolation,nodeIntegration:security.nodeIntegration},clipboard:{authenticatedWrite:true,invalidValuesRejected:true,systemClipboard:'substituted'},restart:{before:beforeRestart.instanceId,after:afterRestart.instanceId,handoff:restart,rendererRetained:true,draftRetained:true,explicitDiscard:true},rendererCrash:{hostPreserved:true,rendererReplaced:true,lossNotice:true},nativeDialogAcknowledgement:'substituted',closeHides:true,activation:{hiddenIdleCycles:3,pipeReconnect:true,minimizedRestored:true,singleWindow:true,draftRetained:true},pid:process.pid}),{flag:'wx'});
     }catch(error){
       const observation=await window.webContents.executeJavaScript(`({url:location.href,text:document.body.innerText,retention:document.getElementById('st-retention')?.value,draftMarker:window.desktopDraftMarker})`).catch(()=>null);
       fs.writeFileSync(output,JSON.stringify({schemaVersion:1,status:'FAIL',phase,error:String(error),observation,nativeNotices,failedRequests,rendererMessages}),{flag:'wx'});

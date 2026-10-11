@@ -145,7 +145,13 @@ async function start() {
     state('restarting');window.webContents.send('desktop.connection-candidate',value);
   });
   supervisor.on('restart',(handoff: unknown)=>{if(typeof handoff==='string'&&/^[0-9a-f]{32}$/.test(handoff)){expectedHandoff=handoff;invalidate();state('restarting');}});
-  supervisor.on('show',()=>{businessWindow();void manager.show().then(result=>supervisor.send('window.show-result',{result})).catch(()=>{});});
+  supervisor.on('show',(requestId:string)=>{
+    void (async()=>{
+      const window=businessWindow();
+      if(!window.webContents.getURL()&&!await retryRenderer(window))throw new Error('desktop_show_unavailable');
+      return manager.show();
+    })().then(result=>supervisor.send('window.show-result',{result},requestId),()=>supervisor.send('window.show-result',{result:'failed'},requestId)).catch(()=>{});
+  });
   supervisor.on('disconnected',()=>{void loginWindows.stop();pageCommands.invalidate();invalidate();state('disconnected');});
   supervisor.on('stop',async notice=>{
     await loginWindows.stop();

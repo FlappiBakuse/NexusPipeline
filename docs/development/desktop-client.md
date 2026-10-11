@@ -8,7 +8,9 @@
 
 监督 IPC 使用同 SID、同权限等级、NETWORK 显式拒绝的命名管道；内核提供 PID、映像路径与启动时间，双 nonce HMAC 验证两端身份。根入口只能发出激活请求，不读取桌面会话密钥。记录签名、私有 ACL 和完整进程家族约束重连、关闭和资源替换。未知或损坏记录保留原字节并拒绝接管。
 
-进程映像通过 Windows `QueryFullProcessImageNameW` 查询，与启动时间一起固定身份；模块加载尚未完成的进程也使用其实际 EXE 路径。身份查询失败时拒绝确认该进程。
+进程映像通过 Windows `QueryFullProcessImageNameW` 查询，与启动时间一起固定身份；模块加载尚未完成的进程也使用其实际 EXE 路径。身份查询失败时拒绝确认该进程。暂态家族快照失败保留最近有效记录并在下一监控周期重查；不会永久撤销已验证会话或结束监控。停止和资源替换仍完整核验身份。
+
+重复启动与托盘打开共用串行激活，桌面返回显示结果；隐藏/最小化窗口保留路由与输入。断连时保留显示请求，在受信任管道重连后完成；确认主进程与已记录家族退出后允许重新创建。归属错误保全现场并拒绝接管。托盘操作失败显示反馈并记录稳定原因。
 
 Host 重启保留桌面 renderer，准备状态暂停轮询和写操作，dirty guard 处理编辑取舍。重连候选固定实际端口、Host 实例、构建身份、当前 frame、路由和导航代次；只在当前候选获准后导航。意外断线保持当前 renderer 并显示恢复状态；有限重试后给出重试/退出操作。更新前刷新偏好并退出整个已确认桌面家族，剩余进程或文件锁使替换失败。
 
@@ -28,6 +30,6 @@ Test Host 在现役 runner 设置 `NEXUS_SYSTEM_ACTION_DRYRUN=1` 时替代防火
 
 所有本机产物应放在外部目录。设置 `NEXUS_TEST_ARTIFACT_ROOT` 和 `NEXUS_PARTNER_ROOT` 后执行 `node tests/run.mjs release`，现役 runner 隔离源码、构建 Vue、冻结输入、装配 Electron、内嵌 Host 身份并生成完整应用 manifest。`NEXUS_ELECTRON_ARCHIVE` 可指向已固定摘要的官方 ZIP；未指定时从精确官方地址下载并校验。构建输出路径由 runner 报告。
 
-`node tests/run.mjs gate --id host.integration.restart-update` 使用 asInvoker 完整软件验证整包交换、启动凭据、恢复和用户字节保全。该 runner 构建隔离的 0.17.0 全清单与 0.17.1 精简清单，验证不同补丁及文件集合的更新、损坏回滚和未知文件保全；夹具不改变产品目标版本。`host.integration.desktop` 执行五项原生 TypeScript 用例、八项真实载荷只读校验以及真实 Electron 中的页面、偏好、重启草稿保留、明确刷新、renderer 崩溃恢复和隐藏行为。原生提示的确认动作在自动化中由受控替代记录；DPI、多屏和生产 UAC 继续人工验收。生产软件清单要求 requireAdministrator，自动化不触发 UAC。
+`node tests/run.mjs gate --id host.integration.restart-update` 使用 asInvoker 完整软件验证整包交换、启动凭据、恢复和用户字节保全。该 runner 构建隔离的 0.17.0 全清单与 0.17.1 精简清单，验证不同补丁及文件集合的更新、损坏回滚和未知文件保全；夹具不改变产品目标版本。`host.integration.desktop` 执行十四项原生 TypeScript 用例、八项真实载荷只读校验以及真实 Electron 中的页面、偏好、重启草稿保留、明确刷新、renderer 崩溃恢复、隐藏后重复激活、断连重连和主进程退出后重开。原生提示的确认动作在自动化中由受控替代记录；DPI、多屏和生产 UAC 继续人工验收。生产软件清单要求 requireAdministrator，自动化不触发 UAC。
 
 载荷资源与 canonical buildInputs 见[构建身份](build-identity.md)，访问能力见[Plugin API](../reference/plugin-api/managed.md)，人工与远端未验证范围见[状态](../STATUS.md)。

@@ -9,6 +9,21 @@ namespace NexusPipeline.Tests.ControlPlane;
 
 public sealed class DesktopProtocolTests
 {
+    [Fact]
+    public async Task ProcessMonitorContinuesAfterTransientSnapshotFailure()
+    {
+        using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+        int observations = 0, failures = 0;
+        await DesktopMonitor.RunAsync(() =>
+        {
+            observations++;
+            if (observations == 1) throw new IOException("desktop_root_exited_during_capture");
+            if (observations == 3) stop.Cancel();
+            return Task.CompletedTask;
+        }, _ => failures++, stop.Token, TimeSpan.FromMilliseconds(10));
+        Assert.Equal(3, observations);
+        Assert.Equal(1, failures);
+    }
     private static DesktopCoordinator CreateDesktop(bool lightweight, Func<Uri, bool> browser)
     {
         var settings = new NexusPipeline.Modules.Settings.SettingsState(new NexusPipeline.Modules.Settings.AppSettings { LightweightMode = lightweight });
