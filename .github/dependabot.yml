@@ -8,7 +8,3 @@ updates:
     directory: /tests/e2e
     schedule:
       interval: weekly
-  - package-ecosystem: github-actions
-    directory: /
-    schedule:
-      interval: weekly
