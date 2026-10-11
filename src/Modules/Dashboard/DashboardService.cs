@@ -79,14 +79,17 @@ internal sealed class DashboardService : IDisposable
         if (!_loaded) { _layout = _store.Load(); _loaded = true; }
         else _store.EnsureUnchanged();
         var (revision, cards) = Catalog(locale);
+        var defaultPositions = cards.Select((card, index) => (card.CardId, index))
+            .ToDictionary(item => item.CardId, item => item.index, StringComparer.Ordinal);
         var entries = _layout?.Entries.ToList() ?? [];
         var known = entries.Select(e => e.CardId).ToHashSet(StringComparer.Ordinal);
         foreach (var card in cards)
         {
             if (!known.Add(card.CardId)) continue;
             var entry = new DashboardEntry(card.CardId, card.DefaultVisible);
-            if (card.CardId == "core:status") entries.Insert(0, entry);
-            else entries.Add(entry);
+            int insertAt = entries.FindIndex(existing => defaultPositions.TryGetValue(existing.CardId, out int position)
+                && position > defaultPositions[card.CardId]);
+            entries.Insert(insertAt < 0 ? entries.Count : insertAt, entry);
         }
         if (entries.Count > DashboardLayoutStore.MaximumEntries) throw new DashboardFailure(DashboardFailureKind.TooLarge);
         if (_layout is null || entries.Count != _layout.Entries.Length)

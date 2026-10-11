@@ -4,7 +4,7 @@
 
 managed 插件经 `IPluginHostContext.DashboardCards.Register` 注册本地 ID，Host 从真实插件身份生成 `plugin:<name>:<id>`。重复或带冒号 ID 拒绝；插件上下文释放时注销全部句柄。组合层适配器只投影实际运行插件，并使用声明的本地化资源。
 
-GET `/api/dashboard/layout` 一次返回 schemaVersion、catalogRevision、cards、layout、visibleCardIds。GET `/api/dashboard/cards` 返回当前目录。目录仅来自成功启动的 managed 登记，按 defaultOrder/cardId 排序；三张内置卡默认值为 0/100/200。首次出现按 defaultVisible 追加一次，包括默认隐藏卡；首次发现系统状态卡插入开头。不可用卡不显示，但记录、visible 和原位置保留。软件更新、默认值变化及重新启用不重新添加已知卡。
+GET `/api/dashboard/layout` 一次返回 schemaVersion、catalogRevision、cards、layout、visibleCardIds。GET `/api/dashboard/cards` 返回当前目录。目录仅来自成功启动的 managed 登记，按 defaultOrder/cardId 排序；三张内置卡默认值为 0/100/200。首次出现按 defaultVisible 和目录顺序插入一次，包括默认隐藏卡；已有记录的相对顺序保留。游戏活动卡使用 -100，首次加入布局及恢复默认时位于顶部。不可用卡不显示，但记录、visible 和原位置保留。软件更新、默认值变化及重新启用不重新添加已知卡；已保存布局可通过恢复默认采用新的默认顺序。
 
 `DashboardService` 的同一事务门串行处理发现和保存；`DashboardLayoutStore` 校验 schemaVersion=1、GUID、UTC 时间、安全整数 revision、唯一 ID、运行与历史必要记录及最多 512 条记录。已有布局沿用 `core:history-duration` 的位置和显示偏好控制整组图表；磁盘中的 `core:history-counts` 原记录保留，但不进入可选目录或接受独立保存。缺少系统状态记录时按首次发现原子添加，不改变 layoutId 或其他记录。候选经同目录原子写入成功后才发布内存引用和通知；无变化不写盘、不增 revision。损坏、未知格式或外部字节变化返回 503 并保留原文件，恢复默认不修复损坏文件。
 

@@ -40,12 +40,12 @@ public sealed class DashboardTests : IDisposable
 
     [Fact] public void ConcurrentReadsPersistDefaultsExactlyOnce()
     {
-        var source = new Source { Cards = [Plugin()] };
+        var source = new Source { Cards = [Plugin() with { DefaultOrder = -100 }] };
         using var service = new DashboardService(source, FilePath);
         Parallel.For(0, 20, _ => service.Read("zh-CN"));
         var state = service.Read("en-US");
         Assert.Equal(1, state.Layout.Revision);
-        Assert.Equal(DashboardLayoutStore.CoreIds.Append(Plugin().CardId), state.Layout.Entries.Select(e => e.CardId));
+        Assert.Equal(DashboardLayoutStore.CoreIds.Prepend(Plugin().CardId), state.Layout.Entries.Select(e => e.CardId));
         using var restarted = new DashboardService(source, FilePath);
         var next = restarted.Read("zh-CN");
         Assert.Equal(state.Layout.LayoutId, next.Layout.LayoutId);
@@ -148,10 +148,12 @@ public sealed class DashboardTests : IDisposable
     [Fact] public void FirstHiddenRegistrationIsNotDefaultedAgain()
     {
         var source = new Source(); using var service = new DashboardService(source, FilePath);
-        var baseline = service.Read("zh-CN"); Save(service, baseline, "core:history-duration", "core:running");
-        source.Set(Plugin(false)); var seen = service.Read("zh-CN");
-        Assert.False(seen.Layout.Entries[^1].Visible);
-        source.Set(Plugin(true)); var updated = service.Read("zh-CN");
+        var baseline = service.Read("zh-CN"); var saved = Save(service, baseline, "core:history-duration", "core:running");
+        source.Set(Plugin(false) with { DefaultOrder = -100 }); var seen = service.Read("zh-CN");
+        Assert.Equal(Plugin().CardId, seen.Layout.Entries[0].CardId);
+        Assert.False(seen.Layout.Entries[0].Visible);
+        Assert.Equal(saved.Layout.Entries, seen.Layout.Entries.Skip(1));
+        source.Set(Plugin(true) with { DefaultOrder = -100 }); var updated = service.Read("zh-CN");
         Assert.Equal(seen.Layout.Entries, updated.Layout.Entries); Assert.Equal(seen.Layout.Revision, updated.Layout.Revision);
     }
 
