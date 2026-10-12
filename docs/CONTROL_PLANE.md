@@ -34,6 +34,8 @@
 | 通知截图开关 | 设置 API（`webhookScreenshotEnabled` / `smtpScreenshotEnabled`） | `settings update` | `get_settings` 只读返回开关状态 |
 | 更新 | 更新 API | `update check/download/apply` | `get_update_status` |
 
+HTTP 更新状态与 MCP `get_update_status` 提供可空的 `lastApplyFailure`，字段为 `transactionId`、`targetVersion`、`code` 和 `atUtc`。它投影最近一次有效失败结果，仅在目标版本高于当前运行版本时显示；旧结果和未知文件保持原字节。
+
 更新状态投影在发现候选版本后补充 `policyVerified`、`canDownload`、`manualUpdateRequired`、`updateBlockCode`、`barrierVersion`、`migrationUrl` 和 `policyError`。`updateBlockCode=breaking-update` 时，页面显示手动下载安装包与配置迁移指引，下载、下次启动应用和自动应用入口均被后端拒绝；策略无法验证时使用 `policy-unavailable` 并保持 fail-closed。
 
 插件读取的本地列表、商店列表和详情投影均可提供 additive 字段 `createdAt`；该字段来自 catalog 的可选创建日期，缺失时返回空值，`updatedAt` 继续表示最新 changelog 日期。

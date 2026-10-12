@@ -106,6 +106,7 @@ internal sealed class StatusToolQuery
             status.BarrierVersion,
             status.MigrationUrl,
             status.PolicyError,
+            lastApplyFailure = status.LastApplyFailure?.ToPublicView(),
             automation = new
             {
                 checkEnabled = automation.CheckEnabled,

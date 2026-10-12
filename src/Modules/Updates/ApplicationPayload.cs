@@ -8,6 +8,11 @@ namespace NexusPipeline.Modules.Updates;
 internal sealed record ApplicationPayloadFile(string Path, long SizeBytes, string Sha256, string Kind);
 internal sealed record UpdatePayloadIdentity(string ManifestSha256, string BuildId, string FrontendHash, string Generation);
 
+internal sealed class PayloadFileException(string code, string path) : IOException(code + ": " + path)
+{
+    internal string Code { get; } = code;
+}
+
 internal static class ApplicationPayload
 {
     internal const string ManifestPath = "resources/payload-manifest.json";
@@ -15,6 +20,9 @@ internal static class ApplicationPayload
     internal const string DesktopArchive = "resources/desktop/resources/app.asar";
 
     internal static ApplicationBuildIdentity Validate(string root, string? expectedVersion = null, bool installed = false)
+        => ValidateCore(root, expectedVersion, installed, allowMissingReadme: false);
+
+    private static ApplicationBuildIdentity ValidateCore(string root, string? expectedVersion, bool installed, bool allowMissingReadme)
     {
         PayloadPathSafety.RequireLinkFree(root);
         byte[] manifestBytes = ReadBounded(Path.Combine(root, ManifestPath), 2 * 1024 * 1024);
@@ -94,12 +102,22 @@ internal static class ApplicationPayload
         if (listed.Keys.Any(path => path.StartsWith("resources/desktop/", StringComparison.Ordinal) && !runtimeNames.Contains(path) && !nativeFiles.Contains(path)))
             throw new InvalidDataException("Undeclared desktop dependency");
         var actual = (installed ? EnumerateApplication(root) : Enumerate(root)).Where(file => file != ManifestPath && !file.StartsWith("plugins/", StringComparison.OrdinalIgnoreCase)).ToArray();
-        if (actual.Length != listed.Count || actual.Any(path => !listed.ContainsKey(path))) throw new InvalidDataException("Payload file set mismatch");
+        if (actual.Any(path => !listed.ContainsKey(path))) throw new InvalidDataException("Payload contains undeclared files");
         foreach (var file in listed.Values)
         {
             string path = Path.Combine(root, file.Path.Replace('/', Path.DirectorySeparatorChar));
+            FileAttributes attributes;
+            try { attributes = File.GetAttributes(path); }
+            catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+            {
+                if (allowMissingReadme && file.Path == "README.md") continue;
+                throw new PayloadFileException("payload_file_missing", file.Path);
+            }
+            if ((attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0)
+                throw new PayloadFileException("payload_invalid", file.Path);
             using var stream = File.OpenRead(path);
-            if (stream.Length != file.SizeBytes || Convert.ToHexStringLower(SHA256.HashData(stream)) != file.Sha256) throw new InvalidDataException("Payload bytes mismatch: " + file.Path);
+            if (stream.Length != file.SizeBytes || Convert.ToHexStringLower(SHA256.HashData(stream)) != file.Sha256)
+                throw new PayloadFileException("payload_file_changed", file.Path);
         }
         return identity;
     }
@@ -108,6 +126,24 @@ internal static class ApplicationPayload
     {
         var identity = Validate(root, version, installed);
         return new(Convert.ToHexStringLower(SHA256.HashData(ReadBounded(Path.Combine(root, ManifestPath), 2 * 1024 * 1024))), identity.BuildId, identity.FrontendHash, identity.InstallationGeneration);
+    }
+
+    internal static UpdatePayloadIdentity FreezeForUpdate(string root, string? version, bool installed)
+    {
+        if (!installed) return Freeze(root, version);
+        var identity = ValidateCore(root, version, installed: true, allowMissingReadme: true);
+        return new(Convert.ToHexStringLower(SHA256.HashData(ReadBounded(Path.Combine(root, ManifestPath), 2 * 1024 * 1024))),
+            identity.BuildId, identity.FrontendHash, identity.InstallationGeneration);
+    }
+
+    internal static void VerifyBaseline(string root, UpdatePayloadIdentity frozen, UpdateInventory inventory)
+    {
+        if (FreezeForUpdate(root, null, installed: true) != frozen)
+            throw new InvalidDataException("Frozen application identity changed");
+        // The inventory freezes absence as well as bytes; rollback must not adopt a later README.
+        var actual = UpdateInventory.Capture(root, "NexusPipeline.exe", "README.md", "resources/desktop", ManifestPath);
+        var expected = inventory.Entries.Where(entry => entry.Path is not (".backup-ready" or ".installer-identity"));
+        if (!actual.Entries.SequenceEqual(expected)) throw new InvalidDataException("Frozen baseline inventory changed");
     }
 
     internal static void VerifyFrozen(string root, UpdatePayloadIdentity frozen, string? version = null, bool installed = false)

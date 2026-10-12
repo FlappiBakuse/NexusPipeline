@@ -43,6 +43,7 @@ internal sealed class UpdateService
     private readonly Action<string, DesktopResumeIntent> _abortDesktop;
     private readonly Func<string, string?, bool, UpdatePayloadIdentity> _freezePayload;
     private readonly Func<(HostMaintenanceLease? Lease, string? Reason)> _acquireMaintenance;
+    private readonly UpdateApplyFailure? _lastApplyFailure;
     private readonly OutboundHttpClientProvider _outbound;
     private readonly object _gate = new();
 
@@ -92,7 +93,7 @@ internal sealed class UpdateService
         _stopDesktop = stopDesktop ?? ((_, _) => true);
         _captureDesktopIntent = captureDesktopIntent ?? (() => DesktopResumeIntent.FromVisible(false));
         _abortDesktop = abortDesktop ?? ((_, _) => { });
-        _freezePayload = freezePayload ?? ApplicationPayload.Freeze;
+        _freezePayload = freezePayload ?? ApplicationPayload.FreezeForUpdate;
         _outbound = outbound ?? new OutboundHttpClientProvider(() => OutboundProxyOptions.Direct);
         if (acquireMaintenance is not null)
         {
@@ -105,6 +106,7 @@ internal sealed class UpdateService
                 : ((HostMaintenanceLease?)null, "存在活动运行、编辑会话或待执行系统操作，暂不能应用更新");
         }
         _state = HasRecoveryArtifacts() ? UpdateState.RecoveryPending : UpdateState.Idle;
+        _lastApplyFailure = UpdateApplyFailure.ReadLatest(installDir, CurrentVersion);
     }
 
     public UpdateState State
@@ -668,6 +670,14 @@ internal sealed class UpdateService
         bool desktopPrepared = false;
         bool installer = transactionId is not null;
         UpdateTask? startedJournal = null;
+        try { _ = _freezePayload(_installDir, null, true); }
+        catch (Exception ex)
+        {
+            lock (_gate) { _state = installer ? UpdateState.Idle : UpdateState.Ready; _maintenanceLease = null; }
+            lease.Dispose();
+            Logger.Error($"[更新] 当前安装校验失败：{ex.Message}");
+            return UpdateApplyResult.Busy(UpdateApply.FailureCode(ex), "当前安装的程序文件校验失败，请检查更新日志");
+        }
         try
         {
             transactionId ??= Guid.NewGuid().ToString("N");
@@ -933,7 +943,8 @@ internal sealed class UpdateService
             _updateBlockCode,
             _barrierVersion,
             _migrationUrl,
-            _policyError);
+            _policyError,
+            _lastApplyFailure);
     }
 
     private void ClearDiscoveryLocked()
@@ -1013,7 +1024,8 @@ internal sealed record UpdateStatusSnapshot(
     string? UpdateBlockCode = null,
     string? BarrierVersion = null,
     string? MigrationUrl = null,
-    string? PolicyError = null);
+    string? PolicyError = null,
+    UpdateApplyFailure? LastApplyFailure = null);
 
 /// <summary>下载请求结果：Started 表示后台下载已受理，Rejected 携带稳定的 API 错误码。</summary>
 internal sealed record UpdateDownloadResult(bool Succeeded, string? Code, string? Error)

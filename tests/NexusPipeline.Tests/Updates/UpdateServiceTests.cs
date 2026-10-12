@@ -244,14 +244,14 @@ public sealed class UpdateServiceTests : IAsyncLifetime
     }
 
     private UpdateService NewService(Func<DesktopResumeIntent>? capture = null, Func<string, TimeSpan, bool>? stop = null,
-        Action<string, DesktopResumeIntent>? abort = null)
+        Action<string, DesktopResumeIntent>? abort = null, Func<string, string?, bool, UpdatePayloadIdentity>? freeze = null)
     {
         return new UpdateService(
             () => _settings,
             _installDir!,
             () => _canApply,
             () => _exited = true,
-            freezePayload: (_, _, _) => new(new string('a', 64), new string('b', 64), new string('c', 64), "g0170"),
+            freezePayload: freeze ?? ((_, _, _) => new(new string('a', 64), new string('b', 64), new string('c', 64), "g0170")),
             captureDesktopIntent: capture, stopDesktop: stop, abortDesktop: abort);
     }
 
@@ -665,6 +665,24 @@ public sealed class UpdateServiceTests : IAsyncLifetime
             Assert.NotNull(UpdateTask.Read(Path.Combine(_installDir!, ".nxp-update", "task.json")));
         }
         finally { UpdateApply.LaunchApplyOverride = null; }
+    }
+
+    [Fact]
+    public async Task InvalidInstalledPayloadRejectsApplyBeforeDesktopStopAndReleasesAdmission()
+    {
+        bool stopped = false;
+        var service = NewService(stop: (_, _) => stopped = true, freeze: (_, _, installed) => installed
+            ? throw new PayloadFileException("payload_file_changed", "README.md")
+            : new(new string('a', 64), new string('b', 64), new string('c', 64), "g0170"));
+        await service.CheckAsync("test"); service.StartDownload("test"); await WaitStateAsync(service, UpdateState.Ready);
+        var result = service.RequestApply(false, "test");
+        Assert.False(result.Succeeded);
+        Assert.Equal("payload_file_changed", result.Code);
+        Assert.False(stopped);
+        Assert.False(_exited);
+        Assert.Equal(UpdateState.Ready, service.State);
+        Assert.False(File.Exists(Path.Combine(_installDir!, ".nxp-update", "task.json")));
+        Assert.Equal("payload_file_changed", service.RequestApply(false, "test").Code);
     }
 
     [Fact]
