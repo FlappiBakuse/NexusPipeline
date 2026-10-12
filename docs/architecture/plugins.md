@@ -16,7 +16,7 @@
 
 `PluginManager.LoadAll` 在运行时再次比较每个插件的 `minHostVersion` 与宿主当前受限版本。手动放入最低版本过高的插件会保留在管理投影中并标记 `Incompatible`，同时跳过数据插件能力/解析器注册与 managed-code 程序集加载；前端详情显示最低宿主版本和升级提示。Plugin API 不兼容继续使用独立的运行时错误码，避免与宿主版本不兼容混淆。
 
-插件状态持久化在 `.nxp/state/plugins/`：`catalog-cache.json` 为经校验的目录快照，`catalog-cache.meta.json` 为条件验证元数据，`ownership.json` 为商店安装版本和 SHA 归属，`pending.json` 为跨重启事务，`staging/` 与 `backup/` 为操作现场。卸载只依赖本地插件目录和已验证的归属记录，catalog 暂不可用时仍可创建卸载事务；本地已安装但已从 catalog 移除且仍有归属记录的插件以 `unlisted` 状态保留卸载入口。未验证归属的本地插件不进入商店更新/卸载事务。现有用户 `plugins/` 在宿主更新时保留；宿主更新器只交换 exe 与 `wwwroot/`。
+插件状态持久化在 `.nxp/state/plugins/`：`catalog-cache.json` 为经校验的目录快照，`catalog-cache.meta.json` 为条件验证元数据，`ownership.json` 为商店安装版本和 SHA 归属，`pending.json` 为跨重启事务，`staging/` 与 `backup/` 为操作现场。卸载只依赖本地插件目录和已验证的归属记录，catalog 暂不可用时仍可创建卸载事务；本地已安装但已从 catalog 移除且仍有归属记录的插件以 `unlisted` 状态保留卸载入口。未验证归属的本地插件不进入商店更新/卸载事务。现有用户 `plugins/` 在宿主更新时保留；宿主更新器交换主程序、`resources/desktop/`、`README.md` 和 `resources/payload-manifest.json`。
 
 插件配置、密钥和作用域 JSON 解析失败时保留 `.corrupt-<timestamp>-<guid>` 现场，再以空值继续运行；后续写入不会覆盖原始损坏文件。managed-code 生命周期初始化、启动和停止均有 20 秒截止时间；用户运行事件在插件作用域中跟踪，并在清理时执行有界排空。
 
@@ -33,7 +33,7 @@ managed-code 插件可以通过当前 Plugin API 2.0 注册用户列表徽章、
 - `PluginManager` 只扫描当前安装目录 `plugins/<ArtifactName>/`，schema 2 要求物理目录名与 manifest.artifactName 完全一致；逻辑身份取 manifest.name。它不读取网络，也不决定包下载策略。
 - `PluginRepositoryService` 只信任固定官方 `catalog.json`，先使用 5 分钟验证有效期内的内存快照；过期时以 `catalog-cache.meta.json` 中的 ETag/Last-Modified 发起条件请求，`304` 复用快照，`200` 以内容 SHA256 决定是否更新 catalog 文件；请求失败时使用已校验的磁盘缓存并标记 `stale`，没有可用缓存则返回 `repository_unavailable`。更新资格还要求本地目录与已验证 `ownership.json` 归属一致；catalog 由插件自身的 manifest、store 和包生成。
 - 插件 ZIP 经 SHA256、大小、ZIP 条目路径/压缩资源上限和 manifest 二次校验后进入 `.nxp/state/plugins/staging/`；`pending.json` 记录逻辑机器 ID、目标 artifactName 和跨重启事务，启动时应用事务后扫描当前插件目录。
-- `.nxp/state/plugins/ownership.json` 记录由官方商店安装的版本、SHA 和 artifactName；`catalog-cache.json` 与 `catalog-cache.meta.json` 共同构成可验证的离线展示缓存。更新器只交换宿主 exe 与 `wwwroot/`，运行时 `plugins/` 保持原目录。
+- `.nxp/state/plugins/ownership.json` 记录由官方商店安装的版本、SHA 和 artifactName；`catalog-cache.json` 与 `catalog-cache.meta.json` 共同构成可验证的离线展示缓存。更新器交换主程序、`resources/desktop/`、`README.md` 和 `resources/payload-manifest.json`，运行时 `plugins/` 保持原目录。
 - Web 端点为 `GET /api/plugins/store`、`POST /api/plugins/store/refresh` 和 `POST /api/plugins/store/{name}/{install|update|uninstall}`；启用、禁用与商店操作成功响应统一返回 `restartRequired`，前端据此提示重启生效。
 - managed-code 用户级设置端点为 `GET /api/plugin-contributions/user-global/{userId}` 与 `PUT /api/plugin-contributions/user-global/{userId}/{pluginName}/{contributionId}`；用户列表徽章使用单次聚合端点 `GET /api/plugin-contributions/user-list-badges`，宿主负责异常隔离、白名单校验和 HTML 展示数据投影。
 - Plugin API 2.0 提供通用 UI 贡献、插件 Web API、本地化、二进制资产、模拟器 provider 和通知收件人覆盖。UI 使用 `/api/plugin-contributions/ui/`，插件 Web API 使用 `/api/plugin-api/<plugin>/<route>`；SMTP 收件人留空时采用宿主全局设置。

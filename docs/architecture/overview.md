@@ -103,7 +103,7 @@ NexusPipeline/
 │   ├── src/styles/     设计 token、基础元素样式与布局/shell 样式
 │   ├── src/stores/     Pinia 全局状态
 │   └── public/i18n/    宿主 zh-CN/en-US 词典（唯一资源源）
-├── release/wwwroot/    Vite 构建后的发布静态 Web 资源（生成物）
+├── desktop/           Electron 桌面源码，发行载荷位于 resources/desktop/
 ├── .nxp/               安装目录内的内部运行状态（runtime 标记与 state 持久状态）
 ├── tests/
 │   ├── NexusPipeline.Tests/  xUnit 单元测试（通过 InternalsVisibleTo 访问 internal 契约）
