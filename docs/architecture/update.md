@@ -26,7 +26,7 @@ Setup 使用本实例事务互斥体，将现役 Host 复制到同根 `.nxp/runt
 
 旧安装允许缺少根目录 `README.md`；已存在的说明文件仍按清单校验。备份清单固定说明文件的存在状态，回滚恢复原字节或原先缺失状态。候选包、交换后的新安装及启动回执要求完整载荷。应用请求在停止桌面前校验旧安装，worker 在宿主退出后重新核验。
 
-更新状态的 `lastApplyFailure` 返回最近一次有效失败的事务 ID、目标版本、错误代码和 UTC 时间，仅在目标高于当前运行版本时显示。结果读取不改变未知或无效记录。
+更新状态的 `lastApplyFailure` 返回最近一次有效失败的事务 ID、目标版本、错误代码和 UTC 时间，仅在目标高于当前运行版本时显示。结果读取不改变未知或无效记录；更新卡按 `automation.nextCheckAt` 刷新首次及后续检查结果，检查、下载和应用期间每秒刷新。
 
 主程序更新事务固定交换四项应用资产：`NexusPipeline.exe`、`resources/desktop/`、`README.md` 和 `resources/payload-manifest.json`。Vue 以资源形式内嵌在 Host 中。用户 `plugins/`、`config/`、`data/`、`history/`、`logs/`、`.nxp/state/desktop/` 和未知同级文件均不参与交换；官方插件仓库不参与宿主自动更新流程。
 

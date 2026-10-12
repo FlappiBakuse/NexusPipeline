@@ -39,6 +39,13 @@ const completionActionText = computed(() => {
     : t("settings.update.not_checked");
 });
 const updateStatusView = computed(() => updateStatusViewFor(updateStatus.value?.state));
+const applyFailureText = computed(() => {
+  const failure = updateStatus.value?.lastApplyFailure;
+  if (!failure) return "";
+  const key = ["payload_file_missing", "payload_file_changed", "payload_invalid"].includes(failure.code)
+    ? `settings.update.failure.${failure.code}` : "settings.update.failure.generic";
+  return t("settings.update.apply_failed", { version: failure.targetVersion, current: updateStatus.value?.current || "", reason: t(key) });
+});
 const canCheckUpdate = computed(() => !["checking", "downloading", "ready", "applying"].includes(updateStatus.value?.state || "idle"));
 
 function errorText(reason: unknown) {
@@ -65,10 +72,10 @@ function scheduleUpdatePoll() {
   const delay = pollFailures > 0
     ? Math.min(60000, 2500 * 2 ** Math.min(5, pollFailures - 1))
     :
-    state === "checking" || state === "downloading"
+    state === "checking" || state === "downloading" || state === "applying"
       ? 1000
       : updateStatus.value?.automation?.checkEnabled === true
-        ? 60000
+        ? Math.max(1000, Math.min(60000, (Date.parse(updateStatus.value?.automation?.nextCheckAt || "") || Date.now() + 60000) - Date.now()))
         : 0;
   if (!delay) return;
   updateTimer = setTimeout(() => void loadUpdateStatus(), delay);
@@ -160,6 +167,7 @@ defineExpose({ reload: loadUpdateStatus });
       </div>
     </div>
     <p class="muted update-state-copy">{{ completionActionText }}</p>
+    <p v-if="applyFailureText" class="callout callout-warning" role="alert">{{ applyFailureText }}</p>
     <p v-if="updateStatus?.manualUpdateRequired" class="callout callout-warning update-manual-warning" data-testid="update-manual-warning">
       {{ t("settings.update.manual_required_help", { version: updateStatus.latest || "" }) }}
       <a v-if="updateStatus.migrationUrl" :href="String(updateStatus.migrationUrl)" target="_blank" rel="noopener noreferrer">
