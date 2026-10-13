@@ -179,7 +179,7 @@ onBeforeUnmount(() => {
 .nxp-select-menu { position: absolute; top: calc(100% + 6px); right: 0; left: 0; z-index: 60; display: flex; max-height: min(280px, 40vh); flex-direction: column; gap: 2px; overflow: hidden; padding: 5px; border: 1px solid var(--content-control-border, var(--nx-color-border)); border-radius: var(--radius-md, var(--nx-radius-md)); background: var(--content-card, var(--nx-color-surface)); box-shadow: var(--shadow); }
 .nxp-select-menu-scroll { min-height: 0; max-height: 100%; }
 .nxp-select-menu[hidden] { display: none; }
-.nxp-select-option { display: flex; width: 100%; min-height: 36px; align-items: center; justify-content: space-between; gap: 8px; margin: 0; padding: 7px 9px; border: 0; border-radius: 6px; background: transparent; color: var(--nx-color-text); font: inherit; font-size: 13px; font-weight: 400; text-align: left; box-shadow: none; }
+.nxp-select-option { display: flex; width: 100%; min-height: 40px; align-items: center; justify-content: space-between; gap: 8px; margin: 0; padding: 7px 9px; border: 0; border-radius: 6px; background: transparent; color: var(--nx-color-text); font: inherit; font-size: 13px; font-weight: 400; text-align: left; box-shadow: none; }
 .nxp-select-option:hover, .nxp-select-option:focus-visible, .nxp-select-option.nxp-select-option-selected { background: var(--content-control-hover, transparent); color: var(--accent, var(--nx-color-accent)); }
 .nxp-select-option:disabled { cursor: not-allowed; color: var(--faint, var(--nx-color-muted)); opacity: .55; }
 .nxp-select-check { flex: 0 0 auto; color: var(--accent, var(--nx-color-accent)); font-weight: 700; }

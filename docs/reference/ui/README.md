@@ -25,3 +25,5 @@
 Custom Element 事件的参数按声明顺序位于 `CustomEvent.detail` 数组；对象、数组和布尔属性通过 DOM property 或 Vue 绑定赋值。每个分组页的示例均给出 Vue 用法与事件消费方式。
 
 测试入口统一见 [testing/README.md](../../testing/README.md)。公共 UI 的组件契约由 `frontend/src/ui` 的测试维护，插件装配由 Frontend API/contract 测试维护；前端分层和扫描边界见[前端架构](../../architecture/frontend.md)。
+
+布局、卡片层级与本机设计验收遵循[前端设计规范](../../development/frontend-design.md)。卡片表面随真实渲染祖先交替；第四层起违规，深数据使用透明分组，公开元素 host 不重复计层。

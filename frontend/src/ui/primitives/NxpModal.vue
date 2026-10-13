@@ -37,7 +37,14 @@ let returnFocus: HTMLElement | null = null;
 function focusableElements() {
   return Array.from(root.value?.querySelectorAll<HTMLElement>("button, input, select, textarea, a[href], [tabindex]:not([tabindex='-1'])") || [])
     .filter(element => !element.matches(".nxp-modal-backdrop"))
-    .filter(element => !element.hasAttribute("disabled") && !element.closest("[hidden]"));
+    .filter(element => {
+      if (element.tabIndex < 0 || element.hasAttribute("disabled") || element.closest("[hidden], [inert]")) return false;
+      for (let current: HTMLElement | null = element; current && current !== root.value; current = current.parentElement) {
+        const style = getComputedStyle(current);
+        if (style.display === "none" || style.visibility === "hidden") return false;
+      }
+      return true;
+    });
 }
 
 function focusInitial() {
@@ -51,7 +58,11 @@ function restoreFocus() {
 }
 
 function onKeydown(event: KeyboardEvent) {
-  if (!props.open || !root.value) return;
+  if (event.defaultPrevented || !props.open || !root.value) return;
+  const activeOverlay = document.activeElement?.closest("[role='listbox'], [role='menu'], [role='dialog']");
+  if (activeOverlay && !root.value.contains(activeOverlay)) return;
+  const dialogs = document.querySelectorAll(".nxp-modal");
+  if (dialogs[dialogs.length - 1] !== root.value) return;
   if (event.key === "Escape") {
     if (!props.locked && props.closeable) {
       event.preventDefault();
@@ -68,7 +79,10 @@ function onKeydown(event: KeyboardEvent) {
   }
   const first = elements[0];
   const last = elements[elements.length - 1];
-  if (event.shiftKey && document.activeElement === first) {
+  if (!root.value.contains(document.activeElement)) {
+    event.preventDefault();
+    (event.shiftKey ? last : first).focus({ preventScroll: true });
+  } else if (event.shiftKey && document.activeElement === first) {
     event.preventDefault();
     last.focus({ preventScroll: true });
   } else if (!event.shiftKey && document.activeElement === last) {
@@ -111,7 +125,7 @@ onBeforeUnmount(() => {
   <Transition name="nxp-modal" appear>
     <div v-if="props.open" ref="root" v-bind="attrs" class="nxp-modal" role="dialog" aria-modal="true" tabindex="-1" :aria-label="props.ariaLabel || props.title || undefined">
       <div v-if="props.closeable" class="nxp-modal-backdrop" aria-hidden="true" @pointerdown="preventBackdropFocus" @click="onBackdropClick"></div>
-      <section ref="panel" class="nxp-modal-panel secondary-surface" :class="[props.panelClass, { 'nxp-modal-panel--wide': props.size === 'wide', 'is-secondary': props.surface === 'secondary', 'nxp-modal-panel--with-footer': props.footer || Boolean($slots.footer) }]" tabindex="-1" :data-locked="props.locked ? '' : undefined">
+      <section ref="panel" class="nxp-modal-panel secondary-surface" data-nxp-surface-context="dialog" :class="[props.panelClass, { 'nxp-modal-panel--wide': props.size === 'wide', 'is-secondary': props.surface === 'secondary', 'nxp-modal-panel--with-footer': props.footer || Boolean($slots.footer) }]" tabindex="-1" :data-locked="props.locked ? '' : undefined">
         <header v-if="title || closeable || $slots.header" class="nxp-modal-header">
           <slot name="header"><h2 v-if="title" class="nxp-modal-title">{{ title }}</h2></slot>
           <button v-if="closeable" class="icon-button nxp-modal-close" type="button" :aria-label="props.closeLabel" @click="emit('close')"><NxpIcon name="close" class-name="nxp-modal-close-icon" /></button>

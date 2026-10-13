@@ -1,6 +1,8 @@
 <script setup lang="ts">
-/** Nexus section surface：一级卡片使用 `is-primary`，二级分组使用 `is-secondary`。
- *  header 承载标题、说明与右侧 actions；不带 header 时退化为纯 surface。 */
+import { ref } from "vue";
+import { useSurface } from "../surface";
+const root = ref<HTMLElement | null>(null);
+useSurface(root);
 const props = withDefaults(defineProps<{
   title?: string;
   description?: string;
@@ -13,7 +15,7 @@ const props = withDefaults(defineProps<{
 </script>
 
 <template>
-  <section class="nxp-section-card" :class="[`is-${props.variant}`, { 'has-header': Boolean(props.title || props.description || $slots.header || $slots.actions) }]">
+  <section ref="root" class="nxp-section-card" :class="[`is-${props.variant}`, { 'has-header': Boolean(props.title || props.description || $slots.header || $slots.actions) }]">
     <header v-if="props.title || props.description || $slots.header || $slots.actions" class="nxp-section-card-header">
       <slot name="header">
         <div class="nxp-section-card-copy">

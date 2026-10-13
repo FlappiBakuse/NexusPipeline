@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import NxpConfirmDialog from "../../ui/composites/NxpConfirmDialog.vue";
+import { useConfirmation } from "../../ui/confirmation";
+const { message: confirmMessage, confirm, resolve: resolveConfirm } = useConfirmation();
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowReactive, watch } from "vue";
 import { onBeforeRouteLeave } from "vue-router";
 import { api, apiResponse, isAbortError } from "../../platform/api";
@@ -58,9 +61,9 @@ let releaseTraffic: (() => void) | undefined;
 let releaseLocale: (() => void) | undefined;
 function wakeLayout() { if (!document.hidden) void editor.refresh(); }
 function beforeUnload(event: BeforeUnloadEvent) { if (editor.editing || editor.saving) { event.preventDefault(); event.returnValue = ""; } }
-onBeforeRouteLeave(() => {
+onBeforeRouteLeave(async () => {
   if (editor.saving) return false;
-  if (editor.editing && !window.confirm(t("dashboard.layout.discard_confirm"))) return false;
+  if (editor.editing && !await confirm(t("dashboard.layout.discard_confirm"))) return false;
   editor.cancel(); return true;
 });
 
@@ -358,4 +361,5 @@ watch(historyVisible, visible => { if (visible) void loadHistorySummary(); else 
     </template>
   </main>
   <DashboardLayoutModal :editor="editor" />
+  <NxpConfirmDialog :open="Boolean(confirmMessage)" :title="t('common.confirm')" :message="confirmMessage" :confirm-label="t('common.confirm')" :cancel-label="t('common.cancel')" @confirm="resolveConfirm(true)" @cancel="resolveConfirm(false)" @close="resolveConfirm(false)" />
 </template>

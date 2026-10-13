@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import NxpConfirmDialog from "../../ui/composites/NxpConfirmDialog.vue";
+import { useConfirmation } from "../../ui/confirmation";
+const { message: confirmMessage, confirm, resolve: resolveConfirm } = useConfirmation();
 import { computed } from "vue";
 import NxpModal from "../../ui/primitives/NxpModal.vue";
 import NxpButton from "../../ui/primitives/NxpButton.vue";
@@ -11,11 +14,11 @@ const props = defineProps<{ editor: DashboardLayoutEditor }>();
 const current = computed(() => props.editor.draft.map(id => props.editor.committed?.cards.find(card => card.cardId === id)).filter(card => card !== undefined));
 const available = computed(() => props.editor.committed?.cards.filter(card => !props.editor.draft.includes(card.cardId)) ?? []);
 const frozen = computed(() => props.editor.saving || props.editor.pending);
-function loadLatest() {
-  if (window.confirm(t("dashboard.layout.discard_confirm"))) props.editor.loadLatest();
+async function loadLatest() {
+  if (await confirm(t("dashboard.layout.discard_confirm"))) props.editor.loadLatest();
 }
-function close() {
-  if (props.editor.pending && !window.confirm(t("dashboard.layout.pending_cancel"))) return;
+async function close() {
+  if (props.editor.pending && !await confirm(t("dashboard.layout.pending_cancel"))) return;
   props.editor.cancel();
 }
 </script>
@@ -74,6 +77,7 @@ function close() {
       </div>
     </template>
   </NxpModal>
+  <NxpConfirmDialog :open="Boolean(confirmMessage)" :title="t('common.confirm')" :message="confirmMessage" :confirm-label="t('common.confirm')" :cancel-label="t('common.cancel')" @confirm="resolveConfirm(true)" @cancel="resolveConfirm(false)" @close="resolveConfirm(false)" />
 </template>
 
 <style scoped>

@@ -205,13 +205,13 @@ watch(() => props.open, value => {
 .nxp-date-range-popover { position: absolute; top: calc(100% + 8px); left: 0; z-index: 70; display: grid; container-name: nxp-date-range-popover; container-type: inline-size; min-width: min(100%, 520px); gap: var(--space-3, var(--nx-space-3, 12px)); padding: var(--space-3, var(--nx-space-3, 12px)); border: 1px solid var(--content-control-border, var(--nx-color-border)); border-radius: var(--radius-md, var(--nx-radius-md, 8px)); background: var(--content-card, var(--nx-color-surface)); box-shadow: var(--shadow, 0 16px 40px rgb(0 0 0 / 28%)); }
 .nxp-date-range-toolbar { display: grid; grid-template-columns: 40px minmax(0, 1fr) 40px; align-items: center; gap: var(--space-2, var(--nx-space-2, 8px)); }
 .nxp-date-range-toolbar strong { min-width: 0; color: var(--text, var(--nx-color-text)); font-size: 13px; text-align: center; }
-.nxp-date-range-toolbar button { min-width: 40px; min-height: 36px; padding: 0; font-size: 20px; line-height: 1; }
+.nxp-date-range-toolbar button { min-width: 40px; min-height: 40px; padding: 0; font-size: 20px; line-height: 1; }
 .nxp-date-range-months { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3, var(--nx-space-3, 12px)); }
 .nxp-date-range-month { min-width: 0; }
 .nxp-date-range-month h4 { margin: 0 0 8px; color: var(--text, var(--nx-color-text)); font-size: 12px; text-align: center; }
-.nxp-date-range-grid { display: grid; grid-template-columns: repeat(7, minmax(32px, 1fr)); gap: 3px; }
+.nxp-date-range-grid { display: grid; grid-template-columns: repeat(7, minmax(40px, 1fr)); gap: 3px; }
 .nxp-date-range-weekday { display: grid; min-height: 24px; place-items: center; color: var(--faint, var(--nx-color-muted)); font-size: 10px; font-weight: 700; }
-.nxp-date-range-day { display: grid; min-width: 0; min-height: 32px; place-items: center; padding: 0; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--text, var(--nx-color-text)); font-size: 12px; box-shadow: none; }
+.nxp-date-range-day { display: grid; min-width: 40px; min-height: 40px; place-items: center; padding: 0; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--text, var(--nx-color-text)); font-size: 12px; box-shadow: none; }
 .nxp-date-range-day:hover:not(:disabled), .nxp-date-range-day:focus-visible { border-color: var(--accent, var(--nx-color-primary)); background: var(--content-control-hover, var(--nx-color-surface)); color: var(--accent, var(--nx-color-primary)); }
 .nxp-date-range-day.is-in-range { border-radius: 0; background: var(--accent-soft, rgb(100 120 255 / 18%)); color: var(--accent, var(--nx-color-primary)); }
 .nxp-date-range-day.is-start { border-radius: 6px 0 0 6px; background: var(--accent, var(--nx-color-primary)); color: var(--on-accent, #fff); }
