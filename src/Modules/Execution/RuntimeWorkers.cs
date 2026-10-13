@@ -123,19 +123,20 @@ internal sealed class RuntimeWorkers : IAsyncDisposable
             return false;
         }
 
-        bool isFinal = completed.AttemptId == _attemptId
-            && completed.AttemptNumber == _attemptNumber
-            && completed.Generation == _finalJudgeGeneration;
         if (error is not null)
         {
             Logger.Warn($"[{_modeText}运行] 脚本「{_scriptName}」判断脚本执行错误（视为继续运行）：{error.Message}");
-            if (isFinal)
+            // Failed workers have no result; single-flight admission retains the active generation.
+            if (_finalJudgeRequested && _judgeGeneration == _finalJudgeGeneration)
             {
                 _finalJudgeCompleted = true;
             }
             return true;
         }
 
+        bool isFinal = completed.AttemptId == _attemptId
+            && completed.AttemptNumber == _attemptNumber
+            && completed.Generation == _finalJudgeGeneration;
         bool current = completed.AttemptId == _attemptId
             && completed.AttemptNumber == _attemptNumber
             && completed.Generation == _judgeGeneration;
