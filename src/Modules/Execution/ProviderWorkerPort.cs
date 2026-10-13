@@ -22,17 +22,21 @@ internal sealed class ProviderWorkerPort : IPluginProviderWorkerPort
     private readonly int _attempt;
     private readonly Action<string, LogLevel>? _log;
     private readonly TimeSpan _startupTimeout;
+    private readonly Action<ProcessIdentity>? _onStarted;
     private bool _used;
     internal bool CleanupConfirmed { get; private set; } = true;
     internal bool TerminalReceived { get; private set; }
+    internal bool WorkerStarted { get; private set; }
     internal string TerminalStatus { get; private set; } = "not_started";
 
     internal ProviderWorkerPort(string pluginRoot, string projectRoot, string executionId,
-        string recordId, int attempt, Action<string, LogLevel>? log, TimeSpan? startupTimeout = null)
+        string recordId, int attempt, Action<string, LogLevel>? log, TimeSpan? startupTimeout = null,
+        Action<ProcessIdentity>? onStarted = null)
     {
         _pluginRoot = Path.GetFullPath(pluginRoot); _projectRoot = Path.GetFullPath(projectRoot);
         _executionId = executionId; _recordId = recordId; _attempt = attempt; _log = log;
         _startupTimeout = startupTimeout ?? TimeSpan.FromSeconds(30);
+        _onStarted = onStarted;
         if (_startupTimeout <= TimeSpan.Zero || _startupTimeout > TimeSpan.FromSeconds(30))
             throw new ArgumentOutOfRangeException(nameof(startupTimeout));
     }
@@ -81,12 +85,8 @@ internal sealed class ProviderWorkerPort : IPluginProviderWorkerPort
         psi.RedirectStandardInput = true;
         using Process process = SystemActions.StartOwnedProcess(psi, ownership)
             ?? throw new InvalidOperationException("provider.worker_start_failed");
-        // Project code can echo bootstrap secrets. Drain console streams but publish
-        // only the whitelisted authenticated structured protocol to user history.
-        process.OutputDataReceived += (_, _) => { };
-        process.ErrorDataReceived += (_, _) => { };
-        process.BeginOutputReadLine(); process.BeginErrorReadLine();
-        var identity = ProcessIdentity.Capture(process);
+        ProcessIdentity? identity = null;
+        ProviderWorkerArtifacts? artifacts = null;
         bool cancelled = false;
         string kind = "fault";
         using var receiveStop = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -96,7 +96,19 @@ internal sealed class ProviderWorkerPort : IPluginProviderWorkerPort
         long startupStamp = Stopwatch.GetTimestamp();
         try
         {
+            // Project code can echo bootstrap secrets. Only authenticated frames reach history.
+            process.OutputDataReceived += (_, _) => { };
+            process.ErrorDataReceived += (_, _) => { };
+            process.BeginOutputReadLine(); process.BeginErrorReadLine();
+            identity = ProcessIdentity.Capture(process);
             if (identity is null) throw new InvalidOperationException("provider.worker_identity_unavailable");
+            WorkerStarted = true;
+            _onStarted?.Invoke(identity.Value);
+            artifacts = request.UseSessionArtifacts ? new ProviderWorkerArtifacts(session, identity.Value) : null;
+            bootstrap = bootstrap with { SessionArtifactsDirectory = artifacts?.DirectoryPath };
+            bootstrapJson = JsonSerializer.Serialize(bootstrap, PluginWorkerProtocol.Json);
+            if (System.Text.Encoding.UTF8.GetByteCount(bootstrapJson) > PluginWorkerProtocol.MaximumFrameBytes)
+                throw new InvalidDataException("provider.bootstrap_size");
             using var startup = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             TimeSpan startupRemaining = _startupTimeout - Stopwatch.GetElapsedTime(startupStamp);
             if (startupRemaining <= TimeSpan.Zero) throw new TimeoutException();
@@ -164,6 +176,13 @@ internal sealed class ProviderWorkerPort : IPluginProviderWorkerPort
                 try { await receive.ConfigureAwait(false); }
                 catch (Exception) when (receive.IsCanceled || receive.IsFaulted) { /* observed; the owning attempt keeps its terminal/cancel decision */ }
             }
+            if (CleanupConfirmed && artifacts is not null)
+            {
+                try { artifacts.Complete(); }
+                catch (IOException) { CleanupConfirmed = false; _log?.Invoke("provider.artifacts_cleanup_unconfirmed", LogLevel.Warn); }
+                catch (UnauthorizedAccessException) { CleanupConfirmed = false; _log?.Invoke("provider.artifacts_cleanup_unconfirmed", LogLevel.Warn); }
+            }
+            artifacts?.Dispose();
         }
         return new(kind, process.HasExited ? process.ExitCode : null, CleanupConfirmed);
     }
@@ -175,13 +194,23 @@ internal sealed class ProviderWorkerPort : IPluginProviderWorkerPort
         {
             var frame = await PluginWorkerProtocol.ReadAsync(events, token).ConfigureAwait(false);
             PluginWorkerProtocol.Validate(frame, bootstrap, "worker_to_host", sequence);
-            if (frame.Kind is not ("ready" or "task_event" or "progress" or "cancel_ack" or "completed" or "fault"))
+            if (frame.Kind is not ("ready" or "task_event" or "progress" or "log" or "cancel_ack" or "completed" or "fault"))
                 throw new InvalidDataException("worker.message_kind");
             if (frame.Kind == "ready" && !ready.TrySetResult(true))
                 throw new InvalidDataException("worker.duplicate_ready");
             if (frame.Kind is "task_event" or "completed" && !ready.Task.IsCompletedSuccessfully)
                 throw new InvalidDataException("worker.not_ready");
             var evidence = frame.Payload.DeepClone().AsObject();
+            if (frame.Kind == "log")
+            {
+                if (frame.Payload.Count != 1 || frame.Payload["text"] is not JsonValue value
+                    || !value.TryGetValue<string>(out string? text) || text.Length > 2048)
+                    throw new InvalidDataException("worker.log_shape");
+                foreach (string secret in new[] { bootstrap.Nonce }.Concat((bootstrap.Input["secrets"] as JsonObject ?? new())
+                    .Select(pair => pair.Value?.GetValue<string>() ?? "")).Where(secret => secret.Length > 0))
+                    text = text.Replace(secret, "[redacted]", StringComparison.Ordinal);
+                evidence["text"] = text;
+            }
             evidence["sessionId"] = bootstrap.SessionId;
             evidence["recordId"] = bootstrap.RecordId;
             evidence["attemptNumber"] = bootstrap.AttemptNumber;

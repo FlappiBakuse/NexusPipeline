@@ -204,7 +204,7 @@ internal class HostCompositionRoot
         collection.AddSingleton<INotificationService>(provider => provider.GetRequiredService<NotificationDispatcher>());
         collection.AddSingleton<ExecutionAdmissionPolicy>();
         collection.AddSingleton<ExecutionPlanBuilder>();
-        collection.AddSingleton<ExecutionStateStore>();
+        collection.AddSingleton<ExecutionStateStore>(provider => new(provider.GetRequiredService<ExecutionAdmissionPolicy>(), ProviderConfigurationOperations.SnapshotIsolation));
         collection.AddSingleton<RealtimeEventBus>();
         collection.AddSingleton<ExecutionValidator>();
         collection.AddSingleton<ExecutionPreviewService>(provider => new ExecutionPreviewService(
@@ -287,6 +287,11 @@ internal class HostCompositionRoot
             provider.GetRequiredService<IPluginCapabilityResolver>(),
             provider.GetRequiredService<ScriptSpecResolver>(),
             provider.GetRequiredService<IScriptPlansChanged>()));
+        collection.AddSingleton<ProviderConfigurationOperations>(provider => new ProviderConfigurationOperations(
+            provider.GetRequiredService<IScriptRepository>(), provider.GetRequiredService<PluginManager>(),
+            provider.GetRequiredService<ExecutionDispatcher>(), provider.GetRequiredService<RealtimeEventBus>(),
+            automaticCommit: provider.GetRequiredService<ScriptCommands>().CommitProviderConfiguration,
+            users: provider.GetRequiredService<UserCommands>()));
         collection.AddSingleton<UserCommands>(provider => new UserCommands(
             provider.GetRequiredService<IUserMutationState>(),
             provider.GetRequiredService<IUserMutationAdmission>(),
@@ -382,7 +387,8 @@ internal class HostCompositionRoot
             provider.GetRequiredService<ScriptFileBrowser>(),
             provider.GetRequiredService<NexusPipeline.Modules.Users.Contracts.ITaskQueryProjection>(),
             provider.GetRequiredService<NexusPipeline.ControlPlane.Http.Static.IFrontendAssetProvider>(),
-            provider.GetRequiredService<NexusPipeline.Modules.ClientSessions.ClientSessionService>()));
+            provider.GetRequiredService<NexusPipeline.Modules.ClientSessions.ClientSessionService>(),
+            provider.GetRequiredService<ProviderConfigurationOperations>()));
         collection.AddSingleton<ExecutionExplainService>();
         collection.AddSingleton<DiagnosticsService>();
         _services = collection.BuildServiceProvider(new ServiceProviderOptions

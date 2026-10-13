@@ -7,7 +7,11 @@ namespace NexusPipeline.Plugin.Abstractions;
 
 /// <summary>Versioned local worker transport. Console output is never protocol data.</summary>
 public sealed record PluginWorkerBootstrap(string EventPipe, string ControlPipe, string Nonce,
-    string ExecutionId, string RecordId, int AttemptNumber, string SessionId, JsonObject Input);
+    string ExecutionId, string RecordId, int AttemptNumber, string SessionId, JsonObject Input)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SessionArtifactsDirectory { get; init; }
+}
 
 public sealed record PluginWorkerEnvelope(int WireVersion, string ExecutionId, string RecordId,
     int AttemptNumber, string SessionId, string Direction, long SourceSequence, string Kind,

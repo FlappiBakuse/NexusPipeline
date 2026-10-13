@@ -6,6 +6,7 @@ public static class Program
     [STAThread]
     public static int Main(string[] args)
     {
+        if (Modules.Updates.UpdateMigrationRunner.IsEntry(args)) return Modules.Updates.UpdateMigrationRunner.RunEntry(args);
         return ApplicationHost.Run(args);
     }
 }

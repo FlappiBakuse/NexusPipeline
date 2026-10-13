@@ -135,6 +135,8 @@ internal sealed class ConfigSessionMark
     public string WritableRoot { get; set; } = "";
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public bool? ProviderWorkersStopped { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? ProviderConfigurationHash { get; set; }
 
     /// <summary>本次会话已冻结的 extraConfigPaths。</summary>
     public List<ConfigSessionExtraPath> ExtraConfigPaths { get; set; } = new();
@@ -192,6 +194,7 @@ internal sealed class ConfigSessionMark
             .Append(nameof(OriginExecutionId))
             .Append(nameof(WritableRoot))
             .Append(nameof(ProviderWorkersStopped))
+            .Append(nameof(ProviderConfigurationHash))
             .Append(nameof(ConfigContractId))
             .ToHashSet(StringComparer.Ordinal);
 
@@ -345,6 +348,8 @@ internal sealed class ConfigSessionMark
         && (PendingConfigInput is null || IsValidPendingInput(PendingConfigInput))
         && (RecoveryIsolation is null || RecoveryIsolation.IsValid())
         && WritableRoot is not null
+        && (ProviderConfigurationHash is null || SessionPhase == "provider_run" && ProviderConfigurationHash.Length == 64
+            && ProviderConfigurationHash.All(char.IsAsciiHexDigit))
         && (WritableRoot.Length == 0 || Path.IsPathFullyQualified(WritableRoot))
         && (SessionPhase != "provider_run" || ProviderWorkersStopped is not null && Path.IsPathFullyQualified(WritableRoot));
 

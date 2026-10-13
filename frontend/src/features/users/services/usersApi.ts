@@ -35,6 +35,18 @@ export function reorderUsers(ids: string[]): Promise<unknown> {
 export function getUser(id: string): Promise<any> {
   return api("GET", `/api/users/${encodeURIComponent(id)}`);
 }
+export function initializeProviderBinding(operationId: string, userId: string, scriptId: string,
+  expectedUserRevision: string, configuration: unknown): Promise<any> {
+  return api("POST", "/api/provider-configurations", {
+    operationId, userId, expectedUserRevision, script: { id: scriptId }, configuration,
+  });
+}
+export function listProviderBindingOperations(): Promise<any[]> {
+  return api('GET', '/api/provider-configurations');
+}
+export function cancelProviderBindingOperation(operationId: string): Promise<unknown> {
+  return api('POST', `/api/provider-configurations/${encodeURIComponent(operationId)}/cancel`, {});
+}
 
 export function getGlobalSettings(id: string): Promise<any> {
   return api("GET", `/api/users/${encodeURIComponent(id)}/global-settings`);

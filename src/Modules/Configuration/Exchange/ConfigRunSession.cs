@@ -32,6 +32,7 @@ internal sealed class ConfigRunSession
     private bool _finalizationCompleted;
     private readonly bool _providerSession;
     private readonly string? _exclusiveExecutable;
+    private readonly System.Text.Json.Nodes.JsonObject? _providerConfiguration;
     private string? _finalizationError;
     internal Func<string?>? RestoreTaskSelections { get; set; }
     internal int OriginAttempt { get; set; }
@@ -54,6 +55,7 @@ internal sealed class ConfigRunSession
         _originExecutionId = originExecutionId;
         _originRecordId = originRecordId;
         _providerSession = resolvedSpec?.ProviderPlan is not null;
+        _providerConfiguration = resolvedSpec?.ProviderPlan?.EffectiveConfiguration?.DeepClone().AsObject();
         _exclusiveExecutable = resolvedSpec?.RequireExclusiveProcess == true ? resolvedSpec.Script.MainExe : null;
     }
 
@@ -61,6 +63,8 @@ internal sealed class ConfigRunSession
     internal bool RequiresRestoration => IsPrepared && !_providerSession;
 
     public string ScriptDir => ConfigPaths.ScriptDir(_scriptId, _userKey);
+    public string EffectiveConfigurationPath => _providerConfiguration is not null && _userKey is not null
+        ? ProviderEffectiveConfiguration.PathFor(_scriptId, _userKey) : _configPath;
 
     public void PrepareScriptArea()
     {
@@ -81,11 +85,15 @@ internal sealed class ConfigRunSession
             if (string.IsNullOrWhiteSpace(_userKey) || _metadata is null) { error = "provider requires a Host user binding"; return false; }
             if (File.Exists(ConfigSessionMark.MarkFile(_scriptId, _userKey)) || File.Exists(ConfigSessionMark.BackupMarkFile(_scriptId, _userKey)))
             { error = "provider recovery journal already exists"; return false; }
-            new ConfigSessionMark { ScriptId = _scriptId, UserId = _userKey, SessionPhase = "provider_run",
-                ConfigPath = _metadata.WritableRoot, ConfigKind = "dir", WorkingDirectory = _metadata.WorkingDirectory,
+            var mark = new ConfigSessionMark { ScriptId = _scriptId, UserId = _userKey, SessionPhase = "provider_run",
+                ConfigPath = _providerConfiguration is null ? _metadata.WritableRoot : EffectiveConfigurationPath,
+                ConfigKind = _providerConfiguration is null ? "dir" : "file", WorkingDirectory = _metadata.WorkingDirectory,
                 WritableRoot = _metadata.WritableRoot, ProfileHash = _metadata.ProfileHash, ConfigContractId = _metadata.ConfigContractId,
                 PluginName = _metadata.PluginName, PluginVersion = _metadata.PluginVersion,
-                OriginExecutionId = _originExecutionId, ProviderWorkersStopped = false }.Write();
+                OriginExecutionId = _originExecutionId, ProviderWorkersStopped = false };
+            if (_providerConfiguration is not null)
+                ProviderEffectiveConfiguration.Prepare(mark, _providerConfiguration);
+            else mark.Write();
             IsPrepared = true; return true;
         }
         if (string.IsNullOrWhiteSpace(_userKey) || string.IsNullOrWhiteSpace(_configPath))
@@ -132,7 +140,7 @@ internal sealed class ConfigRunSession
     public void ApplyReplacements(List<string> replacements)
     {
         if (RestoreTaskSelections is not null) throw new InvalidOperationException("taskProtocol cannot use legacy replaceConfigs");
-        ConfigSwapSession.ApplyConfigReplacements(_scriptId, _userKey, _configPath, replacements);
+        ConfigSwapSession.ApplyConfigReplacements(_scriptId, _userKey, EffectiveConfigurationPath, replacements);
     }
 
     /// <summary>进程树未能确认退出时锁住配置收尾，保留现场供恢复，而不是继续覆盖/还原文件。</summary>
@@ -197,6 +205,8 @@ internal sealed class ConfigRunSession
                 try
                 {
                     mark.ProviderWorkersStopped = true; mark.Write();
+                    if (!ProviderEffectiveConfiguration.RestoreAndCleanup(mark))
+                        throw new IOException("provider configuration restoration unconfirmed");
                     ConfigSessionMark.Clear(_scriptId, _userKey);
                     if (File.Exists(ConfigSessionMark.MarkFile(_scriptId, _userKey)) || File.Exists(ConfigSessionMark.BackupMarkFile(_scriptId, _userKey)))
                         _finalizationError = "provider journal cleanup pending";

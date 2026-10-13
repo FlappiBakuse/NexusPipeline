@@ -35,6 +35,7 @@ public class NexusUser
 public class UserScriptBinding
 {
     public string ScriptInstanceId { get; set; } = "";
+    public string ExecutionProviderConfigRevision { get; set; } = "";
 
     /// <summary>
     /// 用户级专项插件输入值（输入名 → 值，如 BetterGI 的「一条龙配置名」、ZZZ 的「实例序号」）。
@@ -77,6 +78,7 @@ public class UserScriptBinding
         return new UserScriptBinding
         {
             ScriptInstanceId = ScriptInstanceId,
+            ExecutionProviderConfigRevision = ExecutionProviderConfigRevision,
             Enabled = Enabled,
             ConfigInputs = new Dictionary<string, string>(ConfigInputs, StringComparer.OrdinalIgnoreCase),
             PreRunScript = PreRunScript,

@@ -376,10 +376,55 @@ internal sealed class ScriptCommands
         return resolved;
     }
 
+    internal OperationResult<ScriptInstance> CommitProviderConfiguration(ScriptInstance candidate, string expectedDefinitionHash)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(candidate.Name) || !ProviderConfigurationContract.SafeId(candidate.Id)
+                || !ProviderConfigurationContract.SafeId(candidate.ExecutionProviderConfigRevision))
+                return Validation<ScriptInstance>("configuration.script.invalid");
+            NormalizePaths(candidate);
+            candidate.ConfigurationRevision = _pluginCapabilities.ConfigurationRevision(candidate.PluginType);
+            candidate.RequiresReconfiguration = false;
+            var resolved = ResolveCandidate(candidate, out string? resolutionError);
+            if (resolutionError is not null || resolved is null) return Validation<ScriptInstance>(resolutionError ?? "configuration.script.invalid");
+            string? error = ScriptPathPolicy.CheckScriptPaths(resolved.Script, _pluginCapabilities)
+                ?? Limits.CheckNameBytes(candidate.Name, AppFixedLimits.MaxEntityNameBytes, "脚本名称")
+                ?? Limits.CheckAttempts(candidate.MaxAttempts)
+                ?? Limits.CheckScriptTimeouts(candidate.LogStallTimeoutMinutes, candidate.TotalTimeoutMinutes);
+            if (error is not null) return Validation<ScriptInstance>(error);
+            if (resolved.Script.JudgeScriptEnabled && string.IsNullOrWhiteSpace(resolved.Script.JudgeScript))
+                return Validation<ScriptInstance>("judge_script_required");
+            var result = _state.Mutate(scripts => {
+                int index = scripts.ToList().FindIndex(script => script.Id == candidate.Id);
+                var previous = index >= 0 ? scripts[index].Clone() : null;
+                if (ProviderConfigurationContract.Fingerprint(previous) != expectedDefinitionHash)
+                    return Conflict<ScriptInstance>("configuration.script.cas_conflict", "Script changed during initialization");
+                if (EntityNameRules.HasConflict(scripts, candidate.Name, item => item.Name, item => item.Id == candidate.Id))
+                    return Conflict<ScriptInstance>("duplicate_name", "Script name already exists");
+                if (index < 0 && Limits.CheckScriptCount(scripts.Count) is { } limit) return Validation<ScriptInstance>(limit);
+                candidate.Index = previous?.Index ?? (scripts.Count == 0 ? 0 : scripts.Max(script => script.Index) + 1);
+                if (index < 0) scripts.Add(candidate.Clone()); else scripts[index] = candidate.Clone();
+                try { ScriptDefinitionStore.SaveScripts(scripts.ToList()); }
+                catch
+                {
+                    if (index < 0) scripts.RemoveAt(scripts.Count - 1); else scripts[index] = previous!;
+                    throw;
+                }
+                Audit.Log(Audit.Web, "保存执行 provider 配置", candidate.Id);
+                return OperationResult<ScriptInstance>.Ok(candidate.Clone());
+            });
+            if (result.Succeeded) _plansChanged.RevalidatePendingPlans();
+            return result;
+        }
+        catch (Exception ex) { return Internal<ScriptInstance>(ex); }
+    }
+
     private static void NormalizePaths(ScriptInstance script)
     {
         script.ExecutionProviderId = script.ExecutionProviderId?.Trim() ?? "";
         script.ExecutionProviderConfigId = script.ExecutionProviderConfigId?.Trim() ?? "";
+        script.ExecutionProviderConfigRevision = script.ExecutionProviderConfigRevision?.Trim() ?? "";
         script.RootPath = StripPathQuotes(script.RootPath);
         script.MainExe = StripPathQuotes(script.MainExe);
         script.ConfigPath = StripPathQuotes(script.ConfigPath);

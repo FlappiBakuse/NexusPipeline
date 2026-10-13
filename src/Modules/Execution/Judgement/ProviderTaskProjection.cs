@@ -19,6 +19,7 @@ internal sealed class ProviderTaskProjection
     private readonly JsonArray _structured = new();
     private readonly JsonArray _diagnostics = new();
     private readonly JsonArray _progress = new();
+    private readonly JsonObject _logSources = new();
     private readonly Queue<long> _progressSequences = new();
     private int _progressBytes;
     private long _lastSequence;
@@ -29,6 +30,7 @@ internal sealed class ProviderTaskProjection
     private int _evidenceBytes;
     private string _frameworkVersion = "";
     private string _projectVersion = "";
+    private RunAttemptResult? _instanceJudgement;
     internal ProviderTaskProjection(PluginProviderPlan plan, string provider, string version,
         string record, string user, string script, int number)
     {
@@ -66,8 +68,17 @@ internal sealed class ProviderTaskProjection
         if (_lastSequence > 0 && item.Sequence != _lastSequence + 1)
             throw new InvalidDataException("provider.event_gap");
         int bytes = System.Text.Encoding.UTF8.GetByteCount(json);
-        if (item.Kind == "progress")
+        if (item.Kind is "progress" or "log")
         {
+            if (item.Evidence["logSource"] is JsonValue sourceValue && sourceValue.TryGetValue<string>(out string? source)
+                && source is { Length: > 0 and <= 64 } && source.All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '_' or '-')
+                && (_logSources.ContainsKey(source) || _logSources.Count < 32))
+            {
+                var metadata = new JsonObject();
+                foreach (string key in new[] { "logPath", "fileIdentity", "startByteOffset", "byteOffset", "rotationEpoch", "encoding", "sourceState" })
+                    if (item.Evidence[key] is JsonValue field && field.ToJsonString().Length <= 512) metadata[key] = field.DeepClone();
+                metadata["sequence"] = item.Sequence; _logSources[source] = metadata;
+            }
             _lastSequence = item.Sequence;
             _replays.Add(item.Sequence, json); _progressSequences.Enqueue(item.Sequence);
             _progress.Add(fact); _progressBytes += bytes;
@@ -80,6 +91,7 @@ internal sealed class ProviderTaskProjection
             if (item.Evidence["code"] is JsonValue codeValue
                 && codeValue.TryGetValue<string>(out string? code)
                 && code is { Length: > 0 and <= 128 }
+                && !(code.StartsWith("log.", StringComparison.Ordinal) && (code.EndsWith(".complete", StringComparison.Ordinal) || code.EndsWith(".absent", StringComparison.Ordinal)))
                 && code.All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '_' or '-')
                 && _diagnostics.Count < 32
                 && !_diagnostics.OfType<JsonObject>().Any(d => d["code"]?.GetValue<string>() == code))
@@ -131,6 +143,20 @@ internal sealed class ProviderTaskProjection
         _reducer.FinishAttempt(_lifecycle);
     }
 
+    internal void ApplyJudgement(SessionJudge judge)
+    {
+        if (!judge.IsConfigured) return;
+        string reason = judge.Reason ?? (judge.IsFailure ? "失败关键字已命中" : "完成关键字已命中");
+        _instanceJudgement = judge.IsFailure ? RunAttemptResult.Failed(reason, "provider.judge_failed")
+            : judge.MarkerOutcome == SessionJudge.JudgeOutcome.Partial ? RunAttemptResult.Partial(reason, "provider.judge_partial")
+            : judge.IsMarker ? RunAttemptResult.Success(reason, "provider.judge_succeeded") : null;
+        if (_instanceJudgement is not null)
+        {
+            _instanceJudgement.NotifyText = judge.NotifyText;
+            _instanceJudgement.NotifyScreenshotId = judge.NotifyScreenshotId;
+        }
+    }
+
     private JsonArray Results()
     {
         var results = JsonNode.Parse(TaskProtocolJson.Write(_reducer.Results))!.AsArray();
@@ -145,9 +171,14 @@ internal sealed class ProviderTaskProjection
         ["revision"] = _reducer.Revision, ["userId"] = _user, ["scriptInstanceId"] = _script,
         ["originalPlan"] = JsonNode.Parse(TaskProtocolJson.Write(_reducer.OriginalPlan)),
         ["lifecycleOutcome"] = _lifecycle, ["engineStatus"] = _engine,
-        ["businessVerification"] = "unverified", ["structuredEvidenceVersion"] = 1,
+        ["businessVerification"] = _instanceJudgement?.Status switch {
+            "success" => "verified_succeeded", "partial" => "partial", "failed" => "verified_failed", _ => "unverified" },
+        ["instanceJudgement"] = _instanceJudgement is null ? null : new JsonObject {
+            ["status"] = _instanceJudgement.Status, ["reasonCode"] = _instanceJudgement.ReasonCode, ["scope"] = "instance" },
+        ["structuredEvidenceVersion"] = 1,
         ["structuredEvidence"] = _structured.DeepClone(),
         ["progressEvidence"] = _progress.DeepClone(), ["diagnosticTruncated"] = _diagnosticTruncated,
+        ["logSources"] = _logSources.DeepClone(),
         ["attemptReports"] = new JsonArray(new JsonObject { ["attemptId"] = _attempt, ["number"] = _number,
             ["selectedTaskIds"] = new JsonArray(_reducer.OriginalPlan.Tasks.Select(task => (JsonNode?)JsonValue.Create(task.Id)).ToArray()),
             ["taskResults"] = Results() }),
@@ -159,6 +190,7 @@ internal sealed class ProviderTaskProjection
     internal RunAttemptResult Result(string detail)
     {
         if (_lifecycle == "cancelled") return RunAttemptResult.Cancelled(detail);
+        if (_instanceJudgement is not null) return _instanceJudgement;
         if (_engine != "succeeded") return RunAttemptResult.Fatal(detail, "provider.engine_failed");
         return _reducer.Summarize(_lifecycle).Outcome switch
         {

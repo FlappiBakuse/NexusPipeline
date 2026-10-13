@@ -60,9 +60,9 @@ internal sealed class ScriptSaveValidation
             foreach (ResolvedScriptUser user in targets)
             {
                 // 按用户绑定输入实例化校验语境：接管配置是用户级选择
-                ResolvedScriptSpec spec = user.Binding.ConfigInputs.Count == 0
+                ResolvedScriptSpec spec = user.Binding.ConfigInputs.Count == 0 && script.ExecutionProviderId.Length == 0
                     ? sharedSpec
-                    : _resolver.Resolve(script, user.Binding.ConfigInputs);
+                    : _resolver.Resolve(script, user.Binding.ConfigInputs, user.UserId, user.Binding.ExecutionProviderConfigRevision);
                 if (!spec.Succeeded)
                 {
                     continue;

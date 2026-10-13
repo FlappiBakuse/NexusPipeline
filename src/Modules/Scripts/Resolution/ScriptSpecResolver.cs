@@ -41,13 +41,13 @@ internal sealed class ScriptSpecResolver
     /// 解析脚本声明。inputOverrides 为用户级输入值（UserScriptBinding.ConfigInputs），
     /// 优先于脚本实例持久化的 PluginInputs；通用脚本忽略该参数。
     /// </summary>
-    public ResolvedScriptSpec Resolve(ScriptInstance declaration, IReadOnlyDictionary<string, string>? inputOverrides = null, string userId = "")
+    public ResolvedScriptSpec Resolve(ScriptInstance declaration, IReadOnlyDictionary<string, string>? inputOverrides = null, string userId = "", string userConfigRevision = "")
     {
         ScriptInstance script = declaration.Clone();
         string revision = _capabilities.ConfigurationRevision(script.PluginType);
         script.RequiresReconfiguration = revision.Length > 0 && script.ConfigurationRevision != revision;
         if (!string.IsNullOrWhiteSpace(script.ExecutionProviderId))
-            return ResolveProvider(script, userId);
+            return ResolveProvider(script, userId, userConfigRevision);
         if (!string.IsNullOrWhiteSpace(script.ExecutionProviderConfigId))
             return Failed(script, "未声明执行 provider，不能使用 provider 配置身份", "");
         if (string.IsNullOrWhiteSpace(script.PluginType))
@@ -138,7 +138,7 @@ internal sealed class ScriptSpecResolver
     {
         ScriptInstance script = candidate.Clone();
         if (!string.IsNullOrWhiteSpace(script.ExecutionProviderId))
-            return ResolveProvider(script);
+            return ResolveProvider(script, preferInlineSource: true);
         if (!string.IsNullOrWhiteSpace(script.ExecutionProviderConfigId))
             return Failed(script, "未声明执行 provider，不能使用 provider 配置身份", "");
         return string.IsNullOrWhiteSpace(script.PluginType)
@@ -151,7 +151,7 @@ internal sealed class ScriptSpecResolver
         return Resolve(declaration).Script;
     }
 
-    private ResolvedScriptSpec ResolveProvider(ScriptInstance script, string userId = "")
+    private ResolvedScriptSpec ResolveProvider(ScriptInstance script, string userId = "", string userConfigRevision = "", bool preferInlineSource = false)
     {
         string id = script.ExecutionProviderId?.Trim() ?? "";
         string configId = script.ExecutionProviderConfigId?.Trim() ?? "";
@@ -165,14 +165,17 @@ internal sealed class ScriptSpecResolver
         if (!string.IsNullOrWhiteSpace(script.MainExe) || !string.IsNullOrWhiteSpace(script.ConfigPath)
             || !string.IsNullOrWhiteSpace(script.LogPath))
             return Failed(script, "直驱实例不能伪造外部脚本主程序或配置路径", "");
-        var judge = new ResolvedJudgeScript(false, "javascript", "provider", "", Hash(""));
+        var judgement = ResolveGeneric(script, preferInlineSource);
+        if (judgement.Error is not null) return judgement;
+        var judge = judgement.JudgeScript;
         try
         {
             // This resolver is synchronous. Run the provider's read-only
             // preparation off the caller's UI context; never start a worker here.
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
             var request = new NexusPipeline.Plugin.Abstractions.PluginProviderPrepareRequest(
-                configId, userId, script.Id, script.RootPath, "interface.json", "", new());
+                configId, userId, script.Id, script.RootPath, "interface.json", script.ExecutionProviderConfigRevision, new())
+                { UserConfigRevision = userConfigRevision };
             var preparation = Task.Run(async () => await provider.Provider.PrepareAsync(request, timeout.Token)
                 .ConfigureAwait(false), timeout.Token);
             NexusPipeline.Plugin.Abstractions.PluginProviderPlan plan;
@@ -191,7 +194,8 @@ internal sealed class ScriptSpecResolver
                 JsonSerializer.Serialize(plan))!;
             return new ResolvedScriptSpec(script, provider.PluginVersion, judge,
                 Hash("provider=" + id + "\nversion=" + provider.PluginVersion + "\nconfig=" + configId
-                    + "\nroot=" + script.RootPath + "\nplan=" + JsonSerializer.Serialize(frozen))) { ProviderPlan = frozen };
+                    + "\nroot=" + script.RootPath + "\nplan=" + JsonSerializer.Serialize(frozen)
+                    + "\njudgement=" + ComputeProfileHash(script, "", provider.PluginVersion, judge))) { ProviderPlan = frozen };
         }
         catch (Exception ex)
         {

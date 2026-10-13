@@ -7,6 +7,7 @@
 | Owner | 现役目录 | 责任 |
 |---|---|---|
 | Host | `src/Host` | 进程入口、组合根、生命周期和跨域接线 |
+| Provider 配置事务 | `src/Host/Composition/ProviderConfigurationOperations.cs` | 初始化操作 journal、资源租约、受控 worker 事实与脚本可见修订的联合提交；控制面使用 `Modules/Scripts/Contracts/IProviderConfigurationOperations` |
 | ControlPlane | `src/ControlPlane` | Web、CLI、MCP、认证和响应适配 |
 | Modules/<name> | `src/Modules/<name>` | 领域用例、契约、状态和持久化边界 |
 | Platform | `src/Platform` | Windows、存储、网络和系统适配 |

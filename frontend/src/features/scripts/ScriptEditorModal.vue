@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useOperationAccess } from "../../platform/operation-access";
 const { allowed: nativeBrowseAllowed, reason: nativeBrowseReason } = useOperationAccess("hostFilePicker");
-import { computed, nextTick, reactive, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from "vue";
 import { isAbortError } from "../../platform/api";
 import { projectSpecializedCapabilities } from "../../platform/specialized-capabilities";
 import { renderPluginSlot } from "@bridge/index";
@@ -17,7 +17,7 @@ import NxpPathPicker from "../../ui/primitives/NxpPathPicker.vue";
 import NxpSelect, { type NxpOption } from "../../ui/primitives/NxpSelect.vue";
 import NxpTextArea from "../../ui/primitives/NxpTextArea.vue";
 import NxpTextInput from "../../ui/primitives/NxpTextInput.vue";
-import { browseNativeDialog, createScript, probeScriptRoot, updateScript } from "./services/scriptsApi";
+import { browseNativeDialog, createScript, probeScriptRoot, updateScript, saveProviderConfiguration, getProviderConfiguration, cancelProviderConfiguration, type ProviderConfigurationStatus } from "./services/scriptsApi";
 import { createRootProbe } from "./utils/scriptProbe";
 import { emptyScriptDraft, scriptDraftFrom, scriptPayload, validateScriptDraft } from "./utils/scriptTypes";
 import {
@@ -44,6 +44,36 @@ const props = defineProps<{
 const emit = defineEmits<{ close: []; saved: [] }>();
 
 const draft = reactive<ScriptDraft>({ ...emptyScriptDraft });
+const providerConfiguration = ref<Record<string, unknown> | null>(null);
+const configurationStatus = ref<ProviderConfigurationStatus | null>(null);
+const saving = ref(false);
+let disposed = false;
+let pollGeneration = 0;
+const configurationBusy = computed(() => saving.value || Boolean(configurationStatus.value && !["ready", "cancelled", "needs_attention"].includes(configurationStatus.value.state)));
+const configurationLabel = computed(() => configurationStatus.value
+  ? t(`scripts.configuration.${configurationStatus.value.state}`, {}, configurationStatus.value.state) : "");
+const operationKey = () => `nxp-provider-operation:${draft.executionProviderId}:${draft.id || draft.rootPath}`;
+function rememberOperation(key: string, id: string | null) {
+  try { if (id) sessionStorage.setItem(key, id); else sessionStorage.removeItem(key); } catch { /* Storage may be disabled by the browser. */ }
+}
+async function followConfiguration(id: string, key: string) {
+  const generation = ++pollGeneration;
+  while (!disposed && generation === pollGeneration) {
+    const status = await getProviderConfiguration(id);
+    if (disposed || generation !== pollGeneration) return;
+    configurationStatus.value = status;
+    if (["ready", "cancelled", "needs_attention"].includes(status.state)) {
+      if (status.cleanupConfirmed) rememberOperation(key, null);
+      if (status.state === "ready") { toast(t("scripts.script_instance_saved")); emit("saved"); close(); }
+      return;
+    }
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
+}
+async function cancelConfiguration() {
+  if (configurationStatus.value) await cancelProviderConfiguration(configurationStatus.value.operationId);
+}
+onBeforeUnmount(() => { disposed = true; pollGeneration += 1; });
 const editorSlotRoot = ref<HTMLElement | null>(null);
 const importFileInput = ref<HTMLInputElement | null>(null);
 const pendingRelativePaths = reactive<Partial<Record<ScriptPathField, string>>>({});
@@ -377,6 +407,7 @@ function showScriptValidation(value: unknown) {
 }
 
 async function save() {
+  if (configurationBusy.value) return;
   const invalid = validateScriptDraft(draft);
   if (invalid) {
     syncScriptFieldErrors(invalid);
@@ -384,8 +415,23 @@ async function save() {
     return;
   }
   syncScriptFieldErrors(null);
+  saving.value = true;
   try {
     const payload = scriptPayload(draft);
+    if (draft.executionProviderId && providerConfiguration.value) {
+      const key = operationKey();
+      let previous: string | null = null;
+      try { previous = sessionStorage.getItem(key); } catch { /* The operation remains queryable through the API. */ }
+      if (previous && /^[a-zA-Z0-9_-]{1,64}$/.test(previous)) {
+        try { await followConfiguration(previous, key); return; }
+        catch (error) { if ((error as { status?: number }).status !== 404) throw error; rememberOperation(key, null); }
+      }
+      const id = crypto.randomUUID().replaceAll("-", "");
+      rememberOperation(key, id);
+      configurationStatus.value = await saveProviderConfiguration(id, payload, providerConfiguration.value);
+      await followConfiguration(id, key);
+      return;
+    }
     const response = draft.id ? await updateScript(draft.id, payload) : await createScript(payload);
     toast(t("scripts.script_instance_saved"));
     showScriptValidation(response);
@@ -393,7 +439,7 @@ async function save() {
     close();
   } catch (reason) {
     if (!isAbortError(reason)) toast(reason instanceof Error ? reason.message : String(reason), "error");
-  }
+  } finally { saving.value = false; }
 }
 async function paintEditorSlot() {
   await nextTick();
@@ -403,6 +449,7 @@ async function paintEditorSlot() {
       primaryId: draft.id,
       executionProviderId: draft.executionProviderId || '',
       executionProviderConfigId: draft.executionProviderConfigId || '',
+      executionProviderConfigRevision: draft.executionProviderConfigRevision || '',
       packageRoot: draft.rootPath,
     });
   }
@@ -412,6 +459,10 @@ function providerConfigured(event: Event) {
   if (detail?.providerId !== draft.executionProviderId || detail?.packageRoot !== draft.rootPath
     || !/^[a-zA-Z0-9_-]{1,128}$/.test(detail?.profileId || '')) return;
   draft.executionProviderConfigId = detail.profileId;
+  if (detail.configuration && typeof detail.configuration === "object" && !Array.isArray(detail.configuration)
+    && new TextEncoder().encode(JSON.stringify(detail.configuration)).byteLength <= 1024 * 1024) {
+    providerConfiguration.value = structuredClone(detail.configuration);
+  }
   const launch = detail.hostLaunchConfiguration;
   if (launch?.launchGame === true && launch.gameMode === "pc"
     && typeof launch.gameExe === "string" && typeof launch.gameArgs === "string"
@@ -423,8 +474,18 @@ function providerConfigured(event: Event) {
     draft.gameWaitSeconds = launch.gameWaitSeconds;
   }
 }
-watch(() => [draft.executionProviderId, draft.rootPath], () => { void paintEditorSlot(); });
+watch(() => [draft.executionProviderId, draft.rootPath], () => { providerConfiguration.value = null; void paintEditorSlot(); });
+watch(() => [draft.executionProviderId, draft.id, draft.rootPath], async () => {
+  if (!draft.executionProviderId || !draft.rootPath || configurationBusy.value) return;
+  const key = operationKey();
+  let id: string | null = null;
+  try { id = sessionStorage.getItem(key); } catch { return; }
+  if (!id || !/^[a-zA-Z0-9_-]{1,64}$/.test(id)) return;
+  try { await followConfiguration(id, key); }
+  catch (error) { if ((error as { status?: number }).status === 404) rememberOperation(key, null); }
+});
 function close() {
+  pollGeneration += 1;
   rootProbe.invalidate();
   if (editorSlotRoot.value) void disposePluginSlot(editorSlotRoot.value);
   emit("close");
@@ -436,6 +497,7 @@ watch(
     rootProbe.invalidate();
     clearTransferState();
     Object.assign(draft, scriptDraftFrom(props.script, props.plugin));
+    providerConfiguration.value = null;
     void paintEditorSlot();
   },
   { immediate: true },
@@ -726,7 +788,7 @@ watch(
             </div>
           </div>
         </div>
-        <div v-if="!draft.pluginType && !draft.executionProviderId" class="subsection judge-box">
+        <div v-if="!draft.pluginType" class="subsection judge-box">
           <div class="section-heading">
             <h3>{{ t("scripts.custom_completion_markers") }}</h3>
           </div>
@@ -821,10 +883,14 @@ watch(
           hidden
         ></div>
     <template #footer>
+        <span v-if="configurationStatus" role="status" aria-live="polite">{{ configurationLabel }}</span>
+        <NxpButton v-if="configurationBusy && configurationStatus" class="ghost" type="button" @click.stop="cancelConfiguration">
+          {{ t("scripts.configuration.stop") }}
+        </NxpButton>
         <NxpButton class="ghost" type="button" @click.stop="close">
           {{ t("common.cancel") }}
         </NxpButton>
-        <NxpButton class="primary" type="button" @click.stop="save">
+        <NxpButton class="primary" type="button" :disabled="configurationBusy || configurationStatus?.cleanupConfirmed === false" @click.stop="save">
           {{ t("common.save") }}
         </NxpButton>
     </template>

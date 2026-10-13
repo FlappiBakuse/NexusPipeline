@@ -28,6 +28,7 @@ public sealed class WebApiContractTests
                 "plugin-contributions",
                 "plugin-runtime",
                 "plugins",
+                "provider-configurations",
                 "queues",
                 "runs",
                 "scripts",

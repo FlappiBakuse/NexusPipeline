@@ -20,7 +20,10 @@ internal sealed record UserBindingReadModel(
     int RunDays,
     int MaxSuccessfulRunsPerDay,
     UserBindingEffectiveReadModel Effective,
-    UserBindingLocksReadModel Locks);
+    UserBindingLocksReadModel Locks)
+{
+    public string ExecutionProviderConfigRevision { get; init; } = "";
+}
 
 internal sealed record UserBindingEffectiveReadModel(
     bool Enabled,
@@ -153,6 +156,7 @@ internal sealed class UserQueries
                 effective.RunDays,
                 effective.MaxSuccessfulRunsPerDay,
                 effective.Participates),
-            new UserBindingLocksReadModel(locks.General, locks.Notification, locks.Advanced));
+            new UserBindingLocksReadModel(locks.General, locks.Notification, locks.Advanced))
+            { ExecutionProviderConfigRevision = binding.ExecutionProviderConfigRevision };
     }
 }

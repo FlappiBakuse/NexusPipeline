@@ -300,6 +300,7 @@ internal sealed partial class UserCommands
                         candidate,
                         scriptId,
                         request.ConfigInputsSpecified ? candidate.ConfigInputs : old.ConfigInputs);
+                    replacement.ExecutionProviderConfigRevision = old.ExecutionProviderConfigRevision;
                     if (CheckLockedBindingUpdate(currentUser, old, replacement) is UserMutationBlock overrideBlock)
                     {
                         block = overrideBlock;

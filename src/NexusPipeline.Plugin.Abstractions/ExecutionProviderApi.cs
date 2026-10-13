@@ -49,7 +49,10 @@ public sealed record PluginProviderPrepareRequest(
     string PackageRoot,
     string InterfaceRelativePath,
     string ConfigRevision,
-    JsonObject Configuration);
+    JsonObject Configuration)
+{
+    public string UserConfigRevision { get; init; } = "";
+}
 
 public sealed record PluginProviderResource(string Kind, string Identity);
 
@@ -61,7 +64,10 @@ public sealed record PluginProviderPlan(
     string AuthorizationFingerprint,
     IReadOnlyList<PluginProviderResource> Resources,
     IReadOnlyList<PluginProviderTask> Tasks,
-    JsonObject PrivatePlan);
+    JsonObject PrivatePlan)
+{
+    public JsonObject? EffectiveConfiguration { get; init; }
+}
 
 /// <summary>Host-mediated worker launcher: provider never owns queue/history/lease state.</summary>
 public interface IPluginProviderWorkerPort
@@ -76,7 +82,10 @@ public sealed record PluginProviderWorkerRequest(
     string RelativeExecutable,
     IReadOnlyList<string> Arguments,
     string WorkingDirectory,
-    JsonObject Input);
+    JsonObject Input)
+{
+    public bool UseSessionArtifacts { get; init; }
+}
 
 public sealed record PluginProviderWorkerResult(string ExitKind, int? ExitCode, bool CleanupConfirmed);
 
@@ -96,7 +105,10 @@ public sealed record PluginProviderRunContext(
     PluginProviderPlan Plan,
     IPluginProviderWorkerPort Worker,
     Func<PluginProviderEvent, ValueTask> PublishEvent,
-    PluginProviderLaunchTarget? LaunchTarget = null);
+    PluginProviderLaunchTarget? LaunchTarget = null)
+{
+    public string EffectiveConfigurationPath { get; init; } = "";
+}
 
 /// <summary>Strong target facts captured after the existing Host launch controller confirms readiness.</summary>
 public sealed record PluginProviderLaunchTarget(

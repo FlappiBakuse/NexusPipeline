@@ -4,6 +4,7 @@ export interface Script {
   pluginType?: string;
   executionProviderId?: string;
   executionProviderConfigId?: string;
+  executionProviderConfigRevision?: string;
   pluginInputs?: Record<string, unknown>;
   rootPath?: string;
   mainExe?: string;
@@ -73,6 +74,7 @@ export const emptyScriptDraft: ScriptDraft = {
   pluginType: "",
   executionProviderId: "",
   executionProviderConfigId: "",
+  executionProviderConfigRevision: "",
   pluginInputs: {},
   rootPath: "",
   mainExe: "",
@@ -113,6 +115,7 @@ export function scriptDraftFrom(script: Script | null, plugin = ""): ScriptDraft
     pluginType: value.pluginType || (plugin.startsWith('provider:') ? '' : plugin),
     executionProviderId: value.executionProviderId || (plugin.startsWith('provider:') ? plugin.slice(9) : ''),
     executionProviderConfigId: value.executionProviderConfigId || '',
+    executionProviderConfigRevision: value.executionProviderConfigRevision || '',
     name: value.name || "",
     pluginInputs: value.pluginInputs && typeof value.pluginInputs === "object" ? { ...value.pluginInputs } : {},
     rootPath: value.rootPath || "",
@@ -144,6 +147,7 @@ export function scriptPayload(draft: ScriptDraft) {
     pluginType: draft.pluginType || "",
     executionProviderId: draft.executionProviderId || "",
     executionProviderConfigId: draft.executionProviderConfigId || "",
+    executionProviderConfigRevision: draft.executionProviderConfigRevision || "",
     name: draft.name.trim(),
     rootPath: stripQuotes(draft.rootPath),
     pluginInputs: draft.pluginType ? { ...draft.pluginInputs } : {},

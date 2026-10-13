@@ -1,3 +1,4 @@
+using NexusPipeline.Modules.Scripts.Contracts;
 using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
@@ -149,6 +150,7 @@ internal sealed class WebServer : IDisposable
                 var type when type == typeof(CancellationToken) => cancellationToken,
                 var type when type == typeof(SettingsCommands) => routeBindings.SettingsCommands,
                 var type when type == typeof(ScriptCommands) => routeBindings.ScriptCommands,
+                var type when type == typeof(IProviderConfigurationOperations) => routeBindings.ProviderConfigurations,
                 var type when type == typeof(QueueCommands) => routeBindings.QueueCommands,
                 var type when type == typeof(UserCommands) => routeBindings.UserCommands,
                 var type when type == typeof(ConfigEditCommands) => routeBindings.ConfigEditCommands,

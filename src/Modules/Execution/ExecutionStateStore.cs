@@ -24,6 +24,7 @@ internal sealed class ExecutionStateStore
     private readonly List<CompletionIntent> _completionIntents = new();
 
     private readonly ExecutionAdmissionPolicy _policy;
+    private readonly Func<IReadOnlyList<ConfigRecoveryIsolationProjection>> _providerRecovery;
 
     private PendingSystemAction? _pendingSystemAction;
 
@@ -31,9 +32,10 @@ internal sealed class ExecutionStateStore
 
     private readonly object _sync = new();
 
-    public ExecutionStateStore(ExecutionAdmissionPolicy? policy = null)
+    public ExecutionStateStore(ExecutionAdmissionPolicy? policy = null, Func<IReadOnlyList<ConfigRecoveryIsolationProjection>>? providerRecovery = null)
     {
         _policy = policy ?? new ExecutionAdmissionPolicy();
+        _providerRecovery = providerRecovery ?? (() => []);
     }
 
     internal ExecutionGroupState GroupState
@@ -327,6 +329,8 @@ internal sealed class ExecutionStateStore
 
     private IReadOnlyList<ConfigRecoveryIsolationProjection> UnownedRecoveryIsolationLocked() =>
         ConfigRecoveryService.SnapshotIsolation()
+            .Concat(_providerRecovery())
+            .Concat(ProviderWorkerArtifacts.SnapshotIsolation())
             .Where(isolation => isolation.ExplicitIsolation
                 || string.IsNullOrWhiteSpace(isolation.OriginExecutionId)
                 || !_active.Any(exec => exec.Id == isolation.OriginExecutionId))
@@ -653,6 +657,41 @@ internal sealed class ExecutionStateStore
                     ? Array.Empty<string>()
                     : new[] { Path.GetFullPath(configPath) },
             };
+        return TryBeginConfigurationSession(leaseKey, resources, out conflict);
+    }
+
+    internal bool TryBeginProviderConfiguration(string operationId, string scriptId, string packageRoot,
+        IReadOnlyList<NexusPipeline.Plugin.Abstractions.PluginProviderResource> requested, out string? conflict, string? previousRoot = null)
+    {
+        string root = Path.GetFullPath(packageRoot).TrimEnd('\\', '/');
+        if (requested.Count is < 1 or > 64 || requested.Any(resource => resource.Kind is not ("writable_root" or "desktop_input" or "adb_endpoint")))
+            throw new InvalidDataException("configuration.resources.invalid");
+        var roots = requested.Where(resource => resource.Kind == "writable_root").Select(resource => Path.GetFullPath(resource.Identity).TrimEnd('\\', '/')).ToArray();
+        if (roots.Length == 0 || roots.Any(path => !path.Equals(root, StringComparison.OrdinalIgnoreCase)
+            && !path.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidDataException("configuration.resources.root_scope");
+        if (!string.IsNullOrEmpty(previousRoot)) roots = roots.Append(Path.GetFullPath(previousRoot).TrimEnd('\\', '/')).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        foreach (string path in roots)
+            for (string? current = path; current is not null; current = Path.GetDirectoryName(current))
+                if (Directory.Exists(current) && (File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
+                    throw new InvalidDataException("configuration.resources.link");
+        if (requested.Any(resource => resource.Kind == "desktop_input" && resource.Identity != "current_session"
+            || resource.Kind == "adb_endpoint" && (string.IsNullOrWhiteSpace(resource.Identity) || resource.Identity.Length > 512)))
+            throw new InvalidDataException("configuration.resources.identity");
+        var resources = ExecutionResourceSet.Empty with
+        {
+            ScriptIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "script:" + scriptId },
+            WritableRoots = roots,
+            DesktopDomains = new HashSet<string>(requested.Where(resource => resource.Kind == "desktop_input")
+                .Select(_ => "session:" + System.Diagnostics.Process.GetCurrentProcess().SessionId), StringComparer.OrdinalIgnoreCase),
+            EmulatorEndpoints = new HashSet<string>(requested.Where(resource => resource.Kind == "adb_endpoint")
+                .Select(resource => ExecutionResourceSetBuilder.NormalizeEmulatorEndpoint(resource.Identity) ?? resource.Identity.Trim().ToLowerInvariant()), StringComparer.OrdinalIgnoreCase),
+        };
+        return TryBeginConfigurationSession(scriptId + ":provider-operation:" + operationId, resources, out conflict);
+    }
+
+    private bool TryBeginConfigurationSession(string leaseKey, ExecutionResourceSet resources, out string? conflict)
+    {
 
         lock (_coordinationSync)
         {

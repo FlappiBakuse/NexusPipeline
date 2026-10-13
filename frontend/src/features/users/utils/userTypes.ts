@@ -18,6 +18,7 @@ export interface BindingLocks {
 
 export interface Binding {
   scriptInstanceId: string;
+  executionProviderConfigRevision?: string;
   scriptName?: string;
   enabled?: boolean;
   notifyEnabled?: boolean;
@@ -50,6 +51,7 @@ export interface Script {
   requiresReconfiguration?: boolean;
   executionProviderId?: string;
   executionProviderConfigId?: string;
+  executionProviderConfigRevision?: string;
   rootPath?: string;
   id: string;
   name: string;

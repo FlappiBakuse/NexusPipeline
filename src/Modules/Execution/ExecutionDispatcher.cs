@@ -93,6 +93,10 @@ internal sealed class ExecutionDispatcher : IExecutionService, IFrozenQueueExecu
     public void EndEditSession(string scriptId, string userName)
         => _state.EndEditSession(scriptId, userName);
 
+    internal bool TryBeginProviderConfiguration(string operationId, string scriptId, string packageRoot,
+        IReadOnlyList<NexusPipeline.Plugin.Abstractions.PluginProviderResource> resources, out string? conflict, string? previousRoot = null)
+        => _state.TryBeginProviderConfiguration(operationId, scriptId, packageRoot, resources, out conflict, previousRoot);
+
     public bool CancelSystemAction(string source = Audit.Web) => _systemActions.Cancel(source);
 
     public RunningExecution StartScript(string scriptId, string mode, string source = Audit.System, string? userName = null)
