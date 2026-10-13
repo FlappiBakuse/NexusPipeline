@@ -35,8 +35,9 @@ class HostReleaseTests(unittest.TestCase):
             root = Path(temporary)
             archive = root / 'artifact.zip'
             names = ['candidate.json', 'build-metadata.json', 'installer-build-metadata.json',
-                     'NexusPipeline-v1.2.3-win-x64.zip', 'NexusPipeline-v1.2.3-win-x64.zip.sha256',
-                     'NexusPipeline-v1.2.3-win-x64-setup.exe', 'NexusPipeline-v1.2.3-win-x64-setup.exe.sha256']
+                     'NexusPipeline-v1.2.3-win-x64.zip',
+                     'NexusPipeline-v1.2.3-win-x64-setup.exe']
+            names.extend(sorted(host_release.component_asset_names('v1.2.3')))
             with zipfile.ZipFile(archive, 'w') as stream:
                 for name in names:
                     stream.writestr(name, b'data')
@@ -64,12 +65,12 @@ class HostReleaseTests(unittest.TestCase):
             package = output / 'NexusPipeline-v1.2.3-win-x64.zip'
             package.write_bytes(b'package')
             digest = hashlib.sha256(package.read_bytes()).hexdigest()
-            (output / f'{package.name}.sha256').write_text(digest, encoding='ascii')
             (output / 'build-metadata.json').write_text('{}', encoding='utf-8')
             setup = output / 'NexusPipeline-v1.2.3-win-x64-setup.exe'
             setup.write_bytes(b'installer')
-            (output / f'{setup.name}.sha256').write_text(hashlib.sha256(setup.read_bytes()).hexdigest(), encoding='ascii')
             (output / 'installer-build-metadata.json').write_text('{}', encoding='utf-8')
+            for name in host_release.component_asset_names('v1.2.3'):
+                (output / name).write_bytes(b'component fixture')
             def git_result(_root, *args):
                 if args == ('rev-parse', 'HEAD'): return 'a' * 40
                 if args == ('status', '--porcelain=v1', '--untracked-files=all'): return ''
@@ -78,14 +79,16 @@ class HostReleaseTests(unittest.TestCase):
             with patch.object(host_release, 'git_output', side_effect=git_result), \
                  patch.object(host_release, 'verify_received_package', return_value={'sha256': digest,
                      'buildInputs':{'sourceSha':'a'*40,'sourceTreeSha':'b'*40,'partnerSha':'c'*40,'workflowSha':'d'*40}}) as package_reader, \
-                 patch.object(host_release, 'verify_received_installer'):
+                 patch.object(host_release, 'verify_received_installer'), \
+                 patch.object(host_release, 'verify_components'):
                 candidate = write_candidate_manifest(root, output, source_sha='a' * 40,
                     partner_sha='c' * 40, workflow_sha='d' * 40, run_id=12, run_attempt=2)
                 self.assertEqual(candidate['producer']['runAttempt'], 2)
                 self.assertEqual(candidate['sourceTreeSha'], 'b' * 40)
                 self.assertEqual({item['path'] for item in candidate['files']},
-                                 {package.name, package.name + '.sha256', setup.name, setup.name + '.sha256',
-                                  'build-metadata.json', 'installer-build-metadata.json'})
+                                 {package.name, setup.name,
+                                  'build-metadata.json', 'installer-build-metadata.json',
+                                  *host_release.component_asset_names('v1.2.3')})
                 self.assertNotIn('candidate.json', {item['path'] for item in candidate['files']})
                 with patch.object(host_release, 'project_version', return_value='1.2.3'):
                     self.assertEqual(validate_candidate_data(root, output, expected_source_sha='a' * 40,
@@ -123,7 +126,6 @@ class HostReleaseTests(unittest.TestCase):
             setup = output / 'NexusPipeline-v1.2.3-win-x64-setup.exe'
             setup.write_bytes(b'installer')
             digest = hashlib.sha256(setup.read_bytes()).hexdigest()
-            (output / f'{setup.name}.sha256').write_text(digest, encoding='ascii')
             payload = [{'path': 'README.md', 'sha256': 'b' * 64, 'sizeBytes': 1}]
             from tools.host_installer import INNO_COMPILER_SHA256, INNO_DISTRIBUTION_SHA256
             data = {'schemaVersion': 1, 'sourceSha': 'a' * 40, 'tag': 'v1.2.3',
@@ -229,21 +231,36 @@ class HostReleaseTests(unittest.TestCase):
             inputs = parse_json((Path(__file__).resolve().parents[2] / "tests/fixtures/build-identity/build-inputs.example.json").read_bytes())
             inputs.update(productVersion="1.2.3", sourceSha="a" * 40)
             application = create_record(inputs)
+            archive_file = desktop / 'resources/app.asar'
+            archive_file.parent.mkdir()
+            archive_file.write_bytes(b'application')
+            application_manifest = {**application, 'files': [
+                {'path': file.relative_to(production).as_posix(), 'sizeBytes': file.stat().st_size,
+                 'sha256': hashlib.sha256(file.read_bytes()).hexdigest(), 'kind': 'fixture'}
+                for file in production.rglob('*') if file.is_file()
+                and not file.relative_to(production).as_posix().startswith('plugins/')
+                and file.name != 'payload-manifest.json']}
+            (production / 'resources/payload-manifest.json').write_text(json.dumps(application_manifest), encoding='utf-8')
+            (root / 'desktop').mkdir()
+            (root / 'desktop/runtime-files.json').write_text(json.dumps({'files': [{'path': 'NexusPipeline.Desktop.exe'}]}), encoding='utf-8')
             reader = patch("tools.application_reader.read", return_value=application)
             validator = patch("tools.application_payload.validate", return_value={})
             reader.start(); validator.start()
             self.addCleanup(reader.stop); self.addCleanup(validator.stop)
             first = archive_production(production, output, "v1.2.3", source_sha="a" * 40, manifest_path=root / "src" / "app.manifest")
             self.assertEqual(Path(first["zip"]).name, "NexusPipeline-v1.2.3-win-x64.zip")
-            self.assertEqual(Path(first["sha"]).name, "NexusPipeline-v1.2.3-win-x64.zip.sha256")
-            self.assertEqual(Path(first["sha"]).read_bytes(), first["metadata"]["sha256"].encode("ascii"))
+            self.assertEqual(set(output.iterdir()), {Path(first["zip"]), output / "build-metadata.json",
+                                                     *(output / name for name in host_release.component_asset_names('v1.2.3'))})
             first_bytes = Path(first["zip"]).read_bytes()
             with self.assertRaisesRegex(HostReleaseError, "已存在"):
                 archive_production(production, output, "v1.2.3", source_sha="a" * 40, manifest_path=root / "src" / "app.manifest")
             second = archive_production(production, root / "out-again", "v1.2.3", source_sha="a" * 40, manifest_path=root / "src" / "app.manifest")
             self.assertEqual(first_bytes, Path(second["zip"]).read_bytes())
+            for name in host_release.component_asset_names('v1.2.3'):
+                self.assertEqual((output / name).read_bytes(), (root / 'out-again' / name).read_bytes())
+            host_release.verify_components(output, Path(first['zip']), first['metadata'], root)
             with zipfile.ZipFile(second["zip"]) as archive:
-                self.assertEqual(archive.namelist(), ["NexusPipeline.exe", "plugins/EmulatorSupport/plugin.json", "plugins/LiveScreenshot/plugin.json", "README.md", "resources/desktop/NexusPipeline.Desktop.exe", "resources/payload-manifest.json"])
+                self.assertEqual(archive.namelist(), ["NexusPipeline.exe", "plugins/EmulatorSupport/plugin.json", "plugins/LiveScreenshot/plugin.json", "README.md", "resources/desktop/NexusPipeline.Desktop.exe", "resources/desktop/resources/app.asar", "resources/payload-manifest.json"])
                 self.assertEqual(archive.read("resources/desktop/NexusPipeline.Desktop.exe"), b"desktop")
                 self.assertEqual(archive.read("plugins/EmulatorSupport/plugin.json"), b"{\"name\":\"fixture\"}\r\n")
 

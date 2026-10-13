@@ -1,5 +1,13 @@
 # 自动更新
 
+默认更新源读取 `metadata/updates/channels.json` 的两槽声明。pendingTarget 只有在 Release 已公开、渠道正确、分页资产身份及 target manifest 摘要均有效时才成为可用版本；其尚未发布、损坏或要求未知能力时，独立校验 previousPublishedTarget 并保留待发布状态。没有上一目标时保持当前安装，不枚举历史 Release，也不推荐降级。
+
+target manifest 把完整 ZIP 和 host-core、desktop-app、desktop-runtime 组件绑定到同一次 Release 的资产 ID、尺寸和 GitHub digest。当前安装先通过载荷校验，逐文件尺寸与摘要均相同的组件可以复用；组件下载更大时使用完整包，组件传输暂不可用时仅全量回退一次。摘要、文件集合、能力或迁移路线错误直接阻断。最终重建仍完整核对 PE、ASAR、前端构建身份及 payload manifest，并生成仅供本地恢复使用的包和校验收据。
+
+当前已登记 g0170 无业务数据变化路线；目标 Host 的专用 runner 在普通服务初始化之前处理握手，父协调器验证真实进程与管道身份、一次性随机数、构建、能力和序号，确认结束后才交换应用。schema 2 journal 冻结发行资产和 runner 收据；跨 schema 的编译迁移器框架由模块 owner 提供明确存储根和 schema，通过隔离转换、备份、可恢复切换和精确文件收据保护数据。当前发行不制造业务格式变化；未知路线、schema 和恢复现场继续阻断。契约见[更新协议](../../contracts/updates/README.md)。
+
+发现入口对未知目标能力先规划有界桥接：要求源 reader 与完整能力集合匹配、桥接入口可由当前 reader 验证、目标能力覆盖最终要求，且版本严格处于本机与最终目标之间。最多核验八个桥接，使用同一 Release/资产摘要验证，不下载未知协议目标清单，不执行入口声明的命令。状态分别报告 `bridge-required` 和 `bridge-unavailable`；桥接应用后重新检查最终目标。
+
 ## 安装器交接和启动确认
 
 Setup 使用本实例事务互斥体，将现役 Host 复制到同根 `.nxp/runtime/workers/update-<事务随机ID>.exe` 作为独立 worker，通过 `--app-root` 固定执行根目录；worker 摘要必须与现役 Host 一致。已有服务时通过本地 `installer-apply` API 取得现役维护租约；无服务时经同一 `UpdateService` 准入。配置恢复、运行、编辑和其他更新事务阻断切换。
@@ -22,7 +30,7 @@ Setup 使用本实例事务互斥体，将现役 Host 复制到同根 `.nxp/runt
 
 运行期自动化等待信息通过更新状态 API 和 MCP `get_update_status` 的 additive `automation` 投影提供，包括检查开关、上次/下次自动检查、是否等待闲时和阻止原因。渠道或更新源变化会使发现结果进入 pending invalidation；正在进行或已 Ready 的事务保留给当前人工处理，自动化不会应用已失效的发现结果。
 
-更新检查发现候选版本后，`UpdateService` 通过固定更新源读取根目录 `update-policy.json`。策略必须通过 schema、仓库标识、版本顺序、屏障 code 和迁移 URL 校验；网络失败、响应超限或策略无效时保持发现结果并禁止内置下载。对当前版本到目标版本区间内的最早屏障，状态 API 和 MCP 返回 `manualUpdateRequired`、`updateBlockCode=breaking-update`、`barrierVersion` 与可选 `migrationUrl`，下载、启动前自动应用、下次启动应用和闲时自动应用均被拒绝。策略验证成功且未命中屏障时才允许下载；策略缓存只用于带 HTTP validator 的后续验证，网络失败不会授权旧缓存。
+更新检查发现候选版本后，`UpdateService` 通过独立策略域读取 canonical `metadata/updates/legacy-policy.json`。策略必须通过 schema、仓库标识、版本顺序、屏障 code 和迁移 URL 校验；网络失败、响应超限或策略无效时保持发现结果并禁止内置下载。对当前版本到目标版本区间内的最早屏障，状态 API 和 MCP 返回 `manualUpdateRequired`、`updateBlockCode=breaking-update`、`barrierVersion` 与可选 `migrationUrl`，下载、启动前自动应用、下次启动应用和闲时自动应用均被拒绝。策略验证成功且未命中屏障时才允许下载；策略缓存只用于带 HTTP validator 的后续验证，网络失败不会授权旧缓存。
 
 旧安装允许缺少根目录 `README.md`；已存在的说明文件仍按清单校验。备份清单固定说明文件的存在状态，回滚恢复原字节或原先缺失状态。候选包、交换后的新安装及启动回执要求完整载荷。应用请求在停止桌面前校验旧安装，worker 在宿主退出后重新核验。
 
@@ -32,7 +40,7 @@ Setup 使用本实例事务互斥体，将现役 Host 复制到同根 `.nxp/runt
 
 停止桌面前，当前事务冻结 schema 1 的 `DesktopResumeIntent`，Mode 仅接受 `show` 或 `background`。尚未创建窗口的根启动 Show 请求也进入冻结意图；恢复不依赖历史 handoff 或被删除的 session。明确未启动 worker 的失败由同事务 Desktop owner 撤销停止状态并恢复该意图；已启动或无法确认的 worker 保留租约、journal 与停止状态。普通重启未启动子进程时只撤销匹配的 handoff，当前 renderer 恢复 ready 并保留草稿。
 
-journal 记录 staging、backup 的文件和目录精确清单、每文件长度及 SHA256，以及 worker、原包和 checksum 侧文件摘要。清理先核验所有资源，再通过独占文件句柄复核和删除对应字节；目录仅允许非递归空目录删除。中断后可继续清理已缺失的已确认资源，新增、变形、链接或变化的未知字节保留现场。交换和回滚共用这些清单；已确认路径上的损坏候选先写保护记录并移入 `.nxp/state/updates/<事务>.preserved/`，随后恢复完整旧载荷。未知新增候选文件阻断回滚并保留 immutable backup 与 journal。
+journal 记录 staging、backup 的文件和目录精确清单、每文件长度及 SHA256，以及 worker 与已下载资产的摘要。新协议冻结 GitHub Release 及 asset ID、名称、长度和服务端 digest，恢复和应用继续使用该发行身份。清理先核验所有资源，再通过独占文件句柄复核和删除对应字节；目录仅允许非递归空目录删除。中断后可继续清理已缺失的已确认资源，新增、变形、链接或变化的未知字节保留现场。交换和回滚共用这些清单；已确认路径上的损坏候选先写保护记录并移入 `.nxp/state/updates/<事务>.preserved/`，随后恢复完整旧载荷。未知新增候选文件阻断回滚并保留 immutable backup 与 journal。
 
 下载和解压只创建新文件，拒绝覆盖已有 staging。网络操作按实际写入的字节记录长度与摘要，并记录由本操作创建的目录；取消或失败先核验完整创建集合，出现未知子项或改变字节时保留现场。就绪后的暂存清单和 checksum 摘要沿用创建收据，申请应用时重新核验，不重新认领后来加入的内容。
 
@@ -40,7 +48,11 @@ journal 记录 staging、backup 的文件和目录精确清单、每文件长度
 
 v0.17.0 使用独立安装代际 `g0170`，不接管 `g01615` 的目录、注册表登记及管理辅助程序。`update-policy.json` 的 `0.17.0` 独立屏障要求旧版用户按新目录安装指南迁移；旧目录和配置原地保留。同路径 Setup 升级只接收当前代际、本 Windows 用户已登记且身份匹配的安装目录。文件归属清单包含 Host、桌面完整运行时及载荷清单自身；安装、更新和卸载使用同一应用边界。
 
-候选构建对同一 production staging 生成 ZIP 和 Setup；`candidate.json` 固定列出两份资产、纯 SHA 侧文件和两份构建元数据。publisher 从原成功 run 下载服务端指定 artifact，核对来源、tree、依赖与编译器锁、四项分发资产的字节，再发布并远端逐项回读；不从发行页按 latest 重新取包。
+候选构建对同一 production staging 生成完整 ZIP、Setup、target manifest 和 `host-core`、`desktop-app`、`desktop-runtime` 三个组件包。`candidate.json` 记录这六项公开资产与两份内部构建元数据；公开发行不包含 SHA 侧文件，发行说明末尾列出资产摘要表。publisher 从原成功 run 下载服务端指定 artifact，核对来源、tree、依赖与编译器锁、完整资产字节，再发布并远端逐项回读；不从发行页按 latest 重新取包。
+
+target manifest 按完整文件清单与构建身份重建 staging。未变组件仅复用当前安装中逐文件核验通过的内容；组件传输失败允许一次完整 ZIP 回退，身份、摘要或载荷错误直接失败。下载前同时计算新 staging、旧载荷备份、下载和工作空间的卷上峰值，应用仍执行同一维护租约与恢复事务。
+
+当前迁移路线为 `g0170-no-store-change-v1`，数据 store 集合为空，保留用户数据原地不变。候选的 target runner 在正常宿主、插件及桌面初始化前通过私有管道完成实际映像身份、nonce、协议、能力和路线核验。`UpdateDataMigration` 提供独立副本、跨 schema 路线、输出清单、切换、恢复和提交框架；实际业务 schema 变更须先由对应 owner 登记并验证，不从无数据变更路线推定支持其他格式。
 
 启动恢复发现未完成的 apply journal 且 immutable backup 包含宿主 exe 时，当前启动实例不会直接覆盖自己的映像；它会拉起独立 recovery worker，等待当前实例释放单实例互斥体后还原 backup、写入 `RollbackConfirmed` 并重拉宿主，旧版本启动收尾再删除 backup 与 journal。回滚失败时现场继续保留并由下一次启动重试。
 

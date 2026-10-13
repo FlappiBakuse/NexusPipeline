@@ -40,11 +40,12 @@ test("default partner input requires the official main policy", () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "nxp-default-partner-"));
   try {
     const current = {schemaVersion: 1, repository: "FlappiBakuse/NexusPipeline-Plugins", ref: "main"};
-    fs.writeFileSync(path.join(directory, "plugins.lock.json"), JSON.stringify(current));
+    fs.mkdirSync(path.join(directory, "tests"));
+    fs.writeFileSync(path.join(directory, "tests/inputs.lock.json"), JSON.stringify(current));
     assert.deepEqual(defaultPartner(directory), current);
     for (const input of [{...current, ref: "a".repeat(40)}, {...current, repository: "other/plugins"},
       {...current, schemaVersion: 0}, {...current, unknown: true}]) {
-      fs.writeFileSync(path.join(directory, "plugins.lock.json"), JSON.stringify(input));
+      fs.writeFileSync(path.join(directory, "tests/inputs.lock.json"), JSON.stringify(input));
       assert.throws(() => defaultPartner(directory));
     }
   } finally { fs.rmSync(directory, {recursive: true}); }

@@ -33,7 +33,7 @@ class InputPairTests(unittest.TestCase):
                 "truncated": False, "tree": [{"type": "blob", "path": "tests/ci_inputs.py", "sha": "b" * 40}]}
             self.responses[f"/repos/{repo}/compare/{controller}...main"] = {
                 "status": "identical", "merge_base_commit": {"sha": controller}}
-            for name in ["tests/policy.json", "plugins.lock.json" if index == 0 else "tests/inputs.lock.json"]:
+            for name in ["tests/policy.json", "tests/inputs.lock.json"]:
                 self.responses[f"/repos/{repo}/contents/{name}?ref={tested}"] = {
                     "type": "file", "encoding": "base64", "content": base64.b64encode(b'{"schemaVersion":1}\n').decode()}
         self.pair = inputs.create_pair([1, 2], self.read)

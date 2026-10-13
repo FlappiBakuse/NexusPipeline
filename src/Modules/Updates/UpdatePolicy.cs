@@ -18,7 +18,7 @@ internal static class UpdatePolicy
     public const int MaxCodeLength = 64;
     public const long MaxPolicyBytes = 256 * 1024;
     public const string Repository = "FlappiBakuse/NexusPipeline";
-    public const string DefaultPolicyUrl = "https://raw.githubusercontent.com/FlappiBakuse/NexusPipeline/main/update-policy.json";
+    public const string DefaultPolicyUrl = "https://raw.githubusercontent.com/FlappiBakuse/NexusPipeline/main/metadata/updates/legacy-policy.json";
 
     private static readonly Regex CodePattern = new(
         "^[a-z0-9][a-z0-9._-]{0,63}$",

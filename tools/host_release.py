@@ -17,8 +17,10 @@ from xml.etree import ElementTree
 
 try:
     from .pe_manifest import verify_embedded_manifest
+    from .update_components import asset_names as component_asset_names, generate as generate_components, verify as verify_components
 except ImportError:
     from pe_manifest import verify_embedded_manifest
+    from update_components import asset_names as component_asset_names, generate as generate_components, verify as verify_components
 
 
 REPOSITORY = "FlappiBakuse/NexusPipeline"
@@ -125,7 +127,10 @@ def stage_bundled_plugins(production_root: Path, plugins_root: Path, manifest_pa
         _require(package.is_file() and not package.is_symlink(), f"官方稳定插件包缺失：{artifact}")
         raw = package.read_bytes()
         _require(len(raw) == item["packageSizeBytes"] and hashlib.sha256(raw).hexdigest() == item["packageSha256"], f"官方稳定插件包字节不符：{artifact}")
-        catalog = json.loads((plugins_root / "catalog.json").read_text(encoding="utf-8-sig"))
+        catalog_path = plugins_root / "metadata/catalog/stable.json"
+        _require(catalog_path.is_file() and not catalog_path.is_symlink()
+                 and catalog_path.read_bytes() == (plugins_root / "catalog.json").read_bytes(), "官方稳定 catalog canonical 与根投影不一致")
+        catalog = json.loads(catalog_path.read_text(encoding="utf-8-sig"))
         entry = next((entry for entry in catalog.get("plugins", []) if entry.get("artifactName") == artifact), None)
         _require(entry is not None and entry.get("version") == version and entry.get("sha256") == item["packageSha256"] and entry.get("sizeBytes") == len(raw), f"官方稳定 catalog 不匹配：{artifact}")
         declared = {file["path"]: file for file in item["files"]}
@@ -189,7 +194,9 @@ def archive_production(
         from .application_payload import validate as validate_application
     except ImportError:
         from application_payload import validate as validate_application
-    validate_application(production_root, json.loads((production_root / "resources/payload-manifest.json").read_bytes()), application, Path(__file__).resolve().parents[1])
+    source_root = manifest_path.resolve().parents[1]
+    application_manifest = json.loads((production_root / "resources/payload-manifest.json").read_bytes())
+    validate_application(production_root, application_manifest, application, source_root)
     payload_files = []
     with zipfile.ZipFile(zip_path, "x", compression=zipfile.ZIP_DEFLATED, compresslevel=zip_compression_level) as archive:
         for relative, path in files:
@@ -204,8 +211,6 @@ def archive_production(
                     size += len(chunk); digest.update(chunk); target.write(chunk)
             payload_files.append({"path": relative, "sizeBytes": size, "sha256": digest.hexdigest()})
     with zip_path.open('rb') as stream: digest = hashlib.file_digest(stream, 'sha256').hexdigest()
-    sha_path = output_dir / f"{zip_path.name}.sha256"
-    sha_path.write_bytes(digest.encode("ascii"))
     metadata = {
         "schemaVersion": 1,
         "sourceSha": source_sha,
@@ -224,8 +229,9 @@ def archive_production(
         "payloadFiles": payload_files,
     }
     (output_dir / "build-metadata.json").write_text(json.dumps(metadata, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
+    generate_components(production_root, output_dir, tag, application_manifest, payload_files, source_root)
     with zip_path.open('rb') as stream: _require(hashlib.file_digest(stream, 'sha256').hexdigest() == digest, "生产 ZIP 二次 SHA256 校验失败")
-    return {"zip": str(zip_path), "sha": str(sha_path), "metadata": metadata}
+    return {"zip": str(zip_path), "metadata": metadata}
 
 
 def _run_checked(command: list[str], cwd: Path, runner: Callable[[list[str], Path], None] | None) -> None:
@@ -439,8 +445,8 @@ def assemble_candidate_from_phases(root: Path, host_phase: Path, installer_phase
     tag = "v" + project_version(root)
     zip_name = f"NexusPipeline-{tag}-win-x64.zip"
     setup_name = f"NexusPipeline-{tag}-win-x64-setup.exe"
-    host_files = (zip_name, f"{zip_name}.sha256", "build-metadata.json")
-    installer_files = (setup_name, f"{setup_name}.sha256", "installer-build-metadata.json")
+    host_files = (zip_name, "build-metadata.json", *sorted(component_asset_names(tag)))
+    installer_files = (setup_name, "installer-build-metadata.json")
     for directory, names in ((host_phase, host_files), (installer_phase, installer_files)):
         _require(directory.is_dir() and not directory.is_symlink()
                  and all((directory / name).is_file() and not (directory / name).is_symlink() for name in names),
@@ -459,7 +465,7 @@ def assemble_candidate_from_phases(root: Path, host_phase: Path, installer_phase
 def candidate_asset_names(tag: str) -> set[str]:
     zip_name = f"NexusPipeline-{tag}-win-x64.zip"
     setup_name = f"NexusPipeline-{tag}-win-x64-setup.exe"
-    return {zip_name, f"{zip_name}.sha256", setup_name, f"{setup_name}.sha256",
+    return {zip_name, setup_name, *component_asset_names(tag),
             "build-metadata.json", "installer-build-metadata.json"}
 
 
@@ -472,9 +478,8 @@ def verify_received_installer(output_dir: Path, root: Path, zip_metadata: dict[s
         from host_installer import INNO_COMPILER_SHA256, INNO_DISTRIBUTION_SHA256, dependency_pair
     setup_name = f"NexusPipeline-{expected_tag}-win-x64-setup.exe"
     setup = output_dir / setup_name
-    sidecar = output_dir / f"{setup_name}.sha256"
     metadata_path = output_dir / "installer-build-metadata.json"
-    _require(all(path.is_file() and not path.is_symlink() for path in (setup, sidecar, metadata_path)),
+    _require(all(path.is_file() and not path.is_symlink() for path in (setup, metadata_path)),
              "安装器候选文件缺失或不是普通文件")
     try:
         metadata = _strict_metadata(metadata_path)
@@ -499,8 +504,7 @@ def verify_received_installer(output_dir: Path, root: Path, zip_metadata: dict[s
     received = setup_override or setup
     _require(received.is_file() and not received.is_symlink(), "安装器回读文件无效")
     digest = hashlib.sha256(received.read_bytes()).hexdigest()
-    _require(metadata["setupSha256"] == digest and metadata["setupSizeBytes"] == received.stat().st_size
-             and sidecar.read_text(encoding="ascii").strip() == digest,
+    _require(metadata["setupSha256"] == digest and metadata["setupSizeBytes"] == received.stat().st_size,
              "安装器摘要或大小不符")
     return metadata
 
@@ -542,8 +546,8 @@ def write_candidate_manifest(
              f"Host candidate 文件集合无效：{sorted(actual)}")
     metadata = verify_received_package(output_dir / zip_name, output_dir / "build-metadata.json",
                                        expected_source_sha=source_sha, expected_tag=tag)
+    verify_components(output_dir, output_dir / zip_name, metadata, root)
     _verify_candidate_build_inputs(metadata, source_sha, tree_sha, partner_sha, workflow_sha)
-    _require((output_dir / f"{zip_name}.sha256").read_text(encoding="ascii").strip() == metadata["sha256"], "Host SHA sidecar 与包不一致")
     verify_received_installer(output_dir, root, metadata, expected_source_sha=source_sha, expected_tag=tag)
     files = [
         {"path": name, "sha256": hashlib.sha256((output_dir / name).read_bytes()).hexdigest(),
@@ -640,15 +644,15 @@ def validate_candidate_data(
                  f"Host candidate inventory 摘要或大小不符：{name}")
     metadata = verify_received_package(output_dir / zip_name, output_dir / "build-metadata.json",
                                        expected_source_sha=expected_source_sha, expected_tag=tag)
+    verify_components(output_dir, output_dir / zip_name, metadata, root)
     _verify_candidate_build_inputs(metadata, expected_source_sha, candidate["sourceTreeSha"],
                                    expected_partner_sha, expected_producer["workflowSha"])
-    _require((output_dir / f"{zip_name}.sha256").read_text(encoding="ascii").strip() == metadata["sha256"], "Host candidate SHA sidecar 不符")
     verify_received_installer(output_dir, root, metadata, expected_source_sha=expected_source_sha, expected_tag=tag)
     return candidate
 
 
 def extract_candidate_artifact(archive_path: Path, output_dir: Path, *, expected_digest: str) -> None:
-    """Extract only the seven approved data files from a server-identified artifact."""
+    """Extract only the approved data files from a server-identified artifact."""
     _require(re.fullmatch(r"sha256:[0-9a-f]{64}", expected_digest) is not None,
              "candidate artifact 服务端摘要无效")
     _require(archive_path.is_file() and not archive_path.is_symlink(), "candidate artifact ZIP 无效")
@@ -663,15 +667,17 @@ def extract_candidate_artifact(archive_path: Path, output_dir: Path, *, expected
         with zipfile.ZipFile(archive_path) as archive:
             infos = archive.infolist()
             names = [info.filename for info in infos]
-            _require(len(infos) == 7 and len(set(names)) == 7 and "candidate.json" in names
+            _require(len(infos) == 9 and len(set(names)) == 9 and "candidate.json" in names
                      and "build-metadata.json" in names and "installer-build-metadata.json" in names,
                      "candidate artifact 文件集合无效")
             for info in infos:
                 name = info.filename
                 _require("/" not in name and "\\" not in name and name not in {".", ".."}
                          and (name in {"candidate.json", "build-metadata.json", "installer-build-metadata.json"}
-                              or re.fullmatch(r"NexusPipeline-v[0-9A-Za-z.+-]+-win-x64\.zip(?:\.sha256)?", name) is not None
-                              or re.fullmatch(r"NexusPipeline-v[0-9A-Za-z.+-]+-win-x64-setup\.exe(?:\.sha256)?", name) is not None),
+                              or re.fullmatch(r"NexusPipeline-v[0-9A-Za-z.+-]+-win-x64\.zip", name) is not None
+                              or re.fullmatch(r"NexusPipeline-v[0-9A-Za-z.+-]+-win-x64-(host-core|desktop-app|desktop-runtime)\.zip", name) is not None
+                              or re.fullmatch(r"NexusPipeline-v[0-9A-Za-z.+-]+-win-x64-update\.json", name) is not None
+                              or re.fullmatch(r"NexusPipeline-v[0-9A-Za-z.+-]+-win-x64-setup\.exe", name) is not None),
                          f"candidate artifact 路径无效：{name}")
                 mode = (info.external_attr >> 16) & 0o170000
                 _require(not info.is_dir() and mode in {0, 0o100000}
@@ -860,7 +866,7 @@ def verify_received_package(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="NexusPipeline Host production release boundary")
-    parser.add_argument("command", nargs="?", choices=("release", "verify-package", "verify-installer", "candidate", "extract-candidate", "inspect-candidate", "validate-candidate", "build-frontend", "build-bundled", "build-host", "assemble-candidate"), default="release")
+    parser.add_argument("command", nargs="?", choices=("release", "verify-package", "verify-installer", "verify-components", "candidate", "extract-candidate", "inspect-candidate", "validate-candidate", "build-frontend", "build-bundled", "build-host", "assemble-candidate"), default="release")
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--tag")
     parser.add_argument("--source-sha")
@@ -971,7 +977,7 @@ def main(argv: list[str] | None = None) -> int:
         result = verify_received_package(args.package, args.metadata, expected_source_sha=args.expected_source_sha, expected_tag=args.expected_tag)
         print(json.dumps(result, ensure_ascii=False, sort_keys=True))
         return 0
-    if args.command == "verify-installer":
+    if args.command in {"verify-installer", "verify-components"}:
         for value, label in ((args.output, "--output"), (args.expected_source_sha, "--expected-source-sha"),
                              (args.expected_tag, "--expected-tag")):
             _require(value is not None, f"{label} is required")
@@ -979,6 +985,10 @@ def main(argv: list[str] | None = None) -> int:
         zip_name = f"NexusPipeline-{tag}-win-x64.zip"
         zip_metadata = verify_received_package(args.output / zip_name, args.output / "build-metadata.json",
                                                expected_source_sha=args.expected_source_sha, expected_tag=tag)
+        if args.command == "verify-components":
+            result = verify_components(args.output, args.output / zip_name, zip_metadata, root)
+            print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+            return 0
         result = verify_received_installer(args.output, root, zip_metadata,
                                            expected_source_sha=args.expected_source_sha, expected_tag=tag,
                                            setup_override=args.package)
@@ -1013,7 +1023,6 @@ def main(argv: list[str] | None = None) -> int:
         if helper_dir.is_dir() and helper_dir.resolve().parent == output:
             shutil.rmtree(helper_dir)
         for name in (f"NexusPipeline-v{project_version(root)}-win-x64-setup.exe",
-                     f"NexusPipeline-v{project_version(root)}-win-x64-setup.exe.sha256",
                      "installer-build-metadata.json"):
             (installer_dir / name).replace(output / name)
         _require(installer_dir.is_dir() and installer_dir.resolve().parent == output,

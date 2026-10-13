@@ -16,6 +16,7 @@ internal static class UpdateCleanup
         bool abort, Action<string>? completedStep)
     {
         task.Validate();
+        UpdateMigrationRunner.RequireStopped(task);
         if (task.WorkerLaunchPending) throw new IOException("update cleanup worker launch unconfirmed");
         root = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar);
         PayloadPathSafety.RequireLinkFree(root);
@@ -47,7 +48,8 @@ internal static class UpdateCleanup
         backupInventory.RequireOwned(backup);
         RequireContainer(stagingParent, [task.StagedDir]);
         RequireContainer(Path.GetDirectoryName(backup)!, [backup]);
-        RequireContainer(update, [journal, stagingParent, UpdateInventory.Resolve(root, package), UpdateInventory.Resolve(root, checksum)]);
+        RequireContainer(update, [journal, stagingParent, UpdateInventory.Resolve(root, package), UpdateInventory.Resolve(root, checksum),
+            .. task.DataMigration is null ? Array.Empty<string>() : new[] { task.DataMigration.TransactionRoot }]);
         string? worker = task.WorkerIdentity?.ImageName;
         if (worker is not null)
         {
@@ -69,6 +71,7 @@ internal static class UpdateCleanup
         if (File.Exists(marker)) RequireFile(root, ".nxp-version", markerHash);
 
         void Step(string name, Action action) { Guard(); action(); completedStep?.Invoke(name); }
+        if (task.DataMigration is not null) Step("migration", () => UpdateDataMigration.Cleanup(task.DataMigration, Guard));
         Step("staging", () => { stageInventory.DeleteOwned(task.StagedDir, Guard); DeleteEmpty(task.StagedDir); });
         Step("downloads", () =>
         {

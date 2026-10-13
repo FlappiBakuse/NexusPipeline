@@ -1,6 +1,5 @@
 using System.IO.Compression;
 using System.Security.Cryptography;
-using System.Text;
 using NexusPipeline.ControlPlane.Http;
 using NexusPipeline.Platform.Storage;
 
@@ -10,7 +9,7 @@ namespace NexusPipeline.Modules.Updates;
 internal sealed record UpdateDownloadProgress(long BytesRead, long BytesTotal);
 
 /// <summary>
-/// 更新包：受策略约束的 zip/sha256 下载、SHA256 强校验与解压资源上限。
+/// 更新包：受策略约束的 ZIP 下载、服务端 SHA256 强校验与解压资源上限。
 /// 布局：根 Host、README、resources 应用清单与桌面树；plugins 单独装配。
 /// 拒绝数据目录、路径穿越、重复条目和 zip bomb。
 /// </summary>
@@ -27,127 +26,25 @@ internal static class UpdatePackage
         "config", "data", "history", "logs", "outputs", "user-assets", ".nxp-update", ".nxp-backup", ".nxp-version",
     };
 
-    /// <summary>流式下载 ZIP 与 SHA；ZIP 和 SHA 使用相同的 URI/重定向策略。</summary>
+    /// <summary>以服务端资产身份验证 ZIP，保存本地校验收据供恢复事务使用。</summary>
     public static async Task<(bool Ok, string? Error)> DownloadAsync(
         HttpClient http,
         UpdateSourcePolicy policy,
-        string zipUrl,
-        string shaUrl,
+        UpdateReleaseAsset asset,
         string destZip,
         string destSha,
         IProgress<UpdateDownloadProgress>? progress,
         CancellationToken token,
         UpdateCreatedArtifacts? artifacts = null)
     {
-        if (!Uri.TryCreate(zipUrl, UriKind.Absolute, out Uri? zipUri)
-            || !Uri.TryCreate(shaUrl, UriKind.Absolute, out Uri? shaUri))
-        {
-            return (false, "下载地址无效");
-        }
         try
         {
-            string shaText;
-            using (HttpResponseMessage shaResponse = await policy.GetAsync(
-                       http, shaUri, UpdateResourceKind.ReleaseAsset, "NexusPipeline-update", token).ConfigureAwait(false))
-            {
-                if (!shaResponse.IsSuccessStatusCode)
-                {
-                    return (false, $"获取校验文件失败：HTTP {(int)shaResponse.StatusCode}");
-                }
-                if (shaResponse.Content.Headers.ContentLength is > 64 * 1024)
-                {
-                    return (false, "校验文件超过尺寸上限");
-                }
-                shaText = (await ReadBoundedTextAsync(shaResponse.Content, 64 * 1024, token).ConfigureAwait(false)).Trim();
-                if (shaText.Length == 0)
-                {
-                    return (false, "校验文件为空");
-                }
-            }
-
-            using (HttpResponseMessage response = await policy.GetAsync(
-                       http, zipUri, UpdateResourceKind.ReleaseAsset, "NexusPipeline-update", token).ConfigureAwait(false))
-            {
-                if (!response.IsSuccessStatusCode)
-                {
-                    return (false, $"下载失败：HTTP {(int)response.StatusCode}");
-                }
-                long? declared = response.Content.Headers.ContentLength;
-                if (declared is > UpdateCatalog.MaxDownloadBytes)
-                {
-                    return (false, $"更新包超过尺寸上限（{UpdateCatalog.MaxDownloadBytes / 1024 / 1024} MB）");
-                }
-                long total = 0;
-                progress?.Report(new UpdateDownloadProgress(0, declared ?? 0));
-                byte[] buffer = new byte[64 * 1024];
-                await using Stream source = await response.Content.ReadAsStreamAsync(token).ConfigureAwait(false);
-                PayloadPathSafety.RequireLinkFree(destZip);
-                if (artifacts is null) Directory.CreateDirectory(Path.GetDirectoryName(destZip)!);
-                else artifacts.EnsureDirectory(Path.GetDirectoryName(destZip)!);
-                await using var output = new FileStream(destZip, FileMode.CreateNew, FileAccess.Write, FileShare.None);
-                using var produced = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-                long written = 0;
-                try
-                {
-                    while (true)
-                    {
-                        int read = await source.ReadAsync(buffer, token).ConfigureAwait(false);
-                        if (read == 0)
-                        {
-                            break;
-                        }
-                        total += read;
-                        if (total > UpdateCatalog.MaxDownloadBytes)
-                        {
-                            return (false, $"更新包超过尺寸上限（{UpdateCatalog.MaxDownloadBytes / 1024 / 1024} MB）");
-                        }
-                        await output.WriteAsync(buffer.AsMemory(0, read), token).ConfigureAwait(false);
-                        produced.AppendData(buffer, 0, read); written += read;
-                        progress?.Report(new UpdateDownloadProgress(total, declared ?? 0));
-                    }
-                }
-                finally { artifacts?.FileCreated(destZip, written, Convert.ToHexStringLower(produced.GetHashAndReset())); }
-            }
-            PayloadPathSafety.RequireLinkFree(destSha);
-            byte[] checksum = Encoding.ASCII.GetBytes(shaText + Environment.NewLine);
-            await using (var output = new FileStream(destSha, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-            {
-                bool written = false;
-                try { await output.WriteAsync(checksum, token).ConfigureAwait(false); written = true; }
-                finally { artifacts?.FileCreated(destSha, written ? checksum.Length : 0,
-                    Convert.ToHexStringLower(SHA256.HashData(written ? checksum : []))); }
-            }
+            await UpdateAssetDownloader.DownloadAsync(http, policy, asset, destZip, progress, token, artifacts).ConfigureAwait(false);
+            await UpdateAssetDownloader.WriteChecksumAsync(destSha, asset.Sha256, token, artifacts).ConfigureAwait(false);
             return (true, null);
         }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            return (false, $"下载失败：{ex.Message}");
-        }
-    }
-
-    private static async Task<string> ReadBoundedTextAsync(HttpContent content, int maxBytes, CancellationToken token)
-    {
-        await using Stream input = await content.ReadAsStreamAsync(token).ConfigureAwait(false);
-        using var buffer = new MemoryStream();
-        byte[] chunk = new byte[8192];
-        while (true)
-        {
-            int read = await input.ReadAsync(chunk, token).ConfigureAwait(false);
-            if (read == 0)
-            {
-                break;
-            }
-            if (buffer.Length + read > maxBytes)
-            {
-                throw new InvalidDataException("校验文件超过尺寸上限");
-            }
-            buffer.Write(chunk, 0, read);
-        }
-        return Encoding.UTF8.GetString(buffer.ToArray());
+        catch (OperationCanceledException) { throw; }
+        catch (Exception error) { return (false, error.Message); }
     }
 
     /// <summary>SHA256 强校验：只接受 64 位十六进制 hash，兼容带文件名的标准 sha256sum 文本。</summary>

@@ -16,6 +16,9 @@ export interface UpdateStatus {
   barrierVersion?: string;
   migrationUrl?: string;
   policyError?: string;
+  pendingVersion?: string | null;
+  pendingStatus?: string | null;
+  pendingError?: string | null;
   lastApplyFailure?: {
     transactionId: string;
     targetVersion: string;

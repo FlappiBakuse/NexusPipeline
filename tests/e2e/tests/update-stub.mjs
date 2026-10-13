@@ -13,7 +13,7 @@ export const UPDATE_BASE = `http://127.0.0.1:${UPDATE_PORT}/`;
 let server = null;
 
 function pluginCatalogJson() {
-  const file = path.join(pluginRepositoryRoot(), "catalog.json");
+  const file = path.join(pluginRepositoryRoot(), "metadata/catalog/stable.json");
   return fs.existsSync(file)
     ? fs.readFileSync(file, "utf8")
     : JSON.stringify({ schemaVersion: 2, repository: "FlappiBakuse/NexusPipeline-Plugins", generatedAt: new Date().toISOString(), plugins: [] });

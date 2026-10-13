@@ -210,6 +210,7 @@ public sealed class UpdateServiceTests : IAsyncLifetime
             var releases = new JsonArray();
             var release = new JsonObject
             {
+                ["id"] = 1001,
                 ["tag_name"] = $"v{CandidateVersion}",
                 ["name"] = $"v{CandidateVersion}",
                 ["draft"] = false,
@@ -219,13 +220,12 @@ public sealed class UpdateServiceTests : IAsyncLifetime
                 {
                     new JsonObject
                     {
+                        ["id"] = 2001,
+                        ["state"] = "uploaded",
+                        ["size"] = _zipBytes.Length,
+                        ["digest"] = "sha256:" + _zipSha,
                         ["name"] = $"NexusPipeline-v{CandidateVersion}-win-x64.zip",
                         ["browser_download_url"] = $"{SourceUrl}NexusPipeline-v{CandidateVersion}-win-x64.zip",
-                    },
-                    new JsonObject
-                    {
-                        ["name"] = $"NexusPipeline-v{CandidateVersion}-win-x64.zip.sha256",
-                        ["browser_download_url"] = $"{SourceUrl}NexusPipeline-v{CandidateVersion}-win-x64.zip.sha256",
                     },
                 },
             };
@@ -236,11 +236,39 @@ public sealed class UpdateServiceTests : IAsyncLifetime
         {
             return (200, "application/octet-stream", _zipBytes);
         }
-        if (path.EndsWith(".sha256", StringComparison.OrdinalIgnoreCase))
-        {
-            return (200, "text/plain", Encoding.ASCII.GetBytes(_zipSha + Environment.NewLine));
-        }
         return (404, "text/plain", Array.Empty<byte>());
+    }
+
+    [Fact]
+    public void CatalogAcceptsServerDigestWithoutChecksumAttachment()
+    {
+        JsonNode releases = JsonNode.Parse(Encoding.UTF8.GetString(BuildResponse("/").Body))!;
+        Assert.True(NexusVersion.TryParse(CurrentVersion, out NexusVersion current));
+        ReleaseInfo release = Assert.IsType<ReleaseInfo>(UpdateCatalog.PickRelease(releases, "prerelease", current));
+        Assert.Equal(1001, release.ReleaseId);
+        Assert.Equal(2001, release.ZipAsset.Id);
+        Assert.Equal(_zipBytes.Length, release.ZipAsset.SizeBytes);
+        Assert.Equal(_zipSha, release.ZipAsset.Sha256);
+        Assert.Single(releases[0]!["assets"]!.AsArray());
+    }
+
+    [Fact]
+    public void CatalogRejectsInvalidOrAmbiguousAssetFacts()
+    {
+        Assert.True(NexusVersion.TryParse(CurrentVersion, out NexusVersion current));
+        foreach (string field in new[] { "id", "size", "digest", "state", "browser_download_url" })
+        {
+            foreach (JsonNode? invalid in new JsonNode?[] { null, JsonValue.Create(false), JsonValue.Create(-1), JsonValue.Create("") })
+            {
+                JsonNode releases = JsonNode.Parse(Encoding.UTF8.GetString(BuildResponse("/").Body))!;
+                releases[0]!["assets"]![0]![field] = invalid?.DeepClone();
+                Assert.Null(UpdateCatalog.PickRelease(releases, "prerelease", current));
+            }
+        }
+        JsonNode duplicate = JsonNode.Parse(Encoding.UTF8.GetString(BuildResponse("/").Body))!;
+        JsonArray assets = duplicate[0]!["assets"]!.AsArray();
+        assets.Add(assets[0]!.DeepClone());
+        Assert.Null(UpdateCatalog.PickRelease(duplicate, "prerelease", current));
     }
 
     private UpdateService NewService(Func<DesktopResumeIntent>? capture = null, Func<string, TimeSpan, bool>? stop = null,

@@ -36,6 +36,12 @@ internal sealed record UpdateTask(string Mode, string Version, string StagedDir,
     public string PackageSource { get; init; } = "download";
     public bool DesktopStopped { get; init; }
     public int SwappedAssetCount { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public UpdateReleaseEvidence? ReleaseEvidence { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public UpdateRunnerReceipt? RunnerReceipt { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public UpdateDataState? DataMigration { get; init; }
 
     internal static UpdateTask Create(string mode, string version, string staging) =>
         new(mode, version, staging, mode == "defer" ? UpdatePhase.Deferred : UpdatePhase.ApplyRequested, DateTimeOffset.UtcNow);
@@ -136,7 +142,7 @@ internal sealed record UpdateTask(string Mode, string Version, string StagedDir,
             || WorkerLaunchPending && WorkerPath is null)
             throw new InvalidDataException("unsupported_update_journal: preparation missing");
         DesktopResumeIntent?.Validate();
-        if (JournalSchemaVersion != 1 || StagingInventory is null || frozen && BackupInventory is null
+        if (JournalSchemaVersion != (ReleaseEvidence is null ? 1 : 2) || StagingInventory is null || frozen && BackupInventory is null
             || WorkerIdentity is not null && !UpdateInventory.Hash(WorkerSha256)
             || WorkerSha256 is not null && !UpdateInventory.Hash(WorkerSha256)
             || PackageChecksumSha256 is not null && !UpdateInventory.Hash(PackageChecksumSha256))
@@ -153,6 +159,19 @@ internal sealed record UpdateTask(string Mode, string Version, string StagedDir,
             || Phase is (UpdatePhase.Deferred or UpdatePhase.ApplyRequested or UpdatePhase.BackupPreparing or UpdatePhase.BackupReady) && SwappedAssetCount != 0
             || Phase is (UpdatePhase.SwapReady or UpdatePhase.AwaitingStartup or UpdatePhase.Committed) && SwappedAssetCount != 4)
             throw new InvalidDataException("unsupported_update_journal: application identity missing");
+        ReleaseEvidence?.Validate(Version, TargetPayload!);
+        if (RunnerReceipt is not null && ReleaseEvidence is null)
+            throw new InvalidDataException("update.runner_without_evidence");
+        RunnerReceipt?.Validate(this);
+        if (DataMigration is not null)
+        {
+            DataMigration.Validate();
+            string expected = Path.Combine(Path.GetDirectoryName(Path.GetDirectoryName(StagedDir))!, "migration-" + TransactionId);
+            if (ReleaseEvidence is null || RunnerReceipt is not { Completed: true } || DataMigration.Stores.Count != 0
+                || !string.Equals(DataMigration.TransactionRoot, expected, StringComparison.OrdinalIgnoreCase)
+                || DataMigration.Workspace.Entries.Count != 0 || DataMigration.Committed != (Phase == UpdatePhase.Committed))
+                throw new InvalidDataException("update.data_plan_unavailable");
+        }
         if ((TransactionId is null) != (TargetImageHash is null)
             || TransactionId is not null && (!Guid.TryParseExact(TransactionId, "N", out _)
                 || TargetImageHash is not { Length: 64 } || TargetImageHash.Any(ch => !Uri.IsHexDigit(ch)))
@@ -172,6 +191,7 @@ internal sealed record UpdateTask(string Mode, string Version, string StagedDir,
             || previous.TargetImageHash is not null && previous.TargetImageHash != TargetImageHash))
             throw new InvalidDataException("update_journal_identity_changed");
         if (previous is not null && (previous.TargetPayload != TargetPayload || previous.PackageSha256 != PackageSha256 || previous.PackageSource != PackageSource
+            || previous.ReleaseEvidence != ReleaseEvidence || previous.JournalSchemaVersion != JournalSchemaVersion
             || previous.PreviousPayload is not null && previous.PreviousPayload != PreviousPayload
             || previous.StagingInventory != StagingInventory || previous.PackageChecksumSha256 != PackageChecksumSha256
             || previous.DesktopResumeIntent is not null && previous.DesktopResumeIntent != DesktopResumeIntent
@@ -179,6 +199,14 @@ internal sealed record UpdateTask(string Mode, string Version, string StagedDir,
             || previous.Preservation is not null && (Preservation is null || previous.Preservation.Files.Any(entry => !Preservation.Files.Contains(entry)))
             || SwappedAssetCount < previous.SwappedAssetCount))
             throw new InvalidDataException("update_journal_payload_changed");
+        if (previous?.RunnerReceipt is { } oldRunner && (RunnerReceipt is null || oldRunner.NonceHash != RunnerReceipt.NonceHash
+            || oldRunner.ImageHash != RunnerReceipt.ImageHash || oldRunner.Identity is not null && oldRunner.Identity != RunnerReceipt.Identity
+            || oldRunner.Input != RunnerReceipt.Input || oldRunner.Output != RunnerReceipt.Output
+            || RunnerReceipt.Sequence < oldRunner.Sequence || oldRunner.Completed && !RunnerReceipt.Completed))
+            throw new InvalidDataException("update.runner_receipt_changed");
+        if (previous?.DataMigration is { } oldData && (DataMigration is null || oldData.TransactionRoot != DataMigration.TransactionRoot
+            || !oldData.Stores.SequenceEqual(DataMigration.Stores) || oldData.Workspace != DataMigration.Workspace || oldData.Committed && !DataMigration.Committed))
+            throw new InvalidDataException("update.data_plan_changed");
         Directory.CreateDirectory(Path.GetDirectoryName(file)!);
         string bytes = JsonSerializer.Serialize(this, JsonOpts.Indented);
         if (System.Text.Encoding.UTF8.GetByteCount(bytes) > 2 * 1024 * 1024) throw new InvalidDataException("update.journal_limit");

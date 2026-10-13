@@ -14,7 +14,7 @@ CI 不创建临时测试账户、不写入测试账户密码、不使用令牌�
 
 Host 的 Python 门禁通过 `tests/support/unittest-runner.py` 输出原生用例 ID 和计数；本机报告拒绝空集合、跳过、预期失败及计数不符。发行契约组同时验证包、安装器元数据和候选 producer 来源。
 
-`plugins.lock.json` 规定普通 PR 的默认对端为官方 Plugins 仓库 `main`，scope 在当次运行解析并固定其完整 SHA。配对 PR 使用受信 descriptor 中的真实对端 SHA，descriptor 同时绑定两仓输入锁字节。这个根文件不是 SDK 编译 SHA 或稳定预装包版本锁；正式预装字节由 `BundledPlugins.json` 及发行候选清单核验。
+`tests/inputs.lock.json` 规定普通 PR 的默认对端为官方 Plugins 仓库 `main`，scope 在当次运行解析并固定其完整 SHA。配对 PR 使用受信 descriptor 中的真实对端 SHA，descriptor 同时绑定两仓输入锁字节。这个根文件不是 SDK 编译 SHA 或稳定预装包版本锁；正式预装字节由 `BundledPlugins.json` 及发行候选清单核验。
 
 
 ## 持续集成显示名称

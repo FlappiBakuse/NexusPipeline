@@ -131,6 +131,9 @@ internal static class ApiUpdateHandler
             barrierVersion = status.BarrierVersion,
             migrationUrl = status.MigrationUrl,
             policyError = status.PolicyError,
+            pendingVersion = status.PendingVersion,
+            pendingStatus = status.PendingStatus,
+            pendingError = status.PendingError,
             errorCode = string.IsNullOrWhiteSpace(status.Error) ? null : "update_failed",
             lastApplyFailure = status.LastApplyFailure?.ToPublicView(),
             automation = new

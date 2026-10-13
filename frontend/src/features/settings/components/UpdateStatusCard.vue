@@ -34,11 +34,23 @@ const completionActionText = computed(() => {
   if (state === "applying") return t("settings.update.applying");
   if (updateStatus.value?.available)
     return t("settings.update.version", { version: updateStatus.value.latest || "" });
+  if (updateStatus.value?.pendingStatus && !["ready", "current-or-older"].includes(updateStatus.value.pendingStatus))
+    return t("settings.update.pending_unavailable", { version: updateStatus.value.pendingVersion || "" });
   return updateStatus.value?.checked
     ? t("settings.update.latest")
     : t("settings.update.not_checked");
 });
 const updateStatusView = computed(() => updateStatusViewFor(updateStatus.value?.state));
+const pendingText = computed(() => {
+  const status = updateStatus.value?.pendingStatus;
+  if (!status || ["ready", "current-or-older"].includes(status)) return "";
+  if (status === "bridge-required") return t("settings.update.pending_bridge",
+    { version: updateStatus.value?.pendingVersion || "", bridgeVersion: updateStatus.value?.latest || "" });
+  return t(status === "bridge-unavailable" ? "settings.update.pending_bridge_unavailable"
+    : status === "not-published" ? "settings.update.pending_not_published"
+    : status === "unsupported-capability" ? "settings.update.pending_unsupported" : "settings.update.pending_invalid",
+    { version: updateStatus.value?.pendingVersion || "" });
+});
 const applyFailureText = computed(() => {
   const failure = updateStatus.value?.lastApplyFailure;
   if (!failure) return "";
@@ -167,6 +179,7 @@ defineExpose({ reload: loadUpdateStatus });
       </div>
     </div>
     <p class="muted update-state-copy">{{ completionActionText }}</p>
+    <p v-if="pendingText" class="muted" role="status">{{ pendingText }}</p>
     <p v-if="applyFailureText" class="callout callout-warning" role="alert">{{ applyFailureText }}</p>
     <p v-if="updateStatus?.manualUpdateRequired" class="callout callout-warning update-manual-warning" data-testid="update-manual-warning">
       {{ t("settings.update.manual_required_help", { version: updateStatus.latest || "" }) }}

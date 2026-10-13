@@ -11,6 +11,7 @@ import sys
 import time
 
 from build_source import changed_paths, fingerprint, full_sha, git, snapshot, source_entries, tree_sha
+from update_metadata import validate_legacy_projection, validate_channels
 
 
 def scope(paths: list[str]) -> dict:
@@ -37,6 +38,8 @@ def scope(paths: list[str]) -> dict:
 
 
 def plan(root: Path, base: str, head: str, checkout: str, partner_sha: str | None = None) -> dict:
+    validate_legacy_projection(root, base)
+    validate_channels(root)
     full_sha(root, checkout)
     if git(root, 'rev-parse', 'HEAD') != checkout:
         raise ValueError('Actual checkout does not match the declared SHA')

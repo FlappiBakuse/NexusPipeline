@@ -9,20 +9,24 @@ test "$(jq -r .sourceSha "$metadata")" = "$SOURCE_SHA"
 test "$(jq -r .tag "$metadata")" = "$TAG"
 test "$(jq -r .mode "$metadata")" = production
 zip_asset="NexusPipeline-$(jq -r .tag "$metadata")-win-x64.zip"
-sha_asset="$zip_asset.sha256"
 setup_asset="NexusPipeline-$(jq -r .tag "$metadata")-win-x64-setup.exe"
-setup_sha_asset="$setup_asset.sha256"
-test -f "$zip_asset" -a -f "$sha_asset" -a -f "$setup_asset" -a -f "$setup_sha_asset" -a -f installer-build-metadata.json
-expected="$(tr -d '\r\n' < "$sha_asset")"
+assets=("$zip_asset" "$setup_asset" "${zip_asset%.zip}-update.json"
+        "${zip_asset%.zip}-host-core.zip" "${zip_asset%.zip}-desktop-app.zip" "${zip_asset%.zip}-desktop-runtime.zip")
+test -f "$zip_asset" -a -f "$setup_asset" -a -f installer-build-metadata.json
+expected="$(jq -r .sha256 "$metadata")"
 actual="$(sha256sum "$zip_asset" | cut -d' ' -f1)"
 test "$expected" = "$actual"
-test "$(tr -d '\r\n' < "$setup_sha_asset")" = "$(sha256sum "$setup_asset" | cut -d' ' -f1)"
 python "$GITHUB_WORKSPACE/NexusPipeline/tools/host_release.py" verify-package \
   --package "$zip_asset" \
   --metadata "$metadata" \
   --expected-source-sha "$SOURCE_SHA" \
   --expected-tag "$TAG"
 python "$GITHUB_WORKSPACE/NexusPipeline/tools/host_release.py" verify-installer \
+  --root "$GITHUB_WORKSPACE/NexusPipeline-Source" \
+  --output "$PUBLISH_ROOT" \
+  --expected-source-sha "$SOURCE_SHA" \
+  --expected-tag "$TAG"
+python "$GITHUB_WORKSPACE/NexusPipeline/tools/host_release.py" verify-components \
   --root "$GITHUB_WORKSPACE/NexusPipeline-Source" \
   --output "$PUBLISH_ROOT" \
   --expected-source-sha "$SOURCE_SHA" \
@@ -51,10 +55,19 @@ else
 fi
 test "$(jq -r .tag_name <<<"$release_json")" = "$TAG" || { echo "Release tag 身份冲突" >&2; exit 1; }
 test "$(jq -r .target_commitish <<<"$release_json")" = "$SOURCE_SHA" || { echo "Release source 身份冲突" >&2; exit 1; }
+expected_prerelease=false
+if [[ "$TAG" =~ ^v0\. || "$TAG" =~ -(beta|rc)\.[0-9]+$ ]]; then expected_prerelease=true; fi
+test "$(jq -r .prerelease <<<"$release_json")" = "$expected_prerelease" || { echo "Release 渠道身份冲突" >&2; exit 1; }
 release_id="$(jq -r .id <<<"$release_json")"
-test "$release_id" != null -a "$release_id" != ""
-for asset in "$zip_asset" "$sha_asset" "$setup_asset" "$setup_sha_asset"; do
-  existing_url="$(jq -r --arg name "$asset" '.assets[]? | select(.name == $name) | .url' <<<"$release_json" | head -n 1)"
+[[ "$release_id" =~ ^[1-9][0-9]*$ ]]
+expected_names="$(printf '%s\n' "${assets[@]}" | jq -R . | jq -s .)"
+jq -e --argjson names "$expected_names" '
+  all(.assets[]?; .name as $name | $names | index($name) != null)
+' <<<"$release_json" >/dev/null || { echo "Release 含未声明资产，拒绝公开" >&2; exit 1; }
+for asset in "${assets[@]}"; do
+  count="$(jq --arg name "$asset" '[.assets[]? | select(.name == $name)] | length' <<<"$release_json")"
+  test "$count" -le 1 || { echo "Release 资产重名：$asset" >&2; exit 1; }
+  existing_url="$(jq -r --arg name "$asset" '.assets[]? | select(.name == $name) | .url' <<<"$release_json")"
   if [ -n "$existing_url" ]; then
     existing="$(mktemp)"
     curl "${curl_read[@]}" -sS -L -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/octet-stream' "$existing_url" -o "$existing"
@@ -65,8 +78,18 @@ for asset in "$zip_asset" "$sha_asset" "$setup_asset" "$setup_sha_asset"; do
   fi
 done
 release_json="$(gh api "repos/$GH_REPO/releases/$release_id")"
-for asset in "$zip_asset" "$sha_asset" "$setup_asset" "$setup_sha_asset"; do
-  asset_url="$(jq -r --arg name "$asset" '.assets[]? | select(.name == $name) | .url' <<<"$release_json" | head -n 1)"
+jq -e --argjson names "$expected_names" --arg tag "$TAG" --arg sha "$SOURCE_SHA" --argjson prerelease "$expected_prerelease" '
+  .tag_name == $tag and .target_commitish == $sha and .prerelease == $prerelease and
+  ([.assets[].name] | sort) == ($names | sort)
+' <<<"$release_json" >/dev/null || { echo "Release 刷新后身份或资产集合冲突" >&2; exit 1; }
+for asset in "${assets[@]}"; do
+  expected_digest="sha256:$(sha256sum "$asset" | cut -d' ' -f1)"
+  expected_size="$(wc -c < "$asset" | tr -d ' ')"
+  jq -e --arg name "$asset" --arg digest "$expected_digest" --argjson size "$expected_size" '
+    [.assets[]? | select(.name == $name)] as $found |
+    ($found | length) == 1 and ($found[0] | .state == "uploaded" and (.id | type) == "number" and .id > 0 and (.id | floor) == .id and .digest == $digest and .size == $size)
+  ' <<<"$release_json" >/dev/null || { echo "Release 资产身份、尺寸或服务端摘要不符：$asset" >&2; exit 1; }
+  asset_url="$(jq -r --arg name "$asset" '.assets[]? | select(.name == $name) | .url' <<<"$release_json")"
   test -n "$asset_url"
   received="$(mktemp)"
   curl "${curl_read[@]}" -sS -f -L -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/octet-stream' "$asset_url" -o "$received"
@@ -89,5 +112,6 @@ for asset in "$zip_asset" "$sha_asset" "$setup_asset" "$setup_sha_asset"; do
   fi
   rm -f "$received"
 done
+jq -e '([.assets[].id] | length) == ([.assets[].id] | unique | length)' <<<"$release_json" >/dev/null
 gh api --method PATCH "repos/$GH_REPO/releases/$release_id" -F draft=false
 test "$(gh api "repos/$GH_REPO/releases/$release_id" --jq '.draft')" = false
