@@ -64,8 +64,11 @@ export function pluginRepositoryRoot() {
   const repository = configured
     ? path.resolve(projectRoot, configured)
     : path.resolve(projectRoot, "..", "NexusPipeline-Plugins");
-  if (!fs.existsSync(path.join(repository, "catalog.json"))) {
-    throw new Error(`插件仓库缺少 catalog.json：${repository}；可设置 NEXUS_OFFICIAL_PLUGINS_ROOT 指定检出位置`);
+  const canonical = path.join(repository, "metadata/catalog/stable.json");
+  const projection = path.join(repository, "catalog.json");
+  if (![canonical, projection].every(file => fs.existsSync(file) && !fs.lstatSync(file).isSymbolicLink())
+      || !fs.readFileSync(canonical).equals(fs.readFileSync(projection))) {
+    throw new Error(`插件仓库 stable catalog 缺失或投影不一致：${repository}；可设置 NEXUS_OFFICIAL_PLUGINS_ROOT 指定检出位置`);
   }
   return repository;
 }

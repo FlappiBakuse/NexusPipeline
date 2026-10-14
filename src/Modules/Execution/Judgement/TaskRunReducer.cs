@@ -191,12 +191,13 @@ internal sealed partial class TaskRunReducer
         Revision++;
     }
 
-    internal void FinishAttempt(string lifecycle)
+    internal void FinishAttempt(string lifecycle, bool preservePending = false)
     {
         if (Daily) { FinishDaily(lifecycle); return; }
         foreach (string key in _selected)
         {
             var state = _effective[key];
+            if (preservePending && state.Status == "pending" && lifecycle != "cancelled") continue;
             if (state.Status is "pending" or "running")
                 _effective[key] = state with { Status = lifecycle == "cancelled" ? "cancelled" : "unknown", ReasonCode = "tasks.no_terminal_evidence", ReasonText = null };
         }

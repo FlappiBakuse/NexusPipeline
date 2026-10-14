@@ -53,7 +53,7 @@ const toastVisible = ref(true);
         <h3>按钮与状态</h3>
         <div class="ui-lab-row"><NxpButton class="primary">主要操作</NxpButton><NxpButton class="tertiary">次要操作</NxpButton><NxpButton class="danger">危险操作</NxpButton><NxpButton disabled>禁用</NxpButton></div>
         <div class="ui-lab-row"><NxpBadge tone="ok">已启用</NxpBadge><NxpBadge tone="blue">运行中</NxpBadge><NxpBadge tone="warn">待处理</NxpBadge><NxpBadge tone="bad">异常</NxpBadge><NxpBadge tone="muted">未设置</NxpBadge></div>
-        <div class="ui-lab-row"><NxpIcon name="check" /><NxpIcon name="chevronDown" /><NxpSpinner /><NxpTooltip text="延迟显示的局部提示"><button class="tertiary" type="button">悬停提示</button></NxpTooltip></div>
+        <div class="ui-lab-row"><NxpIcon name="check" /><NxpIcon name="chevronDown" /><NxpSpinner /><NxpTooltip text="延迟显示的局部提示"><NxpButton class="tertiary" type="button">悬停提示</NxpButton></NxpTooltip></div>
       </NxpCard>
 
       <NxpCard>
@@ -84,8 +84,8 @@ const toastVisible = ref(true);
       </NxpCard>
     </div>
 
-    <div class="ui-lab-footer"><button class="primary" type="button" @click="modalOpen = true">打开模态框状态</button></div>
-    <NxpModal :open="modalOpen" title="组件模态框" @close="modalOpen = false"><p>模态框、遮罩、焦点和 Escape 行为在这里集中检查。</p><template #footer><button class="ghost" type="button" @click="modalOpen = false">取消</button><button class="primary" type="button" @click="modalOpen = false">完成</button></template></NxpModal>
+    <div class="ui-lab-footer"><NxpButton class="primary" type="button" @click="modalOpen = true">打开模态框状态</NxpButton></div>
+    <NxpModal :open="modalOpen" title="组件模态框" @close="modalOpen = false"><p>模态框、遮罩、焦点和 Escape 行为在这里集中检查。</p><template #footer><NxpButton class="ghost" type="button" @click="modalOpen = false">取消</NxpButton><NxpButton class="primary" type="button" @click="modalOpen = false">完成</NxpButton></template></NxpModal>
   </main>
 </template>
 

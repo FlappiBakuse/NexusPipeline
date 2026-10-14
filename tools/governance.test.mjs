@@ -30,9 +30,9 @@ test("T01-T03: designated API claims reject drift and preserve historical/negati
   write("tests/old.test.ts", 'expect(api("1.5")).toBe(false);');
   assert.ok(checkContracts(root).every(rule => rule.status === "PASS"));
   const file = "docs/testing/policy.md", current = fs.readFileSync(path.join(root, file), "utf8");
-  write(file, current.replace("Frontend API 1.6 的宿主外部契约", "Frontend API 1.5 的宿主外部契约"));
+  write(file, current.replace("Frontend API 1.7 的宿主外部契约", "Frontend API 1.5 的宿主外部契约"));
   assert.equal(checkContracts(root).find(rule => rule.file === file).status, "FAIL");
-  write(file, current.replace("Frontend API 1.6 的宿主外部契约", "当前前端的外部契约"));
+  write(file, current.replace("Frontend API 1.7 的宿主外部契约", "当前前端的外部契约"));
   assert.equal(checkContracts(root).find(rule => rule.file === file).status, "REVIEW");
   write("src/NexusPipeline.Plugin.Abstractions/PluginApi.cs", "// cannot extract facts");
   assert.equal(checkContracts(root).at(-1).status, "NOT_CHECKED");
@@ -44,9 +44,9 @@ test("T04-T05: normalized internal parent path is allowed; outside/missing targe
   assert.throws(() => repositoryPath(root, "docs", "../../external.md"));
   assert.throws(() => repositoryPath(root, "docs", "missing.md"));
   write("AGENTS.md", "# Fixture\n");
-  write("docs/reference/plugin-api/managed.md", "当前 managed 插件精确声明 Plugin API `2.1`\nFrontend API 独立维持 `1.6`\n");
-  write("docs/reference/plugin-api/frontend.md", "## 前端插件运行时（Frontend API 1.6）\nFrontend API `1.6` 精确版本；只有 `1.6` 被接受\n");
-  write("docs/testing/policy.md", "- Frontend API 1.6 的宿主外部契约\n");
+  write("docs/reference/plugin-api/managed.md", "当前 managed 插件精确声明 Plugin API `2.2`\nFrontend API 独立维持 `1.7`\n");
+  write("docs/reference/plugin-api/frontend.md", "## 前端插件运行时（Frontend API 1.7）\nFrontend API `1.7` 精确版本；只有 `1.7` 被接受\n");
+  write("docs/testing/policy.md", "- Frontend API 1.7 的宿主外部契约\n");
   const run = () => spawnSync(process.execPath, [path.join(source, "tools/check-doc-links.mjs"), "--root", root], { encoding: "utf8" });
   write("docs/map.json", JSON.stringify({ schemaVersion: 1, topics: [{ id: "guide", path: "../CONTRIBUTING.md" }] }));
   assert.equal(run().status, 0);

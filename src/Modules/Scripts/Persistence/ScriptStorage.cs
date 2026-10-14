@@ -108,9 +108,9 @@ internal sealed class ScriptStorage
                     authoritative = false;
                     script.Id = Guid.NewGuid().ToString("N");
                 }
-                if (string.IsNullOrWhiteSpace(script.PluginType)
-                    && string.IsNullOrWhiteSpace(script.ExecutionProviderId))
+                if (string.IsNullOrWhiteSpace(script.PluginType))
                 {
+                    if (!string.IsNullOrWhiteSpace(script.ExecutionProviderId)) ClearProviderDerivedFields(script);
                     LoadGenericJudgeScript(script);
                     if (!string.IsNullOrWhiteSpace(script.JudgeScript))
                     {
@@ -152,7 +152,6 @@ internal sealed class ScriptStorage
                     ? (script.Id = Guid.NewGuid().ToString("N"))
                     : script.Id;
                 if (string.IsNullOrWhiteSpace(script.PluginType)
-                    && string.IsNullOrWhiteSpace(script.ExecutionProviderId)
                     && !string.IsNullOrWhiteSpace(script.JudgeScript))
                 {
                     string language = JudgeScriptStore.NormalizeLanguage(script.JudgeScriptLanguage);
@@ -193,11 +192,11 @@ internal sealed class ScriptStorage
     {
         foreach (ScriptInstance script in scripts)
         {
-            if (!string.IsNullOrWhiteSpace(script.PluginType)
-                || !string.IsNullOrWhiteSpace(script.ExecutionProviderId))
+            if (!string.IsNullOrWhiteSpace(script.PluginType))
             {
                 ClearSpecializedDerivedFields(script);
             }
+            else if (!string.IsNullOrWhiteSpace(script.ExecutionProviderId)) ClearProviderDerivedFields(script);
         }
     }
 
@@ -223,15 +222,23 @@ internal sealed class ScriptStorage
         JsonObject record = JsonSerializer.SerializeToNode(script, JsonOpts.Indented)?.AsObject()
             ?? new JsonObject();
         record.Remove("JudgeScript");
-        if (!string.IsNullOrWhiteSpace(script.PluginType)
-            || !string.IsNullOrWhiteSpace(script.ExecutionProviderId))
+        if (!string.IsNullOrWhiteSpace(script.PluginType))
         {
             foreach (string property in SpecializedDerivedProperties)
             {
                 record.Remove(property);
             }
         }
+        else if (!string.IsNullOrWhiteSpace(script.ExecutionProviderId))
+            foreach (string property in new[] { "RequiresReconfiguration", "MainExe", "Args", "ConfigPath", "LogPath" })
+                record.Remove(property);
         return record;
+    }
+
+    private static void ClearProviderDerivedFields(ScriptInstance script)
+    {
+        script.RequiresReconfiguration = false;
+        script.MainExe = ""; script.Args = ""; script.ConfigPath = ""; script.LogPath = "";
     }
 
     private static void ClearSpecializedDerivedFields(ScriptInstance script)

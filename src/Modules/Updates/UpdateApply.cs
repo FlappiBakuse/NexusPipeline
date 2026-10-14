@@ -131,30 +131,36 @@ internal static class UpdateApply
                 string archive = Path.Combine(AppPaths.UpdateDir, AppPaths.UpdatePackageZipName(targetVersion) + suffix);
                 if (ImageHash(archive) != journal.PackageSha256) throw new InvalidDataException("update.package_hash_changed");
             }
-            var previous = ApplicationPayload.Freeze(installDir, installed: true);
+            var previous = ApplicationPayload.FreezeForUpdate(installDir, null, installed: true);
             RequireDesktopFilesReleased(installDir);
             var backupInventory = UpdateInventory.Capture(installDir, ApplicationAssets)
                 .WithFile(BackupReadyMarker, System.Text.Encoding.UTF8.GetBytes(journal.TransactionId + Environment.NewLine));
             if (InstallationOwnership.SnapshotBytesForUpdate(installDir) is { } installerBytes)
                 backupInventory = backupInventory.WithFile(".installer-identity", installerBytes);
             journal = journal with { PreviousPayload = previous, DesktopStopped = true, BackupInventory = backupInventory };
+            ApplicationPayload.VerifyBaseline(installDir, previous, backupInventory);
             EnsureNoStaleBackup(backup);
             journal = journal with { Mode = "apply", Phase = UpdatePhase.BackupPreparing };
             journal.Write();
             CreateBackupSnapshot(installDir, backup, journal.TransactionId!);
             journal.BackupInventory.RequireOwned(backup);
-            ApplicationPayload.VerifyFrozen(backup, journal.PreviousPayload!, installed: true);
+            ApplicationPayload.VerifyBaseline(backup, journal.PreviousPayload!, journal.BackupInventory);
             backupComplete = true;
             journal = journal with { Phase = UpdatePhase.BackupReady };
             journal.Write();
             PauseForFaultInjection(UpdatePhase.BackupReady);
+
+            journal = UpdateMigrationRunner.ExecuteAsync(journal).GetAwaiter().GetResult();
+            if (journal.DataMigration is not null)
+                journal = journal with { DataMigration = UpdateDataMigration.Apply(journal.DataMigration,
+                    state => (journal with { DataMigration = state }).Write()) };
 
             string oldExe = Path.Combine(installDir, "NexusPipeline.exe");
             ApplicationPayload.VerifyFrozen(stagedDir, journal.TargetPayload!, targetVersion);
             journal = journal with { Phase = UpdatePhase.SwapInProgress };
             journal.Write();
             foreach (string asset in ApplicationAssets)
-                journal.BackupInventory.RequireOwned(installDir, asset);
+                journal.BackupInventory!.RequireOwned(installDir, asset);
             foreach (string asset in ApplicationAssets)
             {
                 SwapInto(stagedDir, installDir, asset, journal);
@@ -166,6 +172,7 @@ internal static class UpdateApply
             journal.Write();
             PauseForFaultInjection(UpdatePhase.SwapReady);
 
+            ApplicationPayload.VerifyFrozen(installDir, journal.TargetPayload!, targetVersion, installed: true);
             journal = journal with { Phase = UpdatePhase.AwaitingStartup };
             journal.Write();
             candidateProcess = LaunchService(installDir, webOnly, journal);
@@ -175,7 +182,8 @@ internal static class UpdateApply
             ApplicationPayload.VerifyFrozen(installDir, journal.TargetPayload!, targetVersion, installed: true);
             InstallationOwnership.RefreshAfterUpdate(installDir, targetVersion);
             WriteVersionFile(targetVersion);
-            journal = journal with { Mode = "completed", Phase = UpdatePhase.Committed };
+            journal = journal with { Mode = "completed", Phase = UpdatePhase.Committed,
+                DataMigration = journal.DataMigration is null ? null : journal.DataMigration with { Committed = true } };
             journal.Write();
             Audit.Log(Audit.System, "更新应用完成", $"v{targetVersion}（staging：{stagedDir}）");
             Logger.Info($"[更新] 文件交换完成（v{targetVersion}），正在重新拉起宿主。");
@@ -188,6 +196,8 @@ internal static class UpdateApply
             Logger.Error($"[更新] 应用失败：{ex.Message}");
             Audit.Log(Audit.System, "更新切换失败", ex.Message);
             UpdateTask? current = UpdateTask.Read();
+            if (current is not null) journal = current;
+            UpdateMigrationRunner.RequireStopped(journal);
             if (ReadVersionFile() is not null || string.Equals(current?.Phase, UpdatePhase.Committed, StringComparison.Ordinal))
             {
                 WriteTransactionResult(journal, false, "committed_cleanup_pending");
@@ -201,7 +211,7 @@ internal static class UpdateApply
                 Logger.Error("[更新] 新宿主未通过启动核对且退出未确认；保留唯一备份，禁止覆盖。");
                 WriteTransactionResult(journal, false, "candidate_stop_unconfirmed"); return 1;
             }
-            WriteTransactionResult(journal, false, "apply_failed");
+            WriteTransactionResult(journal, false, FailureCode(ex));
             if (staleBackupDetected)
             {
                 // 旧 backup 的归属无法在 worker 内安全分类：严禁拿它作为本次回滚源，也严禁自动删除。
@@ -294,6 +304,7 @@ internal static class UpdateApply
             return false;
         }
         if (pending.WorkerLaunchPending) throw new IOException("update worker launch ownership unconfirmed");
+        UpdateMigrationRunner.RequireStopped(pending);
         if (appliedVersion is not null)
         {
             if (pending.Version != appliedVersion || pending.Phase is not (UpdatePhase.Committed or UpdatePhase.AwaitingStartup))
@@ -304,7 +315,8 @@ internal static class UpdateApply
                 if (workerAlive == true) return false;
                 if (workerAlive is null) throw new IOException("update worker identity unconfirmed");
                 ValidateCommitProof(pending);
-                pending = pending with { Mode = "completed", Phase = UpdatePhase.Committed };
+                pending = pending with { Mode = "completed", Phase = UpdatePhase.Committed,
+                    DataMigration = pending.DataMigration is null ? null : pending.DataMigration with { Committed = true } };
                 pending.Write();
             }
         }
@@ -382,6 +394,7 @@ internal static class UpdateApply
             UpdateWorkerLaunch launch = UpdateWorkerLaunch.NotStarted;
             try
             {
+                _ = ApplicationPayload.FreezeForUpdate(AppPaths.AppRoot, null, installed: true);
                 apply.Write();
                 if (!stopDesktop(transaction)) throw new IOException("desktop_stop_unconfirmed");
                 desktopPrepared = true;
@@ -663,13 +676,15 @@ internal static class UpdateApply
 
     private static void Rollback(UpdateTask journal)
     {
+        UpdateMigrationRunner.RequireStopped(journal);
+        if (journal.DataMigration is not null) UpdateDataMigration.Rollback(journal.DataMigration);
         string backup = AppPaths.UpdateBackupDir;
         if (!HasBackupData(backup))
         {
             throw new IOException("没有可恢复的完整更新 backup");
         }
         string installDir = AppPaths.AppRoot;
-        ApplicationPayload.VerifyFrozen(backup, journal.PreviousPayload!, installed: true);
+        ApplicationPayload.VerifyBaseline(backup, journal.PreviousPayload!, journal.BackupInventory!);
         journal.BackupInventory!.RequireOwned(backup);
         journal.Write();
         journal = UpdateRollbackProtection.Prepare(journal, installDir, AppPaths.UpdateTaskFile, ApplicationAssets);
@@ -677,7 +692,7 @@ internal static class UpdateApply
             _ = UpdateRollbackProtection.CurrentOwned(journal, installDir, asset);
         foreach (string asset in ApplicationAssets)
             RestoreFromBackup(backup, installDir, asset, journal);
-        ApplicationPayload.VerifyFrozen(installDir, journal.PreviousPayload!, installed: true);
+        ApplicationPayload.VerifyBaseline(installDir, journal.PreviousPayload!, journal.BackupInventory!);
         InstallationOwnership.RestoreAfterRollback(installDir, backup);
         UpdateTask confirmed = journal with { Mode = "apply", Phase = UpdatePhase.RollbackConfirmed };
         confirmed.Write();
@@ -687,10 +702,6 @@ internal static class UpdateApply
     private static void RestoreFromBackup(string backup, string installation, string asset, UpdateTask journal)
     {
         string backupItem = UpdateInventory.Resolve(backup, asset), target = UpdateInventory.Resolve(installation, asset);
-        if (!Directory.Exists(backupItem) && !File.Exists(backupItem))
-        {
-            return;
-        }
         var current = UpdateRollbackProtection.CurrentOwned(journal, installation, asset);
         current.DeleteOwned(installation, () => UpdateRollbackProtection.Guard(journal, AppPaths.UpdateTaskFile), asset);
         UpdateRollbackProtection.Guard(journal, AppPaths.UpdateTaskFile);
@@ -1073,7 +1084,7 @@ internal static class UpdateApply
         }
         catch (Exception ex)
         {
-            Logger.Error($"[更新] 拉起 recovery worker 失败：{ex.Message}");
+            Logger.Error($"[更新] 拉起 recovery worker 失败：{ex}");
             if (armed || startAttempted && ex is not System.ComponentModel.Win32Exception) return UpdateWorkerLaunch.Unconfirmed;
             if (ownedWorker is not null && ownedHash is not null) TryDeleteOwnedWorker(ownedWorker, ownedHash);
             try { journal?.Write(); }
@@ -1168,6 +1179,14 @@ internal static class UpdateApply
             : "[更新] 已重新拉起宿主（服务模式）。");
         return process;
     }
+
+    internal static string FailureCode(Exception error) => error switch
+    {
+        PayloadFileException file => file.Code,
+        FileNotFoundException or DirectoryNotFoundException => "payload_file_missing",
+        InvalidDataException => "payload_invalid",
+        _ => "apply_failed",
+    };
 
     internal static string ImageHash(string path)
     {

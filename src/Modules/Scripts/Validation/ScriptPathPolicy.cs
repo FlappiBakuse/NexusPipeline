@@ -27,11 +27,12 @@ internal static class ScriptPathPolicy
                 || !string.IsNullOrWhiteSpace(script.MainExe)
                 || !string.IsNullOrWhiteSpace(script.Args)
                 || !string.IsNullOrWhiteSpace(script.ConfigPath)
-                || !string.IsNullOrWhiteSpace(script.LogPath)
-                || script.JudgeScriptEnabled || script.HasKeywords())
+                || !string.IsNullOrWhiteSpace(script.LogPath))
                 return "直驱实例不能同时声明外部脚本、专项插件或日志判定路径";
             if (!IsProviderConfigId(script.ExecutionProviderConfigId))
                 return "直驱实例 provider 配置身份无效";
+            if (script.ExecutionProviderConfigRevision.Length != 0 && !NexusPipeline.Modules.Scripts.Contracts.ProviderConfigurationContract.SafeId(script.ExecutionProviderConfigRevision))
+                return "直驱实例 provider 配置修订无效";
             if (string.IsNullOrWhiteSpace(script.RootPath) || !Directory.Exists(script.RootPath))
                 return $"项目根目录不存在或不是文件夹：{script.RootPath}";
             if (script.LaunchGame || script.ForceCloseGame)
@@ -43,7 +44,7 @@ internal static class ScriptPathPolicy
             }
             return null;
         }
-        if (!string.IsNullOrWhiteSpace(script.ExecutionProviderConfigId))
+        if (!string.IsNullOrWhiteSpace(script.ExecutionProviderConfigId) || !string.IsNullOrWhiteSpace(script.ExecutionProviderConfigRevision))
             return "未声明执行 provider，不能保存 provider 配置身份";
         bool specialized = !string.IsNullOrWhiteSpace(script.PluginType);
         string root = script.RootPath.Trim();

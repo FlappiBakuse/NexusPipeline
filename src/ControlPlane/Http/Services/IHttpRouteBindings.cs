@@ -1,3 +1,4 @@
+using NexusPipeline.Modules.Scripts.Contracts;
 using NexusPipeline.Modules.Settings.UseCases;
 using NexusPipeline.Modules.Scripts.UseCases;
 using NexusPipeline.Modules.Queues.UseCases;
@@ -37,6 +38,7 @@ internal interface IHttpRouteBindings
     SettingsCommands SettingsCommands { get; }
 
     ScriptCommands ScriptCommands { get; }
+    IProviderConfigurationOperations ProviderConfigurations => throw new NotSupportedException();
 
     QueueCommands QueueCommands { get; }
 

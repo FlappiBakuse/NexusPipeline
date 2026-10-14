@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { useOperationAccess } from "../../../platform/operation-access";
 const { allowed: nativeBrowseAllowed, reason: nativeBrowseReason } = useOperationAccess("hostFilePicker");
-import { computed, nextTick, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { openEventStream, type EventStreamHandle } from "../../../platform/events";
 import { isAbortError } from "../../../platform/api";
 import { projectSpecializedCapabilities } from "../../../platform/specialized-capabilities";
 import { state } from "../../../platform/page-state";
@@ -28,6 +29,9 @@ import {
   addBinding,
   browseNativeDialog,
   getUser,
+  initializeProviderBinding,
+  listProviderBindingOperations,
+  cancelProviderBindingOperation,
   removeAvatar as removeAvatarRequest,
   removeBinding as removeBindingRequest,
   reorderBindings as reorderBindingsRequest,
@@ -281,10 +285,11 @@ async function removeBinding(binding: Binding) {
     if (!isAbortError(reason)) toast(errorText(reason), "error");
   }
 }
-async function paintBindingSlots() {
+async function paintBindingSlots(skipDirty = false) {
   await nextTick();
   const slots = root.value?.querySelectorAll<HTMLElement>('[data-plugin-slot="users.binding.sections"]') || [];
   for (const slot of slots) {
+    if (skipDirty && providerUserDrafts.has(slot.dataset.pluginPrimaryId || '')) continue;
     const script = props.scripts.find(item => item.id === slot.dataset.pluginPrimaryId);
     await renderPluginSlot(slot, "users.binding.sections", {
       mode: "binding",
@@ -292,9 +297,55 @@ async function paintBindingSlots() {
       secondaryId: draft.value?.id || "",
       executionProviderId: script?.executionProviderId || '',
       executionProviderConfigId: script?.executionProviderConfigId || '',
+      executionProviderConfigRevision: script?.executionProviderConfigRevision || '',
+      userConfigRevision: draft.value?.bindings?.find(binding => binding.scriptInstanceId === script?.id)?.executionProviderConfigRevision || '',
       packageRoot: script?.rootPath || '',
     });
   }
+}
+const providerBindingOperations = new Set<string>();
+const providerUserDrafts = new Set<string>();
+function providerUserDraft(event: Event) {
+  const target = event.target instanceof HTMLElement ? event.target.closest<HTMLElement>('[data-plugin-slot="users.binding.sections"]') : null;
+  if (target?.dataset.pluginPrimaryId) providerUserDrafts.add(target.dataset.pluginPrimaryId);
+}
+const providerBindingStatus = ref<Record<string, { operationId: string; state: string; errorCode: string; cleanupConfirmed: boolean }>>({});
+let providerEvents: EventStreamHandle | undefined;
+let providerDisposed = false;
+let providerStatusGeneration = 0;
+async function refreshProviderBindingStatus() {
+  const generation = ++providerStatusGeneration;
+  const values = await listProviderBindingOperations();
+  if (providerDisposed || generation !== providerStatusGeneration) return;
+  const statuses: typeof providerBindingStatus.value = {};
+  for (const item of values) if (item.userId === draft.value.id && item.state !== 'current') statuses[item.scriptId] = item;
+  providerBindingStatus.value = statuses;
+  const user = await getUser(draft.value.id) as User;
+  if (providerDisposed || generation !== providerStatusGeneration) return;
+  let changed = false;
+  for (const binding of draft.value.bindings || []) {
+    const current = user.bindings?.find(item => item.scriptInstanceId === binding.scriptInstanceId);
+    if (current && current.executionProviderConfigRevision !== binding.executionProviderConfigRevision) {
+      binding.executionProviderConfigRevision = current.executionProviderConfigRevision; changed = true;
+    }
+  }
+  if (changed) { planRevision.value++; await paintBindingSlots(true); }
+}
+async function initializeProviderUser(event: Event) {
+  const target = event.target instanceof HTMLElement ? event.target.closest<HTMLElement>('[data-plugin-slot="users.binding.sections"]') : null;
+  const scriptId = target?.dataset.pluginPrimaryId || '';
+  const binding = draft.value.bindings?.find(item => item.scriptInstanceId === scriptId);
+  if (!binding || providerBindingOperations.has(scriptId)) return;
+  const detail = (event as CustomEvent).detail;
+  if (!detail || typeof detail.configuration !== 'object' || typeof detail.expectedUserRevision !== 'string') return;
+  providerBindingOperations.add(scriptId);
+  try {
+    await initializeProviderBinding(crypto.randomUUID().replaceAll('-', ''), draft.value.id, scriptId,
+      detail.expectedUserRevision, detail.configuration);
+    providerUserDrafts.delete(scriptId);
+    await refreshProviderBindingStatus();
+  } catch (reason) { if (!isAbortError(reason)) toast(errorText(reason), 'error'); }
+  finally { providerBindingOperations.delete(scriptId); }
 }
 async function refresh(reloadPlan = true) {
   if (reloadPlan) planRevision.value++;
@@ -383,7 +434,14 @@ defineExpose({ refresh });
 
 onMounted(() => {
   void paintBindingSlots();
+  providerEvents = openEventStream({
+    onReady: () => refreshProviderBindingStatus(), onMissed: () => refreshProviderBindingStatus(),
+    onEvent: async event => {
+      if (event.type === 'provider_configuration' && event.data?.userId === draft.value.id) await refreshProviderBindingStatus();
+    },
+  });
 });
+onBeforeUnmount(() => { providerDisposed = true; providerEvents?.close(); });
 </script>
 
 <template>
@@ -397,7 +455,7 @@ onMounted(() => {
     :close-label="t('common.close')"
     @close="close"
   >
-    <section ref="root" class="user-management-surface">
+    <section ref="root" class="user-management-surface" @nxp-provider-user-save="initializeProviderUser" @nxp-provider-user-draft="providerUserDraft">
       <section class="user-management-settings">
         <div class="field">
           <label class="field-label" for="um-name">{{ t("users.user_name") }} <span class="req">*</span></label>
@@ -518,6 +576,12 @@ onMounted(() => {
             <Transition name="app-collapse">
               <div v-if="expandedBindingId === binding.scriptInstanceId" class="um-binding-body">
                 <div class="um-binding-options">
+                  <p v-if="providerBindingStatus[binding.scriptInstanceId]" role="status">
+                    {{ t(`scripts.configuration.${providerBindingStatus[binding.scriptInstanceId]!.state}`) }}
+                    {{ providerBindingStatus[binding.scriptInstanceId]!.errorCode }}
+                    <NxpButton v-if="!['ready', 'cancelled', 'needs_attention'].includes(providerBindingStatus[binding.scriptInstanceId]!.state)"
+                      @click="cancelProviderBindingOperation(providerBindingStatus[binding.scriptInstanceId]!.operationId)">{{ t('scripts.configuration.stop') }}</NxpButton>
+                  </p>
                   <NxpButton class="um-edit-config" type="button" :class="{ 'is-unavailable': Boolean(bindingStatus(binding)) }" @click.stop="openConfigEdit(binding)">
                     <span class="um-edit-config-copy"><strong>{{ t("users.edit_configuration") }}</strong><span class="muted">{{ t("users.binding.config_open_help") }}</span></span><span class="um-edit-config-arrow" aria-hidden="true"><NxpIcon name="chevronRight" /></span>
                   </NxpButton>

@@ -32,7 +32,7 @@ const props = withDefaults(defineProps<{
 <style>
 .nxp-drag-handle {
   display: inline-flex;
-  min-width: var(--nx-drag-handle-size, 32px);
+  min-width: max(var(--nx-drag-handle-size, 32px), var(--nx-control-height, 40px));
   min-height: var(--nx-control-height, 36px);
   align-items: center;
   justify-content: center;

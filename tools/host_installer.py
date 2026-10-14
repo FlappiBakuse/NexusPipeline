@@ -228,8 +228,6 @@ def compile_payload(production_root: Path, metadata: dict, dependency_path: Path
         script_path.name, "iscc.stdout.log", "iscc.stderr.log", setup.name, "wizard.png", "wizard-small.png",
     }, "安装器输出文件集合不符")
     digest = sha256(setup)
-    sidecar = output_dir / f"{setup.name}.sha256"
-    sidecar.write_text(digest, encoding="ascii")
     result = {"schemaVersion": 1, "sourceSha": metadata["sourceSha"],
               "tag": metadata["tag"], "version": metadata["version"], "zipSha256": metadata["sha256"],
               "setupSha256": digest, "setupSizeBytes": setup.stat().st_size,

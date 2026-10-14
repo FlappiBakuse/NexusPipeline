@@ -43,7 +43,8 @@ internal sealed class ConfigSwapRecovery
         ConfigSessionMark? mark = ConfigSessionMark.TryRead(scriptId, userName);
         if (mark?.SessionPhase == "provider_run")
         {
-            if (mark.ProviderWorkersStopped == true) { ConfigSessionMark.Clear(scriptId, userName); return; }
+            if (mark.ProviderWorkersStopped == true && ProviderEffectiveConfiguration.RestoreAndCleanup(mark))
+            { ConfigSessionMark.Clear(scriptId, userName); return; }
             throw new IOException("provider writers require independent stop confirmation; shared project files are preserved");
         }
         if (TaskSelectionResidue(scriptId, userName))
@@ -191,6 +192,7 @@ internal sealed class ConfigSwapRecovery
         if (!string.IsNullOrWhiteSpace(userName) && ConfigSessionMark.TryRead(scriptId, userName) is { SessionPhase: "provider_run" } provider)
         {
             if (provider.ProviderWorkersStopped != true) { EnqueuePendingRecover(scriptId, userName); return false; }
+            if (!ProviderEffectiveConfiguration.RestoreAndCleanup(provider)) { EnqueuePendingRecover(scriptId, userName); return false; }
             ConfigSessionMark.Clear(scriptId, userName);
             return !HasSessionMarkFiles(scriptId, userName);
         }

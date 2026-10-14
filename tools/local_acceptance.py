@@ -182,6 +182,7 @@ def build(host: Path, plugins: Path, output: Path, compiler: Path | None, cache:
         release = importlib.import_module('host_release')
         installer = importlib.import_module('host_installer')
         pe = importlib.import_module('pe_manifest')
+        version = release.project_version(source)
         compiler = resolve_compiler(cache, compiler)
         npm = 'npm.cmd'
         command('Host frontend dependencies', [npm, 'ci', '--no-audit', '--no-fund'], source/'frontend')
@@ -214,7 +215,7 @@ def build(host: Path, plugins: Path, output: Path, compiler: Path | None, cache:
         identity = json.loads(Path(inputs['identity']).read_bytes())
         manifest = payload.create(production, identity, source)
         payload.validate(production, manifest, identity, source)
-        package = output/'NexusPipeline-v0.17.2-local-acceptance-win-x64.zip'
+        package = output/f'NexusPipeline-v{version}-local-acceptance-win-x64.zip'
         package.unlink(missing_ok=True)
         files = [{'path': path.relative_to(production).as_posix(), 'sizeBytes': path.stat().st_size, 'sha256': digest(path)}
                  for path in sorted(production.rglob('*')) if path.is_file()]
@@ -227,7 +228,7 @@ def build(host: Path, plugins: Path, output: Path, compiler: Path | None, cache:
             for file in files:
                 if hashlib.sha256(bundle.read(file['path'])).hexdigest() != file['sha256']:
                     raise ValueError('Local ZIP payload mismatch')
-        metadata = {'mode': 'local-acceptance', 'producer': 'local', 'publishable': False, 'version': '0.17.2', 'tag': 'v0.17.2',
+        metadata = {'mode': 'local-acceptance', 'producer': 'local', 'publishable': False, 'version': version, 'tag': 'v'+version,
                     'sourceSha': host_input['baseSourceCommit'], 'sha256': digest(package), 'payloadFiles': files,
                     'buildInputs': identity['buildInputs'], 'buildId': identity['buildId'], 'frontendHash': identity['frontendHash']}
         setup = installer.compile_payload(production, metadata, source/'tools/runtime-dependencies.json', compiler,
@@ -276,9 +277,9 @@ def build(host: Path, plugins: Path, output: Path, compiler: Path | None, cache:
             raise ValueError('Acceptance must contain every active source plugin')
         receipt.update(status='BUILD_PASS', buildId=identity['buildId'], buildInputs=identity['buildInputs'],
             frontendHash=identity['frontendHash'], zip={'path': str(package), 'sha256': digest(package)},
-            setup={'path': str(output/'installer/NexusPipeline-v0.17.2-win-x64-setup.exe'), 'sha256': setup['setupSha256']},
+            setup={'path': str(output/f'installer/NexusPipeline-v{version}-win-x64-setup.exe'), 'sha256': setup['setupSha256']},
             software=str(acceptance), pluginBuilds=plugin_results)
-        receipt.update(hostVersion='0.17.2',
+        receipt.update(hostVersion=version,
             gameCheckInVersion=next(result['version'] for result in plugin_results if result['artifactName'] == 'GameCheckIn'),
             installationGeneration='g0170',
             baseSourceCommit=host_input['baseSourceCommit'], sourceTreeSha=host_input['sourceTreeSha'],

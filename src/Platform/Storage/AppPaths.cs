@@ -86,7 +86,7 @@ internal static class AppPaths
     /// <summary>更新任务标记（mode: apply|defer|completed + 目标版本 + staging 路径）。</summary>
     public static readonly string UpdateTaskFile = Path.Combine(UpdateDir, "task.json");
 
-    /// <summary>应用前旧版本备份（仅 NexusPipeline.exe + wwwroot；plugins 属于用户数据）。</summary>
+    /// <summary>应用前旧版本备份（主程序、桌面资源、README 和载荷清单；plugins 属于用户数据）。</summary>
     public static readonly string UpdateBackupDir = Path.Combine(AppRoot, ".nxp-backup", "previous");
 
     /// <summary>应用成功标记（内容 = 目标版本），供新实例启动收尾读取。</summary>

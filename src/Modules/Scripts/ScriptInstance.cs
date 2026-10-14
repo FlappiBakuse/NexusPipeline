@@ -17,6 +17,7 @@ public class ScriptInstance
 
     /// <summary>Provider-owned configuration identity; no executable path is fabricated for direct drive.</summary>
     public string ExecutionProviderConfigId { get; set; } = "";
+    public string ExecutionProviderConfigRevision { get; set; } = "";
 
     /// <summary>专用插件用户输入值（resolve.json inputs 声明的 name → 用户填写值；通用脚本恒为空）。键大小写以声明为准。</summary>
     public Dictionary<string, string> PluginInputs { get; set; } = new();

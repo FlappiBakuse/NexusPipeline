@@ -9,6 +9,9 @@
   --nx-space-5: 24px;
   --nx-space-6: 32px;
   --nx-space-7: 40px;
+  --nx-gap-small: var(--nx-space-2);
+  --nx-gap-field: var(--nx-space-4);
+  --nx-gap-section: var(--nx-space-5);
   --nx-control-height: 40px;
   --nx-drag-handle-size: 32px;
   --nx-drag-handle-touch-size: 40px;
@@ -29,6 +32,9 @@ body {
   --nx-color-danger: var(--_nexus-appearance-color-danger, var(--_nexus-theme-color-danger, var(--danger, var(--bad, #ff758f))));
   --nx-focus-ring: var(--_nexus-theme-focus-ring, 0 0 0 3px color-mix(in srgb, var(--nx-color-accent) 28%, transparent));
 }
+
+[data-nxp-surface-kind="card"][data-nxp-surface-depth][data-nxp-surface-tone="a"] { background: var(--nx-color-surface); }
+[data-nxp-surface-kind="card"][data-nxp-surface-depth][data-nxp-surface-tone="b"] { background: var(--content-card-soft, var(--secondary-surface, var(--nx-color-surface))); }
 
 * {
   box-sizing: border-box;

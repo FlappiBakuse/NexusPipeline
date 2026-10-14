@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, useAttrs } from "vue";
+import { computed, ref, useAttrs } from "vue";
+import { useSurface } from "../surface";
 import NxpIcon from "../primitives/NxpIcon.vue";
 import NxpCollapseTransition from "./NxpCollapseTransition.vue";
 
@@ -14,6 +15,7 @@ const props = withDefaults(defineProps<{
   controlsId?: string;
   panel?: string;
   surface?: "default" | "secondary";
+  flattenAtLimit?: boolean;
 }>(), {
   title: "",
   description: "",
@@ -27,6 +29,8 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{ toggle: [expanded: boolean] }>();
 
 const attrs = useAttrs();
+const root = ref<HTMLElement | null>(null);
+useSurface(root, () => Boolean(props.flattenAtLimit));
 const bodyId = computed(() => props.controlsId || props.panelId || undefined);
 
 function toggle() {
@@ -35,7 +39,7 @@ function toggle() {
 </script>
 
 <template>
-  <section v-bind="attrs" class="nxp-collapsible-card" :class="{ 'nxp-collapsible-card-open': props.expanded, 'is-secondary': props.surface === 'secondary' }">
+  <section ref="root" v-bind="attrs" class="nxp-collapsible-card" :class="{ 'nxp-collapsible-card-open': props.expanded, 'is-secondary': props.surface === 'secondary' }">
     <button
       class="nxp-collapsible-card-toggle"
       type="button"
@@ -105,4 +109,10 @@ function toggle() {
 .nxp-collapsible-card-body[hidden] { display: none; }
 .nxp-collapsible-card-body .settings-list:first-child { margin-top: 0; }
 .nxp-collapsible-card.is-secondary { border-color: var(--content-card-border); background: var(--content-card-soft); }
+.nxp-collapsible-card[data-nxp-surface-kind="group"] { border: 0; border-radius: 0; background: transparent; overflow: visible; }
+.nxp-collapsible-card[data-nxp-surface-kind="group"] > .nxp-collapsible-card-body { padding: var(--nx-space-2) 0 var(--nx-space-2) var(--nx-space-4); border-top: 0; border-inline-start: 1px solid var(--nx-color-border); }
+.nxp-collapsible-card[data-nxp-surface-kind="group"] > .nxp-collapsible-card-toggle { padding-inline: var(--nx-space-2); }
+.nxp-collapsible-card-title, .nxp-collapsible-card-copy { overflow-wrap: anywhere; white-space: normal; }
+.nxp-collapsible-card-side { max-width: 50%; min-width: 0; }
+@media (max-width: 560px) { .nxp-collapsible-card-toggle { flex-wrap: wrap; } .nxp-collapsible-card-side { max-width: 100%; } }
 </style>

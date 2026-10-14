@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { vNxpSurface } from "../../ui/surface";
 import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { api, isAbortError } from "../../platform/api";
 import { openEventStream, type EventStreamHandle } from "../../platform/events";
@@ -356,7 +357,7 @@ onBeforeUnmount(() => {
         :title="t('users.no_users_yet')"
         :description="t('users.page.empty_help')"
       />
-      <section v-else class="card list-surface">
+      <section v-nxp-surface v-else class="card list-surface">
         <NxpSortableList transition-name="app-card" class="script-grid global-user-list" @reorder="reorderUsers">
           <GlobalUserCard
             v-for="user in sortedUsers"

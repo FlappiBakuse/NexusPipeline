@@ -21,6 +21,7 @@
 | 运行计划解释 | `POST /api/dispatch/explain/script`、`POST /api/dispatch/explain/queue`（只读） | `run script/queue --dry-run` | `explain_script_run` / `explain_queue_run` |
 | 取消 | `/api/cancel`、系统操作取消 | `cancel` | `cancel_run` / `cancel_system_action` |
 | 运行观察 | `/api/status`、`/api/events`（SSE）、运行详情 | `status`、run 轮询 | `get_status` / `list_runs` / `get_run` |
+| Provider 配置初始化 | `POST /api/provider-configurations`、`GET /api/provider-configurations`、`GET /api/provider-configurations/{operationId}`、`POST /api/provider-configurations/{operationId}/cancel` | 由 Web/HTTP 承担 | 由 Web/HTTP 承担 |
 | 历史 | `/api/history/summary`（范围、脚本、队列、用户、状态筛选）→ `/api/history/dates` → `/api/history/users?date=...` → `/api/history?date=...&userKey=...`；详情 `/api/history/detail`；截图 `/api/history/image` | `history ... --status <status>` | `list_history(status=...)` |
 | 本机路径选择 | `POST /api/native-dialog`（仅回环请求） | — | — |
 | 插件读取 | `GET /api/plugins` | `plugin list/get` | `list_plugins` |
@@ -33,6 +34,8 @@
 | 系统诊断 | `GET /api/diagnostics`；`POST /api/diagnostics/export`；受管 artifact 下载 | `doctor`、`doctor export --output <新文件>` | `get_diagnostics` |
 | 通知截图开关 | 设置 API（`webhookScreenshotEnabled` / `smtpScreenshotEnabled`） | `settings update` | `get_settings` 只读返回开关状态 |
 | 更新 | 更新 API | `update check/download/apply` | `get_update_status` |
+
+HTTP 更新状态与 MCP `get_update_status` 提供可空的 `lastApplyFailure`，字段为 `transactionId`、`targetVersion`、`code` 和 `atUtc`。它投影最近一次有效失败结果，仅在目标版本高于当前运行版本时显示；旧结果和未知文件保持原字节。
 
 更新状态投影在发现候选版本后补充 `policyVerified`、`canDownload`、`manualUpdateRequired`、`updateBlockCode`、`barrierVersion`、`migrationUrl` 和 `policyError`。`updateBlockCode=breaking-update` 时，页面显示手动下载安装包与配置迁移指引，下载、下次启动应用和自动应用入口均被后端拒绝；策略无法验证时使用 `policy-unavailable` 并保持 fail-closed。
 

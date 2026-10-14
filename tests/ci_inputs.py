@@ -108,7 +108,7 @@ def validate_pair(pair, read=api):
         require(commit.get("sha") == source["testedSha"] and commit.get("tree", {}).get("sha") == source["treeSha"]
                 and [parent.get("sha") for parent in commit.get("parents", [])] == [source["baseSha"], source["headSha"]], "Pair merge tree or parents differ")
         require(file_digest(read, repo, source["testedSha"], "tests/policy.json") == source["policyDigest"], "Pair policy changed")
-        lock = "plugins.lock.json" if repo == REPOSITORIES[0] else "tests/inputs.lock.json"
+        lock = "tests/inputs.lock.json"
         require(file_digest(read, repo, source["testedSha"], lock) == source["inputLockDigest"], "Pair input lock changed")
         ancestry = read(f"/repos/{repo}/compare/{source['controllerSha']}...main")
         require(ancestry.get("status") in ("ahead", "identical")
@@ -148,7 +148,7 @@ def create_pair(numbers, read=api):
         tested = read(f"/repos/{repo}/git/ref/pull/{number}/merge")["object"]["sha"]
         commit = read(f"/repos/{repo}/git/commits/{tested}")
         controller = read(f"/repos/{repo}/git/ref/heads/main")["object"]["sha"]
-        lock = "plugins.lock.json" if repo == REPOSITORIES[0] else "tests/inputs.lock.json"
+        lock = "tests/inputs.lock.json"
         sources.append({"repository": repo, "prNumber": number, "baseSha": pull["base"]["sha"],
                         "headSha": pull["head"]["sha"], "testedSha": tested, "treeSha": commit["tree"]["sha"],
                         "policyDigest": file_digest(read, repo, tested, "tests/policy.json"),

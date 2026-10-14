@@ -139,13 +139,15 @@
     {
       "id": "architecture.configuration",
       "path": "architecture/configuration.md",
-      "summary": "配置会话、快照、交换、编辑隔离与结果同步",
+      "summary": "配置会话、快照、交换、编辑隔离、provider 初始化事务与结果同步",
       "topics": [
         "配置",
         "编辑",
         "交换",
         "快照",
-        "配置契约迁移"
+        "配置契约迁移",
+        "provider 初始化",
+        "配置修订"
       ],
       "aliases": [
         "配置编辑",
@@ -379,6 +381,8 @@
       ],
       "codePaths": [
         "src/Modules/Updates",
+        "metadata/updates",
+        "tools/update_metadata.py",
         "update-policy.json"
       ],
       "testDomains": [

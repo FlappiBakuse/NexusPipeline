@@ -16,11 +16,22 @@ export interface UpdateStatus {
   barrierVersion?: string;
   migrationUrl?: string;
   policyError?: string;
+  pendingVersion?: string | null;
+  pendingStatus?: string | null;
+  pendingError?: string | null;
+  lastApplyFailure?: {
+    transactionId: string;
+    targetVersion: string;
+    code: string;
+    atUtc: string;
+  } | null;
   automation?: {
     checkEnabled?: boolean;
     waitingForIdle?: boolean;
     idleBlockCode?: string;
     autoUpdateEnabled?: boolean;
+    lastCheckAt?: string | null;
+    nextCheckAt?: string | null;
   };
 }
 

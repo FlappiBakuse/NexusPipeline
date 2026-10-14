@@ -10,7 +10,7 @@ const fileDigest = file => createHash("sha256").update(fs.readFileSync(file,"utf
 
 
 export function defaultPartner(root) {
-  const input = JSON.parse(fs.readFileSync(path.join(root, "plugins.lock.json"), "utf8"));
+  const input = JSON.parse(fs.readFileSync(path.join(root, "tests/inputs.lock.json"), "utf8"));
   if (Object.keys(input).sort().join(",") !== "ref,repository,schemaVersion" || input.schemaVersion !== 1
       || input.repository !== repositories[1] || input.ref !== "main") throw new Error("Invalid default Plugins input");
   return input;
@@ -33,7 +33,7 @@ export function validatePairCheckout(root, file, plan, partnerRoot) {
       || own.headSha !== plan.headSha || own.testedSha !== plan.testedSha || partner.testedSha !== plan.partnerSha)
     throw new Error("Pair differs from scope identity");
   for (const [directory, source] of [[root,own], ...(partnerRoot ? [[partnerRoot,partner]] : [])]) {
-    const lock = source.repository === repositories[0] ? "plugins.lock.json" : "tests/inputs.lock.json";
+    const lock = "tests/inputs.lock.json";
     if (git(directory,"rev-parse","HEAD") !== source.testedSha || git(directory,"rev-parse","HEAD^{tree}") !== source.treeSha
         || git(directory,"status","--porcelain") || fileDigest(path.join(directory,"tests/policy.json")) !== source.policyDigest
         || fileDigest(path.join(directory,lock)) !== source.inputLockDigest)

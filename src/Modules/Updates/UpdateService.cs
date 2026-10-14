@@ -43,6 +43,7 @@ internal sealed class UpdateService
     private readonly Action<string, DesktopResumeIntent> _abortDesktop;
     private readonly Func<string, string?, bool, UpdatePayloadIdentity> _freezePayload;
     private readonly Func<(HostMaintenanceLease? Lease, string? Reason)> _acquireMaintenance;
+    private readonly UpdateApplyFailure? _lastApplyFailure;
     private readonly OutboundHttpClientProvider _outbound;
     private readonly object _gate = new();
 
@@ -68,6 +69,9 @@ internal sealed class UpdateService
     private string? _barrierVersion;
     private string? _migrationUrl;
     private string? _policyError;
+    private string? _pendingVersion;
+    private string? _pendingStatus;
+    private string? _pendingError;
 
     public UpdateService(
         Func<AppSettings> settings,
@@ -92,7 +96,7 @@ internal sealed class UpdateService
         _stopDesktop = stopDesktop ?? ((_, _) => true);
         _captureDesktopIntent = captureDesktopIntent ?? (() => DesktopResumeIntent.FromVisible(false));
         _abortDesktop = abortDesktop ?? ((_, _) => { });
-        _freezePayload = freezePayload ?? ApplicationPayload.Freeze;
+        _freezePayload = freezePayload ?? ApplicationPayload.FreezeForUpdate;
         _outbound = outbound ?? new OutboundHttpClientProvider(() => OutboundProxyOptions.Direct);
         if (acquireMaintenance is not null)
         {
@@ -105,6 +109,7 @@ internal sealed class UpdateService
                 : ((HostMaintenanceLease?)null, "存在活动运行、编辑会话或待执行系统操作，暂不能应用更新");
         }
         _state = HasRecoveryArtifacts() ? UpdateState.RecoveryPending : UpdateState.Idle;
+        _lastApplyFailure = UpdateApplyFailure.ReadLatest(installDir, CurrentVersion);
     }
 
     public UpdateState State
@@ -274,19 +279,8 @@ internal sealed class UpdateService
                 policy.SourceUri,
                 TimeSpan.FromMinutes(10),
                 allowAutoRedirect: false);
-            using HttpResponseMessage response = await policy.GetAsync(
-                http,
-                policy.SourceUri,
-                UpdateResourceKind.Manifest,
-                "NexusPipeline-update/" + CurrentVersion,
-                operation.Cts.Token).ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode)
-            {
-                throw new IOException($"清单请求失败：HTTP {(int)response.StatusCode}");
-            }
-            string json = await response.Content.ReadAsStringAsync(operation.Cts.Token).ConfigureAwait(false);
-            operation.Cts.Token.ThrowIfCancellationRequested();
-            ReleaseInfo? best = UpdateCatalog.PickRelease(JsonNode.Parse(json), channel, current);
+            UpdateDiscoveryResult discovery = await UpdateDiscovery.FetchAsync(http, policy, channel, current, operation.Cts.Token).ConfigureAwait(false);
+            ReleaseInfo? best = discovery.Release;
             UpdatePolicyFetchResult policyResult = best is null
                 ? new UpdatePolicyFetchResult(false, null, null)
                 : await UpdatePolicy.FetchAsync(
@@ -305,6 +299,9 @@ internal sealed class UpdateService
                     return BuildSnapshotLocked();
                 }
                 _latest = best;
+                _pendingVersion = discovery.PendingVersion;
+                _pendingStatus = discovery.PendingStatus;
+                _pendingError = discovery.PendingError;
                 _policyVerified = best is null ? null : policyResult.Verified;
                 _canDownload = best is not null && policyResult.Verified && barrier is null;
                 _manualUpdateRequired = barrier is not null;
@@ -424,31 +421,9 @@ internal sealed class UpdateService
                     new Uri(latest.ZipUrl),
                     TimeSpan.FromMinutes(10),
                     allowAutoRedirect: false);
-                (bool ok, string? downloadError) = await UpdatePackage.DownloadAsync(
-                    http,
-                    policy,
-                    latest.ZipUrl,
-                    latest.ShaUrl,
-                    zipPath,
-                    shaPath,
-                    progress,
-                    operation.Cts.Token, operation.Artifacts).ConfigureAwait(false);
+                var delivery = await UpdateDelivery.PrepareAsync(http, policy, latest, _installDir, CurrentVersion,
+                    zipPath, shaPath, stagingDir, _freezePayload, operation.Artifacts!, progress, operation.Cts.Token).ConfigureAwait(false);
                 operation.Cts.Token.ThrowIfCancellationRequested();
-                if (!ok)
-                {
-                    throw new IOException(downloadError ?? "下载失败");
-                }
-                if (!UpdatePackage.VerifySha256(zipPath, shaPath, out string? verifyError))
-                {
-                    throw new IOException(verifyError ?? "SHA256 校验失败");
-                }
-                operation.Cts.Token.ThrowIfCancellationRequested();
-                string? extractError = UpdatePackage.ExtractApplication(zipPath, stagingDir, version, _freezePayload, operation.Artifacts);
-                operation.Cts.Token.ThrowIfCancellationRequested();
-                if (extractError is not null)
-                {
-                    throw new IOException(extractError);
-                }
                 var frozenPayload = _freezePayload(stagingDir, version, false);
                 string frozenPackageHash = operation.Artifacts!.FileHash(zipPath);
                 var inventory = operation.Artifacts.Inventory(stagingDir);
@@ -457,7 +432,7 @@ internal sealed class UpdateService
                     CleanupDownloadArtifacts(operation);
                     return;
                 }
-                Audit.Log(auditSource, "更新下载完成", $"v{version}（SHA256 校验通过，已就绪）");
+                Audit.Log(auditSource, "更新下载完成", $"v{version}（{delivery.Transport}，下载 {delivery.NetworkBytes} 字节，复用 {delivery.ReusedBytes} 字节，{delivery.Reason}）");
             }
             catch (OperationCanceledException) when (operation.Cts.IsCancellationRequested)
             {
@@ -668,6 +643,14 @@ internal sealed class UpdateService
         bool desktopPrepared = false;
         bool installer = transactionId is not null;
         UpdateTask? startedJournal = null;
+        try { _ = _freezePayload(_installDir, null, true); }
+        catch (Exception ex)
+        {
+            lock (_gate) { _state = installer ? UpdateState.Idle : UpdateState.Ready; _maintenanceLease = null; }
+            lease.Dispose();
+            Logger.Error($"[更新] 当前安装校验失败：{ex.Message}");
+            return UpdateApplyResult.Busy(UpdateApply.FailureCode(ex), "当前安装的程序文件校验失败，请检查更新日志");
+        }
         try
         {
             transactionId ??= Guid.NewGuid().ToString("N");
@@ -750,6 +733,8 @@ internal sealed class UpdateService
             throw new InvalidDataException("update.ready_checksum_changed");
         return UpdateTask.Create(mode, version, staging) with { TargetPayload = payload, PackageSha256 = packageHash,
             StagingInventory = inventory,
+            ReleaseEvidence = installerPackageHash is null ? UpdateReleaseEvidence.Freeze(_latest!, payload) : null,
+            JournalSchemaVersion = installerPackageHash is null && _latest?.TargetManifestAsset is not null ? 2 : 1,
             PackageChecksumSha256 = installerPackageHash is null ? _readyChecksumHash : null,
             PackageSource = installerPackageHash is null ? "download" : "installer" };
     }
@@ -933,7 +918,11 @@ internal sealed class UpdateService
             _updateBlockCode,
             _barrierVersion,
             _migrationUrl,
-            _policyError);
+            _policyError,
+            _lastApplyFailure,
+            _pendingVersion,
+            _pendingStatus,
+            _pendingError);
     }
 
     private void ClearDiscoveryLocked()
@@ -954,6 +943,9 @@ internal sealed class UpdateService
         _barrierVersion = null;
         _migrationUrl = null;
         _policyError = null;
+        _pendingVersion = null;
+        _pendingStatus = null;
+        _pendingError = null;
     }
 
     private static int? BytesToPercent(long bytesRead, long bytesTotal)
@@ -1013,7 +1005,11 @@ internal sealed record UpdateStatusSnapshot(
     string? UpdateBlockCode = null,
     string? BarrierVersion = null,
     string? MigrationUrl = null,
-    string? PolicyError = null);
+    string? PolicyError = null,
+    UpdateApplyFailure? LastApplyFailure = null,
+    string? PendingVersion = null,
+    string? PendingStatus = null,
+    string? PendingError = null);
 
 /// <summary>下载请求结果：Started 表示后台下载已受理，Rejected 携带稳定的 API 错误码。</summary>
 internal sealed record UpdateDownloadResult(bool Succeeded, string? Code, string? Error)

@@ -379,7 +379,7 @@ internal sealed class ExecutionPlanBuilder
             return user;
         }
         // 解析失败保留为失败快照（coordinator 生成该用户的失败记录），不影响计划内其他用户
-        return user with { Spec = _specs.Resolve(script, user.Binding.ConfigInputs, user.UserId) };
+        return user with { Spec = _specs.Resolve(script, user.Binding.ConfigInputs, user.UserId, user.Binding.ExecutionProviderConfigRevision) };
     }
 
     private IReadOnlyList<ResolvedScriptUser> ResolveUsersWithSpecs(ScriptInstance script, IReadOnlyList<ResolvedScriptUser> users)

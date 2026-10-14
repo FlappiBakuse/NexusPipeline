@@ -7,7 +7,8 @@ internal static class UpdateRemoteResourceRules
 {
     internal const string DefaultSourceUrl = "https://api.github.com/repos/FlappiBakuse/NexusPipeline/releases";
     internal const string DefaultPolicyHost = "raw.githubusercontent.com";
-    internal const string DefaultPolicyPath = "/FlappiBakuse/NexusPipeline/main/update-policy.json";
+    internal const string DefaultPolicyPath = "/FlappiBakuse/NexusPipeline/main/metadata/updates/legacy-policy.json";
+    internal const string DefaultDiscoveryUrl = "https://raw.githubusercontent.com/FlappiBakuse/NexusPipeline/main/metadata/updates/channels.json";
 
     private static readonly string[] DefaultAssetHosts =
     {
@@ -42,6 +43,8 @@ internal static class UpdateRemoteResourceRules
         IEnumerable<string> hosts = resourceKind switch
         {
             UpdateResourceKind.Manifest => new[] { "api.github.com" },
+            UpdateResourceKind.ReleaseMetadata => new[] { "api.github.com" },
+            UpdateResourceKind.Discovery => new[] { DefaultPolicyHost },
             UpdateResourceKind.Policy => new[] { DefaultPolicyHost },
             UpdateResourceKind.ReleaseAsset => DefaultAssetHosts,
             _ => throw new ArgumentOutOfRangeException(nameof(resourceKind), resourceKind, null),

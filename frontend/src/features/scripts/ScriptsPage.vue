@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { vNxpSurface } from "../../ui/surface";
 import ScriptTypeIcon from "./ScriptTypeIcon.vue";
 import NxpOverflowText from "../../ui/primitives/NxpOverflowText.vue";
 import {
@@ -25,10 +26,25 @@ import NxpModal from "../../ui/primitives/NxpModal.vue";
 import NxpSortableList from "../../ui/composites/NxpSortableList.vue";
 import ScriptCard from "./ScriptCard.vue";
 import ScriptEditorModal from "./ScriptEditorModal.vue";
-import { deleteScript, listScripts, getStatus, reorderScripts as reorderScriptsRequest } from "./services/scriptsApi";
+import { deleteScript, listScripts, getStatus, listProviderConfigurations, type ProviderConfigurationStatus, reorderScripts as reorderScriptsRequest } from "./services/scriptsApi";
+import { openEventStream, type EventStreamHandle } from "../../platform/events";
 import type { Script, ScriptPlugin } from "./utils/scriptTypes";
 
 const scripts = ref<Script[]>([]);
+const configurations = ref<ProviderConfigurationStatus[]>([]);
+let configurationEvents: EventStreamHandle | null = null;
+const recoveryRequired = computed(() => configurations.value.some(item => !item.scriptId && !item.cleanupConfirmed));
+function configurationState(script: Script) {
+  if (!script.executionProviderId) return "";
+  if (recoveryRequired.value) return "needs_attention";
+  const values = configurations.value.filter(item => item.scriptId === script.id && !item.userId);
+  const active = [...values].reverse().find(item => !["ready", "cancelled", "needs_attention", "sync_pending"].includes(item.state));
+  return active?.state || values.at(-1)?.state || (script.executionProviderConfigRevision ? "ready" : "");
+}
+async function refreshConfigurations() {
+  const values = await listProviderConfigurations();
+  if (!disposed) configurations.value = values;
+}
 const plugins = ref<ScriptPlugin[]>([]);
 const loading = ref(true);
 const error = ref("");
@@ -159,9 +175,21 @@ onMounted(() => {
   disposed = false;
   setTopbarTitle(t("common.script_instance"));
   void load();
+  void refreshConfigurations().catch(() => {});
+  configurationEvents = openEventStream({
+    onReady: () => refreshConfigurations(), onMissed: () => refreshConfigurations(),
+    onEvent: async event => {
+      if (event.type !== "provider_configuration") return;
+      await refreshConfigurations();
+      if (event.data?.state === "ready" && !editorOpen.value) {
+        const values = await listScripts(); if (!disposed && Array.isArray(values)) scripts.value = values;
+      }
+    },
+  });
 });
 onBeforeUnmount(() => {
   disposed = true;
+  configurationEvents?.close();
   const slots =
     root.value?.querySelectorAll<HTMLElement>("[data-plugin-slot]") || [];
   for (const slot of slots) void disposePluginSlot(slot);
@@ -178,6 +206,7 @@ onBeforeUnmount(() => {
       tone="danger"
     />
     <template v-else>
+      <p v-if="recoveryRequired" role="alert">{{ t("scripts.configuration.recovery_required") }}</p>
       <NxpPageHeader
         :eyebrow="t('common.script_instance')"
         :title="t('shell.scripts')"
@@ -199,12 +228,13 @@ onBeforeUnmount(() => {
         :title="t('scripts.no_script_instances_yet')"
         :description="t('scripts.page.empty_help')"
       />
-      <section v-else class="card list-surface">
+      <section v-nxp-surface v-else class="card list-surface">
         <NxpSortableList transition-name="app-card" class="script-grid" @reorder="reorderScripts">
           <ScriptCard
             v-for="script in scripts"
             :key="script.id"
             :script="script"
+              :configuration-state="configurationState(script)"
             :plugin-label="pluginName(script)"
             :unavailable-message="unavailable(script) || undefined"
             :translate="t"

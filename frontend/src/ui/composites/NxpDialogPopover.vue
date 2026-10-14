@@ -97,7 +97,7 @@ onBeforeUnmount(() => {
 <style>
 .nxp-dialog-popover { position: absolute; }
 .nxp-dialog-popover:focus { outline: none; }
-.nxp-dialog-popover-close { position: absolute; top: 6px; right: 6px; z-index: 1; display: inline-flex; width: 32px; height: 32px; align-items: center; justify-content: center; border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--muted); }
+.nxp-dialog-popover-close { position: absolute; top: 6px; right: 6px; z-index: 1; display: inline-flex; width: 40px; height: 40px; align-items: center; justify-content: center; border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--muted); }
 .nxp-dialog-popover-close:hover, .nxp-dialog-popover-close:focus-visible { border-color: var(--content-control-border); background: var(--content-control-hover); color: var(--text); }
 .nxp-dialog-popover-close-icon { width: 16px; height: 16px; }
 </style>

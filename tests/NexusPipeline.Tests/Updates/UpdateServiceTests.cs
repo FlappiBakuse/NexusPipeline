@@ -210,6 +210,7 @@ public sealed class UpdateServiceTests : IAsyncLifetime
             var releases = new JsonArray();
             var release = new JsonObject
             {
+                ["id"] = 1001,
                 ["tag_name"] = $"v{CandidateVersion}",
                 ["name"] = $"v{CandidateVersion}",
                 ["draft"] = false,
@@ -219,13 +220,12 @@ public sealed class UpdateServiceTests : IAsyncLifetime
                 {
                     new JsonObject
                     {
+                        ["id"] = 2001,
+                        ["state"] = "uploaded",
+                        ["size"] = _zipBytes.Length,
+                        ["digest"] = "sha256:" + _zipSha,
                         ["name"] = $"NexusPipeline-v{CandidateVersion}-win-x64.zip",
                         ["browser_download_url"] = $"{SourceUrl}NexusPipeline-v{CandidateVersion}-win-x64.zip",
-                    },
-                    new JsonObject
-                    {
-                        ["name"] = $"NexusPipeline-v{CandidateVersion}-win-x64.zip.sha256",
-                        ["browser_download_url"] = $"{SourceUrl}NexusPipeline-v{CandidateVersion}-win-x64.zip.sha256",
                     },
                 },
             };
@@ -236,22 +236,50 @@ public sealed class UpdateServiceTests : IAsyncLifetime
         {
             return (200, "application/octet-stream", _zipBytes);
         }
-        if (path.EndsWith(".sha256", StringComparison.OrdinalIgnoreCase))
-        {
-            return (200, "text/plain", Encoding.ASCII.GetBytes(_zipSha + Environment.NewLine));
-        }
         return (404, "text/plain", Array.Empty<byte>());
     }
 
+    [Fact]
+    public void CatalogAcceptsServerDigestWithoutChecksumAttachment()
+    {
+        JsonNode releases = JsonNode.Parse(Encoding.UTF8.GetString(BuildResponse("/").Body))!;
+        Assert.True(NexusVersion.TryParse(CurrentVersion, out NexusVersion current));
+        ReleaseInfo release = Assert.IsType<ReleaseInfo>(UpdateCatalog.PickRelease(releases, "prerelease", current));
+        Assert.Equal(1001, release.ReleaseId);
+        Assert.Equal(2001, release.ZipAsset.Id);
+        Assert.Equal(_zipBytes.Length, release.ZipAsset.SizeBytes);
+        Assert.Equal(_zipSha, release.ZipAsset.Sha256);
+        Assert.Single(releases[0]!["assets"]!.AsArray());
+    }
+
+    [Fact]
+    public void CatalogRejectsInvalidOrAmbiguousAssetFacts()
+    {
+        Assert.True(NexusVersion.TryParse(CurrentVersion, out NexusVersion current));
+        foreach (string field in new[] { "id", "size", "digest", "state", "browser_download_url" })
+        {
+            foreach (JsonNode? invalid in new JsonNode?[] { null, JsonValue.Create(false), JsonValue.Create(-1), JsonValue.Create("") })
+            {
+                JsonNode releases = JsonNode.Parse(Encoding.UTF8.GetString(BuildResponse("/").Body))!;
+                releases[0]!["assets"]![0]![field] = invalid?.DeepClone();
+                Assert.Null(UpdateCatalog.PickRelease(releases, "prerelease", current));
+            }
+        }
+        JsonNode duplicate = JsonNode.Parse(Encoding.UTF8.GetString(BuildResponse("/").Body))!;
+        JsonArray assets = duplicate[0]!["assets"]!.AsArray();
+        assets.Add(assets[0]!.DeepClone());
+        Assert.Null(UpdateCatalog.PickRelease(duplicate, "prerelease", current));
+    }
+
     private UpdateService NewService(Func<DesktopResumeIntent>? capture = null, Func<string, TimeSpan, bool>? stop = null,
-        Action<string, DesktopResumeIntent>? abort = null)
+        Action<string, DesktopResumeIntent>? abort = null, Func<string, string?, bool, UpdatePayloadIdentity>? freeze = null)
     {
         return new UpdateService(
             () => _settings,
             _installDir!,
             () => _canApply,
             () => _exited = true,
-            freezePayload: (_, _, _) => new(new string('a', 64), new string('b', 64), new string('c', 64), "g0170"),
+            freezePayload: freeze ?? ((_, _, _) => new(new string('a', 64), new string('b', 64), new string('c', 64), "g0170")),
             captureDesktopIntent: capture, stopDesktop: stop, abortDesktop: abort);
     }
 
@@ -665,6 +693,24 @@ public sealed class UpdateServiceTests : IAsyncLifetime
             Assert.NotNull(UpdateTask.Read(Path.Combine(_installDir!, ".nxp-update", "task.json")));
         }
         finally { UpdateApply.LaunchApplyOverride = null; }
+    }
+
+    [Fact]
+    public async Task InvalidInstalledPayloadRejectsApplyBeforeDesktopStopAndReleasesAdmission()
+    {
+        bool stopped = false;
+        var service = NewService(stop: (_, _) => stopped = true, freeze: (_, _, installed) => installed
+            ? throw new PayloadFileException("payload_file_changed", "README.md")
+            : new(new string('a', 64), new string('b', 64), new string('c', 64), "g0170"));
+        await service.CheckAsync("test"); service.StartDownload("test"); await WaitStateAsync(service, UpdateState.Ready);
+        var result = service.RequestApply(false, "test");
+        Assert.False(result.Succeeded);
+        Assert.Equal("payload_file_changed", result.Code);
+        Assert.False(stopped);
+        Assert.False(_exited);
+        Assert.Equal(UpdateState.Ready, service.State);
+        Assert.False(File.Exists(Path.Combine(_installDir!, ".nxp-update", "task.json")));
+        Assert.Equal("payload_file_changed", service.RequestApply(false, "test").Code);
     }
 
     [Fact]

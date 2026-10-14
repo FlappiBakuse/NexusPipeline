@@ -6,7 +6,7 @@ using NexusPipeline.Modules.Users;
 namespace NexusPipeline.Modules.Users.UseCases;
 
 /// <summary>用户命令 facade；具体领域操作按 profile、global settings、binding 与 avatar 分文件维护。</summary>
-internal sealed partial class UserCommands
+internal sealed partial class UserCommands : IUserProviderConfigurationStore
 {
     private readonly IUserMutationState _state;
     private readonly IUserMutationAdmission _admission;

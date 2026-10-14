@@ -6,7 +6,7 @@ namespace NexusPipeline.Modules.Updates;
 
 /// <summary>
 /// 更新清单：受限 Nexus 版本解析比较、GitHub Releases API JSON 解析与渠道过滤。纯逻辑，便于单测。
-/// 资产约定：release 必须同时携带 NexusPipeline-v{ver}-win-x64.zip 与同名 .sha256 才能被发现。
+/// 资产约定：release 必须携带完整 ZIP 及 GitHub 提供的 SHA256 digest、资产身份与尺寸。
 /// </summary>
 internal static class UpdateCatalog
 {
@@ -27,7 +27,7 @@ internal static class UpdateCatalog
 
     /// <summary>
     /// 从 GitHub Releases API JSON 中按渠道挑选最高版本：跳过 draft；Release 的 prerelease 标记
-    /// 必须符合宿主项目发布策略；stable 渠道只见正式 Release；资产 zip+sha256 必须齐全；版本须高于当前版本。
+    /// 必须符合宿主项目发布策略；stable 渠道只见正式 Release；完整 ZIP 的服务端资产摘要必须有效；版本须高于当前版本。
     /// </summary>
     public static ReleaseInfo? PickRelease(JsonNode? root, string channel, NexusVersion currentVersion)
     {
@@ -42,7 +42,7 @@ internal static class UpdateCatalog
             {
                 continue;
             }
-            if (release["draft"]?.GetValue<bool>() == true)
+            if (release["draft"] is not JsonValue draft || !draft.TryGetValue<bool>(out bool isDraft) || isDraft)
             {
                 continue;
             }
@@ -51,7 +51,8 @@ internal static class UpdateCatalog
             {
                 continue;
             }
-            bool declaredPrerelease = release["prerelease"]?.GetValue<bool>() == true;
+            if (release["prerelease"] is not JsonValue prerelease || !prerelease.TryGetValue<bool>(out bool declaredPrerelease)
+                || release["id"] is not JsonValue releaseIdentity || !releaseIdentity.TryGetValue<long>(out long releaseId) || releaseId <= 0) continue;
             bool expectedPrerelease = NexusReleasePolicy.RequiresGitHubPrerelease(version);
             if (declaredPrerelease != expectedPrerelease)
             {
@@ -65,45 +66,50 @@ internal static class UpdateCatalog
             {
                 continue;
             }
-            string? zipUrl = null;
-            string? shaUrl = null;
-            if (release["assets"] is JsonArray assets)
+            string zipName = AppPaths.UpdatePackageZipName(Format(version));
+            JsonObject[] matching = (release["assets"] as JsonArray)?.OfType<JsonObject>()
+                .Where(item => item["name"]?.ToString() == zipName).ToArray() ?? [];
+            if (matching.Length != 1 || !TryReadAsset(matching[0], zipName, out UpdateReleaseAsset? asset)) continue;
+            string manifestName = $"NexusPipeline-v{Format(version)}-win-x64-update.json";
+            var assets = new Dictionary<string, UpdateReleaseAsset>(StringComparer.Ordinal);
+            UpdateReleaseAsset? targetManifest = null;
+            if ((release["assets"] as JsonArray)?.Any(item => item?["name"]?.ToString() == manifestName) == true)
             {
-                string zipName = AppPaths.UpdatePackageZipName(Format(version));
-                string shaName = AppPaths.UpdatePackageShaName(Format(version));
-                foreach (JsonNode? asset in assets)
+                if (release["assets"] is not JsonArray declaredAssets || declaredAssets.Any(item => item is not JsonObject)) continue;
+                bool valid = true;
+                var ids = new HashSet<long>();
+                foreach (JsonObject item in (release["assets"] as JsonArray)!.OfType<JsonObject>())
                 {
-                    if (asset is not JsonObject item)
-                    {
-                        continue;
-                    }
-                    string? name = item["name"]?.ToString();
-                    string? url = item["browser_download_url"]?.ToString();
-                    if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(url))
-                    {
-                        continue;
-                    }
-                    if (string.Equals(name, zipName, StringComparison.OrdinalIgnoreCase))
-                    {
-                        zipUrl = url;
-                    }
-                    else if (string.Equals(name, shaName, StringComparison.OrdinalIgnoreCase))
-                    {
-                        shaUrl = url;
-                    }
+                    string name = item["name"]?.ToString() ?? "";
+                    if (!TryReadAsset(item, name, out var parsed) || !assets.TryAdd(name, parsed!) || !ids.Add(parsed!.Id)) { valid = false; break; }
                 }
+                if (!valid || !assets.TryGetValue(manifestName, out targetManifest) || targetManifest.SizeBytes > UpdateTargetManifest.MaxBytes
+                    || !assets.ContainsKey($"NexusPipeline-v{Format(version)}-win-x64-setup.exe")
+                    || UpdateTargetManifest.ComponentIds.Any(id => !assets.ContainsKey($"NexusPipeline-v{Format(version)}-win-x64-{id}.zip"))) continue;
             }
-            if (zipUrl is null || shaUrl is null)
-            {
-                continue;
-            }
-            var candidate = new ReleaseInfo(version, tag!, release["name"]?.ToString() ?? "", release["body"]?.ToString() ?? "", declaredPrerelease, zipUrl, shaUrl);
+            var candidate = new ReleaseInfo(version, tag!, release["name"]?.ToString() ?? "", release["body"]?.ToString() ?? "",
+                declaredPrerelease, releaseId, asset!, targetManifest, assets);
             if (best is null || Compare(version, best.Version) > 0)
             {
                 best = candidate;
             }
         }
         return best;
+    }
+
+    internal static bool TryReadAsset(JsonObject item, string expectedName, out UpdateReleaseAsset? asset)
+    {
+        asset = null;
+        if (item["name"]?.ToString() != expectedName || item["state"]?.ToString() != "uploaded"
+            || item["id"] is not JsonValue idValue || !idValue.TryGetValue<long>(out long id) || id <= 0
+            || item["size"] is not JsonValue sizeValue || !sizeValue.TryGetValue<long>(out long size) || size <= 0 || size > MaxDownloadBytes
+            || item["digest"] is not JsonValue digestValue || !digestValue.TryGetValue<string>(out string? digest)
+            || digest is not { Length: 71 } || !digest.StartsWith("sha256:", StringComparison.Ordinal)
+            || digest[7..].Any(ch => ch is not (>= '0' and <= '9' or >= 'a' and <= 'f'))
+            || item["browser_download_url"] is not JsonValue urlValue || !urlValue.TryGetValue<string>(out string? url)
+            || !Uri.TryCreate(url, UriKind.Absolute, out Uri? uri) || uri.UserInfo.Length != 0 || uri.Fragment.Length != 0) return false;
+        asset = new(id, expectedName, url!, size, digest[7..]);
+        return true;
     }
 
     /// <summary>更新源校验：必须是 https；回环 http（127.0.0.1/::1/localhost）为测试预留。</summary>
@@ -151,8 +157,14 @@ internal sealed record ReleaseInfo(
     string Name,
     string Notes,
     bool Prerelease,
-    string ZipUrl,
-    string ShaUrl)
+    long ReleaseId,
+    UpdateReleaseAsset ZipAsset,
+    UpdateReleaseAsset? TargetManifestAsset = null,
+    IReadOnlyDictionary<string, UpdateReleaseAsset>? Assets = null,
+    UpdateTargetManifest? FrozenTarget = null)
 {
     public string VersionText => UpdateCatalog.Format(Version);
+    public string ZipUrl => ZipAsset.Url;
 }
+
+internal sealed record UpdateReleaseAsset(long Id, string Name, string Url, long SizeBytes, string Sha256);

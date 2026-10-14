@@ -83,8 +83,9 @@ describe("remote settings persistence", () => {
     await wrapper.get("#st-token").setValue("active-token");
     await flushPromises();
     await wrapper.get("#st-token").setValue("queued-old-token");
-    vi.spyOn(window, "confirm").mockReturnValue(true);
     const clear = wrapper.getComponent(SettingsRemoteAccessSection).props("clearToken")();
+    await flushPromises();
+    wrapper.findAllComponents(NxpConfirmDialog).find(dialog => dialog.props("open"))!.vm.$emit("confirm");
     await flushPromises();
     expect(fixture.api.mock.calls.some(args => (args[2] as any)?.secretValue === "")).toBe(false);
     release();
@@ -100,13 +101,17 @@ describe("remote settings persistence", () => {
   it("cancels revocation without side effects and reports uncertain writes", async () => {
     secret = "saved-token";
     await setup();
-    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
-    await wrapper.getComponent(SettingsRemoteAccessSection).props("clearToken")();
+    const cancelled = wrapper.getComponent(SettingsRemoteAccessSection).props("clearToken")();
+    await flushPromises();
+    wrapper.findAllComponents(NxpConfirmDialog).find(dialog => dialog.props("open"))!.vm.$emit("cancel");
+    await cancelled;
     expect(secret).toBe("saved-token");
     expect(fixture.api.mock.calls.filter(args => args[0] === "PUT")).toHaveLength(0);
-    confirm.mockReturnValue(true);
+    const clear = wrapper.getComponent(SettingsRemoteAccessSection).props("clearToken")();
+    await flushPromises();
     fixture.api.mockRejectedValueOnce(new Error("response-lost"));
-    await wrapper.getComponent(SettingsRemoteAccessSection).props("clearToken")();
+    wrapper.findAllComponents(NxpConfirmDialog).find(dialog => dialog.props("open"))!.vm.$emit("confirm");
+    await clear;
     await flushPromises();
     expect(wrapper.getComponent(SettingsRemoteAccessSection).props("tokenError")).toBe("settings.remote_access.clear_unconfirmed");
     expect(wrapper.get("#st-token").attributes()).toHaveProperty("disabled");

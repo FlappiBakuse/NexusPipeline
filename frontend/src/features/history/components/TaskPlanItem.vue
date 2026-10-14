@@ -23,7 +23,7 @@ const name = computed(() => props.task.nameText ? resolveTaskText(props.task.nam
 function label(group: string, value: string) { return t(`tasks.${group}.${value}`, {}, t(`tasks.${group}.unknown`)); }
 const status = computed(() => props.report?.finalTaskResults.find(result => result.taskId === props.task.id)?.status || 'pending');
 const engineStatus = computed(() => props.report?.finalTaskResults.find(result => result.taskId === props.task.id)?.engineStatus);
-const engineLabel = computed(() => engineStatus.value === 'succeeded'
+const engineLabel = computed(() => props.report?.resultBasis === 'framework-task-v1' ? taskStatusLabel(status.value, props.report) : engineStatus.value === 'succeeded'
   ? (getLocale().startsWith('zh') ? '上游报告完成 · 业务未核验' : 'Upstream completed · business unverified')
   : engineStatus.value === 'failed' ? (getLocale().startsWith('zh') ? '上游引擎失败' : 'Upstream engine failed') : '');
 const tone = computed(() => ['succeeded', 'skipped'].includes(status.value) ? 'ok' : status.value === 'failed' ? 'bad' : status.value === 'partial' ? 'warn' : status.value === 'running' ? 'blue' : 'muted');
@@ -48,12 +48,12 @@ watch(() => props.focusTaskId, id => {
 </script>
 
 <template>
-  <NxpCollapsibleCard class="task-card" :title="name" :expanded="expanded" :surface="depth % 2 === 0 ? 'secondary' : 'default'" :data-task-id="task.id" @toggle="expanded = $event">
+  <NxpCollapsibleCard class="task-card" :title="name" :expanded="expanded" :flatten-at-limit="true" :data-task-id="task.id" @toggle="expanded = $event">
     <template v-if="report" #actions><NxpBadge :tone="engineStatus === 'failed' ? 'bad' : tone">{{ engineLabel || taskStatusLabel(status, report) }}</NxpBadge></template>
     <div v-if="children.length" class="task-plan-children">
       <TaskPlanItem v-for="child in children" :key="child.id" :task="child" :tasks="tasks" :report="report" :display-snapshot="displaySnapshot" :focus-task-id="focusTaskId" :depth="depth + 1" :ancestors="[...ancestors, task.id]" />
     </div>
-    <dl v-else-if="!isParent" class="task-plan-facts" :class="{ 'is-light': depth % 2 === 1 }">
+    <dl v-else-if="!isParent" class="task-plan-facts">
       <div><dt>{{ t('tasks.detection') }}</dt><dd>{{ label('detection', task.detection) }}</dd></div>
       <div><dt>{{ t('tasks.risk') }}</dt><dd>{{ label('risk', task.retryRisk) }}</dd></div>
       <div><dt>{{ t('tasks.role') }}</dt><dd>{{ label('role', task.role) }}</dd></div>
@@ -71,7 +71,7 @@ watch(() => props.focusTaskId, id => {
           <figcaption>{{ getLocale().startsWith('zh') ? '结构化引擎证据' : 'Structured engine evidence' }}</figcaption>
           <pre>{{ JSON.stringify(report?.structuredEvidence?.find(item => item.id === id), null, 2) }}</pre>
         </figure>
-        <figure v-for="(evidence, index) in result.evidence" :key="`${evidence.sourceId}:${evidence.epoch}:${evidence.sequence}`" class="task-evidence" :class="{ 'is-light': depth % 2 === 0 }">
+        <figure v-for="(evidence, index) in result.evidence" :key="`${evidence.sourceId}:${evidence.epoch}:${evidence.sequence}`" class="task-evidence">
           <figcaption>{{ t('tasks.evidence') }} {{ index + 1 }} · {{ evidence.sourceId }} / {{ evidence.epoch }} / {{ evidence.sequence }}</figcaption>
           <pre>{{ evidenceText(attempt.attemptId, evidence) }}</pre>
         </figure>
@@ -89,15 +89,14 @@ watch(() => props.focusTaskId, id => {
 </template>
 
 <style scoped>
-.task-card { --nx-collapsible-header-height: 57.6px; --nx-collapsible-header-padding: 12.8px; --nx-collapsible-body-padding: 16px; }
+.task-card { --nx-collapsible-header-height: calc(var(--nx-control-height) + var(--nx-space-4)); --nx-collapsible-header-padding: var(--nx-space-3); --nx-collapsible-body-padding: var(--nx-space-4); }
 .task-attempt { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--nx-color-border); font-size: 12px; }
 .task-attempt p { line-height: 1.6; }
-.task-evidence { margin: 8px 0 0; padding: 10px; border: 1px solid var(--nx-color-border); border-radius: var(--radius-lg, var(--nx-radius-lg)); background: var(--content-card); }
-.task-evidence.is-light { background: var(--content-card-soft); }
+.task-evidence { margin: var(--nx-space-2) 0 0; padding: var(--nx-space-3) 0; border-top: 1px solid var(--nx-color-border); min-width: 0; }
 figcaption { color: var(--nx-color-muted); overflow-wrap: anywhere; }
 pre { margin: 8px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.6; }
 .task-plan-children { display: grid; gap: 8px; }
-.task-plan-facts { display: flex; flex-wrap: wrap; gap: 12px 24px; margin: 0; padding: 12px; border: 1px solid var(--nx-color-border); border-radius: var(--radius-lg, var(--nx-radius-lg)); background: var(--content-card); font-size: 12px; }
-.task-plan-facts.is-light { background: var(--content-card-soft); }
+.task-plan-facts { display: flex; flex-wrap: wrap; gap: 12px 24px; margin: 0; padding: 12px; border-top: 1px solid var(--nx-color-border); font-size: 12px; }
+.task-plan-facts > div { min-width: 0; overflow-wrap: anywhere; }
 dt { color: var(--nx-color-muted); } dd { margin: 5px 0 0; }
 </style>

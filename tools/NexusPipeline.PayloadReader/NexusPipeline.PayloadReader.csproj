@@ -8,7 +8,9 @@
     <Compile Include="../../src/Platform/Storage/BundleResourceReader.cs" Link="BundleResourceReader.cs" />
     <Compile Include="../../src/Modules/Updates/ApplicationPayload.cs" Link="ApplicationPayload.cs" />
     <Compile Include="../../src/Modules/Updates/ApplicationBuildIdentity.cs" Link="ApplicationBuildIdentity.cs" />
+    <Compile Include="../../src/Modules/Updates/UpdateInventory.cs" Link="UpdateInventory.cs" />
     <Compile Include="../../src/Shared/Versioning/NexusVersion.cs" Link="NexusVersion.cs" />
     <Compile Include="../../src/Platform/Storage/PayloadPathSafety.cs" Link="PayloadPathSafety.cs" />
+    <Compile Include="../../src/Platform/Storage/VerifiedFileDeletion.cs" Link="VerifiedFileDeletion.cs" />
   </ItemGroup>
 </Project>

@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "channels": {
+    "stable": { "previousPublishedTarget": null, "pendingTarget": null },
+    "prerelease": {
+      "previousPublishedTarget": null,
+      "pendingTarget": {
+        "releaseTag": "v0.17.3",
+        "manifestAssetName": "NexusPipeline-v0.17.3-win-x64-update.json",
+        "readerProtocol": 1,
+        "requiredCapabilities": ["payload-manifest-v1", "migration-snapshot-v1", "transaction-recovery-v1"]
+      }
+    }
+  },
+  "bridges": []
+}

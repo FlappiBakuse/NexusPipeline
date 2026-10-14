@@ -8,7 +8,7 @@ describe("NxpModal", () => {
     const trigger = document.createElement("button");
     document.body.append(trigger);
     trigger.focus();
-    const wrapper = mount(NxpModal, { attachTo: document.body, props: { open: true, title: "测试弹窗" }, slots: { default: "内容" } });
+    const wrapper = mount(NxpModal, { attachTo: document.body, props: { open: true, title: "测试弹窗" }, slots: { header: () => [h("input", { type: "file", tabindex: -1, style: "display: none" }), h("h2", "测试弹窗")], default: "内容" } });
     await nextTick();
     expect(document.activeElement).toBe(wrapper.get(".nxp-modal-close").element);
     expect(wrapper.get(".nxp-modal-backdrop").element.tagName).toBe("DIV");
@@ -29,6 +29,12 @@ describe("NxpModal", () => {
     await wrapper.get(".nxp-modal-close").trigger("click");
     expect(wrapper.emitted("close")).toHaveLength(1);
     const button = wrapper.get(".nxp-modal-footer button").element as HTMLButtonElement;
+    const outside = document.createElement("button");
+    document.body.append(outside);
+    outside.focus();
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }));
+    expect(document.activeElement).toBe(wrapper.get(".nxp-modal-close").element);
+    outside.remove();
     button.focus();
     await wrapper.trigger("keydown", { key: "Tab" });
     expect(document.activeElement).toBe(wrapper.get(".nxp-modal-close").element);

@@ -107,9 +107,9 @@ defineExpose({ focus: () => input.value?.focus() });
 .nxp-input:disabled { opacity: .55; }
 .nxp-input[aria-invalid="true"] { border-color: var(--nx-color-danger); box-shadow: 0 0 0 1px var(--nx-color-danger); }
 .nxp-password-input { position: relative; display: block; width: 100%; min-width: 0; }
-.nxp-password-input > .nxp-input { padding-right: calc(var(--nx-space-3) + 32px); }
+.nxp-password-input > .nxp-input { padding-right: calc(var(--nx-space-3) + 40px); }
 .nxp-password-input > .nxp-input::-ms-reveal { display: none; }
-.nxp-password-toggle { position: absolute; top: 50%; right: 4px; display: inline-flex; width: 32px; height: 32px; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: var(--nx-radius-sm); transform: translateY(-50%); background: transparent; color: var(--nx-color-muted); cursor: pointer; }
+.nxp-password-toggle { position: absolute; top: 50%; right: 4px; display: inline-flex; width: 40px; height: 40px; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: var(--nx-radius-sm); transform: translateY(-50%); background: transparent; color: var(--nx-color-muted); cursor: pointer; }
 .nxp-password-toggle:hover { background: var(--content-control-hover, var(--nx-color-surface)); color: var(--nx-color-text); }
 .nxp-password-toggle:focus-visible { outline: 2px solid var(--nx-color-accent); outline-offset: 1px; }
 .nxp-password-toggle-icon { width: 17px; height: 17px; }

@@ -23,7 +23,7 @@
 2. 按[测试命令](../testing/commands.md)执行默认质量门禁，并运行修改范围适用的 System Smoke；
 3. 确认 `git diff --check` 通过，工作树中没有运行产物、用户配置、日志、密钥和测试 runtime；
 4. 核对发布包只包含程序运行所需文件，用户配置和运行数据不进入资产；
-5. 确认 Release Notes 使用当前版本的真实变更，SHA 资产与 zip 一一对应。
+5. 确认 Release Notes 使用当前版本的真实变更，GitHub 资产 digest、尺寸与本地候选字节一致。
 
 ### 发布步骤
 
@@ -31,7 +31,7 @@
 
 以下步骤需要维护者明确授权：
 
-从受保护 `main` 手动选择 `operation=candidate` 的 Host 发布工作流按固定 source plan 依序执行 frontend、bundled、host、package-verify、installer 与 candidate 汇总作业；`source_ref` 必须是受保护 main 历史中的可达引用。candidate 不需要 tag：它用固定源码生成真实前端、生产 Host、桌面和预装插件，核验载荷并生成 ZIP 和 Setup。Inno Setup 6.7.3 的下载包与编译器分别验固定 SHA256；两种分发物及各自纯 SHA 侧文件进入同一 `host-candidate-<runId>-<attempt>`，候选清单还记录 ZIP/Setup 构建元数据。失败报告使用独立 diagnostics artifact；候选不会创建或移动 tag，也不会自行发布。
+从受保护 `main` 手动选择 `operation=candidate` 的 Host 发布工作流按固定 source plan 依序执行 frontend、bundled、host、package-verify、installer 与 candidate 汇总作业；`source_ref` 必须是受保护 main 历史中的可达引用。candidate 不需要 tag：它用固定源码生成真实前端、生产 Host、桌面和预装插件，核验载荷并生成 ZIP 和 Setup。Inno Setup 6.7.3 的下载包与编译器分别验固定 SHA256；两种分发物进入同一 `host-candidate-<runId>-<attempt>`，候选清单还记录 ZIP/Setup 构建元数据。失败报告使用独立 diagnostics artifact；候选不会创建或移动 tag，也不会自行发布。
 
 已有 tag 指向候选源码且候选 job 真正成功时，发布者可从 `main` 手动执行同包恢复：
 
@@ -39,9 +39,9 @@
 gh workflow run release.yml --ref main -f operation=publish-only -f tag=<已有 tag> -f candidate_run_id=<原候选 run ID>
 ```
 
-同一 run 出现多个成功候选 artifact 时，再传 `-f candidate_artifact_id=<服务端 artifact ID>`。独立 writer 核对原 attempt/job、服务端 artifact 摘要、候选清单、Git tree、现有 tag、ZIP 与 Setup 来源及摘要；只复用原候选，不重新编译。四个分发资产（ZIP、Setup 与各自 SHA 侧文件）采用固定白名单；同 tag 同资产不同字节拒绝覆盖，远端逐项读回通过后才公开 Release。仅在本地合成 run ID 打出的候选不能用于发布。
+同一 run 出现多个成功候选 artifact 时，再传 `-f candidate_artifact_id=<服务端 artifact ID>`。独立 writer 核对原 attempt/job、服务端 artifact 摘要、候选清单、Git tree、现有 tag、ZIP 与 Setup 来源及摘要；只复用原候选，不重新编译。公开资产白名单包含完整 ZIP、Setup、update.json 和 host-core、desktop-app、desktop-runtime 三个组件 ZIP；同 tag 同资产不同字节拒绝覆盖，远端逐项读回及 GitHub digest、尺寸、ID 核验通过后才公开 Release。仅在本地合成 run ID 打出的候选不能用于发布。
 
-新版本需先在受保护 `main` 的对应合并提交完成候选验收；获授权后才能创建并推送指向该提交的 tag。已有 tag 不因发布工具修复而移动。Release Notes 依据该 tag 的真实变更写入 UTF-8 无 BOM 文件；独立下载 ZIP/SHA 复核后，再按授权更新 Release 正文并检查更新可见性。控制工具修复通过正常源码 PR 和 `Host / 构建检查`；恢复始终使用原候选，已有资产必须字节一致。
+新版本需先在受保护 `main` 的对应合并提交完成候选验收；获授权后才能创建并推送指向该提交的 tag。已有 tag 不因发布工具修复而移动。Release Notes 依据该 tag 的真实变更写入 UTF-8 无 BOM 文件；独立下载 ZIP 并按服务端 digest 复核后，再按授权更新 Release 正文并检查更新可见性。控制工具修复通过正常源码 PR 和 `Host / 构建检查`；恢复始终使用原候选，已有资产必须字节一致。
 
 ### 资产与 SHA 规则
 
@@ -51,7 +51,7 @@ gh workflow run release.yml --ref main -f operation=publish-only -f tag=<已有 
 | Release 标题 | `vX.Y.Z` |
 | Pre-release | `major=0` 或版本带 `-beta.N` / `-rc.N` 后缀时使用 `--prerelease` |
 | zip 资产 | `NexusPipeline-vX.Y.Z[-beta.N|-rc.N]-win-x64.zip` |
-| SHA 资产 | 对应 zip 文件名追加 `.sha256` |
+| 资产完整性 | GitHub Release API 的 `asset.digest=sha256:<64 位摘要>`、资产 ID 和尺寸 |
 
 发布包采用扁平根布局：
 
@@ -91,23 +91,17 @@ Setup 使用现役目录与实例归属校验决定首次、覆盖和保留数�
 
 “闲时自动更新”与“定期检查更新”同时开启时，宿主在每次启动恢复完成后、初始化服务前检查更新；检查预算为 30 秒、下载预算为 5 分钟，若发现可安全应用的新版本或已有 `Ready` 暂存就先应用再启动。失败或超时会继续启动当前版本，同一目标自动失败后冷却 12 小时；无法安全完成更新恢复时停止服务启动。运行期原有等待闲时应用和手动检查、下载、应用流程继续生效。单独的“插件自动更新”开关会在插件事务恢复与加载前暂存所有符合 catalog 的已安装插件（包括已禁用项；手动安装项须与 catalog artifact 精确匹配），运行期每 12 小时检查并在维护租约空闲后安排安全重启；插件启用偏好保留。
 
-SHA 文件内容为纯 hash，不含文件名和空格，使用 UTF-8 无 BOM。PowerShell 示例：
+从 v0.17.3 起，发布包与安装器不生成或上传独立 SHA 附件。候选清单与构建元数据保存本地摘要，writer 上传后逐项核对 GitHub 的资产 ID、唯一名称、`uploaded` 状态、尺寸、`digest`，再下载校验原字节。缺少服务端摘要时拒绝公开 Release。
 
-```powershell
-$zip = "NexusPipeline-vX.Y.Z-win-x64.zip"
-Get-FileHash $zip -Algorithm SHA256 | ForEach-Object { $_.Hash.ToLower() } |
-    Set-Content -Path "$zip.sha256" -Encoding ascii -NoNewline
-```
+更新器只接受服务端摘要完整的 ZIP，逐块检查尺寸和 SHA256。缺失、重复、类型错误或不匹配的资产不能下载应用。下载后生成的本地校验收据用于现役恢复事务，不能作为独立发行附件上传。
 
-更新引擎可见性自检：
+v0.17.2 及更早版本要求 SHA 附件，用户首次进入此更新格式需手动使用完整 ZIP 或 Setup 安装 v0.17.3。此桥接限制写入对应 Release Notes；不为旧客户端保留 SHA 附件，也不以移除屏障绕过安装代次限制。
 
-- Release 必须同时具备 zip 与 sha256 资产；缺少任一项时更新清单会跳过该版本；
-- 上传后在本机设置页点击「检查更新」，或调用 `POST /api/update/check`，确认更新源识别到刚发布的 tag 与两项资产；
-- 无法以管理员上下文启动宿主时，用 `gh release view vX.Y.Z --json tagName,isPrerelease,assets` 核对发布列表、tag 与 Pre-release 分类、资产命名、资产摘要和 zip 根布局。
+更新可见性自检使用 GitHub Release API 核对 tag、Pre-release 分类与资产身份，再在设置页检查更新；本地隔离源必须提供相同资产字段，不能只提供下载 URL。
 
 ### 更新策略与破坏性版本屏障
 
-`update-policy.json` 位于仓库根目录，桥接版本发布时保持有效。未来改变更新器无法安全处理的安装布局前，在该文件的 `barriers` 数组追加一条按版本递增的记录：
+`metadata/updates/legacy-policy.json` 是旧更新屏障的 canonical；根目录 `update-policy.json` 继续作为已发布客户端固定 URL 的真实 JSON 投影。编辑 canonical 后运行 `python tools/update_metadata.py generate`，通过正常 PR 同时提交两份字节一致的文件。未来改变更新器无法安全处理的安装布局前，在 canonical 的 `barriers` 数组追加一条按版本递增的记录：
 
 ```json
 {
@@ -117,9 +111,9 @@ Get-FileHash $zip -Algorithm SHA256 | ForEach-Object { $_.Hash.ToLower() } |
 }
 ```
 
-版本必须使用当前受限格式，`code` 使用小写字母、数字、点、下划线或连字符，`migrationUrl` 使用 HTTPS。宿主从桥接版本开始检查当前版本到目标版本之间的所有屏障；命中后保留更新发现结果，禁止内置下载、启动前自动应用、下次启动应用和闲时自动应用，页面显示手动下载安装包与迁移配置的指引。策略文件使用独立的 policy URI 安全域：默认源固定为官方仓库 main 分支的 `update-policy.json`，自定义源使用同源地址，重定向继续按 policy 规则校验。策略文件无法验证时同样禁止内置下载，页面显示策略暂不可验证。仓库根目录策略文件由生产解析器校验。barrier 历史只追加，既有记录不删除、不修改、不重排。发布破坏性版本前需先提交策略文件，再发布对应版本，并在 Release Notes 写明迁移步骤。
+版本必须使用当前受限格式，`code` 使用小写字母、数字、点、下划线或连字符，`migrationUrl` 使用 HTTPS。宿主从桥接版本开始检查当前版本到目标版本之间的所有屏障；命中后保留更新发现结果，禁止内置下载、启动前自动应用、下次启动应用和闲时自动应用，页面显示手动下载安装包与迁移配置的指引。策略文件使用独立的 policy URI 安全域：默认源固定为官方仓库 main 分支的 `metadata/updates/legacy-policy.json`，已发布客户端继续读取字节一致的根投影，自定义源使用同源地址，重定向继续按 policy 规则校验。策略文件无法验证时同样禁止内置下载，页面显示策略暂不可验证。生产检查校验 canonical/投影一致性及屏障历史前缀。barrier 历史只追加，既有记录不删除、不修改、不重排。发布破坏性版本前需先提交策略文件，再发布对应版本，并在 Release Notes 写明迁移步骤。
 
-v0.17.0 的 `desktop-shell-embedded-ui` 屏障必须在公开 ZIP、Setup 及 SHA 资产前从官方 main 策略入口回读，记录实际 source SHA 和原文摘要。屏障和新目录安装指南经过受保护 PR 合入后，使用隔离的真实 v0.16.15 发布物确认跨入 v0.17.0、跳到 v0.17.1 均返回 `manualUpdateRequired`、`breaking-update`、`barrierVersion=0.17.0` 和迁移说明，并拒绝下载和应用。保留旧目录及原始用户数据；v0.17.0 到同代后续补丁仍支持普通更新。候选构建、tag 和资产发布依此顺序推进，不把本地策略测试当作公开入口已生效。
+v0.17.0 的 `desktop-shell-embedded-ui` 屏障必须在公开 ZIP、Setup 资产前从官方 main 策略入口回读，记录实际 source SHA 和原文摘要。屏障和新目录安装指南经过受保护 PR 合入后，使用隔离的真实 v0.16.15 发布物确认跨入 v0.17.0、跳到 v0.17.1 均返回 `manualUpdateRequired`、`breaking-update`、`barrierVersion=0.17.0` 和迁移说明，并拒绝下载和应用。保留旧目录及原始用户数据；v0.17.0 到同代后续补丁仍支持普通更新。候选构建、tag 和资产发布依此顺序推进，不把本地策略测试当作公开入口已生效。
 
 ### Release Notes 格式
 
@@ -135,7 +129,7 @@ v0.17.0 的 `desktop-shell-embedded-ui` 屏障必须在公开 ZIP、Setup 及 SH
 ### 另一个分组
 - 要点一
 
-SHA256：见附件对应版本的 `.sha256` 校验文件
+完整性：见 GitHub Release API 对应资产的 SHA256 digest；旧客户端首次安装 v0.17.3 请使用完整 ZIP 或 Setup。
 ```
 
 按用户价值或工程主题分组，列出可核对的结果。版本历史的完整记录进入 [CHANGELOG.md](../../CHANGELOG.md)。
@@ -151,8 +145,8 @@ SHA256：见附件对应版本的 `.sha256` 校验文件
 
 - 将发布版本的已知问题状态同步到 [STATUS.md](../STATUS.md)，并移出已完成计划；
 - 确认远端 Release 资产上传成功、下载复核和 SHA256 校验全部通过；
-- 完成确认后，清理项目内本次发布的 zip、`.sha256`、Release Notes 临时文件和打包暂存目录；
-- 清理仅针对当前项目内已核对的精确路径，不删除源码、测试、插件、用户运行数据或后续开发所需目录；
+- 完成确认后，按实际验收与发布闭环清理外部临时目录中的可重建产物；
+- 清理仅针对已核对归属和使用状态的精确路径，不删除源码、测试、插件、用户运行数据或后续开发所需目录；
 - 仓库外原字节检查点和失败证据按实际发布闭环及目录归属处理；标签删除另需授权。
 
 本机 `local-acceptance` receipt 的 `producer=local`、`publishable=false` 不具备候选资格，不传给 publish-only。维护者确认源与行为后，按实际授权提交干净源码，再从受保护 main 手动生成正式候选。

@@ -6,6 +6,8 @@ namespace NexusPipeline.Modules.Updates;
 internal enum UpdateResourceKind
 {
     Manifest,
+    Discovery,
+    ReleaseMetadata,
     Policy,
     ReleaseAsset,
 }
@@ -16,6 +18,8 @@ internal sealed class UpdateSourcePolicy
     private readonly RemoteResourcePolicy _manifest;
     private readonly RemoteResourcePolicy _policy;
     private readonly RemoteResourcePolicy _asset;
+    private readonly RemoteResourcePolicy _discovery;
+    private readonly RemoteResourcePolicy _releaseMetadata;
     private readonly bool _isDefaultSource;
 
     public Uri SourceUri { get; }
@@ -33,10 +37,12 @@ internal sealed class UpdateSourcePolicy
         }
 
         SourceUri = uri;
-        _isDefaultSource = string.IsNullOrWhiteSpace(sourceUrl);
+        _isDefaultSource = string.IsNullOrWhiteSpace(sourceUrl) || source == UpdateRemoteResourceRules.DefaultSourceUrl;
         _manifest = new RemoteResourcePolicy(UpdateRemoteResourceRules.Create(uri, _isDefaultSource, UpdateResourceKind.Manifest));
         _policy = new RemoteResourcePolicy(UpdateRemoteResourceRules.Create(uri, _isDefaultSource, UpdateResourceKind.Policy));
         _asset = new RemoteResourcePolicy(UpdateRemoteResourceRules.Create(uri, _isDefaultSource, UpdateResourceKind.ReleaseAsset));
+        _discovery = new RemoteResourcePolicy(UpdateRemoteResourceRules.Create(uri, _isDefaultSource, UpdateResourceKind.Discovery));
+        _releaseMetadata = new RemoteResourcePolicy(UpdateRemoteResourceRules.Create(uri, _isDefaultSource, UpdateResourceKind.ReleaseMetadata));
     }
 
     public string? ValidateManifestUri(Uri uri) => _manifest.ValidateUri(uri);
@@ -59,7 +65,7 @@ internal sealed class UpdateSourcePolicy
         RemoteResourcePolicy policy = PolicyFor(resourceKind);
         Action<HttpRequestMessage> configure = request =>
         {
-            if (resourceKind is UpdateResourceKind.Manifest or UpdateResourceKind.Policy)
+            if (resourceKind is UpdateResourceKind.Manifest or UpdateResourceKind.Policy or UpdateResourceKind.Discovery or UpdateResourceKind.ReleaseMetadata)
             {
                 request.Headers.TryAddWithoutValidation("Accept", "application/vnd.github+json");
             }
@@ -72,6 +78,8 @@ internal sealed class UpdateSourcePolicy
         => resourceKind switch
         {
             UpdateResourceKind.Manifest => _manifest,
+            UpdateResourceKind.Discovery => _discovery,
+            UpdateResourceKind.ReleaseMetadata => _releaseMetadata,
             UpdateResourceKind.Policy => _policy,
             UpdateResourceKind.ReleaseAsset => _asset,
             _ => throw new ArgumentOutOfRangeException(nameof(resourceKind), resourceKind, null),

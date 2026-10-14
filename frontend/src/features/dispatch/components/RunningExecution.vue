@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { vNxpSurface } from "../../../ui/surface";
 import { nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { t } from "../../../platform/i18n";
 import NxpBadge from "../../../ui/primitives/NxpBadge.vue";
@@ -165,7 +166,7 @@ function recordMode(record: DispatchRunningRecord) {
   <div id="system-action-area">
     <SystemActionCard v-if="systemAction && systemAction.action !== 'exit'" :action="systemAction" @cancelled="emit('cancelled')" />
   </div>
-  <section ref="root" id="dispatch-running" class="content-section list-surface" data-testid="dispatch-running">
+  <section v-nxp-surface ref="root" id="dispatch-running" class="content-section list-surface" data-testid="dispatch-running">
     <div class="section-heading">
       <h3>{{ t("common.running") }} ({{ running.length }})</h3>
       <span class="muted">{{ t("dispatch.updates_every_second") }}</span>

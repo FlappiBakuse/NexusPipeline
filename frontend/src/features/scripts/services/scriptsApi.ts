@@ -13,6 +13,28 @@ export function createScript(payload: unknown): Promise<unknown> {
 export function updateScript(id: string, payload: unknown): Promise<unknown> {
   return api("PUT", `/api/scripts/${encodeURIComponent(id)}`, payload);
 }
+export interface ProviderConfigurationStatus {
+  operationId: string;
+  userId?: string;
+  scriptId: string;
+  state: string;
+  revision: string;
+  errorCode: string;
+  cleanupConfirmed: boolean;
+  progress: { code?: string };
+}
+export function saveProviderConfiguration(operationId: string, script: unknown, configuration: unknown): Promise<ProviderConfigurationStatus> {
+  return api("POST", "/api/provider-configurations", { operationId, script, configuration });
+}
+export function getProviderConfiguration(operationId: string): Promise<ProviderConfigurationStatus> {
+  return api("GET", `/api/provider-configurations/${encodeURIComponent(operationId)}`);
+}
+export function listProviderConfigurations(): Promise<ProviderConfigurationStatus[]> {
+  return api("GET", "/api/provider-configurations");
+}
+export function cancelProviderConfiguration(operationId: string): Promise<unknown> {
+  return api("POST", `/api/provider-configurations/${encodeURIComponent(operationId)}/cancel`, {});
+}
 export function deleteScript(id: string): Promise<unknown> {
   return api("DELETE", `/api/scripts/${encodeURIComponent(id)}`);
 }

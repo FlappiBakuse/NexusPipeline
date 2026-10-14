@@ -16,6 +16,10 @@ export function currentTaskReport(report?: TaskReport): boolean {
 
 export function taskStatusLabel(status: string, report?: TaskReport): string {
   if (report && !currentTaskReport(report)) return t('tasks.unsupported_report');
+  if (report?.resultBasis === 'framework-task-v1' && providerTaskReport(report)) {
+    const labels: Record<string, [string, string]> = { succeeded: ['任务完成（框架结果）', 'Task completed (framework result)'], failed: ['框架任务失败', 'Framework task failed'], pending: ['未执行', 'Not started'] };
+    if (labels[status]) return labels[status][getLocale().startsWith('zh') ? 0 : 1];
+  }
   return t(`tasks.${dailyTaskReport(report) ? 'daily_status' : 'status'}.${status}`, {}, t(`tasks.status.${status}`));
 }
 

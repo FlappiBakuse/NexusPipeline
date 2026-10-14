@@ -24,7 +24,7 @@ export function ownerOf(file) {
     return "Frontend";
   }
   if (parts.length === 1 && file.endsWith(".md") && file !== "AGENTS.md") return "Docs";
-  return ({ desktop: "Desktop", tests: "Tests", docs: "Docs", tools: "Tools" })[parts[0]] || "Repository";
+  return ({ desktop: "Desktop", tests: "Tests", docs: "Docs", tools: "Tools", metadata: "Distribution", contracts: "Contracts" })[parts[0]] || "Repository";
 }
 
 export function pathRule(root, change, baseSha) {
@@ -35,7 +35,7 @@ export function pathRule(root, change, baseSha) {
   if (/^(config|data|history|logs|\.nxp|release|\.generated|\.artifacts)\//.test(file)
       || !file.startsWith("tests/fixtures/") && /(^|\/)(node_modules|bin|obj)\//.test(file))
     return { ...result, status: "FAIL", reason: "Runtime/build output is not source" };
-  const jsonRole = !file.endsWith(".json") || /^(tests\/fixtures\/|frontend\/public\/i18n\/|tools\/schemas\/)/.test(file)
+  const jsonRole = !file.endsWith(".json") || /^(tests\/fixtures\/|frontend\/public\/i18n\/|tools\/schemas\/|metadata\/updates\/|contracts\/updates\/)/.test(file)
     || file === "docs/map.json" || /^(src|frontend|desktop)\/.*\/(?:i18n|schemas)\//.test(file);
   if (baseSha && (owner.startsWith("Modules/") || owner.startsWith("Frontend/features/"))) {
     const directory = owner.startsWith("Modules/") ? "src/" + owner : "frontend/src/features/" + owner.split("/").at(-1);
@@ -116,15 +116,15 @@ export function checkChanges(root, evidence, options = {}) {
     }
     if (/^frontend\/src\/ui\/(primitives|composites)\/.*\.vue$/.test(change.path) && ["A", "C", "R"].includes(change.status))
       rules.push({ rule: "GOV-UI-01", status: "REVIEW", file: change.path, reason: options.uiReason || "Inspect registry candidates and record why they cannot be reused" });
-    if (/^(src\/NexusPipeline\.csproj|src\/NexusPipeline.Plugin.Abstractions\/|version\.json|update-policy\.json|desktop\/package(?:-lock)?\.json)/.test(change.path))
+    if (/^(src\/NexusPipeline\.csproj|src\/NexusPipeline.Plugin.Abstractions\/|version\.json|update-policy\.json|metadata\/updates\/|contracts\/updates\/|desktop\/package(?:-lock)?\.json)/.test(change.path))
       rules.push({ rule: "GOV-VER-01", status: "REVIEW", file: change.path, reason: "Check explicit version/contract authorization; tool cannot infer it" });
-    if (options.governanceOnly && /^(src\/|frontend\/src\/|desktop\/|version\.json|update-policy\.json)/.test(change.path))
+    if (options.governanceOnly && /^(src\/|frontend\/src\/|desktop\/|version\.json|update-policy\.json|metadata\/updates\/|contracts\/updates\/)/.test(change.path))
       rules.push({ rule: "GOV-VER-01", status: "FAIL", file: change.path, reason: "Explicit governance-only scope excludes product/contract/version source changes" });
   }
   if (options.architectureCurrent) rules.push(architectureDelta(options.architectureCurrent, options.architectureBaseline));
   const context = contextFor(root, { ...options, paths: changes.map(change => change.path) });
   if (options.partnerRoot) for (const [actual, expected] of [[context.partner.lock.hostApiVersion, context.apiFacts.pluginApi], [context.partner.lock.frontendApiVersion, context.apiFacts.frontendApi]])
-    rules.push({ rule: "GOV-DOC-01", status: !expected ? "NOT_CHECKED" : actual === expected ? "PASS" : "FAIL", file: "host.lock.json", repository: "Plugins", actual, expected });
+    rules.push({ rule: "GOV-DOC-01", status: !expected ? "NOT_CHECKED" : actual === expected ? "PASS" : "FAIL", file: "contracts/host-compatibility.json", repository: "Plugins", actual, expected });
   return { schemaVersion: 1, repository: "Host", ...evidence, changes, workingTreeIncluded: Boolean(options.workingTree),
     sourceFingerprint: options.workingTree ? sourceFingerprint(root) : null,
     owners: [...owners].sort(), rules, status: aggregate(rules), context,

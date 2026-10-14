@@ -43,7 +43,9 @@ internal static class RunOutcomeProjector
                 _ => "pending",
             };
         // Authenticated engine events are not independent business verification.
-        if (semantics == TaskReportSemantics.ProviderExecution) business = "unverified";
+        if (semantics == TaskReportSemantics.ProviderExecution)
+            business = report?["instanceJudgement"]?["status"]?.GetValue<string>() switch {
+                "success" => "verified_succeeded", "partial" => "partial", "failed" => "verified_failed", _ => "unverified" };
         string recovery = recoveryFailed ? "quarantined" : configPrepared ? "restored" : "not_required";
         return new(engine, business, execution, recovery);
     }

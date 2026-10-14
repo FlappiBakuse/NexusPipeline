@@ -8,7 +8,8 @@ internal static class ProviderPlanPolicy
 {
     internal static void Validate(string projectRoot, PluginProviderPlan plan)
     {
-        if (string.IsNullOrWhiteSpace(plan.PlanId) || string.IsNullOrWhiteSpace(plan.ConfigRevision)
+        if (plan.ResultBasis is not ("legacy-provider" or "framework-task-v1")
+            || string.IsNullOrWhiteSpace(plan.PlanId) || string.IsNullOrWhiteSpace(plan.ConfigRevision)
             || string.IsNullOrWhiteSpace(plan.AuthorizationFingerprint) || plan.Tasks.Count > 1024
             || plan.Resources.Count > 64 || Encoding.UTF8.GetByteCount(JsonSerializer.Serialize(plan)) > 1024 * 1024
             || plan.Tasks.Any(t => string.IsNullOrWhiteSpace(t.Id) || t.Id.Length > 128 || t.Name.Length > 512)

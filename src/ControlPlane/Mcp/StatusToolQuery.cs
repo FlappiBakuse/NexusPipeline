@@ -106,6 +106,10 @@ internal sealed class StatusToolQuery
             status.BarrierVersion,
             status.MigrationUrl,
             status.PolicyError,
+            lastApplyFailure = status.LastApplyFailure?.ToPublicView(),
+            pendingVersion = status.PendingVersion,
+            pendingStatus = status.PendingStatus,
+            pendingError = status.PendingError,
             automation = new
             {
                 checkEnabled = automation.CheckEnabled,

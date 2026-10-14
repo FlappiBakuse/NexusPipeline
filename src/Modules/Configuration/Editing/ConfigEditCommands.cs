@@ -1039,7 +1039,7 @@ internal sealed partial class ConfigEditCommands
         // 专项快照按用户绑定输入实例化：接管哪个配置文件/实例目录是用户级选择
         ResolvedScriptSpec spec = _specResolver.Resolve(
             declaration,
-            inputOverrides ?? binding.Binding.ConfigInputs);
+            inputOverrides ?? binding.Binding.ConfigInputs, binding.UserId, binding.Binding.ExecutionProviderConfigRevision);
         if (!spec.Succeeded)
         {
             return Validation<ConfigEditTarget>(spec.Error ?? "脚本有效配置解析失败");

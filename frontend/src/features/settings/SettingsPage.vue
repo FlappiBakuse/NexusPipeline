@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import NxpConfirmDialog from "../../ui/composites/NxpConfirmDialog.vue";
+import { useConfirmation } from "../../ui/confirmation";
+const { message: confirmMessage, confirm, resolve: resolveConfirm } = useConfirmation();
 import {
   computed,
   nextTick,
@@ -22,6 +25,7 @@ import { useShellStore } from "../../stores/shell";
 import { toast } from "../../platform/toast";
 import type { NxpOption } from "../../ui/primitives/NxpSelect.vue";
 import NxpEmptyState from "../../ui/primitives/NxpEmptyState.vue";
+import NxpButton from "../../ui/primitives/NxpButton.vue";
 import NxpPageHeader from "../../ui/composites/NxpPageHeader.vue";
 import NxpCollapsibleCard from "../../ui/composites/NxpCollapsibleCard.vue";
 import NxpSwitchSetting from "../../ui/composites/NxpSwitchSetting.vue";
@@ -373,7 +377,8 @@ async function readToken() {
 }
 async function clearToken() {
   if (tokenClearing.value || tokenUnconfirmed.value) return;
-  if (!window.confirm(t("settings.remote_access.clear_confirm"))) return;
+  if (!await confirm(t("settings.remote_access.clear_confirm"))) return;
+  if (disposed || tokenClearing.value || tokenUnconfirmed.value) return;
   tokenClearing.value = true;
   tokenReadController?.abort();
   tokenReading.value = false;
@@ -529,7 +534,7 @@ onBeforeUnmount(() => {
       />
       <ServiceRestartNotice :before-restart="beforeRestart" />
       <nav class="settings-categories" :aria-label="t('settings.categories')">
-        <button v-for="category in categories" :key="category.id" type="button" :aria-pressed="panelExpanded(category.id)" @click="togglePanel(category.id)">{{ category.label }}</button>
+        <NxpButton v-for="category in categories" :key="category.id" type="button" :aria-pressed="panelExpanded(category.id)" @click="togglePanel(category.id)">{{ category.label }}</NxpButton>
       </nav>
       <div class="settings-cards" data-testid="settings-cards">
         <SettingsServiceSection
@@ -635,4 +640,5 @@ onBeforeUnmount(() => {
       ></div>
     </template>
   </main>
+  <NxpConfirmDialog :open="Boolean(confirmMessage)" :title="t('common.confirm')" :message="confirmMessage" :confirm-label="t('common.confirm')" :cancel-label="t('common.cancel')" @confirm="resolveConfirm(true)" @cancel="resolveConfirm(false)" @close="resolveConfirm(false)" />
 </template>

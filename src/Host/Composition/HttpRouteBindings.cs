@@ -1,3 +1,4 @@
+using NexusPipeline.Modules.Scripts.Contracts;
 using NexusPipeline.ControlPlane.Http.Services;
 using NexusPipeline.ControlPlane.Http;
 using NexusPipeline.Modules.Settings.UseCases;
@@ -66,10 +67,12 @@ internal sealed class HttpRouteBindings : IHttpRouteBindings
         ScriptFileBrowser scriptFileBrowser,
         NexusPipeline.Modules.Users.Contracts.ITaskQueryProjection taskQueries,
         NexusPipeline.ControlPlane.Http.Static.IFrontendAssetProvider frontendAssets,
-        NexusPipeline.Modules.ClientSessions.ClientSessionService clientSessions)
+        NexusPipeline.Modules.ClientSessions.ClientSessionService clientSessions,
+        IProviderConfigurationOperations? providerConfigurations = null)
     {
         FrontendAssets = frontendAssets;
         ClientSessions = clientSessions;
+        _providerConfigurations = providerConfigurations;
         Routes = ApiRouteCatalog.Bind(typeof(WebServer).Assembly, Array.Empty<object>());
         SettingsCommands = settingsCommands;
         ScriptCommands = scriptCommands;
@@ -111,6 +114,8 @@ internal sealed class HttpRouteBindings : IHttpRouteBindings
     public SettingsCommands SettingsCommands { get; }
 
     public ScriptCommands ScriptCommands { get; }
+    private readonly IProviderConfigurationOperations? _providerConfigurations;
+    public IProviderConfigurationOperations ProviderConfigurations => _providerConfigurations ?? throw new NotSupportedException();
 
     public QueueCommands QueueCommands { get; }
 
