@@ -262,8 +262,7 @@ internal sealed class Bootstrap
     {
         if (CanRequestDirectExit(out string reasonCode))
         {
-            System.Windows.Forms.Application.Exit();
-            return true;
+            return ApplicationHost.IsWebOnly ? _requestWebOnlyExit() : _requestServiceExit();
         }
         string reason = LocalizeExitReason(reasonCode);
         Logger.Warn(LocalizeExitLog(
@@ -297,8 +296,7 @@ internal sealed class Bootstrap
                 reasonCode));
             return false;
         }
-        System.Windows.Forms.Application.Exit();
-        return true;
+        return ApplicationHost.IsWebOnly ? _requestWebOnlyExit() : _requestServiceExit();
     }
 
     /// <summary>统一的服务重启入口，供 Web、CLI 间接调用和 MCP 共享原子维护租约。</summary>
