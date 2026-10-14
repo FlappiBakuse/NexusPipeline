@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { vNxpSurface } from "../../ui/surface";
 import NxpConfirmDialog from "../../ui/composites/NxpConfirmDialog.vue";
 import { useConfirmation } from "../../ui/confirmation";
 const { message: confirmMessage, confirm, resolve: resolveConfirm } = useConfirmation();
@@ -338,7 +339,7 @@ watch(historyVisible, visible => { if (visible) void loadHistorySummary(); else 
         <NxpEmptyState v-if="editor.committed && !visibleCards.length" :title="t('dashboard.layout.none')" :description="t('dashboard.layout.empty_help')" />
         <div v-if="visibleCards.length" class="dashboard-card-grid">
         <template v-for="cardId in visibleCards" :key="cardId">
-        <section v-if="cardId === 'core:status'" id="dashboard-state" class="dashboard-state dashboard-wide-card" :class="(status.running || []).length ? 'running' : 'idle'" data-testid="dashboard-state" aria-live="polite">
+        <section v-nxp-surface v-if="cardId === 'core:status'" id="dashboard-state" class="dashboard-state dashboard-wide-card" :class="(status.running || []).length ? 'running' : 'idle'" data-testid="dashboard-state" aria-live="polite">
           <div class="dashboard-state-copy"><div class="state-label">{{ (status.running || []).length ? t("common.running") : t("dashboard.system_idle") }}</div><h3>{{ (status.running || []).length ? t("dashboard.task_in_progress") : t("dashboard.everything_is_ready") }}</h3><p>{{ (status.running || []).length ? t("dashboard.running.summary", { count: (status.running || []).length }) : t("dashboard.running.empty_help") }}</p></div>
         </section>
         <NxpCard v-else-if="cardId === 'core:running'" class="content-section list-surface dashboard-wide-card" data-testid="running-panel">

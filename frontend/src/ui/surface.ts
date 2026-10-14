@@ -1,17 +1,15 @@
-import { onBeforeUnmount, onMounted, watch, type Ref } from "vue";
+import { onBeforeUnmount, onMounted, watch, type Ref, type Directive } from "vue";
 
 type Surface = { element: HTMLElement; flatten: () => boolean };
-const surfaces = new Set<Surface>();
+const surfaces = new Map<HTMLElement, Surface>();
+const dirty = new Set<Surface>();
 let observer: MutationObserver | undefined;
 let scheduled = false;
 
 function refresh() {
   scheduled = false;
-  const ordered = [...surfaces].filter(surface => surface.element.isConnected);
-  const registered = new Set(ordered.map(surface => surface.element));
-  for (const element of document.querySelectorAll<HTMLElement>(".card, .section-surface, .list-surface, .table-surface, .dashboard-state")) {
-    if (!registered.has(element)) ordered.push({ element, flatten: () => false });
-  }
+  const ordered = [...dirty].filter(surface => surfaces.get(surface.element) === surface && surface.element.isConnected);
+  dirty.clear();
   ordered.sort((a, b) => a.element === b.element ? 0 : a.element.compareDocumentPosition(b.element) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1);
   for (const { element, flatten } of ordered) {
     let depth = 0;
@@ -31,37 +29,63 @@ function refresh() {
 }
 
 function schedule() {
-  if (scheduled) return;
+  if (scheduled || !dirty.size) return;
   scheduled = true;
   queueMicrotask(refresh);
 }
 
-export function useSurface(root: Ref<HTMLElement | null>, flatten: () => boolean = () => false) {
-  let active: Surface | undefined;
-  function release() {
-    if (active) {
-      surfaces.delete(active);
-      delete active.element.dataset.nxpSurfaceKind;
-      delete active.element.dataset.nxpSurfaceDepth;
-      delete active.element.dataset.nxpSurfaceTone;
-    }
-    active = undefined;
-    if (!surfaces.size) { observer?.disconnect(); observer = undefined; }
+function invalidateSubtree(node: Node) {
+  if (!(node instanceof Element)) return;
+  const active = surfaces.get(node as HTMLElement);
+  if (active) dirty.add(active);
+  for (const element of node.querySelectorAll<HTMLElement>("[data-nxp-surface-kind]")) {
+    const descendant = surfaces.get(element);
+    if (descendant) dirty.add(descendant);
   }
+  schedule();
+}
+
+function registerSurface(element: HTMLElement, flatten: () => boolean = () => false) {
+  const active = { element, flatten };
+  surfaces.set(element, active);
+  // Detached registrations must be discoverable when their containing subtree is inserted later.
+  element.dataset.nxpSurfaceKind = "card";
+  // Public light-DOM elements have separate Vue apps, so ancestry follows the rendered tree.
+  if (!observer) {
+    observer = new MutationObserver(records => {
+      for (const record of records) {
+        for (const node of record.addedNodes) invalidateSubtree(node);
+        for (const node of record.removedNodes) invalidateSubtree(node);
+      }
+    });
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+  }
+  invalidateSubtree(element);
+  return () => {
+    surfaces.delete(element);
+    dirty.delete(active);
+    delete element.dataset.nxpSurfaceKind;
+    delete element.dataset.nxpSurfaceDepth;
+    delete element.dataset.nxpSurfaceTone;
+    if (!surfaces.size) { observer?.disconnect(); observer = undefined; }
+    else invalidateSubtree(element);
+  };
+}
+
+const registrations = new WeakMap<HTMLElement, () => void>();
+export const vNxpSurface: Directive<HTMLElement> = {
+  mounted(element) { registrations.set(element, registerSurface(element)); },
+  unmounted(element) { registrations.get(element)?.(); registrations.delete(element); },
+};
+
+export function useSurface(root: Ref<HTMLElement | null>, flatten: () => boolean = () => false) {
+  let release: (() => void) | undefined;
   function register() {
-    release();
-    if (!root.value) return;
-    active = { element: root.value, flatten };
-    surfaces.add(active);
-    // Public light-DOM elements have separate Vue apps, so ancestry must follow the rendered tree.
-    if (!observer) {
-      observer = new MutationObserver(schedule);
-      observer.observe(document.documentElement, { childList: true, subtree: true });
-    }
-    schedule();
+    release?.();
+    release = root.value ? registerSurface(root.value, flatten) : undefined;
   }
   onMounted(register);
   watch(root, register, { flush: "post" });
-  watch(flatten, schedule);
-  onBeforeUnmount(release);
+  watch(flatten, () => { if (root.value) invalidateSubtree(root.value); });
+  onBeforeUnmount(() => release?.());
 }

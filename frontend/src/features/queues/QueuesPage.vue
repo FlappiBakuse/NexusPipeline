@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { vNxpSurface } from "../../ui/surface";
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { api, isAbortError } from "../../platform/api";
 import { t } from "../../platform/i18n";
@@ -413,7 +414,7 @@ onBeforeUnmount(() => {
         :title="t('queues.no_queues_yet')"
         :description="t('queues.page.help')"
       />
-    <section v-else class="card list-surface">
+    <section v-nxp-surface v-else class="card list-surface">
         <NxpSortableList transition-name="app-card" class="script-grid" @reorder="reorderQueues">
         <QueueCard
           v-for="queue in visibleQueues"

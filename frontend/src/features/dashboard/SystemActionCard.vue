@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { vNxpSurface } from "../../ui/surface";
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { api, isAbortError } from "../../platform/api";
 import { toast } from "../../platform/toast";
@@ -67,7 +68,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="card section-surface system-action-card" role="status" aria-live="polite" data-testid="system-action-card" :data-action-verb="verb">
+  <section v-nxp-surface class="card section-surface system-action-card" role="status" aria-live="polite" data-testid="system-action-card" :data-action-verb="verb">
     <div class="section-heading">
       <h3>{{ t("common.completion_action_countdown") }}</h3>
       <span class="muted">{{ t("common.status.queue_action_pending") }}</span>

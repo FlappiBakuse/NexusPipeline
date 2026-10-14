@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { vNxpSurface } from "../../ui/surface";
 import ScriptTypeIcon from "./ScriptTypeIcon.vue";
 import NxpOverflowText from "../../ui/primitives/NxpOverflowText.vue";
 import {
@@ -227,7 +228,7 @@ onBeforeUnmount(() => {
         :title="t('scripts.no_script_instances_yet')"
         :description="t('scripts.page.empty_help')"
       />
-      <section v-else class="card list-surface">
+      <section v-nxp-surface v-else class="card list-surface">
         <NxpSortableList transition-name="app-card" class="script-grid" @reorder="reorderScripts">
           <ScriptCard
             v-for="script in scripts"
