@@ -80,8 +80,10 @@ procedure UpdateSpaceDisplay(Sender: TObject); forward;
 procedure CurPageChanged(CurPageID: Integer);
 begin
   if (CurPageID = wpSelectDir) or (CurPageID = wpSelectTasks) then UpdateSpaceDisplay(nil);
-  if CurPageID = wpFinished then
+  if CurPageID = wpFinished then begin
+    WizardForm.FinishedHeadingLabel.Font.Name := WizardForm.Font.Name;
     WizardForm.NextButton.Left := WizardForm.CancelButton.Left + WizardForm.CancelButton.Width - WizardForm.NextButton.Width;
+  end;
   if (CurPageID = wpFinished) and not InstallationQualified then begin
     WizardForm.FinishedHeadingLabel.Caption := CustomMessage('InstallIncompleteTitle');
     WizardForm.FinishedLabel.Caption := CustomMessage('InstallIncompleteDetail');
