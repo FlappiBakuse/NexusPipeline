@@ -655,6 +655,7 @@
         "NexusPipeline.Tests.Updates.UpdateDataMigrationTests.ConversionAndCommitKeepUnknownFieldsAndForbidOldSnapshotOverNewWrites",
         "NexusPipeline.Tests.Updates.UpdateDataMigrationTests.GraphSelectsBoundedDirectCompiledRouteAndRejectsUnknownSchemaAndCycles",
         "NexusPipeline.Tests.Updates.UpdateDataMigrationTests.InterruptedStoreMovesResumeFromPersistedBytesAndRollbackIsIdempotent",
+        "NexusPipeline.Tests.Updates.UpdateDataMigrationTests.ProcessTerminationDuringPreparationPreservesUnownedBytesAndRecoversRecordedFiles",
         "NexusPipeline.Tests.Updates.UpdateDataMigrationTests.ReservedOverlappingSourcesAndCancelledConversionNeverChangeActiveStore",
         "NexusPipeline.Tests.Updates.UpdateDataMigrationTests.UnknownActiveChangesPreserveBothBackupAndJournalOwnedSnapshots",
         "NexusPipeline.Tests.Updates.UpdateDeliveryTests.CancellationPreservesInstallationAndDoesNotDownloadFullPackage",

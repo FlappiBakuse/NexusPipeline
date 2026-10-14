@@ -3,6 +3,9 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using NexusPipeline.Plugin.Abstractions;
 
+if (args.Length == 2 && args[0] == "--migration-cut")
+    return await MigrationCut.RunAsync(int.Parse(args[1]));
+
 if (args.Length == 2 && args[0] == "--owned-window")
 {
     if (!File.Exists(".nxp-test-fixture") || File.ReadAllText(".nxp-test-fixture") != "owned-process-contract"

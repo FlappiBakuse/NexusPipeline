@@ -33,6 +33,14 @@ internal sealed class UpdateCreatedArtifacts(string root)
         _directories.Add(full);
     }
 
+    internal static void CreateNewDirectory(string path)
+    {
+        PayloadPathSafety.RequireLinkFree(path);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        if (!CreateDirectoryW(path, IntPtr.Zero))
+            throw new IOException("update.created_directory_conflict", new Win32Exception(Marshal.GetLastWin32Error()));
+    }
+
     internal void FileCreated(string path, long size, string hash)
     {
         string full = Resolve(path);

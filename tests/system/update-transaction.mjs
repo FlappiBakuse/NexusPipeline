@@ -80,7 +80,7 @@ for (const missingReadme of [false, true]) test(`current update worker commits o
   writeJournal(journal, version, staging, targetPayload);
   const plan = path.join(root, `update-policy-missing-${missingReadme}.json`);
   fs.writeFileSync(plan, JSON.stringify({ RunId: runtime.runId, Exchanges: [{ Id: "fresh-worker-policy", Method: "GET",
-    Url: "https://raw.githubusercontent.com/FlappiBakuse/NexusPipeline/main/update-policy.json", Status: 200,
+    Url: "https://raw.githubusercontent.com/FlappiBakuse/NexusPipeline/main/metadata/updates/legacy-policy.json", Status: 200,
     BodyBase64: Buffer.from(JSON.stringify({ schemaVersion: 1, repository: "FlappiBakuse/NexusPipeline", barriers: [] })).toString("base64"), ContentType: "application/json" }] }));
   const worker = path.join(runtime.runtimeDir, `.nxp/runtime/workers/update-${randomUUID().replaceAll("-", "")}.exe`);
   fs.mkdirSync(path.dirname(worker), {recursive:true});
@@ -143,7 +143,7 @@ test("failed policy proof aborts only its exited worker and cannot repeat the ap
   writeJournal(journal, "0.17.1", staging, targetPayload);
   const plan = path.join(root, "failed-update-policy-plan.json");
   fs.writeFileSync(plan, JSON.stringify({ RunId: runtime.runId, Exchanges: [{ Id: "failed-fresh-policy", Method: "GET",
-    Url: "https://raw.githubusercontent.com/FlappiBakuse/NexusPipeline/main/update-policy.json", Status: 503,
+    Url: "https://raw.githubusercontent.com/FlappiBakuse/NexusPipeline/main/metadata/updates/legacy-policy.json", Status: 503,
     BodyBase64: Buffer.from("unavailable").toString("base64"), ContentType: "text/plain" }] }));
   const worker = path.join(runtime.runtimeDir, `.nxp/runtime/workers/update-${randomUUID().replaceAll("-", "")}.exe`);
   fs.mkdirSync(path.dirname(worker), {recursive:true});
@@ -188,7 +188,7 @@ for(const missingReadme of [false,true]) for(const phase of ['BackupReady','Swap
   const label=`rollback-${phase}-missing-${missingReadme}`;
   const plan=path.join(root,`${label}-policy.json`),pause=path.join(root,`${label}.pause`);
   fs.writeFileSync(plan,JSON.stringify({RunId:runtime.runId,Exchanges:[{Id:'rollback-policy',Method:'GET',
-    Url:'https://raw.githubusercontent.com/FlappiBakuse/NexusPipeline/main/update-policy.json',Status:200,
+    Url:'https://raw.githubusercontent.com/FlappiBakuse/NexusPipeline/main/metadata/updates/legacy-policy.json',Status:200,
     BodyBase64:Buffer.from(JSON.stringify({schemaVersion:1,repository:'FlappiBakuse/NexusPipeline',barriers:[]})).toString('base64'),ContentType:'application/json'}]}));
   const worker=path.join(runtime.runtimeDir,`.nxp/runtime/workers/update-${randomUUID().replaceAll('-','')}.exe`);
   fs.mkdirSync(path.dirname(worker),{recursive:true});fs.copyFileSync(runtime.runtimeExe,worker);
@@ -242,7 +242,7 @@ for (const scenario of [
   writeJournal(journal, '0.17.1', staging, target);
   const plan = path.join(root, `invalid-payload-${scenario.name.replaceAll(' ', '-')}-policy.json`);
   fs.writeFileSync(plan, JSON.stringify({ RunId: runtime.runId, Exchanges: [{ Id: 'invalid-payload-policy', Method: 'GET',
-    Url: 'https://raw.githubusercontent.com/FlappiBakuse/NexusPipeline/main/update-policy.json', Status: 200,
+    Url: 'https://raw.githubusercontent.com/FlappiBakuse/NexusPipeline/main/metadata/updates/legacy-policy.json', Status: 200,
     BodyBase64: Buffer.from(JSON.stringify({ schemaVersion: 1, repository: 'FlappiBakuse/NexusPipeline', barriers: [] })).toString('base64'), ContentType: 'application/json' }] }));
   const worker = path.join(runtime.runtimeDir, `.nxp/runtime/workers/update-${randomUUID().replaceAll('-', '')}.exe`);
   fs.mkdirSync(path.dirname(worker), { recursive: true }); fs.copyFileSync(runtime.runtimeExe, worker);
@@ -274,7 +274,7 @@ test('startup recovery restores a missing README baseline after the swapped work
   const journal=path.join(runtime.runtimeDir,'.nxp-update/task.json');writeJournal(journal,'0.17.1',staging,target);
   const plan=path.join(root,'interrupted-worker-policy.json'),pause=path.join(root,'interrupted-worker.pause');
   fs.writeFileSync(plan,JSON.stringify({RunId:runtime.runId,Exchanges:[{Id:'interrupted-policy',Method:'GET',
-    Url:'https://raw.githubusercontent.com/FlappiBakuse/NexusPipeline/main/update-policy.json',Status:200,
+    Url:'https://raw.githubusercontent.com/FlappiBakuse/NexusPipeline/main/metadata/updates/legacy-policy.json',Status:200,
     BodyBase64:Buffer.from(JSON.stringify({schemaVersion:1,repository:'FlappiBakuse/NexusPipeline',barriers:[]})).toString('base64'),ContentType:'application/json'}]}));
   const worker=path.join(runtime.runtimeDir,`.nxp/runtime/workers/update-${randomUUID().replaceAll('-','')}.exe`);
   fs.mkdirSync(path.dirname(worker),{recursive:true});fs.copyFileSync(runtime.runtimeExe,worker);
@@ -317,7 +317,7 @@ test('unknown nested candidate bytes preserve the immutable backup and recovery 
   const journal=path.join(runtime.runtimeDir,'.nxp-update/task.json');writeJournal(journal,'0.17.1',staging,target);
   const plan=path.join(root,'unknown-candidate-policy.json'),pause=path.join(root,'unknown-candidate.pause');
   fs.writeFileSync(plan,JSON.stringify({RunId:runtime.runId,Exchanges:[{Id:'unknown-policy',Method:'GET',
-    Url:'https://raw.githubusercontent.com/FlappiBakuse/NexusPipeline/main/update-policy.json',Status:200,
+    Url:'https://raw.githubusercontent.com/FlappiBakuse/NexusPipeline/main/metadata/updates/legacy-policy.json',Status:200,
     BodyBase64:Buffer.from(JSON.stringify({schemaVersion:1,repository:'FlappiBakuse/NexusPipeline',barriers:[]})).toString('base64'),ContentType:'application/json'}]}));
   const worker=path.join(runtime.runtimeDir,`.nxp/runtime/workers/update-${randomUUID().replaceAll('-','')}.exe`);
   fs.mkdirSync(path.dirname(worker),{recursive:true});fs.copyFileSync(runtime.runtimeExe,worker);

@@ -83,9 +83,15 @@ internal sealed record UpdateDataStoreReceipt(string StoreId, string ActiveRoot,
     UpdateInventory Input, UpdateInventory Output, int SwitchStep);
 internal sealed record UpdateDataState(string TransactionRoot, IReadOnlyList<UpdateDataStoreReceipt> Stores, bool Committed)
 {
+    public string PreparationPhase { get; init; } = "Prepared";
+    public string WorkspaceIdentity { get; init; } = "";
+    public string OwnerToken { get; init; } = "";
+    public string PendingPath { get; init; } = "";
     public UpdateInventory Workspace { get; init; } = new([]);
     public bool Equals(UpdateDataState? other) => other is not null && TransactionRoot == other.TransactionRoot
-        && Committed == other.Committed && Stores.SequenceEqual(other.Stores) && Workspace == other.Workspace;
+        && Committed == other.Committed && Stores.SequenceEqual(other.Stores) && Workspace == other.Workspace
+        && PreparationPhase == other.PreparationPhase && WorkspaceIdentity == other.WorkspaceIdentity
+        && OwnerToken == other.OwnerToken && PendingPath == other.PendingPath;
     public override int GetHashCode() => HashCode.Combine(TransactionRoot, Committed);
 
     internal void Validate()
@@ -95,7 +101,8 @@ internal sealed record UpdateDataState(string TransactionRoot, IReadOnlyList<Upd
             || Stores.Select(store => store.StoreId).Distinct(StringComparer.Ordinal).Count() != Stores.Count)
             throw new InvalidDataException("update.data_journal");
         PayloadPathSafety.RequireLinkFree(TransactionRoot);
-        if (Workspace is null || Stores.Count != 0 && Workspace.Entries.Count == 0) throw new InvalidDataException("update.data_creation_receipts_missing");
+        if (PreparationPhase is not ("Preparing" or "Prepared") || Committed && PreparationPhase != "Prepared"
+            || Workspace is null || PreparationPhase == "Prepared" && Stores.Count != 0 && Workspace.Entries.Count == 0) throw new InvalidDataException("update.data_creation_receipts_missing");
         Workspace.Validate();
         var active = new List<string>();
         foreach (var store in Stores)
@@ -138,7 +145,7 @@ internal sealed record UpdateDataState(string TransactionRoot, IReadOnlyList<Upd
 internal static class UpdateDataMigration
 {
     internal static async Task<UpdateDataState> PrepareAsync(string installation, string transactionRoot,
-        IReadOnlyList<(IUpdateStoreOwner Owner, string TargetSchema)> stores, UpdateMigrationGraph graph, CancellationToken token)
+        IReadOnlyList<(IUpdateStoreOwner Owner, string TargetSchema)> stores, UpdateMigrationGraph graph, CancellationToken token, Action<UpdateDataState> persist)
     {
         if (stores.Count is < 1 or > 32 || stores.Select(store => store.Owner.Id).Distinct(StringComparer.Ordinal).Count() != stores.Count)
             throw new InvalidDataException("update.data_store_set");
@@ -162,33 +169,60 @@ internal static class UpdateDataMigration
             location.Owner.Validate(location.source, schema);
             return (location.Owner, location.source, schema, plan: graph.Plan(location.Owner.Id, schema, location.target), location.target, location.index);
         }).ToArray();
-        Directory.CreateDirectory(transactionRoot);
-        var receipts = new List<UpdateDataStoreReceipt>();
+        var receipts = declarations.Select(declaration =>
+        {
+            if (File.Exists(declaration.source)) throw new InvalidDataException("update.data_store_directory_required");
+            string root = Path.Combine(transactionRoot, declaration.index.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            return new UpdateDataStoreReceipt(declaration.Owner.Id, declaration.source, Path.Combine(root, "input"),
+                Path.Combine(root, "output"), Path.Combine(root, "backup"), declaration.schema, declaration.target,
+                Directory.Exists(declaration.source), UpdateInventory.Current(declaration.source, null), new([]), 0);
+        }).ToList();
+        var preparing = new UpdateDataState(transactionRoot, receipts.ToArray(), false)
+            { PreparationPhase = "Preparing", OwnerToken = Guid.NewGuid().ToString("N") };
+        persist(preparing);
+        UpdateCreatedArtifacts.CreateNewDirectory(transactionRoot);
+        persist(preparing);
+        string identity = DirectoryIdentity.Read(transactionRoot);
+        byte[] marker = System.Text.Encoding.UTF8.GetBytes(preparing.OwnerToken);
+        using (var stream = new FileStream(Path.Combine(transactionRoot, ".owner"), FileMode.CreateNew, FileAccess.Write, FileShare.None))
+        { stream.Write(marker); stream.Flush(true); }
+        preparing = preparing with { WorkspaceIdentity = identity, Workspace = UpdateInventory.Capture(transactionRoot) };
+        persist(preparing);
+        void Checkpoint(string pending = "")
+        {
+            if (!File.ReadAllBytes(Path.Combine(transactionRoot, ".owner")).SequenceEqual(marker)
+                || DirectoryIdentity.Read(transactionRoot) != identity) throw new IOException("update.data_workspace_replaced");
+            preparing = preparing with { Stores = receipts.ToArray(), Workspace = UpdateInventory.Capture(transactionRoot), PendingPath = pending };
+            persist(preparing);
+        }
         foreach (var declaration in declarations)
         {
             token.ThrowIfCancellationRequested();
             string storeRoot = Path.Combine(transactionRoot, declaration.index.ToString(System.Globalization.CultureInfo.InvariantCulture));
             string input = Path.Combine(storeRoot, "input"), output = Path.Combine(storeRoot, "output"), backup = Path.Combine(storeRoot, "backup");
-            if (File.Exists(declaration.source)) throw new InvalidDataException("update.data_store_directory_required");
-            bool present = Directory.Exists(declaration.source);
-            var inventory = UpdateInventory.Current(declaration.source, null);
-            Copy(declaration.source, input, inventory, token);
+            bool present = receipts[declaration.index].OriginallyPresent;
+            var inventory = receipts[declaration.index].Input;
+            Checkpoint(Path.GetRelativePath(transactionRoot, input));
+            Copy(declaration.source, input, inventory, token, () => Checkpoint(Path.GetRelativePath(transactionRoot, input)));
+            Checkpoint();
             string previous = input;
             for (int step = 0; step < declaration.plan.Count; step++)
             {
                 string destination = step == declaration.plan.Count - 1 ? output : Path.Combine(storeRoot, "step-" + step);
-                Directory.CreateDirectory(destination);
+                Checkpoint(Path.GetRelativePath(transactionRoot, destination));
+                UpdateCreatedArtifacts.CreateNewDirectory(destination);
                 await graph.ConvertAsync(declaration.plan[step], previous, destination, token).ConfigureAwait(false);
                 declaration.Owner.Validate(destination, declaration.plan[step].OutputSchema);
                 _ = UpdateInventory.Capture(destination);
                 previous = destination;
+                Checkpoint();
             }
-            if (declaration.plan.Count == 0) Copy(input, output, inventory, token);
+            if (declaration.plan.Count == 0) Copy(input, output, inventory, token, () => Checkpoint(Path.GetRelativePath(transactionRoot, output)));
             declaration.Owner.Validate(output, declaration.target);
             RequireExact(declaration.source, inventory, present);
             var result = UpdateInventory.Capture(output);
-            receipts.Add(new(declaration.Owner.Id, declaration.source, input, output, backup, declaration.schema,
-                declaration.target, present, inventory, result, 0));
+            receipts[declaration.index] = receipts[declaration.index] with { Output = result };
+            Checkpoint();
         }
         var owned = UpdateInventory.Capture(transactionRoot).Entries.ToList();
         foreach (var receipt in receipts.Where(receipt => receipt.OriginallyPresent))
@@ -198,14 +232,17 @@ internal static class UpdateDataMigration
             owned.AddRange(receipt.Input.Entries.Select(entry => entry with { Path = relative + '/' + entry.Path }));
         }
         var state = new UpdateDataState(transactionRoot, receipts.ToArray(), false)
-        { Workspace = new(owned.OrderBy(entry => entry.Path, StringComparer.Ordinal).ToArray()) };
+        { Workspace = new(owned.OrderBy(entry => entry.Path, StringComparer.Ordinal).ToArray()),
+            WorkspaceIdentity = identity, OwnerToken = preparing.OwnerToken };
         state.Validate();
+        persist(state);
         return state;
     }
 
     internal static UpdateDataState Apply(UpdateDataState state, Action<UpdateDataState> persist)
     {
         state.Validate();
+        if (state.PreparationPhase != "Prepared") throw new InvalidDataException("update.data_not_prepared");
         if (state.Committed) throw new InvalidDataException("update.data_already_committed");
         persist(state);
         for (int index = 0; index < state.Stores.Count; index++)
@@ -246,6 +283,7 @@ internal static class UpdateDataMigration
     internal static void Rollback(UpdateDataState state)
     {
         state.Validate();
+        if (state.PreparationPhase == "Preparing") { Cleanup(state); return; }
         if (state.Committed) throw new InvalidDataException("update.data_committed_rollback_forbidden");
         foreach (var store in state.Stores.Reverse())
         {
@@ -287,7 +325,16 @@ internal static class UpdateDataMigration
         state.Validate();
         if (!state.Committed)
             foreach (var store in state.Stores) RequireExact(store.ActiveRoot, store.Input, store.OriginallyPresent);
-        state.Workspace.DeleteOwned(state.TransactionRoot, () => { state.Validate(); guard?.Invoke(); });
+        void RequireIdentity()
+        {
+            if (!Directory.Exists(state.TransactionRoot)) return;
+            if (state.PreparationPhase == "Preparing" && state.WorkspaceIdentity.Length == 0
+                || state.WorkspaceIdentity.Length != 0 && DirectoryIdentity.Read(state.TransactionRoot) != state.WorkspaceIdentity)
+                throw new IOException("update.data_preparation_ownership_unconfirmed");
+        }
+        RequireIdentity();
+        state.Workspace.RequireOwned(state.TransactionRoot);
+        state.Workspace.DeleteOwned(state.TransactionRoot, () => { state.Validate(); RequireIdentity(); guard?.Invoke(); });
         guard?.Invoke();
         if (Directory.Exists(state.TransactionRoot)) Directory.Delete(state.TransactionRoot, false);
     }
@@ -301,7 +348,7 @@ internal static class UpdateDataMigration
             throw new IOException("update.data_snapshot_changed");
     }
 
-    private static void Copy(string source, string destination, UpdateInventory inventory, CancellationToken token)
+    private static void Copy(string source, string destination, UpdateInventory inventory, CancellationToken token, Action checkpoint)
     {
         PayloadPathSafety.RequireLinkFree(destination);
         if (File.Exists(destination) || Directory.Exists(destination)) throw new IOException("update.data_copy_destination_exists");
@@ -318,6 +365,7 @@ internal static class UpdateDataMigration
                 byte[] buffer = new byte[64 * 1024]; int read;
                 while ((read = input.Read(buffer)) != 0) { token.ThrowIfCancellationRequested(); output.Write(buffer, 0, read); }
             }
+            checkpoint();
         }
         RequireExact(destination, inventory, true);
     }

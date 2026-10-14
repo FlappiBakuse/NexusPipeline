@@ -71,6 +71,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="NexusPipeline.Tests" />
+    <InternalsVisibleTo Include="NexusPipeline.TestProviderWorker" />
     <InternalsVisibleTo Include="NexusPipeline.StressDiagnostics" />
     <InternalsVisibleTo Include="NexusPipeline.TaskProtocolTests" />
   </ItemGroup>

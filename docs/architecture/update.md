@@ -63,3 +63,5 @@ target manifest 按完整文件清单与构建身份重建 staging。未变组�
 `InstallerMetadataCheckpoint` 使用 schema 2 记录 manager、应用根和可信快捷方式的精确字节；schema 1 现场继续由 `LegacyInstallerMetadataCheckpoint` 恢复。预置前冻结备份，先记录可恢复的 Prepositioning，再复制完整 EXE/DAT/MSG 文件组。Inno 后观察实际 ARP 和卸载文件，凭当前应用身份与更新回执判定提交或回滚；只删除已确认属于本事务的字节，第三方变化保留现场并阻断。提交清理可以在下次恢复时继续。
 
 `tools/installer-space.iss` 从构建时冻结的载荷清单计算核心与首次插件选择，并按目标、manager、临时卷合并新增占用，包含新 staging、真实旧资产复制、卸载预置、记录和已知下载。永久 helper 是 Host 副本，临时元数据程序单独计入临时卷。分配粒度使用实际卷信息，元数据余量随清单路径与记录数增长。预览复用已核对的保护身份，向导和互斥下最终检查共用原生计算；最终检查重新解封归属、检测依赖并读取各卷可用空间。ARP EstimatedSize 沿用 Inno 的实际安装计数，不能写入临时峰值。
+
+准备数据副本前必须通过调用方持久回调保存 Preparing 状态、输入清单和预期工作区。独占创建目录后记录物理目录身份与 owner token，完成文件写入后更新精确清单，最终发布 Prepared。恢复核对原始 store 和已记录工作区；创建后尚未取得身份、转换中未入清单的字节或其他未知内容保留现场，不递归删除。该框架的受控强杀恢复测试不代表真实业务 schema 迁移已经登记或验收。

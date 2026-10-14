@@ -99,19 +99,78 @@ public sealed class UpdateDataMigrationTests : IDisposable
     {
         var graph = new UpdateMigrationGraph([new Migrator("one-two", "1", "2")]);
         await Assert.ThrowsAsync<InvalidDataException>(() => UpdateDataMigration.PrepareAsync(_root, Transaction,
-            [(_owner, "2"), (new StoreOwner("second", "data/fixture/nested"), "2")], graph, default));
+            [(_owner, "2"), (new StoreOwner("second", "data/fixture/nested"), "2")], graph, default, Persist));
         Assert.False(Directory.Exists(Transaction));
         await Assert.ThrowsAsync<InvalidDataException>(() => UpdateDataMigration.PrepareAsync(_root, Transaction,
-            [(new StoreOwner("reserved", ".nxp/state"), "2")], graph, default));
+            [(new StoreOwner("reserved", ".nxp/state"), "2")], graph, default, Persist));
         using var cancellation = new CancellationTokenSource();
         var cancelling = new UpdateMigrationGraph([new Migrator("cancel", "1", "2", () => cancellation.Cancel())]);
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => UpdateDataMigration.PrepareAsync(_root, Transaction,
-            [(_owner, "2")], cancelling, cancellation.Token));
+            [(_owner, "2")], cancelling, cancellation.Token, Persist));
         Assert.Equal(_original, File.ReadAllBytes(Path.Combine(Active, "store.json")));
     }
 
+    [Fact]
+    public async Task ProcessTerminationDuringPreparationPreservesUnownedBytesAndRecoversRecordedFiles()
+    {
+        for (int cut = 1; cut <= 9; cut++)
+        {
+            using var fixture = new NexusPipeline.Tests.Execution.ProviderWorkerFixture();
+            File.WriteAllText(Path.Combine(fixture.Root, ".nxp-test-fixture"), "owned-process-contract");
+            Directory.CreateDirectory(Path.Combine(fixture.Root, "active"));
+            string active = Path.Combine(fixture.Root, "active", "data.txt");
+            File.WriteAllText(active, "user bytes");
+            var start = new System.Diagnostics.ProcessStartInfo(Path.Combine(fixture.Root, "NexusPipeline.TestProviderWorker.exe"))
+                { WorkingDirectory = fixture.Root, UseShellExecute = false, CreateNoWindow = true };
+            start.ArgumentList.Add("--migration-cut"); start.ArgumentList.Add(cut.ToString());
+            using var child = System.Diagnostics.Process.Start(start)!;
+            try
+            {
+                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+                while (!File.Exists(Path.Combine(fixture.Root, "cut-ready")))
+                {
+                    Assert.False(child.HasExited);
+                    await Task.Delay(20, deadline.Token);
+                }
+                child.Kill(); await child.WaitForExitAsync(deadline.Token);
+                var state = System.Text.Json.JsonSerializer.Deserialize<UpdateDataState>(File.ReadAllBytes(Path.Combine(fixture.Root, "journal.json")))!;
+                Assert.Equal("Preparing", state.PreparationPhase);
+                Assert.Equal("user bytes", File.ReadAllText(active));
+                Assert.Throws<InvalidDataException>(() => UpdateDataMigration.Apply(state, _ => { }));
+                if (cut is 2 or 9)
+                {
+                    Assert.Throws<IOException>(() => UpdateDataMigration.Cleanup(state));
+                    Assert.True(Directory.Exists(state.TransactionRoot));
+                }
+                else
+                {
+                    if (Directory.Exists(state.TransactionRoot))
+                    {
+                        string unknown = Path.Combine(state.TransactionRoot, "external.txt");
+                        File.WriteAllText(unknown, "retain");
+                        Assert.Throws<IOException>(() => UpdateDataMigration.Cleanup(state));
+                        Assert.Equal("retain", File.ReadAllText(unknown));
+                        File.Delete(unknown);
+                    }
+                    UpdateDataMigration.Cleanup(state);
+                    UpdateDataMigration.Cleanup(state);
+                    Assert.False(Directory.Exists(state.TransactionRoot));
+                }
+                Assert.Equal("user bytes", File.ReadAllText(active));
+            }
+            finally { if (!child.HasExited) { child.Kill(); await child.WaitForExitAsync(); } }
+        }
+    }
+
+    private void Persist(UpdateDataState state)
+    {
+        state.Validate();
+        string file = Path.Combine(_root, "preparation.json");
+        File.WriteAllText(file, System.Text.Json.JsonSerializer.Serialize(state));
+    }
+
     private Task<UpdateDataState> PrepareAsync() => UpdateDataMigration.PrepareAsync(_root, Transaction, [(_owner, "2")],
-        new UpdateMigrationGraph([new Migrator("one-two", "1", "2")]), default);
+        new UpdateMigrationGraph([new Migrator("one-two", "1", "2")]), default, Persist);
 
     private sealed class StoreOwner(string id, string relative) : IUpdateStoreOwner
     {
