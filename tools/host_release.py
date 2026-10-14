@@ -117,6 +117,15 @@ def stage_bundled_plugins(production_root: Path, plugins_root: Path, manifest_pa
     _require(manifest.get("schemaVersion") == 1 and manifest.get("repository") == "FlappiBakuse/NexusPipeline-Plugins", "预装插件清单来源无效")
     items = manifest.get("plugins")
     _require(isinstance(items, list) and {item.get("artifactName") for item in items} == {"EmulatorSupport", "LiveScreenshot"} and len(items) == 2, "预装插件身份无效")
+    projection = plugins_root / "catalog.json"
+    catalog_path = plugins_root / "metadata/catalog/stable.json"
+    _require(projection.is_file() and not projection.is_symlink() and not catalog_path.is_symlink(), "官方稳定 catalog 路径无效")
+    if catalog_path.exists():
+        _require(catalog_path.is_file() and catalog_path.read_bytes() == projection.read_bytes(), "官方稳定 catalog canonical 与根投影不一致")
+    else:
+        # Protected Plugins revisions before catalog relocation expose only the root projection.
+        catalog_path = projection
+    catalog = json.loads(catalog_path.read_text(encoding="utf-8-sig"))
     target_root = production_root / "plugins"
     _require(not target_root.exists(), "生产 staging 已存在插件目录")
     target_root.mkdir()
@@ -127,10 +136,6 @@ def stage_bundled_plugins(production_root: Path, plugins_root: Path, manifest_pa
         _require(package.is_file() and not package.is_symlink(), f"官方稳定插件包缺失：{artifact}")
         raw = package.read_bytes()
         _require(len(raw) == item["packageSizeBytes"] and hashlib.sha256(raw).hexdigest() == item["packageSha256"], f"官方稳定插件包字节不符：{artifact}")
-        catalog_path = plugins_root / "metadata/catalog/stable.json"
-        _require(catalog_path.is_file() and not catalog_path.is_symlink()
-                 and catalog_path.read_bytes() == (plugins_root / "catalog.json").read_bytes(), "官方稳定 catalog canonical 与根投影不一致")
-        catalog = json.loads(catalog_path.read_text(encoding="utf-8-sig"))
         entry = next((entry for entry in catalog.get("plugins", []) if entry.get("artifactName") == artifact), None)
         _require(entry is not None and entry.get("version") == version and entry.get("sha256") == item["packageSha256"] and entry.get("sizeBytes") == len(raw), f"官方稳定 catalog 不匹配：{artifact}")
         declared = {file["path"]: file for file in item["files"]}
