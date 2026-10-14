@@ -14,8 +14,11 @@ public sealed class WebApiContractTests
         Assert.Equal(
             new[]
             {
+                "browser-login",
                 "cancel",
                 "client-capabilities",
+                "client-sessions",
+                "dashboard",
                 "diagnostics",
                 "dispatch",
                 "events",
