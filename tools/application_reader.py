@@ -12,7 +12,8 @@ except ImportError:
 def read(directory: Path,version: str|None=None) -> dict:
     root=Path(__file__).resolve().parents[1]
     sources=['Directory.Build.props','tools/NexusPipeline.PayloadReader/NexusPipeline.PayloadReader.csproj','tools/NexusPipeline.PayloadReader/Program.cs',
-             'src/Platform/Storage/BundleResourceReader.cs','src/Platform/Storage/PayloadPathSafety.cs','src/Modules/Updates/ApplicationPayload.cs','src/Modules/Updates/ApplicationBuildIdentity.cs','src/Shared/Versioning/NexusVersion.cs']
+             'src/Platform/Storage/BundleResourceReader.cs','src/Platform/Storage/PayloadPathSafety.cs','src/Platform/Storage/VerifiedFileDeletion.cs',
+             'src/Modules/Updates/ApplicationPayload.cs','src/Modules/Updates/ApplicationBuildIdentity.cs','src/Modules/Updates/UpdateInventory.cs','src/Shared/Versioning/NexusVersion.cs']
     digest=hashlib.sha256()
     for name in sources:digest.update(name.encode());digest.update((root/name).read_bytes())
     cache=Path(os.environ.get('NEXUS_TEST_ARTIFACT_ROOT',os.environ.get('TEMP',''))).resolve()/'application-reader'/digest.hexdigest()
