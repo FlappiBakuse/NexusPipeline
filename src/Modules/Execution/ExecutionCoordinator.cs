@@ -997,11 +997,19 @@ internal sealed class ExecutionCoordinator : RunSession
         if (descriptor is null || plan is null || descriptor.PluginVersion != _resolvedSpec?.PluginVersion)
             return RunAttemptResult.Fatal("执行 provider 或冻结计划不可用", "provider.unavailable");
         NexusPipeline.Modules.Scripts.Validation.ProviderPlanPolicy.Validate(_script.RootPath, plan);
-        _providerProjection = new(plan, descriptor.PluginId, descriptor.PluginVersion, _providerRecordId,
-            _activeUser?.UserId ?? "", _script.Id, attempt.Number);
+        bool framework = plan.ResultBasis == "framework-task-v1";
+        if (!framework || _providerProjection is null)
+            _providerProjection = new(plan, descriptor.PluginId, descriptor.PluginVersion, _providerRecordId,
+                _activeUser?.UserId ?? "", _script.Id, attempt.Number);
+        else
+        {
+            string[] selected = _providerProjection.RetryTaskIds();
+            if (selected.Length == 0) return RunAttemptResult.Fatal("没有可确认的失败任务", "provider.retry_unavailable");
+            _providerProjection.BeginAttempt(attempt.Number, selected);
+        }
         var projectionGate = new object();
         var lines = new System.Collections.Concurrent.ConcurrentQueue<string>();
-        var judge = new SessionJudge(_script);
+        var judge = new SessionJudge(framework ? new ScriptInstance() : _script);
         string attemptId = _providerRecordId + ":provider:" + attempt.Number;
         JudgeSnapshot Capture(int generation)
         {
@@ -1038,7 +1046,7 @@ internal sealed class ExecutionCoordinator : RunSession
         async ValueTask Publish(NexusPipeline.Plugin.Abstractions.PluginProviderEvent item)
         {
             bool changed;
-            lock (projectionGate) changed = _providerProjection.Accept(item);
+            lock (projectionGate) changed = _providerProjection.Accept(attempt.Number, item);
             if (item.Kind == "log" && item.Evidence["text"]?.GetValue<string>() is { Length: > 0 } line) lines.Enqueue(line);
             if (item.Kind is not ("progress" or "log") || changed && (lastProgressPublish == 0
                 || Stopwatch.GetElapsedTime(lastProgressPublish) >= TimeSpan.FromMilliseconds(250)))
@@ -1054,7 +1062,8 @@ internal sealed class ExecutionCoordinator : RunSession
             var context = new NexusPipeline.Plugin.Abstractions.PluginProviderRunContext(OriginExecutionId,
                 _providerRecordId, attempt.Number, _activeUser?.UserId ?? "", _script.Id, plan,
                 mediated, _ => ValueTask.CompletedTask, CaptureProviderLaunchTarget())
-            { EffectiveConfigurationPath = _configRun?.EffectiveConfigurationPath ?? "" };
+            { EffectiveConfigurationPath = framework ? "" : _configRun?.EffectiveConfigurationPath ?? "",
+                SelectedTaskIds = framework ? _providerProjection.SelectedTaskIds : null };
             var execution = descriptor.Provider.RunAsync(context, OperationToken);
             while (!execution.IsCompleted && !OperationToken.IsCancellationRequested)
             {
@@ -1092,6 +1101,9 @@ internal sealed class ExecutionCoordinator : RunSession
                 return RunAttemptResult.Fatal("直驱进程清理未确认，已保留配置现场", "provider.cleanup_unconfirmed");
             }
             if (!port.WorkerStarted) return RunAttemptResult.Fatal("直驱 worker 未启动", "provider.worker_not_started");
+            if (framework && engine != "succeeded" && !(port.TerminalReceived && port.TerminalStatus == "failed"
+                && port.ExitCode is > 0 && result.EngineStatus == "failed"))
+                return RunAttemptResult.Fatal("直驱 worker 未确认任务失败终态", "provider.terminal_unconfirmed");
             RunAttemptResult outcome = _providerProjection.Result(result.Detail);
             if (outcome.Status == "failed" && !outcome.IsFatal && !OperationToken.IsCancellationRequested
                 && _pendingReplaceConfigs is { Count: > 0 })

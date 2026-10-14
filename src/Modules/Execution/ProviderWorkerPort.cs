@@ -28,6 +28,7 @@ internal sealed class ProviderWorkerPort : IPluginProviderWorkerPort
     internal bool TerminalReceived { get; private set; }
     internal bool WorkerStarted { get; private set; }
     internal string TerminalStatus { get; private set; } = "not_started";
+    internal int? ExitCode { get; private set; }
 
     internal ProviderWorkerPort(string pluginRoot, string projectRoot, string executionId,
         string recordId, int attempt, Action<string, LogLevel>? log, TimeSpan? startupTimeout = null,
@@ -184,7 +185,8 @@ internal sealed class ProviderWorkerPort : IPluginProviderWorkerPort
             }
             artifacts?.Dispose();
         }
-        return new(kind, process.HasExited ? process.ExitCode : null, CleanupConfirmed);
+        ExitCode = process.HasExited ? process.ExitCode : null;
+        return new(kind, ExitCode, CleanupConfirmed);
     }
 
     private async Task ReceiveAsync(Stream events, PluginWorkerBootstrap bootstrap,

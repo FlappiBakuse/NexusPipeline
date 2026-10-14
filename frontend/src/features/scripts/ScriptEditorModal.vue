@@ -788,7 +788,7 @@ watch(
             </div>
           </div>
         </div>
-        <div v-if="!draft.pluginType" class="subsection judge-box">
+        <div v-if="!draft.pluginType && draft.executionProviderId !== 'maa-framework'" class="subsection judge-box">
           <div class="section-heading">
             <h3>{{ t("scripts.custom_completion_markers") }}</h3>
           </div>

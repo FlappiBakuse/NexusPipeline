@@ -29,6 +29,7 @@ internal sealed record ProviderConfigurationJournal
     public string RequestHash { get; init; } = "";
     public string ExpectedDefinitionHash { get; init; } = "";
     public string PreviousRoot { get; init; } = "";
+    public bool SourceOnly { get; init; }
     public string UserId { get; init; } = "";
     public string UserConfigRevision { get; init; } = "";
     public string ExpectedUserBindingHash { get; init; } = "";
@@ -221,7 +222,7 @@ internal sealed class ProviderConfigurationOperations : IProviderConfigurationOp
                 if (userBinding.Revision != request.ExpectedUserRevision) throw new InvalidDataException("configuration.user.cas_conflict");
             }
             var operation = new Operation(new() { OperationId = request.OperationId, RequestHash = requestHash, Script = script, PreviousRoot = previous?.RootPath ?? "",
-                UserId = userBinding?.UserId ?? "", UserConfigRevision = userBinding?.Revision ?? "", ExpectedUserBindingHash = userBinding?.Fingerprint ?? "",
+                SourceOnly = request.SourceOnly, UserId = userBinding?.UserId ?? "", UserConfigRevision = userBinding?.Revision ?? "", ExpectedUserBindingHash = userBinding?.Fingerprint ?? "",
                 ExpectedDefinitionHash = isNew ? "" : Fingerprint(_scripts.FindById(script.Id)) }, null);
             Write(operation);
             _operations.Add(request.OperationId, operation);
@@ -275,7 +276,7 @@ internal sealed class ProviderConfigurationOperations : IProviderConfigurationOp
             string expectedRevision = operation.Journal.UserId.Length == 0 ? script.ExecutionProviderConfigRevision : operation.Journal.UserConfigRevision;
             if (operation.Journal.UserId.Length != 0) configuration["sharedRevision"] = script.ExecutionProviderConfigRevision;
             var candidate = await lifecycle.StageAsync(new(operation.Journal.OperationId, script.ExecutionProviderConfigId, script.Id,
-                operation.Journal.UserId, script.RootPath, "", expectedRevision, configuration), token).ConfigureAwait(false);
+                operation.Journal.UserId, script.RootPath, "", expectedRevision, configuration) { SourceOnly = operation.Journal.SourceOnly }, token).ConfigureAwait(false);
             if (candidate.OperationId != operation.Journal.OperationId || candidate.ProfileId != script.ExecutionProviderConfigId
                 || !SafeId(candidate.Revision) || candidate.ExpectedRevision != expectedRevision)
                 throw new InvalidDataException("configuration.candidate.identity");
@@ -309,6 +310,15 @@ internal sealed class ProviderConfigurationOperations : IProviderConfigurationOp
                 candidate = prepared;
                 lock (_sync) { operation.Journal = operation.Journal with { Candidate = candidate }; Write(operation); }
             }
+            PluginProviderConfigurationInitialization initialized;
+            if (operation.Journal.SourceOnly)
+            {
+                if (script.ExecutionProviderId != "maa-framework" || expectedRevision.Length == 0)
+                    throw new InvalidDataException("configuration.source_sync_invalid");
+                initialized = new(false, true, new(), []) { SourceOnly = true };
+            }
+            else
+            {
             Change(operation, "initializing");
             var launchTarget = await ProviderConfigurationLauncher.LaunchAsync(candidate, token, identity => {
                 lock (_sync)
@@ -332,11 +342,12 @@ internal sealed class ProviderConfigurationOperations : IProviderConfigurationOp
             var witnessed = new ConfigurationEvidencePort(worker, candidate, progress => {
                 lock (_sync) { operation.Progress = progress; _events.Publish("provider_configuration", Status(operation)); }
             });
-            var initialized = await lifecycle.InitializeAsync(new(candidate, witnessed, _ => ValueTask.CompletedTask, launchTarget), token).ConfigureAwait(false);
+            initialized = await lifecycle.InitializeAsync(new(candidate, witnessed, _ => ValueTask.CompletedTask, launchTarget), token).ConfigureAwait(false);
             cleanup = worker.CleanupConfirmed;
             if (!cleanup || !initialized.CleanupConfirmed) throw new InvalidDataException("configuration.cleanup_unconfirmed");
             if (!worker.WorkerStarted || !initialized.Ready || !witnessed.Initialized
                 || worker.TerminalStatus != "succeeded") throw new InvalidDataException("configuration.initialization_unconfirmed");
+            }
             token.ThrowIfCancellationRequested();
             Change(operation, "commit_ready", cleanup: true);
             await lifecycle.CommitAsync(candidate, initialized, token).ConfigureAwait(false);
@@ -371,10 +382,11 @@ internal sealed class ProviderConfigurationOperations : IProviderConfigurationOp
         }
         finally
         {
-            if (cleanup) { operation.Lease?.Dispose(); operation.Lease = null; }
+            if (cleanup) operation.Lease?.Dispose();
             ActiveJournals.TryRemove(PathFor(operation.Journal.OperationId), out _);
             lock (_sync)
             {
+                if (cleanup) operation.Lease = null;
                 try { Archive(operation); }
                 catch (Exception error) when (RecoveryError(error))
                 { operation.Journal = operation.Journal with { State = "needs_attention", ErrorCode = "configuration.archive_failed" }; }

@@ -8,6 +8,7 @@ namespace NexusPipeline.Modules.Scripts.Contracts;
 
 internal sealed record ProviderConfigurationSaveRequest(string OperationId, ScriptInstance Script, JsonObject Configuration)
 {
+    public bool SourceOnly { get; init; }
     public string UserId { get; init; } = "";
     public string ExpectedUserRevision { get; init; } = "";
 }

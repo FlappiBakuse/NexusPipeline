@@ -184,7 +184,7 @@ export function validateScriptDraft(draft: ScriptDraft): { key: string; args?: R
   if (new TextEncoder().encode(draft.name.trim()).length > 64) {
     return { key: "scripts.validation.name_length", args: { bytes: 64 } };
   }
-  if (draft.judgeScriptEnabled && !draft.judgeScript.trim()) {
+  if (draft.executionProviderId !== "maa-framework" && draft.judgeScriptEnabled && !draft.judgeScript.trim()) {
     return { key: "scripts.editor.judge_code_help" };
   }
   return null;

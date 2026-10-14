@@ -23,7 +23,7 @@ const name = computed(() => props.task.nameText ? resolveTaskText(props.task.nam
 function label(group: string, value: string) { return t(`tasks.${group}.${value}`, {}, t(`tasks.${group}.unknown`)); }
 const status = computed(() => props.report?.finalTaskResults.find(result => result.taskId === props.task.id)?.status || 'pending');
 const engineStatus = computed(() => props.report?.finalTaskResults.find(result => result.taskId === props.task.id)?.engineStatus);
-const engineLabel = computed(() => engineStatus.value === 'succeeded'
+const engineLabel = computed(() => props.report?.resultBasis === 'framework-task-v1' ? taskStatusLabel(status.value, props.report) : engineStatus.value === 'succeeded'
   ? (getLocale().startsWith('zh') ? '上游报告完成 · 业务未核验' : 'Upstream completed · business unverified')
   : engineStatus.value === 'failed' ? (getLocale().startsWith('zh') ? '上游引擎失败' : 'Upstream engine failed') : '');
 const tone = computed(() => ['succeeded', 'skipped'].includes(status.value) ? 'ok' : status.value === 'failed' ? 'bad' : status.value === 'partial' ? 'warn' : status.value === 'running' ? 'blue' : 'muted');

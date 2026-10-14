@@ -9,17 +9,69 @@ namespace NexusPipeline.Host.Composition;
 
 internal sealed class ProviderConfigurationSynchronization : IAsyncDisposable
 {
-    private sealed class Watch(ScriptInstance script, FileSystemWatcher watcher, UserProviderConfigurationBinding? user) : IDisposable
+    private sealed class Watch(ScriptInstance script, UserProviderConfigurationBinding? user)
     {
         internal readonly ScriptInstance Script = script;
         internal readonly UserProviderConfigurationBinding? User = user;
-        internal readonly FileSystemWatcher Watcher = watcher;
+        internal string Metadata = "";
         internal long LastChange = Environment.TickCount64;
         internal long LastProbe;
         internal int Dirty = 1;
         internal string Signature = "";
         internal (string[] Files, string[] Directories)? Inputs;
-        public void Dispose() => Watcher.Dispose();
+
+    }
+    private sealed class RootWatch : IDisposable
+    {
+        internal readonly List<Watch> Bindings = [];
+        private readonly FileSystemWatcher _watcher;
+        internal RootWatch(string root)
+        {
+            _watcher = new(root) { IncludeSubdirectories = true,
+                NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName | NotifyFilters.LastWrite | NotifyFilters.Size };
+            _watcher.Changed += (_, item) => Changed(item.FullPath); _watcher.Created += (_, item) => Changed(item.FullPath);
+            _watcher.Deleted += (_, item) => Changed(item.FullPath);
+            _watcher.Renamed += (_, item) => { Changed(item.OldFullPath); Changed(item.FullPath); };
+            _watcher.Error += (_, _) => Changed(null);
+            _watcher.EnableRaisingEvents = true;
+        }
+        private void Changed(string? path)
+        {
+            lock (Bindings) foreach (var watch in Bindings)
+            {
+                lock (watch)
+                    if (path is not null && watch.Inputs is { } inputs
+                        && !inputs.Files.Contains(path, StringComparer.OrdinalIgnoreCase)
+                        && !inputs.Directories.Any(directory => path.StartsWith(directory + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))) continue;
+                Interlocked.Exchange(ref watch.LastChange, Environment.TickCount64); Interlocked.Exchange(ref watch.Dirty, 1);
+            }
+        }
+        public void Dispose() => _watcher.Dispose();
+    }
+    private readonly Dictionary<string, RootWatch> _roots = new(StringComparer.OrdinalIgnoreCase);
+    private static string Root(Watch watch) => Path.GetFullPath(watch.Script.RootPath).TrimEnd('\\', '/');
+    private void Remove(Watch watch)
+    {
+        string key = Root(watch);
+        if (!_roots.TryGetValue(key, out var root)) return;
+        lock (root.Bindings)
+        {
+            root.Bindings.Remove(watch);
+            if (root.Bindings.Count == 0) { root.Dispose(); _roots.Remove(key); }
+        }
+    }
+    private static string Metadata(Watch watch, Dictionary<string, string> cache)
+    {
+        if (watch.Inputs is not { } inputs) return "";
+        string Stat(string path)
+        {
+            if (cache.TryGetValue(path, out string? value)) return value;
+            var file = new FileInfo(path);
+            value = file.Exists ? file.Length + ":" + file.LastWriteTimeUtc.Ticks : "missing";
+            cache[path] = value; return value;
+        }
+        return string.Join("\n", inputs.Files.Select(path => path + ":" + Stat(path))
+            .Concat(inputs.Directories.Select(path => path + ":" + Directory.GetLastWriteTimeUtc(path).Ticks)));
     }
     private readonly IScriptRepository _scripts;
     private readonly IPluginExecutionProviderResolver _providers;
@@ -56,7 +108,7 @@ internal sealed class ProviderConfigurationSynchronization : IAsyncDisposable
                     if (!inputs.TryGetValue(pair.Key, out var input) || input.Script.RootPath != pair.Value.Script.RootPath
                         || input.Script.ExecutionProviderConfigRevision != pair.Value.Script.ExecutionProviderConfigRevision
                         || input.User?.Fingerprint != pair.Value.User?.Fingerprint)
-                    { Publish(pair.Value, "current", ""); pair.Value.Dispose(); _watches.Remove(pair.Key); }
+                    { Publish(pair.Value, "current", ""); Remove(pair.Value); _watches.Remove(pair.Key); }
                 foreach (var pair in inputs)
                 {
                     var script = pair.Value.Script;
@@ -64,33 +116,26 @@ internal sealed class ProviderConfigurationSynchronization : IAsyncDisposable
                     if (_providers.ResolveExecutionProvider(script.ExecutionProviderId)?.Provider is not IPluginProviderConfigurationSynchronization) continue;
                     try
                     {
-                        var watcher = new FileSystemWatcher(script.RootPath) { IncludeSubdirectories = true,
-                            NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName | NotifyFilters.LastWrite | NotifyFilters.Size };
-                        var watch = new Watch(script, watcher, pair.Value.User);
-                        void Changed(string? path = null)
-                        {
-                            lock (watch)
-                                if (path is not null && watch.Inputs is { } inputs
-                                    && !inputs.Files.Contains(path, StringComparer.OrdinalIgnoreCase)
-                                    && !inputs.Directories.Any(directory => path.StartsWith(directory + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))) return;
-                            Interlocked.Exchange(ref watch.LastChange, Environment.TickCount64); Interlocked.Exchange(ref watch.Dirty, 1);
-                        }
-                        watcher.Changed += (_, item) => Changed(item.FullPath); watcher.Created += (_, item) => Changed(item.FullPath);
-                        watcher.Deleted += (_, item) => Changed(item.FullPath);
-                        watcher.Renamed += (_, item) => { Changed(item.OldFullPath); Changed(item.FullPath); }; watcher.Error += (_, _) => Changed();
-                        watcher.EnableRaisingEvents = true; _watches.Add(pair.Key, watch);
+                        var watch = new Watch(script, pair.Value.User);
+                        string key = Root(watch);
+                        if (!_roots.TryGetValue(key, out var root)) _roots.Add(key, root = new RootWatch(key));
+                        lock (root.Bindings) root.Bindings.Add(watch);
+                        _watches.Add(pair.Key, watch);
                     }
                     catch (Exception error) when (error is IOException or ArgumentException)
                     { _publish(script.Id, "needs_attention", "source.watch.unavailable", pair.Value.User?.UserId ?? ""); }
                 }
+                var metadataCache = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var watch in _watches.Values.ToArray())
                 {
                     long now = Environment.TickCount64;
                     if (_busy(watch.Script.Id) || now - Interlocked.Read(ref watch.LastChange) < 1000
                         || Volatile.Read(ref watch.Dirty) == 0 && now - watch.LastProbe < 60000) continue;
-                    Interlocked.Exchange(ref watch.Dirty, 0); watch.LastProbe = now;
+                    bool dirty = Interlocked.Exchange(ref watch.Dirty, 0) != 0; watch.LastProbe = now;
                     try
                     {
+                        string metadata = Metadata(watch, metadataCache);
+                        if (!dirty && metadata.Length != 0 && metadata == watch.Metadata) continue;
                         if (_providers.ResolveExecutionProvider(watch.Script.ExecutionProviderId)?.Provider is not IPluginProviderConfigurationSynchronization provider)
                         { Publish(watch, "needs_attention", "configuration.lifecycle.unavailable"); continue; }
                         var script = watch.Script;
@@ -112,6 +157,7 @@ internal sealed class ProviderConfigurationSynchronization : IAsyncDisposable
                             if (source.WatchFiles.Count > 50000 || source.WatchDirectories?.Count > 128) throw new InvalidDataException("source.watch.limit");
                             lock (watch) watch.Inputs = (source.WatchFiles.Select(Resolve).ToArray(), (source.WatchDirectories ?? []).Select(Resolve).ToArray());
                         }
+                        watch.Metadata = Metadata(watch, metadataCache);
                         string signature = source.State + ":" + source.SourceRevision + ":" + source.DiagnosticCode;
                         if (source.State == "current") { watch.Signature = signature; Publish(watch, "current", ""); continue; }
                         if (watch.Signature == signature) continue;
@@ -119,7 +165,7 @@ internal sealed class ProviderConfigurationSynchronization : IAsyncDisposable
                         if (source.State != "changed") { Publish(watch, "needs_attention", source.DiagnosticCode); continue; }
                         Publish(watch, "sync_pending", "source.sync_pending");
                         _start(new(Guid.NewGuid().ToString("N"), script.Clone(), new JsonObject())
-                            { UserId = watch.User?.UserId ?? "", ExpectedUserRevision = watch.User?.Revision ?? "" });
+                            { SourceOnly = script.ExecutionProviderId == "maa-framework", UserId = watch.User?.UserId ?? "", ExpectedUserRevision = watch.User?.Revision ?? "" });
                     }
                     catch (OperationCanceledException) when (_stop.IsCancellationRequested) { throw; }
                     catch (Exception)
@@ -135,7 +181,7 @@ internal sealed class ProviderConfigurationSynchronization : IAsyncDisposable
             }
         }
         catch (OperationCanceledException) when (_stop.IsCancellationRequested) { }
-        finally { foreach (var watch in _watches.Values) watch.Dispose(); _watches.Clear(); }
+        finally { foreach (var root in _roots.Values) root.Dispose(); _roots.Clear(); _watches.Clear(); }
     }
     public async ValueTask DisposeAsync()
     {

@@ -304,6 +304,46 @@ public sealed class ProviderRunnerTests : IClassFixture<HostTestScope>
         }
     }
 
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    public async Task FrameworkRetrySubmitsOnlyFailedSuffixWithinHostBudget(int maximum)
+    {
+        using var fixture = new ProviderWorkerFixture();
+        var script = new ScriptInstance { Id = "framework-" + Guid.NewGuid().ToString("N"), Name = "framework retry",
+            RootPath = fixture.Root, ExecutionProviderId = "dummy", ExecutionProviderConfigId = "p", MaxAttempts = maximum,
+            SuccessKeywords = "ignored", JudgeScriptEnabled = true, JudgeScriptLanguage = "javascript",
+            JudgeScript = "console.log(JSON.stringify({status:'success',reason:'must not run'}));" };
+        var plan = new PluginProviderPlan("plan", "revision", "authorization", [new("writable_root", fixture.Root)],
+            [new("A", "Same name", 0), new("B", "Same name", 1), new("C", "Same name", 2)], new())
+            { ResultBasis = "framework-task-v1" };
+        var spec = new ResolvedScriptSpec(script, "1", new(false, "javascript", "provider", "", ""), "hash") { ProviderPlan = plan };
+        var user = new ResolvedScriptUser("user", "User", new() { ScriptInstanceId = script.Id, Enabled = true }, spec);
+        var coordinator = new ExecutionCoordinator(script, "manual", "", "", "User", default, null, null, null, null,
+            new PluginAvailabilityPolicyTestsFixture.EmptyUserRepository(), new PluginAvailabilityPolicyTestsFixture.EmptyEmulatorSupportProviderResolver(),
+            user, spec, executionProviders: new Providers(fixture.Root, true));
+        try
+        {
+            var record = await coordinator.RunAsync();
+            Assert.Equal(maximum == 3 ? "success" : "failed", record.Status);
+            Assert.Equal(maximum, record.Attempts);
+            Assert.Equal("unverified", record.Outcomes!.BusinessVerification);
+            Assert.Equal("framework-task-v1", record.TaskReport!["resultBasis"]!.GetValue<string>());
+            Assert.Null(record.TaskReport["instanceJudgement"]);
+            Assert.Equal(maximum, record.TaskReport["attemptReports"]!.AsArray().Count);
+            string[] expected = maximum == 1 ? ["1:A", "1:B"] : maximum == 2 ? ["1:A", "1:B", "2:B", "2:C"] : ["1:A", "1:B", "2:B", "2:C", "3:C"];
+            Assert.Equal(expected, File.ReadAllLines(Path.Combine(fixture.Root, "submitted-tasks.txt")));
+            var first = record.TaskReport["attemptReports"]![0]!;
+            Assert.Equal("failed", first["taskResults"]![1]!["status"]!.GetValue<string>());
+            Assert.Equal("pending", first["taskResults"]![2]!["status"]!.GetValue<string>());
+            Assert.Equal("succeeded", record.TaskReport["finalTaskResults"]![0]!["status"]!.GetValue<string>());
+            Assert.Equal(record.Id + ":provider:1", record.TaskReport["finalTaskResults"]![0]!["lastAttemptId"]!.GetValue<string>());
+            if (maximum == 3) Assert.True(record.TaskReport["summary"]!["recovered"]!.GetValue<bool>());
+        }
+        finally { coordinator.DisposeScreenshots(); }
+    }
+
     private sealed class Providers(string root, bool useWorker, int progressCount = 0, JsonObject? input = null, bool cleanup = true) : IPluginAvailability, IPluginExecutionProviderResolver
     {
         internal bool? ActualWorkerCleanup;
@@ -324,6 +364,13 @@ public sealed class ProviderRunnerTests : IClassFixture<HostTestScope>
             var workerInput = input?.DeepClone().AsObject() ?? new() { ["progressCount"] = progressCount };
             if (workerInput["fromEffectiveConfiguration"]?.GetValue<bool>() == true)
                 workerInput["log"] = JsonNode.Parse(File.ReadAllText(context.EffectiveConfigurationPath))!["value"]!.DeepClone();
+            if (context.Plan.ResultBasis == "framework-task-v1")
+            {
+                workerInput["selectedTaskIds"] = new JsonArray(context.SelectedTaskIds!.Select(id => (JsonNode?)JsonValue.Create(id)).ToArray());
+                var result = await context.Worker.RunAsync(new("NexusPipeline.TestProviderWorker.exe", [], root, workerInput), context.PublishEvent, token);
+                completed(result);
+                return new(result.ExitCode == 0 ? "succeeded" : "failed", "framework batch", result.CleanupConfirmed);
+            }
             if (useWorker) completed(await context.Worker.RunAsync(new("NexusPipeline.TestProviderWorker.exe", [], root,
                 workerInput) { UseSessionArtifacts = true }, context.PublishEvent, token));
             else await context.PublishEvent(new("completed", 1, "task", "succeeded", new JsonObject()));

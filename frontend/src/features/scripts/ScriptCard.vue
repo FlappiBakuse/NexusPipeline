@@ -18,6 +18,7 @@ interface ScriptCardScript {
   id: string;
   name: string;
   pluginType?: string;
+  executionProviderId?: string;
   requiresReconfiguration?: boolean;
   launchGame?: boolean;
   gameMode?: string;
@@ -79,8 +80,8 @@ const emit = defineEmits<{
           <NxpBadge v-if="configurationState" :tone="configurationState === 'ready' ? 'muted' : 'warn'">{{ translate(`scripts.configuration.${configurationState}`) }}</NxpBadge>
           <NxpBadge :tone="script.pluginType && unavailableMessage ? 'bad' : 'muted'" :data-testid="script.pluginType ? 'script-card-plugin-badge' : undefined">{{ script.pluginType ? unavailableMessage ? translate("common.plugin.unknown") : translate("scripts.specialized_badge", { name: pluginLabel }) : translate("scripts.general_script") }}</NxpBadge>
           <NxpBadge v-if="script.launchGame" tone="muted" data-testid="script-card-game-mode-badge">{{ script.gameMode === "emulator" ? translate("scripts.android_emulator") : translate("scripts.pc_client") }}</NxpBadge>
-          <NxpBadge v-if="script.judgeScriptEnabled && script.judgeScript" tone="muted" data-testid="script-card-judge-badge">{{ translate("scripts.judge_script") }}</NxpBadge>
-          <NxpBadge v-else-if="script.successKeywords || script.failureKeywords" tone="muted" data-testid="script-card-judge-badge">{{ translate("scripts.keyword_judge") }}</NxpBadge>
+          <NxpBadge v-if="script.executionProviderId !== 'maa-framework' && script.judgeScriptEnabled && script.judgeScript" tone="muted" data-testid="script-card-judge-badge">{{ translate("scripts.judge_script") }}</NxpBadge>
+          <NxpBadge v-else-if="script.executionProviderId !== 'maa-framework' && (script.successKeywords || script.failureKeywords)" tone="muted" data-testid="script-card-judge-badge">{{ translate("scripts.keyword_judge") }}</NxpBadge>
           <NxpBadge v-if="script.logStallTimeoutMinutes === -1" tone="warn" data-testid="script-card-long-badge">{{ translate("scripts.long_running_policy") }}</NxpBadge>
           <span
             class="plugin-slot script-plugin-slot"

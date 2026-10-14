@@ -165,9 +165,9 @@ internal sealed class ScriptSpecResolver
         if (!string.IsNullOrWhiteSpace(script.MainExe) || !string.IsNullOrWhiteSpace(script.ConfigPath)
             || !string.IsNullOrWhiteSpace(script.LogPath))
             return Failed(script, "直驱实例不能伪造外部脚本主程序或配置路径", "");
-        var judgement = ResolveGeneric(script, preferInlineSource);
-        if (judgement.Error is not null) return judgement;
-        var judge = judgement.JudgeScript;
+        var judgement = id == "maa-framework" ? null : ResolveGeneric(script, preferInlineSource);
+        if (judgement?.Error is not null) return judgement;
+        var judge = judgement?.JudgeScript ?? new ResolvedJudgeScript(false, "javascript", "provider", "", "");
         try
         {
             // This resolver is synchronous. Run the provider's read-only

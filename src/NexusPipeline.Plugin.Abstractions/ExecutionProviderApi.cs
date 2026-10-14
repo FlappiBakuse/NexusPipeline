@@ -67,6 +67,7 @@ public sealed record PluginProviderPlan(
     JsonObject PrivatePlan)
 {
     public JsonObject? EffectiveConfiguration { get; init; }
+    public string ResultBasis { get; init; } = "legacy-provider";
 }
 
 /// <summary>Host-mediated worker launcher: provider never owns queue/history/lease state.</summary>
@@ -108,6 +109,7 @@ public sealed record PluginProviderRunContext(
     PluginProviderLaunchTarget? LaunchTarget = null)
 {
     public string EffectiveConfigurationPath { get; init; } = "";
+    public IReadOnlyList<string>? SelectedTaskIds { get; init; }
 }
 
 /// <summary>Strong target facts captured after the existing Host launch controller confirms readiness.</summary>

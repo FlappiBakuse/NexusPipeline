@@ -27,7 +27,10 @@ public sealed record PluginProviderConfigurationSourceState(string State, string
     IReadOnlyList<string>? WatchFiles = null, IReadOnlyList<string>? WatchDirectories = null);
 
 public sealed record PluginProviderConfigurationRequest(string OperationId, string ProfileId, string ScriptInstanceId,
-    string UserId, string PackageRoot, string InterfaceRelativePath, string ExpectedRevision, JsonObject Configuration);
+    string UserId, string PackageRoot, string InterfaceRelativePath, string ExpectedRevision, JsonObject Configuration)
+{
+    public bool SourceOnly { get; init; }
+}
 public sealed record PluginProviderConfigurationDiscovery(JsonObject Sources, IReadOnlyList<PluginProviderDiagnostic> Diagnostics);
 public sealed record PluginProviderConfigurationCandidate(string OperationId, string ProfileId, string Revision,
     string ExpectedRevision, string AuthorizationFingerprint, IReadOnlyList<PluginProviderResource> Resources,
@@ -37,4 +40,7 @@ public sealed record PluginProviderConfigurationContext(PluginProviderConfigurat
     IPluginProviderWorkerPort Worker, Func<PluginProviderEvent, ValueTask> PublishEvent,
     PluginProviderLaunchTarget? LaunchTarget = null);
 public sealed record PluginProviderConfigurationInitialization(bool Ready, bool CleanupConfirmed, JsonObject Facts,
-    IReadOnlyList<PluginProviderDiagnostic> Diagnostics);
+    IReadOnlyList<PluginProviderDiagnostic> Diagnostics)
+{
+    public bool SourceOnly { get; init; }
+}

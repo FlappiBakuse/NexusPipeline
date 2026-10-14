@@ -44,6 +44,7 @@ export interface TaskResult {
   evidence: Array<{ sourceId: string; epoch: number; sequence: number; ruleId: string }>;
 }
 export interface TaskReport {
+  resultBasis?: string;
   semanticsVersion?: string;
   hostEvidence?: Array<{ kind: string; attemptId: string; hostEventId: string; taskIds: string[] }>;
   engineStatus?: string;

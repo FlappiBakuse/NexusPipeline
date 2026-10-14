@@ -12,8 +12,37 @@ internal sealed class ProviderTaskProjection
     private readonly string _provider;
     private readonly string _user;
     private readonly string _script;
-    private readonly string _attempt;
-    private readonly int _number;
+    private string _attempt = "";
+    private int _number;
+    private readonly bool _framework;
+    private string[] _selected = [];
+    private readonly JsonArray _attempts = new();
+    private readonly Dictionary<string, string> _nativeTasks = new(StringComparer.Ordinal);
+    private bool _taskFailed;
+    internal IReadOnlyList<string> SelectedTaskIds => _selected.ToArray();
+    internal string[] RetryTaskIds() => _taskFailed
+        ? _reducer.OriginalPlan.Tasks.OrderBy(task => task.Order).Select(task => task.Id)
+            .SkipWhile(id => _engineTasks.GetValueOrDefault(id) != "failed")
+            .Where(id => _engineTasks.GetValueOrDefault(id) != "succeeded").ToArray() : [];
+
+    internal void BeginAttempt(int number, IReadOnlyList<string> selected)
+    {
+        if (selected.Count == 0 || selected.Distinct(StringComparer.Ordinal).Count() != selected.Count
+            || !_reducer.OriginalPlan.Tasks.OrderBy(t => t.Order).Select(t => t.Id).Where(selected.Contains).SequenceEqual(selected))
+            throw new InvalidDataException("provider.attempt_selection");
+        _number = number; _attempt = _record + ":provider:" + number;
+        _selected = selected.ToArray(); _lifecycle = "running"; _engine = "running"; _taskFailed = false;
+        _lastSequence = 0; _replays.Clear(); _progressSequences.Clear(); _progress.Clear(); _progressBytes = 0;
+        _nativeTasks.Clear(); _instanceJudgement = null;
+        foreach (string id in _selected) _engineTasks.Remove(id);
+        _reducer.BeginAttempt(_attempt, number, _selected);
+    }
+
+    internal bool Accept(int number, PluginProviderEvent item)
+    {
+        if (number != _number) throw new InvalidDataException("provider.stale_attempt");
+        return Accept(item);
+    }
     private string _lifecycle = "running";
     private string _engine = "running";
     private readonly JsonArray _structured = new();
@@ -35,7 +64,7 @@ internal sealed class ProviderTaskProjection
         string record, string user, string script, int number)
     {
         _record = record; _provider = provider; _user = user; _script = script;
-        _number = number; _attempt = record + ":provider:" + number;
+        _framework = plan.ResultBasis == "framework-task-v1";
         TaskDefinition[] tasks = plan.Tasks.Select(task => new TaskDefinition
         {
             Id = task.Id, SourceKey = task.Id, Name = task.Name, ParentId = null, Role = "business",
@@ -44,7 +73,7 @@ internal sealed class ProviderTaskProjection
         }).ToArray();
         _reducer = TaskRunReducer.CreateProvider(record, new TaskPlan("provider-execution-v1", plan.PlanId, "provider", provider,
             version, DateTimeOffset.Now, plan.AuthorizationFingerprint, "complete", tasks, []) { SemanticsVersion = "provider-execution-v1" });
-        _reducer.BeginAttempt(_attempt, number, tasks.Select(task => task.Id));
+        BeginAttempt(number, tasks.OrderBy(task => task.Order).Select(task => task.Id).ToArray());
     }
 
     internal bool Accept(PluginProviderEvent item)
@@ -112,21 +141,42 @@ internal sealed class ProviderTaskProjection
         if (item.Kind is "ready" or "cancel_ack") return true;
         if (item.Kind == "task_event")
         {
-            if (!_reducer.OriginalPlan.Tasks.Any(task => task.Id == item.TaskId)
+            if (!_selected.Contains(item.TaskId)
                 || item.Status is not ("running" or "succeeded" or "failed"))
                 throw new InvalidDataException("provider.task_identity_or_status");
             if (_engineTasks.TryGetValue(item.TaskId!, out string? previous)
                 ? previous != "running" || item.Status == "running" : item.Status != "running")
                 throw new InvalidDataException("provider.task_transition");
+            if (_framework)
+            {
+                string native = item.Evidence["nativeTaskId"]?.GetValue<string>() ?? "";
+                if (!ulong.TryParse(native, out ulong job) || job == 0)
+                    throw new InvalidDataException("provider.native_task_identity");
+                if (item.Status == "running")
+                {
+                    if (_nativeTasks.ContainsKey(native) || _selected.TakeWhile(id => id != item.TaskId)
+                        .Any(id => _engineTasks.GetValueOrDefault(id) != "succeeded"))
+                        throw new InvalidDataException("provider.task_order");
+                    _nativeTasks.Add(native, item.TaskId!);
+                }
+                else if (_nativeTasks.GetValueOrDefault(native) != item.TaskId)
+                    throw new InvalidDataException("provider.native_task_identity");
+            }
             _engineTasks[item.TaskId!] = item.Status!;
         }
-        if (item.Kind == "completed" && (item.Status != "succeeded"
-            || _reducer.OriginalPlan.Tasks.Any(task => _engineTasks.GetValueOrDefault(task.Id) != "succeeded")))
-            throw new InvalidDataException("provider.missing_task_terminal");
+        if (item.Kind == "completed")
+        {
+            bool succeeded = item.Status == "succeeded" && _selected.All(id => _engineTasks.GetValueOrDefault(id) == "succeeded");
+            bool failed = _framework && item.Status == "failed" && item.Evidence["code"]?.GetValue<string>() == "maa.task_failed"
+                && _selected.Count(id => _engineTasks.GetValueOrDefault(id) == "failed") == 1
+                && !_selected.Any(id => _engineTasks.GetValueOrDefault(id) == "running");
+            if (!succeeded && !failed) throw new InvalidDataException("provider.missing_task_terminal");
+            _taskFailed = failed;
+        }
         var observation = item.Kind == "task_event" ? new TaskObservation
         {
             Id = "native:" + item.Sequence, TaskId = item.TaskId ?? "", ExecutionOrdinal = 1,
-            Status = item.Status == "running" ? "running" : "unknown",
+            Status = _framework ? item.Status! : item.Status == "running" ? "running" : "unknown",
             ReasonCode = "provider.engine_" + item.Status, Evidence = [], StructuredEvidenceRefs = [evidenceId],
         } : null;
         _reducer.AcceptProviderFacts(new(_record, _attempt,
@@ -138,14 +188,18 @@ internal sealed class ProviderTaskProjection
 
     internal void Finish(string engine, bool cancelled)
     {
+        if (_lifecycle != "running") return;
         _engine = engine;
         _lifecycle = cancelled ? "cancelled" : engine == "succeeded" ? "completed" : "failed";
-        _reducer.FinishAttempt(_lifecycle);
+        _reducer.FinishAttempt(_lifecycle, preservePending: _framework);
+        _attempts.Add(new JsonObject { ["attemptId"] = _attempt, ["number"] = _number,
+            ["selectedTaskIds"] = new JsonArray(_selected.Select(id => (JsonNode?)JsonValue.Create(id)).ToArray()),
+            ["taskResults"] = AttemptResults(), ["stopReason"] = cancelled ? "cancelled" : _taskFailed ? "maa.task_failed" : engine });
     }
 
     internal void ApplyJudgement(SessionJudge judge)
     {
-        if (!judge.IsConfigured) return;
+        if (_framework || !judge.IsConfigured) return;
         string reason = judge.Reason ?? (judge.IsFailure ? "失败关键字已命中" : "完成关键字已命中");
         _instanceJudgement = judge.IsFailure ? RunAttemptResult.Failed(reason, "provider.judge_failed")
             : judge.MarkerOutcome == SessionJudge.JudgeOutcome.Partial ? RunAttemptResult.Partial(reason, "provider.judge_partial")
@@ -165,9 +219,20 @@ internal sealed class ProviderTaskProjection
         return results;
     }
 
+    private JsonArray AttemptResults() => new(Results().OfType<JsonObject>()
+        .Where(result => _selected.Contains(result["taskId"]!.GetValue<string>())).Select(result => (JsonNode?)result.DeepClone()).ToArray());
+
+    private JsonArray Attempts()
+    {
+        var attempts = _attempts.DeepClone().AsArray();
+        if (_lifecycle == "running") attempts.Add(new JsonObject { ["attemptId"] = _attempt, ["number"] = _number,
+            ["selectedTaskIds"] = new JsonArray(_selected.Select(id => (JsonNode?)JsonValue.Create(id)).ToArray()), ["taskResults"] = AttemptResults() });
+        return attempts;
+    }
+
     internal JsonObject Snapshot() => new()
     {
-        ["schemaVersion"] = 1, ["semanticsVersion"] = "provider-execution-v1", ["runId"] = _record, ["pluginId"] = _provider,
+        ["resultBasis"] = _framework ? "framework-task-v1" : "legacy-provider", ["schemaVersion"] = 1, ["semanticsVersion"] = "provider-execution-v1", ["runId"] = _record, ["pluginId"] = _provider,
         ["revision"] = _reducer.Revision, ["userId"] = _user, ["scriptInstanceId"] = _script,
         ["originalPlan"] = JsonNode.Parse(TaskProtocolJson.Write(_reducer.OriginalPlan)),
         ["lifecycleOutcome"] = _lifecycle, ["engineStatus"] = _engine,
@@ -179,9 +244,7 @@ internal sealed class ProviderTaskProjection
         ["structuredEvidence"] = _structured.DeepClone(),
         ["progressEvidence"] = _progress.DeepClone(), ["diagnosticTruncated"] = _diagnosticTruncated,
         ["logSources"] = _logSources.DeepClone(),
-        ["attemptReports"] = new JsonArray(new JsonObject { ["attemptId"] = _attempt, ["number"] = _number,
-            ["selectedTaskIds"] = new JsonArray(_reducer.OriginalPlan.Tasks.Select(task => (JsonNode?)JsonValue.Create(task.Id)).ToArray()),
-            ["taskResults"] = Results() }),
+        ["attemptReports"] = Attempts(),
         ["finalTaskResults"] = Results(),
         ["summary"] = JsonNode.Parse(TaskProtocolJson.Write(_reducer.Summarize(_lifecycle))),
         ["incidents"] = new JsonArray(), ["diagnostics"] = _diagnostics.DeepClone(),
@@ -191,6 +254,7 @@ internal sealed class ProviderTaskProjection
     {
         if (_lifecycle == "cancelled") return RunAttemptResult.Cancelled(detail);
         if (_instanceJudgement is not null) return _instanceJudgement;
+        if (_framework && _taskFailed) return RunAttemptResult.Failed(detail, "provider.tasks_failed");
         if (_engine != "succeeded") return RunAttemptResult.Fatal(detail, "provider.engine_failed");
         return _reducer.Summarize(_lifecycle).Outcome switch
         {

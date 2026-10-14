@@ -61,10 +61,12 @@ public sealed class ProviderConfigurationTests : IClassFixture<HostTestScope>
 
     private sealed class UserStore(Repository scripts) : IUserProviderConfigurationStore
     {
+        internal int BindingCount = 1;
         internal string Revision = "previous_user", Fingerprint = new('a', 64);
         public UserProviderConfigurationBinding? FindProviderBinding(string userId, string scriptId) => userId == "user" && scriptId == "existing"
             ? new(userId, scriptId, Revision, Fingerprint) : null;
-        public IReadOnlyList<UserProviderConfigurationBinding> ProviderBindings() => [FindProviderBinding("user", "existing")!];
+        public IReadOnlyList<UserProviderConfigurationBinding> ProviderBindings() => Enumerable.Range(0, BindingCount)
+            .Select(index => new UserProviderConfigurationBinding(index == 0 ? "user" : "user-" + index, "existing", Revision, Fingerprint)).ToArray();
         public OperationResult<bool> CommitProviderBinding(string userId, string scriptId, string expectedFingerprint, string revision, string expectedScriptFingerprint)
         {
             if (expectedFingerprint != Fingerprint || ProviderConfigurationOperations.Fingerprint(scripts.Visible) != expectedScriptFingerprint)
@@ -74,12 +76,50 @@ public sealed class ProviderConfigurationTests : IClassFixture<HostTestScope>
     }
 
     [Fact]
-    public async Task SourceChangesCoalesceWaitForIdleAndCommitOneInitializedRevision()
+    public async Task TenBindingsShareIdleSourceChecksAndStopObservingAfterDisposal()
+    {
+        using var fixture = new ProviderWorkerFixture();
+        string source = Path.Combine(fixture.Root, "owned-source.json"); File.WriteAllText(source, "before");
+        var repository = new Repository { Visible = new() { Id = "existing", Name = "Shared root", RootPath = fixture.Root,
+            ExecutionProviderId = "maa-framework", ExecutionProviderConfigId = "profile", ExecutionProviderConfigRevision = "shared" } };
+        var users = new UserStore(repository) { BindingCount = 9 };
+        var provider = new Provider { SourcePath = source, CommittedSource = "before" };
+        var requests = new System.Collections.Concurrent.ConcurrentQueue<ProviderConfigurationSaveRequest>();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+        var synchronization = new ProviderConfigurationSynchronization(repository, new Providers(provider, fixture.Root), requests.Enqueue,
+            _ => false, (_, _, _, _) => { }, users);
+        try
+        {
+            while (Volatile.Read(ref provider.Inspections) < 10) await Task.Delay(20, timeout.Token);
+            Assert.Equal(10, Volatile.Read(ref provider.Inspections));
+            for (int index = 0; index < 5; index++)
+                File.WriteAllText(Path.Combine(fixture.Root, "unrelated-worker.log"), index.ToString());
+            await Task.Delay(TimeSpan.FromSeconds(62), timeout.Token);
+            Assert.Equal(10, Volatile.Read(ref provider.Inspections));
+            Assert.Empty(requests);
+            File.WriteAllText(source, "after");
+            while (requests.Count < 10) await Task.Delay(20, timeout.Token);
+            Assert.Equal(20, Volatile.Read(ref provider.Inspections));
+            Assert.Equal(10, requests.Select(request => request.UserId).Distinct().Count());
+            Assert.All(requests, request => Assert.True(request.SourceOnly));
+            Console.WriteLine("source-watch measurement: bindings=10; initialInspections=10; idleSeconds=62; idleInspections=0; changedInspections=10; sourceOnlyRequests=10");
+        }
+        finally { await synchronization.DisposeAsync(); }
+        int stopped = Volatile.Read(ref provider.Inspections);
+        File.WriteAllText(source, "after-disposal");
+        await Task.Delay(1500, timeout.Token);
+        Assert.Equal(stopped, Volatile.Read(ref provider.Inspections));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SourceChangesCoalesceWaitForIdleAndCommitWithoutReplayingMaaPrograms(bool sourceOnly)
     {
         using var fixture = new ProviderWorkerFixture();
         string source = Path.Combine(fixture.Root, "owned-source.json"); File.WriteAllText(source, "before");
         var repository = new Repository { Visible = new() { Id = "existing", Name = "Owned sync", RootPath = fixture.Root,
-            ExecutionProviderId = "fixture", ExecutionProviderConfigId = "profile", ExecutionProviderConfigRevision = "previous" } };
+            ExecutionProviderId = sourceOnly ? "maa-framework" : "fixture", ExecutionProviderConfigId = "profile", ExecutionProviderConfigRevision = "previous" } };
         var provider = new Provider { SourcePath = source, CommittedSource = "before" }; var events = new RealtimeEventBus();
         var state = new ExecutionStateStore();
         await using var operations = new ProviderConfigurationOperations(repository, new Providers(provider, fixture.Root), Dispatcher(state, events), events,
@@ -113,8 +153,8 @@ public sealed class ProviderConfigurationTests : IClassFixture<HostTestScope>
         state.EndEditSession("other", "provider-operation:busy");
         var result = await Wait(operations, pending.OperationId);
         Assert.Equal("ready", result.State); Assert.Equal(result.Revision, repository.Visible.ExecutionProviderConfigRevision);
-        Assert.True(result.CleanupConfirmed); Assert.Equal(1, provider.Initializations); Assert.Equal(1, provider.Commits);
-        await Task.Delay(1500, timeout.Token); Assert.Equal(1, provider.Initializations);
+        Assert.True(result.CleanupConfirmed); Assert.Equal(sourceOnly ? 0 : 1, provider.Initializations); Assert.Equal(1, provider.Commits);
+        await Task.Delay(1500, timeout.Token); Assert.Equal(sourceOnly ? 0 : 1, provider.Initializations);
         }
         finally { noiseStop.Cancel(); await noise; }
     }

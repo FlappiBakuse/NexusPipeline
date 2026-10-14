@@ -91,6 +91,24 @@ if (bootstrap.Input["mode"]?.GetValue<string>() == "initialize_only")
     await Send("completed", new() { ["status"] = "succeeded" });
     return 0;
 }
+if (bootstrap.Input["selectedTaskIds"] is JsonArray selected)
+{
+    foreach (string id in selected.Select(item => item!.GetValue<string>()))
+    {
+        File.AppendAllText("submitted-tasks.txt", bootstrap.AttemptNumber + ":" + id + "\n");
+        string native = ((int)id[0]).ToString();
+        await Send("task_event", new() { ["taskId"] = id, ["nativeTaskId"] = native, ["status"] = "running" });
+        bool failed = bootstrap.AttemptNumber == 1 && id == "B" || bootstrap.AttemptNumber == 2 && id == "C";
+        await Send("task_event", new() { ["taskId"] = id, ["nativeTaskId"] = native, ["status"] = failed ? "failed" : "succeeded" });
+        if (failed)
+        {
+            await Send("completed", new() { ["status"] = "failed", ["code"] = "maa.task_failed" });
+            return 3;
+        }
+    }
+    await Send("completed", new() { ["status"] = "succeeded" });
+    return 0;
+}
 await Send("task_event", new() { ["taskId"] = "task", ["status"] = "running" });
 if (bootstrap.Input["progressCount"]?.GetValue<int>() is int count)
 {
