@@ -91,3 +91,5 @@ GameCheckIn 的 `credentials/editors`、`credentials/editors/state`、`credentia
 宿主加载插件后以最多三个并行下载在后台预取类型图标，不等待弹窗打开，不阻塞启动；停止宿主时取消预取并等待清理。Scripts 服务使用宿主代理下载，仅允许完整 SHA 固定的 HTTPS raw 来源并拒绝重定向，大小上限为 2 MiB、超时 10 秒。经摘要验证的图像缓存于 `.nxp/cache/script-type-icons/`，缓存命中无需联网；并发下载共享任务，单个客户端取消不影响其他请求。网络或校验失败使用项目图标，后续弹窗请求可以重试；缓存写入失败仍返回已经验证的图像。上游图标字节不包含在源码和发行包中。
 
 今日概览布局：`GET /api/dashboard/cards`、`GET /api/dashboard/layout`、`PUT /api/dashboard/layout`（General）。GET layout 的完整语言表示带强 ETag；PUT 正文为 schemaVersion/catalogRevision/visibleCardIds，必须携同语言 If-Match。目录冲突 409 优先于表示冲突 412，缺前置条件 428，非法值 400，超限 413，持久化失败/坏文件 503。成功 PUT 无 ETag，后续 GET 取得新基线。SSE 提供 dashboard.layout.changed 和 dashboard.catalog.changed 失效通知。详见[卡片 owner](architecture/dashboard.md)。
+
+专项任务新报告采用 schema 3 / daily-flow-v2，运行与历史接口保留 verification 的识别覆盖、未知项及实际 worker 完成依据。已知任务无失败且实际执行正常结束、恢复成功时，含未知项的主状态仍为 success；历史筛选、成功配额和通知沿用该真实主状态。未知项只读显示为未核验，旧 schema 2 不补造覆盖信息。

@@ -89,7 +89,7 @@ internal partial class RunHistoryService : ITaskHistoryCheckpoints
                                 if (node is JsonObject result && result["status"]?.GetValue<string>() is "pending" or "running")
                                 { result["status"] = "unknown"; result["reasonCode"] = "tasks.interrupted"; }
                         }
-                        bool daily = RunRecordFormat.ReportSemantics(report) == TaskReportSemantics.DailyFlow;
+                        bool daily = RunRecordFormat.ReportSemantics(report) is TaskReportSemantics.DailyFlow or TaskReportSemantics.RecognitionFlow;
                         if (daily) (recoverDailyReport ?? throw new InvalidDataException("Daily report recovery is unavailable"))(report);
                         else Interrupt(report["finalTaskResults"] as JsonArray);
                         foreach (var attempt in report["attemptReports"]?.AsArray() ?? [])

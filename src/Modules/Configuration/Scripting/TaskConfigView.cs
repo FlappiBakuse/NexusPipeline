@@ -22,6 +22,8 @@ internal sealed class TaskConfigView
         internal string? Integrity { get; }
         internal Lazy<TaskConfigDocument?> Parsed { get; }
         internal Lazy<string> Serialized { get; }
+        internal Lazy<string> Outcome { get; }
+        internal bool ResourceLimitExceeded { get; private set; }
 
         internal Entry(string path, string baseDirectory, byte[] bytes, string revision,
             string format, bool writable, string? integrity, Action parsed)
@@ -37,7 +39,9 @@ internal sealed class TaskConfigView
             {
                 if (format is not ("json" or "yaml")) return null;
                 parsed();
-                return new TaskConfigDocument(bytes, format);
+                try { return new TaskConfigDocument(bytes, format); }
+                catch (InvalidDataException error) when (error.Message.StartsWith("resource_limit:", StringComparison.Ordinal))
+                { ResourceLimitExceeded = true; throw; }
             });
             Serialized = new Lazy<string>(() =>
             {
@@ -48,6 +52,22 @@ internal sealed class TaskConfigView
                 var result = new JsonObject { ["document"] = document, ["revision"] = revision, ["format"] = format };
                 if (integrity is not null) result["integrity"] = integrity;
                 return result.ToJsonString();
+            });
+            Outcome = new Lazy<string>(() =>
+            {
+                try
+                {
+                    var result = JsonNode.Parse(Serialized.Value)!.AsObject();
+                    result["readOutcome"] = integrity == "mismatch" ? "integrity_mismatch" : "parsed";
+                    return result.ToJsonString();
+                }
+                catch (Exception error) when (error is JsonException or YamlDotNet.Core.YamlException
+                    or System.Text.DecoderFallbackException
+                    || error is InvalidDataException && error.Message.StartsWith("unsupported_schema:", StringComparison.Ordinal))
+                {
+                    return new JsonObject { ["document"] = null, ["revision"] = revision,
+                        ["format"] = format, ["readOutcome"] = "opaque", ["reasonCode"] = "unsupported_structure" }.ToJsonString();
+                }
             });
         }
     }
@@ -116,6 +136,21 @@ internal sealed class TaskConfigView
     {
         if (!_entries.TryGetValue(id, out var entry) || entry.Writable) throw new InvalidDataException("config_unavailable: undeclared read resource");
         return Read(entry);
+    }
+
+    internal string ReadConfig(string id, string protocolVersion) => ReadForProtocol(id, true, protocolVersion);
+    internal string ReadResource(string id, string protocolVersion) => ReadForProtocol(id, false, protocolVersion);
+
+    private string ReadForProtocol(string id, bool writable, string protocolVersion)
+    {
+        if (!_entries.TryGetValue(id, out var entry) || entry.Writable != writable)
+            throw new InvalidDataException("config_unavailable: undeclared resource");
+        return protocolVersion switch
+        {
+            "0.2.0" => Read(entry),
+            "0.3.0" => entry.Outcome.Value,
+            _ => throw new InvalidDataException("unsupported_task_protocol"),
+        };
     }
 
     /// <summary>
@@ -286,6 +321,7 @@ internal sealed class TaskConfigView
 
     private static void VerifyUnchanged(Entry entry)
     {
+        if (entry.ResourceLimitExceeded) throw new InvalidDataException("resource_limit: captured configuration cannot be admitted");
         ValidatePath(entry.Path);
         if (new FileInfo(entry.Path).Length != entry.Bytes.Length)
             throw new InvalidDataException("configuration_conflict: resource changed after snapshot");

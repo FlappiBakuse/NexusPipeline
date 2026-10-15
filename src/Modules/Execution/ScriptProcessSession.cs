@@ -17,15 +17,21 @@ internal sealed class ScriptProcessSession : IDisposable
         Process process,
         ProcessOwnership? ownership,
         string launchExe,
-        ProcessIdentity? preservedLauncher)
+        ProcessIdentity? preservedLauncher,
+        ProcessRole rootRole)
     {
         Process = process;
         Ownership = ownership;
         LaunchExe = launchExe;
         PreservedLauncher = preservedLauncher;
+        RootRole = rootRole;
+        StartedIdentity = ProcessIdentity.Capture(process)
+            ?? ownership?.ObserveCompletion().Processes.SingleOrDefault(item => item.Identity.Pid == process.Id)?.Identity;
     }
 
     public Process Process { get; }
+    internal ProcessRole RootRole { get; }
+    internal ProcessIdentity? StartedIdentity { get; }
 
     public ProcessOwnership? Ownership { get; }
 
@@ -101,7 +107,7 @@ internal sealed class ScriptProcessSession : IDisposable
                 if (preservedLauncher is null)
                     Logger.Warn("[进程角色] 启动器根进程身份未能核验，按必要自动化进程处理。");
             }
-            return new ScriptProcessSession(process, ownership, launchExe, preservedLauncher);
+            return new ScriptProcessSession(process, ownership, launchExe, preservedLauncher, rootRole);
         }
         catch
         {

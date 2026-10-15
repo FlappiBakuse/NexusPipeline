@@ -7,8 +7,10 @@ internal static partial class TaskProtocolValidation
 {
     internal static void Discovery(TaskDiscovery discovery)
     {
-        Require(discovery.ProtocolVersion == "0.2.0" && discovery.Type == "discovery", "discovery envelope");
-        Require(discovery.Coverage is "complete" or "partial" or "unsupported", "coverage");
+        Require(discovery.ProtocolVersion is "0.2.0" or "0.3.0" && discovery.Type == "discovery", "discovery envelope");
+        bool recognition = discovery.ProtocolVersion == "0.3.0";
+        Require(recognition ? discovery.Coverage is "complete" or "partial" or "opaque"
+            : discovery.Coverage is "complete" or "partial" or "unsupported", "coverage");
         Require(discovery.Tasks is { Length: <= 1024 }, "task count");
         Diagnostics(discovery.Diagnostics, discovery.ProtocolVersion);
         Require(discovery.SelectionFields is { Length: <= 2048 }, "selection field count");
@@ -45,7 +47,9 @@ internal static partial class TaskProtocolValidation
             }
             Require(fields.Add(field.ResourceId + "\n" + field.Selector.ToJsonString()), "duplicate selection field");
         }
-        TaskGraph(discovery.Tasks, true);
+        TaskGraph(discovery.Tasks, true, recognition);
+        if (recognition) RecognitionDiscovery(discovery);
+        else Require(discovery.Verification is null && discovery.SelectionFields.All(field => field.TaskIds is null && field.TaskIndices is null), "legacy recognition fields");
     }
 
     internal static void ProviderPlan(TaskPlan plan)
@@ -57,7 +61,7 @@ internal static partial class TaskProtocolValidation
         TaskGraph(plan.Tasks, false);
     }
 
-    private static void TaskGraph(TaskDefinition[] definitions, bool daily)
+    private static void TaskGraph(TaskDefinition[] definitions, bool daily, bool recognition = false)
     {
         var tasks = new Dictionary<string, TaskDefinition>(StringComparer.Ordinal);
         foreach (var task in definitions)
@@ -74,7 +78,9 @@ internal static partial class TaskProtocolValidation
             if (task.ParentId is not null) Text(task.ParentId);
             if (task.ConfigRef is not null) Text(task.ConfigRef);
             Require(!task.CountsAsUnit || task.ParentId is null, "child cannot count twice");
-            if (daily) DailyTask(task);
+            if (recognition) RecognitionTask(task);
+            else Require(task.Recognition is null && task.LifecycleRole is null && task.SelectionPolicy is null, "legacy recognition fields");
+            if (daily && (!recognition || task.Recognition == "known")) DailyTask(task);
             else Require(task.CompletionPolicy is null && task.WorkflowRole is null
                 && task.ObservationContract is null && task.RetryPolicy is null, "provider task policy");
         }
@@ -99,14 +105,23 @@ internal static partial class TaskProtocolValidation
         IReadOnlySet<string> declaredConfigIds,
         IReadOnlySet<string> declaredResourceIds)
     {
-        Require(protocol.Version == "0.2.0", "unsupported task protocol");
+        Require(protocol.Version is "0.2.0" or "0.3.0", "unsupported task protocol");
+        bool recognition = protocol.Version == "0.3.0";
         TaskConfigAssessment? assessment = discovery.ConfigAssessment;
         Require(assessment is not null, "config assessment required");
         if (assessment is null) throw new InvalidDataException("protocol_error: config assessment required");
-        Require(assessment.SchemaVersion == "1" && assessment.Checks is { Length: > 0 and <= 128 }, "config assessment envelope");
+        Require(assessment.SchemaVersion == (recognition ? "2" : "1") && assessment.Checks is { Length: > 0 and <= 128 }, "config assessment envelope");
 
         var declarations = protocol.ConfigRules.ToDictionary(rule => rule.RuleId, StringComparer.Ordinal);
         Require(declarations.Count == protocol.ConfigRules.Length && declarations.Count > 0, "config rule declarations");
+        foreach (var declaration in declarations.Values)
+        {
+            Require(recognition
+                ? declaration.Category is "compatibility" or "known_configuration_issue" or "safety" or "protocol_fault"
+                : declaration.Category is null, "config rule category");
+            Require(declaration.Category != "compatibility" || declaration.Criticality != "critical_when_applicable",
+                "compatibility cannot require execution blocking");
+        }
         var seen = new HashSet<string>(StringComparer.Ordinal);
         var taskIds = discovery.Tasks.Select(task => task.Id).ToHashSet(StringComparer.Ordinal);
         // Optional manifest resources may be absent from the frozen view. Their
@@ -152,7 +167,7 @@ internal static partial class TaskProtocolValidation
                 if (check.ReasonText is not null) TaskDisplaySnapshot.ValidateReference(check.ReasonText, protocol.Version);
             }
             if (check.ExecutionEffect == "block")
-                Require(declaration!.Criticality == "critical_when_applicable", "unapproved config block");
+                Require(declaration!.Criticality == "critical_when_applicable" && declaration.Category != "compatibility", "unapproved config block");
         }
         foreach (TaskConfigRuleDescriptor declaration in protocol.ConfigRules.Where(rule => rule.Required))
             Require(seen.Any(key => key.StartsWith(declaration.RuleId + "\n", StringComparison.Ordinal)), "required config rule missing");
@@ -255,7 +270,7 @@ internal static partial class TaskProtocolValidation
         IReadOnlySet<string> selected, IReadOnlySet<(string, int, long)> evidence,
         IReadOnlySet<string>? structuredEvidence = null)
     {
-        Require(batch.ProtocolVersion == "0.2.0" && batch.Type == "observation"
+        Require(batch.ProtocolVersion is "0.2.0" or "0.3.0" && batch.Type == "observation"
             && batch.RunId == runId && batch.AttemptId == attemptId, "observation identity");
         Require(structuredEvidence is null && batch.StructuredEvidenceVersion is null, "external structured evidence");
         Diagnostics(batch.Diagnostics, batch.ProtocolVersion);

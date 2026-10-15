@@ -17,17 +17,17 @@ internal static class TaskProtocolManifest
             if (manifest["taskProtocol"] is not JsonObject protocol)
                 throw new InvalidDataException("taskProtocol must be an object");
             string? version = protocol["version"]?.GetValue<string>();
-            if (version != "0.2.0")
+            if (version is not ("0.2.0" or "0.3.0"))
                 throw new InvalidDataException("unsupported taskProtocol.version");
             Fields(protocol, "version", "discoverScript", "retryScript", "readResources", "localization", "configRules", "environmentChecks", "repairRules");
             ValidateLocalization(protocol["localization"], true);
             if (manifest.ContainsKey("configValidator"))
                 throw new InvalidDataException("taskProtocol cannot declare configValidator");
-            ValidateConfigRules(protocol["configRules"]);
+            ValidateConfigRules(protocol["configRules"], version);
             ValidateEnvironmentChecks(protocol["environmentChecks"]);
             ValidateRepairRules(protocol["repairRules"], protocol["configRules"]);
             if (!PluginRepositoryCatalog.TryParseVersion(manifest["minHostVersion"]?.GetValue<string>() ?? "", out var minimum)
-                || !PluginRepositoryCatalog.TryParseVersion("0.16.15", out var required)
+                || !PluginRepositoryCatalog.TryParseVersion(version == "0.3.0" ? "0.17.4" : "0.16.15", out var required)
                 || minimum.CompareTo(required) < 0)
                 throw new InvalidDataException("taskProtocol minHostVersion is below the negotiated protocol minimum");
             foreach (string field in new[] { "discoverScript", "retryScript" }) ScriptPath(protocol[field]?.GetValue<string>());
@@ -122,7 +122,7 @@ internal static class TaskProtocolManifest
                 TaskProtocolJson.Write(new { defaultLocale = localization["defaultLocale"]!.GetValue<string>(), messages })))).ToLowerInvariant();
             frozen = new("", "", localization["defaultLocale"]!.GetValue<string>(), hash, messages);
         }
-        return new("0.2.0", Read(protocol["discoverScript"]!.GetValue<string>()),
+        return new(protocol["version"]!.GetValue<string>(), Read(protocol["discoverScript"]!.GetValue<string>()),
             Read(manifest["judgeScript"]!.GetValue<string>()), Read(protocol["retryScript"]!.GetValue<string>()),
             ((JsonArray)protocol["readResources"]!).Select(r => new TaskReadResource(
                 r!["id"]!.GetValue<string>(), r["source"]!.GetValue<string>(), r["path"]!.GetValue<string>(),
@@ -220,7 +220,7 @@ internal static class TaskProtocolManifest
         }
     }
 
-    private static void ValidateConfigRules(JsonNode? value)
+    private static void ValidateConfigRules(JsonNode? value, string version)
     {
         if (value is not JsonArray rules || rules.Count is 0 or > 32)
             throw new InvalidDataException("taskProtocol.configRules must contain 1..32 rules");
@@ -228,7 +228,14 @@ internal static class TaskProtocolManifest
         foreach (JsonNode? node in rules)
         {
             if (node is not JsonObject rule) throw new InvalidDataException("invalid config rule");
-            Fields(rule, "id", "required", "criticality");
+            if (version == "0.3.0")
+            {
+                Fields(rule, "id", "required", "criticality", "category");
+                if (rule["category"]?.GetValue<string>() is not ("compatibility" or "known_configuration_issue" or "safety" or "protocol_fault")
+                    || rule["category"]?.GetValue<string>() == "compatibility" && rule["criticality"]?.GetValue<string>() == "critical_when_applicable")
+                    throw new InvalidDataException("invalid config rule category or compatibility criticality");
+            }
+            else Fields(rule, "id", "required", "criticality");
             string id = rule["id"]?.GetValue<string>() ?? "";
             if (!System.Text.RegularExpressions.Regex.IsMatch(id, "^[A-Za-z0-9_.:-]{1,160}$") || !ids.Add(id))
                 throw new InvalidDataException("invalid or duplicate config rule id");
@@ -345,7 +352,8 @@ internal static class TaskProtocolManifest
         return protocol["configRules"] is not JsonArray rules
             ? []
             : rules.Select(node => new TaskConfigRuleDescriptor(
-                node!["id"]!.GetValue<string>(), node["required"]!.GetValue<bool>(), node["criticality"]!.GetValue<string>())).ToArray();
+                node!["id"]!.GetValue<string>(), node["required"]!.GetValue<bool>(), node["criticality"]!.GetValue<string>())
+                { Category = node["category"]?.GetValue<string>() }).ToArray();
     }
 
     private static TaskEnvironmentCheckDescriptor[] ReadEnvironmentChecks(JsonObject protocol)

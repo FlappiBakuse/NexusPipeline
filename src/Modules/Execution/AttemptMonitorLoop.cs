@@ -140,6 +140,9 @@ internal sealed class AttemptMonitorLoop
                         || OkRuntimeActivityProbe.Observe(session.Script.PluginType, session.Script.RootPath) == "inactive");
                 if (scriptExited)
                 {
+                    session.TaskProtocolRun?.SetProcessCompletion(TaskExecutionCompletion.FromOwnedProcesses(
+                        session.ProcessOwnership?.ObserveCompletion(), processSession.StartedIdentity, processSession.RootRole, excludeGame,
+                        OkRuntimeActivityProbe.WorkerImages(session.Script.PluginType, session.Script.RootPath)));
                     await processSession.WaitForOutputDrainAsync(token).ConfigureAwait(false);
                     if (attemptMonitor.StartupFailure is { } exitedStartupFailure)
                     {

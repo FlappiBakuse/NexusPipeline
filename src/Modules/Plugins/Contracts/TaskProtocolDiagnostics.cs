@@ -3,8 +3,11 @@ using System.Text.Json.Serialization;
 
 namespace NexusPipeline.Modules.Plugins.Contracts;
 
-/// <summary>Manifest-owned configuration rule declaration for taskProtocol 0.2.0.</summary>
-internal sealed record TaskConfigRuleDescriptor(string RuleId, bool Required, string Criticality);
+internal sealed record TaskConfigRuleDescriptor(string RuleId, bool Required, string Criticality)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Category { get; init; }
+}
 
 /// <summary>Frozen, declarative repair limited to a saved user resource.</summary>
 internal sealed record TaskConfigRepairDescriptor(string Id, string RuleId, string ResourceId,

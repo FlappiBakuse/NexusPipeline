@@ -17,7 +17,12 @@ internal sealed record TaskEffectiveResult(string TaskId, string Status, string 
 }
 internal sealed record TaskSummary(string Tone, string Outcome, Dictionary<string, int> Counts, bool Recovered);
 internal sealed record TaskRetrySelection(string Decision, string ReasonCode, string[] IncludedTaskIds,
-    string[] PrerequisiteTaskIds, string[] ExpandedUnitIds);
+    string[] PrerequisiteTaskIds, string[] ExpandedUnitIds)
+{
+    internal string[] PreservedLifecycleTaskIds { get; init; } = [];
+    internal string[] PreservedOpaqueTaskIds { get; init; } = [];
+    internal string[] PreservedOpaqueScopeIds { get; init; } = [];
+}
 internal sealed record TaskIncidentEvent(string AttemptId, TaskIncident Incident);
 
 /// <summary>One run, one owner. Every accepted fact belongs to a host-generated attempt/log identity.</summary>
@@ -40,16 +45,18 @@ internal sealed partial class TaskRunReducer
     private bool _hadFailure;
     private readonly TaskReductionMode _mode;
     private bool Daily => _mode == TaskReductionMode.DailyFlow;
+    private bool RecognitionAware => Daily && _plan.ProtocolVersion == "0.3.0";
     internal string RunId { get; }
     internal string RunBoundary { get; private set; } = "unknown";
     internal long Revision { get; private set; }
 
     internal static TaskRunReducer CreateDaily(string runId, TaskPlan plan)
     {
-        TaskProtocolValidation.Require(plan.ProtocolVersion == "0.2.0" && plan.SemanticsVersion == "daily-flow-v1", "daily semantics version");
+        TaskProtocolValidation.Require(plan.ProtocolVersion == "0.2.0" && plan.SemanticsVersion == "daily-flow-v1"
+            || plan.ProtocolVersion == "0.3.0" && plan.SemanticsVersion == "daily-flow-v2", "daily semantics version");
         TaskProtocolValidation.Discovery(new TaskDiscovery { ProtocolVersion = plan.ProtocolVersion, Type = "discovery",
             Coverage = plan.Coverage, Tasks = plan.Tasks, Diagnostics = plan.Diagnostics,
-            ConfigAssessment = plan.ConfigAssessment });
+            ConfigAssessment = plan.ConfigAssessment, Verification = plan.Verification, SelectionFields = plan.SelectionFields });
         return new(runId, plan, TaskReductionMode.DailyFlow);
     }
 
@@ -91,6 +98,7 @@ internal sealed partial class TaskRunReducer
     internal void Accept(TaskObservationBatch batch, TaskLogBatch logs)
     {
         TaskProtocolValidation.Require(Daily, "daily reducer required");
+        TaskProtocolValidation.Require(batch.ProtocolVersion == _plan.ProtocolVersion, "negotiated observation version");
         var available = AvailableEvidence(logs);
         TaskProtocolValidation.Observation(batch, RunId, _attemptId, _selected, available);
         AcceptCore(new(batch.Observations, batch.RunBoundary, batch.BoundaryEvidence,
@@ -186,7 +194,8 @@ internal sealed partial class TaskRunReducer
         else if (RunBoundary is not ("ended" or "aborted")) RunBoundary = batch.RunBoundary;
         if (Daily && logs.HasGap) RecordHostFailure("log_gap");
         if (logs.HasGap)
-            foreach (var key in _selected.Where(key => _effective[key].Status is "pending" or "running").ToArray())
+            foreach (var key in _selected.Where(key => (!RecognitionAware || _tasks[key].Recognition == "known")
+                && _effective[key].Status is "pending" or "running").ToArray())
                 _effective[key] = _effective[key] with { Status = Daily ? "failed" : "unknown", ReasonCode = "logs.gap", ReasonText = null };
         Revision++;
     }
@@ -225,6 +234,9 @@ internal sealed partial class TaskRunReducer
             .ToDictionary(s => s, _ => 0, StringComparer.Ordinal);
         foreach (var task in _tasks.Values.Where(t => t.Enabled && t.ParentId is null && t.Role == "business" && t.CountsAsUnit))
         { counts["total"]++; counts[ReducedStatus(task.Id)]++; }
+        if (RecognitionAware && _tasks.Values.Any(task => task.Enabled && task.Recognition == "known"
+            && task.LifecycleRole is "prepare" or "finalize" && ReducedStatus(task.Id) is "failed" or "blocked"))
+            return new("bad", "lifecycle_failed", counts, false);
         if (Daily) return SummarizeDaily(counts);
         (string tone, string outcome) = lifecycle is "failed" or "interrupted" ? ("bad", "lifecycle_failed")
             : counts["total"] > 0 && counts["failed"] == counts["total"] ? ("bad", "all_failed")
@@ -236,12 +248,15 @@ internal sealed partial class TaskRunReducer
         return new(tone, outcome, counts, _hadFailure && tone == "ok");
     }
 
-    internal TaskRetrySelection SelectRetry(int maximumAttempts, bool cancelled, bool budgetExhausted)
+    internal TaskRetrySelection SelectRetry(int maximumAttempts, bool cancelled, bool budgetExhausted, bool executionFailed = false)
     {
         static TaskRetrySelection Stop(string code) => new("stop", code, [], [], []);
         if (cancelled) return Stop("retry.cancelled");
         if (budgetExhausted || _attemptNumber >= maximumAttempts) return Stop("retry.budget_exhausted");
+        if (RecognitionAware && executionFailed && !_tasks.Values.Any(task => task.Enabled && task.Recognition == "known"))
+            return PreserveRecognitionScope(new("original_rerun", "retry.original_rerun", [], [], []));
         var candidates = _effective.Values.Where(r => (Daily ? ReducedStatus(r.TaskId) : r.Status) is "failed" or "blocked")
+            .Where(r => !RecognitionAware || _tasks[r.TaskId].Recognition == "known")
             .Where(r => !Daily || !ProtectedByPartial(r.TaskId)).Select(r => r.TaskId).ToArray();
         if (candidates.Length == 0) return Stop("retry.no_verified_candidate");
         var selected = new HashSet<string>(StringComparer.Ordinal);
@@ -250,6 +265,9 @@ internal sealed partial class TaskRunReducer
         foreach (string candidate in candidates)
         {
             var unitSelection = new HashSet<string>(StringComparer.Ordinal) { candidate };
+            if (RecognitionAware)
+                unitSelection.UnionWith(_tasks.Values.Where(task => task.Enabled && task.Recognition == "known"
+                    && task.LifecycleRole is "prepare" or "finalize").Select(task => task.Id));
             var unitPrerequisites = new HashSet<string>(StringComparer.Ordinal);
             var unitExpanded = new HashSet<string>(StringComparer.Ordinal);
             bool changed;
@@ -269,13 +287,25 @@ internal sealed partial class TaskRunReducer
             } while (changed);
             // Evaluate each failed identity independently. A separate unsafe failure must
             // not veto a safe retry, but its shared unit/dependencies still must pass.
-            if (unitSelection.Any(key => !_tasks.TryGetValue(key, out var task) || (Daily ? !DailyRetryAllowed(key) : task.RetryRisk != "safe")
-                || (!task.Enabled && task.Role == "business"))) continue;
+            if (unitSelection.Any(key => !_tasks.TryGetValue(key, out var task)
+                || (RecognitionAware && task.Recognition == "opaque" ? !task.Enabled
+                    : Daily ? !DailyRetryAllowed(key) : task.RetryRisk != "safe")
+                || (!task.Enabled && (RecognitionAware || task.Role == "business")))) continue;
             selected.UnionWith(unitSelection);
             prerequisites.UnionWith(unitPrerequisites);
             expanded.UnionWith(unitExpanded);
         }
         if (selected.Count == 0) return Stop("retry.risk_not_verified");
+        if (RecognitionAware)
+        {
+            var selection = PreserveRecognitionScope(new("selective", "retry.unfinished", selected.ToArray(),
+                prerequisites.ToArray(), expanded.Order(StringComparer.Ordinal).ToArray()));
+            if (selection.IncludedTaskIds.Any(ProtectedByPartial)) return Stop("retry.partial_scope_protected");
+            var positions = selection.IncludedTaskIds.Select((id, index) => (id, index)).ToDictionary(pair => pair.id, pair => pair.index);
+            if (selection.IncludedTaskIds.Any(id => _tasks[id].Dependencies.Any(dependency =>
+                positions.TryGetValue(dependency, out int index) && index > positions[id]))) return Stop("retry.dependency_order_conflict");
+            return selection;
+        }
         var ordered = new List<string>();
         while (selected.Count > 0)
         {
@@ -284,5 +314,20 @@ internal sealed partial class TaskRunReducer
             ordered.AddRange(ready); selected.ExceptWith(ready);
         }
         return new("selective", "retry.unfinished", ordered.ToArray(), ordered.Where(prerequisites.Contains).ToArray(), expanded.Order(StringComparer.Ordinal).ToArray());
+    }
+
+    private TaskRetrySelection PreserveRecognitionScope(TaskRetrySelection selection)
+    {
+        var enabled = _plan.Tasks.Where(task => task.Enabled).ToArray();
+        string[] lifecycle = enabled.Where(task => task.Recognition == "known" && task.LifecycleRole is "prepare" or "finalize")
+            .Select(task => task.Id).ToArray();
+        string[] opaque = enabled.Where(task => task.Recognition == "opaque").Select(task => task.Id).ToArray();
+        var scope = selection.IncludedTaskIds.Concat(lifecycle).Concat(opaque).ToHashSet(StringComparer.Ordinal);
+        return selection with
+        {
+            IncludedTaskIds = enabled.Where(task => scope.Contains(task.Id)).Select(task => task.Id).ToArray(),
+            PreservedLifecycleTaskIds = lifecycle, PreservedOpaqueTaskIds = opaque,
+            PreservedOpaqueScopeIds = _plan.Verification!.OpaqueScopes.Where(item => item.Enabled).Select(item => item.Id).ToArray(),
+        };
     }
 }

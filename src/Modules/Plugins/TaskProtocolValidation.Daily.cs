@@ -51,6 +51,7 @@ internal static partial class TaskProtocolValidation
 
     internal static void DailyAuthority(TaskDefinition task, TaskObservation observation)
     {
+        Require(task.Recognition != "opaque", "opaque task has no observation authority");
         var contract = task.ObservationContract!;
         Require(observation.Evidence.Length > 0 && observation.Evidence.All(e =>
             contract.Sources.Contains(e.SourceId, StringComparer.Ordinal)

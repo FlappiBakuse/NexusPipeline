@@ -5,9 +5,9 @@ using NexusPipeline.Shared.Serialization;
 
 namespace NexusPipeline.Modules.History;
 
-internal enum TaskReportSemantics { DailyFlow, ProviderExecution }
+internal enum TaskReportSemantics { DailyFlow, RecognitionFlow, ProviderExecution }
 
-internal static class RunRecordFormat
+internal static partial class RunRecordFormat
 {
     private static readonly JsonSerializerOptions Options = new(JsonOpts.Default)
     {
@@ -67,7 +67,7 @@ internal static class RunRecordFormat
                 && report["userId"]?.GetValue<string>() == record.UserId
                 && report["scriptInstanceId"]?.GetValue<string>() == record.ScriptInstanceId
                 && report["originalPlan"] is JsonObject plan
-                && plan["protocolVersion"]?.GetValue<string>() == (mode == TaskReportSemantics.DailyFlow ? "0.2.0" : "provider-execution-v1")
+                && plan["protocolVersion"]?.GetValue<string>() == ProtocolFor(mode)
                 && plan["semanticsVersion"]?.GetValue<string>() == report["semanticsVersion"]?.GetValue<string>());
         }
         Require(record.HistoryDirectory is not null && record.LogFile is not null);
@@ -91,6 +91,11 @@ internal static class RunRecordFormat
             && report["semanticsVersion"] is JsonValue semantics && semantics.TryGetValue<string>(out string? name))
         {
             if (version == 2 && name == "daily-flow-v1") return TaskReportSemantics.DailyFlow;
+            if (version == 3 && name == "daily-flow-v2")
+            {
+                ValidateRecognitionReport(report);
+                return TaskReportSemantics.RecognitionFlow;
+            }
             if (version == 1 && name == "provider-execution-v1") return TaskReportSemantics.ProviderExecution;
         }
         throw new InvalidDataException("unsupported_history_format: 请使用完整备份的旧版查看旧历史，并在新目录重新配置。");
@@ -102,15 +107,18 @@ internal static class RunRecordFormat
         {
             var semantics = ReportSemantics(report);
             return report["originalPlan"] is JsonObject plan
-                && plan["protocolVersion"]?.GetValue<string>() == (semantics == TaskReportSemantics.DailyFlow ? "0.2.0" : "provider-execution-v1")
+                && plan["protocolVersion"]?.GetValue<string>() == ProtocolFor(semantics)
                 && plan["semanticsVersion"]?.GetValue<string>() == report["semanticsVersion"]?.GetValue<string>();
         }
-        catch (Exception ex) when (ex is InvalidDataException or InvalidOperationException or FormatException) { return false; }
+        catch (Exception ex) when (ex is InvalidDataException or InvalidOperationException or FormatException or JsonException) { return false; }
     }
 
     internal static bool FileName(string? name) => !string.IsNullOrWhiteSpace(name)
         && name is not ("." or "..") && name == Path.GetFileName(name)
         && name.IndexOfAny(Path.GetInvalidFileNameChars()) < 0;
+
+    private static string ProtocolFor(TaskReportSemantics semantics) => semantics switch
+    { TaskReportSemantics.DailyFlow => "0.2.0", TaskReportSemantics.RecognitionFlow => "0.3.0", _ => "provider-execution-v1" };
 
     internal static void Require([System.Diagnostics.CodeAnalysis.DoesNotReturnIf(false)] bool valid)
     {

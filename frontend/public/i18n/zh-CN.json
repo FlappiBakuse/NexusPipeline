@@ -1430,5 +1430,18 @@
   "scripts.configuration.stop": "停止初始化",
   "scripts.configuration.preparing_dependencies": "正在准备已锁定依赖",
   "scripts.configuration.sync_pending": "等待同步来源配置",
-  "scripts.configuration.recovery_required": "配置恢复现场需要处理。未知文件已保留，新的初始化与执行暂时隔离。"
+  "scripts.configuration.recovery_required": "配置恢复现场需要处理。未知文件已保留，新的初始化与执行暂时隔离。",
+  "tasks.verification.complete": "已识别全部任务：{known} 项。",
+  "tasks.verification.partial": "已识别 {known} 项；另有 {opaque} 项任务和 {scopes} 个范围未逐项核验。",
+  "tasks.verification.opaque": "未逐项核验：{opaque} 项任务、{scopes} 个范围。",
+  "tasks.completion.normal": "已确认自动化进程正常结束；这不代表未知任务逐项成功。",
+  "tasks.completion.failed": "自动化进程以非零退出码结束。",
+  "tasks.completion.unconfirmed": "尚未确认自动化进程正常结束。",
+  "tasks.coverage.opaque": "未逐项核验",
+  "tasks.verification.retained_on_retry": "重试保留了未知任务及其原有顺序。",
+  "tasks.verification.historical_unrecorded": "此历史记录未保存逐项核验范围。",
+  "execution.success_process_exit_only": "运行成功：自动化进程正常结束，任务未逐项核验。",
+  "execution.success_with_partial_verification": "运行成功：已知任务完成，其他任务未逐项核验。",
+  "execution.unconfirmed_worker": "尚未确认自动化进程正常结束。",
+  "execution.owned_process_nonzero": "自动化进程以非零退出码结束。"
 }

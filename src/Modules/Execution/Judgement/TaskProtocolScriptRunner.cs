@@ -17,9 +17,11 @@ internal static class TaskProtocolScriptRunner
             return await Task.Run(() =>
             {
                 var host = JintScriptHost.Create(preview ? TimeSpan.FromSeconds(2) : TimeSpan.FromSeconds(30), deadline.Token, 2_000_000, 128 * 1024 * 1024);
-                host.SetInput(TaskProtocolJson.Write(input));
-                host.SetValue("__nexusReadConfig", WrapRead(readConfig));
-                host.SetValue("__nexusReadResource", WrapRead(readResource));
+                string wireInput = TaskProtocolJson.Write(input);
+                bool recognition = System.Text.Json.Nodes.JsonNode.Parse(wireInput)?["protocolVersion"]?.GetValue<string>() == "0.3.0";
+                host.SetInput(wireInput);
+                host.SetValue("__nexusReadConfig", WrapRead(readConfig, recognition));
+                host.SetValue("__nexusReadResource", WrapRead(readResource, recognition));
                 host.SetValue("__nexusInspectDeclaredTarget", WrapInspection(inspectDeclaredTarget));
                 host.Execute(source, JintScriptHostProfile.TaskProtocol);
                 if (host.Outputs.Count != 1) throw new InvalidDataException("protocol_error: expected exactly one result");
@@ -41,10 +43,14 @@ internal static class TaskProtocolScriptRunner
     }
 
     // Resource absence is a catchable JS error; CLR objects and local paths never cross the boundary.
-    private static Func<string, string> WrapRead(Func<string, string> read) => id =>
+    private static Func<string, string> WrapRead(Func<string, string> read, bool recognition) => id =>
     {
         try { return "{\"ok\":true,\"value\":" + read(id) + "}"; }
-        catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException or System.Text.Json.JsonException)
+        catch (InvalidDataException ex) when (recognition && ex.Message.StartsWith("resource_limit:", StringComparison.Ordinal))
+        { return "{\"ok\":false,\"error\":\"resource_limit\"}"; }
+        catch (Exception ex) when (recognition && ex is IOException or UnauthorizedAccessException)
+        { return "{\"ok\":false,\"error\":\"safety_conflict\"}"; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or System.Text.Json.JsonException)
         { return "{\"ok\":false}"; }
     };
 

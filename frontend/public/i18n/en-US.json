@@ -1430,5 +1430,18 @@
   "scripts.configuration.stop": "Stop initialization",
   "scripts.configuration.preparing_dependencies": "Preparing locked dependencies",
   "scripts.configuration.sync_pending": "Waiting to synchronize source configuration",
-  "scripts.configuration.recovery_required": "Configuration recovery needs attention. Unknown files are preserved; new initialization and execution are isolated."
+  "scripts.configuration.recovery_required": "Configuration recovery needs attention. Unknown files are preserved; new initialization and execution are isolated.",
+  "tasks.verification.complete": "All tasks recognized: {known}.",
+  "tasks.verification.partial": "{known} recognized tasks; {opaque} tasks and {scopes} scopes were not individually verified.",
+  "tasks.verification.opaque": "Not individually verified: {opaque} tasks and {scopes} scopes.",
+  "tasks.completion.normal": "The automation process exited normally; this does not verify individual unknown tasks.",
+  "tasks.completion.failed": "The automation process exited with a nonzero code.",
+  "tasks.completion.unconfirmed": "Normal completion of the automation process has not been confirmed.",
+  "tasks.coverage.opaque": "Not individually verified",
+  "tasks.verification.retained_on_retry": "The retry preserved unknown tasks and their original order.",
+  "tasks.verification.historical_unrecorded": "This historical record did not store the scope of individual verification.",
+  "execution.success_process_exit_only": "Run succeeded: the automation process exited normally; tasks were not individually verified.",
+  "execution.success_with_partial_verification": "Run succeeded: known tasks completed; other tasks were not individually verified.",
+  "execution.unconfirmed_worker": "Normal completion of the automation process has not been confirmed.",
+  "execution.owned_process_nonzero": "The automation process exited with a nonzero code."
 }

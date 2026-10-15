@@ -22,7 +22,7 @@ internal sealed class JintScriptHost
         const console = { log: (value) => __nexusLog(typeof value === "string" ? value : JSON.stringify(value)) };
         function __taskResource(value) {
           const result = JSON.parse(value);
-          if (!result.ok) throw new Error('config_unavailable');
+          if (!result.ok) throw new Error(result.error || 'config_unavailable');
           return result.value;
         }
         const nexus = Object.freeze({
