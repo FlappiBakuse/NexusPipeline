@@ -5,7 +5,7 @@
 | 依赖 | 版本 | 用途 |
 |---|---|---|
 | Windows | 11 x64 | 唯一支持平台（WinForms 托盘 + Win32 API） |
-| .NET SDK | global.json 指定的 10.0.401 补丁带 | 编译与运行；部署机需要 .NET 10 Desktop Runtime |
+| .NET SDK | global.json 指定的 10.0.401 补丁带 | 编译；构建输入固定 .NET Desktop / ASP.NET Core Runtime 10.0.13，程序运行允许后续 10.0 补丁 |
 | Node.js | 24.x | 前端构建、Web Logic、System Smoke 和 Playwright 测试 |
 
 - 网页管理界面由 `frontend/` 中的 Vue/TypeScript/Vite 源码构建为纯静态 ES modules；运行程序只加载构建结果，源码构建需要 Node.js/npm。

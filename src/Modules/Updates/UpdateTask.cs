@@ -42,6 +42,17 @@ internal sealed record UpdateTask(string Mode, string Version, string StagedDir,
     public UpdateRunnerReceipt? RunnerReceipt { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public UpdateDataState? DataMigration { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public UpdateTransportReceipt? TransportReceipt { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool SetupTransition { get; init; }
+
+    [JsonIgnore]
+    internal string[] ApplicationScopes => JournalSchemaVersion == 3
+        ? StagingInventory!.Entries.Where(entry => !entry.IsDirectory).Select(entry =>
+            entry.Path.StartsWith("resources/desktop/", StringComparison.Ordinal) ? "resources/desktop" : entry.Path)
+            .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray()
+        : ["NexusPipeline.exe", "resources/desktop", "README.md", ApplicationPayload.ManifestPath];
 
     internal static UpdateTask Create(string mode, string version, string staging) =>
         new(mode, version, staging, mode == "defer" ? UpdatePhase.Deferred : UpdatePhase.ApplyRequested, DateTimeOffset.UtcNow);
@@ -142,7 +153,7 @@ internal sealed record UpdateTask(string Mode, string Version, string StagedDir,
             || WorkerLaunchPending && WorkerPath is null)
             throw new InvalidDataException("unsupported_update_journal: preparation missing");
         DesktopResumeIntent?.Validate();
-        if (JournalSchemaVersion != (ReleaseEvidence is null ? 1 : 2) || StagingInventory is null || frozen && BackupInventory is null
+        if (JournalSchemaVersion != (PayloadSchemaVersion == 2 ? 3 : ReleaseEvidence is null ? 1 : 2) || StagingInventory is null || frozen && BackupInventory is null
             || WorkerIdentity is not null && !UpdateInventory.Hash(WorkerSha256)
             || WorkerSha256 is not null && !UpdateInventory.Hash(WorkerSha256)
             || PackageChecksumSha256 is not null && !UpdateInventory.Hash(PackageChecksumSha256))
@@ -153,13 +164,31 @@ internal sealed record UpdateTask(string Mode, string Version, string StagedDir,
         static bool Hash(string? value) => value is { Length: 64 } && value.All(c => char.IsAsciiHexDigit(c) && !char.IsUpper(c));
         static bool Payload(UpdatePayloadIdentity? value) => value is not null && Hash(value.ManifestSha256) && Hash(value.BuildId)
             && Hash(value.FrontendHash) && value.Generation == InstallationGeneration.Id;
-        if (PayloadSchemaVersion != 1 || !Payload(TargetPayload) || !Hash(PackageSha256) || PackageSource is not ("download" or "installer")
+        if (PayloadSchemaVersion is not (1 or 2) || !Payload(TargetPayload) || !Hash(PackageSha256) || PackageSource is not ("download" or "installer")
             || frozen && (!Payload(PreviousPayload) || !DesktopStopped)
-            || SwappedAssetCount is < 0 or > 4
+            || SwappedAssetCount < 0 || SwappedAssetCount > ApplicationScopes.Length
             || Phase is (UpdatePhase.Deferred or UpdatePhase.ApplyRequested or UpdatePhase.BackupPreparing or UpdatePhase.BackupReady) && SwappedAssetCount != 0
-            || Phase is (UpdatePhase.SwapReady or UpdatePhase.AwaitingStartup or UpdatePhase.Committed) && SwappedAssetCount != 4)
+            || Phase is (UpdatePhase.SwapReady or UpdatePhase.AwaitingStartup or UpdatePhase.Committed) && SwappedAssetCount != ApplicationScopes.Length)
             throw new InvalidDataException("unsupported_update_journal: application identity missing");
         ReleaseEvidence?.Validate(Version, TargetPayload!);
+        if (JournalSchemaVersion == 3)
+        {
+            if (!ApplicationScopes.Contains(UpdateRecipe.UpdateEntry) || !ApplicationScopes.Contains("NexusPipeline.exe")
+                || !ApplicationScopes.Contains(ApplicationPayload.ManifestPath) || !ApplicationScopes.Contains("resources/desktop")
+                || !ApplicationScopes.Contains("README.md")
+                || ApplicationScopes.Any(path => path is not ("NexusPipeline.exe" or UpdateRecipe.UpdateEntry or "README.md"
+                    or ApplicationPayload.ManifestPath or "resources/desktop"))
+                || PackageSource == "download" && (TransportReceipt is null || ReleaseEvidence is not { Protocol: 2 })
+                || PackageSource == "installer" && (TransportReceipt is not null || ReleaseEvidence is not null))
+                throw new InvalidDataException("update.application_scopes_invalid");
+            TransportReceipt?.Validate(ReleaseEvidence);
+            if (PreviousPayload is not null && TransportReceipt is not null && PreviousPayload.ManifestSha256 != TransportReceipt.SourceManifestSha256)
+                throw new InvalidDataException("update.source_payload_changed");
+        }
+        else if (TransportReceipt is not null || ReleaseEvidence is { Protocol: not 1 })
+            throw new InvalidDataException("update.legacy_transport_invalid");
+        if (SetupTransition && (JournalSchemaVersion != 3 || PackageSource != "installer"))
+            throw new InvalidDataException("update.setup_transition_invalid");
         if (RunnerReceipt is not null && ReleaseEvidence is null)
             throw new InvalidDataException("update.runner_without_evidence");
         RunnerReceipt?.Validate(this);
@@ -192,6 +221,8 @@ internal sealed record UpdateTask(string Mode, string Version, string StagedDir,
             throw new InvalidDataException("update_journal_identity_changed");
         if (previous is not null && (previous.TargetPayload != TargetPayload || previous.PackageSha256 != PackageSha256 || previous.PackageSource != PackageSource
             || previous.ReleaseEvidence != ReleaseEvidence || previous.JournalSchemaVersion != JournalSchemaVersion
+            || previous.PayloadSchemaVersion != PayloadSchemaVersion || previous.TransportReceipt != TransportReceipt
+            || previous.SetupTransition != SetupTransition
             || previous.PreviousPayload is not null && previous.PreviousPayload != PreviousPayload
             || previous.StagingInventory != StagingInventory || previous.PackageChecksumSha256 != PackageChecksumSha256
             || previous.DesktopResumeIntent is not null && previous.DesktopResumeIntent != DesktopResumeIntent

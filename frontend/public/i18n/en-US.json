@@ -1000,6 +1000,8 @@
   "settings.update.pending_invalid": "Candidate {version} has not passed release asset verification. A previous verified update remains downloadable when available.",
   "settings.update.manual_required": "Version {version} requires manual installation.",
   "settings.update.manual_required_help": "This update changes the installation layout and cannot be installed by the built-in updater. Download the latest package manually and migrate runtime data such as config, data, history, logs, and plugins.",
+  "settings.update.adoption_pending": "Installation ownership needs verification after manual copying",
+  "settings.update.adoption_help": "Check for updates downloads the official Update and Portable packages to verify the complete application and its original installation baseline before refreshing ownership. This uses network data. Connect to the network or run the new Setup if offline. Installation maintenance stays paused until verification completes; normal operation remains available.",
   "settings.update.not_checked": "Updates have not been checked yet.",
   "settings.update.open_migration": "View migration guidance",
   "settings.update.periodic": "Check for updates periodically",

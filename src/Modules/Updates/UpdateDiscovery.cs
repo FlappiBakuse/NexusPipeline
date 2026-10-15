@@ -9,7 +9,63 @@ internal sealed record UpdateDiscoveryResult(ReleaseInfo? Release, string? Pendi
 
 internal static class UpdateDiscovery
 {
-    private sealed record Target(string Tag, string ManifestName, int Reader, string[] Capabilities);
+    internal static async Task<ReleaseInfo> FetchOfficialTargetAsync(HttpClient http, string version,
+        NexusVersion previous, CancellationToken token)
+    {
+        var policy = new UpdateSourcePolicy(null);
+        string tag = "v" + version;
+        var result = await FetchPublishedAsync(http, policy, tag, token).ConfigureAwait(false);
+        if (result.Release is null || result.Release["published_at"] is not JsonValue published
+            || !published.TryGetValue<string>(out var timestamp) || !DateTimeOffset.TryParse(timestamp, out _))
+            throw new IOException("installer.adoption_release_unavailable");
+        var candidate = UpdateCatalog.PickRelease(new JsonArray(result.Release), "prerelease", previous);
+        if (candidate is null || candidate.Tag != tag || candidate.DeltaAsset is null)
+            throw new InvalidDataException("installer.adoption_release_invalid");
+        foreach (var asset in candidate.Assets!.Values)
+            if (asset.Url != $"https://github.com/FlappiBakuse/NexusPipeline/releases/download/{tag}/{asset.Name}")
+                throw new InvalidDataException("installer.adoption_asset_origin");
+        return candidate;
+    }
+
+    private static async Task<(JsonObject? Release, string? Status, string? Error)> FetchPublishedAsync(
+        HttpClient http, UpdateSourcePolicy policy, string tag, CancellationToken token)
+    {
+        Uri releaseUri = new(policy.SourceUri.AbsoluteUri.TrimEnd('/') + "/tags/" + Uri.EscapeDataString(tag));
+        using var response = await policy.GetAsync(http, releaseUri, UpdateResourceKind.ReleaseMetadata,
+            "NexusPipeline-update", token).ConfigureAwait(false);
+        if (response.StatusCode == HttpStatusCode.NotFound) return (null, "not-published", null);
+        if (!response.IsSuccessStatusCode) return (null, "release-unavailable", $"update.release_http_{(int)response.StatusCode}");
+        JsonNode document = UpdateJson.Parse(await UpdateJson.ReadBoundedAsync(response.Content, MetadataLimit, token).ConfigureAwait(false));
+        Require(document is JsonObject && Text(document, "tag_name") == tag, "release_identity");
+        if (Boolean(document, "draft")) return (null, "not-published", null);
+        long id = Integer(document, "id");
+        Require(id > 0, "release_identity");
+        var assets = new JsonArray();
+        var ids = new HashSet<long>();
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        for (int page = 1; ; page++)
+        {
+            Require(page <= 5, "asset_pages");
+            Uri assetsUri = new(policy.SourceUri.AbsoluteUri.TrimEnd('/') + $"/{id}/assets?per_page=100&page={page}");
+            using var assetResponse = await policy.GetAsync(http, assetsUri, UpdateResourceKind.ReleaseMetadata,
+                "NexusPipeline-update", token).ConfigureAwait(false);
+            Require(assetResponse.IsSuccessStatusCode, "assets_unavailable");
+            JsonNode pageRoot = UpdateJson.Parse(await UpdateJson.ReadBoundedAsync(assetResponse.Content, MetadataLimit, token).ConfigureAwait(false));
+            Require(pageRoot is JsonArray { Count: <= 100 }, "asset_page");
+            foreach (JsonNode? asset in (JsonArray)pageRoot)
+            {
+                Require(asset is JsonObject && ids.Add(Integer(asset, "id")) && names.Add(Text(asset, "name")), "asset_duplicate");
+                assets.Add(asset!.DeepClone());
+            }
+            Require(assets.Count <= 400, "asset_count");
+            if (((JsonArray)pageRoot).Count < 100) break;
+        }
+        document["assets"] = assets;
+        return ((JsonObject)document, null, null);
+    }
+
+    private sealed record Target(string Tag, string ManifestName, int Reader, string[] Capabilities,
+        bool RecipePackage = false, string? BaseManifestHint = null);
     private sealed record Bridge(int SourceReader, string[] SourceCapabilities, int TargetReader,
         string[] TargetCapabilities, Target Entry);
     private const int MetadataLimit = 2 * 1024 * 1024;
@@ -24,15 +80,17 @@ internal static class UpdateDiscovery
         JsonNode root = UpdateJson.Parse(await UpdateJson.ReadBoundedAsync(response.Content, MetadataLimit, token).ConfigureAwait(false));
         if (!policy.IsDefaultSource && root is JsonArray)
             return new(UpdateCatalog.PickRelease(root, channel, current));
-        Object(root, "schemaVersion", "channels", "bridges");
-        Require(Integer(root, "schemaVersion") == 1, "protocol");
+        long schema = Integer(root, "schemaVersion");
+        Require(schema is 1 or 2, "protocol");
+        if (schema == 1) Object(root, "schemaVersion", "channels", "bridges");
+        else Object(root, "schemaVersion", "channels");
         Object(root["channels"], "stable", "prerelease");
-        Bridge[] bridges = ReadBridges(root["bridges"]);
+        Bridge[] bridges = schema == 1 ? ReadBridges(root["bridges"]) : [];
         foreach (string name in new[] { "stable", "prerelease" })
             Object(root["channels"]![name], "previousPublishedTarget", "pendingTarget");
         var selected = root["channels"]![channel]!;
-        Target? previous = ReadTarget(selected["previousPublishedTarget"]);
-        Target? pending = ReadTarget(selected["pendingTarget"]);
+        Target? previous = ReadTarget(selected["previousPublishedTarget"], schema == 2);
+        Target? pending = ReadTarget(selected["pendingTarget"], schema == 2);
         var previousResult = await ResolveAsync(previous).ConfigureAwait(false);
         var pendingResult = await ResolveAsync(pending).ConfigureAwait(false);
         ReleaseInfo? best = previousResult.Release;
@@ -65,38 +123,14 @@ internal static class UpdateDiscovery
             }
             try
             {
-                Uri releaseUri = new(policy.SourceUri.AbsoluteUri.TrimEnd('/') + "/tags/" + Uri.EscapeDataString(target.Tag));
-                using var releaseResponse = await policy.GetAsync(http, releaseUri, UpdateResourceKind.ReleaseMetadata,
-                    "NexusPipeline-update", token).ConfigureAwait(false);
-                if (releaseResponse.StatusCode == HttpStatusCode.NotFound) return (null, "not-published", null);
-                if (!releaseResponse.IsSuccessStatusCode) return (null, "release-unavailable", $"update.release_http_{(int)releaseResponse.StatusCode}");
-                JsonNode release = UpdateJson.Parse(await UpdateJson.ReadBoundedAsync(releaseResponse.Content, MetadataLimit, token).ConfigureAwait(false));
-                Require(release is JsonObject && Text(release, "tag_name") == target.Tag, "release_identity");
-                if (Boolean(release, "draft")) return (null, "not-published", null);
-                long id = Integer(release, "id");
-                Require(id > 0, "release_identity");
-                var assets = new JsonArray();
-                var ids = new HashSet<long>();
-                var names = new HashSet<string>(StringComparer.Ordinal);
-                for (int page = 1; ; page++)
+                var published = await FetchPublishedAsync(http, policy, target.Tag, token).ConfigureAwait(false);
+                if (published.Release is null) return (null, published.Status, published.Error);
+                ReleaseInfo? candidate = UpdateCatalog.PickRelease(new JsonArray(published.Release), channel, current);
+                if (target.RecipePackage)
                 {
-                    Require(page <= 5, "asset_pages");
-                    Uri assetsUri = new(policy.SourceUri.AbsoluteUri.TrimEnd('/') + $"/{id}/assets?per_page=100&page={page}");
-                    using var assetResponse = await policy.GetAsync(http, assetsUri, UpdateResourceKind.ReleaseMetadata,
-                        "NexusPipeline-update", token).ConfigureAwait(false);
-                    Require(assetResponse.IsSuccessStatusCode, "assets_unavailable");
-                    JsonNode pageRoot = UpdateJson.Parse(await UpdateJson.ReadBoundedAsync(assetResponse.Content, MetadataLimit, token).ConfigureAwait(false));
-                    Require(pageRoot is JsonArray { Count: <= 100 }, "asset_page");
-                    foreach (JsonNode? asset in (JsonArray)pageRoot)
-                    {
-                        Require(asset is JsonObject && ids.Add(Integer(asset, "id")) && names.Add(Text(asset, "name")), "asset_duplicate");
-                        assets.Add(asset!.DeepClone());
-                    }
-                    Require(assets.Count <= 400, "asset_count");
-                    if (((JsonArray)pageRoot).Count < 100) break;
+                    Require(candidate?.DeltaAsset is not null && candidate.ZipAsset.Name == target.ManifestName, "release_assets");
+                    return (candidate! with { BaseManifestHint = target.BaseManifestHint }, "ready", null);
                 }
-                release["assets"] = assets;
-                ReleaseInfo? candidate = UpdateCatalog.PickRelease(new JsonArray(release), channel, current);
                 Require(candidate?.TargetManifestAsset?.Name == target.ManifestName, "release_assets");
                 byte[] manifestBytes = await UpdateAssetDownloader.ReadAsync(http, policy, candidate!.TargetManifestAsset!,
                     UpdateTargetManifest.MaxBytes, token).ConfigureAwait(false);
@@ -112,8 +146,9 @@ internal static class UpdateDiscovery
         }
     }
 
-    private static bool Supported(Target target) => target.Reader == 1
-        && target.Capabilities.All(UpdateTargetManifest.Capabilities.Contains);
+    private static bool Supported(Target target) => target.RecipePackage
+        ? target.Reader == 2 && target.Capabilities.Order(StringComparer.Ordinal).SequenceEqual(UpdateRecipe.Capabilities.Order(StringComparer.Ordinal))
+        : target.Reader == 1 && target.Capabilities.All(UpdateTargetManifest.Capabilities.Contains);
     private static NexusVersion VersionOf(Target target)
     {
         UpdateCatalog.TryParseTag(target.Tag, out var version);
@@ -142,9 +177,25 @@ internal static class UpdateDiscovery
         return capabilities;
     }
 
-    private static Target? ReadTarget(JsonNode? value)
+    private static Target? ReadTarget(JsonNode? value, bool recipePackage = false)
     {
         if (value is null) return null;
+        if (recipePackage)
+        {
+            Object(value, "releaseTag", "readerProtocol", "requiredCapabilities", "assets", "basePayloadManifestSha256");
+            string releaseTag = Text(value, "releaseTag");
+            Require(UpdateCatalog.TryParseTag(releaseTag, out var parsed) && releaseTag == "v" + parsed, "target_identity");
+            Object(value["assets"], "setup", "portable", "update");
+            string prefix = $"NexusPipeline-{releaseTag}-win-x64-";
+            Require(Text(value["assets"], "setup") == prefix + "Setup.exe"
+                && Text(value["assets"], "portable") == prefix + "Portable.zip"
+                && Text(value["assets"], "update") == prefix + "Update.zip", "target_assets");
+            long reader = Integer(value, "readerProtocol");
+            Require(reader is >= 1 and <= int.MaxValue, "protocol");
+            string? hint = value["basePayloadManifestSha256"] is null ? null : Text(value, "basePayloadManifestSha256");
+            Require(hint is null || UpdateInventory.Hash(hint), "base_hint");
+            return new(releaseTag, prefix + "Portable.zip", (int)reader, ReadCapabilities(value["requiredCapabilities"]), true, hint);
+        }
         Object(value, "releaseTag", "manifestAssetName", "readerProtocol", "requiredCapabilities");
         string tag = Text(value, "releaseTag"), manifest = Text(value, "manifestAssetName");
         Require(UpdateCatalog.TryParseTag(tag, out var version) && tag == "v" + version

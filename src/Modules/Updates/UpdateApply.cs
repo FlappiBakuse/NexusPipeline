@@ -105,7 +105,7 @@ internal static class UpdateApply
             {
                 Logger.Error($"[更新] 应用前策略核验失败，保留事务：{policyFailure.Code} {policyFailure.Error}");
                 WriteTransactionResult(journal, false, policyFailure.Code ?? "policy-unavailable");
-                LaunchService(installDir, webOnly, journal).Dispose();
+                if (!journal.SetupTransition) LaunchService(installDir, webOnly, journal).Dispose();
                 return 1;
             }
             if (ConfigUpdateAdmission.HasPendingRecovery(AppPaths.DataDir))
@@ -133,18 +133,20 @@ internal static class UpdateApply
             }
             var previous = ApplicationPayload.FreezeForUpdate(installDir, null, installed: true);
             RequireDesktopFilesReleased(installDir);
-            var backupInventory = UpdateInventory.Capture(installDir, ApplicationAssets)
+            var backupInventory = UpdateInventory.Capture(installDir, journal.ApplicationScopes)
                 .WithFile(BackupReadyMarker, System.Text.Encoding.UTF8.GetBytes(journal.TransactionId + Environment.NewLine));
             if (InstallationOwnership.SnapshotBytesForUpdate(installDir) is { } installerBytes)
                 backupInventory = backupInventory.WithFile(".installer-identity", installerBytes);
+            if (journal.JournalSchemaVersion == 3 && InstallationOwnership.SnapshotHelperBytesForUpdate(installDir) is { } installerHelper)
+                backupInventory = backupInventory.WithFile(".installer-helper", installerHelper);
             journal = journal with { PreviousPayload = previous, DesktopStopped = true, BackupInventory = backupInventory };
-            ApplicationPayload.VerifyBaseline(installDir, previous, backupInventory);
+            ApplicationPayload.VerifyBaseline(installDir, previous, backupInventory, journal.ApplicationScopes);
             EnsureNoStaleBackup(backup);
             journal = journal with { Mode = "apply", Phase = UpdatePhase.BackupPreparing };
             journal.Write();
-            CreateBackupSnapshot(installDir, backup, journal.TransactionId!);
+            CreateBackupSnapshot(installDir, backup, journal);
             journal.BackupInventory.RequireOwned(backup);
-            ApplicationPayload.VerifyBaseline(backup, journal.PreviousPayload!, journal.BackupInventory);
+            ApplicationPayload.VerifyBaseline(backup, journal.PreviousPayload!, journal.BackupInventory, journal.ApplicationScopes);
             backupComplete = true;
             journal = journal with { Phase = UpdatePhase.BackupReady };
             journal.Write();
@@ -159,9 +161,9 @@ internal static class UpdateApply
             ApplicationPayload.VerifyFrozen(stagedDir, journal.TargetPayload!, targetVersion);
             journal = journal with { Phase = UpdatePhase.SwapInProgress };
             journal.Write();
-            foreach (string asset in ApplicationAssets)
+            foreach (string asset in journal.ApplicationScopes)
                 journal.BackupInventory!.RequireOwned(installDir, asset);
-            foreach (string asset in ApplicationAssets)
+            foreach (string asset in journal.ApplicationScopes)
             {
                 SwapInto(stagedDir, installDir, asset, journal);
                 journal = journal with { SwappedAssetCount = journal.SwappedAssetCount + 1 };
@@ -239,7 +241,7 @@ internal static class UpdateApply
                     Logger.Error($"[更新] 回滚失败（保留 backup/journal/staging，下次启动重试）：{rollbackEx.Message}");
                     TryWritePhase(journal, UpdatePhase.RollbackPending);
                 }
-                if (rolledBack)
+                if (rolledBack && !journal.SetupTransition)
                 {
                     try
                     {
@@ -255,7 +257,7 @@ internal static class UpdateApply
             else
             {
                 AbortBeforeBackup(journal);
-                if (!staleBackupDetected)
+                if (!staleBackupDetected && !journal.SetupTransition)
                 {
                     try
                     {
@@ -615,17 +617,15 @@ internal static class UpdateApply
         Directory.CreateDirectory(backup);
     }
 
-    private static readonly string[] ApplicationAssets = ["NexusPipeline.exe", "resources/desktop", "README.md", ApplicationPayload.ManifestPath];
-
-    private static void CreateBackupSnapshot(string installDir, string backup, string transactionId)
+    private static void CreateBackupSnapshot(string installDir, string backup, UpdateTask journal)
     {
-        foreach (string asset in ApplicationAssets)
+        foreach (string asset in journal.ApplicationScopes)
         {
             PayloadPathSafety.RequireLinkFree(Path.Combine(installDir, asset));
             CopySnapshotItem(Path.Combine(installDir, asset), Path.Combine(backup, asset));
         }
-        InstallationOwnership.SnapshotForUpdate(installDir, backup);
-        WriteRequiredText(Path.Combine(backup, BackupReadyMarker), transactionId);
+        InstallationOwnership.SnapshotForUpdate(installDir, backup, journal.JournalSchemaVersion == 3);
+        WriteRequiredText(Path.Combine(backup, BackupReadyMarker), journal.TransactionId!);
     }
 
     private static void EnsureOptionalAssetTargetIsSafe(string path)
@@ -684,16 +684,16 @@ internal static class UpdateApply
             throw new IOException("没有可恢复的完整更新 backup");
         }
         string installDir = AppPaths.AppRoot;
-        ApplicationPayload.VerifyBaseline(backup, journal.PreviousPayload!, journal.BackupInventory!);
+        ApplicationPayload.VerifyBaseline(backup, journal.PreviousPayload!, journal.BackupInventory!, journal.ApplicationScopes);
         journal.BackupInventory!.RequireOwned(backup);
         journal.Write();
-        journal = UpdateRollbackProtection.Prepare(journal, installDir, AppPaths.UpdateTaskFile, ApplicationAssets);
-        foreach (string asset in ApplicationAssets)
+        journal = UpdateRollbackProtection.Prepare(journal, installDir, AppPaths.UpdateTaskFile, journal.ApplicationScopes);
+        foreach (string asset in journal.ApplicationScopes)
             _ = UpdateRollbackProtection.CurrentOwned(journal, installDir, asset);
-        foreach (string asset in ApplicationAssets)
+        foreach (string asset in journal.ApplicationScopes)
             RestoreFromBackup(backup, installDir, asset, journal);
-        ApplicationPayload.VerifyBaseline(installDir, journal.PreviousPayload!, journal.BackupInventory!);
-        InstallationOwnership.RestoreAfterRollback(installDir, backup);
+        ApplicationPayload.VerifyBaseline(installDir, journal.PreviousPayload!, journal.BackupInventory!, journal.ApplicationScopes);
+        InstallationOwnership.RestoreAfterRollback(installDir, backup, journal);
         UpdateTask confirmed = journal with { Mode = "apply", Phase = UpdatePhase.RollbackConfirmed };
         confirmed.Write();
         Audit.Log(Audit.System, "更新回滚完成", "旧版本文件已从 immutable backup 还原");
@@ -993,6 +993,8 @@ internal static class UpdateApply
             File.Copy(sourceExe, workerExe, overwrite: false);
             ownedWorker = workerExe;
             ownedHash = ImageHash(workerExe);
+            if (journal.SetupTransition && ownedHash != journal.TargetImageHash)
+                throw new IOException("update.transition_worker_hash");
             (journal with { WorkerSha256 = ownedHash, WorkerPath = workerExe, WorkerLaunchPending = true }).Write();
             var startInfo = new ProcessStartInfo(workerExe)
             {
@@ -1000,7 +1002,7 @@ internal static class UpdateApply
                 CreateNoWindow = true,
                 WorkingDirectory = AppPaths.AppRoot,
             };
-            startInfo.ArgumentList.Add("apply-update");
+            startInfo.ArgumentList.Add(journal.SetupTransition ? "apply-transition" : "apply-update");
             startInfo.ArgumentList.Add("--app-root"); startInfo.ArgumentList.Add(AppPaths.AppRoot);
             startInfo.ArgumentList.Add("--staged");
             startInfo.ArgumentList.Add(stagedDir);

@@ -28,7 +28,7 @@ internal sealed class UpdateCreatedArtifacts(string root)
         if (parent.Equals(_root, StringComparison.OrdinalIgnoreCase)
             || parent.StartsWith(_root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) EnsureDirectory(parent);
         else { PayloadPathSafety.RequireLinkFree(parent); Directory.CreateDirectory(parent); }
-        if (!CreateDirectoryW(full, IntPtr.Zero))
+        if (!CreateDirectoryW(PayloadPathSafety.NativePath(full), IntPtr.Zero))
             throw new IOException("update.created_directory_conflict", new Win32Exception(Marshal.GetLastWin32Error()));
         _directories.Add(full);
     }
@@ -37,7 +37,7 @@ internal sealed class UpdateCreatedArtifacts(string root)
     {
         PayloadPathSafety.RequireLinkFree(path);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        if (!CreateDirectoryW(path, IntPtr.Zero))
+        if (!CreateDirectoryW(PayloadPathSafety.NativePath(path), IntPtr.Zero))
             throw new IOException("update.created_directory_conflict", new Win32Exception(Marshal.GetLastWin32Error()));
     }
 

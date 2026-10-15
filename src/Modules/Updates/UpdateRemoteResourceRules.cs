@@ -8,7 +8,7 @@ internal static class UpdateRemoteResourceRules
     internal const string DefaultSourceUrl = "https://api.github.com/repos/FlappiBakuse/NexusPipeline/releases";
     internal const string DefaultPolicyHost = "raw.githubusercontent.com";
     internal const string DefaultPolicyPath = "/FlappiBakuse/NexusPipeline/main/metadata/updates/legacy-policy.json";
-    internal const string DefaultDiscoveryUrl = "https://raw.githubusercontent.com/FlappiBakuse/NexusPipeline/main/metadata/updates/channels.json";
+    internal const string DefaultDiscoveryUrl = "https://raw.githubusercontent.com/FlappiBakuse/NexusPipeline/main/metadata/updates/v2/channels.json";
 
     private static readonly string[] DefaultAssetHosts =
     {

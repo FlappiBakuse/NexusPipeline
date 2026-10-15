@@ -40,10 +40,10 @@ def prepare_compilation(root: Path,output: Path,*,source_sha: str,source_tree_sh
     runtime=json.loads((root/'desktop'/'electron-runtime.json').read_text(encoding='utf-8'))
     index=generate(root/'frontend'/'dist',output/'frontend')
     npm='npm.cmd' if os.name=='nt' else 'npm'
-    toolchain={'dotnetSdkVersion':command('dotnet','--version'),'dotnetRuntimeVersion':'10.0.12','nodeVersion':command('node','--version').removeprefix('v'),
+    toolchain={'dotnetSdkVersion':command('dotnet','--version'),'dotnetRuntimeVersion':'10.0.13','nodeVersion':command('node','--version').removeprefix('v'),
         'npmVersion':command(npm,'--version'),'pythonVersion':platform.python_version(),'innoSetupVersion':'6.7.3',
         'innoCompilerSha256':'0a8757031b33777e4c9cbffee40f11a5062b36d25cbe144c1db73b6102b80ad7','innoDistributionSha256':'9c73c3bae7ed48d44112a0f48e66742c00090bdb5bef71d9d3c056c66e97b732'}
-    if 'Microsoft.NETCore.App 10.0.12 ' not in command('dotnet','--list-runtimes'):raise ValueError('Required .NET runtime is missing')
+    if 'Microsoft.NETCore.App 10.0.13 ' not in command('dotnet','--list-runtimes'):raise ValueError('Required .NET runtime is missing')
     inputs={'schemaVersion':2,'productVersion':version,'generation':'g0170','rid':'win-x64','sourceSha':source_sha,'sourceTreeSha':source_tree_sha,'partnerSha':partner_sha,'workflowSha':workflow_sha,
         'frontendHash':index['frontendHash'],'frontendPackageLockSha256':sha(root/'frontend'/'package-lock.json'),'desktopPackageLockSha256':sha(root/'desktop'/'package-lock.json'),
         'electronVersion':runtime['version'],'electronArchiveSha256':runtime['archiveSha256'],'bootstrapProtocolVersion':1,'toolchain':toolchain,**profile}

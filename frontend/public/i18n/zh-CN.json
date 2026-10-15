@@ -1000,6 +1000,8 @@
   "settings.update.pending_invalid": "候选 {version} 暂未通过发行资产校验；如有上一有效更新，仍可下载。",
   "settings.update.manual_required": "发现 v{version}，该更新需要手动安装。",
   "settings.update.manual_required_help": "当前更新包含安装布局变化，无法通过内置更新安装。请手动下载最新安装包并迁移 config、data、history、logs、plugins 等运行时数据。",
+  "settings.update.adoption_pending": "手动覆盖后的安装归属待核验",
+  "settings.update.adoption_help": "点击检查更新会下载官方 Update 和 Portable 包，核验当前完整应用与原安装基线后刷新安装归属。这会产生下载流量；离线时请联网重试或运行新版 Setup。核验完成前暂停安装维护操作，普通运行不受影响。",
   "settings.update.not_checked": "尚未检查更新。",
   "settings.update.open_migration": "查看迁移说明",
   "settings.update.periodic": "定期检查更新",

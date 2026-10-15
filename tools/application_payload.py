@@ -4,6 +4,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import shutil
 try:
     from .build_identity import validate_record
     from .runtime_profile import frozen as frozen_profile
@@ -38,6 +39,7 @@ def runtime_files(root: Path) -> dict:
 
 def kind(name: str,upstream: dict) -> str:
     if name=='NexusPipeline.exe':return 'host'
+    if name=='NexusPipeline Update.exe':return 'update-entry'
     if name=='README.md':return 'readme'
     if name==ENTRY:return 'desktop-entry'
     if name==ASAR:return 'desktop-app'
@@ -46,7 +48,7 @@ def kind(name: str,upstream: dict) -> str:
     if name in upstream or name==NATIVE:return 'desktop-runtime'
     raise ValueError('Unexpected application file: '+name)
 
-def inventory(directory: Path,upstream: dict) -> list[dict]:
+def inventory(directory: Path,upstream: dict, *, schema: int = 2) -> list[dict]:
     files=[];names=set();total=0
     for file in sorted(directory.rglob('*')):
         if file.is_symlink() or getattr(file.lstat(),'st_file_attributes',0) & 0x400:raise ValueError('Linked application file')
@@ -61,18 +63,29 @@ def inventory(directory: Path,upstream: dict) -> list[dict]:
     if not 0<len(files)<=MAX_FILES:raise ValueError('Application file count')
     paths={item['path'] for item in files}
     missing=({'NexusPipeline.exe','README.md',ENTRY,ASAR,NATIVE}|set(upstream))-paths
+    if schema==2:missing|={'NexusPipeline Update.exe'}-paths
+    elif schema!=1 or 'NexusPipeline Update.exe' in paths:raise ValueError('Unsupported application schema/files')
     if missing:raise ValueError('Incomplete application tree: '+', '.join(sorted(missing)))
     for item in files:
         if item['path'] in upstream:
             frozen=upstream[item['path']]
             if item['sizeBytes']!=frozen['sizeBytes'] or item['sha256']!=frozen['sha256']:raise ValueError('Electron runtime byte mismatch')
         if item['kind'] in ('host','readme','desktop-entry','desktop-app') and item['sizeBytes']==0:raise ValueError('Empty required application file')
+    if schema==2:
+        host=next(item for item in files if item['kind']=='host')
+        helper=next(item for item in files if item['kind']=='update-entry')
+        if any(host[key]!=helper[key] for key in ('sha256','sizeBytes')):raise ValueError('Update entry differs from Host')
     return files
 
 def create(directory: Path,record: dict,root: Path) -> dict:
     validate_record(record)
+    helper=directory/'NexusPipeline Update.exe'
+    if not helper.exists():
+        with helper.open('xb') as output, (directory/'NexusPipeline.exe').open('rb') as source:
+            shutil.copyfileobj(source,output)
     inputs=record['buildInputs']
     value={key:record[key] for key in ('schemaVersion','product','productVersion','installationGeneration','rid','buildId','frontendHash')}
+    value['schemaVersion']=2
     value.update(sourceSha=inputs['sourceSha'],sourceTreeSha=inputs['sourceTreeSha'],desktop={
         'entryPoint':ENTRY,'appArchive':ASAR,'electronVersion':inputs['electronVersion'],'electronArchiveSha256':inputs['electronArchiveSha256'],
         'packageLockSha256':inputs['desktopPackageLockSha256'],'bootstrapProtocolVersion':1},files=inventory(directory,runtime_files(root)))
@@ -88,7 +101,8 @@ def validate(directory: Path,value: dict,record: dict,root: Path) -> dict:
     validate_record(record)
     inputs=record['buildInputs']
     if type(value) is not dict or set(value)!=FIELDS or type(value['desktop']) is not dict or set(value['desktop'])!=DESKTOP_FIELDS|(PROFILE_FIELDS if inputs['schemaVersion']==2 else set()):raise ValueError('Invalid application manifest fields')
-    for key in ('schemaVersion','product','productVersion','installationGeneration','rid','buildId','frontendHash'):
+    if type(value['schemaVersion']) is not int or value['schemaVersion'] not in (1,2):raise ValueError('Unsupported application schema')
+    for key in ('product','productVersion','installationGeneration','rid','buildId','frontendHash'):
         if value[key]!=record[key]:raise ValueError('Application identity mismatch: '+key)
     inputs=record['buildInputs']
     if value['sourceSha']!=inputs['sourceSha'] or value['sourceTreeSha']!=inputs['sourceTreeSha']:raise ValueError('Application source mismatch')
@@ -97,7 +111,7 @@ def validate(directory: Path,value: dict,record: dict,root: Path) -> dict:
         profile=frozen_profile(root)
         if any(inputs[key]!=profile[key] for key in PROFILE_FIELDS):raise ValueError('Frozen application runtime profile mismatch')
         expected.update(profile)
-    if value['desktop']!=expected or type(value['files']) is not list or value['files']!=inventory(directory,runtime_files(root)):raise ValueError('Application manifest byte or file set mismatch')
+    if value['desktop']!=expected or type(value['files']) is not list or value['files']!=inventory(directory,runtime_files(root),schema=value['schemaVersion']):raise ValueError('Application manifest byte or file set mismatch')
     return value
 
 

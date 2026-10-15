@@ -34,8 +34,8 @@ def validate_legacy_projection(root: Path, base: str | None = None) -> None:
             raise ValueError('Published legacy barriers must remain an unchanged prefix')
 
 
-def validate_channels(root: Path, version: str | None = None) -> None:
-    path = root / 'metadata/updates/channels.json'
+def validate_channels(root: Path, version: str | None = None, *, schema: int = 2) -> None:
+    path = root / ('metadata/updates/v2/channels.json' if schema == 2 else 'metadata/updates/channels.json')
     if not path.is_file() or path.is_symlink() or path.stat().st_size > 2 * 1024 * 1024:
         raise ValueError('Missing/linked/oversized update channel declaration')
     def unique(pairs):
@@ -49,8 +49,8 @@ def validate_channels(root: Path, version: str | None = None) -> None:
     def fields(value, names):
         if not isinstance(value, dict) or set(value) != set(names):
             raise ValueError('Unknown/missing update channel field')
-    fields(data, ('schemaVersion', 'channels', 'bridges'))
-    if type(data['schemaVersion']) is not int or data['schemaVersion'] != 1:
+    fields(data, ('schemaVersion', 'channels') if schema == 2 else ('schemaVersion', 'channels', 'bridges'))
+    if type(data['schemaVersion']) is not int or data['schemaVersion'] != schema or schema not in (1, 2):
         raise ValueError('Unsupported discovery protocol')
     fields(data['channels'], ('stable', 'prerelease'))
     def capabilities(value):
@@ -62,17 +62,28 @@ def validate_channels(root: Path, version: str | None = None) -> None:
         if type(value) is not int or not 1 <= value <= 2**31 - 1:
             raise ValueError('Invalid discovery protocol')
     def target_fields(target):
-        fields(target, ('releaseTag', 'manifestAssetName', 'readerProtocol', 'requiredCapabilities'))
+        fields(target, ('releaseTag', 'assets', 'basePayloadManifestSha256', 'readerProtocol', 'requiredCapabilities') if schema == 2
+               else ('releaseTag', 'manifestAssetName', 'readerProtocol', 'requiredCapabilities'))
         tag = target['releaseTag']
         if (not isinstance(tag, str) or len(tag) > 256
                 or not re.fullmatch(r'v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-(?:beta|rc)\.(?:0|[1-9]\d*))?', tag)):
             raise ValueError('Invalid discovery Release tag')
-        if target['manifestAssetName'] != f'NexusPipeline-{tag}-win-x64-update.json':
+        if schema == 2:
+            fields(target['assets'], ('setup', 'portable', 'update'))
+            expected = {key: f'NexusPipeline-{tag}-win-x64-{suffix}' for key, suffix in
+                        (('setup', 'Setup.exe'), ('portable', 'Portable.zip'), ('update', 'Update.zip'))}
+            if target['assets'] != expected or target['readerProtocol'] != 2 or target['requiredCapabilities'] != [
+                    'payload-manifest-v2', 'single-delta-v1', 'transaction-recovery-v1']:
+                raise ValueError('Invalid recipe discovery target')
+            hint = target['basePayloadManifestSha256']
+            if hint is not None and (type(hint) is not str or re.fullmatch('[0-9a-f]{64}', hint) is None):
+                raise ValueError('Invalid discovery baseline hint')
+        elif target['manifestAssetName'] != f'NexusPipeline-{tag}-win-x64-update.json':
             raise ValueError('Discovery manifest name does not match its Release')
         protocol(target['readerProtocol'])
         capabilities(target['requiredCapabilities'])
         return tag
-    bridges = data['bridges']
+    bridges = data.get('bridges', [])
     if not isinstance(bridges, list) or len(bridges) > 8:
         raise ValueError('Invalid discovery bridges')
     bridge_tags = set()
@@ -116,6 +127,7 @@ def main() -> None:
         projection.write_bytes(canonical.read_bytes())
     validate_legacy_projection(root, args.base)
     validate_channels(root)
+    validate_channels(root, schema=1)
     print("Update metadata and legacy projection: PASS")
 
 

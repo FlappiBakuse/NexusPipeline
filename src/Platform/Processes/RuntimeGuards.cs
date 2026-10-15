@@ -111,7 +111,7 @@ internal sealed class StableExitWindow
 /// 本次 Attempt 的进程所有权。Job Object 负责保留 launcher 已退出后的普通子进程，
 /// Toolhelp/identity 作为外部 watchdog 的补充观察来源。
 /// </summary>
-internal sealed class ProcessOwnership : IDisposable
+internal sealed partial class ProcessOwnership : IDisposable
 {
     private const int JobObjectBasicProcessIdList = 3;
 
@@ -165,6 +165,7 @@ internal sealed class ProcessOwnership : IDisposable
             else
             {
                 HasAssignedProcess = true;
+                if (ProcessIdentity.Capture(process) is { } identity) RetainExitHandle(process, identity);
             }
             return assigned;
         }
@@ -199,6 +200,7 @@ internal sealed class ProcessOwnership : IDisposable
                 if (identity is not null && Path.IsPathFullyQualified(identity.Value.ImageName))
                 {
                     identities.Add(identity.Value);
+                    RetainExitHandle(process, identity.Value);
                 }
                 else if (process.HasExited)
                 {
@@ -261,6 +263,7 @@ internal sealed class ProcessOwnership : IDisposable
             return;
         }
         _disposed = true;
+        ReleaseExitHandles();
         _job.Dispose();
     }
 

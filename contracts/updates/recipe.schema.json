@@ -1,0 +1,281 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/FlappiBakuse/NexusPipeline/contracts/updates/recipe.schema.json",
+  "title": "NexusPipeline application transport recipe",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "packageKind",
+    "product",
+    "rid",
+    "installationGeneration",
+    "target",
+    "base",
+    "requirements",
+    "includedFiles",
+    "reusedFiles",
+    "removedFiles",
+    "bundledFiles",
+    "manualCover"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "packageKind": {
+      "enum": [
+        "portable",
+        "update"
+      ]
+    },
+    "product": {
+      "const": "NexusPipeline"
+    },
+    "rid": {
+      "const": "win-x64"
+    },
+    "installationGeneration": {
+      "const": "g0170"
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "buildId",
+        "frontendHash",
+        "payloadManifestSha256"
+      ],
+      "properties": {
+        "version": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-(?:beta|rc)\\.[1-9][0-9]*)?$"
+        },
+        "buildId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "frontendHash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "payloadManifestSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "base": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "releaseTag",
+            "releaseId",
+            "assetId",
+            "assetSha256",
+            "payloadManifestSha256"
+          ],
+          "properties": {
+            "releaseTag": {
+              "type": "string",
+              "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+(?:-(?:beta|rc)\\.[1-9][0-9]*)?$"
+            },
+            "releaseId": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "assetId": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "assetSha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "payloadManifestSha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        }
+      ]
+    },
+    "requirements": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "readerProtocol",
+        "requiredCapabilities",
+        "routeId"
+      ],
+      "properties": {
+        "readerProtocol": {
+          "const": 2
+        },
+        "requiredCapabilities": {
+          "const": [
+            "payload-manifest-v2",
+            "single-delta-v1",
+            "transaction-recovery-v1"
+          ]
+        },
+        "routeId": {
+          "const": "g0170-no-store-change-v1"
+        }
+      }
+    },
+    "includedFiles": {
+      "type": "array",
+      "maxItems": 4096,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "sizeBytes",
+          "sha256"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 240
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 268435456
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      }
+    },
+    "reusedFiles": {
+      "type": "array",
+      "maxItems": 4096,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "sizeBytes",
+          "sha256"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 240
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 268435456
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      }
+    },
+    "removedFiles": {
+      "type": "array",
+      "maxItems": 4096,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "sizeBytes",
+          "sha256"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 240
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 268435456
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      }
+    },
+    "manualCover": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "allowed",
+        "minimumSourceVersion",
+        "exactBaseRequired",
+        "requiresPostStartReconciliation",
+        "reason"
+      ],
+      "properties": {
+        "allowed": {
+          "type": "boolean"
+        },
+        "minimumSourceVersion": {
+          "const": "0.17.3"
+        },
+        "exactBaseRequired": {
+          "type": "boolean"
+        },
+        "requiresPostStartReconciliation": {
+          "type": "boolean"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      }
+    },
+    "bundledFiles": {
+      "type": "array",
+      "maxItems": 4096,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "sizeBytes",
+          "sha256"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 240,
+            "pattern": "^plugins/(EmulatorSupport|LiveScreenshot)/"
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 268435456
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      }
+    }
+  }
+}

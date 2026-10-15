@@ -254,10 +254,10 @@ jobs:
         shell: pwsh
         run: |
           $meta = Get-Content .generated/host-phase/build-metadata.json -Raw | ConvertFrom-Json
-          $package = ".generated/host-phase/NexusPipeline-$($meta.tag)-win-x64.zip"
+          $package = ".generated/host-phase/NexusPipeline-$($meta.tag)-win-x64-Portable.zip"
           python ../NexusPipeline-Control/tools/host_release.py verify-package --package $package --metadata .generated/host-phase/build-metadata.json --expected-source-sha '${{ needs.source-plan.outputs.source_sha }}' --expected-tag $meta.tag
           if ($LASTEXITCODE -ne 0) { throw 'Production package failed validation' }
-          python ../NexusPipeline-Control/tools/host_release.py verify-components --root . --output .generated/host-phase --expected-source-sha '${{ needs.source-plan.outputs.source_sha }}' --expected-tag $meta.tag
+          python ../NexusPipeline-Control/tools/host_release.py verify-packages --root . --output .generated/host-phase --expected-source-sha '${{ needs.source-plan.outputs.source_sha }}' --expected-tag $meta.tag
           if ($LASTEXITCODE -ne 0) { throw 'Production components failed validation' }
 
   installer-build:

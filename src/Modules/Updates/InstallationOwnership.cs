@@ -11,10 +11,14 @@ namespace NexusPipeline.Modules.Updates;
 internal sealed record InstalledPayloadFile(string Path, string Sha256);
 internal sealed record InstallerInstanceIdentity(int SchemaVersion, string InstanceId, string AppRoot,
     string WindowsUserId, DateTimeOffset CreatedAtUtc, string State, string Version,
-    IReadOnlyList<InstalledPayloadFile> PayloadFiles);
+    IReadOnlyList<InstalledPayloadFile> PayloadFiles)
+{
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public InstalledPayloadFile[]? AuxiliaryPayloadFiles { get; init; }
+}
 
 /// <summary>Setup instance and retained-data ownership; updates keep this same payload manifest current.</summary>
-internal static class InstallationOwnership
+internal static partial class InstallationOwnership
 {
     internal const string RegistryPath = @"Software\NexusPipeline.Generations\" + InstallationGeneration.Id + @"\Installer";
     internal static string CurrentRegistryPath => TestScope() is { } scope ? @"Software\NexusPipeline\Tests\Installer\" + scope.Id : RegistryPath;
@@ -96,16 +100,32 @@ internal static class InstallationOwnership
         RequireSeparateRoots(root, protectedRoots);
     }
 
-    internal static string Seal(InstallerInstanceIdentity identity) => Convert.ToBase64String(ProtectedData.Protect(
-        Encoding.UTF8.GetBytes(JsonSerializer.Serialize(identity)), null, DataProtectionScope.CurrentUser));
+    internal static string Seal(InstallerInstanceIdentity identity)
+    {
+        if (identity.AuxiliaryPayloadFiles is not null) throw new InvalidDataException("installer.identity_not_normalized");
+        // The existing Inno uninstaller validates its original path set before invoking the refreshed Host helper.
+        var auxiliary = identity.PayloadFiles.Where(file => file.Path == UpdateRecipe.UpdateEntry).ToArray();
+        var wire = identity with { PayloadFiles = identity.PayloadFiles.Where(file => file.Path != UpdateRecipe.UpdateEntry).ToArray(),
+            AuxiliaryPayloadFiles = auxiliary.Length == 0 ? null : auxiliary };
+        return Convert.ToBase64String(ProtectedData.Protect(
+            Encoding.UTF8.GetBytes(JsonSerializer.Serialize(wire)), null, DataProtectionScope.CurrentUser));
+    }
 
     internal static InstallerInstanceIdentity Unseal(string seal, string expectedRoot, string instanceId, string userId)
     {
         var identity = JsonSerializer.Deserialize<InstallerInstanceIdentity>(ProtectedData.Unprotect(
             Convert.FromBase64String(seal), null, DataProtectionScope.CurrentUser)) ?? throw new InvalidDataException("installer.identity_empty");
+        if (identity.PayloadFiles is null) throw new InvalidDataException("installer.payload_manifest");
+        if (identity.AuxiliaryPayloadFiles is { } auxiliary)
+        {
+            if (auxiliary.Length != 1 || auxiliary[0]?.Path != UpdateRecipe.UpdateEntry)
+                throw new InvalidDataException("installer.auxiliary_payload_manifest");
+            identity = identity with { PayloadFiles = identity.PayloadFiles.Concat(auxiliary).OrderBy(file => file.Path, StringComparer.Ordinal).ToArray(),
+                AuxiliaryPayloadFiles = null };
+        }
         if (identity.SchemaVersion != 1 || !Guid.TryParseExact(identity.InstanceId, "N", out _)
             || identity.InstanceId != instanceId || identity.WindowsUserId != userId
-            || identity.CreatedAtUtc == default || identity.State is not ("active" or "retained-data")
+            || identity.CreatedAtUtc == default || identity.State is not ("active" or "retained-data" or "manual-adoption-pending")
             || !string.Equals(Path.GetFullPath(identity.AppRoot).TrimEnd('\\'), Path.GetFullPath(expectedRoot).TrimEnd('\\'), StringComparison.OrdinalIgnoreCase)
             || identity.PayloadFiles.Count > 20000)
             throw new InvalidDataException("installer.identity_mismatch");
@@ -119,7 +139,7 @@ internal static class InstallationOwnership
     }
 
     private static bool IsApplicationPath(string path) => ApplicationPayload.SafePath(path)
-        && (path is "NexusPipeline.exe" or "README.md" or ApplicationPayload.ManifestPath || path.StartsWith("resources/desktop/", StringComparison.Ordinal));
+        && (path is "NexusPipeline.exe" or UpdateRecipe.UpdateEntry or "README.md" or ApplicationPayload.ManifestPath || path.StartsWith("resources/desktop/", StringComparison.Ordinal));
 
     internal static bool HasAbandonedEmptyRegistration()
     {
@@ -176,6 +196,8 @@ internal static class InstallationOwnership
 
     internal static InstallerInstanceIdentity? Read(string root, bool requireActive = false)
     {
+        ResumeManualMaintenance(root);
+        ResumeManualAdoption(root);
         RequireGenerationDestination(root);
         RequireLinkFree(root); RequireLinkFree(ManagerDirectory); RequireLinkFree(IdentityPath);
         if (HasAbandonedEmptyRegistration()) return null;
@@ -197,12 +219,12 @@ internal static class InstallationOwnership
 
     private static string Digest(string text) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text))).ToLowerInvariant();
 
-    private static void Save(InstallerInstanceIdentity identity)
+    private static void Save(InstallerInstanceIdentity identity, bool updateHelper = true)
     {
         RequireGenerationDestination(identity.AppRoot);
         RequireLinkFree(identity.AppRoot); RequireLinkFree(ManagerDirectory);
         Directory.CreateDirectory(ManagerDirectory);
-        if (identity.State == "active")
+        if (identity.State == "active" && updateHelper)
         {
             string source = Path.Combine(identity.AppRoot, "NexusPipeline.exe");
             string helper = Path.Combine(ManagerDirectory, "nexus-installer-helper.exe");
@@ -297,14 +319,49 @@ internal static class InstallationOwnership
         }
     }
 
-    internal static void SnapshotForUpdate(string root, string backup)
+    internal static void SnapshotForUpdate(string root, string backup, bool includeHelper = false)
     {
         if (SnapshotBytesForUpdate(root) is { } bytes)
+        {
             File.WriteAllBytes(Path.Combine(backup, ".installer-identity"), bytes);
+            if (includeHelper && SnapshotHelperBytesForUpdate(root) is { } helper)
+                File.WriteAllBytes(Path.Combine(backup, ".installer-helper"), helper);
+        }
     }
 
-    internal static byte[]? SnapshotBytesForUpdate(string root) => Read(root, true) is null
-        ? null : Encoding.UTF8.GetBytes(File.ReadAllText(IdentityPath).TrimStart('\uFEFF'));
+    internal static byte[]? SnapshotBytesForUpdate(string root)
+    {
+        if (Read(root, true) is not { } identity) return null;
+        RequireRegisteredHostOrAbsent(identity);
+        _ = ApplicationPayload.FreezeForUpdate(root, identity.Version, installed: true);
+        foreach (var file in identity.PayloadFiles)
+        {
+            string path = Path.Combine(root, file.Path);
+            RequireLinkFree(path);
+            if (!File.Exists(path) && file.Path is "README.md" or UpdateRecipe.UpdateEntry) continue;
+            if (!File.Exists(path) || UpdateApply.ImageHash(path) != file.Sha256)
+                throw new IOException("installer.manual_adoption_pending");
+        }
+        _ = SnapshotHelperBytesForUpdate(root);
+        return Encoding.UTF8.GetBytes(File.ReadAllText(IdentityPath).TrimStart('\uFEFF'));
+    }
+
+    internal static byte[]? SnapshotHelperBytesForUpdate(string root)
+    {
+        if (Read(root) is not { } identity) return null;
+        if (identity.State is not ("active" or "manual-adoption-pending")) throw new IOException("installer.instance_not_active");
+        string helper = Path.Combine(ManagerDirectory, "nexus-installer-helper.exe");
+        RequireLinkFree(helper);
+        if (Directory.Exists(helper)) throw new IOException("installer.unknown_helper_preserved");
+        if (!File.Exists(helper)) return null;
+        string? expected = identity.PayloadFiles.SingleOrDefault(file => file.Path == "NexusPipeline.exe")?.Sha256;
+        if (expected is null || new FileInfo(helper).Length > UpdatePackage.MaxSingleEntryBytes)
+            throw new IOException("installer.unknown_helper_preserved");
+        byte[] bytes = File.ReadAllBytes(helper);
+        if (Convert.ToHexStringLower(SHA256.HashData(bytes)) != expected)
+            throw new IOException("installer.unknown_helper_preserved");
+        return bytes;
+    }
 
     internal static void RefreshAfterUpdate(string root, string version)
     {
@@ -312,19 +369,43 @@ internal static class InstallationOwnership
         Save(identity with { Version = version, PayloadFiles = CapturePayload(root) });
     }
 
-    internal static void RestoreAfterRollback(string root, string backup)
+    internal static void RestoreAfterRollback(string root, string backup, UpdateTask? task = null)
     {
         string path = Path.Combine(backup, ".installer-identity");
         if (!File.Exists(path)) return;
         RequireLinkFree(path);
         using var key = Registry.CurrentUser.OpenSubKey(CurrentRegistryPath, false);
         var identity = Unseal(File.ReadAllText(path), root, key?.GetValue("InstanceId") as string ?? "", CurrentUserId);
+        if (task is { JournalSchemaVersion: 3 })
+        {
+            task.BackupInventory!.RequireOwned(backup);
+            string helper = Path.Combine(ManagerDirectory, "nexus-installer-helper.exe");
+            RequireLinkFree(helper);
+            string? previousHash = identity.PayloadFiles.SingleOrDefault(file => file.Path == "NexusPipeline.exe")?.Sha256;
+            string? targetHash = task.StagingInventory!.Entries.SingleOrDefault(file => file.Path == "NexusPipeline.exe")?.Sha256;
+            string original = Path.Combine(backup, ".installer-helper");
+            var snapshot = task.BackupInventory.Entries.SingleOrDefault(file => file.Path == ".installer-helper");
+            if ((snapshot is null) != !File.Exists(original) || snapshot is not null
+                && (snapshot.Sha256 != previousHash || new FileInfo(original).Length != snapshot.SizeBytes || UpdateApply.ImageHash(original) != snapshot.Sha256))
+                throw new IOException("installer.helper_snapshot_changed");
+            if (Directory.Exists(helper)) throw new IOException("installer.unknown_helper_preserved");
+            if (File.Exists(helper))
+            {
+                string actual = UpdateApply.ImageHash(helper);
+                if (actual != previousHash && actual != targetHash) throw new IOException("installer.unknown_helper_preserved");
+                VerifiedFileDeletion.Delete(helper, new FileInfo(helper).Length, actual);
+            }
+            if (File.Exists(original)) File.Copy(original, helper, false);
+            Save(identity, updateHelper: false);
+            return;
+        }
         Save(identity);
     }
 
     internal static void Uninstall(string root, bool deleteData)
     {
         var identity = Read(root, true) ?? throw new IOException("installer.instance_unknown");
+        RequireRegisteredHostOrAbsent(identity);
         string full = identity.AppRoot;
         if (ConfigUpdateAdmission.HasPendingRecovery(Path.Combine(full, "data"))
             || File.Exists(Path.Combine(full, ".nxp-update", "task.json")) || Directory.Exists(Path.Combine(full, ".nxp-backup")))

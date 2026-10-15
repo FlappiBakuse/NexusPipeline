@@ -6,7 +6,7 @@
 
 NexusPipeline 是一个运行在 Windows 11 x64 上的本地游戏自动化脚本管家。它可以按计划启动脚本、监控日志、处理重试、隔离多账号配置，并在任务结束后发送通知或执行关机、休眠、重启等操作。
 
-程序常驻托盘，管理页面默认位于 `http://127.0.0.1:58731/`。配置、历史、日志和插件都保存在本机，不需要云平台或数据库。运行程序需要 .NET 10 Desktop Runtime 与 ASP.NET Core Runtime 10.0.12 或后续 10.0 补丁，以及管理员权限。
+程序常驻托盘，管理页面默认位于 `http://127.0.0.1:58731/`。配置、历史、日志和插件都保存在本机，不需要云平台或数据库。运行程序需要 .NET 10 Desktop Runtime 与 ASP.NET Core Runtime 10.0.13 或后续 10.0 补丁，以及管理员权限。
 
 ![NexusPipeline 主界面：中文浅色主题的今日概览](https://raw.githubusercontent.com/FlappiBakuse/NexusPipeline/main/docs/assets/screenshots/main-window-v0.17.png)
 
@@ -35,7 +35,7 @@ NexusPipeline 是一个运行在 Windows 11 x64 上的本地游戏自动化脚�
 4. 双击根 `NexusPipeline.exe` 打开桌面管理，完成脚本、账号和队列设置。网页入口仍可通过托盘打开，使用服务实际端口。
 5. 需要开机运行时，在「设置」中开启开机自启动。
 
-便携版缺少运行时会显示 .NET 自带的提示。可直接打开包内的 [运行依赖说明](https://github.com/FlappiBakuse/NexusPipeline/blob/main/docs/user/README.md#安装和依赖)，或分别下载官方 [Desktop Runtime 10.0.12 x64](https://builds.dotnet.microsoft.com/dotnet/WindowsDesktop/10.0.12/windowsdesktop-runtime-10.0.12-win-x64.exe) 和 [ASP.NET Core Runtime 10.0.12 x64](https://builds.dotnet.microsoft.com/dotnet/aspnetcore/Runtime/10.0.12/aspnetcore-runtime-10.0.12-win-x64.exe)。安装器会检查两项依赖；便携版不会自动下载。
+便携版缺少运行时会显示 .NET 自带的提示。可直接打开包内的 [运行依赖说明](https://github.com/FlappiBakuse/NexusPipeline/blob/main/docs/user/README.md#安装和依赖)，或分别下载官方 [Desktop Runtime 10.0.13 x64](https://builds.dotnet.microsoft.com/dotnet/WindowsDesktop/10.0.13/windowsdesktop-runtime-10.0.13-win-x64.exe) 和 [ASP.NET Core Runtime 10.0.13 x64](https://builds.dotnet.microsoft.com/dotnet/aspnetcore/Runtime/10.0.13/aspnetcore-runtime-10.0.13-win-x64.exe)。安装器会检查两项依赖；便携版不会自动下载。
 
 ## 升级前备份（重要）
 

@@ -35,9 +35,9 @@ class HostReleaseTests(unittest.TestCase):
             root = Path(temporary)
             archive = root / 'artifact.zip'
             names = ['candidate.json', 'build-metadata.json', 'installer-build-metadata.json',
-                     'NexusPipeline-v1.2.3-win-x64.zip',
-                     'NexusPipeline-v1.2.3-win-x64-setup.exe']
-            names.extend(sorted(host_release.component_asset_names('v1.2.3')))
+                     'NexusPipeline-v1.2.3-win-x64-Portable.zip',
+                     'NexusPipeline-v1.2.3-win-x64-Setup.exe']
+            names.extend(sorted({'NexusPipeline-v1.2.3-win-x64-Update.zip'}))
             with zipfile.ZipFile(archive, 'w') as stream:
                 for name in names:
                     stream.writestr(name, b'data')
@@ -62,14 +62,14 @@ class HostReleaseTests(unittest.TestCase):
             (root / 'src' / 'NexusPipeline.csproj').write_text('<Project><PropertyGroup><Version>1.2.3</Version></PropertyGroup></Project>', encoding='utf-8')
             output = root / 'candidate'
             output.mkdir()
-            package = output / 'NexusPipeline-v1.2.3-win-x64.zip'
+            package = output / 'NexusPipeline-v1.2.3-win-x64-Portable.zip'
             package.write_bytes(b'package')
             digest = hashlib.sha256(package.read_bytes()).hexdigest()
             (output / 'build-metadata.json').write_text('{}', encoding='utf-8')
-            setup = output / 'NexusPipeline-v1.2.3-win-x64-setup.exe'
+            setup = output / 'NexusPipeline-v1.2.3-win-x64-Setup.exe'
             setup.write_bytes(b'installer')
             (output / 'installer-build-metadata.json').write_text('{}', encoding='utf-8')
-            for name in host_release.component_asset_names('v1.2.3'):
+            for name in {'NexusPipeline-v1.2.3-win-x64-Update.zip'}:
                 (output / name).write_bytes(b'component fixture')
             def git_result(_root, *args):
                 if args == ('rev-parse', 'HEAD'): return 'a' * 40
@@ -80,7 +80,7 @@ class HostReleaseTests(unittest.TestCase):
                  patch.object(host_release, 'verify_received_package', return_value={'sha256': digest,
                      'buildInputs':{'sourceSha':'a'*40,'sourceTreeSha':'b'*40,'partnerSha':'c'*40,'workflowSha':'d'*40}}) as package_reader, \
                  patch.object(host_release, 'verify_received_installer'), \
-                 patch.object(host_release, 'verify_components'):
+                 patch.object(host_release, 'verify_packages'):
                 candidate = write_candidate_manifest(root, output, source_sha='a' * 40,
                     partner_sha='c' * 40, workflow_sha='d' * 40, run_id=12, run_attempt=2)
                 self.assertEqual(candidate['producer']['runAttempt'], 2)
@@ -88,7 +88,7 @@ class HostReleaseTests(unittest.TestCase):
                 self.assertEqual({item['path'] for item in candidate['files']},
                                  {package.name, setup.name,
                                   'build-metadata.json', 'installer-build-metadata.json',
-                                  *host_release.component_asset_names('v1.2.3')})
+                                  *{'NexusPipeline-v1.2.3-win-x64-Update.zip'}})
                 self.assertNotIn('candidate.json', {item['path'] for item in candidate['files']})
                 with patch.object(host_release, 'project_version', return_value='1.2.3'):
                     self.assertEqual(validate_candidate_data(root, output, expected_source_sha='a' * 40,
@@ -117,13 +117,13 @@ class HostReleaseTests(unittest.TestCase):
             output.mkdir()
             tools_dir = root / 'tools'
             tools_dir.mkdir()
-            dependency = {'framework': 'Microsoft.WindowsDesktop.App', 'version': '10.0.12',
+            dependency = {'framework': 'Microsoft.WindowsDesktop.App', 'version': '10.0.13',
                           'rid': 'win-x64', 'url': 'https://builds.dotnet.microsoft.com/dotnet/one.exe',
                           'sha256': 'a' * 64}
             other = {**dependency, 'framework': 'Microsoft.AspNetCore.App'}
             (tools_dir / 'runtime-dependencies.json').write_text(
                 json.dumps({'schemaVersion': 1, 'dependencies': [dependency, other]}), encoding='utf-8')
-            setup = output / 'NexusPipeline-v1.2.3-win-x64-setup.exe'
+            setup = output / 'NexusPipeline-v1.2.3-win-x64-Setup.exe'
             setup.write_bytes(b'installer')
             digest = hashlib.sha256(setup.read_bytes()).hexdigest()
             payload = [{'path': 'README.md', 'sha256': 'b' * 64, 'sizeBytes': 1}]
@@ -188,7 +188,7 @@ class HostReleaseTests(unittest.TestCase):
         info.file_size = host_release.MAX_SINGLE_ENTRY_BYTES
         info.compress_size = info.file_size
         desktop = zipfile.ZipInfo("resources/desktop/NexusPipeline.Desktop.exe")
-        host_release._validate_package_layout([info, desktop])
+        host_release._validate_package_layout([info, desktop, zipfile.ZipInfo('NexusPipeline Update.exe')])
         info.file_size += 1
         with self.assertRaises(HostReleaseError): host_release._validate_package_layout([info])
         with patch.object(host_release, 'MAX_PACKAGE_ENTRIES', 0), self.assertRaises(HostReleaseError):
@@ -211,6 +211,7 @@ class HostReleaseTests(unittest.TestCase):
             production = root / "production"
             production.mkdir()
             (production / "NexusPipeline.exe").write_bytes(b"binary")
+            (production / "NexusPipeline Update.exe").write_bytes(b"binary")
             desktop = production / "resources" / "desktop"
             desktop.mkdir(parents=True)
             (desktop / "NexusPipeline.Desktop.exe").write_bytes(b"desktop")
@@ -234,7 +235,10 @@ class HostReleaseTests(unittest.TestCase):
             archive_file = desktop / 'resources/app.asar'
             archive_file.parent.mkdir()
             archive_file.write_bytes(b'application')
-            application_manifest = {**application, 'files': [
+            native = desktop / 'resources/app.asar.unpacked/node_modules/@koromix/koffi-win32-x64/win32_x64/koffi.node'
+            native.parent.mkdir(parents=True)
+            native.write_bytes(b'native')
+            application_manifest = {**application, 'schemaVersion': 2, 'files': [
                 {'path': file.relative_to(production).as_posix(), 'sizeBytes': file.stat().st_size,
                  'sha256': hashlib.sha256(file.read_bytes()).hexdigest(), 'kind': 'fixture'}
                 for file in production.rglob('*') if file.is_file()
@@ -248,19 +252,19 @@ class HostReleaseTests(unittest.TestCase):
             reader.start(); validator.start()
             self.addCleanup(reader.stop); self.addCleanup(validator.stop)
             first = archive_production(production, output, "v1.2.3", source_sha="a" * 40, manifest_path=root / "src" / "app.manifest")
-            self.assertEqual(Path(first["zip"]).name, "NexusPipeline-v1.2.3-win-x64.zip")
+            self.assertEqual(Path(first["zip"]).name, "NexusPipeline-v1.2.3-win-x64-Portable.zip")
             self.assertEqual(set(output.iterdir()), {Path(first["zip"]), output / "build-metadata.json",
-                                                     *(output / name for name in host_release.component_asset_names('v1.2.3'))})
+                                                     *(output / name for name in {'NexusPipeline-v1.2.3-win-x64-Update.zip'})})
             first_bytes = Path(first["zip"]).read_bytes()
             with self.assertRaisesRegex(HostReleaseError, "已存在"):
                 archive_production(production, output, "v1.2.3", source_sha="a" * 40, manifest_path=root / "src" / "app.manifest")
             second = archive_production(production, root / "out-again", "v1.2.3", source_sha="a" * 40, manifest_path=root / "src" / "app.manifest")
             self.assertEqual(first_bytes, Path(second["zip"]).read_bytes())
-            for name in host_release.component_asset_names('v1.2.3'):
+            for name in {'NexusPipeline-v1.2.3-win-x64-Update.zip'}:
                 self.assertEqual((output / name).read_bytes(), (root / 'out-again' / name).read_bytes())
-            host_release.verify_components(output, Path(first['zip']), first['metadata'], root)
+            host_release.verify_packages(output, Path(first['zip']), first['metadata'])
             with zipfile.ZipFile(second["zip"]) as archive:
-                self.assertEqual(archive.namelist(), ["NexusPipeline.exe", "plugins/EmulatorSupport/plugin.json", "plugins/LiveScreenshot/plugin.json", "README.md", "resources/desktop/NexusPipeline.Desktop.exe", "resources/desktop/resources/app.asar", "resources/payload-manifest.json"])
+                self.assertEqual(set(archive.namelist()), {item["path"] for item in second["metadata"]["payloadFiles"]} | host_release.GUIDES | {host_release.RECIPE_PATH})
                 self.assertEqual(archive.read("resources/desktop/NexusPipeline.Desktop.exe"), b"desktop")
                 self.assertEqual(archive.read("plugins/EmulatorSupport/plugin.json"), b"{\"name\":\"fixture\"}\r\n")
 

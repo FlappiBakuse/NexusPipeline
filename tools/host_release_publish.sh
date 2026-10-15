@@ -8,10 +8,10 @@ metadata="build-metadata.json"
 test "$(jq -r .sourceSha "$metadata")" = "$SOURCE_SHA"
 test "$(jq -r .tag "$metadata")" = "$TAG"
 test "$(jq -r .mode "$metadata")" = production
-zip_asset="NexusPipeline-$(jq -r .tag "$metadata")-win-x64.zip"
-setup_asset="NexusPipeline-$(jq -r .tag "$metadata")-win-x64-setup.exe"
-assets=("$zip_asset" "$setup_asset" "${zip_asset%.zip}-update.json"
-        "${zip_asset%.zip}-host-core.zip" "${zip_asset%.zip}-desktop-app.zip" "${zip_asset%.zip}-desktop-runtime.zip")
+prefix="NexusPipeline-$(jq -r .tag "$metadata")-win-x64"
+zip_asset="$prefix-Portable.zip"
+setup_asset="$prefix-Setup.exe"
+assets=("$zip_asset" "$setup_asset" "$prefix-Update.zip")
 test -f "$zip_asset" -a -f "$setup_asset" -a -f installer-build-metadata.json
 expected="$(jq -r .sha256 "$metadata")"
 actual="$(sha256sum "$zip_asset" | cut -d' ' -f1)"
@@ -26,12 +26,15 @@ python "$GITHUB_WORKSPACE/NexusPipeline/tools/host_release.py" verify-installer 
   --output "$PUBLISH_ROOT" \
   --expected-source-sha "$SOURCE_SHA" \
   --expected-tag "$TAG"
-python "$GITHUB_WORKSPACE/NexusPipeline/tools/host_release.py" verify-components \
+python "$GITHUB_WORKSPACE/NexusPipeline/tools/host_release.py" verify-packages \
   --root "$GITHUB_WORKSPACE/NexusPipeline-Source" \
   --output "$PUBLISH_ROOT" \
   --expected-source-sha "$SOURCE_SHA" \
   --expected-tag "$TAG"
 api="https://api.github.com/repos/$GH_REPO/releases/tags/$TAG"
+read_assets() {
+  gh api --paginate "repos/$GH_REPO/releases/$release_id/assets?per_page=100" | jq -s 'add'
+}
 response_file="$(mktemp)"
 status="$(curl "${curl_read[@]}" -sS -o "$response_file" -w '%{http_code}' -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "$api")"
 if [ "$status" = 404 ]; then
@@ -44,7 +47,18 @@ if [ "$status" = 404 ]; then
   else
     prerelease=false
     if [[ "$TAG" =~ ^v0\. || "$TAG" =~ -(beta|rc)\.[0-9]+$ ]]; then prerelease=true; fi
-    release_json="$(gh api --method POST "repos/$GH_REPO/releases" -f tag_name="$TAG" -f target_commitish="$SOURCE_SHA" -f name="$TAG" -f body="sourceSha=$SOURCE_SHA" -F draft=true -F prerelease="$prerelease")"
+    body_file="$(mktemp)"
+    {
+      printf 'sourceSha=%s\n\n| Asset | SHA256 |\n|---|---|\n' "$SOURCE_SHA"
+      for asset in "${assets[@]}"; do
+        printf '| %s | %s |\n' "$asset" "$(sha256sum "$asset" | cut -d' ' -f1)"
+      done
+    } > "$body_file"
+    request_file="$(mktemp)"
+    jq -n --arg tag "$TAG" --arg source "$SOURCE_SHA" --argjson prerelease "$prerelease" --rawfile body "$body_file" \
+      '{tag_name:$tag,target_commitish:$source,name:$tag,body:$body,draft:true,prerelease:$prerelease}' > "$request_file"
+    release_json="$(gh api --method POST "repos/$GH_REPO/releases" --input "$request_file")"
+    rm -f "$body_file" "$request_file"
   fi
 elif [ "$status" = 200 ]; then
   release_json="$(cat "$response_file")"
@@ -60,6 +74,7 @@ if [[ "$TAG" =~ ^v0\. || "$TAG" =~ -(beta|rc)\.[0-9]+$ ]]; then expected_prerele
 test "$(jq -r .prerelease <<<"$release_json")" = "$expected_prerelease" || { echo "Release 渠道身份冲突" >&2; exit 1; }
 release_id="$(jq -r .id <<<"$release_json")"
 [[ "$release_id" =~ ^[1-9][0-9]*$ ]]
+release_json="$(jq --argjson assets "$(read_assets)" '.assets=$assets' <<<"$release_json")"
 expected_names="$(printf '%s\n' "${assets[@]}" | jq -R . | jq -s .)"
 jq -e --argjson names "$expected_names" '
   all(.assets[]?; .name as $name | $names | index($name) != null)
@@ -78,6 +93,7 @@ for asset in "${assets[@]}"; do
   fi
 done
 release_json="$(gh api "repos/$GH_REPO/releases/$release_id")"
+release_json="$(jq --argjson assets "$(read_assets)" '.assets=$assets' <<<"$release_json")"
 jq -e --argjson names "$expected_names" --arg tag "$TAG" --arg sha "$SOURCE_SHA" --argjson prerelease "$expected_prerelease" '
   .tag_name == $tag and .target_commitish == $sha and .prerelease == $prerelease and
   ([.assets[].name] | sort) == ($names | sort)

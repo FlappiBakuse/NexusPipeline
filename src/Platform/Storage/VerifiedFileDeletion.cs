@@ -10,7 +10,7 @@ internal static class VerifiedFileDeletion
     internal static void Delete(string path, long sizeBytes, string sha256)
     {
         PayloadPathSafety.RequireLinkFree(path);
-        using SafeFileHandle handle = CreateFileW(path, 0x80010000, 0, IntPtr.Zero, 3, 0x00200000, IntPtr.Zero);
+        using SafeFileHandle handle = CreateFileW(PayloadPathSafety.NativePath(path), 0x80010000, 0, IntPtr.Zero, 3, 0x00200000, IntPtr.Zero);
         if (handle.IsInvalid) throw new IOException("owned_file_open_failed", new Win32Exception(Marshal.GetLastWin32Error()));
         if (!GetFileInformationByHandleEx(handle, 9, out FileAttributeTagInfo attributes, Marshal.SizeOf<FileAttributeTagInfo>())
             || (attributes.Attributes & 0x410) != 0)

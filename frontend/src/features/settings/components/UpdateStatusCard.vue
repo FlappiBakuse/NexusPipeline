@@ -22,6 +22,7 @@ let authBlocked = false;
 
 const completionActionText = computed(() => {
   const state = updateStatus.value?.state || "idle";
+  if (updateStatus.value?.updateBlockCode === "manual-adoption-pending") return t("settings.update.adoption_pending");
   if (updateStatus.value?.manualUpdateRequired) {
     return t("settings.update.manual_required", { version: updateStatus.value.latest || "" });
   }
@@ -181,7 +182,10 @@ defineExpose({ reload: loadUpdateStatus });
     <p class="muted update-state-copy">{{ completionActionText }}</p>
     <p v-if="pendingText" class="muted" role="status">{{ pendingText }}</p>
     <p v-if="applyFailureText" class="callout callout-warning" role="alert">{{ applyFailureText }}</p>
-    <p v-if="updateStatus?.manualUpdateRequired" class="callout callout-warning update-manual-warning" data-testid="update-manual-warning">
+    <p v-if="updateStatus?.updateBlockCode === 'manual-adoption-pending'" class="callout callout-warning" role="status">
+      {{ t("settings.update.adoption_help") }}
+    </p>
+    <p v-else-if="updateStatus?.manualUpdateRequired" class="callout callout-warning update-manual-warning" data-testid="update-manual-warning">
       {{ t("settings.update.manual_required_help", { version: updateStatus.latest || "" }) }}
       <a v-if="updateStatus.migrationUrl" :href="String(updateStatus.migrationUrl)" target="_blank" rel="noopener noreferrer">
         {{ t("settings.update.open_migration") }}

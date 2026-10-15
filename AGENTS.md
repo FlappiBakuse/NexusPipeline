@@ -71,7 +71,7 @@ Preview 同版本 hash 变化可更新；hash 相同不因 sourceCommit 变化�
 
 专项插件只声明宿主支持的能力，前端代码写在 Host；专项不包含 frontend 对象、frontend-module、web/frontend 浏览器代码或 .NET 程序集。后端 judge/configEditor 脚本保持有效；configValidator 已退役，声明旧字段的包显式拒绝，配置诊断通过 taskProtocol discover.configAssessment，不改用户快照。managed 插件可通过 Frontend API 1.7、公开 slot/route 和 `nxp-*` Native Custom Elements 扩展。未声明能力不得静默当作支持。
 
-`frontend/` 是唯一宿主前端源码；Vite 最终输出以只读资源内嵌 Host；发行载荷为根 `NexusPipeline.exe`、`README.md`、`resources/desktop/` 和 `resources/payload-manifest.json`。`frontend/src/platform` 管平台服务，`app/bootstrap.ts` 管启动，`features/<domain>` 管业务。桥接仅通过 `plugin-bridge/host-adapter.ts` 使用宿主平台；app/features/ui 经 `@bridge/index` facade，不依赖 bridge 私有实现。插件不引用 Vue 私有组件/class。
+`frontend/` 是唯一宿主前端源码；Vite 最终输出以只读资源内嵌 Host；发行载荷为根 `NexusPipeline.exe`、其原字节副本 `NexusPipeline Update.exe`、`README.md`、`resources/desktop/` 和 `resources/payload-manifest.json`。`frontend/src/platform` 管平台服务，`app/bootstrap.ts` 管启动，`features/<domain>` 管业务。桥接仅通过 `plugin-bridge/host-adapter.ts` 使用宿主平台；app/features/ui 经 `@bridge/index` facade，不依赖 bridge 私有实现。插件不引用 Vue 私有组件/class。
 
 复用 `ui/primitives` 与既有 CSS 变量、紧凑列表。页面适配 360/768/1280 视口，触控目标至少 40px，公共数字输入的紧凑增减按钮按设计规范登记为例外；保持主题、焦点、ARIA 与可访问性。轮询/订阅经生命周期管理，离开页面释放。运行目标 Args 的路径与参数使用现役解析协议，不私自把命令行引号规则搬进持久化字段。
 

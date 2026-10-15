@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 2,
+  "channels": {
+    "stable": { "previousPublishedTarget": null, "pendingTarget": null },
+    "prerelease": {
+      "previousPublishedTarget": null,
+      "pendingTarget": {
+        "releaseTag": "v0.17.4",
+        "readerProtocol": 2,
+        "requiredCapabilities": ["payload-manifest-v2", "single-delta-v1", "transaction-recovery-v1"],
+        "assets": {
+          "setup": "NexusPipeline-v0.17.4-win-x64-Setup.exe",
+          "portable": "NexusPipeline-v0.17.4-win-x64-Portable.zip",
+          "update": "NexusPipeline-v0.17.4-win-x64-Update.zip"
+        },
+        "basePayloadManifestSha256": "e50d5094814d1152692e69cccf183e5911618ad3e5c37bee0e87f6104cd106d0"
+      }
+    }
+  }
+}

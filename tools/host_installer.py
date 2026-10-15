@@ -78,7 +78,7 @@ def dependency_pair(path: Path) -> dict[str, dict]:
     by_framework = {item.get("framework"): item for item in items}
     _require(set(by_framework) == {"Microsoft.WindowsDesktop.App", "Microsoft.AspNetCore.App"}, "依赖框架不完整")
     for item in items:
-        _require(item.get("version") == "10.0.12" and item.get("rid") == "win-x64", "依赖版本或架构不符")
+        _require(item.get("version") == "10.0.13" and item.get("rid") == "win-x64", "依赖版本或架构不符")
         _require(isinstance(item.get("url"), str) and item["url"].startswith("https://builds.dotnet.microsoft.com/dotnet/"),
                  "依赖下载 URL 非固定微软官方包")
         _require(re.fullmatch(r"[0-9a-f]{64}", item.get("sha256", "")) is not None, "依赖 SHA256 无效")
@@ -190,7 +190,7 @@ def build_installer(production_root: Path, metadata_path: Path, dependency_path:
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
     _require(isinstance(metadata, dict) and isinstance(metadata.get("tag"), str)
              and isinstance(metadata.get("sourceSha"), str), "生产 ZIP 元数据身份无效")
-    package = metadata_path.parent / f"NexusPipeline-{metadata['tag']}-win-x64.zip"
+    package = metadata_path.parent / f"NexusPipeline-{metadata['tag']}-win-x64-Portable.zip"
     verify_received_package(package, metadata_path,
                             expected_source_sha=metadata["sourceSha"], expected_tag=metadata["tag"])
     helper = metadata_path.parent / "installer-helper" / "nxp-metadata-helper.exe"
@@ -223,7 +223,7 @@ def compile_payload(production_root: Path, metadata: dict, dependency_path: Path
     (output_dir / "iscc.stdout.log").write_text(completed.stdout, encoding="utf-8")
     (output_dir / "iscc.stderr.log").write_text(completed.stderr, encoding="utf-8")
     _require(completed.returncode == 0, f"Inno Setup 编译失败，退出码 {completed.returncode}")
-    setup = output_dir / f"NexusPipeline-v{metadata['version']}-win-x64-setup.exe"
+    setup = output_dir / f"NexusPipeline-v{metadata['version']}-win-x64-Setup.exe"
     _require(set(path.name for path in output_dir.iterdir()) == {
         script_path.name, "iscc.stdout.log", "iscc.stderr.log", setup.name, "wizard.png", "wizard-small.png",
     }, "安装器输出文件集合不符")

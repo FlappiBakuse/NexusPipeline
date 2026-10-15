@@ -20,6 +20,7 @@ node tests/run.mjs plan --base <完整基线SHA> --include-working-tree --partne
 node tests/run.mjs batch --plan <外部scope.json> --batch <control或batch-01至batch-05> --partner-root <同一Plugins检出>
 node tests/run.mjs gate --id host.backend.updates-restart
 node tests/run.mjs gate --id host.integration.desktop
+node tests/run.mjs gate --id host.integration.installation-adoption
 node tests/run.mjs gate --id host.ci-policy
 ```
 
@@ -107,6 +108,8 @@ python -m unittest discover -s tools/tests -p test_pe_manifest.py
 
 
 ## 本机批次诊断
+
+`node tests/run.mjs gate --id host.integration.installation-adoption` 验证手动覆盖后的安装归属登记与中断恢复。运行前设置绝对路径 `NEXUS_ADOPTION_BASELINE_PACKAGE`（官方 0.17.3 完整包）和 `NEXUS_ADOPTION_BASELINE_RELEASE`（独立取得的官方 Release API JSON，包含资产 digest）；入口只读核对旧包，使用当前源码构建 asInvoker Test Host。19 个固定场景覆盖辅助程序存在／缺失时的五个登记阶段、维护暂停的三个提交阶段、独立证明后补回缺失的共同入口与 README，以及未知辅助程序、离线和自行修改清单的拒绝路径，以及完整还原原载荷后维护恢复的中断路径；成功登记场景还验证卸载保留用户数据。HTTP、Setup 资产和注册表隔离范围为受控夹具；结果不代表官方在线发布、真实 Setup 安装或 UAC 验收。失败现场保留在本轮外部报告目录。
 
 `plan`、`batch` 和 `gate` 保留为本机按需入口，报告核对实际输入、原生结果、计数、场景和清理。它们不参与 GitHub PR 检查，也不提供远端合并资格。源码配对和服务端作业审计工具仅用于显式诊断。
 

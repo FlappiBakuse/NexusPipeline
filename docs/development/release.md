@@ -31,7 +31,7 @@
 
 以下步骤需要维护者明确授权：
 
-从受保护 `main` 手动选择 `operation=candidate` 的 Host 发布工作流按固定 source plan 依序执行 frontend、bundled、host、package-verify、installer 与 candidate 汇总作业；`source_ref` 必须是受保护 main 历史中的可达引用。candidate 不需要 tag：它用固定源码生成真实前端、生产 Host、桌面和预装插件，核验载荷并生成 ZIP 和 Setup。Inno Setup 6.7.3 的下载包与编译器分别验固定 SHA256；两种分发物进入同一 `host-candidate-<runId>-<attempt>`，候选清单还记录 ZIP/Setup 构建元数据。失败报告使用独立 diagnostics artifact；候选不会创建或移动 tag，也不会自行发布。
+从受保护 `main` 手动选择 `operation=candidate` 的 Host 发布工作流按固定 source plan 依序执行 frontend、bundled、host、package-verify、installer 与 candidate 汇总作业；`source_ref` 必须是受保护 main 历史中的可达引用。candidate 不需要 tag：它用固定源码生成真实前端、生产 Host、桌面和预装插件，核验载荷并生成 Portable、Update 和 Setup。Inno Setup 6.7.3 的下载包与编译器分别验固定 SHA256；三个分发物进入同一 `host-candidate-<runId>-<attempt>`，候选清单还记录 ZIP/Setup 构建元数据。失败报告使用独立 diagnostics artifact；候选不会创建或移动 tag，也不会自行发布。
 
 已有 tag 指向候选源码且候选 job 真正成功时，发布者可从 `main` 手动执行同包恢复：
 
@@ -39,7 +39,7 @@
 gh workflow run release.yml --ref main -f operation=publish-only -f tag=<已有 tag> -f candidate_run_id=<原候选 run ID>
 ```
 
-同一 run 出现多个成功候选 artifact 时，再传 `-f candidate_artifact_id=<服务端 artifact ID>`。独立 writer 核对原 attempt/job、服务端 artifact 摘要、候选清单、Git tree、现有 tag、ZIP 与 Setup 来源及摘要；只复用原候选，不重新编译。公开资产白名单包含完整 ZIP、Setup、update.json 和 host-core、desktop-app、desktop-runtime 三个组件 ZIP；同 tag 同资产不同字节拒绝覆盖，远端逐项读回及 GitHub digest、尺寸、ID 核验通过后才公开 Release。仅在本地合成 run ID 打出的候选不能用于发布。
+同一 run 出现多个成功候选 artifact 时，再传 `-f candidate_artifact_id=<服务端 artifact ID>`。独立 writer 核对原 attempt/job、服务端 artifact 摘要、候选清单、Git tree、现有 tag、ZIP 与 Setup 来源及摘要；只复用原候选，不重新编译。公开资产白名单精确为 Setup.exe、Portable.zip、Update.zip；增量配方和覆盖说明位于包内，发现元数据在仓库 v2 端点维护；同 tag 同资产不同字节拒绝覆盖，远端逐项读回及 GitHub digest、尺寸、ID 核验通过后才公开 Release。仅在本地合成 run ID 打出的候选不能用于发布。
 
 新版本需先在受保护 `main` 的对应合并提交完成候选验收；获授权后才能创建并推送指向该提交的 tag。已有 tag 不因发布工具修复而移动。Release Notes 依据该 tag 的真实变更写入 UTF-8 无 BOM 文件；独立下载 ZIP 并按服务端 digest 复核后，再按授权更新 Release 正文并检查更新可见性。控制工具修复通过正常源码 PR 和 `Host / 构建检查`；恢复始终使用原候选，已有资产必须字节一致。
 
@@ -77,7 +77,7 @@ Setup 的文件解压完成不等于安装成功。新装须完成实例归属�
 
 Setup 在 Inno 写入 ARP 与原生 `unins*.exe/.dat/.msg` 之前保存当前用户实例的窄元数据检查点（DPAPI 状态、原字节备份和摘要）。写入后先观察 ARP 与原生卸载器，再启动独立 worker。未启动或确认回滚时，按检查点恢复原登记和原卸载器；事务与新程序身份均确认提交时保留新登记。提交后仅清理失败时仍按提交处理，Setup 继续返回失败供诊断。阶段不明、外部字节改动或补偿失败时保留检查点，拒绝覆盖；下次可信 Setup 会先恢复可判定的检查点。初装登记失败同样撤回 Inno 成功登记，程序与用户数据保留供诊断。测试入口及原始证据要求见[测试命令](../testing/commands.md)。
 
-登记检查点调用 Setup 内嵌的 asInvoker 辅助程序，其入口限于安装元数据和旧实例后台服务交接。覆盖安装在写入 Inno 元数据之前核对当前用户归属与旧载荷哈希，确认该根目录记录的进程与本机控制端口已经就绪；未运行的旧实例通过 `runas` 启动后台服务，不打开管理页面。实际维护准入、任务结束与更新退出仍由旧服务执行。正式 Host 保持 `requireAdministrator`，独立更新 worker 仍由 `runas` 启动。worker 的授权请求被拒后，补偿不再发出第二次提权请求。辅助程序不进入 ZIP 的四项应用载荷。
+登记检查点调用 Setup 内嵌的 asInvoker 辅助程序，其入口限于安装元数据和旧实例后台服务交接。覆盖安装在写入 Inno 元数据之前核对当前用户归属与旧载荷哈希，确认该根目录记录的进程与本机控制端口已经就绪；未运行的旧实例通过 `runas` 启动后台服务，不打开管理页面。实际维护准入、任务结束与更新退出仍由旧服务执行。正式 Host 保持 `requireAdministrator`，独立更新 worker 仍由 `runas` 启动。worker 的授权请求被拒后，补偿不再发出第二次提权请求。安装元数据辅助程序不进入 Portable 或通用 Update；共同载荷包含可见 Update 入口。
 
 0.16.9001/0.16.9002 是隔离 Windows VM 跨版本实验夹具，仅供旧原生卸载器验证，不是公开历史版本；正式候选只接受本次已确认版本的干净配对源码。未获源码提交授权时，可保存当前脏源指纹与本地 ZIP/Setup 诊断摘要，但不能称为正式候选通过。
 
@@ -150,3 +150,7 @@ v0.17.0 的 `desktop-shell-embedded-ui` 屏障必须在公开 ZIP、Setup 资产
 - 仓库外原字节检查点和失败证据按实际发布闭环及目录归属处理；标签删除另需授权。
 
 本机 `local-acceptance` receipt 的 `producer=local`、`publishable=false` 不具备候选资格，不传给 publish-only。维护者确认源与行为后，按实际授权提交干净源码，再从受保护 main 手动生成正式候选。
+
+## 三资产升级链
+
+当前发行只提供 Setup、Portable、Update 三个用户资产。v0.17.3 的旧 reader 保留原发现协议；进入 v0.17.4 使用新 Setup 首跳或包内精确基线说明，不能宣称旧 reader 原生支持新三资产。新 reader 认证同一 Release 的资产 ID、长度与服务端 digest 后读取包内配方，按精确基线复用，传输不可用或基线不匹配时最多回退一次完整包。摘要、结构、安全与恢复错误不触发盲目回退。

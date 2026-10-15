@@ -28,7 +28,7 @@ class HostInstallerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="nxp-installer-payload-") as temporary:
             root = Path(temporary)
             payload = root / "production"
-            source = {
+            source = {"NexusPipeline Update.exe": b"host",
                 "NexusPipeline.exe": b"exe",
                 "README.md": b"readme",
                 "resources/payload-manifest.json": b"manifest",
@@ -53,7 +53,7 @@ class HostInstallerTests(unittest.TestCase):
             self.assertIn("onlyifdoesntexist", script)
             manifest_line = next(line for line in script.splitlines() if line.startswith('[{"Path":'))
             inventory = json.loads(manifest_line)
-            self.assertEqual({item["Path"] for item in inventory}, {"NexusPipeline.exe", "README.md", "resources/payload-manifest.json", "resources/desktop/NexusPipeline.Desktop.exe"})
+            self.assertEqual({item["Path"] for item in inventory}, {"NexusPipeline.exe", "NexusPipeline Update.exe", "README.md", "resources/payload-manifest.json", "resources/desktop/NexusPipeline.Desktop.exe"})
             self.assertEqual(next(item["Sha256"] for item in inventory if item["Path"] == "README.md"),
                              hashlib.sha256(source["README.md"]).hexdigest())
             self.assertIn("VerifyStagedFile('README.md'", script)
@@ -72,7 +72,7 @@ class HostInstallerTests(unittest.TestCase):
     def test_runtime_lock_rejects_nonofficial_or_wrong_architecture(self) -> None:
         with tempfile.TemporaryDirectory(prefix="nxp-installer-dependencies-") as temporary:
             path = Path(temporary) / "deps.json"
-            items = [{"framework": name, "version": "10.0.12", "rid": "win-x64",
+            items = [{"framework": name, "version": "10.0.13", "rid": "win-x64",
                       "url": "https://builds.dotnet.microsoft.com/dotnet/runtime.exe", "sha256": "a" * 64}
                      for name in ("Microsoft.WindowsDesktop.App", "Microsoft.AspNetCore.App")]
             path.write_text(json.dumps({"schemaVersion": 1, "dependencies": items}), encoding="utf-8")

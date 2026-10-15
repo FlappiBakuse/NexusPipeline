@@ -2,6 +2,8 @@
 
 `tools/local_acceptance.py` 允许从未提交双仓工作树构建生产软件，保留正式候选的 clean/source/Actions 来源检查。
 
+`distribution/` 仅包含 Setup、Portable、Update 三个包，使用正式配方生成器验证增量重建与完整树一致。基线通过官方 Release API 独立认证；可用 `--baseline-cache <外部目录>` 复用已下载的官方包，每次仍重新核验资产身份和摘要。缓存中没有合适基线时生成完整内容的 Update，不伪造可复用文件。`local-acceptance-receipt.json` 保存包摘要、基线身份与复用字节，所有产物仍不可直接发布。
+
 ```powershell
 python tools/local_acceptance.py build --host-root "<Host源码绝对路径>" --plugins-root "<Plugins源码绝对路径>" --output "<仓库外独占验收目录>"
 ```

@@ -120,7 +120,7 @@ exit $p.ExitCode
     return executable
 
 
-def build(host: Path, plugins: Path, output: Path, compiler: Path | None, cache: Path) -> dict:
+def build(host: Path, plugins: Path, output: Path, compiler: Path | None, cache: Path, baseline_cache: Path | None = None) -> dict:
     output = output.resolve()
     if output.is_relative_to(host) or output.is_relative_to(plugins) or output in (host.parent, plugins.parent) or output.is_symlink() or output.is_junction():
         raise ValueError('Local acceptance output must be external to the repositories')
@@ -170,19 +170,27 @@ def build(host: Path, plugins: Path, output: Path, compiler: Path | None, cache:
         if code:
             raise subprocess.CalledProcessError(code, arguments)
     try:
+        sys.path.insert(0, str(source/'tools'))
+        release = importlib.import_module('host_release')
+        version = release.project_version(source)
+        distribution = output/'distribution'
+        if distribution.exists():
+            if distribution.is_symlink() or distribution.is_junction():
+                raise ValueError('Linked distribution output')
+            for file in distribution.iterdir():
+                if file.name not in release.public_asset_names('v'+version) or not file.is_file() or file.is_symlink():
+                    raise ValueError('Unknown distribution output')
+            for file in distribution.iterdir(): file.unlink()
         for name in ('application-inputs', 'production', 'installer-helper', 'installer', 'plugin-packages'):
             path = output/name
             if path.exists():
                 if path.is_symlink() or path.is_junction():
                     raise ValueError('Linked build output')
                 shutil.rmtree(path)
-        sys.path.insert(0, str(source/'tools'))
         application_build = importlib.import_module('application_build')
         payload = importlib.import_module('application_payload')
-        release = importlib.import_module('host_release')
         installer = importlib.import_module('host_installer')
         pe = importlib.import_module('pe_manifest')
-        version = release.project_version(source)
         compiler = resolve_compiler(cache, compiler)
         npm = 'npm.cmd'
         command('Host frontend dependencies', [npm, 'ci', '--no-audit', '--no-fund'], source/'frontend')
@@ -215,24 +223,23 @@ def build(host: Path, plugins: Path, output: Path, compiler: Path | None, cache:
         identity = json.loads(Path(inputs['identity']).read_bytes())
         manifest = payload.create(production, identity, source)
         payload.validate(production, manifest, identity, source)
-        package = output/f'NexusPipeline-v{version}-local-acceptance-win-x64.zip'
-        package.unlink(missing_ok=True)
         files = [{'path': path.relative_to(production).as_posix(), 'sizeBytes': path.stat().st_size, 'sha256': digest(path)}
                  for path in sorted(production.rglob('*')) if path.is_file()]
-        with zipfile.ZipFile(package, 'x', compression=zipfile.ZIP_DEFLATED, compresslevel=6) as bundle:
-            for file in files:
-                info = zipfile.ZipInfo(file['path'], date_time=(1980,1,1,0,0,0))
-                info.create_system=0; info.external_attr=0o644<<16; info.compress_type=zipfile.ZIP_DEFLATED
-                bundle.writestr(info, (production/file['path']).read_bytes())
-        with zipfile.ZipFile(package) as bundle:
-            for file in files:
-                if hashlib.sha256(bundle.read(file['path'])).hexdigest() != file['sha256']:
-                    raise ValueError('Local ZIP payload mismatch')
+        distribution = output/'distribution'
+        distribution.mkdir(exist_ok=True)
+        baseline = importlib.import_module('update_baseline').acquire(baseline_cache or cache/'baseline', version)
+        transport = importlib.import_module('update_packages').generate(production, distribution, 'v'+version, manifest, files, baseline=baseline)
+        package = distribution/f'NexusPipeline-v{version}-win-x64-Portable.zip'
+        update_package = distribution/f'NexusPipeline-v{version}-win-x64-Update.zip'
         metadata = {'mode': 'local-acceptance', 'producer': 'local', 'publishable': False, 'version': version, 'tag': 'v'+version,
                     'sourceSha': host_input['baseSourceCommit'], 'sha256': digest(package), 'payloadFiles': files,
                     'buildInputs': identity['buildInputs'], 'buildId': identity['buildId'], 'frontendHash': identity['frontendHash']}
         setup = installer.compile_payload(production, metadata, source/'tools/runtime-dependencies.json', compiler,
             output/'installer', source/'tools/installer.iss.in', helper/'nxp-metadata-helper.exe')
+        setup_path = distribution/f'NexusPipeline-v{version}-win-x64-Setup.exe'
+        (output/'installer'/setup_path.name).rename(setup_path)
+        if {file.name for file in distribution.iterdir()} != release.public_asset_names('v'+version):
+            raise ValueError('Local distribution must contain exactly Setup, Portable and Update')
         packages = output/'plugin-packages'
         packages.mkdir(exist_ok=True)
         plugin_results = []
@@ -277,7 +284,8 @@ def build(host: Path, plugins: Path, output: Path, compiler: Path | None, cache:
             raise ValueError('Acceptance must contain every active source plugin')
         receipt.update(status='BUILD_PASS', buildId=identity['buildId'], buildInputs=identity['buildInputs'],
             frontendHash=identity['frontendHash'], zip={'path': str(package), 'sha256': digest(package)},
-            setup={'path': str(output/f'installer/NexusPipeline-v{version}-win-x64-setup.exe'), 'sha256': setup['setupSha256']},
+            setup={'path': str(setup_path), 'sha256': setup['setupSha256']},
+            update={'path': str(update_package), 'sha256': digest(update_package)}, transport=transport,
             software=str(acceptance), pluginBuilds=plugin_results)
         receipt.update(hostVersion=version,
             gameCheckInVersion=next(result['version'] for result in plugin_results if result['artifactName'] == 'GameCheckIn'),
@@ -285,11 +293,9 @@ def build(host: Path, plugins: Path, output: Path, compiler: Path | None, cache:
             baseSourceCommit=host_input['baseSourceCommit'], sourceTreeSha=host_input['sourceTreeSha'],
             hostSourceManifestSha256=host_input['sourceManifestSha256'], pluginsBaseCommit=plugin_input['baseSourceCommit'],
             pluginsSourceManifestSha256=plugin_input['sourceManifestSha256'])
-        receipt['artifacts'] = [receipt['zip'], receipt['setup']] + [
+        receipt['artifacts'] = [receipt['zip'], receipt['setup'], receipt['update']] + [
             {'path': str(next((packages/result['artifactName']).glob('*.zip'))), 'sha256': result['sha256'], 'version': result['version']}
             for result in plugin_results]
-        for name, item in (('zip', receipt['zip']), ('setup', receipt['setup'])):
-            Path(item['path']+'.sha256').write_text(item['sha256']+'  '+Path(item['path']).name+'\n', encoding='utf-8')
         return receipt
     finally:
         receipt['finishedAt']=time.time()
@@ -302,10 +308,11 @@ def main():
     parser.add_argument('command', choices=['build'])
     for name in ('host-root','plugins-root','output'):
         parser.add_argument('--'+name, type=Path, required=True)
-    for name in ('compiler','cache'):
+    for name in ('compiler','cache','baseline-cache'):
         parser.add_argument('--'+name, type=Path)
     args=parser.parse_args()
-    build(args.host_root.resolve(), args.plugins_root.resolve(), args.output, args.compiler, (args.cache or args.output/'cache').resolve())
+    build(args.host_root.resolve(), args.plugins_root.resolve(), args.output, args.compiler, (args.cache or args.output/'cache').resolve(),
+          args.baseline_cache.resolve() if args.baseline_cache else None)
 
 
 if __name__=='__main__':

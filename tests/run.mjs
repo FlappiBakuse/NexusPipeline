@@ -665,6 +665,32 @@ async function runGate(id) {
     return run(process.execPath,["tests/desktop/run-client.mjs",directory]);
   }
   if (id === "host.integration.store") return runStoreDiagnostic();
+  if (id === "host.integration.installation-adoption") {
+    const baseline = process.env.NEXUS_ADOPTION_BASELINE_PACKAGE;
+    const release = process.env.NEXUS_ADOPTION_BASELINE_RELEASE;
+    if (!baseline || !release || !path.isAbsolute(baseline) || !path.isAbsolute(release))
+      throw new Error("Adoption diagnostic requires explicit official baseline package and API receipt paths");
+    let code = await publishTestHost({withApplication:true}); if(code)return code;
+    const fixture = path.join(runRoot,"adoption-fixture");
+    code = await run(pythonCommand,["tests/system/prepare-adoption.py","--application",testHostDir,
+      "--baseline-package",baseline,"--baseline-release",release,"--output",fixture]); if(code)return code;
+    const output = path.join(runRoot,"adoption-results");
+    code = await run("dotnet",["run","--project","tests/NexusPipeline.UpdateTests/NexusPipeline.UpdateTests.csproj",
+      "-p:NexusTestHost=true","-p:UseSharedCompilation=false","--disable-build-servers","--",
+      "--application",testHostDir,"--baseline",path.join(fixture,"baseline"),"--packages",path.join(fixture,"packages"),"--output",output]);
+    if(code)return code;
+    const report = JSON.parse(fs.readFileSync(path.join(output,"result.json"),"utf8"));
+    const expected = [false, true].flatMap(absent => ["none", "prepared", "helper", "identity", "anchor"]
+      .map(stage => `adoption-${stage}-helper-absent-${absent ? "True" : "False"}`))
+      .concat(["maintenance-prepared", "maintenance-identity", "maintenance-anchor",
+        "missing-common-files-repaired-after-independent-proof", "untrusted-common-entry-preserved",
+        "untrusted-helper-preserved", "offline-keeps-original-ownership", "self-described-modified-payload-rejected",
+        "restored-original-payload-resumes-maintenance-after-interruption"]);
+    const actual = report.cases.map(item => item.name).sort();
+    return report.status === "PASS" && report.passed === 19 && report.failed === 0 && report.skipped === 0
+      && report.cases.every(item => item.status === "PASS")
+      && JSON.stringify(actual) === JSON.stringify(expected.sort()) ? 0 : 4;
+  }
   if (id === "host.integration.restart-update") {
     const code = await publishTestHost({ withApplication: true });
     if(code)return code;

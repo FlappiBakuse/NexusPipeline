@@ -1,22 +1,28 @@
 # 自动更新
 
-默认更新源读取 `metadata/updates/channels.json` 的两槽声明。pendingTarget 只有在 Release 已公开、渠道正确、分页资产身份及 target manifest 摘要均有效时才成为可用版本；其尚未发布、损坏或要求未知能力时，独立校验 previousPublishedTarget 并保留待发布状态。没有上一目标时保持当前安装，不枚举历史 Release，也不推荐降级。
+默认更新源读取 `metadata/updates/v2/channels.json` 的两槽声明。pendingTarget 只有在 Release 已公开、渠道正确、分页资产身份与协议要求有效时才成为可用版本；其尚未发布、损坏或要求未知能力时，独立校验 previousPublishedTarget 并保留待发布状态。没有上一目标时保持当前安装，不枚举历史 Release，也不推荐降级。旧 `metadata/updates/channels.json` 保留 reader 1 发现合同，不向旧 reader 投放新配方。
 
-target manifest 把完整 ZIP 和 host-core、desktop-app、desktop-runtime 组件绑定到同一次 Release 的资产 ID、尺寸和 GitHub digest。当前安装先通过载荷校验，逐文件尺寸与摘要均相同的组件可以复用；组件下载更大时使用完整包，组件传输暂不可用时仅全量回退一次。摘要、文件集合、能力或迁移路线错误直接阻断。最终重建仍完整核对 PE、ASAR、前端构建身份及 payload manifest，并生成仅供本地恢复使用的包和校验收据。
+reader 2 将 Setup、Portable、Update 三个公开资产绑定到同一次 Release 的资产 ID、尺寸和 GitHub digest。Portable 与 Update 内的 schema 1 配方冻结 included/reused/removed 文件及目标 payload schema 2 清单。当前安装的精确基线匹配且差异包更小时使用 Update；传输不可用或合法配方的基线不匹配只允许一次 Portable 回退。摘要、路径、文件集合、能力或迁移路线错误直接阻断。重建后完整核对 PE、ASAR、前端构建身份及 payload manifest；Portable 的预装插件仅核验，不覆盖已有插件目录。reader 1 的组件解析保留给明确的旧协议目标。
 
-当前已登记 g0170 无业务数据变化路线；目标 Host 的专用 runner 在普通服务初始化之前处理握手，父协调器验证真实进程与管道身份、一次性随机数、构建、能力和序号，确认结束后才交换应用。schema 2 journal 冻结发行资产和 runner 收据；跨 schema 的编译迁移器框架由模块 owner 提供明确存储根和 schema，通过隔离转换、备份、可恢复切换和精确文件收据保护数据。当前发行不制造业务格式变化；未知路线、schema 和恢复现场继续阻断。契约见[更新协议](../../contracts/updates/README.md)。
+当前已登记 g0170 无业务数据变化路线；目标 Host 的专用 runner 在普通服务初始化之前处理握手，父协调器验证真实进程与管道身份、一次性随机数、构建、能力和序号，确认结束后才交换应用。新事务使用 schema 3 journal，冻结发行资产、运输方式、配方摘要、基线清单、实际下载与复用字节及 runner 收据；已知 schema 1/2 现场仍按原 reader 恢复。跨 schema 的编译迁移器框架由模块 owner 提供明确存储根和 schema，通过隔离转换、备份、可恢复切换和精确文件收据保护数据。未知路线、schema 和恢复现场继续阻断。契约见[更新协议](../../contracts/updates/README.md)。
 
 发现入口对未知目标能力先规划有界桥接：要求源 reader 与完整能力集合匹配、桥接入口可由当前 reader 验证、目标能力覆盖最终要求，且版本严格处于本机与最终目标之间。最多核验八个桥接，使用同一 Release/资产摘要验证，不下载未知协议目标清单，不执行入口声明的命令。状态分别报告 `bridge-required` 和 `bridge-unavailable`；桥接应用后重新检查最终目标。
 
 ## 安装器交接和启动确认
 
-Setup 使用本实例事务互斥体，将现役 Host 复制到同根 `.nxp/runtime/workers/update-<事务随机ID>.exe` 作为独立 worker，通过 `--app-root` 固定执行根目录；worker 摘要必须与现役 Host 一致。已有服务时通过本地 `installer-apply` API 取得现役维护租约；无服务时经同一 `UpdateService` 准入。配置恢复、运行、编辑和其他更新事务阻断切换。
+Setup 要求本实例停止，使用事务互斥体，将已验证的新候选 Host 复制到同根 `.nxp/runtime/workers/update-<事务随机ID>.exe`，通过 `installer-transition` 和 `--app-root` 进入专用协调器。协调器核对旧安装归属、旧载荷、候选映像及安装元数据检查点，再交由同一 `UpdateService` 和 apply worker 执行切换。配置恢复、运行、编辑和其他更新事务阻断切换。
+
+`NexusPipeline Update.exe` 是 Host 的原字节副本。无参数启动该文件或显式 `update-window` 进入更新窗口；worker 参数优先分派。已有服务时窗口通过核验后的本地控制面请求更新，无服务时只组合最小更新依赖，不加载插件和调度服务。
 
 交换完成先写 `AwaitingStartup`，保留 immutable backup。新宿主在维护租约下初始化插件和 Control API 后提交回执；worker 核对事务 ID、真实程序集版本、实际 EXE SHA256、PID、完整映像路径及启动时间，收尾完成后才返回成功。新宿主等待成功结果后解除维护，执行正常启动检查。回执失败时只按已捕获身份停止候选并回滚；无法确认停止或清理时保留 journal、备份和错误结果，不称更新完成。缺失 Phase、CreatedAt 或身份的旧 journal 保留原字节并阻断更新；当前事务的 CreatedAt 不刷新。worker 在备份前冻结自身身份和目标映像，失败证明与已退出 worker 对应后才清理本次暂存，避免重复启动失败事务。
 
 ## 实例归属和卸载
 
 `InstallationOwnership` 管当前用户安装归属。随机 instance ID、规范根目录、用户 SID 和当前应用文件 SHA256 清单通过 DPAPI 保护，并与 HKCU 的摘要锚点核对；注册表路径本身不足以接管旧目录。辅助程序位于用户级管理目录，调用前也按当前受保护清单验证。
+
+受保护身份将共同 Update 入口存入 `AuxiliaryPayloadFiles`，其他路径保留在旧卸载器可读取的 `PayloadFiles`；Host 解封后合并、校验唯一性并按完整归属操作。手动覆盖首次启动将旧归属标为 `manual-adoption-pending`，保留原版本及每个文件摘要，旧卸载器不能继续维护。暂停与恢复 active 均有独立 DPAPI 检查点及 HKCU 摘要核对；联网核验官方包后才更新载荷归属和安装 helper。普通运行与维护状态分开，自动检查不会隐式下载完整包进行归属收尾。
+
+归属收尾允许共同 Update 入口与 README 缺失；独立验证官方完整载荷后，仅从本次已验证 staging 原子补回缺失文件，再核对完整载荷并提交登记。离线保持缺失及维护暂停；已存在但摘要不同的文件保留并报错，不以补文件为由覆盖未知字节。
 
 更新提交刷新当前载荷清单，回滚恢复清单及辅助程序。卸载先完成归属、链接和恢复现场检查，再删除当前清单中仍匹配 SHA256 的应用文件；未知或已修改文件保留。默认保留数据并记录 retained-data 状态，再安装同一路径需明确确认保留数据重用。明确删除数据只遍历本实例固定数据目录，拒绝链接和未解决恢复现场，不触及游戏、脚本或系统运行时。
 
@@ -36,7 +42,7 @@ Setup 使用本实例事务互斥体，将现役 Host 复制到同根 `.nxp/runt
 
 更新状态的 `lastApplyFailure` 返回最近一次有效失败的事务 ID、目标版本、错误代码和 UTC 时间，仅在目标高于当前运行版本时显示。结果读取不改变未知或无效记录；更新卡按 `automation.nextCheckAt` 刷新首次及后续检查结果，检查、下载和应用期间每秒刷新。
 
-主程序更新事务固定交换四项应用资产：`NexusPipeline.exe`、`resources/desktop/`、`README.md` 和 `resources/payload-manifest.json`。Vue 以资源形式内嵌在 Host 中。用户 `plugins/`、`config/`、`data/`、`history/`、`logs/`、`.nxp/state/desktop/` 和未知同级文件均不参与交换；官方插件仓库不参与宿主自动更新流程。
+主程序更新事务从已验证清单推导交换范围；schema 2 载荷包括 `NexusPipeline.exe`、`NexusPipeline Update.exe`、`resources/desktop/`、`README.md` 和 `resources/payload-manifest.json`。Vue 以资源形式内嵌在 Host 中。用户 `plugins/`、`config/`、`data/`、`history/`、`logs/`、`.nxp/state/desktop/` 和未知同级文件均不参与交换；官方插件仓库不参与宿主自动更新流程。
 
 停止桌面前，当前事务冻结 schema 1 的 `DesktopResumeIntent`，Mode 仅接受 `show` 或 `background`。尚未创建窗口的根启动 Show 请求也进入冻结意图；恢复不依赖历史 handoff 或被删除的 session。明确未启动 worker 的失败由同事务 Desktop owner 撤销停止状态并恢复该意图；已启动或无法确认的 worker 保留租约、journal 与停止状态。普通重启未启动子进程时只撤销匹配的 handoff，当前 renderer 恢复 ready 并保留草稿。
 
@@ -48,7 +54,7 @@ journal 记录 staging、backup 的文件和目录精确清单、每文件长度
 
 v0.17.0 使用独立安装代际 `g0170`，不接管 `g01615` 的目录、注册表登记及管理辅助程序。`update-policy.json` 的 `0.17.0` 独立屏障要求旧版用户按新目录安装指南迁移；旧目录和配置原地保留。同路径 Setup 升级只接收当前代际、本 Windows 用户已登记且身份匹配的安装目录。文件归属清单包含 Host、桌面完整运行时及载荷清单自身；安装、更新和卸载使用同一应用边界。
 
-候选构建对同一 production staging 生成完整 ZIP、Setup、target manifest 和 `host-core`、`desktop-app`、`desktop-runtime` 三个组件包。`candidate.json` 记录这六项公开资产与两份内部构建元数据；公开发行不包含 SHA 侧文件，发行说明末尾列出资产摘要表。publisher 从原成功 run 下载服务端指定 artifact，核对来源、tree、依赖与编译器锁、完整资产字节，再发布并远端逐项回读；不从发行页按 latest 重新取包。
+候选构建对同一 production staging 生成 `NexusPipeline-v<V>-win-x64-Setup.exe`、`-Portable.zip` 和 `-Update.zip`。`candidate.json` 记录这三项公开资产与两份内部构建元数据；公开发行不包含 SHA 侧文件或独立配方资产，发行说明末尾列出资产摘要表。publisher 从原成功 run 下载服务端指定 artifact，核对来源、tree、依赖与编译器锁、完整资产字节，再发布并远端逐项回读；不从发行页按 latest 重新取包。
 
 target manifest 按完整文件清单与构建身份重建 staging。未变组件仅复用当前安装中逐文件核验通过的内容；组件传输失败允许一次完整 ZIP 回退，身份、摘要或载荷错误直接失败。下载前同时计算新 staging、旧载荷备份、下载和工作空间的卷上峰值，应用仍执行同一维护租约与恢复事务。
 
@@ -65,3 +71,7 @@ target manifest 按完整文件清单与构建身份重建 staging。未变组�
 `tools/installer-space.iss` 从构建时冻结的载荷清单计算核心与首次插件选择，并按目标、manager、临时卷合并新增占用，包含新 staging、真实旧资产复制、卸载预置、记录和已知下载。永久 helper 是 Host 副本，临时元数据程序单独计入临时卷。分配粒度使用实际卷信息，元数据余量随清单路径与记录数增长。预览复用已核对的保护身份，向导和互斥下最终检查共用原生计算；最终检查重新解封归属、检测依赖并读取各卷可用空间。ARP EstimatedSize 沿用 Inno 的实际安装计数，不能写入临时峰值。
 
 准备数据副本前必须通过调用方持久回调保存 Preparing 状态、输入清单和预期工作区。独占创建目录后记录物理目录身份与 owner token，完成文件写入后更新精确清单，最终发布 Prepared。恢复核对原始 store 和已记录工作区；创建后尚未取得身份、转换中未入清单的字节或其他未知内容保留现场，不递归删除。该框架的受控强杀恢复测试不代表真实业务 schema 迁移已经登记或验收。
+
+空间检查按实际卷的分配单位计入解压、重建、备份、worker、安装 helper 与 journal 余量；应用与每用户安装管理器跨卷时逐卷检查，空间不足在写入或交换之前拒绝。
+
+手动覆盖维护暂停期间，若用户完整还原原登记版本的应用载荷，新 Setup 先复核原 DPAPI/HKCU 锚点和每个受管文件摘要，再通过可恢复的双 seal 检查点恢复旧维护状态。旧载荷未完整还原、未知 helper 或归属变化时保留暂停与现场。

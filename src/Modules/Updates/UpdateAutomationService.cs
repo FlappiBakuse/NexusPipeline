@@ -59,7 +59,7 @@ internal sealed class UpdateAutomationService
         : this(
             settings,
             updates.GetStatus,
-            auditSource => updates.CheckAsync(auditSource),
+            auditSource => updates.CheckAsync(auditSource, reconcileManualAdoption: false),
             auditSource => updates.StartDownload(auditSource),
             updates.RequestImmediateApplyWithLease,
             idlePolicy.TryAcquire,

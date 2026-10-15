@@ -1,7 +1,7 @@
 <Project>
   <PropertyGroup>
     <NexusInstallationGeneration>g0170</NexusInstallationGeneration>
-    <RuntimeFrameworkVersion>10.0.12</RuntimeFrameworkVersion>
+    <RuntimeFrameworkVersion>10.0.13</RuntimeFrameworkVersion>
     <RollForward>LatestPatch</RollForward>
   </PropertyGroup>
   <Target Name="GenerateInstallationGeneration" BeforeTargets="CoreCompile" Condition="'$(MSBuildProjectName)' == 'NexusPipeline' or '$(NexusGenerateInstallationGeneration)' == 'true'">
@@ -15,7 +15,7 @@
     </ItemGroup>
   </Target>
   <ItemGroup>
-    <FrameworkReference Update="Microsoft.NETCore.App;Microsoft.WindowsDesktop.App;Microsoft.AspNetCore.App" RuntimeFrameworkVersion="10.0.12" />
+    <FrameworkReference Update="Microsoft.NETCore.App;Microsoft.WindowsDesktop.App;Microsoft.AspNetCore.App" RuntimeFrameworkVersion="10.0.13" />
   </ItemGroup>
   <PropertyGroup>
     <!-- Keep every project from re-including another project's generated obj/bin files. -->

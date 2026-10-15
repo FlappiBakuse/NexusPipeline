@@ -29,7 +29,7 @@ function preserveFailedTransaction(label,journal) {
 }
 function stageApplication(staging, readme) {
   fs.mkdirSync(staging,{recursive:true});
-  for(const asset of ["NexusPipeline.exe","README.md","resources"]) fs.cpSync(path.join(runtime.updateReleaseDirectory(),asset),path.join(staging,asset),{recursive:true});
+  for(const asset of ["NexusPipeline.exe","NexusPipeline Update.exe","README.md","resources"]) fs.cpSync(path.join(runtime.updateReleaseDirectory(),asset),path.join(staging,asset),{recursive:true});
   fs.writeFileSync(path.join(staging,"README.md"),readme);
   const file=path.join(staging,"resources/payload-manifest.json"), manifest=readJson(file);
   const entry=manifest.files.find(item=>item.path==="README.md");
@@ -49,8 +49,8 @@ function writeJournal(file,version,staging,payload) {
   }
   capture(staging);entries.sort((left,right)=>left.Path<right.Path?-1:left.Path>right.Path?1:0);
   fs.writeFileSync(file,JSON.stringify({Mode:"apply",Version:version,StagedDir:staging,Phase:"ApplyRequested",CreatedAt:new Date().toISOString(),
-    PayloadSchemaVersion:1,TargetPayload:payload,PreviousPayload:null,PackageSha256:"a".repeat(64),PackageSource:"installer",DesktopStopped:true,SwappedAssetCount:0,
-    JournalSchemaVersion:1,StagingInventory:{Entries:entries},BackupInventory:null,WorkerSha256:hash(runtime.runtimeExe),PackageChecksumSha256:null,Preservation:null,
+    PayloadSchemaVersion:2,TargetPayload:payload,PreviousPayload:null,PackageSha256:"a".repeat(64),PackageSource:"installer",DesktopStopped:true,SwappedAssetCount:0,
+    JournalSchemaVersion:3,StagingInventory:{Entries:entries},BackupInventory:null,WorkerSha256:hash(runtime.runtimeExe),PackageChecksumSha256:null,Preservation:null,
     WorkerPath:null,WorkerLaunchPending:false,DesktopResumeIntent:{SchemaVersion:1,Mode:'background'},TransactionId:randomUUID().replaceAll('-',''),TargetImageHash:hash(path.join(staging,'NexusPipeline.exe'))}));
 }
 
@@ -197,7 +197,7 @@ for(const missingReadme of [false,true]) for(const phase of ['BackupReady','Swap
       NEXUS_TEST_HTTP_PLAN:plan,NEXUS_TEST_UPDATE_PAUSE_PHASE:phase,NEXUS_TEST_UPDATE_PAUSE_FILE:pause});
     assert.equal(await runtime.waitFor(()=>fs.existsSync(pause),15000,50),true,runtime.runtimeDiagnostic());
     const frozen=readJson(journal);assert.equal(frozen.Phase,phase);assert.deepEqual(frozen.PreviousPayload,oldPayload);
-    assert.equal(frozen.SwappedAssetCount,phase==='SwapReady'?4:0);
+    assert.equal(frozen.SwappedAssetCount,phase==='SwapReady'?5:0);
     const damaged=phase==='SwapReady'?path.join(runtime.runtimeDir,'resources/desktop/resources/app.asar'):path.join(staging,'README.md');
     fs.appendFileSync(damaged,'corruption');fs.unlinkSync(pause);
     assert.equal(await runtime.waitFor(async()=>{
@@ -236,10 +236,10 @@ for (const scenario of [
   const oldImage = hash(runtime.runtimeExe);
   const staging = path.join(runtime.runtimeDir, '.nxp-update/staging/0.17.1.g1');
   const target = stageApplication(staging, 'complete candidate README');
-  const affected = path.join(scenario.area === 'staging' ? staging : runtime.runtimeDir, scenario.asset);
-  if (scenario.missing) fs.unlinkSync(affected); else fs.appendFileSync(affected, 'user changes');
   const journal = path.join(runtime.runtimeDir, '.nxp-update/task.json');
   writeJournal(journal, '0.17.1', staging, target);
+  const affected = path.join(scenario.area === 'staging' ? staging : runtime.runtimeDir, scenario.asset);
+  if (scenario.missing) fs.unlinkSync(affected); else fs.appendFileSync(affected, 'user changes');
   const plan = path.join(root, `invalid-payload-${scenario.name.replaceAll(' ', '-')}-policy.json`);
   fs.writeFileSync(plan, JSON.stringify({ RunId: runtime.runId, Exchanges: [{ Id: 'invalid-payload-policy', Method: 'GET',
     Url: 'https://raw.githubusercontent.com/FlappiBakuse/NexusPipeline/main/metadata/updates/legacy-policy.json', Status: 200,

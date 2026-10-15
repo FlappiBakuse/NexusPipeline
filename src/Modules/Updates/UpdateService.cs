@@ -24,6 +24,7 @@ internal enum UpdateState
     ApplyPending,
     Applying,
     RecoveryPending,
+    ManualAdoptionPending,
 }
 
 /// <summary>
@@ -59,6 +60,10 @@ internal sealed class UpdateService
     private string? _readyPackageHash;
     private string? _readyChecksumHash;
     private UpdateInventory? _readyInventory;
+    private UpdateTransportReceipt? _readyTransportReceipt;
+    private readonly bool _setupTransition;
+    private readonly string? _sourceVersion;
+    private bool _manualAdoptionRequired;
     private HostMaintenanceLease? _maintenanceLease;
     private bool _hasChecked;
     private bool _discoveryInvalidationPending;
@@ -85,9 +90,13 @@ internal sealed class UpdateService
         Func<string, TimeSpan, bool>? stopDesktop = null,
         Func<string, string?, bool, UpdatePayloadIdentity>? freezePayload = null,
         Func<DesktopResumeIntent>? captureDesktopIntent = null,
-        Action<string, DesktopResumeIntent>? abortDesktop = null)
+        Action<string, DesktopResumeIntent>? abortDesktop = null,
+        bool setupTransition = false,
+        string? sourceVersion = null)
     {
         _settings = settings;
+        _setupTransition = setupTransition;
+        _sourceVersion = sourceVersion;
         _installDir = installDir;
         _canApplyFallback = canApply;
         _requestExit = requestExit;
@@ -109,6 +118,13 @@ internal sealed class UpdateService
                 : ((HostMaintenanceLease?)null, "存在活动运行、编辑会话或待执行系统操作，暂不能应用更新");
         }
         _state = HasRecoveryArtifacts() ? UpdateState.RecoveryPending : UpdateState.Idle;
+        if (_state == UpdateState.Idle && !setupTransition)
+        {
+            try { _manualAdoptionRequired = InstallationOwnership.PendingManualAdoption(installDir, CurrentVersion) is not null; }
+            catch (Exception error) when (error is IOException or System.Security.Cryptography.CryptographicException)
+            { _manualAdoptionRequired = true; _error = error.Message; }
+            if (_manualAdoptionRequired) _state = UpdateState.ManualAdoptionPending;
+        }
         _lastApplyFailure = UpdateApplyFailure.ReadLatest(installDir, CurrentVersion);
     }
 
@@ -247,12 +263,14 @@ internal sealed class UpdateService
     /// <summary>检查更新：只允许 Idle 开始；Ready、ApplyPending、Applying 等状态不会被覆盖。</summary>
     public async Task<UpdateStatusSnapshot> CheckAsync(
         string auditSource,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool reconcileManualAdoption = true)
     {
         UpdateOperation operation;
         lock (_gate)
         {
-            if (_state != UpdateState.Idle)
+            if (_state is not (UpdateState.Idle or UpdateState.ManualAdoptionPending)
+                || _manualAdoptionRequired && !reconcileManualAdoption)
             {
                 return BuildSnapshotLocked();
             }
@@ -265,6 +283,7 @@ internal sealed class UpdateService
 
         try
         {
+            if (_manualAdoptionRequired) await ReconcileManualAdoptionAsync(operation).ConfigureAwait(false);
             AppSettings settings = _settings();
             string source = EffectiveSourceUrl(settings);
             string? validationError = UpdateCatalog.ValidateSource(source);
@@ -352,6 +371,28 @@ internal sealed class UpdateService
         return GetStatus();
     }
 
+    private async Task ReconcileManualAdoptionAsync(UpdateOperation operation)
+    {
+        var admission = _acquireMaintenance();
+        using var lease = admission.Lease ?? throw new IOException(admission.Reason ?? "installer.adoption_busy");
+        var owner = InstallationOwnership.PendingManualAdoption(_installDir, CurrentVersion);
+        if (owner is not null)
+        {
+            var policy = new UpdateSourcePolicy(null);
+            using var http = _outbound.CreateClient(policy.SourceUri, TimeSpan.FromMinutes(10), allowAutoRedirect: false);
+            string workspace = Path.Combine(_installDir, ".nxp", "state", "updates", "adoption-" + Guid.NewGuid().ToString("N"));
+            var proof = await ManualAdoptionProof.VerifyAsync(http, _installDir, owner, CurrentVersion, workspace, operation.Cts.Token).ConfigureAwait(false);
+            lock (_gate)
+            {
+                operation.Cts.Token.ThrowIfCancellationRequested();
+                if (!IsCurrentLocked(operation)) throw new OperationCanceledException();
+                InstallationOwnership.CommitManualAdoption(_installDir, owner, proof);
+                _manualAdoptionRequired = false;
+            }
+        }
+        else lock (_gate) { if (IsCurrentLocked(operation)) _manualAdoptionRequired = false; }
+    }
+
     /// <summary>开始下载并校验到 staging（后台任务，进度经 GetStatus 轮询）。</summary>
     public UpdateDownloadResult StartDownload(
         string auditSource,
@@ -427,7 +468,7 @@ internal sealed class UpdateService
                 var frozenPayload = _freezePayload(stagingDir, version, false);
                 string frozenPackageHash = operation.Artifacts!.FileHash(zipPath);
                 var inventory = operation.Artifacts.Inventory(stagingDir);
-                if (!TrySetReady(operation, frozenPayload, frozenPackageHash, inventory, operation.Artifacts.FileHash(shaPath)))
+                if (!TrySetReady(operation, frozenPayload, frozenPackageHash, inventory, operation.Artifacts.FileHash(shaPath), delivery.Receipt))
                 {
                     CleanupDownloadArtifacts(operation);
                     return;
@@ -479,7 +520,7 @@ internal sealed class UpdateService
             cts = operation.Cts;
             _operation = null;
             _generation++;
-            _state = UpdateState.Idle;
+            _state = _manualAdoptionRequired ? UpdateState.ManualAdoptionPending : UpdateState.Idle;
             _error = "已取消";
             _readyStagingDir = null;
             _bytesRead = 0;
@@ -731,10 +772,14 @@ internal sealed class UpdateService
         inventory.RequireOwned(staging);
         if (installerPackageHash is null && (!File.Exists(checksum) || UpdateApply.ImageHash(checksum) != _readyChecksumHash))
             throw new InvalidDataException("update.ready_checksum_changed");
+        bool expandedPayload = inventory.Entries.Any(entry => entry.Path == UpdateRecipe.UpdateEntry);
         return UpdateTask.Create(mode, version, staging) with { TargetPayload = payload, PackageSha256 = packageHash,
             StagingInventory = inventory,
+            SetupTransition = installerPackageHash is not null && _setupTransition,
+            PayloadSchemaVersion = expandedPayload ? 2 : 1,
+            TransportReceipt = installerPackageHash is null ? _readyTransportReceipt : null,
             ReleaseEvidence = installerPackageHash is null ? UpdateReleaseEvidence.Freeze(_latest!, payload) : null,
-            JournalSchemaVersion = installerPackageHash is null && _latest?.TargetManifestAsset is not null ? 2 : 1,
+            JournalSchemaVersion = expandedPayload ? 3 : installerPackageHash is null && _latest?.TargetManifestAsset is not null ? 2 : 1,
             PackageChecksumSha256 = installerPackageHash is null ? _readyChecksumHash : null,
             PackageSource = installerPackageHash is null ? "download" : "installer" };
     }
@@ -813,7 +858,8 @@ internal sealed class UpdateService
         }
     }
 
-    private bool TrySetReady(UpdateOperation operation, UpdatePayloadIdentity payload, string packageHash, UpdateInventory inventory, string checksumHash)
+    private bool TrySetReady(UpdateOperation operation, UpdatePayloadIdentity payload, string packageHash, UpdateInventory inventory, string checksumHash,
+        UpdateTransportReceipt? transportReceipt)
     {
         lock (_gate)
         {
@@ -827,6 +873,7 @@ internal sealed class UpdateService
             _readyPackageHash = packageHash;
             _readyInventory = inventory;
             _readyChecksumHash = checksumHash;
+            _readyTransportReceipt = transportReceipt;
             _bytesRead = 0;
             _bytesTotal = 0;
             return true;
@@ -844,7 +891,7 @@ internal sealed class UpdateService
             _error = message;
             _latest = null;
             ClearPolicyLocked();
-            _state = UpdateState.Idle;
+            _state = _manualAdoptionRequired ? UpdateState.ManualAdoptionPending : UpdateState.Idle;
             _readyStagingDir = null;
             _bytesRead = 0;
             _bytesTotal = 0;
@@ -868,7 +915,7 @@ internal sealed class UpdateService
             }
             if (_state == expectedState)
             {
-                _state = UpdateState.Idle;
+                _state = _manualAdoptionRequired ? UpdateState.ManualAdoptionPending : UpdateState.Idle;
                 if (_discoveryInvalidationPending)
                 {
                     ClearDiscoveryLocked();
@@ -892,7 +939,7 @@ internal sealed class UpdateService
 
     private NexusVersion ParseCurrent()
     {
-        return UpdateCatalog.TryParseTag(CurrentVersion, out NexusVersion version)
+        return UpdateCatalog.TryParseTag(_sourceVersion ?? CurrentVersion, out NexusVersion version)
             ? version
             : NexusVersion.Stable(0, 0, 0);
     }
@@ -914,8 +961,8 @@ internal sealed class UpdateService
             _hasChecked,
             _policyVerified,
             _canDownload,
-            _manualUpdateRequired,
-            _updateBlockCode,
+            _manualUpdateRequired || _manualAdoptionRequired,
+            _manualAdoptionRequired ? "manual-adoption-pending" : _updateBlockCode,
             _barrierVersion,
             _migrationUrl,
             _policyError,

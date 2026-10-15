@@ -66,14 +66,17 @@ internal static class UpdateCatalog
             {
                 continue;
             }
-            string zipName = AppPaths.UpdatePackageZipName(Format(version));
+            string portableName = $"NexusPipeline-v{Format(version)}-win-x64-Portable.zip";
+            bool recipePackage = (release["assets"] as JsonArray)?.Any(item => item?["name"]?.ToString() == portableName) == true;
+            string zipName = recipePackage ? portableName : AppPaths.UpdatePackageZipName(Format(version));
             JsonObject[] matching = (release["assets"] as JsonArray)?.OfType<JsonObject>()
                 .Where(item => item["name"]?.ToString() == zipName).ToArray() ?? [];
             if (matching.Length != 1 || !TryReadAsset(matching[0], zipName, out UpdateReleaseAsset? asset)) continue;
             string manifestName = $"NexusPipeline-v{Format(version)}-win-x64-update.json";
             var assets = new Dictionary<string, UpdateReleaseAsset>(StringComparer.Ordinal);
             UpdateReleaseAsset? targetManifest = null;
-            if ((release["assets"] as JsonArray)?.Any(item => item?["name"]?.ToString() == manifestName) == true)
+            UpdateReleaseAsset? deltaAsset = null;
+            if (recipePackage || (release["assets"] as JsonArray)?.Any(item => item?["name"]?.ToString() == manifestName) == true)
             {
                 if (release["assets"] is not JsonArray declaredAssets || declaredAssets.Any(item => item is not JsonObject)) continue;
                 bool valid = true;
@@ -83,12 +86,18 @@ internal static class UpdateCatalog
                     string name = item["name"]?.ToString() ?? "";
                     if (!TryReadAsset(item, name, out var parsed) || !assets.TryAdd(name, parsed!) || !ids.Add(parsed!.Id)) { valid = false; break; }
                 }
-                if (!valid || !assets.TryGetValue(manifestName, out targetManifest) || targetManifest.SizeBytes > UpdateTargetManifest.MaxBytes
+                if (!valid) continue;
+                if (recipePackage)
+                {
+                    if (assets.Count != 3 || !assets.ContainsKey($"NexusPipeline-v{Format(version)}-win-x64-Setup.exe")
+                        || !assets.TryGetValue($"NexusPipeline-v{Format(version)}-win-x64-Update.zip", out deltaAsset)) continue;
+                }
+                else if (!assets.TryGetValue(manifestName, out targetManifest) || targetManifest.SizeBytes > UpdateTargetManifest.MaxBytes
                     || !assets.ContainsKey($"NexusPipeline-v{Format(version)}-win-x64-setup.exe")
                     || UpdateTargetManifest.ComponentIds.Any(id => !assets.ContainsKey($"NexusPipeline-v{Format(version)}-win-x64-{id}.zip"))) continue;
             }
             var candidate = new ReleaseInfo(version, tag!, release["name"]?.ToString() ?? "", release["body"]?.ToString() ?? "",
-                declaredPrerelease, releaseId, asset!, targetManifest, assets);
+                declaredPrerelease, releaseId, asset!, targetManifest, assets, DeltaAsset: deltaAsset);
             if (best is null || Compare(version, best.Version) > 0)
             {
                 best = candidate;
@@ -161,7 +170,9 @@ internal sealed record ReleaseInfo(
     UpdateReleaseAsset ZipAsset,
     UpdateReleaseAsset? TargetManifestAsset = null,
     IReadOnlyDictionary<string, UpdateReleaseAsset>? Assets = null,
-    UpdateTargetManifest? FrozenTarget = null)
+    UpdateTargetManifest? FrozenTarget = null,
+    UpdateReleaseAsset? DeltaAsset = null,
+    string? BaseManifestHint = null)
 {
     public string VersionText => UpdateCatalog.Format(Version);
     public string ZipUrl => ZipAsset.Url;

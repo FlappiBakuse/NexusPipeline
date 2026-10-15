@@ -10,6 +10,17 @@ namespace NexusPipeline.Modules.Updates;
 
 internal static class InstallerServiceHandoff
 {
+    internal static int? FindOwningServicePort(string root, string version)
+    {
+        var layout = new RuntimeStateLayout(root);
+        InstallationOwnership.RequireLinkFree(layout.WebPortPath);
+        if (!File.Exists(layout.WebPortPath) || !int.TryParse(File.ReadAllText(layout.WebPortPath).Trim(),
+            NumberStyles.None, CultureInfo.InvariantCulture, out int port) || port is < 1 or > 65535) return null;
+        using var client = new HttpClient(new HttpClientHandler { UseProxy = false, AllowAutoRedirect = false })
+            { Timeout = TimeSpan.FromSeconds(2) };
+        return IsReady(layout, Path.Combine(root, "NexusPipeline.exe"), version, client) ? port : null;
+    }
+
     internal static void EnsureOwningService(string root)
     {
         root = Path.GetFullPath(root).TrimEnd('\\');

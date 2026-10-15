@@ -62,6 +62,14 @@ def main():
     reject('negative-file-size', lambda: alter_manifest(lambda value: value['files'][0].update(sizeBytes=-1)))
     reject('frontend-identity-mismatch', lambda: alter_manifest(lambda value: value.update(frontendHash='0' * 64)))
     reject('invalid-host-bundle-with-matching-file-hash', lambda: replace_asset('NexusPipeline.exe', lambda _: b'not a .NET bundle'))
+    reject('update-entry-must-match-host-even-with-matching-file-hash',
+           lambda: replace_asset('NexusPipeline Update.exe', lambda value: value + b'changed'))
+    helper = root / 'NexusPipeline Update.exe'
+    def remove_helper():
+        saved = helper.read_bytes()
+        helper.unlink()
+        return lambda: helper.write_bytes(saved)
+    reject('complete-package-requires-update-entry', remove_helper)
     reject('invalid-asar-with-matching-file-hash', lambda: replace_asset('resources/desktop/resources/app.asar', lambda value: b'\xff' * 16 + value[16:]))
     desktop = root / 'resources/desktop/NexusPipeline.Desktop.exe'
     missing = desktop.with_suffix('.missing')
@@ -80,7 +88,7 @@ def main():
               'counts': {'testsRun': len(cases), 'failures': 0, 'skipped': 0}, 'caseIds': [case['id'] for case in cases],
               'cases': cases, 'buildId': baseline['buildId'], 'candidateExecuted': False}
     (args.output / 'reader-report.json').write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
-    print('Real readonly application reader: eight cases PASS')
+    print(f'Real readonly application reader: {len(cases)} cases PASS')
 
 
 if __name__ == '__main__':

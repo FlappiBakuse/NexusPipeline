@@ -27,6 +27,59 @@ public sealed class UpdateDiscoveryTests
     }
 
     [Fact]
+    public async Task ManualAdoptionRequiresPublishedExactOfficialAssetsWithoutConsultingDiscovery()
+    {
+        string prefix = "NexusPipeline-v0.17.4-win-x64-";
+        var release = _releases["0.17.4"];
+        release["published_at"] = "2026-10-14T00:00:00Z";
+        var assets = new JsonArray(Asset(prefix + "Setup.exe", 401, [1]),
+            Asset(prefix + "Portable.zip", 402, [2]), Asset(prefix + "Update.zip", 403, [3]));
+        foreach (var asset in assets)
+            asset!["browser_download_url"] = "https://github.com/FlappiBakuse/NexusPipeline/releases/download/v0.17.4/" + asset["name"];
+        release["assets"] = assets;
+        using var http = new HttpClient(new Handler((request, _) =>
+        {
+            string route = request.RequestUri!.AbsolutePath;
+            Assert.Equal("api.github.com", request.RequestUri.Host);
+            _requests.Add(route);
+            return route.EndsWith("/tags/v0.17.4", StringComparison.Ordinal) ? Json(release)
+                : route.EndsWith("/4/assets", StringComparison.Ordinal) ? Json(assets)
+                : throw new InvalidOperationException("Unexpected proof request: " + route);
+        }));
+        var target = await UpdateDiscovery.FetchOfficialTargetAsync(http, "0.17.4", NexusVersion.Stable(0, 17, 3), CancellationToken.None);
+        Assert.Equal("v0.17.4", target.Tag);
+        Assert.Equal(2, _requests.Count);
+        release["published_at"] = null;
+        await Assert.ThrowsAsync<IOException>(() => UpdateDiscovery.FetchOfficialTargetAsync(http, "0.17.4", NexusVersion.Stable(0, 17, 3), CancellationToken.None));
+        release["published_at"] = "2026-10-14T00:00:00Z";
+        assets[0]!["browser_download_url"] = "https://github.com/other/project/releases/download/v0.17.4/" + prefix + "Setup.exe";
+        await Assert.ThrowsAsync<InvalidDataException>(() => UpdateDiscovery.FetchOfficialTargetAsync(http, "0.17.4", NexusVersion.Stable(0, 17, 3), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task RecipeDiscoveryRequiresExactlyThreeAssetsAndDoesNotFetchAnExternalManifest()
+    {
+        string prefix = "NexusPipeline-v0.17.5-win-x64-";
+        _entry["schemaVersion"] = 2;
+        _entry.Remove("bridges");
+        _entry["channels"]!["prerelease"]!["previousPublishedTarget"] = null;
+        _entry["channels"]!["prerelease"]!["pendingTarget"] = new JsonObject {
+            ["releaseTag"] = "v0.17.5", ["readerProtocol"] = 2,
+            ["requiredCapabilities"] = new JsonArray(UpdateRecipe.Capabilities.Select(value => (JsonNode?)JsonValue.Create(value)).ToArray()),
+            ["basePayloadManifestSha256"] = new string('a', 64),
+            ["assets"] = new JsonObject { ["setup"] = prefix + "Setup.exe", ["portable"] = prefix + "Portable.zip", ["update"] = prefix + "Update.zip" } };
+        _releases["0.17.5"]["assets"] = new JsonArray(Asset(prefix + "Setup.exe", 501, [1]),
+            Asset(prefix + "Portable.zip", 502, [2]), Asset(prefix + "Update.zip", 503, [3]));
+        var result = await CheckAsync();
+        Assert.Equal("0.17.5", result.Release?.VersionText);
+        Assert.NotNull(result.Release?.DeltaAsset);
+        Assert.Null(result.Release?.TargetManifestAsset);
+        Assert.DoesNotContain(_requests, path => path.EndsWith("-update.json", StringComparison.Ordinal));
+        ((JsonArray)_releases["0.17.5"]["assets"]!).Add(Asset("extra.zip", 504, [4]));
+        Assert.Null((await CheckAsync()).Release);
+    }
+
+    [Fact]
     public async Task UnsupportedTargetUsesOnlyVerifiedCompatibleBridgeAndNeverFetchesFutureManifest()
     {
         _entry["channels"]!["prerelease"]!["previousPublishedTarget"] = null;

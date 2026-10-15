@@ -5,7 +5,7 @@ using NexusPipeline.Platform.Storage;
 namespace NexusPipeline.Modules.Updates;
 
 internal sealed record UpdateDeliveryResult(string Transport, long NetworkBytes, long ReusedBytes, string Reason,
-    UpdateStoragePlan? StoragePlan = null);
+    UpdateStoragePlan? StoragePlan = null, UpdateTransportReceipt? Receipt = null);
 
 internal static class UpdateDelivery
 {
@@ -14,6 +14,9 @@ internal static class UpdateDelivery
         Func<string, string?, bool, UpdatePayloadIdentity> freeze, UpdateCreatedArtifacts artifacts,
         IProgress<UpdateDownloadProgress>? progress, CancellationToken token)
     {
+        if (release.DeltaAsset is not null)
+            return await UpdateRecipeDelivery.PrepareAsync(http, policy, release, installation, currentVersion,
+                zipPath, checksumPath, staging, freeze, artifacts, progress, token).ConfigureAwait(false);
         async Task FullAsync(UpdateTargetManifest? target)
         {
             await UpdateAssetDownloader.DownloadAsync(http, policy, release.ZipAsset, zipPath, progress, token, artifacts).ConfigureAwait(false);
@@ -130,7 +133,7 @@ internal static class UpdateDelivery
         return stream.Length == file.SizeBytes && Convert.ToHexStringLower(SHA256.HashData(stream)) == file.Sha256;
     }
 
-    private static void CopyFile(Stream input, string staging, UpdateTargetFile file, UpdateCreatedArtifacts artifacts, CancellationToken token)
+    internal static void CopyFile(Stream input, string staging, UpdateTargetFile file, UpdateCreatedArtifacts artifacts, CancellationToken token)
     {
         string destination = Path.Combine(staging, file.Path);
         artifacts.EnsureDirectory(Path.GetDirectoryName(destination)!);
@@ -168,7 +171,7 @@ internal static class UpdateDelivery
             || target.Files.Any(file => !Matches(staging, file))) throw new InvalidDataException("update.target_payload_identity");
     }
 
-    private static void CreateLocalPackage(string destination, string staging, IReadOnlyList<UpdateTargetFile> files,
+    internal static void CreateLocalPackage(string destination, string staging, IReadOnlyList<UpdateTargetFile> files,
         UpdateCreatedArtifacts artifacts, CancellationToken token)
     {
         bool created = false;

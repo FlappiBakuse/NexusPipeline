@@ -3,22 +3,22 @@
   "dependencies": [
     {
       "framework": "Microsoft.WindowsDesktop.App",
-      "version": "10.0.12",
+      "version": "10.0.13",
       "rid": "win-x64",
-      "url": "https://builds.dotnet.microsoft.com/dotnet/WindowsDesktop/10.0.12/windowsdesktop-runtime-10.0.12-win-x64.exe",
-      "sizeBytes": 60032984,
-      "sha512": "0b907e9312867172a4eb82f4b5ab3f7c2d25e27d8349546d77eeb5d5b8cbecab9ebebfed189b13e9669dc578d892756c548366da539d47b3ddac5efcb7ae72fe",
-      "sha256": "55a67d8476cde95a9cc43a95803b4f54446e7c9251ed22aa6421d4908174ae84",
+      "url": "https://builds.dotnet.microsoft.com/dotnet/WindowsDesktop/10.0.13/windowsdesktop-runtime-10.0.13-win-x64.exe",
+      "sizeBytes": 60056984,
+      "sha512": "adaf5e06b66b145848f3a994b51ea1590d19a5c02f6e7c5899ed896bbdb020af6386d2eaef613034d697388adaf48aa8c3291343f0bbb5f8e62e37aff9564a00",
+      "sha256": "f5f0268b3d89ec3b9eb952b620330360b35c63593ead45816aeb26e934a4b7b6",
       "metadataUrl": "https://dotnetcli.blob.core.windows.net/dotnet/release-metadata/10.0/releases.json"
     },
     {
       "framework": "Microsoft.AspNetCore.App",
-      "version": "10.0.12",
+      "version": "10.0.13",
       "rid": "win-x64",
-      "url": "https://builds.dotnet.microsoft.com/dotnet/aspnetcore/Runtime/10.0.12/aspnetcore-runtime-10.0.12-win-x64.exe",
-      "sizeBytes": 11262864,
-      "sha512": "1bd1cf3cc23a05611bf266046281c7bfb6c3231a9690482ddc31ea74ede62eaded12517c362983976aa7e20c57108812dcd04f67884957b85a6829cd56ceaac5",
-      "sha256": "e5d20698ea8cdda55bcf8d6151d5b65097761506a1d8ed9af39910cfc956e5ad",
+      "url": "https://builds.dotnet.microsoft.com/dotnet/aspnetcore/Runtime/10.0.13/aspnetcore-runtime-10.0.13-win-x64.exe",
+      "sizeBytes": 11292832,
+      "sha512": "680bf274a7ecc1818d49e1845072aa3064102992fb00547965107938ff6808ea35f832c46f1b4e05231cae47e40e746419c024e5622f7a1254c0dcb946c5c07c",
+      "sha256": "1c349d16bebabe5a77f1b7d116f87502518a35b6f1d9541829889ca468830ffc",
       "metadataUrl": "https://dotnetcli.blob.core.windows.net/dotnet/release-metadata/10.0/releases.json"
     }
   ]

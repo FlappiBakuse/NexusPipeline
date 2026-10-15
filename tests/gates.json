@@ -295,6 +295,17 @@
       "partnerRequired": false
     },
     {
+      "id": "host.integration.installation-adoption",
+      "repository": "Host",
+      "name": "Host / 手动覆盖安装归属",
+      "kind": "integration",
+      "hardTimeoutMs": null,
+      "qualificationMs": null,
+      "trigger": "手动覆盖证明、安装归属检查点及 helper 恢复相关变化",
+      "dependsOn": ["host.build.test-host"],
+      "partnerRequired": false
+    },
+    {
       "id": "host.installer-localization",
       "repository": "Host",
       "name": "Host / 安装器语言与契约",

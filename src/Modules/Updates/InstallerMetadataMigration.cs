@@ -6,6 +6,17 @@ namespace NexusPipeline.Modules.Updates;
 
 internal static class InstallerMetadataCheckpoint
 {
+    internal static void ValidateTransition(string root, string transaction, string version, string imageHash)
+    {
+        var state = Read(root, transaction);
+        if (!state.Upgrade || state.Status != "InnoWritten" || state.After is null || state.TargetVersion != version
+            || state.TargetImageHash != imageHash || state.SourceImageHash != Hash(Path.Combine(root, "NexusPipeline.exe")))
+            throw new IOException("installer.transition_checkpoint_mismatch");
+        var identity = InstallationOwnership.Read(root, requireActive: true) ?? throw new IOException("installer.instance_unowned");
+        if (identity.Version != state.SourceVersion) throw new IOException("installer.transition_source_changed");
+        _ = InstallationOwnership.SnapshotBytesForUpdate(root);
+    }
+
     private static string DirectoryPath => Path.Combine(InstallationOwnership.ManagerDirectory, "metadata-checkpoint");
     private static string BackupPath => Path.Combine(DirectoryPath, "uninstaller-backup");
     private static string Normalize(string root) => Path.GetFullPath(root).TrimEnd('\\');

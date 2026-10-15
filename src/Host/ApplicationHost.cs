@@ -76,12 +76,15 @@ internal static class ApplicationHost
         CliOutput.Configure(args);
 #if NEXUS_INSTALLER_METADATA_HELPER
         if (args.Length >= 2 && args[0] == "installer-state"
-            && (args[1].StartsWith("metadata-", StringComparison.Ordinal) || args[1] is "space-plan" or "ensure-owning-service"))
+            && (args[1].StartsWith("metadata-", StringComparison.Ordinal) || args[1] is "space-plan" or "ensure-owning-service" or "require-stopped"))
             return RunInstallerStateCli(args.Skip(1).ToArray());
         return 2;
 #else
         // Installer metadata helpers act on the explicit instance root and never initialize a second Host.
         if (args.FirstOrDefault() == "installer-state") return RunInstallerStateCli(args.Skip(1).ToArray());
+        if (args.FirstOrDefault() is "installer-transition" or "apply-transition")
+            return UpdateCoordinator.RunTransition(args, args[0] == "apply-transition");
+        if (UpdateCoordinator.IsWindowEntry(args, Environment.ProcessPath ?? "")) return UpdateCoordinator.RunWindow();
 
         // 帮助只依赖参数契约，允许在未提权或运行时配置尚未建立时查询。
         if (args.Any(argument => argument is "--help" or "-h")
@@ -260,6 +263,15 @@ internal static class ApplicationHost
             string root = options["--root"];
             switch (args[0])
             {
+                case "require-stopped":
+                    using (var idle = StartupPipeline.AcquireSingleInstanceMutex())
+                    {
+                        if (idle is null) throw new IOException("installer.instance_running");
+                        UpdateCoordinator.ReconcileInstallerOwnership(root);
+                        _ = InstallationOwnership.SnapshotBytesForUpdate(root) ?? throw new IOException("installer.instance_unowned");
+                        idle.ReleaseMutex();
+                    }
+                    break;
                 case "ensure-owning-service":
                     InstallerServiceHandoff.EnsureOwningService(root);
                     break;

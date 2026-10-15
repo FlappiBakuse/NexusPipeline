@@ -3,15 +3,17 @@ namespace NexusPipeline.Modules.Updates;
 internal sealed record UpdateReleaseEvidence(long ReleaseId, string Tag, string TargetBuildId,
     string RouteId, IReadOnlyList<UpdateReleaseAsset> Assets)
 {
+    public int Protocol { get; init; } = 1;
     public bool Equals(UpdateReleaseEvidence? other) => other is not null && ReleaseId == other.ReleaseId
-        && Tag == other.Tag && TargetBuildId == other.TargetBuildId && RouteId == other.RouteId && Assets.SequenceEqual(other.Assets);
-    public override int GetHashCode() => HashCode.Combine(ReleaseId, Tag, TargetBuildId, RouteId);
+        && Protocol == other.Protocol && Tag == other.Tag && TargetBuildId == other.TargetBuildId && RouteId == other.RouteId && Assets.SequenceEqual(other.Assets);
+    public override int GetHashCode() => HashCode.Combine(ReleaseId, Tag, TargetBuildId, RouteId, Protocol);
 
     internal static UpdateReleaseEvidence? Freeze(ReleaseInfo release, UpdatePayloadIdentity payload)
     {
-        if (release.TargetManifestAsset is null) return null;
+        if (release.TargetManifestAsset is null && release.DeltaAsset is null) return null;
         var result = new UpdateReleaseEvidence(release.ReleaseId, release.Tag, payload.BuildId,
-            UpdateMigrationRegistry.NoStoreChangeRoute, release.Assets!.Values.OrderBy(asset => asset.Name, StringComparer.Ordinal).ToArray());
+            UpdateMigrationRegistry.NoStoreChangeRoute, release.Assets!.Values.OrderBy(asset => asset.Name, StringComparer.Ordinal).ToArray())
+            { Protocol = release.DeltaAsset is null ? 1 : 2 };
         result.Validate(release.VersionText, payload);
         return result;
     }
@@ -19,10 +21,12 @@ internal sealed record UpdateReleaseEvidence(long ReleaseId, string Tag, string 
     internal void Validate(string version, UpdatePayloadIdentity payload)
     {
         string prefix = $"NexusPipeline-v{version}-win-x64";
-        string[] required = [prefix + ".zip", prefix + "-setup.exe", prefix + "-update.json",
+        string[] required = Protocol == 2 ? [prefix + "-Setup.exe", prefix + "-Portable.zip", prefix + "-Update.zip"]
+            : [prefix + ".zip", prefix + "-setup.exe", prefix + "-update.json",
             .. UpdateTargetManifest.ComponentIds.Select(id => prefix + "-" + id + ".zip")];
         if (ReleaseId <= 0 || Tag != "v" + version || TargetBuildId != payload.BuildId
-            || RouteId != UpdateMigrationRegistry.NoStoreChangeRoute || Assets is null || Assets.Count is < 6 or > 400
+            || Protocol is not (1 or 2) || RouteId != UpdateMigrationRegistry.NoStoreChangeRoute || Assets is null
+            || (Protocol == 2 ? Assets.Count != 3 : Assets.Count is < 6 or > 400)
             || Assets.Any(asset => asset is null || asset.Id <= 0 || asset.Name is not { Length: > 0 and <= 256 }
                 || asset.SizeBytes is < 1 or > UpdateCatalog.MaxDownloadBytes || !UpdateInventory.Hash(asset.Sha256)
                 || !Uri.TryCreate(asset.Url, UriKind.Absolute, out var uri) || uri.UserInfo.Length != 0 || uri.Fragment.Length != 0

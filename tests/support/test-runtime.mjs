@@ -129,6 +129,7 @@ function copySafe(source, target, root) {
 
 function isRuntimeFile(name) {
   return name === "NexusPipeline.exe"
+    || name === "NexusPipeline Update.exe"
     || /\.(?:dll|deps\.json|runtimeconfig\.json)$/iu.test(name);
 }
 

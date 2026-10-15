@@ -49,7 +49,8 @@ internal static class ApplicationPayload
             ["installationGeneration"] = identity.InstallationGeneration, ["buildId"] = identity.BuildId, ["frontendHash"] = identity.FrontendHash,
             ["sourceSha"] = identity.BuildInputs.GetProperty("sourceSha").GetString()!, ["sourceTreeSha"] = identity.BuildInputs.GetProperty("sourceTreeSha").GetString()!,
         }) if (manifest.GetProperty(item.Key).GetString() != item.Value) throw new InvalidDataException("Payload identity mismatch: " + item.Key);
-        if (manifest.GetProperty("schemaVersion").GetRawText() != "1") throw new InvalidDataException("Payload schema mismatch");
+        string schema = manifest.GetProperty("schemaVersion").GetRawText();
+        if (schema is not ("1" or "2")) throw new InvalidDataException("Payload schema mismatch");
         JsonElement desktop = manifest.GetProperty("desktop");
         bool profiled = identity.BuildInputs.GetProperty("schemaVersion").GetRawText() == "2";
         string[] profileFields = ["runtimeProfileId", "runtimeProfileSha256", "runtimeInventorySha256"];
@@ -69,7 +70,7 @@ internal static class ApplicationPayload
             Fields(file, ["path", "sizeBytes", "sha256", "kind"]);
             string path = file.GetProperty("path").GetString()!, hash = file.GetProperty("sha256").GetString()!, kind = file.GetProperty("kind").GetString()!;
             long size = file.GetProperty("sizeBytes").GetInt64();
-            if (!SafePath(path) || path == ManifestPath || !ValidKind(path, kind) || size is < 0 or > 256L * 1024 * 1024
+            if (!SafePath(path) || path == ManifestPath || !(schema == "2" && path == "NexusPipeline Update.exe" && kind == "update-entry" || ValidKind(path, kind)) || size is < 0 or > 256L * 1024 * 1024
                 || hash.Length != 64 || hash.Any(c => !char.IsAsciiHexDigit(c) || char.IsUpper(c)) || !listed.TryAdd(path, new(path, size, hash, kind)))
                 throw new InvalidDataException("Invalid payload file");
             total += size; if (listed.Count > 4096 || total > 512L * 1024 * 1024) throw new InvalidDataException("Payload exceeds limits");
@@ -77,6 +78,9 @@ internal static class ApplicationPayload
         foreach (string required in new[] { "NexusPipeline.exe", "README.md", DesktopEntry, DesktopArchive,
             "resources/desktop/resources/app.asar.unpacked/node_modules/@koromix/koffi-win32-x64/win32_x64/koffi.node" })
             if (!listed.TryGetValue(required, out var file) || file.SizeBytes == 0) throw new InvalidDataException("Required payload missing");
+        if (schema == "2" && (!listed.TryGetValue("NexusPipeline Update.exe", out var helper)
+            || helper.SizeBytes != listed["NexusPipeline.exe"].SizeBytes || helper.Sha256 != listed["NexusPipeline.exe"].Sha256))
+            throw new InvalidDataException("Update entry must match the verified Host bytes");
         byte[] runtimeBytes = BundleResourceReader.Read(Path.Combine(root, "NexusPipeline.exe"), "NexusPipeline.dll", "NexusPipeline.Desktop.RuntimeFiles", 2 * 1024 * 1024);
         using var runtimeDocument = JsonDocument.Parse(runtimeBytes);
         var runtime = runtimeDocument.RootElement;
@@ -101,7 +105,7 @@ internal static class ApplicationPayload
         string[] nativeFiles = [DesktopArchive, "resources/desktop/resources/app.asar.unpacked/node_modules/@koromix/koffi-win32-x64/win32_x64/koffi.node", "resources/desktop/koffi.LICENSE.txt"];
         if (listed.Keys.Any(path => path.StartsWith("resources/desktop/", StringComparison.Ordinal) && !runtimeNames.Contains(path) && !nativeFiles.Contains(path)))
             throw new InvalidDataException("Undeclared desktop dependency");
-        var actual = (installed ? EnumerateApplication(root) : Enumerate(root)).Where(file => file != ManifestPath && !file.StartsWith("plugins/", StringComparison.OrdinalIgnoreCase)).ToArray();
+        var actual = (installed ? EnumerateApplication(root, schema == "2") : Enumerate(root)).Where(file => file != ManifestPath && !file.StartsWith("plugins/", StringComparison.OrdinalIgnoreCase)).ToArray();
         if (actual.Any(path => !listed.ContainsKey(path))) throw new InvalidDataException("Payload contains undeclared files");
         foreach (var file in listed.Values)
         {
@@ -110,7 +114,7 @@ internal static class ApplicationPayload
             try { attributes = File.GetAttributes(path); }
             catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
             {
-                if (allowMissingReadme && file.Path == "README.md") continue;
+                if (allowMissingReadme && file.Path is "README.md" or "NexusPipeline Update.exe") continue;
                 throw new PayloadFileException("payload_file_missing", file.Path);
             }
             if ((attributes & (FileAttributes.Directory | FileAttributes.ReparsePoint)) != 0)
@@ -131,18 +135,34 @@ internal static class ApplicationPayload
     internal static UpdatePayloadIdentity FreezeForUpdate(string root, string? version, bool installed)
     {
         if (!installed) return Freeze(root, version);
-        var identity = ValidateCore(root, version, installed: true, allowMissingReadme: true);
+        var identity = ValidateForUpdate(root, version);
         return new(Convert.ToHexStringLower(SHA256.HashData(ReadBounded(Path.Combine(root, ManifestPath), 2 * 1024 * 1024))),
             identity.BuildId, identity.FrontendHash, identity.InstallationGeneration);
     }
 
-    internal static void VerifyBaseline(string root, UpdatePayloadIdentity frozen, UpdateInventory inventory)
+    internal static ApplicationBuildIdentity ValidateForUpdate(string root, string? version = null)
+    {
+        var identity = ValidateCore(root, version, installed: true, allowMissingReadme: true);
+        string helperPath = Path.Combine(root, "NexusPipeline Update.exe");
+        PayloadPathSafety.RequireLinkFree(helperPath);
+        if (Directory.Exists(helperPath)) throw new PayloadFileException("payload_invalid", "NexusPipeline Update.exe");
+        if (File.Exists(helperPath))
+        {
+            using var helper = File.OpenRead(helperPath);
+            using var host = File.OpenRead(Path.Combine(root, "NexusPipeline.exe"));
+            if (helper.Length != host.Length || !SHA256.HashData(helper).AsSpan().SequenceEqual(SHA256.HashData(host)))
+                throw new PayloadFileException("payload_file_changed", "NexusPipeline Update.exe");
+        }
+        return identity;
+    }
+
+    internal static void VerifyBaseline(string root, UpdatePayloadIdentity frozen, UpdateInventory inventory, string[]? scopes = null)
     {
         if (FreezeForUpdate(root, null, installed: true) != frozen)
             throw new InvalidDataException("Frozen application identity changed");
-        // The inventory freezes absence as well as bytes; rollback must not adopt a later README.
-        var actual = UpdateInventory.Capture(root, "NexusPipeline.exe", "README.md", "resources/desktop", ManifestPath);
-        var expected = inventory.Entries.Where(entry => entry.Path is not (".backup-ready" or ".installer-identity"));
+        // The inventory freezes absence as well as bytes; rollback cannot adopt a later optional file.
+        var actual = UpdateInventory.Capture(root, scopes ?? ["NexusPipeline.exe", "README.md", "resources/desktop", ManifestPath]);
+        var expected = inventory.Entries.Where(entry => entry.Path is not (".backup-ready" or ".installer-identity" or ".installer-helper"));
         if (!actual.Entries.SequenceEqual(expected)) throw new InvalidDataException("Frozen baseline inventory changed");
     }
 
@@ -158,9 +178,10 @@ internal static class ApplicationPayload
             item.GetProperty("path").GetString()!, item.GetProperty("sizeBytes").GetInt64(), item.GetProperty("sha256").GetString()!, item.GetProperty("kind").GetString()!)).ToArray();
     }
 
-    private static IEnumerable<string> EnumerateApplication(string root)
+    private static IEnumerable<string> EnumerateApplication(string root, bool updater)
     {
-        foreach (string name in new[] { "NexusPipeline.exe", "README.md", "resources" })
+        foreach (string name in updater ? new[] { "NexusPipeline.exe", "NexusPipeline Update.exe", "README.md", "resources" }
+            : new[] { "NexusPipeline.exe", "README.md", "resources" })
         {
             string path = Path.Combine(root, name);
             PayloadPathSafety.RequireLinkFree(path);

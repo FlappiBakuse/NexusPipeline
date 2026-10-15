@@ -40,6 +40,7 @@ def scope(paths: list[str]) -> dict:
 def plan(root: Path, base: str, head: str, checkout: str, partner_sha: str | None = None) -> dict:
     validate_legacy_projection(root, base)
     validate_channels(root)
+    validate_channels(root, schema=1)
     full_sha(root, checkout)
     if git(root, 'rev-parse', 'HEAD') != checkout:
         raise ValueError('Actual checkout does not match the declared SHA')

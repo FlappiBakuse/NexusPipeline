@@ -381,9 +381,15 @@
       ],
       "codePaths": [
         "src/Modules/Updates",
+        "src/Host/Composition/UpdateCoordinator.cs",
+        "src/Host/Updates",
         "metadata/updates",
         "tools/update_metadata.py",
-        "update-policy.json"
+        "tools/update_recipe.py",
+        "tools/update_packages.py",
+        "tools/update_baseline.py",
+        "update-policy.json",
+        "src/Platform/Storage/VolumeSpaceProbe.cs"
       ],
       "testDomains": [
         "hostAreas.update",
