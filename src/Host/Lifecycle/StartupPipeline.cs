@@ -100,7 +100,7 @@ internal static class StartupPipeline
                 desktop.ShowAsync("startup").GetAwaiter().GetResult();
 
 #if NEXUS_TEST_HOST
-            StartTestHostExitMonitor();
+            using var testExitMonitor = StartTestHostExitMonitor();
 #endif
             Application.Run(new TrayApp(runtime));
             ShutdownHosted(runtime, web, mcp, "NexusPipeline 已退出。");
@@ -479,29 +479,20 @@ internal static class StartupPipeline
         }
     }
 
-    private static void StartTestHostExitMonitor()
+    private static System.Windows.Forms.Timer? StartTestHostExitMonitor()
     {
         string? exitFile = TestHostExitFilePath();
-        if (exitFile is null) return;
-        _ = Task.Run(async () =>
+        if (exitFile is null) return null;
+        // Queue the signal on the UI loop so an early receipt cannot consume it before Application.Run starts.
+        var timer = new System.Windows.Forms.Timer { Interval = 100 };
+        timer.Tick += (_, _) =>
         {
-            while (true)
-            {
-                if (File.Exists(exitFile))
-                {
-                    try
-                    {
-                        Application.Exit();
-                    }
-                    catch (Exception ex)
-                    {
-                        Logger.Debug($"Test Host 退出信号处理失败：{ex.Message}");
-                    }
-                    return;
-                }
-                await Task.Delay(100).ConfigureAwait(false);
-            }
-        });
+            if (!File.Exists(exitFile)) return;
+            timer.Stop();
+            Application.Exit();
+        };
+        timer.Start();
+        return timer;
     }
 #endif
 

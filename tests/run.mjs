@@ -374,8 +374,8 @@ async function runBatch() {
     finally {
       if(fs.existsSync(path.join(runRoot,"runtime/.nxp/test-run-marker.json"))) {
         const remaining=invocationBudget.remainingMs({cleanup:true});
-        const cleanup=remaining>1000?await runProcess(process.execPath,[path.join(projectRoot,"tests/support/cleanup-runtime.mjs"),runRoot,runId],{
-          env:process.env,timeoutMs:Math.min(8000,remaining-1000),timeoutCleanupMs:1000}):6;
+        const cleanup=remaining>0?await runProcess(process.execPath,[path.join(projectRoot,"tests/support/cleanup-runtime.mjs"),runRoot,runId],{
+          env:process.env,budget:invocationBudget,timeoutCleanupMs:1000}):6;
         if(cleanup) {result.exitCode ||=6;result.status="FAIL";primary ||=6;}
       }
     }
@@ -534,9 +534,9 @@ async function runFinite(selectedGroup) {
       }
       let childCode = await run(process.execPath, [file], { env });
       const remaining = invocationBudget.remainingMs({ cleanup: true });
-      const cleanupCode = remaining > 1000 ? await runProcess(process.execPath,
+      const cleanupCode = remaining > 0 ? await runProcess(process.execPath,
         [path.join(projectRoot, "tests/support/cleanup-runtime.mjs"), childRoot, childId],
-        { env, timeoutMs: Math.min(5000, remaining - 1000), timeoutCleanupMs: 1000 }) : 6;
+        { env, budget: invocationBudget, timeoutCleanupMs: 1000 }) : 6;
       childCode ||= cleanupCode;
       if (!childCode) {
         const evidence = JSON.parse(fs.readFileSync(output));
@@ -784,14 +784,14 @@ try {
   if (["integration", "diagnostic"].includes(command.toLowerCase())
       || ["host.integration.store", "host.integration.restart-update", "host.integration.desktop"].includes(gateId)) {
     if (!fs.existsSync(runRoot)) fs.mkdirSync(runRoot, { recursive: true });
-    const cleanupMs = Math.min(8_000, invocationBudget.remainingMs({ cleanup: true }) - 1_000);
+    const cleanupMs = invocationBudget.remainingMs({ cleanup: true });
     if (cleanupMs <= 0) {
       console.error("[清理] 命令剩余预算不足，保留运行现场");
       exitCode ||= 6;
     } else {
       const cleanupCode = await runProcess(process.execPath, [
         path.join(projectRoot, "tests", "support", "cleanup-runtime.mjs"), runRoot, runId,
-      ], { defaultCwd: projectRoot, timeoutMs: cleanupMs, timeoutCleanupMs: 1_000,
+      ], { defaultCwd: projectRoot, budget: invocationBudget, timeoutCleanupMs: 1_000,
         env: { ...process.env, NEXUS_TEST_MODE: "test-host" } });
       if (cleanupCode !== 0) exitCode ||= 6;
     }
