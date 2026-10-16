@@ -116,7 +116,7 @@ def run(root: Path, selected: dict, output: Path, partner: Path | None) -> None:
                                          source_tree_sha=selected['sourceTreeSha'], partner_sha=selected['partnerSha'],
                                          workflow_sha=selected['checkoutSha'])
             properties = ['-p:NexusTestHost=false', '-p:UseSharedCompilation=false',
-                          '-p:NexusFrontendProps=' + inputs['frontendProps'], '-p:NexusBuildIdentityPath=' + inputs['identity']]
+                          '-p:NexusFrontendProps=' + inputs['frontendProps'], '-p:NexusBuildIdentityPath=' + inputs['identity'], '-p:NexusUpdaterRecoveryPath=' + inputs['updater']]
             command('Host production compilation', ['dotnet', 'build', 'src/NexusPipeline.csproj', '-c', 'Release',
                     '-r', 'win-x64', '--nologo', '--disable-build-servers', *properties, '--output', output / 'host'], source)
             command('Architecture compiler', ['dotnet', 'build', 'tools/NexusPipeline.Architecture/NexusPipeline.Architecture.csproj',

@@ -306,6 +306,17 @@
       "partnerRequired": false
     },
     {
+      "id": "host.integration.maintenance",
+      "repository": "Host",
+      "name": "Host / 独立维护窗口与原生安装链",
+      "kind": "integration",
+      "hardTimeoutMs": null,
+      "qualificationMs": null,
+      "trigger": "独立维护进程、HTTP生命周期、下载取消或安装链变更",
+      "dependsOn": ["host.build.test-host"],
+      "partnerRequired": false
+    },
+    {
       "id": "host.installer-localization",
       "repository": "Host",
       "name": "Host / 安装器语言与契约",

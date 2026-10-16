@@ -4,7 +4,7 @@
     <RuntimeFrameworkVersion>10.0.13</RuntimeFrameworkVersion>
     <RollForward>LatestPatch</RollForward>
   </PropertyGroup>
-  <Target Name="GenerateInstallationGeneration" BeforeTargets="CoreCompile" Condition="'$(MSBuildProjectName)' == 'NexusPipeline' or '$(NexusGenerateInstallationGeneration)' == 'true'">
+  <Target Name="GenerateInstallationGeneration" BeforeTargets="CoreCompile" Condition="'$(NexusGenerateInstallationGeneration)' == 'true'">
     <PropertyGroup>
       <_GenerationSource>$(IntermediateOutputPath)InstallationGeneration.g.cs</_GenerationSource>
     </PropertyGroup>

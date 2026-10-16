@@ -62,9 +62,9 @@ def main():
     reject('negative-file-size', lambda: alter_manifest(lambda value: value['files'][0].update(sizeBytes=-1)))
     reject('frontend-identity-mismatch', lambda: alter_manifest(lambda value: value.update(frontendHash='0' * 64)))
     reject('invalid-host-bundle-with-matching-file-hash', lambda: replace_asset('NexusPipeline.exe', lambda _: b'not a .NET bundle'))
-    reject('update-entry-must-match-host-even-with-matching-file-hash',
-           lambda: replace_asset('NexusPipeline Update.exe', lambda value: value + b'changed'))
-    helper = root / 'NexusPipeline Update.exe'
+    reject('wrong-updater-role-even-with-matching-file-hash',
+           lambda: replace_asset('NexusPipeline.update.exe', lambda _: (root/'NexusPipeline.exe').read_bytes()))
+    helper = root / 'NexusPipeline.update.exe'
     def remove_helper():
         saved = helper.read_bytes()
         helper.unlink()

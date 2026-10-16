@@ -1,3 +1,6 @@
+using System.Security.Principal;
+using System.Text;
+using NexusPipeline.Maintenance;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -5,16 +8,21 @@ using System.Text.Json.Nodes;
 using Microsoft.Win32;
 using NexusPipeline.Modules.Updates;
 
+if (args.FirstOrDefault() == "--separation")
+{
+    await SeparationSuite.Run(args.Skip(1).ToArray());
+    return;
+}
 var options = new Dictionary<string, string>(StringComparer.Ordinal);
 for (int index = 0; index < args.Length; index += 2)
     if (index + 1 >= args.Length || !options.TryAdd(args[index], Path.GetFullPath(args[index + 1]))) throw new ArgumentException("Invalid arguments");
-if (!options.Keys.Order().SequenceEqual(new[] { "--application", "--baseline", "--output", "--packages" }.Order())) throw new ArgumentException("Explicit application, baseline, packages and output required");
-string application = options["--application"], baseline = options["--baseline"], output = options["--output"], packages = options["--packages"];
+if (!options.Keys.Order().SequenceEqual(new[] { "--application", "--baseline", "--output", "--packages", "--tools" }.Order())) throw new ArgumentException("Explicit application, baseline, packages and output required");
+string application = options["--application"], baseline = options["--baseline"], output = options["--output"], packages = options["--packages"], toolsDirectory = options["--tools"];
 if (Directory.Exists(output) || File.Exists(output)) throw new IOException("Diagnostic output exists");
 Directory.CreateDirectory(output);
 var target = ApplicationPayload.Validate(application);
-if (target.ProductVersion != "0.17.4") throw new InvalidDataException("Diagnostic requires the v0.17.4 target");
-_ = ApplicationPayload.Validate(baseline, "0.17.3");
+if (target.ProductVersion != "0.17.5") throw new InvalidDataException("Diagnostic requires the isolated future-version fixture");
+_ = ApplicationPayload.Validate(baseline, "0.17.4");
 var cases = new List<object>();
 VerifiedManualAdoption? proof = null;
 using var http = new HttpClient(new OfficialFixture(packages));
@@ -22,7 +30,7 @@ foreach (bool absent in new[] { false, true })
     foreach (string stop in new[] { "none", "prepared", "helper", "identity", "anchor" })
         await Case($"adoption-{stop}-helper-absent-{absent}", async (root, owner) =>
         {
-            string helper = Path.Combine(InstallationOwnership.ManagerDirectory, "nexus-installer-helper.exe");
+            string helper = Path.Combine(InstallationOwnership.ManagerDirectory, InstallationOwnership.UninstallWorker);
             if (absent) File.Delete(helper);
             var pending = InstallationOwnership.PendingManualAdoption(root, target.ProductVersion)!;
             Assert(pending.State == "manual-adoption-pending", "pending ownership");
@@ -35,7 +43,7 @@ foreach (bool absent in new[] { false, true })
             catch (InjectedStop) { }
             var recovered = InstallationOwnership.Read(root, true)!;
             Assert(recovered.Version == target.ProductVersion && recovered.InstanceId == owner.InstanceId, "recovered identity");
-            Assert(Hash(helper) == Hash(Path.Combine(root, "NexusPipeline.exe")), "recovered helper");
+            Assert(Hash(helper) == recovered.InstallerTools!.Worker.Sha256, "dedicated helper retained independently");
             Assert(!File.Exists(Path.Combine(InstallationOwnership.ManagerDirectory, "manual-adoption.protected")), "checkpoint cleanup");
             Assert(InstallationOwnership.PendingManualAdoption(root, target.ProductVersion) is null, "maintenance restored");
             if (stop == "none")
@@ -59,15 +67,15 @@ foreach (string stop in new[] { "maintenance-prepared", "maintenance-identity", 
         Assert(pending.State == "manual-adoption-pending" && pending.Version == owner.Version, "pending state recovered");
         Assert(pending.PayloadFiles.SequenceEqual(owner.PayloadFiles), "old ownership bytes not adopted");
         Assert(!File.Exists(Path.Combine(InstallationOwnership.ManagerDirectory, "manual-maintenance.protected")), "maintenance checkpoint cleanup");
-        Assert(Hash(Path.Combine(InstallationOwnership.ManagerDirectory, "nexus-installer-helper.exe"))
-            == owner.PayloadFiles.Single(file => file.Path == "NexusPipeline.exe").Sha256, "old helper retained");
+        Assert(Hash(Path.Combine(InstallationOwnership.ManagerDirectory, InstallationOwnership.UninstallWorker))
+            == owner.InstallerTools!.Worker.Sha256, "dedicated helper retained");
         Throws(() => InstallationOwnership.Read(root, true));
         Throws(() => InstallationOwnership.Uninstall(root, true));
         return Task.CompletedTask;
     });
 await Case("untrusted-helper-preserved", (root, owner) =>
 {
-    string helper = Path.Combine(InstallationOwnership.ManagerDirectory, "nexus-installer-helper.exe");
+    string helper = Path.Combine(InstallationOwnership.ManagerDirectory, InstallationOwnership.UninstallWorker);
     File.WriteAllText(helper, "untrusted fixture bytes");
     Throws(() => InstallationOwnership.PendingManualAdoption(root, target.ProductVersion));
     Assert(File.ReadAllText(helper) == "untrusted fixture bytes", "unknown helper preserved");
@@ -135,7 +143,7 @@ await Case("self-described-modified-payload-rejected", async (root, owner) =>
 });
 if (cases.Count != 19) throw new InvalidDataException("Missing adoption scenarios");
 File.WriteAllText(Path.Combine(output, "result.json"), JsonSerializer.Serialize(new { status = "PASS", cases, passed = cases.Count,
-    failed = 0, skipped = 0, classification = "LOCAL_DIAGNOSTIC", candidateExecuted = false }, new JsonSerializerOptions { WriteIndented = true }));
+    failed = 0, skipped = 0, classification = "LOCAL_DIAGNOSTIC", candidateExecuted = false, sourceClassification = "CURRENT_UNPUBLISHED_SCHEMA2_FIXTURE", targetClassification = "FUTURE_VERSION_FIXTURE", nativeEngineExecuted = false }, new JsonSerializerOptions { WriteIndented = true }));
 Console.WriteLine($"Manual adoption: {cases.Count} scenarios PASS");
 
 async Task Case(string name, Func<string, InstallerInstanceIdentity, Task> action)
@@ -151,10 +159,18 @@ async Task Case(string name, Func<string, InstallerInstanceIdentity, Task> actio
         CopyApplication(baseline, root);
         var inventory = ApplicationPayload.Files(root).Select(file => new InstalledPayloadFile(file.Path, file.Sha256))
             .Append(new(ApplicationPayload.ManifestPath, Hash(Path.Combine(root, ApplicationPayload.ManifestPath)))).ToArray();
-        string inventoryFile = Path.Combine(fixture, "inventory.json");
-        File.WriteAllText(inventoryFile, JsonSerializer.Serialize(inventory));
-        InstallationOwnership.Register(root, "0.17.3", inventoryFile);
-        var owner = InstallationOwnership.Read(root, true)!;
+        Directory.CreateDirectory(InstallationOwnership.ManagerDirectory);
+        string publicEntry = Path.Combine(root, InstallationOwnership.UninstallEntry), worker = Path.Combine(InstallationOwnership.ManagerDirectory, InstallationOwnership.UninstallWorker), native = Path.Combine(root, "unins000.exe");
+        File.Copy(Path.Combine(toolsDirectory, InstallationOwnership.UninstallEntry), publicEntry);
+        _ = ToolBuildIdentity.Read(publicEntry, "uninstaller");
+        File.Copy(publicEntry, worker); File.WriteAllText(native, "not-executed-native-fixture");
+        var owner = new InstallerInstanceIdentity(2, id, root, WindowsIdentity.GetCurrent().User!.Value, DateTimeOffset.UtcNow, "active", "0.17.4", inventory) {
+            InstallerTools = new(new(publicEntry, Hash(publicEntry), "0.17.4"), new(worker, Hash(worker), "0.17.4"), new(native, Hash(native), "fixture")) };
+        string seal = InstallationOwnership.Seal(owner);
+        File.WriteAllText(Path.Combine(InstallationOwnership.ManagerDirectory, "identity.protected"), seal);
+        using (var key = Registry.CurrentUser.CreateSubKey(InstallationOwnership.CurrentRegistryPath)) {
+            key.SetValue("InstanceId", id); key.SetValue("DataRoot", root); key.SetValue("AppDir", root);
+            key.SetValue("IdentityDigest", Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(seal)))); }
         CopyApplication(application, root);
         Directory.CreateDirectory(Path.Combine(root, "data"));
         string user = Path.Combine(root, "data", "retained.bin");
@@ -205,10 +221,10 @@ sealed class OfficialFixture(string packages) : HttpMessageHandler
         var uri = request.RequestUri!;
         string file = uri.AbsoluteUri switch
         {
-            "https://api.github.com/repos/FlappiBakuse/NexusPipeline/releases/tags/v0.17.4" => "release.json",
-            "https://api.github.com/repos/FlappiBakuse/NexusPipeline/releases/174/assets?per_page=100&page=1" => "assets.json",
+            "https://api.github.com/repos/FlappiBakuse/NexusPipeline/releases/tags/v0.17.5" => "release.json",
+            "https://api.github.com/repos/FlappiBakuse/NexusPipeline/releases/175/assets?per_page=100&page=1" => "assets.json",
             "https://raw.githubusercontent.com/FlappiBakuse/NexusPipeline/main/metadata/updates/legacy-policy.json" => "policy.json",
-            _ when uri.AbsoluteUri.StartsWith("https://github.com/FlappiBakuse/NexusPipeline/releases/download/v0.17.4/", StringComparison.Ordinal)
+            _ when uri.AbsoluteUri.StartsWith("https://github.com/FlappiBakuse/NexusPipeline/releases/download/v0.17.5/", StringComparison.Ordinal)
                 => Path.GetFileName(uri.AbsolutePath),
             _ => throw new InvalidDataException("Unexpected fixture request: " + uri)
         };

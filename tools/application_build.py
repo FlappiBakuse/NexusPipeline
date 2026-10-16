@@ -22,7 +22,7 @@ except ImportError:
 def command(*args: str) -> str:return subprocess.check_output(args,text=True,encoding='utf-8').strip()
 def sha(file: Path) -> str:
     with file.open('rb') as stream:return hashlib.file_digest(stream,'sha256').hexdigest()
-def prepare_compilation(root: Path,output: Path,*,source_sha: str,source_tree_sha: str,partner_sha: str,workflow_sha: str) -> dict:
+def prepare_compilation(root: Path,output: Path,*,source_sha: str,source_tree_sha: str,partner_sha: str,workflow_sha: str,test_host: bool=False) -> dict:
     try:
         from .host_release import project_version, normalized_tag
     except ImportError:
@@ -50,10 +50,15 @@ def prepare_compilation(root: Path,output: Path,*,source_sha: str,source_tree_sh
     record=create_record(inputs)
     identity=output/'desktop-build.json';identity.write_bytes(canonical_json(record))
     (output/'build-inputs.json').write_bytes(canonical_json(inputs))
-    return {'identity':str(identity),'frontendProps':str(output/'frontend'/'embedded-frontend.props'),'buildId':record['buildId']}
+    try:
+        from .maintenance_build import prepare as prepare_tools
+    except ImportError:
+        from maintenance_build import prepare as prepare_tools
+    tools = prepare_tools(root, output/'maintenance', record, test_host=test_host)
+    return {'updater':tools['updater'], 'uninstaller':tools['uninstaller'], 'metadataHelper':tools['installer-metadata'], 'identity':str(identity),'frontendProps':str(output/'frontend'/'embedded-frontend.props'),'buildId':record['buildId']}
 
-def prepare(root: Path,output: Path,*,source_sha: str,source_tree_sha: str,partner_sha: str,workflow_sha: str,electron_archive: Path|None=None) -> dict:
-    result=prepare_compilation(root,output,source_sha=source_sha,source_tree_sha=source_tree_sha,partner_sha=partner_sha,workflow_sha=workflow_sha)
+def prepare(root: Path,output: Path,*,source_sha: str,source_tree_sha: str,partner_sha: str,workflow_sha: str,electron_archive: Path|None=None,test_host: bool=False) -> dict:
+    result=prepare_compilation(root,output,source_sha=source_sha,source_tree_sha=source_tree_sha,partner_sha=partner_sha,workflow_sha=workflow_sha,test_host=test_host)
     runtime=json.loads((root/'desktop'/'electron-runtime.json').read_text(encoding='utf-8'))
     if electron_archive is None:
         electron_archive=output/runtime['archive'];urllib.request.urlretrieve(runtime['url'],electron_archive)
@@ -65,9 +70,10 @@ def main():
     parser=argparse.ArgumentParser(allow_abbrev=False)
     for name in ('root','output','electron-archive'):parser.add_argument('--'+name,type=Path,required=name!='electron-archive')
     for name in ('source-sha','source-tree-sha','partner-sha','workflow-sha'):parser.add_argument('--'+name,required=True)
+    parser.add_argument("--test-host", action="store_true")
     args=parser.parse_args()
     try:
-        result=prepare(args.root,args.output,source_sha=args.source_sha,source_tree_sha=args.source_tree_sha,partner_sha=args.partner_sha,workflow_sha=args.workflow_sha,electron_archive=args.electron_archive)
+        result=prepare(args.root,args.output,source_sha=args.source_sha,source_tree_sha=args.source_tree_sha,partner_sha=args.partner_sha,workflow_sha=args.workflow_sha,electron_archive=args.electron_archive,test_host=args.test_host)
         (args.output/'application-inputs.json').write_text(json.dumps(result,indent=2)+'\n',encoding='utf-8');print(json.dumps(result))
     except (ValueError,OSError,subprocess.CalledProcessError) as error:parser.exit(1,str(error)+'\n')
 if __name__=='__main__':main()

@@ -50,20 +50,23 @@ gh workflow run release.yml --ref main -f operation=publish-only -f tag=<已有 
 | tag | `vX.Y.Z`、`vX.Y.Z-beta.N` 或 `vX.Y.Z-rc.N` |
 | Release 标题 | `vX.Y.Z` |
 | Pre-release | `major=0` 或版本带 `-beta.N` / `-rc.N` 后缀时使用 `--prerelease` |
-| zip 资产 | `NexusPipeline-vX.Y.Z[-beta.N|-rc.N]-win-x64.zip` |
+| 便携资产 | `NexusPipeline-vX.Y.Z[-beta.N|-rc.N]-win-x64-Portable.zip` |
+| 安装资产 | `NexusPipeline-vX.Y.Z[-beta.N|-rc.N]-win-x64-Setup.exe` |
+| 增量资产 | `NexusPipeline-vX.Y.Z[-beta.N|-rc.N]-win-x64-Update.zip` |
 | 资产完整性 | GitHub Release API 的 `asset.digest=sha256:<64 位摘要>`、资产 ID 和尺寸 |
 
 发布包采用扁平根布局：
 
 ```text
 NexusPipeline.exe
+NexusPipeline.update.exe
 README.md
 resources/desktop/
 resources/payload-manifest.json
 plugins/
 ```
 
-主程序更新引擎交换 `NexusPipeline.exe`、`resources/desktop/`、`resources/payload-manifest.json` 和包内提供的 `README.md`，不会覆盖运行时 `plugins/`。包内排除 `config/`、`data/`、`history/` 和 `logs/`。更新引擎支持当前发布包布局，并拒绝绝对路径、`..` 路径和重复目录条目。四项应用资产作为同一事务交换、校验和回滚；插件和用户数据不纳入应用事务。
+主程序更新引擎按配方与完整载荷清单交换 `NexusPipeline.exe`、`NexusPipeline.update.exe`、`resources/desktop/`、`resources/payload-manifest.json` 和包内提供的 `README.md`，不会覆盖运行时 `plugins/`。安装版的 `NexusPipeline.uninstall.exe` 单独归属安装工具，不放入公共 ZIP。包内排除 `config/`、`data/`、`history/` 和 `logs/`。更新引擎支持当前发布包布局，并拒绝绝对路径、`..` 路径和重复目录条目。应用载荷作为同一事务交换、校验和回滚；插件和用户数据不纳入应用事务。
 
 ### 安装器运行时依赖
 
@@ -71,7 +74,7 @@ Setup 只认可标准 x64 安装路径下的 .NET 10 Desktop Runtime 和 ASP.NET
 
 依赖安装退出码 0 后重新检测实际框架；3010 提示用户自行重启再运行 Setup，不强制重启，选择稍后重启时 Setup 返回 Inno 标准退出码 8，且不部署或登记应用；其他依赖失败使 Setup 返回 7。依赖包的退出码与 Setup 退出码分别记录。安装、升级与卸载不移除共享 .NET。实际 Windows 验收必须记录运行环境、依赖包摘要和签名、子进程退出码以及应用部署顺序；编译 Setup 不能代替该项验收。
 
-Setup 的空间规划由 Inno 原生代码执行，目录准入只在已有保护身份时调用 Windows 自带 PowerShell 解封 DPAPI，二者都不依赖尚未安装的共享 .NET。元数据辅助程序与正式 Host 使用共享框架，只在安装器完成上述运行时依赖检查后执行。永久卸载 helper 按实际 Host 副本计入 manager 卷，临时元数据程序只计入临时卷。页面预览复用未变保护身份的解封结果；安装开始前在互斥下重新核对归属、依赖与各卷可用空间。
+Setup 的空间规划由 Inno 原生代码执行，目录准入只在已有保护身份时调用 Windows 自带 PowerShell 解封 DPAPI，二者都不依赖尚未安装的共享 .NET。元数据辅助程序与正式 Host 使用共享框架，只在安装器完成上述运行时依赖检查后执行。永久卸载 helper 按独立 uninstaller 实际字节计入 manager 卷，临时元数据程序只计入临时卷。页面预览复用未变保护身份的解封结果；安装开始前在互斥下重新核对归属、依赖与各卷可用空间。
 
 Setup 的文件解压完成不等于安装成功。新装须完成实例归属登记；升级须等独立 worker 返回成功，且新 Host 启动核对及事务提交完成。登记或交接异常时完成页显示“安装未完成”，即使 Inno 已结束文件安装，进程仍返回非零退出码 12，并保留诊断和恢复现场。
 

@@ -140,20 +140,7 @@ internal static class StartupPipeline
     }
 
     /// <summary>返回当前宿主实例使用的单实例互斥体名称；Test Host 按系统测试运行时隔离，生产保持固定名称。</summary>
-    internal static string SingleInstanceMutexName
-    {
-        get
-        {
-#if NEXUS_TEST_HOST
-            string scope = Environment.GetEnvironmentVariable("NEXUS_SYSTEM_RUNTIME_NAME")?.Trim() ?? "";
-            return string.IsNullOrWhiteSpace(scope)
-                ? "NexusPipeline.TestHost.SingleInstance"
-                : $"NexusPipeline.TestHost.SingleInstance.{scope}";
-#else
-            return "NexusPipeline.SingleInstance";
-#endif
-        }
-    }
+    internal static string SingleInstanceMutexName => NexusPipeline.Maintenance.InstanceMutex.Name;
 
     /// <summary>
     /// 创建单实例互斥体并取得所有权：处理「服务被强杀后互斥体被遗弃」——构造函数会抛

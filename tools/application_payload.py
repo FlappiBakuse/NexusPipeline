@@ -39,7 +39,7 @@ def runtime_files(root: Path) -> dict:
 
 def kind(name: str,upstream: dict) -> str:
     if name=='NexusPipeline.exe':return 'host'
-    if name=='NexusPipeline Update.exe':return 'update-entry'
+    if name=='NexusPipeline.update.exe':return 'update-entry'
     if name=='README.md':return 'readme'
     if name==ENTRY:return 'desktop-entry'
     if name==ASAR:return 'desktop-app'
@@ -63,8 +63,8 @@ def inventory(directory: Path,upstream: dict, *, schema: int = 2) -> list[dict]:
     if not 0<len(files)<=MAX_FILES:raise ValueError('Application file count')
     paths={item['path'] for item in files}
     missing=({'NexusPipeline.exe','README.md',ENTRY,ASAR,NATIVE}|set(upstream))-paths
-    if schema==2:missing|={'NexusPipeline Update.exe'}-paths
-    elif schema!=1 or 'NexusPipeline Update.exe' in paths:raise ValueError('Unsupported application schema/files')
+    if schema==2:missing|={'NexusPipeline.update.exe'}-paths
+    elif schema!=1 or 'NexusPipeline.update.exe' in paths:raise ValueError('Unsupported application schema/files')
     if missing:raise ValueError('Incomplete application tree: '+', '.join(sorted(missing)))
     for item in files:
         if item['path'] in upstream:
@@ -74,15 +74,12 @@ def inventory(directory: Path,upstream: dict, *, schema: int = 2) -> list[dict]:
     if schema==2:
         host=next(item for item in files if item['kind']=='host')
         helper=next(item for item in files if item['kind']=='update-entry')
-        if any(host[key]!=helper[key] for key in ('sha256','sizeBytes')):raise ValueError('Update entry differs from Host')
+        if host['sha256']==helper['sha256']:raise ValueError('Updater must be an independent program')
     return files
 
 def create(directory: Path,record: dict,root: Path) -> dict:
     validate_record(record)
-    helper=directory/'NexusPipeline Update.exe'
-    if not helper.exists():
-        with helper.open('xb') as output, (directory/'NexusPipeline.exe').open('rb') as source:
-            shutil.copyfileobj(source,output)
+    if not (directory/'NexusPipeline.update.exe').is_file():raise ValueError('Independent updater input missing')
     inputs=record['buildInputs']
     value={key:record[key] for key in ('schemaVersion','product','productVersion','installationGeneration','rid','buildId','frontendHash')}
     value['schemaVersion']=2

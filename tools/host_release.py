@@ -28,7 +28,7 @@ except ImportError:
 REPOSITORY = "FlappiBakuse/NexusPipeline"
 VERSION_PATTERN = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(beta|rc)\.(0|[1-9]\d*))?$")
 PROTECTED_NAMES = {"config", "data", "history", "logs", ".nxp", "outputs", "user-assets", ".nxp-update", ".nxp-backup"}
-PAYLOAD_ROOTS = {"NexusPipeline.exe", "NexusPipeline Update.exe", "README.md", "resources", "plugins"}
+PAYLOAD_ROOTS = {"NexusPipeline.exe", "NexusPipeline.update.exe", "README.md", "resources", "plugins"}
 TEXT_SUFFIXES = {".css", ".html", ".js", ".json", ".md", ".mjs", ".txt", ".xml", ".yaml", ".yml"}
 MAX_PACKAGE_ENTRIES = 4096
 MAX_PACKAGE_UNCOMPRESSED_BYTES = 512 * 1024 * 1024
@@ -189,7 +189,7 @@ def archive_production(
     folded = [name.casefold() for name, _ in files]
     _require(len(folded) == len(set(folded)), "生产载荷大小写路径冲突")
     files.sort(key=lambda item: (item[0].casefold(), item[0]))
-    _require({name for name, _ in files if "/" not in name} == {"NexusPipeline.exe", "NexusPipeline Update.exe", "README.md"}, "生产载荷根文件不符")
+    _require({name for name, _ in files if "/" not in name} == {"NexusPipeline.exe", "NexusPipeline.update.exe", "README.md"}, "生产载荷根文件不符")
     _require(any(name.startswith("plugins/EmulatorSupport/") for name, _ in files)
              and any(name.startswith("plugins/LiveScreenshot/") for name, _ in files)
              and any(name == "resources/payload-manifest.json" for name, _ in files), "生产载荷目录缺失")
@@ -287,12 +287,16 @@ def build_production(
     inputs = prepare_application(root, output_dir.resolve() / "application-inputs", source_sha=source_sha,
         source_tree_sha=git_output(root, "rev-parse", "HEAD^{tree}"), partner_sha=partner_sha,
         workflow_sha=workflow_sha or source_sha, electron_archive=electron_archive)
-    _run_checked([dotnet, "publish", str(root / "src" / "NexusPipeline.csproj"), "--configuration", "Release", "--runtime", "win-x64", "--self-contained", "false", "-p:PublishSingleFile=true", "-p:DebugType=none", "-p:DebugSymbols=false", "-p:NexusTestHost=false", "-p:NexusFrontendProps=" + inputs["frontendProps"], "-p:NexusBuildIdentityPath=" + inputs["identity"], "--output", str(production_root)], root, runner)
+    _run_checked([dotnet, "publish", str(root / "src" / "NexusPipeline.csproj"), "--configuration", "Release", "--runtime", "win-x64", "--self-contained", "false", "-p:PublishSingleFile=true", "-p:DebugType=none", "-p:DebugSymbols=false", "-p:NexusTestHost=false", "-p:NexusFrontendProps=" + inputs["frontendProps"], "-p:NexusBuildIdentityPath=" + inputs["identity"], "-p:NexusUpdaterRecoveryPath=" + inputs["updater"], "--output", str(production_root)], root, runner)
     verify_embedded_manifest(production_root / "NexusPipeline.exe", "requireAdministrator")
-    if "@@LAUNCH_CODE@@" in (root / "tools" / "installer.iss.in").read_text(encoding="utf-8"):
-        helper_root = output_dir.resolve() / "installer-helper"
-        _run_checked([dotnet, "publish", str(root / "src" / "NexusPipeline.csproj"), "--configuration", "Release", "--runtime", "win-x64", "--self-contained", "false", "-p:PublishSingleFile=true", "-p:DebugType=none", "-p:DebugSymbols=false", "-p:NexusTestHost=false", "-p:NexusInstallerMetadataHelper=true", "--output", str(helper_root)], root, runner)
-        verify_embedded_manifest(helper_root / "nxp-metadata-helper.exe", "asInvoker")
+    helper_root = output_dir.resolve() / "installer-helper"
+    helper_root.mkdir()
+    shutil.copy2(inputs['metadataHelper'], helper_root / 'nxp-metadata-helper.exe')
+    shutil.copy2(inputs['uninstaller'], helper_root / 'NexusPipeline.uninstall.exe')
+    shutil.copy2(inputs['updater'], production_root / 'NexusPipeline.update.exe')
+    verify_embedded_manifest(Path(inputs['updater']), 'requireAdministrator')
+    verify_embedded_manifest(Path(inputs['uninstaller']), 'asInvoker')
+    verify_embedded_manifest(Path(inputs['metadataHelper']), 'asInvoker')
     shutil.copytree(inputs["desktopBundle"], production_root / "resources" / "desktop")
     shutil.copy2(root / "README.md", production_root / "README.md")
     if bundled_phase is None:
@@ -756,7 +760,7 @@ def _validate_package_layout(infos: list[zipfile.ZipInfo]) -> dict[str, zipfile.
     for name in folded_names:
         parts = name.split('/')
         _require(not any('/'.join(parts[:index]) in files for index in range(1, len(parts))), f"生产 ZIP 文件/目录冲突：{name}")
-    _require({name for name in files if name.endswith('.exe')} == {'nexuspipeline.exe', 'nexuspipeline update.exe', 'resources/desktop/nexuspipeline.desktop.exe'}, "生产 ZIP 的 Host 与桌面入口集合不符")
+    _require({name for name in files if name.endswith('.exe')} == {'nexuspipeline.exe', 'nexuspipeline.update.exe', 'resources/desktop/nexuspipeline.desktop.exe'}, "生产 ZIP 的 Host 与桌面入口集合不符")
     return names
 
 

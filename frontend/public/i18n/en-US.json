@@ -991,6 +991,8 @@
   "settings.update.check_schedule": "Check about 5 seconds after service startup, then 12 hours after each automatic check completes",
   "settings.update.checking": "Checking for updates...",
   "settings.update.downloading": "Downloading and verifying the package...",
+  "settings.update.cancelling": "Cancelling and cleaning up",
+  "settings.update.installer_tools_repair": "Run Setup to repair the uninstaller tools. Application updates can continue.",
   "settings.update.latest": "You are running the latest version.",
   "settings.update.pending_bridge": "Update to {bridgeVersion} first, then check for {version} again.",
   "settings.update.pending_bridge_unavailable": "The intermediate update required for {version} is unavailable. The current installation is unchanged.",

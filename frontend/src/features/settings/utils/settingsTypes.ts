@@ -19,6 +19,7 @@ export interface UpdateStatus {
   pendingVersion?: string | null;
   pendingStatus?: string | null;
   pendingError?: string | null;
+  installerToolsWarning?: string | null;
   lastApplyFailure?: {
     transactionId: string;
     targetVersion: string;

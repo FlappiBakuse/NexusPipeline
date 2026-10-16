@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0-windows</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><AssemblyName>nxp-metadata-helper</AssemblyName><Version>0.17.4</Version><ApplicationManifest>../../src/app.installer-helper.manifest</ApplicationManifest></PropertyGroup>
+  <PropertyGroup Condition="'$(NexusToolBuildIdentityPath)' == '' and '$(NexusToolBuildIdentityDirectory)' != ''"><NexusToolBuildIdentityPath>$(NexusToolBuildIdentityDirectory)/installer-metadata.json</NexusToolBuildIdentityPath></PropertyGroup>
+  <ItemGroup><ProjectReference Include="../../src/NexusPipeline.Maintenance/NexusPipeline.Maintenance.csproj" />
+    <EmbeddedResource Include="$(NexusToolBuildIdentityPath)" LogicalName="NexusPipeline.Maintenance.BuildIdentity" Condition="'$(NexusToolBuildIdentityPath)' != ''" />
+  </ItemGroup>
+  <Target Name="RequireToolIdentity" BeforeTargets="PrepareForBuild" Condition="'$(NexusTestHost)' != 'true'"><Error Condition="'$(NexusToolBuildIdentityPath)' == '' or !Exists('$(NexusToolBuildIdentityPath)')" Text="Pass the frozen maintenance tool identity." /></Target>
+</Project>

@@ -4,6 +4,8 @@ import hashlib
 import json
 import tempfile
 import unittest
+from unittest import mock
+import sys
 from pathlib import Path
 
 from tools.host_installer import dependency_pair, render_script, verified_payload
@@ -11,6 +13,46 @@ from tools.host_release import HostReleaseError
 
 
 class HostInstallerTests(unittest.TestCase):
+    def test_setup_placement_preserves_bytes_and_copies_only_for_sharing_conflicts(self) -> None:
+        from tools import build_source
+        with mock.patch.dict(sys.modules, {'build_source': build_source}):
+            from tools import local_acceptance
+        with tempfile.TemporaryDirectory(prefix='nxp-setup-placement-') as temporary:
+            source, target = Path(temporary) / 'staged.exe', Path(temporary) / 'public.exe'
+            original = Path.rename
+            for code, succeeds in [(32, True), (5, False)]:
+                source.write_bytes(b'verified setup bytes')
+                error = PermissionError('controlled file conflict')
+                error.winerror = code
+                calls = []
+                def rename(path, destination):
+                    calls.append(path)
+                    self.assertEqual(source.read_bytes(), b'verified setup bytes')
+                    self.assertFalse(target.exists())
+                    if len(calls) == 1:
+                        raise error
+                    return original(path, destination)
+                with mock.patch.object(Path, 'rename', rename), mock.patch.object(local_acceptance.time, 'sleep'):
+                    if succeeds:
+                        local_acceptance.place_setup(source, target)
+                        self.assertEqual(target.read_bytes(), b'verified setup bytes')
+                        self.assertEqual(source.read_bytes(), b'verified setup bytes')
+                        self.assertEqual(len(calls), 1)
+                        target.unlink()
+                    else:
+                        with self.assertRaises(PermissionError):
+                            local_acceptance.place_setup(source, target)
+                        self.assertEqual(len(calls), 1)
+                        self.assertEqual(source.read_bytes(), b'verified setup bytes')
+            target.write_bytes(b'unknown destination')
+            error = PermissionError('controlled sharing conflict')
+            error.winerror = 32
+            with mock.patch.object(Path, 'rename', side_effect=error):
+                with self.assertRaises(FileExistsError):
+                    local_acceptance.place_setup(source, target)
+            self.assertEqual(target.read_bytes(), b'unknown destination')
+            self.assertEqual(source.read_bytes(), b'verified setup bytes')
+
     def test_production_inno_script_has_real_os_launch_and_no_test_define(self) -> None:
         source = Path(__file__).parents[1]
         template = (source / "installer.iss.in").read_text(encoding="utf-8")
@@ -28,7 +70,7 @@ class HostInstallerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="nxp-installer-payload-") as temporary:
             root = Path(temporary)
             payload = root / "production"
-            source = {"NexusPipeline Update.exe": b"host",
+            source = {"NexusPipeline.update.exe": b"host",
                 "NexusPipeline.exe": b"exe",
                 "README.md": b"readme",
                 "resources/payload-manifest.json": b"manifest",
@@ -53,7 +95,7 @@ class HostInstallerTests(unittest.TestCase):
             self.assertIn("onlyifdoesntexist", script)
             manifest_line = next(line for line in script.splitlines() if line.startswith('[{"Path":'))
             inventory = json.loads(manifest_line)
-            self.assertEqual({item["Path"] for item in inventory}, {"NexusPipeline.exe", "NexusPipeline Update.exe", "README.md", "resources/payload-manifest.json", "resources/desktop/NexusPipeline.Desktop.exe"})
+            self.assertEqual({item["Path"] for item in inventory}, {"NexusPipeline.exe", "NexusPipeline.update.exe", "README.md", "resources/payload-manifest.json", "resources/desktop/NexusPipeline.Desktop.exe"})
             self.assertEqual(next(item["Sha256"] for item in inventory if item["Path"] == "README.md"),
                              hashlib.sha256(source["README.md"]).hexdigest())
             self.assertIn("VerifyStagedFile('README.md'", script)

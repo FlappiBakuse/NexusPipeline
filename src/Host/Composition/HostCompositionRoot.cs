@@ -161,7 +161,7 @@ internal class HostCompositionRoot
         collection.AddSingleton<IControlPlaneStatusReader, ControlPlaneStatusAdapter>();
         Func<ProxyConfiguration, OutboundHttpTarget, bool, HttpMessageHandler>? outboundHandlerFactory = null;
 #if NEXUS_TEST_HOST
-        outboundHandlerFactory = TestHostTransport.CreateFromEnvironment();
+        outboundHandlerFactory = NexusPipeline.Maintenance.Testing.TestHostTransport.CreateFromEnvironment();
 #endif
         collection.AddSingleton<OutboundHttpClientProvider>(_ => new OutboundHttpClientProvider(
             () => OutboundProxyOptionsAdapter.FromSettings(Settings), outboundHandlerFactory));

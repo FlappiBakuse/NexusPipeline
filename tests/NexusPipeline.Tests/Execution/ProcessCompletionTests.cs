@@ -44,7 +44,7 @@ public sealed class ProcessCompletionTests
             await worker.WaitForExitAsync(timeout.Token);
             await helper.WaitForExitAsync(timeout.Token);
             var ended = ownership.ObserveCompletion();
-            while (ended.Processes.Single(item => item.Identity.Pid == worker.Id).ExitCode is null)
+            while (new[] { worker.Id, helper.Id }.Any(pid => ended.Processes.Single(item => item.Identity.Pid == pid).ExitCode is null))
             { await Task.Delay(10, timeout.Token); ended = ownership.ObserveCompletion(); }
             Assert.False(launcher.HasExited);
             Assert.True(ended.Complete, System.Text.Json.JsonSerializer.Serialize(ended));

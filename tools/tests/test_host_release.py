@@ -188,7 +188,7 @@ class HostReleaseTests(unittest.TestCase):
         info.file_size = host_release.MAX_SINGLE_ENTRY_BYTES
         info.compress_size = info.file_size
         desktop = zipfile.ZipInfo("resources/desktop/NexusPipeline.Desktop.exe")
-        host_release._validate_package_layout([info, desktop, zipfile.ZipInfo('NexusPipeline Update.exe')])
+        host_release._validate_package_layout([info, desktop, zipfile.ZipInfo('NexusPipeline.update.exe')])
         info.file_size += 1
         with self.assertRaises(HostReleaseError): host_release._validate_package_layout([info])
         with patch.object(host_release, 'MAX_PACKAGE_ENTRIES', 0), self.assertRaises(HostReleaseError):
@@ -211,7 +211,7 @@ class HostReleaseTests(unittest.TestCase):
             production = root / "production"
             production.mkdir()
             (production / "NexusPipeline.exe").write_bytes(b"binary")
-            (production / "NexusPipeline Update.exe").write_bytes(b"binary")
+            (production / "NexusPipeline.update.exe").write_bytes(b"binary")
             desktop = production / "resources" / "desktop"
             desktop.mkdir(parents=True)
             (desktop / "NexusPipeline.Desktop.exe").write_bytes(b"desktop")

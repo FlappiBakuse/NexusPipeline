@@ -1,6 +1,6 @@
 # 构建身份契约
 
-Host 与桌面载荷使用一份冻结输入身份。`tools/build_identity.py` 负责生成和验证规范记录，`src/Modules/Updates/ApplicationBuildIdentity.cs` 负责 C# 读取和重新计算。结构定义为仓内的 `tools/schemas/build-inputs.schema.json` 与 `desktop-build.schema.json`，读取器还须检查跨字段一致性。
+Host 与桌面载荷使用一份冻结输入身份。`tools/build_identity.py` 负责生成和验证规范记录，`src/NexusPipeline.Maintenance/Updates/ApplicationBuildIdentity.cs` 负责 C# 读取和重新计算。结构定义为仓内的 `tools/schemas/build-inputs.schema.json` 与 `desktop-build.schema.json`，读取器还须检查跨字段一致性。
 
 `application_build.prepare_compilation` 生成真实嵌入前端和冻结编译身份，供生产 PR 编译使用。未装配 Electron 时，运行时字段记录声明的精确锁定要求，不能作为实际运行时字节已验证的证据。完整发行继续使用 `prepare`，核对实际 Electron archive SHA256 后构建桌面；两条入口复用同一身份规范。
 
@@ -28,3 +28,5 @@ python tools/build_identity.py verify --record <实际desktop-build.json>
 本地未提交构建仍固定基线 HEAD，并从实际工作树文件及 Git 文本属性计算 sourceTreeSha，不改写真实暂存区或生成提交。源码原始字节指纹、未提交状态与对端指纹另外进入本地运行及验收报告；这些产物仅为本地诊断。正式候选必须来自干净提交，其冻结 sourceTreeSha、partnerSha 与 workflowSha 还须和可信候选来源逐项相等。
 
 共享合成向量位于 `tests/fixtures/build-identity/`，仅用于跨语言规范字节及摘要一致性验证。其 `0.0.0` 工具版本与合成 SHA 不可用作生产输入。C# 用例进入 `host.backend.updates-restart`，Python 用例进入 `host.release-contract`，范围选择器将规则、schema 和向量同时映射到两类验证；预算、原生报告和清理要求保持[测试命令](../testing/commands.md)的规则。
+
+独立工具内嵌固定资源 `NexusPipeline.Maintenance.BuildIdentity`，严格字段为 schemaVersion、role、productVersion、installationGeneration、sourceSha、sourceTreeSha、buildId。读取器按固定角色读取确切程序集名称，并结合实际文件 hash 和公共载荷身份验证。工具不嵌入最终 Host hash，Host 的 frontendHash/ASAR 合同不变。Host 在编译前嵌入同一次冻结输入构建的 updater 恢复资源；Uninstaller 不进入公共 Host 资源。

@@ -58,7 +58,7 @@ def parse(raw: bytes) -> dict:
 
 def application_path(name: object) -> str:
     name = safe_path(name)
-    require(name in ('NexusPipeline.exe', 'NexusPipeline Update.exe', 'README.md', MANIFEST_PATH)
+    require(name in ('NexusPipeline.exe', 'NexusPipeline.update.exe', 'NexusPipeline Update.exe', 'README.md', MANIFEST_PATH)
             or name.startswith('resources/desktop/'), 'path outside application')
     return name
 
@@ -103,7 +103,7 @@ def validate(recipe: dict) -> dict:
                     for name in target_names for index in range(1, len(name.split('/')))), 'file directory conflict')
     require(len(target_names) <= MAX_FILES and sum(item['sizeBytes'] for item in (*included.values(), *reused.values(), *bundled.values())) <= MAX_BYTES, 'target budget')
     require(MANIFEST_PATH in included and included[MANIFEST_PATH]['sha256'] == target['payloadManifestSha256'], 'manifest identity')
-    required = {'NexusPipeline.exe', 'NexusPipeline Update.exe', 'README.md', ENTRY, ASAR, NATIVE}
+    required = {'NexusPipeline.exe', 'NexusPipeline.update.exe', 'README.md', ENTRY, ASAR, NATIVE}
     combined = included | reused
     require(required <= combined.keys() and all(combined[name]['sizeBytes'] > 0 for name in required), 'required files')
     base = recipe['base']
@@ -189,7 +189,7 @@ def create(application: dict, manifest_bytes: bytes, kind: str, base: dict | Non
     reused = [item for name, item in target.items() if name != MANIFEST_PATH and previous.get(name) == item]
     included = [item for item in target.values() if item not in reused]
     removed = [item for name, item in previous.items() if name not in target]
-    manual = kind == 'update' and base is not None and not removed
+    manual = kind == 'update' and base is not None and not removed and 'NexusPipeline.update.exe' in previous
     return validate({'schemaVersion': 1, 'packageKind': kind, 'product': 'NexusPipeline', 'rid': 'win-x64',
                      'installationGeneration': 'g0170',
                      'target': {'version': application['productVersion'], 'buildId': application['buildId'],

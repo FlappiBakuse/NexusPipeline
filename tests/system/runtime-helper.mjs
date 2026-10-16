@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { controlServiceName } from "../../tools/installation-generation.mjs";
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
@@ -113,6 +114,15 @@ export function startRuntime(args = [], extraEnv = {}) {
 }
 
 export function startUpdateWorker(executable, args, extraEnv = {}) {
+  const journal = path.join(runtimeDir, ".nxp-update/task.json");
+  if (fs.existsSync(journal)) {
+    const task = JSON.parse(fs.readFileSync(journal, "utf8").replace(/^\uFEFF/u, ""));
+    if (task.WorkerPath === null) {
+      assert.equal(task.WorkerSha256, createHash("sha256").update(fs.readFileSync(executable)).digest("hex"));
+      task.WorkerPath = executable; task.WorkerLaunchPending = true;
+      fs.writeFileSync(journal, JSON.stringify(task));
+    }
+  }
   return startOwnedRuntimeProcess(executable, args, extraEnv);
 }
 

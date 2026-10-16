@@ -18,7 +18,7 @@ class UpdateRecipeTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         self.production = self.root / 'production'
         self.production.mkdir()
-        self.files = {'NexusPipeline.exe': b'new host', 'NexusPipeline Update.exe': b'new host',
+        self.files = {'NexusPipeline.exe': b'new host', 'NexusPipeline.update.exe': b'dedicated updater',
                       'README.md': b'guide', 'resources/desktop/runtime.dll': b'unchanged runtime',
                       recipe.ENTRY: b'desktop entry', recipe.NATIVE: b'native binding',
                       recipe.ASAR: b'new desktop app'}
@@ -31,8 +31,8 @@ class UpdateRecipeTests(unittest.TestCase):
                             'frontendHash': 'b' * 64, 'files': [self.entry(name, raw) for name, raw in self.files.items()]}
         self.manifest = json.dumps(self.application).encode()
         (self.production / recipe.MANIFEST_PATH).write_bytes(self.manifest)
-        self.base_files = [self.entry(name, b'old host' if name == 'NexusPipeline.exe' else raw)
-                           for name, raw in self.files.items() if name != 'NexusPipeline Update.exe']
+        self.base_files = [self.entry(name, b'old host' if name == 'NexusPipeline.exe' else b'old dedicated updater' if name == 'NexusPipeline.update.exe' else raw)
+                           for name, raw in self.files.items()]
         self.base_files.append(self.entry(recipe.MANIFEST_PATH, b'old manifest'))
         self.base = {'releaseTag': 'v0.17.3', 'releaseId': 42, 'assetId': 24, 'assetSha256': 'c' * 64,
                      'payloadManifestSha256': hashlib.sha256(b'old manifest').hexdigest()}
@@ -53,6 +53,8 @@ class UpdateRecipeTests(unittest.TestCase):
         delta = self.delta()
         self.assertIn('resources/desktop/runtime.dll', {item['path'] for item in delta['reusedFiles']})
         self.assertTrue(delta['manualCover']['allowed'])
+        legacy = [file for file in self.base_files if file['path'] != 'NexusPipeline.update.exe']
+        self.assertFalse(recipe.create(self.application, self.manifest, 'update', self.base, legacy)['manualCover']['allowed'])
         package = self.root / 'Update.zip'
         recipe.generate(self.production, package, delta, self.guides)
         recipe.verify(package, delta)

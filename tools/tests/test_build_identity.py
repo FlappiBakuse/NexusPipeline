@@ -125,7 +125,8 @@ class BuildIdentityTests(unittest.TestCase):
                 (root / 'desktop/package.json').write_text(json.dumps({'version':version}))
                 (root / 'desktop/package-lock.json').write_text(json.dumps({'version':version,'packages':{'':{'version':version}}}))
                 output = root / version
-                with patch.object(application_build, 'generate', return_value={'frontendHash':'a'*64}), \
+                with patch('tools.maintenance_build.prepare', return_value={'updater':'updater.exe','uninstaller':'uninstaller.exe','installer-metadata':'metadata.exe'}), \
+                     patch.object(application_build, 'generate', return_value={'frontendHash':'a'*64}), \
                      patch.object(application_build, 'frozen_profile', return_value={'runtimeProfileId':'fixture', 'runtimeProfileSha256':'b'*64, 'runtimeInventorySha256':'c'*64}), \
                      patch.object(application_build, 'command', side_effect=lambda *args: 'Microsoft.NETCore.App 10.0.13 [fixture]' if '--list-runtimes' in args else '24.0.1'), \
                      patch.object(application_build, 'build_desktop', return_value={'bundle':'fixture-desktop'}) as desktop:

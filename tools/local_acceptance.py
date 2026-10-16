@@ -22,6 +22,21 @@ def digest(path: Path) -> str:
         return hashlib.file_digest(stream, 'sha256').hexdigest()
 
 
+def place_setup(source: Path, target: Path) -> None:
+    try:
+        source.rename(target)
+    except OSError as error:
+        if getattr(error, 'winerror', None) != 32:
+            raise
+        # A Windows reader may prevent rename while still allowing verified reads.
+        expected = digest(source)
+        with source.open('rb') as input_stream, target.open('xb') as output_stream:
+            shutil.copyfileobj(input_stream, output_stream, 1024 * 1024)
+        if digest(target) != expected:
+            raise ValueError('Setup placement bytes changed')
+        print('Setup sharing conflict: exclusive verified copy completed; staged file retained', flush=True)
+
+
 def raw_tree(entries, objects: Path) -> str:
     objects.mkdir(parents=True, exist_ok=True)
     def write(kind, data):
@@ -87,6 +102,8 @@ def freeze(root: Path, target: Path, manifest_path: Path, objects: Path) -> dict
 def resolve_compiler(cache: Path, supplied: Path | None) -> Path:
     from host_installer import INNO_COMPILER_SHA256, INNO_DISTRIBUTION_SHA256
     if supplied is not None:
+        if not supplied.is_file() or digest(supplied) != INNO_COMPILER_SHA256:
+            raise ValueError('Supplied Inno compiler digest mismatch')
         return supplied.resolve()
     directory = cache / 'inno'
     directory.mkdir(parents=True, exist_ok=True)
@@ -210,19 +227,23 @@ def build(host: Path, plugins: Path, output: Path, compiler: Path | None, cache:
             source_tree_sha=host_input['sourceTreeSha'], partner_sha=plugin_input['baseSourceCommit'], workflow_sha=host_input['baseSourceCommit'], electron_archive=archive)
         publish = ['dotnet', 'publish', 'src/NexusPipeline.csproj', '-c', 'Release', '-r', 'win-x64', '--self-contained', 'false',
             '-p:PublishSingleFile=true', '-p:DebugType=none', '-p:DebugSymbols=false', '-p:UseSharedCompilation=false', '--disable-build-servers',
-            '-p:NexusTestHost=false', '-p:NexusFrontendProps='+inputs['frontendProps'], '-p:NexusBuildIdentityPath='+inputs['identity']]
+            '-p:NexusTestHost=false', '-p:NexusFrontendProps='+inputs['frontendProps'], '-p:NexusBuildIdentityPath='+inputs['identity'], '-p:NexusUpdaterRecoveryPath='+inputs['updater']]
         production = output/'production'
         command('Production Host', [*publish, '-o', production])
         pe.verify_embedded_manifest(production/'NexusPipeline.exe', 'requireAdministrator')
-        helper = output/'installer-helper'
-        command('Production metadata helper', [*publish, '-p:NexusInstallerMetadataHelper=true', '-o', helper])
-        pe.verify_embedded_manifest(helper/'nxp-metadata-helper.exe', 'asInvoker')
+        helper = Path(inputs['metadataHelper']).parent
+        pe.verify_embedded_manifest(Path(inputs['updater']), 'requireAdministrator')
+        pe.verify_embedded_manifest(Path(inputs['uninstaller']), 'asInvoker')
+        pe.verify_embedded_manifest(Path(inputs['metadataHelper']), 'asInvoker')
+        shutil.copy2(inputs['updater'], production/'NexusPipeline.update.exe')
         shutil.copytree(inputs['desktopBundle'], production/'resources/desktop')
         shutil.copy2(source/'README.md', production/'README.md')
         release.stage_bundled_plugins(production, partner, source/'src/Modules/Plugins/Repository/BundledPlugins.json')
         identity = json.loads(Path(inputs['identity']).read_bytes())
         manifest = payload.create(production, identity, source)
         payload.validate(production, manifest, identity, source)
+        actual_identity = importlib.import_module('application_reader').read(production, version)
+        if actual_identity != identity: raise ValueError('Readonly application identity mismatch')
         files = [{'path': path.relative_to(production).as_posix(), 'sizeBytes': path.stat().st_size, 'sha256': digest(path)}
                  for path in sorted(production.rglob('*')) if path.is_file()]
         distribution = output/'distribution'
@@ -235,9 +256,9 @@ def build(host: Path, plugins: Path, output: Path, compiler: Path | None, cache:
                     'sourceSha': host_input['baseSourceCommit'], 'sha256': digest(package), 'payloadFiles': files,
                     'buildInputs': identity['buildInputs'], 'buildId': identity['buildId'], 'frontendHash': identity['frontendHash']}
         setup = installer.compile_payload(production, metadata, source/'tools/runtime-dependencies.json', compiler,
-            output/'installer', source/'tools/installer.iss.in', helper/'nxp-metadata-helper.exe')
+            output/'installer', source/'tools/installer.iss.in', helper/'nxp-metadata-helper.exe', Path(inputs['uninstaller']))
         setup_path = distribution/f'NexusPipeline-v{version}-win-x64-Setup.exe'
-        (output/'installer'/setup_path.name).rename(setup_path)
+        place_setup(output/'installer'/setup_path.name, setup_path)
         if {file.name for file in distribution.iterdir()} != release.public_asset_names('v'+version):
             raise ValueError('Local distribution must contain exactly Setup, Portable and Update')
         packages = output/'plugin-packages'

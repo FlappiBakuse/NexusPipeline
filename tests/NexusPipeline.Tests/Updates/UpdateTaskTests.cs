@@ -6,6 +6,32 @@ namespace NexusPipeline.Tests.Updates;
 
 public sealed class UpdateTaskTests
 {
+    [Theory]
+    [InlineData("NexusPipeline.update.exe", true)]
+    [InlineData("NexusPipeline Update.exe", false)]
+    [InlineData("NexusPipeline.uninstall.exe", false)]
+    [InlineData("unknown.exe", false)]
+    public void FullPackageAdmitsOnlyTheCurrentUpdaterEntry(string entry, bool allowed)
+    {
+        string root = Path.Combine(Path.GetTempPath(), "nxp-package-entry-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            string zip = Path.Combine(root, "package.zip"), stage = Path.Combine(root, "staging");
+            using (var archive = System.IO.Compression.ZipFile.Open(zip, System.IO.Compression.ZipArchiveMode.Create))
+                foreach (string name in new[] { "NexusPipeline.exe", entry })
+                {
+                    using var writer = new StreamWriter(archive.CreateEntry(name).Open());
+                    writer.Write("controlled package bytes");
+                }
+            string? error = UpdatePackage.Extract(zip, stage);
+            Assert.Equal(allowed, error is null);
+            if (allowed) Assert.Equal("controlled package bytes", File.ReadAllText(Path.Combine(stage, entry)));
+            else Assert.False(Directory.Exists(stage));
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
     [Fact]
     public void ExpandedJournalPersistsTransportAndDerivesImmutableApplicationScopes()
     {
@@ -39,6 +65,16 @@ public sealed class UpdateTaskTests
             Assert.Throws<InvalidDataException>(() => (received with { TransportReceipt = null }).Validate());
             Assert.Throws<InvalidDataException>(() => (received with { ReleaseEvidence = received.ReleaseEvidence! with { Protocol = 1 } }).Validate());
             Assert.Equal(task, UpdateTask.Read(journal));
+            string retiredJournal = Path.Combine(root, "retired-task.json");
+            var retired = task with { JournalSchemaVersion = 4, RemovedApplicationFiles = new([
+                new ApplicationPayloadFile(ApplicationPayload.LegacyUpdateEntry, 17, new string('e',64), "update-entry")]) };
+            retired.Write(retiredJournal);
+            Assert.Equal(retired, UpdateTask.Read(retiredJournal));
+            Assert.Contains(ApplicationPayload.LegacyUpdateEntry, retired.ApplicationScopes);
+            Assert.Equal(6, retired.ApplicationScopes.Length);
+            Assert.Throws<InvalidDataException>(() => (retired with { RemovedApplicationFiles = new([
+                new ApplicationPayloadFile(ApplicationPayload.LegacyUpdateEntry, 18, new string('f',64), "update-entry")]) }).Write(retiredJournal));
+            Assert.Equal(retired, UpdateTask.Read(retiredJournal));
         }
         finally { Directory.Delete(root, true); }
     }

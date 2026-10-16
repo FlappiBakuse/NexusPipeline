@@ -5,12 +5,13 @@
     <NexusGenerateInstallationGeneration>true</NexusGenerateInstallationGeneration>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="../../src/Platform/Storage/BundleResourceReader.cs" Link="BundleResourceReader.cs" />
-    <Compile Include="../../src/Modules/Updates/ApplicationPayload.cs" Link="ApplicationPayload.cs" />
-    <Compile Include="../../src/Modules/Updates/ApplicationBuildIdentity.cs" Link="ApplicationBuildIdentity.cs" />
-    <Compile Include="../../src/Modules/Updates/UpdateInventory.cs" Link="UpdateInventory.cs" />
-    <Compile Include="../../src/Shared/Versioning/NexusVersion.cs" Link="NexusVersion.cs" />
-    <Compile Include="../../src/Platform/Storage/PayloadPathSafety.cs" Link="PayloadPathSafety.cs" />
-    <Compile Include="../../src/Platform/Storage/VerifiedFileDeletion.cs" Link="VerifiedFileDeletion.cs" />
+    <Compile Include="../../src/NexusPipeline.Maintenance/Platform/Storage/BundleResourceReader.cs" Link="BundleResourceReader.cs" />
+    <Compile Include="../../src/NexusPipeline.Maintenance/Updates/ApplicationPayload.cs" Link="ApplicationPayload.cs" />
+    <Compile Include="../../src/NexusPipeline.Maintenance/Updates/ApplicationBuildIdentity.cs" Link="ApplicationBuildIdentity.cs" />
+    <Compile Include="../../src/NexusPipeline.Maintenance/Updates/UpdateInventory.cs" Link="UpdateInventory.cs" />
+    <Compile Include="../../src/NexusPipeline.Maintenance/Shared/Versioning/NexusVersion.cs" Link="NexusVersion.cs" />
+    <Compile Include="../../src/NexusPipeline.Maintenance/Platform/Storage/PayloadPathSafety.cs" Link="PayloadPathSafety.cs" />
+    <Compile Include="../../src/NexusPipeline.Maintenance/Platform/Storage/VerifiedFileDeletion.cs" Link="VerifiedFileDeletion.cs" />
+    <Compile Include="../../src/NexusPipeline.Maintenance/ToolBuildIdentity.cs" Link="ToolBuildIdentity.cs" />
   </ItemGroup>
 </Project>

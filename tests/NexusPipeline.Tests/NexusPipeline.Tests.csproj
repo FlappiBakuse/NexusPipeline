@@ -29,6 +29,7 @@
     <EmbeddedResource Include="..\fixtures\build-identity\desktop-build.profile.json" LogicalName="NexusPipeline.Tests.BuildIdentity.ProfileRecord" />
     <Compile Include="..\..\tools\NexusPipeline.TaskProtocolTests\TaskFixtures.cs" Link="Support\TaskFixtures.cs" />
     <ProjectReference Include="..\..\src\NexusPipeline.csproj" />
+    <ProjectReference Include="..\..\src\NexusPipeline.Updater\NexusPipeline.Updater.csproj" />
     <ProjectReference Include="..\fixtures\NexusPipeline.TestPlugin\NexusPipeline.TestPlugin.csproj" />
     <ProjectReference Include="..\fixtures\NexusPipeline.TestProviderWorker\NexusPipeline.TestProviderWorker.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>

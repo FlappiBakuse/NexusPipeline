@@ -991,6 +991,8 @@
   "settings.update.check_schedule": "服务启动约 5 秒后首次检查，此后每次自动检查完成后间隔 12 小时",
   "settings.update.checking": "正在检查更新...",
   "settings.update.downloading": "正在下载并校验更新包...",
+  "settings.update.cancelling": "正在取消并清理",
+  "settings.update.installer_tools_repair": "卸载工具需要使用 Setup 修复；主程序更新仍可继续。",
   "settings.update.latest": "当前已是最新版本。",
   "settings.update.pending_bridge": "请先更新至 {bridgeVersion}，再检查 {version} 的更新。",
   "settings.update.pending_bridge_unavailable": "{version} 所需的过渡更新暂不可用，当前安装保持不变。",

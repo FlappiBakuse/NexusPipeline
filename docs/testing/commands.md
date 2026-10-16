@@ -21,6 +21,7 @@ node tests/run.mjs batch --plan <外部scope.json> --batch <control或batch-01�
 node tests/run.mjs gate --id host.backend.updates-restart
 node tests/run.mjs gate --id host.integration.desktop
 node tests/run.mjs gate --id host.integration.installation-adoption
+node tests/run.mjs gate --id host.integration.maintenance
 node tests/run.mjs gate --id host.ci-policy
 ```
 
@@ -114,3 +115,34 @@ python -m unittest discover -s tools/tests -p test_pe_manifest.py
 `plan`、`batch` 和 `gate` 保留为本机按需入口，报告核对实际输入、原生结果、计数、场景和清理。它们不参与 GitHub PR 检查，也不提供远端合并资格。源码配对和服务端作业审计工具仅用于显式诊断。
 
 本机验收软件从双仓未提交源码使用 [local-acceptance](../development/local-acceptance.md) 构建。实际旧 Setup 升级、卸载日志迁移、元数据回滚与进程中断应使用独立 Windows 用户或可恢复虚拟机。功能 Test Host 的 asInvoker 结果不代替正式 Setup 或生产 manifest 的证据。
+
+独立维护工具相关验证继续使用 `gate --id host.architecture.backend`、`ci --group backend.updates-restart`、`integration` 和 `gate --id host.integration.installation-adoption`。架构 checker 编译 Host、Maintenance、Updater、Uninstaller 及 installer metadata 的 production/test-host 图；工具闭包不允许反向依赖 Host。
+
+`gate --id host.integration.maintenance` 使用真实 WinForms、loopback HTTP、独立 updater 工作进程和 Inno 原生安装/卸载链。设置 `NEXUS_ADOPTION_BASELINE_PACKAGE`、`NEXUS_ADOPTION_BASELINE_RELEASE` 和 `NEXUS_INNO_COMPILER` 为官方 v0.17.3 原包、独立 Release API 回执及固定 Inno 编译器的绝对路径。固定场景验证最终校验与取消交错、未知清理字节、双语安全错误投影、单轮询与晚到响应、窗口关闭所有权、Setup 同版本修复、schema1 首跳、卸载取消/默认保留/明确删除，以及安装/便携缺工具更新和篡改拒绝。测试目录和数据全部隔离；唯一 HKCU 测试 AppId 与归属键、管理目录、快捷方式及 asInvoker 交接由夹具明确记录，生产安装器不启用这些替换。原包 reader 从未修改的官方 bundle 中加载执行，不运行原版 Main，不把新版实现当成旧 reader。生产 UAC、真实用户安装及实际快捷方式仍需人工验收。
+
+同一轮可将 `NEXUS_MAINTENANCE_PREPARED_ROOT` 指向该 gate 的已有运行目录，复用完整应用和未来目标夹具；入口核对实际产品源码字节。设置 `NEXUS_MAINTENANCE_REBUILD_NATIVE=1` 时重新编译原生安装夹具，允许安装器模板独立改变，其他产品源码必须一致。报告分别保留应用构建身份、原生脚本摘要、探针源码和本次场景结果；复用不改变原产物的源码身份。已完成场景只按冻结载荷清单删除可重建的匹配字节，未知文件、配置、数据和失败记录保留。
+
+安装归属 gate 要求 `NEXUS_ADOPTION_BASELINE_PACKAGE` 和 `NEXUS_ADOPTION_BASELINE_RELEASE` 为独立认证的官方 v0.17.3 原包和 Release API JSON。原包只读验证；受控归属接管案例使用当前未发行 schema 2 源和明确标注的未来版本夹具，不执行候选来识别角色、不将夹具称为已发行旧 reader。官方旧版 Setup 首跳、生产 UAC 和原生安装/卸载仍须人工验收。缺输入直接拒绝运行，不伪造旧包。
+
+
+## 本机低负载与构建复用
+
+在进程环境设置 `NEXUS_TEST_LOW_RESOURCE=1`、绝对路径 `NEXUS_TEST_RESOURCE_ROOT` 和已登记的 `NEXUS_TEST_ARTIFACT_ROOT`，继续使用上述 `ci`、`smoke`、`daily`、`gate`、`batch` 入口。Host 与 Plugins 共用同一个 resource root；独立调用排队取得独占 reservation。锁中记录进程和随机身份，失效锁、未知内容或清理未确认时保留现场并拒绝接管，不根据 PID 自动删除锁。收到取消或测试失败仍按原生结果失败。
+
+普通核心、API 测试在 `cache/incremental/<slot>/Host|Plugins` 维护独占原字节工作副本。槽位绑定源仓库路径、工具链与依赖/工程输入；每次完整记录实际源码指纹，只写变化文件，删除已登记且原字节未变的移除源码，保留增量编译输出。缓存源被外部修改、链接或未知同名内容时拒绝同步。源码变化不复用旧测试结果；原生报告、预期场景、用例集合和清理要求不变。
+
+涉及完整应用身份、安装和更新夹具的 integration、相关 gate、batch 与 release 保留按完整源码指纹隔离的工作副本，防止可变槽位改变旧夹具的源码证明。完整应用准备及旧/新版本夹具按精确源码、工具链和构建参数缓存；命中时逐文件核对完整集合与 SHA256。缺少完成收据、失败构建或字节变化不得作为命中，也不自动删除失败现场后重试。维护 gate 的 `application-inputs-ref.json` 记录本轮实际使用的准备位置。
+
+npm 安装收据绑定 Node/npm、平台架构、package/lock、项目 npm 配置、npm 环境及 workspace 选择；匹配已安装 lock 才复用。依赖输入变化或安装失败不生成成功收据。完整应用缓存允许省去相同输入的桌面 npm 安装、Electron 解压和维护工具编译。
+
+低负载模式中 dotnet/npm/Python 重型子命令串行，MSBuild build/publish/test/restore 使用 `-m:1`，子进程设置 `DOTNET_PROCESSOR_COUNT=2`，Host Vitest 一个 worker，插件执行槽位一个。真实测试内部的并发、分钟调度、竞态、超时和取消语义不变；这不是整机 CPU 百分比硬上限。日志记录排队毫秒、源码复制文件/字节、删除文件及构建/依赖命中。
+
+直接调用生产验收或其他 Python 构建时，使用同一 reservation 的包装入口：
+
+```text
+node tools/local-work.mjs python tools/local_acceptance.py build --host-root <Host> --plugins-root <Plugins> --output <外部独占验收目录> --cache <本轮共享缓存>
+```
+
+包装入口只控制本机资源，不改变生产构建参数、来源证明、十四插件装配或人工验收标准。先完成适用自动回归，再构建最终验收软件；存在验收软件时仍遵守保全和禁止覆盖要求。所有目录跟随本机临时目录策略；保留当前缓存以减少重复写入，过期缓存仅在无占用、可重建且不被失败证据引用时按归属清理。
+
+工具验证：`node --test --test-concurrency=1 tests/support/local-resources.test.mjs tests/support/budget.test.mjs`。覆盖增量字节、删除源码、依赖失效、未知修改/链接拒绝、跨进程互斥、取消、失败传播和准备产物损坏拒绝，不加入产品核心用例清单。
