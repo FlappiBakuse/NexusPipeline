@@ -5,91 +5,67 @@ import { t } from "../../../platform/i18n";
 import NxpBadge from "../../../ui/primitives/NxpBadge.vue";
 import NxpButton from "../../../ui/primitives/NxpButton.vue";
 import NxpIcon from "../../../ui/primitives/NxpIcon.vue";
-import NxpIconButton from "../../../ui/primitives/NxpIconButton.vue";
 import NxpScrollArea from "../../../ui/primitives/NxpScrollArea.vue";
+import NxpEmptyState from "../../../ui/primitives/NxpEmptyState.vue";
+import NxpLoadingState from "../../../ui/composites/NxpLoadingState.vue";
 import HistoryDetailModal from "./HistoryDetailModal.vue";
 import { formatDateTime, formatDurationMs, historyBadges, statusLabel, statusTone } from "../utils/historyFormat";
 import type { HistoryRecord } from "../utils/historyTypes";
 
-/** 历史记录栏：记录列表、详情弹窗与运行记录计数。请求由页面执行。 */
-
 const props = defineProps<{
   records: HistoryRecord[];
-  historyDir: string;
-  selectedDate: string;
   selectedUserKey: string;
   selectedUserName: string;
+  loading: boolean;
+  error: string;
   detail: HistoryRecord | null;
 }>();
-
 const emit = defineEmits<{
-  refresh: [];
+  retry: [];
   back: [];
   openDetail: [record: HistoryRecord];
   closeDetail: [];
 }>();
-
-const panelTitle = computed(() => props.selectedUserKey ? `${props.selectedUserName || t("history.no_user_specified")} · ${t("history.run_records")}` : t("history.run_records"));
-const panelCount = computed(() => props.selectedUserKey ? t("history.records.count", { count: props.records.length }) : t("history.choose_user"));
-
-function recordKey(record: HistoryRecord, index: number) {
-  return record.id || `${record.startTime}-${record.scriptName}-${index}`;
-}
-function recordPath(record: HistoryRecord) {
-  return [props.historyDir, props.selectedDate, record.historyDirectory, record.logFile].filter(Boolean).join("\\");
-}
+const panelTitle = computed(() => props.selectedUserKey ? `${props.selectedUserName || t('history.no_user_specified')} · ${t('history.run_records')}` : t('history.run_records'));
 </script>
 
 <template>
-  <div class="history-records-column">
-    <NxpButton v-if="props.selectedUserKey" class="history-detail-back ghost" type="button" data-testid="history-user-filter-back" @click="emit('back')">
-      {{ t("history.back_to_user_list") }}
+  <div class="browser-detail-column history-records-column">
+    <NxpButton v-if="selectedUserKey" class="browser-detail-back ghost" data-testid="history-user-filter-back" @click="emit('back')">
+      {{ t('history.back_to_user_list') }}
     </NxpButton>
-    <section class="history-records-panel history-level-panel">
-      <div class="history-panel-head">
-        <NxpIcon :name="props.selectedUserKey ? 'queues' : props.selectedDate ? 'scripts' : 'history'" /><h3>{{ panelTitle }}</h3>
-        <span class="muted" data-testid="history-records-count">{{ panelCount }}</span>
-        <NxpIconButton class="history-refresh" :label="t('history.refresh_records')" data-testid="history-refresh" @click="emit('refresh')">
-          <NxpIcon name="refresh" />
-        </NxpIconButton>
-      </div>
-      <NxpScrollArea class="history-entry-list history-level-list" :aria-label="panelTitle">
-        <div v-if="!props.selectedUserKey" class="history-empty-message">
-          <strong>{{ t("history.choose_run_users") }}</strong>
-          <span>{{ t("history.filter.user_day_help") }}</span>
+    <NxpScrollArea class="browser-detail-pane history-records-pane" :aria-label="panelTitle">
+      <NxpEmptyState v-if="!selectedUserKey" :title="t('history.choose_run_users')" :description="t('history.filter.user_day_help')" />
+      <template v-else>
+        <div class="history-records-heading">
+          <h3><NxpOverflowText>{{ selectedUserName || t('history.no_user_specified') }}</NxpOverflowText></h3>
+          <NxpBadge v-if="!loading && !error" tone="muted" data-testid="history-records-count">{{ t('history.records.count', { count: records.length }) }}</NxpBadge>
         </div>
-        <div v-else-if="!props.records.length" class="history-empty-message">{{ t("history.records.empty_day") }}</div>
-        <NxpButton
-          v-for="(record, index) in props.records"
-          v-else
-          :key="recordKey(record, index)"
-          class="history-entry"
-          :class="`history-status-${record.status || 'failed'}`"
-          type="button"
-          data-testid="history-entry"
-          @click="emit('openDetail', record)"
-        >
-          <span class="history-entry-bar" aria-hidden="true"></span>
-          <span class="history-entry-main">
-            <span class="history-entry-title">
-              <strong><NxpOverflowText>{{ formatDateTime(record.startTime) }} · {{ record.scriptName || "-" }}<template v-if="record.queueName"> · {{ record.queueName }}</template></NxpOverflowText></strong>
-              <NxpBadge :tone="statusTone(record.status)">{{ statusLabel(record.status) }}</NxpBadge>
+        <NxpLoadingState v-if="loading" :title="t('common.loading')" />
+        <template v-else-if="error">
+          <NxpEmptyState :title="error" tone="danger" />
+          <NxpButton @click="emit('retry')">{{ t('common.retry') }}</NxpButton>
+        </template>
+        <NxpEmptyState v-else-if="!records.length" :title="t('history.records.empty_day')" />
+        <div v-else class="history-record-cards">
+          <NxpButton
+            v-for="(record, index) in records"
+            :key="record.id || `${record.startTime}-${record.scriptName}-${index}`"
+            class="browser-list-item history-record-card"
+            data-testid="history-entry"
+            @click="emit('openDetail', record)"
+          >
+            <span class="history-card-title"><strong><NxpOverflowText>{{ record.scriptName || '-' }}<template v-if="record.queueName"> · {{ record.queueName }}</template></NxpOverflowText></strong><NxpBadge :tone="statusTone(record.status)">{{ statusLabel(record.status) }}</NxpBadge></span>
+            <NxpIcon name="chevronRight" class="history-record-arrow" />
+            <span class="browser-list-description">{{ formatDateTime(record.startTime) }} · {{ t('history.duration.label') }} {{ formatDurationMs(record.durationMs) }}</span>
+            <span class="browser-list-item-meta">
               <NxpBadge v-for="badge in historyBadges(record)" :key="badge.key" :tone="badge.tone" :title="badge.title">{{ badge.label }}</NxpBadge>
-              <span
-                class="plugin-slot history-plugin-slot"
-                data-plugin-slot="history.list.badges"
-                data-plugin-anchor="history.list.badges"
-                data-plugin-mode="list"
-                :data-plugin-primary-id="record.id || ''"
-                hidden
-              ></span>
+              <span class="plugin-slot history-plugin-slot" data-plugin-slot="history.list.badges" data-plugin-anchor="history.list.badges" data-plugin-mode="list" :data-plugin-primary-id="record.id || ''" hidden></span>
             </span>
-            <span class="history-entry-path">{{ recordPath(record) }} · {{ t("history.duration.label") }} {{ formatDurationMs(record.durationMs) }}</span>
-          </span>
-          <span class="history-entry-arrow" aria-hidden="true"><NxpIcon name="chevronRight" /></span>
-        </NxpButton>
-      </NxpScrollArea>
-    </section>
-    <HistoryDetailModal :record="props.detail" :fallback-user="props.selectedUserName" @close="emit('closeDetail')" />
+          </NxpButton>
+        </div>
+      </template>
+    </NxpScrollArea>
+    <HistoryDetailModal :record="detail" :fallback-user="selectedUserName" @close="emit('closeDetail')" />
   </div>
 </template>

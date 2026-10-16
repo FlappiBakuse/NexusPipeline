@@ -25,8 +25,7 @@ body { font-size: 14px; line-height: 1.55; }
 .workspace-page :is(.script-name, .queue-name, .user-name) { font-weight: 650; }
 .workspace-page .dispatch-runbar { border-radius: var(--radius-lg); padding: 20px; gap: var(--nx-space-2); }
 .workspace-page .running-execution { min-width: 0; }
-.workspace-page .plugin-browser { gap: 18px; }
-.workspace-page .history-browser { gap: 18px; }
+.workspace-page :is(.plugin-browser, .browser-layout) { gap: 18px; }
 .page-settings { display: flex; flex-direction: column; gap: var(--space-5); }
 .page-settings > :is(.nxp-page-header, .callout, .settings-categories, .settings-cards, .plugin-slot) { margin-block: 0; }
 .settings-categories { display: flex; flex-wrap: wrap; gap: var(--space-2); }
@@ -42,7 +41,7 @@ body { font-size: 14px; line-height: 1.55; }
 @media (max-height: 480px) {
   .page-main-scroll-fill > .nxp-scroll-viewport { overflow: auto; }
   .app-page-fill { flex: 0 0 auto; }
-  .app-page-fill :is(.plugin-browser, .history-browser) { flex: 0 0 auto; min-height: 320px; }
+  .app-page-fill :is(.plugin-browser, .browser-layout) { flex: 0 0 auto; min-height: 320px; }
 }
 
 .desktop-preferences-warning { margin: 12px 20px; padding: 12px; border: 1px solid var(--warn); border-radius: 10px; color: var(--warn); }
