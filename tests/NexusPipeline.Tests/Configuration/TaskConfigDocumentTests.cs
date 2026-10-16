@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json.Nodes;
 using NexusPipeline.Modules.Configuration.Scripting;
+using NexusPipeline.Modules.Execution.Judgement;
 using Xunit;
 
 namespace NexusPipeline.Tests.Configuration;
@@ -98,7 +99,7 @@ public sealed class TaskConfigDocumentTests
     }
 
     [Fact]
-    public void LargePublicDefinitionsDoNotExpandWritableConfigurationLimits()
+    public async Task LargePublicDefinitionsDoNotExpandWritableConfigurationLimits()
     {
         string root = Path.Combine(Path.GetTempPath(), "resource-limit-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
@@ -106,6 +107,17 @@ public sealed class TaskConfigDocumentTests
         File.WriteAllText(file, "{\"task\":[]}" + new string(' ', 2207014));
         var view = new TaskConfigView();
         view.AddResource("interface", file, "text");
+        string large = "{\"items\":[" + string.Join(',', Enumerable.Repeat("\"" + new string('界', 90) + "\"", 8000)) + "]}";
+        string catalog = Path.Combine(root, "catalog.json");
+        File.WriteAllText(catalog, large);
+        view.AddResource("catalog", catalog, "text");
+        var result = await TaskProtocolScriptRunner.ExecuteAsync<JsonObject>(
+            "const a=JSON.parse(nexus.readResource('interface').document); const b=JSON.parse(nexus.readResource('catalog').document); console.log(JSON.stringify({tasks:a.task.length,items:b.items.length,last:b.items[7999]}));",
+            new { protocolVersion = "0.3.0" }, id => view.ReadConfig(id, "0.3.0"),
+            id => view.ReadResource(id, "0.3.0"), true, default);
+        Assert.Equal(0, result["tasks"]!.GetValue<int>());
+        Assert.Equal(8000, result["items"]!.GetValue<int>());
+        Assert.Equal(new string('界', 90), result["last"]!.GetValue<string>());
         Assert.Contains("interface", view.DeclaredResourceIds);
         Assert.Throws<InvalidDataException>(() => view.AddConfig("config:test.json", file, "json"));
         File.WriteAllBytes(file, new byte[8 * 1024 * 1024 + 1]);

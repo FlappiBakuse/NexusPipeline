@@ -43,7 +43,7 @@ internal sealed class TaskConfigView
                 catch (InvalidDataException error) when (error.Message.StartsWith("resource_limit:", StringComparison.Ordinal))
                 { ResourceLimitExceeded = true; throw; }
             });
-            Serialized = new Lazy<string>(() =>
+            string Serialize(bool includeOutcome)
             {
                 TaskConfigMetrics.Count(6);
                 JsonNode? document = integrity == "mismatch" ? null : format == "text"
@@ -51,15 +51,16 @@ internal sealed class TaskConfigView
                     : Parsed.Value!.Document;
                 var result = new JsonObject { ["document"] = document, ["revision"] = revision, ["format"] = format };
                 if (integrity is not null) result["integrity"] = integrity;
+                if (includeOutcome) result["readOutcome"] = integrity == "mismatch" ? "integrity_mismatch" : "parsed";
                 return result.ToJsonString();
-            });
+            }
+            Serialized = new Lazy<string>(() => Serialize(false));
             Outcome = new Lazy<string>(() =>
             {
                 try
                 {
-                    var result = JsonNode.Parse(Serialized.Value)!.AsObject();
-                    result["readOutcome"] = integrity == "mismatch" ? "integrity_mismatch" : "parsed";
-                    return result.ToJsonString();
+                    // Large read-only interfaces share the script allocation budget; avoid a JSON round trip.
+                    return Serialize(true);
                 }
                 catch (Exception error) when (error is JsonException or YamlDotNet.Core.YamlException
                     or System.Text.DecoderFallbackException
