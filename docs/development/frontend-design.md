@@ -18,6 +18,9 @@
 | UI-10 | 空、加载、错误、成功及保存中状态可辨认，失败保留草稿与可恢复操作。 |
 | UI-11 | 文案走 i18n；中英文、长路径与无空格文本均可读取。 |
 | UI-12 | 使用主题和动效 token，响应 reduced motion；离开页面释放订阅、观察器和浮层。 |
+| UI-13 | 二级弹出页面使用公共 Modal；保存、取消等事务操作必须进入固定 footer，正文单独滚动。只读详情或图像查看器须按具体节点登记例外。 |
+| UI-15 | 设置分类由宿主管理展开与置顶：顶部按钮再次点击收起复位，卡片直接点击原位切换；插件公开卡片仅声明唯一标识和标题，宿主自动管理状态与订阅。验收须覆盖真实插件、无自有事件代码的动态卡片及卸载重挂载。 |
+| UI-14 | 运行流程只展示任务链、状态及必要的失败/证据内容；识别覆盖、完成判定和计划说明不在运行中或历史正文重复展示，计划诊断仅归属已绑定实例的任务计划。历史和绑定预览复用 TaskPlanItem。 |
 
 ## 表面层级与生命周期
 
@@ -38,6 +41,9 @@
 | 日期投影 | `features/history/components/RangePicker.vue` 的 `history-from/history-to` | `type=hidden`，承载现役日期控件的值投影，不增加可见交互。 |
 | 控件与媒体尺寸 | 统一控制高度、图标、边框、触控尺寸及媒体 aspect-ratio | 不作为业务卡片固定宽高的豁免。 |
 | 模态最大宽高 | 公共 Modal 的面板 max-width/max-height | 窄屏收缩，短视口内容可滚动，footer 可访问。 |
+| 任务卡片表面 | `features/history/components/TaskPlanItem.vue` 的实际 card 节点 | 历史和绑定计划统一使用 `--content-card-soft`；保留公共层级计算，超过第三层仍为透明分组。 |
+| 只读次级详情 | RunPlanModal；GameActivities ActivityCarousel 的 detailsOpen Modal | 无编辑事务，使用公共 Modal 标题栏关闭。活动设置不在例外内。 |
+| 全屏图片查看 | HistoryDetailModal 的 history-image-lightbox | 只显示图片与关闭操作，不承载编辑或保存。 |
 | 业务状态背景 | 输入、选中、危险、成功与警告提示 | 使用相应语义 token，不算普通卡片背景交替。 |
 
 ## 检查与验收

@@ -19,6 +19,8 @@
 | `nxp-dialog-popover` | `open` boolean；`false`；`id` string；未提供；`ariaLabel`/`closeLabel` string；空；`closeable` boolean；`true`；`labelledby` string；空 | `close`: `[]` | 默认 slot 是浮层内容。它使用 `role=dialog`；打开时聚焦内容，关闭/卸载时归还原焦点。定位由调用方提供。 |
 | `nxp-confirm-dialog` | `open` boolean；`false`；`title` string，必填；`message` string；空；`confirmLabel`/`cancelLabel` string；`Confirm`/`Cancel`；`confirmTone`: `primary\|danger`；`primary`；`busy` boolean；`false` | `close`、`cancel`、`confirm`: `[]` | 默认 slot 是补充内容。`busy=true` 时锁定 modal、隐藏关闭路径并阻止 cancel；confirm 事件由调用方决定异步提交。 |
 
+二级编辑页面将保存、取消等事务按钮放入 `footer` slot，不放在可滚动正文中；普通只读详情可使用标题栏关闭。Vue 使用 `#footer`，公开元素使用 `footer=true` 和 `slot="footer"`。
+
 Modal 默认 body 使用 `nxp-scroll-area`，调用方可以通过 `bodyClass` 指定自己的语义 class；该 class 只作为当前内容布局钩子，不应依赖内部滚动器的私有节点。
 
 Modal 的滚动内容末尾保留 24px 空白，滚轮与键盘滚动可将最后一项完整移到固定 footer 上方；这段空白属于滚动 viewport，footer 保持独立。桌面环境的背景遮罩从 40 DIP 标题栏下方开始，普通网页仍覆盖整个页面。

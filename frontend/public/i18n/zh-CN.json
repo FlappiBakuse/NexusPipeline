@@ -520,7 +520,7 @@
   "dispatch.warning.config_path_missing": "脚本未声明配置路径",
   "dispatch.warning.history_unavailable": "无法读取今日运行历史",
   "dispatch.warning.invalid_script_spec": "脚本专项配置解析失败",
-  "dispatch.warning.no_enabled_users": "脚本没有启用用户",
+  "dispatch.warning.no_enabled_users": "脚本没有启用的账号绑定：请检查账号是否启用，以及该账号下的脚本实例开关。",
   "dispatch.warning.script_missing": "任务引用的脚本实例不存在",
   "dispatch.will_skip": "将跳过",
   "history.apply_range": "应用范围",
@@ -1445,5 +1445,6 @@
   "execution.success_process_exit_only": "运行成功：自动化进程正常结束，任务未逐项核验。",
   "execution.success_with_partial_verification": "运行成功：已知任务完成，其他任务未逐项核验。",
   "execution.unconfirmed_worker": "尚未确认自动化进程正常结束。",
-  "execution.owned_process_nonzero": "自动化进程以非零退出码结束。"
+  "execution.owned_process_nonzero": "自动化进程以非零退出码结束。",
+  "api.error.no_enabled_bindings": "没有可运行的账号绑定：尚未绑定账号，或账号／脚本绑定未启用。请在“账号与配置”中启用绑定，并查看“检查运行计划”。"
 }

@@ -52,9 +52,9 @@
 - `nxp-modal`：公共二级编辑表面使用 `surface="secondary"`，宽版使用 `size="wide"`；设置 `footer` 布尔属性后会启用底部操作栏，`footer` 具名插槽中的内容显示在带分隔线的底部操作栏。
 - `nxp-schedule-card`：props 为 `item-id`、`panel-id`、`summary-label`、`summary-meta`、`days-label`、`days-aria-label`、`time-label`、`expanded`、`drag-label` 和 `drag-title`；`days`、`time`、`actions` 具名 slot 由组件统一排布；点击摘要发出 `toggle`，新展开状态位于 `CustomEvent.detail[0]`，`item-id` 同时用于排序身份。
 
-设置页的折叠卡片由宿主统一协调，插件可以接入同一协议：插件展开自己的卡片时向 window 派发 `nxp-settings-panel-toggle`（`detail` 为 `{ panelId }`，收起时 `panelId` 为 `null`），并监听 `nxp-settings-panel-state`（`detail` 为 `{ panelId }`）以收起其它卡片。字段帮助文案使用宿主工具提示约定：在控件容器上设置 `data-help="说明文字"`。
+设置页的折叠卡片由宿主统一协调，公开卡片由宿主直接同步 `expanded` 并接收 `toggle`，插件无需自行保存展开状态或转发全局事件。需要观察面板变化的消费者仍可使用同一协议：向 window 派发 `nxp-settings-panel-toggle`（`detail` 为 `{ panelId }`，收起时 `panelId` 为 `null`），并监听 `nxp-settings-panel-state`（`detail` 为 `{ panelId }`）以收起其它卡片。字段帮助文案使用宿主工具提示约定：在控件容器上设置 `data-help="说明文字"`。
 
-`settings.cards` 中的 `nxp-collapsible-card` 设置非空 `data-settings-panel` 和 `title` 后，宿主自动加入对应设置分类按钮，使用卡片的当前标题。所有分类按钮按下方卡片的实际顺序排列，沿用上述面板事件协议；卡片移除时入口一起移除，标题或位置变化时同步更新。面板标识须在设置页内唯一，不能与宿主内置标识重复。
+`settings.cards` 中的 `nxp-collapsible-card` 设置非空 `data-settings-panel` 和 `title` 后，宿主自动加入对应设置分类按钮，使用卡片的当前标题。所有分类按钮按卡片的原始顺序排列。顶部按钮首次点击置顶并展开，再次点击收起并恢复原顺序；直接点击卡片在当前位置切换。宿主统一管理公开卡片的展开状态、事件订阅和置顶；卡片移除时入口一起移除，标题或位置变化时同步更新。面板标识须在设置页内唯一，不能与宿主内置标识重复。
 
 前端资源必须位于插件目录的 `web/` 下；宿主只允许 `GET`/`HEAD` 访问 `/plugin-assets/{plugin}/{relative}`，执行路径包含校验、扩展名白名单和文件存在校验，不提供目录浏览。允许的文件类型为 JS/MJS、CSS、JSON、SVG、PNG、JPG/JPEG、WEBP、GIF、ICO、WOFF/WOFF2。`plugin.json`、配置、密钥、程序集和调试符号不属于公开资源。
 

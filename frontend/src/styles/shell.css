@@ -250,7 +250,8 @@ body[data-wallpaper="on"] :is(.card, .section-surface, .list-surface, .table-sur
 .settings-cards-plugin-slot > .plugin-surface { display: contents; }
 .settings-cards > [data-settings-panel],
 .settings-cards-plugin-slot > .plugin-surface > [data-settings-panel] > .nxp-collapsible-card { min-width: 0; order: 0; }
-.settings-cards > [data-settings-panel]:is(.is-expanded, .nxp-collapsible-card-open), .settings-cards-plugin-slot > .plugin-surface > [data-settings-panel] > .nxp-collapsible-card-open { order: -1; }
+.settings-cards > [data-settings-pinned="true"],
+.settings-cards-plugin-slot > .plugin-surface > [data-settings-pinned="true"] > .nxp-collapsible-card { order: -1; }
 .settings-service-fields { display: grid; gap: var(--space-5); }
 .settings-service-grid { margin: 0; }
 .form-grid.settings-service-grid-primary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -1033,9 +1034,9 @@ body[data-wallpaper="on"][data-theme="light"] {
 .proxy-custom-fields { display: grid; gap: var(--space-4); margin-top: var(--space-4); }
 .proxy-custom-fields[hidden] { display: none; }
 
-.dispatch-runbar { display: grid; grid-template-columns: minmax(130px, .45fr) minmax(0, 1.55fr) auto; align-items: end; gap: var(--space-3); padding: 16px; border: 1px solid var(--content-card-border); border-radius: var(--radius-lg); background: var(--content-card); }
+.dispatch-runbar { display: grid; grid-template-columns: minmax(130px, .45fr) minmax(0, 1.55fr) auto; align-items: end; gap: var(--nx-space-2); padding: 16px; border: 1px solid var(--content-card-border); border-radius: var(--radius-lg); background: var(--content-card); }
 .dispatch-runbar .field { min-width: 0; }
-.dispatch-runbar .control-action { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2); min-width: 264px; align-items: stretch; }
+.dispatch-runbar .control-action { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--nx-space-2); min-width: 264px; align-items: stretch; }
 .dispatch-runbar .control-action button { width: auto; min-width: 0; }
 .dispatch-runbar [hidden] { display: none; }
 .compact-card { border-radius: var(--radius-md); }

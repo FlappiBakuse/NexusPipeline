@@ -637,8 +637,8 @@ internal sealed class ExecutionRunner
                         Mode = exec.Mode,
                         StartTime = DateTime.Now,
                         EndTime = DateTime.Now,
-                        Status = "failed",
-                        ResultDetail = "脚本实例未配置启用用户，已跳过",
+                        Status = "skipped",
+                        ResultDetail = "脚本实例没有启用的账号绑定，已跳过",
                         ResultCode = "run.no_enabled_users",
                     };
                     RunRecord publishedSkipped = PersistRecord(exec, skipped, new List<string>(), Array.Empty<RunScreenshot>(), queue.Name);

@@ -106,17 +106,22 @@ internal sealed class ExecutionValidator
         {
             return;
         }
+        if (!checkProcessConflict) return;
         if (!string.IsNullOrWhiteSpace(userName)
-            && !string.IsNullOrWhiteSpace(script.ConfigPath)
             && _users.ResolveEnabledBinding(script, userName) is null)
         {
-            throw new InvalidOperationException($"用户「{userName}」不存在或已禁用");
+            throw new ExecutionAdmissionException(NoEnabledBindings(script.Name));
         }
         if (string.IsNullOrWhiteSpace(userName) && !_users.ResolveEnabledBindings(script).Any())
         {
-            throw new InvalidOperationException($"脚本「{script.Name}」未配置启用用户，无法运行");
+            throw new ExecutionAdmissionException(NoEnabledBindings(script.Name));
         }
     }
+
+    internal static ExecutionAdmissionFailure NoEnabledBindings(string targetName) => new(
+        ExecutionAdmissionFailureCode.NoEnabledBindings,
+        $"「{targetName}」没有可运行的账号绑定：尚未绑定账号，或账号／脚本绑定未启用。请在账号与配置中启用绑定，并检查运行计划。",
+        Resource: targetName);
 
     public void ValidateQueueStart(DispatchQueue queue)
     {

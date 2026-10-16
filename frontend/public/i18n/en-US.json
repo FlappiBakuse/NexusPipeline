@@ -520,7 +520,7 @@
   "dispatch.warning.config_path_missing": "The script has no declared configuration path",
   "dispatch.warning.history_unavailable": "Today's run history is unavailable",
   "dispatch.warning.invalid_script_spec": "The specialized script configuration could not be resolved",
-  "dispatch.warning.no_enabled_users": "The script has no enabled users",
+  "dispatch.warning.no_enabled_users": "No enabled account binding: check both the account and its script instance switch.",
   "dispatch.warning.script_missing": "The task references a missing script instance",
   "dispatch.will_skip": "Will skip",
   "history.apply_range": "Apply range",
@@ -1445,5 +1445,6 @@
   "execution.success_process_exit_only": "Run succeeded: the automation process exited normally; tasks were not individually verified.",
   "execution.success_with_partial_verification": "Run succeeded: known tasks completed; other tasks were not individually verified.",
   "execution.unconfirmed_worker": "Normal completion of the automation process has not been confirmed.",
-  "execution.owned_process_nonzero": "The automation process exited with a nonzero code."
+  "execution.owned_process_nonzero": "The automation process exited with a nonzero code.",
+  "api.error.no_enabled_bindings": "No runnable account bindings: no account is bound, or the account/script binding is disabled. Enable the binding in Accounts & Configuration and check the run plan."
 }

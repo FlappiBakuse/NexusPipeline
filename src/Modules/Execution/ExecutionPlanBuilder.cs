@@ -324,6 +324,9 @@ internal sealed class ExecutionPlanBuilder
             })
             .ToList();
 
+        if (!allowFailedSpec && tasks.Count > 0 && tasks.All(task => task.Script is not null && task.ResolvedUsers?.Count == 0))
+            throw new ExecutionAdmissionException(ExecutionValidator.NoEnabledBindings(queue.Name));
+
         PlannedQueueTask? blocked = checkProcessConflicts
             ? tasks.FirstOrDefault(task => task.Script is not null && ExecutionValidator.IsScriptRunning(task.Script))
             : null;

@@ -51,6 +51,11 @@ internal sealed class ExecutionExplainService
                 plan.Admission);
         }
 
+        if (plan.ResolvedUsers?.Count == 0)
+        {
+            failure = ExecutionValidator.NoEnabledBindings(plan.Script.Name);
+            AddWarning(warnings, "no_enabled_users", ("scriptId", plan.Script.Id));
+        }
         AddScriptWarnings(plan.Script, plan.ResolvedSpec, warnings);
         var historyCache = new Dictionary<string, IReadOnlyDictionary<string, int>>(StringComparer.Ordinal);
         List<ExecutionExplainUser> users = BuildUsers(
@@ -145,6 +150,9 @@ internal sealed class ExecutionExplainService
                 NullIfEmpty(script.ConfigPath),
                 NullIfEmpty(script.LogPath)));
         }
+
+        if (plan.Tasks.Count > 0 && plan.Tasks.All(task => task.Script is not null && task.ResolvedUsers?.Count == 0))
+            failure = ExecutionValidator.NoEnabledBindings(plan.Queue.Name);
 
         return BuildResult(
             "queue",

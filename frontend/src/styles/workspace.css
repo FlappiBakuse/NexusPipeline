@@ -23,7 +23,7 @@ body { font-size: 14px; line-height: 1.55; }
 .dashboard-state h3 { font-size: 19px; }
 .workspace-page :is(.script-card, .queue-card, .global-user-card) { min-width: 0; }
 .workspace-page :is(.script-name, .queue-name, .user-name) { font-weight: 650; }
-.workspace-page .dispatch-runbar { border-radius: var(--radius-lg); padding: 20px; gap: 16px; }
+.workspace-page .dispatch-runbar { border-radius: var(--radius-lg); padding: 20px; gap: var(--nx-space-2); }
 .workspace-page .running-execution { min-width: 0; }
 .workspace-page .plugin-browser { gap: 18px; }
 .workspace-page .history-browser { gap: 18px; }
