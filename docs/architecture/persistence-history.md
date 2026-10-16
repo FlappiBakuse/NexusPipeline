@@ -1,10 +1,8 @@
 # 持久化与历史
 
-## 历史与运行时数据
+本页定义历史记录与运行状态的存储职责、生命周期和文件布局；配置快照事务见[配置专题](configuration.md)，未知现场处置见[恢复专题](recovery.md)。
 
-
-
-### 历史与日志落盘
+## 历史与日志落盘
 
 任务摘要维护最近实际运行与最近准入停止两条索引。仅有准入证据、且任务报告未产生执行尝试和最终任务结果的整次运行才进入纯准入索引；已执行过任务的运行即使重试时被阻断，仍是最近实际运行，同时记录准入停止。加载旧索引时先按保留的运行记录重新分类再比较时间；已删除的索引项继续作为 tombstone，不能因重建而恢复更旧的成功记录。
 
@@ -21,9 +19,7 @@
 - 保留天数 `HistoryRetentionDays`（默认 7）每日清理一次（启动时 + 调度器每日首次 tick）；上限固定为 180 天；管理器日志 `logs/nexus-pipeline-YYYY-MM-DD.log` 同样按保留天数清理。
 - 审计行 `[审计] 来源 | 操作（详情）`，来源 web/manage/cli/scheduler/system；`GET /api/status` 轮询豁免不记录。
 
-
-
-### 运行状态目录
+## 运行状态目录
 
 正常服务运行产生的三类内部状态集中在安装目录下的 `.nxp/`：
 
@@ -45,15 +41,17 @@
 
 `.nxp-update/`、`.nxp-backup/`、`.nxp-version` 与根目录 update worker 继续作为更新 crash-recovery protocol 的组成部分，保持原路径和生命周期。`scheduler-state.json` 中持久化的 `LastSchedulerCheck` 是崩溃恢复的 replay fence，调度器的实际定时扫描从当前分钟开始，启动或停顿期间错过的历史 occurrence 不会被补发。
 
-
-
-### 文件布局治理规范
+## 文件布局治理规范
 
 运行时文件系统的统一约定（新增或调整持久化路径时必须遵循，并同步更新本节、[配置专题](configuration.md#运行时目录与快照)和[运行状态目录](#运行状态目录)的布局树）：
 
-1. **单一事实源**：全部路径常量集中在 `src/Platform/Storage/RuntimeStateLayout.cs` 与 `src/Modules/Configuration/Paths/ConfigSwapPaths.cs`，业务代码不得自行拼接安装根相对路径。
-2. **目录分类归位**：目录按生命周期分四类——常驻持久（config/、user-assets/、plugins/、data 持久层、.nxp/state/）、常驻可重建（.nxp/runtime/、按保留期滚动的 logs/ 与 history/）、会话事务临时（data work/、.nxp/runtime/staging/）、隔离归档（data-trash/、judge-scripts/orphaned/）。**临时类必须有明确的清理路径**（收尾清理或启动清扫），隔离现场在确认提交前保留。
-3. **命名约定**：目录与普通数据文件一律 kebab-case（`data-trash`、`swap-backup`、`store-txn`、`store-meta.json`），**禁止 dot 后缀命名**（`store.previous` 这类"目录带扩展名"的形式不允许出现，dot 后缀仅允许作为文件扩展名本身，如 `.json`、`.log`、`.jpg` 与临时文件的 `.tmp`）；进程内部隐藏标记用 dot 前缀（`.nxp/`、`.session`、`.session.bak` 与 swap-backup 内的 `.meta` 清单）；数据文件名为 `<名称>.json`（磁盘 JSON 一律 PascalCase 字段 + UTF-8 + 原子写）。隔离/归档条目命名 `<主名>-<yyyyMMddHHmmssfff>-<Guid:N>`，staging 子目录命名 `<名称>.<Guid:N>`。
+1. **单一事实源**：内部运行目录由 [RuntimeStateLayout](../../src/NexusPipeline.Maintenance/Platform/Storage/RuntimeStateLayout.cs) 定位，用户配置工作区由 [ConfigPaths](../../src/Modules/Configuration/Paths/ConfigPaths.cs) 定位；业务调用复用对应 owner 的路径入口。
+2. **目录分类归位**：目录按生命周期分四类——常驻持久（config/、user-assets/、plugins/、data 持久层、.nxp/state/，以及按保留期管理的 logs/ 与 history/）、常驻可重建（.nxp/runtime/）、会话事务临时（data work/、.nxp/runtime/staging/）、隔离归档（data-trash/、judge-scripts/orphaned/）。**临时类必须有明确的清理路径**（收尾清理或启动清扫），隔离现场在确认提交前保留。
+3. **命名约定**：目录与普通数据文件一律 kebab-case（`data-trash`、`swap-backup`、`store-txn`、`store-meta.json`），普通目录不使用类似 `store.previous` 的扩展名式后缀；文件使用 `.json`、`.log`、`.jpg` 或临时 `.tmp` 扩展名，事务暂存名按下述专门格式；进程内部隐藏标记用 dot 前缀（`.nxp/`、`.session`、`.session.bak` 与 swap-backup 内的 `.meta` 清单）；数据文件名为 `<名称>.json`（磁盘 JSON 使用各存储协议明确的字段命名、UTF-8 与原子写；历史记录采用 PascalCase，Dashboard 布局等显式 Web schema 使用 camelCase，不统一改写现有数据）。隔离/归档条目命名 `<主名>-<yyyyMMddHHmmssfff>-<Guid:N>`，staging 子目录命名 `<名称>.<Guid:N>`。
 4. **损坏保全**：JSON 解析失败时原文件改名为 `*.corrupt-<时间戳>-<guid>` 保留现场，等待人工处理，不被后续保存覆盖；快照事务 manifest/commit 损坏时写入阻断标记，拒绝继续猜测写入。
 5. **持久化格式变更**：改变既有 API、字段或目录布局时，先明确当前协议和升级前备份要求；运行时只处理当前协议，未知现场保留并告警，版本发布说明提供用户可执行的备份提示。
-6. **有意保留的复杂度**（经评估为必要，勿"简化"）：`.session`/`.session.bak` 双标记是主标记损坏时拒绝猜测恢复的安全兜底；`limits.json` 启动生成默认文件是既定行为；更新事务目录留在安装根是更新 crash-recovery 协议的一部分；`outputs/` 已无写入方，仅保留保留期清理与更新包白名单作为旧安装残留的自愈防御；history 运行目录内层 JSON 与目录同名（`<脚本名称>-HH-mm-ss/<HH-mm-ss>.json`）为当前布局。
+6. **恢复与清理边界**：`.session`/`.session.bak` 双标记是主标记损坏时拒绝猜测恢复的安全兜底；`limits.json` 启动生成默认文件是既定行为；更新事务目录留在安装根是更新 crash-recovery 协议的一部分；`outputs/` 已无写入方，仅保留保留期清理与更新包白名单作为旧安装残留的自愈防御；history 运行目录内层 JSON 与目录同名（`<脚本名称>-HH-mm-ss/<HH-mm-ss>.json`）为当前布局。
+
+## 历史兼容与清理
+
+不支持的历史索引原字节保留，任务摘要 API 返回 HTTP 409 / unsupported_history_index。当前历史记录标记 SchemaVersion=1；旧记录不解析，用户使用完整备份的旧版查看。历史清理仅删除当前记录完整确权的运行目录，未知附件、旧记录、外部日志和输出保留。

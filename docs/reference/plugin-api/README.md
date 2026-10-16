@@ -18,6 +18,4 @@
 
 任务级事实与选择重试见[专项任务协议](task-protocol.md)。
 
-## 今日概览与外链
-
-Plugin API 2.2 新增 `IPluginHostContext.DashboardCards`，`Register(PluginDashboardCardDescriptor)` 返回必须释放的句柄。本地 ID 不含 owner/冒号，Host 冻结真实 owner 并拒绝重复。Frontend API 1.7 新增 `host.dashboard.registerCard(localId, renderer)` 与 `host.navigation.openExternal(httpsUrl)`。renderer 返回 cleanup，并响应 surface.signal 取消。[目录、默认偏好和平台语义](../../architecture/dashboard.md)。
+今日概览注册与外链见 [Frontend API](frontend.md) 和 [卡片生命周期](../../architecture/dashboard.md)。请求来源和本机操作见[访问契约](access.md)，客户端会话见[网页登录契约](browser-login.md)。

@@ -1,8 +1,10 @@
 # 控制面架构
 
+ControlPlane 负责传输、认证、目标解析和结果映射，业务状态与持久化由 Modules 用例持有。公开入口矩阵见[控制面参考](../reference/control-plane.md)。
+
 ## 统一控制面与 CLI
 
-常驻服务是运行时数据、执行状态和持久化写入的拥有者。Web 请求、正式 CLI 和 `manage` 交互菜单都通过同一组 `/api/*` 控制端点进入服务，服务内部继续复用 `DispatchCenter`、`ConfigEditCommands`、执行准入、配置交换和各资源的持久化事务。CLI 进程只承担参数解析、目标解析、请求发送和结果格式化，不持有第二套配置写入路径。
+常驻服务是运行时数据、执行状态和持久化写入的拥有者。Web 请求、正式 CLI 和 `manage` 交互菜单都通过同一组 `/api/*` 控制端点进入服务，服务内部继续复用 `ExecutionDispatcher`、`ConfigEditCommands`、执行准入、配置交换和各资源的持久化事务。CLI 进程只承担参数解析、目标解析、请求发送和结果格式化，不持有第二套配置写入路径。
 
 正式 CLI 的协议边界如下：
 
@@ -16,8 +18,6 @@
 - `run script/queue --dry-run` 以及对应的 Control API 只构建当前冻结计划并调用执行状态的共享准入评估，返回用户状态、资源、任务、完成操作和稳定失败码，不登记运行或触发副作用。
 
 轻量模式运行常驻服务、托盘、Control API 和静态 Web UI，不创建或恢复 Electron 会话。两种模式均按 `AllowRemoteAccess` 选择监听地址，并共享现役认证、来源校验和实际端口防火墙策略。轻量模式冷启动的默认浏览器由 `OpenDesktopOnStartup` 控制；显式后台和重启不自动打开，重复双击与托盘激活则主动打开实际监听端口。
-
-
 
 ## MCP Agent 控制面
 
@@ -34,7 +34,7 @@ MCP 的启动条件和运行语义如下：
 - `LightweightMode` 保留 Control API 和 Web UI；MCP 是否启动仍由 `McpEnabled` 独立决定。
 - 宿主停止时按 MCP → Scheduler/恢复任务 → Web → 插件的顺序执行清理；MCP 停止异常只记录诊断，不阻断其余清理步骤。
 
-MCP 只保留面向 Agent 的核心子集（22 个工具）：只读工具覆盖状态、诊断、运行计划解释、脚本、用户、队列、运行、历史、插件、脱敏设置和更新状态；常规变更工具覆盖运行/取消、脚本与用户的创建、绑定管理和取消系统操作。删除类、密钥、插件安装/开关、商店、服务重启和更新应用等高风险或低频运维操作不进入 MCP 工具面，由本地 CLI 与管理页面承担。工具元数据和调用前的应用策略同时参与风险控制，队列完成后的休眠、重启、关机、退出等系统操作保持由本地管理路径配置。
+MCP 只保留面向 Agent 的核心子集（入口见[控制面能力表](../reference/control-plane.md#能力现状)）：只读工具覆盖状态、诊断、运行计划解释、脚本、用户、队列、运行、历史、插件、脱敏设置和更新状态；常规变更工具覆盖运行/取消、脚本与用户的创建、绑定管理和取消系统操作。删除类、密钥、插件安装/开关、商店、服务重启和更新应用等高风险或低频运维操作不进入 MCP 工具面，由本地 CLI 与管理页面承担。工具元数据和调用前的应用策略同时参与风险控制，队列完成后的休眠、重启、关机、退出等系统操作保持由本地管理路径配置。
 
 MCP 控制面采用以下行为契约：
 
@@ -61,25 +61,29 @@ MCP 适配层只接收类型化参数，经过 `McpToolContext` 解析稳定 ID/
 }
 ```
 
-MCP 的网络边界独立于 Web 的远程访问设置：Kestrel 只监听 loopback，Host 仅允许 `127.0.0.1`、`localhost` 和 `::1`，Origin 必须为相同 loopback 主机与 MCP 端口，请求体上限为 2 MiB。`get_settings` 对 Webhook、SMTP 和访问令牌只返回空值或 `enc:***` 占位符；secret mutation 只接受显式高风险工具，值经过既有 DPAPI 存储且不会进入返回值或 `Audit.Mcp` 日志。
+MCP 的网络边界独立于 Web 的远程访问设置：Kestrel 只监听 loopback，Host 仅允许 `127.0.0.1`、`localhost` 和 `::1`，Origin 必须为相同 loopback 主机与 MCP 端口，请求体上限为 2 MiB。`get_settings` 对 Webhook、SMTP 和访问令牌只返回空值或 `enc:***` 占位符；MCP 不提供秘密读取或写入工具，秘密管理由专用 Web/CLI 入口承担。
 
+## 实时事件
 
+运行观察通过 `GET /api/events` 提供 SSE：服务端使用 Bearer 认证、15 秒注释心跳和每连接 256 项有界队列；连接断开或队列溢出时前端回到 `/api/status` 同步，运行日志按 200ms 窗口批量发布并在每个运行结束前刷出尾批次。
+
+SSE 使用 `event` 字段承载 `run.status`、`run.log`、`system.action`、`host.status`、`stream.ready` 和 `stream.missed`，数据统一为 `{schemaVersion, sequence, timestamp, data}`；事件总线不执行网络写入，也不保留 replay journal，前端按运行 ID 与日志序列去重。
 
 ## 控制面边界
 
 常驻服务由 `HostCompositionRoot` 装配并持有执行状态和持久化端口。公共初始化只读取约束和设置快照；服务与 Web-only 模式取得单实例互斥体后，统一进入 `HostedRuntimeInitializer`，由其完成实体加载、修复和恢复。Web 与 CLI 都是协议适配层：
 
 ```text
-Web 请求      ─┐
-CLI / manage ─┼→ Control API → ApiXxxHandler → Application Command/核心服务 → DataStore/Logger
-Scheduler    ─┘                         └→ ExecutionStateStore/ExecutionRunner
+Web / CLI / manage → Control API → ApiXxxHandler → Application Command/核心服务
+Scheduler → IExecutionService / IFrozenQueueExecutionService → ExecutionDispatcher
+                                                     └→ ExecutionStateStore/ExecutionRunner
 ```
 
-`manage` 的菜单类通过正式 CLI/Control API 查询和变更，不直接读取或修改运行时实体状态，也不直接调用 `DataStore` 或 `ConfigStore`。Control API 的查询端点在 Normal 与 Lightweight 两种服务模式均可用；Lightweight 只移除静态资源服务。
+`manage` 的菜单类通过正式 CLI/Control API 查询和变更，不直接读取或修改运行时实体状态，也不直接调用 `DataStore` 或 `ConfigStore`。Control API 的查询端点在 Normal 与 Lightweight 两种服务模式均可用；Lightweight 保留静态 Web UI，仅不启用 Electron 桌面会话。
 
 MCP 位于同一主进程的协议适配层。`McpHost` 只在 `McpEnabled` 时创建 Kestrel listener，使用 `McpPort` 绑定 loopback；工具类依赖 `McpToolContext`，再调用 Application Commands/核心服务。MCP 不依赖 Web handler、CLI 路由或前端投影；写入对象还会经过 `McpPolicy` 行为校验。
 
-重启请求从 Web handler 或 CLI 进入 `Bootstrap.RequestRestart`，再由 `HostRestartCoordinator` 取得 `DispatchCenter` 提供的 `HostMaintenanceLease`。租约与 `ExecutionStateStore` 的执行、编辑、宿主配置变更协调锁共享同一准入域；CLI 通过 `/api/settings/restart` 复用该入口。`run_queue` 额外使用 `McpPolicy.ValidateQueueExecution` 复核已有队列的完成操作，因此队列创建来源不会改变 MCP 执行护栏。
+重启请求从 Web handler 或 CLI 进入 `Bootstrap.RequestRestart`，再由 `HostRestartCoordinator` 取得 `ExecutionDispatcher` 提供的 `HostMaintenanceLease`。租约与 `ExecutionStateStore` 的执行、编辑、宿主配置变更协调锁共享同一准入域；CLI 通过 `/api/settings/restart` 复用该入口。`run_queue` 额外使用 `McpPolicy.ValidateQueueExecution` 复核已有队列的完成操作，因此队列创建来源不会改变 MCP 执行护栏。
 
 重启恢复使用实例身份协议：`HostInstance` 为每个进程生成一次 `instanceId`，接受重启的旧实例生成 `handoffId` 并随 `NexusPipeline.exe restart --handoff <id>` 交给子进程，子进程在 `StartupPipeline.RunRestart` 中接管。`GET /api/status` 暴露 `instanceId`、`restartHandoffId` 与 `actualPort`，`POST /api/settings/restart` 返回 `newPort`、`handoffId` 与旧实例 `instanceId`。控制面前端按配置端口与宿主顺延端口逐个读取 `/api/status`，只接受携带本次 `handoffId` 且 `instanceId` 不同于旧实例的应答，再跳转到 `actualPort`；无关 HTTP 服务、仍在应答的旧实例与超时都不会触发跳转。只读的 `GET /api/status` 因此放行同主机的其他端口并返回可读 CORS 应答，其余接口保持同源要求。
 

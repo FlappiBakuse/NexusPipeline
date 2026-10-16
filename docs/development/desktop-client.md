@@ -2,9 +2,13 @@
 
 根 `NexusPipeline.exe` 是 Host、CLI 和启动入口。普通服务默认只运行后台与托盘；无参数启动和托盘显示激活同一桌面窗口；登录任务使用 `service` 入口并遵循 `OpenDesktopOnStartup`。`resources/desktop/NexusPipeline.Desktop.exe` 是固定 Electron 44.5.1 运行时；业务 Vue 从 Host 内嵌资源通过实际 localhost 端口提供。用户安装无需 Node、npm 或 SDK，.NET Desktop 与 ASP.NET Core Runtime 10 x64 仍为运行依赖。
 
+## 启动模式与窗口
+
 轻量模式保留服务、托盘及命名管道激活入口，关闭桌面会话恢复和进程监控。首次启动根据 `OpenDesktopOnStartup` 决定是否在服务就绪后打开默认浏览器，显式后台与重启抑制自动打开；重复双击及托盘主动打开。`web` 命令保留控制台生命周期和主动打开网页，重启不会重复弹出浏览器。浏览器 URL 只含实际 localhost 端口，不带访问令牌，Host 不管理用户浏览器生命周期。托盘通过 `DesktopCoordinator` 串行切换轻量模式；仅 `DesktopModeSettingsCommands` 写入该字段，保存完成再退出受信任桌面，停止失败时补偿该字段并重新读取实际状态。关闭轻量模式保持惰性打开，`OpenDesktopOnStartup` 不随切换修改，正式默认值保持关闭。
 
 窗口 X 隐藏；托盘退出或更新才停止桌面。服务行为中的界面语言、侧边栏的主题偏好与窗口位置分别持久化在当前实例私有运行目录，不改变 Host 通知语言。标准业务尺寸为 1280×720 DIP，另加 40 DIP 标题安全区；初始尺寸按工作区物理像素档位计算并夹紧，恢复时重新验证显示器、DPI 和最大化状态。工作区无法容纳最小界面时由用户选择继续打开、仅后台或取消打开。
+
+## 身份与进程所有权
 
 监督 IPC 使用同 SID、同权限等级、NETWORK 显式拒绝的命名管道；内核提供 PID、映像路径与启动时间，双 nonce HMAC 验证两端身份。根入口只能发出激活请求，不读取桌面会话密钥。记录签名、私有 ACL 和完整进程家族约束重连、关闭和资源替换。未知或损坏记录保留原字节并拒绝接管。
 
@@ -12,9 +16,15 @@
 
 重复启动与托盘打开共用串行激活，桌面返回显示结果；隐藏/最小化窗口保留路由与输入。断连时保留显示请求，在受信任管道重连后完成；确认主进程与已记录家族退出后允许重新创建。归属错误保全现场并拒绝接管。托盘操作失败显示反馈并记录稳定原因。
 
+## 重启与更新协作
+
 Host 重启保留桌面 renderer，准备状态暂停轮询和写操作，dirty guard 处理编辑取舍。重连候选固定实际端口、Host 实例、构建身份、当前 frame、路由和导航代次；只在当前候选获准后导航。意外断线保持当前 renderer 并显示恢复状态；有限重试后给出重试/退出操作。更新前刷新偏好并退出整个已确认桌面家族，剩余进程或文件锁使替换失败。
 
+## 界面与桥接边界
+
 工作空间界面沿用八个业务页面、真实表单与状态；导航分为日常运行、配置管理和工具设置。详情与编辑进入公共二级表面，公开插件 slot/route 和 Native Custom Elements 名称保持稳定。网页保持自身浏览器行为，桌面桥提供版本化的窗口、客户端偏好、导航和纯文本复制接口。复制仅接受当前受信任业务主 frame 的字符串，最大 64 KiB；不提供剪贴板读取或其他格式访问。桌面继续拒绝浏览器权限请求。
+
+## 运行时载荷
 
 桌面窗口、任务栏和桌面 EXE 图标统一来自 `src/NexusPipeline.ico`。构建使用 Windows 资源 API 替换桌面 EXE 的图标组与图像，保留其他资源及原执行权限清单；窗口使用同一 ICO 的独立载荷文件。运行时文件索引固定替换后的 EXE 和 ICO 字节。
 
@@ -32,4 +42,4 @@ Test Host 在现役 runner 设置 `NEXUS_SYSTEM_ACTION_DRYRUN=1` 时替代防火
 
 `node tests/run.mjs gate --id host.integration.restart-update` 使用 asInvoker 完整软件验证整包交换、启动凭据、恢复和用户字节保全。该 runner 构建隔离的 0.17.0 全清单与 0.17.1 精简清单，验证不同补丁及文件集合的更新、损坏回滚和未知文件保全；夹具不改变产品目标版本。`host.integration.desktop` 执行十四项原生 TypeScript 用例、八项真实载荷只读校验以及真实 Electron 中的页面、偏好、重启草稿保留、明确刷新、renderer 崩溃恢复、隐藏后重复激活、断连重连和主进程退出后重开。原生提示的确认动作在自动化中由受控替代记录；DPI、多屏和生产 UAC 继续人工验收。生产软件清单要求 requireAdministrator，自动化不触发 UAC。
 
-载荷资源与 canonical buildInputs 见[构建身份](build-identity.md)，访问能力见[Plugin API](../reference/plugin-api/managed.md)，人工与远端未验证范围见[状态](../STATUS.md)。
+载荷资源与 canonical buildInputs 见[构建身份](build-identity.md)，访问能力见[Plugin API](../reference/plugin-api/managed.md)，人工与远端未验证范围见[状态](../status.md)。

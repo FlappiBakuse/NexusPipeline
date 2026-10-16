@@ -22,13 +22,14 @@
         "README.md",
         "frontend/public/help/runtime-prerequisites.html"
       ],
-      "testDomains": [
-        "governanceDomains.docs-links-contracts"
-      ],
       "authorityFor": [
         "user-operations"
       ],
-      "status": "current"
+      "status": "current",
+      "validationPaths": [
+        "tools/check-doc-links.mjs",
+        "tests/policy.json"
+      ]
     },
     {
       "id": "user.guide.en",
@@ -46,13 +47,14 @@
       "codePaths": [
         "README.md"
       ],
-      "testDomains": [
-        "governanceDomains.docs-links-contracts"
-      ],
       "authorityFor": [
         "user-operations-english"
       ],
-      "status": "current"
+      "status": "current",
+      "validationPaths": [
+        "tools/check-doc-links.mjs",
+        "tests/policy.json"
+      ]
     },
     {
       "id": "architecture.index",
@@ -71,18 +73,19 @@
       "codePaths": [
         "tools/check-doc-links.mjs"
       ],
-      "testDomains": [
-        "governanceDomains.docs-links-contracts"
-      ],
       "authorityFor": [
         "architecture-navigation"
       ],
-      "status": "current"
+      "status": "current",
+      "validationPaths": [
+        "tools/check-doc-links.mjs",
+        "tests/policy.json"
+      ]
     },
     {
       "id": "architecture.overview",
       "path": "architecture/overview.md",
-      "summary": "产品边界、核心概念、模块结构与已接受约束",
+      "summary": "产品边界、核心概念、依赖方向和跨模块不变量",
       "topics": [
         "产品边界",
         "核心概念",
@@ -97,15 +100,15 @@
         "src/Host",
         "src/Host/Composition/HostCompositionRoot.cs"
       ],
-      "testDomains": [
-        "hostAreas.core",
-        "hostAreas.control"
-      ],
       "authorityFor": [
         "product-boundary",
         "architecture-module-map"
       ],
-      "status": "current"
+      "status": "current",
+      "validationPaths": [
+        "tools/check-doc-links.mjs",
+        "tests/policy.json"
+      ]
     },
     {
       "id": "architecture.execution",
@@ -127,14 +130,14 @@
         "src/Modules/Execution/Runtime/RunSession.cs",
         "src/Modules/Execution/ExecutionDispatcher.cs"
       ],
-      "testDomains": [
-        "hostAreas.execution",
-        "systemGroups.execution"
-      ],
       "authorityFor": [
         "execution-lifecycle"
       ],
-      "status": "current"
+      "status": "current",
+      "validationPaths": [
+        "tools/check-doc-links.mjs",
+        "tests/policy.json"
+      ]
     },
     {
       "id": "architecture.configuration",
@@ -161,16 +164,15 @@
         "tests/NexusPipeline.Tests/Configuration/ConfigRepairTests.cs",
         "tools/NexusPipeline.TaskProtocolTests/ConfigRepairProbe.cs"
       ],
-      "testDomains": [
-        "hostAreas.config",
-        "hostAreas.persistence",
-        "systemGroups.config"
-      ],
       "authorityFor": [
         "configuration-editing",
         "configuration-snapshot"
       ],
-      "status": "current"
+      "status": "current",
+      "validationPaths": [
+        "tools/check-doc-links.mjs",
+        "tests/policy.json"
+      ]
     },
     {
       "id": "architecture.recovery",
@@ -191,15 +193,14 @@
         "src/Modules/Configuration/Snapshots",
         "src/Modules/Plugins/Repository"
       ],
-      "testDomains": [
-        "hostAreas.persistence",
-        "systemGroups.plugins",
-        "systemGroups.update"
-      ],
       "authorityFor": [
         "current-recovery"
       ],
-      "status": "current"
+      "status": "current",
+      "validationPaths": [
+        "tools/check-doc-links.mjs",
+        "tests/policy.json"
+      ]
     },
     {
       "id": "architecture.scheduling",
@@ -218,13 +219,14 @@
       "codePaths": [
         "src/Modules/Scheduling"
       ],
-      "testDomains": [
-        "hostAreas.scheduling"
-      ],
       "authorityFor": [
         "scheduling-occurrence"
       ],
-      "status": "current"
+      "status": "current",
+      "validationPaths": [
+        "tools/check-doc-links.mjs",
+        "tests/policy.json"
+      ]
     },
     {
       "id": "architecture.judgement-logs",
@@ -244,14 +246,14 @@
         "src/Modules/Execution/Judgement",
         "src/Modules/Execution/Monitoring"
       ],
-      "testDomains": [
-        "hostAreas.judgement",
-        "hostAreas.execution"
-      ],
       "authorityFor": [
         "judgement-and-log-monitoring"
       ],
-      "status": "current"
+      "status": "current",
+      "validationPaths": [
+        "tools/check-doc-links.mjs",
+        "tests/policy.json"
+      ]
     },
     {
       "id": "architecture.persistence-history",
@@ -272,14 +274,14 @@
         "src/Modules/Configuration/Snapshots",
         "CHANGELOG.md"
       ],
-      "testDomains": [
-        "hostAreas.persistence",
-        "hostAreas.observability"
-      ],
       "authorityFor": [
         "persistence-and-history"
       ],
-      "status": "current"
+      "status": "current",
+      "validationPaths": [
+        "tools/check-doc-links.mjs",
+        "tests/policy.json"
+      ]
     },
     {
       "id": "architecture.observability",
@@ -300,14 +302,14 @@
         "src/Modules/Diagnostics",
         "src/Platform"
       ],
-      "testDomains": [
-        "hostAreas.observability",
-        "hostAreas.control"
-      ],
       "authorityFor": [
         "observability-and-notification"
       ],
-      "status": "current"
+      "status": "current",
+      "validationPaths": [
+        "tools/check-doc-links.mjs",
+        "tests/policy.json"
+      ]
     },
     {
       "id": "architecture.control",
@@ -328,14 +330,14 @@
         "src/ControlPlane",
         "src/Modules/Execution/Realtime"
       ],
-      "testDomains": [
-        "hostAreas.control",
-        "systemGroups.control"
-      ],
       "authorityFor": [
         "control-plane-architecture"
       ],
-      "status": "current"
+      "status": "current",
+      "validationPaths": [
+        "tools/check-doc-links.mjs",
+        "tests/policy.json"
+      ]
     },
     {
       "id": "architecture.plugins",
@@ -356,14 +358,14 @@
         "src/Modules/Plugins/Repository/PluginInstallRecovery.cs",
         "src/NexusPipeline.Plugin.Abstractions"
       ],
-      "testDomains": [
-        "hostAreas.plugins",
-        "systemGroups.plugins"
-      ],
       "authorityFor": [
         "plugin-runtime-ownership"
       ],
-      "status": "current"
+      "status": "current",
+      "validationPaths": [
+        "tools/check-doc-links.mjs",
+        "tests/policy.json"
+      ]
     },
     {
       "id": "architecture.update",
@@ -395,14 +397,14 @@
         "update-policy.json",
         "src/NexusPipeline.Maintenance/Platform/Storage/VolumeSpaceProbe.cs"
       ],
-      "testDomains": [
-        "hostAreas.update",
-        "systemGroups.update"
-      ],
       "authorityFor": [
         "update-lifecycle"
       ],
-      "status": "current"
+      "status": "current",
+      "validationPaths": [
+        "tools/check-doc-links.mjs",
+        "tests/policy.json"
+      ]
     },
     {
       "id": "architecture.frontend",
@@ -424,15 +426,14 @@
         "frontend/src/plugin-bridge",
         "frontend/src/ui"
       ],
-      "testDomains": [
-        "frontendGroups.ui",
-        "frontendGroups.bridge",
-        "governanceDomains.architecture-boundaries"
-      ],
       "authorityFor": [
         "frontend-architecture"
       ],
-      "status": "current"
+      "status": "current",
+      "validationPaths": [
+        "tools/check-doc-links.mjs",
+        "tests/policy.json"
+      ]
     },
     {
       "id": "plugin-api.index",
@@ -452,15 +453,14 @@
         "src/NexusPipeline.Plugin.Abstractions",
         "frontend/src/plugin-bridge"
       ],
-      "testDomains": [
-        "hostAreas.plugins",
-        "frontendGroups.bridge",
-        "governanceDomains.docs-links-contracts"
-      ],
       "authorityFor": [
         "plugin-api-navigation"
       ],
-      "status": "current"
+      "status": "current",
+      "validationPaths": [
+        "tools/check-doc-links.mjs",
+        "tests/policy.json"
+      ]
     },
     {
       "id": "plugin-api.manifest",
@@ -480,13 +480,14 @@
         "src/Modules/Plugins",
         "src/NexusPipeline.Plugin.Abstractions"
       ],
-      "testDomains": [
-        "hostAreas.plugins"
-      ],
       "authorityFor": [
         "plugin-manifest-contract"
       ],
-      "status": "current"
+      "status": "current",
+      "validationPaths": [
+        "tools/check-doc-links.mjs",
+        "tests/policy.json"
+      ]
     },
     {
       "id": "plugin-api.managed",
@@ -506,13 +507,14 @@
         "src/NexusPipeline.Plugin.Abstractions",
         "src/Modules/Plugins"
       ],
-      "testDomains": [
-        "hostAreas.plugins"
-      ],
       "authorityFor": [
         "managed-plugin-contract"
       ],
-      "status": "current"
+      "status": "current",
+      "validationPaths": [
+        "tools/check-doc-links.mjs",
+        "tests/policy.json"
+      ]
     },
     {
       "id": "plugin-api.execution-provider",
@@ -533,15 +535,14 @@
         "src/Modules/Execution/ProviderWorkerPort.cs",
         "src/Modules/Plugins/Runtime/PluginExecutionProviderRegistry.cs"
       ],
-      "testDomains": [
-        "hostAreas.execution",
-        "hostAreas.plugins",
-        "systemGroups.maa"
-      ],
       "authorityFor": [
         "execution-provider-contract"
       ],
-      "status": "current"
+      "status": "current",
+      "validationPaths": [
+        "tools/check-doc-links.mjs",
+        "tests/policy.json"
+      ]
     },
     {
       "id": "plugin-api.frontend",
@@ -562,14 +563,14 @@
         "frontend/src/ui",
         "frontend/src/router.ts"
       ],
-      "testDomains": [
-        "frontendGroups.bridge",
-        "frontendGroups.ui"
-      ],
       "authorityFor": [
         "frontend-plugin-contract"
       ],
-      "status": "current"
+      "status": "current",
+      "validationPaths": [
+        "tools/check-doc-links.mjs",
+        "tests/policy.json"
+      ]
     },
     {
       "id": "plugin-api.data-specialized",
@@ -590,14 +591,14 @@
         "src/Modules/Execution/Judgement",
         "src/Modules/Configuration"
       ],
-      "testDomains": [
-        "hostAreas.plugins",
-        "hostAreas.judgement"
-      ],
       "authorityFor": [
         "data-specialized-plugin-contract"
       ],
-      "status": "current"
+      "status": "current",
+      "validationPaths": [
+        "tools/check-doc-links.mjs",
+        "tests/policy.json"
+      ]
     },
     {
       "id": "ui.catalog",
@@ -617,14 +618,14 @@
         "frontend/src/ui/register.ts",
         "frontend/src/ui"
       ],
-      "testDomains": [
-        "frontendGroups.ui",
-        "frontendGroups.bridge"
-      ],
       "authorityFor": [
         "public-ui-catalog"
       ],
-      "status": "current"
+      "status": "current",
+      "validationPaths": [
+        "tools/check-doc-links.mjs",
+        "tests/policy.json"
+      ]
     },
     {
       "id": "ui.actions-inputs",
@@ -644,13 +645,14 @@
         "frontend/src/ui/primitives",
         "frontend/src/ui/register.ts"
       ],
-      "testDomains": [
-        "frontendGroups.ui"
-      ],
       "authorityFor": [
         "public-ui-actions-inputs"
       ],
-      "status": "current"
+      "status": "current",
+      "validationPaths": [
+        "tools/check-doc-links.mjs",
+        "tests/policy.json"
+      ]
     },
     {
       "id": "ui.selection",
@@ -670,13 +672,14 @@
         "frontend/src/ui/primitives",
         "frontend/src/ui/composites/NxpDateRangePicker.vue"
       ],
-      "testDomains": [
-        "frontendGroups.ui"
-      ],
       "authorityFor": [
         "public-ui-selection"
       ],
-      "status": "current"
+      "status": "current",
+      "validationPaths": [
+        "tools/check-doc-links.mjs",
+        "tests/policy.json"
+      ]
     },
     {
       "id": "ui.overlays-feedback",
@@ -696,13 +699,14 @@
         "frontend/src/ui/primitives",
         "frontend/src/ui/composites"
       ],
-      "testDomains": [
-        "frontendGroups.ui"
-      ],
       "authorityFor": [
         "public-ui-overlays-feedback"
       ],
-      "status": "current"
+      "status": "current",
+      "validationPaths": [
+        "tools/check-doc-links.mjs",
+        "tests/policy.json"
+      ]
     },
     {
       "id": "ui.layout-lists",
@@ -722,13 +726,14 @@
         "frontend/src/ui/composites",
         "frontend/src/ui/primitives"
       ],
-      "testDomains": [
-        "frontendGroups.ui"
-      ],
       "authorityFor": [
         "public-ui-layout-lists"
       ],
-      "status": "current"
+      "status": "current",
+      "validationPaths": [
+        "tools/check-doc-links.mjs",
+        "tests/policy.json"
+      ]
     },
     {
       "id": "testing.index",
@@ -748,14 +753,14 @@
         "tests/run.mjs",
         "tools/check-doc-links.mjs"
       ],
-      "testDomains": [
-        "governanceDomains.test-policy",
-        "governanceDomains.docs-links-contracts"
-      ],
       "authorityFor": [
         "testing-navigation"
       ],
-      "status": "current"
+      "status": "current",
+      "validationPaths": [
+        "tools/check-doc-links.mjs",
+        "tests/policy.json"
+      ]
     },
     {
       "id": "testing.commands",
@@ -780,13 +785,14 @@
         "tests/support/npm-inputs.mjs",
         "tests/support/prepared-artifact.mjs"
       ],
-      "testDomains": [
-        "governanceDomains.tooling"
-      ],
       "authorityFor": [
         "test-commands"
       ],
-      "status": "current"
+      "status": "current",
+      "validationPaths": [
+        "tools/check-doc-links.mjs",
+        "tests/policy.json"
+      ]
     },
     {
       "id": "testing.domains",
@@ -806,13 +812,14 @@
         ".github/workflows/ci.yml",
         "tests/run.mjs"
       ],
-      "testDomains": [
-        "governanceDomains.tooling"
-      ],
       "authorityFor": [
         "test-domain-selection"
       ],
-      "status": "current"
+      "status": "current",
+      "validationPaths": [
+        "tools/check-doc-links.mjs",
+        "tests/policy.json"
+      ]
     },
     {
       "id": "testing.policy",
@@ -831,13 +838,14 @@
       "codePaths": [
         "AGENTS.md"
       ],
-      "testDomains": [
-        "governanceDomains.test-policy"
-      ],
       "authorityFor": [
         "test-policy"
       ],
-      "status": "current"
+      "status": "current",
+      "validationPaths": [
+        "tools/check-doc-links.mjs",
+        "tests/policy.json"
+      ]
     },
     {
       "id": "testing.fixtures",
@@ -858,14 +866,14 @@
         "src/Modules/Configuration",
         "src/Modules/Plugins/Repository"
       ],
-      "testDomains": [
-        "hostAreas.persistence",
-        "hostAreas.config"
-      ],
       "authorityFor": [
         "current-format-fixtures"
       ],
-      "status": "current"
+      "status": "current",
+      "validationPaths": [
+        "tools/check-doc-links.mjs",
+        "tests/policy.json"
+      ]
     },
     {
       "id": "development.index",
@@ -886,14 +894,14 @@
         "build.cmd",
         "tests/run.mjs"
       ],
-      "testDomains": [
-        "governanceDomains.docs-links-contracts",
-        "governanceDomains.tooling"
-      ],
       "authorityFor": [
         "development-navigation"
       ],
-      "status": "current"
+      "status": "current",
+      "validationPaths": [
+        "tools/check-doc-links.mjs",
+        "tests/policy.json"
+      ]
     },
     {
       "id": "development.setup",
@@ -914,14 +922,14 @@
         "build.cmd",
         "frontend/package.json"
       ],
-      "testDomains": [
-        "hostAreas.core",
-        "frontendGroups.ui"
-      ],
       "authorityFor": [
         "development-environment"
       ],
-      "status": "current"
+      "status": "current",
+      "validationPaths": [
+        "tools/check-doc-links.mjs",
+        "tests/policy.json"
+      ]
     },
     {
       "id": "development.workflow",
@@ -944,13 +952,14 @@
         "tools/doc-contracts.mjs",
         "tools/governance.test.mjs"
       ],
-      "testDomains": [
-        "governanceDomains.docs-links-contracts"
-      ],
       "authorityFor": [
         "development-workflow"
       ],
-      "status": "current"
+      "status": "current",
+      "validationPaths": [
+        "tools/check-doc-links.mjs",
+        "tests/policy.json"
+      ]
     },
     {
       "id": "development.release",
@@ -970,14 +979,14 @@
         "build.cmd",
         ".github/workflows/release.yml"
       ],
-      "testDomains": [
-        "hostAreas.update",
-        "governanceDomains.tooling"
-      ],
       "authorityFor": [
         "development-release"
       ],
-      "status": "current"
+      "status": "current",
+      "validationPaths": [
+        "tools/check-doc-links.mjs",
+        "tests/policy.json"
+      ]
     },
     {
       "id": "history.index",
@@ -996,17 +1005,18 @@
         "CHANGELOG.md",
         "docs/history/README.md"
       ],
-      "testDomains": [
-        "governanceDomains.docs-links-contracts"
-      ],
       "authorityFor": [
         "history-navigation"
       ],
-      "status": "current"
+      "status": "current",
+      "validationPaths": [
+        "tools/check-doc-links.mjs",
+        "tests/policy.json"
+      ]
     },
     {
       "id": "decisions.v0166",
-      "path": "decisions/ADR-0166-001.md",
+      "path": "decisions/adr-0166-001.md",
       "summary": "本轮架构边界、公共 UI、当前格式与测试治理决定",
       "topics": [
         "ADR",
@@ -1023,14 +1033,14 @@
         "frontend/src/ui/composites",
         "tests/run.mjs"
       ],
-      "testDomains": [
-        "governanceDomains.architecture-boundaries",
-        "governanceDomains.tooling"
-      ],
       "authorityFor": [
         "v0166-development-decision"
       ],
-      "status": "current"
+      "status": "current",
+      "validationPaths": [
+        "tools/check-doc-links.mjs",
+        "tests/policy.json"
+      ]
     },
     {
       "id": "plugin-api.task-protocol",
@@ -1049,13 +1059,14 @@
         "src/Modules/Execution/Judgement/TaskProtocolRun.cs",
         "src/Modules/Configuration/Exchange/TaskSelectionTransaction.cs"
       ],
-      "testDomains": [
-        "governanceDomains.docs-links-contracts"
-      ],
       "authorityFor": [
         "task-protocol-host"
       ],
-      "status": "current"
+      "status": "current",
+      "validationPaths": [
+        "tools/check-doc-links.mjs",
+        "tests/policy.json"
+      ]
     },
     {
       "id": "development.build-identity",
@@ -1075,14 +1086,14 @@
         "tools/schemas",
         "src/NexusPipeline.Maintenance/Updates/ApplicationBuildIdentity.cs"
       ],
-      "testDomains": [
-        "backend.updates-restart",
-        "host.release-contract"
-      ],
       "authorityFor": [
         "build-identity"
       ],
-      "status": "current"
+      "status": "current",
+      "validationPaths": [
+        "tools/check-doc-links.mjs",
+        "tests/policy.json"
+      ]
     },
     {
       "id": "development.desktop",
@@ -1103,14 +1114,14 @@
         "src/NexusPipeline.Maintenance/Updates/ApplicationPayload.cs",
         "tools/application_build.py"
       ],
-      "testDomains": [
-        "hostAreas.control",
-        "hostAreas.update"
-      ],
       "authorityFor": [
         "desktop-client"
       ],
-      "status": "current"
+      "status": "current",
+      "validationPaths": [
+        "tools/check-doc-links.mjs",
+        "tests/policy.json"
+      ]
     },
     {
       "id": "development.local-acceptance",
@@ -1128,18 +1139,19 @@
         "tools/installer-space.iss",
         "tools/installer_artwork.py"
       ],
-      "testDomains": [
-        "governanceDomains.docs-links-contracts"
-      ],
       "authorityFor": [
         "local-acceptance-build"
       ],
-      "status": "current"
+      "status": "current",
+      "validationPaths": [
+        "tools/check-doc-links.mjs",
+        "tests/policy.json"
+      ]
     },
     {
       "id": "architecture.dashboard",
       "path": "architecture/dashboard.md",
-      "summary": "实例级卡片目录、布局事务、编辑预览、条件保存和生命周期",
+      "summary": "卡片目录、持久化提交、编辑草稿与同步",
       "topics": [
         "Dashboard",
         "卡片",
@@ -1153,14 +1165,14 @@
         "frontend/src/features/dashboard",
         "src/ControlPlane/Http/ApiDashboardHandler.cs"
       ],
-      "testDomains": [
-        "backend",
-        "frontend"
-      ],
       "authorityFor": [
         "dashboard-cards"
       ],
-      "status": "current"
+      "status": "current",
+      "validationPaths": [
+        "tools/check-doc-links.mjs",
+        "tests/policy.json"
+      ]
     },
     {
       "id": "plugin-api.browser-login",
@@ -1183,11 +1195,183 @@
         "desktop/src/main/browser-login.ts",
         "frontend/src/platform/browser-login.ts"
       ],
-      "testDomains": [
-        "hostAreas.plugins"
-      ],
       "authorityFor": [
         "browser-login-contract"
+      ],
+      "status": "current",
+      "validationPaths": [
+        "tools/check-doc-links.mjs",
+        "tests/policy.json"
+      ]
+    },
+    {
+      "id": "decisions.adr-0169-001",
+      "path": "decisions/adr-0169-001.md",
+      "summary": "ADR-0169-001 · 执行事实、角色与恢复准入",
+      "topics": [
+        "ADR-0169-001 · 执行事实、角色与恢复准入"
+      ],
+      "aliases": [],
+      "codePaths": [
+        "tools/check-doc-links.mjs"
+      ],
+      "validationPaths": [
+        "tools/check-doc-links.mjs"
+      ],
+      "authorityFor": [
+        "document.decisions.adr-0169-001"
+      ],
+      "status": "historical"
+    },
+    {
+      "id": "decisions.index",
+      "path": "decisions/README.md",
+      "summary": "决策记录",
+      "topics": [
+        "决策记录"
+      ],
+      "aliases": [],
+      "codePaths": [
+        "tools/check-doc-links.mjs"
+      ],
+      "validationPaths": [
+        "tools/check-doc-links.mjs"
+      ],
+      "authorityFor": [
+        "document.decisions.index"
+      ],
+      "status": "current"
+    },
+    {
+      "id": "development.documentation",
+      "path": "development/documentation.md",
+      "summary": "文档维护规范",
+      "topics": [
+        "文档维护规范"
+      ],
+      "aliases": [],
+      "codePaths": [
+        "tools/check-doc-links.mjs"
+      ],
+      "validationPaths": [
+        "tools/check-doc-links.mjs"
+      ],
+      "authorityFor": [
+        "document.development.documentation"
+      ],
+      "status": "current"
+    },
+    {
+      "id": "development.frontend-design",
+      "path": "development/frontend-design.md",
+      "summary": "前端设计规范",
+      "topics": [
+        "前端设计规范"
+      ],
+      "aliases": [],
+      "codePaths": [
+        "tools/check-doc-links.mjs"
+      ],
+      "validationPaths": [
+        "tools/check-doc-links.mjs"
+      ],
+      "authorityFor": [
+        "document.development.frontend-design"
+      ],
+      "status": "current"
+    },
+    {
+      "id": "history.changelog-earlier",
+      "path": "history/changelog-earlier.md",
+      "summary": "v0.16 版本历史",
+      "topics": [
+        "v0.16 版本历史"
+      ],
+      "aliases": [],
+      "codePaths": [
+        "tools/check-doc-links.mjs"
+      ],
+      "validationPaths": [
+        "tools/check-doc-links.mjs"
+      ],
+      "authorityFor": [
+        "document.history.changelog-earlier"
+      ],
+      "status": "historical"
+    },
+    {
+      "id": "index",
+      "path": "README.md",
+      "summary": "NexusPipeline 文档",
+      "topics": [
+        "NexusPipeline 文档"
+      ],
+      "aliases": [],
+      "codePaths": [
+        "tools/check-doc-links.mjs"
+      ],
+      "validationPaths": [
+        "tools/check-doc-links.mjs"
+      ],
+      "authorityFor": [
+        "document.index"
+      ],
+      "status": "current"
+    },
+    {
+      "id": "reference.control-plane",
+      "path": "reference/control-plane.md",
+      "summary": "控制面能力现状（Control Plane）",
+      "topics": [
+        "控制面能力现状（Control Plane）"
+      ],
+      "aliases": [],
+      "codePaths": [
+        "tools/check-doc-links.mjs"
+      ],
+      "validationPaths": [
+        "tools/check-doc-links.mjs"
+      ],
+      "authorityFor": [
+        "document.reference.control-plane"
+      ],
+      "status": "current"
+    },
+    {
+      "id": "reference.plugin-api.access",
+      "path": "reference/plugin-api/access.md",
+      "summary": "请求来源与本机交互",
+      "topics": [
+        "请求来源与本机交互"
+      ],
+      "aliases": [],
+      "codePaths": [
+        "tools/check-doc-links.mjs"
+      ],
+      "validationPaths": [
+        "tools/check-doc-links.mjs"
+      ],
+      "authorityFor": [
+        "document.reference.plugin-api.access"
+      ],
+      "status": "current"
+    },
+    {
+      "id": "status",
+      "path": "status.md",
+      "summary": "项目状态（Status）",
+      "topics": [
+        "项目状态（Status）"
+      ],
+      "aliases": [],
+      "codePaths": [
+        "tools/check-doc-links.mjs"
+      ],
+      "validationPaths": [
+        "tools/check-doc-links.mjs"
+      ],
+      "authorityFor": [
+        "document.status"
       ],
       "status": "current"
     }

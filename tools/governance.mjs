@@ -92,9 +92,9 @@ export function contextFor(root, { paths = [], keywords = [], owners = [], partn
     || /^## 3\./.test(section) && paths.some(file => file.startsWith("src/"))
     || /^## 5\./.test(section) && (partnerRoot || paths.some(file => file.startsWith("frontend/")) || terms.some(term => /ui|frontend|plugin/.test(term))));
   return { apiFacts, agents: { file: "AGENTS.md", headings: agents.split(/\r?\n/).filter(line => /^#{1,3} /.test(line)), sections },
-    topics, testDomains: [...new Set(topics.flatMap(topic => topic.testDomains || []))].sort(),
+    topics, validationPaths: [...new Set(topics.flatMap(topic => topic.validationPaths || []))].sort(),
     publicElements, uiReference: "docs/reference/ui/README.md", uiReview: "Host imports internal Nxp components; plugins consume public nxp-* elements. Explain why candidates cannot be reused and choose primitive/composite/feature-local.",
-    partner: partnerRoot ? { root: path.resolve(partnerRoot), lock: JSON.parse(fs.readFileSync(repositoryPath(partnerRoot, "", "host.lock.json"), "utf8")), head: git(partnerRoot, "rev-parse", "HEAD"), sourceFingerprint: sourceFingerprint(partnerRoot) }
+    partner: partnerRoot ? { root: path.resolve(partnerRoot), lock: JSON.parse(fs.readFileSync(repositoryPath(partnerRoot, "", "contracts/host-compatibility.json"), "utf8")), head: git(partnerRoot, "rev-parse", "HEAD"), sourceFingerprint: sourceFingerprint(partnerRoot) }
       : { status: "NOT_CHECKED", reason: "No explicit Plugins path" } };
 }
 

@@ -16,7 +16,7 @@
 | 修改宿主更新 | 更新发现、下载校验、启动应用和失败恢复 | [更新专题](architecture/update.md) |
 | 验证一处修改 | 测试层级、逻辑分组、正式模式和本地反馈差别 | [测试索引](testing/README.md)、[测试域](testing/domains.md) |
 | 开始或维护一次开发 | 环境、构建、协作和发行前置条件 | [开发索引](development/README.md) |
-| 查当前未解决问题 | 当前状态和仍需完成的验证 | [项目状态](STATUS.md) |
+| 查当前未解决问题 | 当前状态和仍需完成的验证 | [项目状态](status.md) |
 | 追溯已发布版本 | 版本事实、历史文档和决策理由 | [历史索引](history/README.md)、[CHANGELOG](../CHANGELOG.md) |
 
 ## 按资料类型浏览

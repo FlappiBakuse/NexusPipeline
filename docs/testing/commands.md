@@ -107,7 +107,6 @@ python -m unittest discover -s tools/tests -p test_pe_manifest.py
 
 固定对端插件的编辑用例由其 `tests/policy.json` 声明的 `editorCaseIds` 约束，保留旧版 BetterGI/ZZZ 的两项编辑用例。MaaStellaSora 的旧 MXU 协议没有编辑入口；新版 MFA 协议要求真实编辑脚本的选择、保留无关设置与重复执行证据，入口读取实际 manifest，缺少声明或文件即失败。
 
-
 ## 本机批次诊断
 
 `node tests/run.mjs gate --id host.integration.installation-adoption` 验证手动覆盖后的安装归属登记与中断恢复。运行前设置绝对路径 `NEXUS_ADOPTION_BASELINE_PACKAGE`（官方 0.17.3 完整包）和 `NEXUS_ADOPTION_BASELINE_RELEASE`（独立取得的官方 Release API JSON，包含资产 digest）；入口只读核对旧包，使用当前源码构建 asInvoker Test Host。19 个固定场景覆盖辅助程序存在／缺失时的五个登记阶段、维护暂停的三个提交阶段、独立证明后补回缺失的共同入口与 README，以及未知辅助程序、离线和自行修改清单的拒绝路径，以及完整还原原载荷后维护恢复的中断路径；成功登记场景还验证卸载保留用户数据。HTTP、Setup 资产和注册表隔离范围为受控夹具；结果不代表官方在线发布、真实 Setup 安装或 UAC 验收。失败现场保留在本轮外部报告目录。
@@ -123,7 +122,6 @@ python -m unittest discover -s tools/tests -p test_pe_manifest.py
 同一轮可将 `NEXUS_MAINTENANCE_PREPARED_ROOT` 指向该 gate 的已有运行目录，复用完整应用和未来目标夹具；入口核对实际产品源码字节。设置 `NEXUS_MAINTENANCE_REBUILD_NATIVE=1` 时重新编译原生安装夹具，允许安装器模板独立改变，其他产品源码必须一致。报告分别保留应用构建身份、原生脚本摘要、探针源码和本次场景结果；复用不改变原产物的源码身份。已完成场景只按冻结载荷清单删除可重建的匹配字节，未知文件、配置、数据和失败记录保留。
 
 安装归属 gate 要求 `NEXUS_ADOPTION_BASELINE_PACKAGE` 和 `NEXUS_ADOPTION_BASELINE_RELEASE` 为独立认证的官方 v0.17.3 原包和 Release API JSON。原包只读验证；受控归属接管案例使用当前未发行 schema 2 源和明确标注的未来版本夹具，不执行候选来识别角色、不将夹具称为已发行旧 reader。官方旧版 Setup 首跳、生产 UAC 和原生安装/卸载仍须人工验收。缺输入直接拒绝运行，不伪造旧包。
-
 
 ## 本机低负载与构建复用
 

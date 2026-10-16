@@ -1,4 +1,10 @@
-# 前端架构
+# Frontend API
+
+<!-- contract:versions -->
+| Contract | Version |
+|---|---|
+| frontend-api | 1.7 |
+<!-- /contract:versions -->
 
 `host.clientSessions.get()` 取得 Host 确认的客户端事实；`host.browserLogin.open(request, signal)` 打开本插件 ready flow，返回完成 Promise 与取消操作，不返回采集原始值。见[网页登录契约](browser-login.md)。
 
@@ -35,7 +41,7 @@
 
 前端模块运行在管理页面同源环境，可以使用 DOM、构建后的 ES module 和 CSS。Frontend API 采用精确版本匹配：只有 `1.7` 被接受，其他主次版本均拒绝加载，不提供兼容桥。启用且兼容的插件会直接加载其前端模块；宿主继续校验运行状态、Frontend API 版本、公开资源路径、扩展名和文件存在性。插件前端应使用 Vue/TypeScript/Vite 或等效构建链生成 `web/` 静态资源，通过公开 `nxp-*` Native Custom Elements 以及 slot surface 与宿主交互，不依赖宿主 Vue 内部实现。
 
-公开元素注册表位于 frontend/src/ui/register.ts 的 NEXUS_PUBLIC_ELEMENTS，当前包含 39 个元素，完整清单与复合元件契约见[公共 UI 目录](../ui/README.md)。插件使用注册表登记的元素。
+公开元素注册表位于 frontend/src/ui/register.ts 的 NEXUS_PUBLIC_ELEMENTS，完整清单与复合元件契约见[公共 UI 目录](../ui/README.md)。插件使用注册表登记的元素。
 
 元素在 light DOM 下渲染，自身不产生额外布局盒：插件的结构卡片（`nxp-collapsible-card`、`nxp-section-card`）与宿主卡片一样直接参与设置页卡片栅格，展开态因此按同一规则置顶。`nxp-switch-list` 把多个 `nxp-switch-setting` 组成与设置页一致的开关列表。
 
@@ -52,9 +58,13 @@
 
 前端资源必须位于插件目录的 `web/` 下；宿主只允许 `GET`/`HEAD` 访问 `/plugin-assets/{plugin}/{relative}`，执行路径包含校验、扩展名白名单和文件存在校验，不提供目录浏览。允许的文件类型为 JS/MJS、CSS、JSON、SVG、PNG、JPG/JPEG、WEBP、GIF、ICO、WOFF/WOFF2。`plugin.json`、配置、密钥、程序集和调试符号不属于公开资源。
 
+## 外观服务
+
 外观表面使用 CSS Variables 作为主题 token；主题名称、token 名和值均经过长度和字符校验。`setTokens` 的 token 名必须匹配 `--[A-Za-z0-9_-]{1,96}`，值不超过 4096 字符且不含控制字符；token 应用在 `body` 上，因此优先于主题 token 并跨主题切换保持有效，直到 `clearTokens()` 或替换新集合。`setBackground(surface)` 接受 `url`（仅 `http`、`https`、`blob` 和 `data` 协议，其余拒绝）、`blurPx`（0–40）、`dimPercent`（0–80）、`surfaceTransparencyPercent`（0–50）与 `secondarySurfaceTransparency`（布尔，默认 `true`）。背景地址在交给 `setBackground` 后由外观表面托管：替换新地址或调用 `clearBackground()` 时宿主回收上一个 `blob:` Object URL，插件无需重复释放。外观变化继续广播 `nexus:appearance-changed`；`createAppearanceHost()` 不接收插件名参数。
 
 壁纸配置、配额、文件校验、去重、轮换、配色与持久化属于插件业务，由插件通过自己的资产 scope、插件 Web API 与前端模块实现；宿主只提供通用资产存储、二进制 Web API 与通用外观表面。旧宿主壁纸数据原地保留，不导入或转换；在新目录重新配置。
+
+## 运行资格与管理投影
 
 `capabilities` 仅作为发现元数据，除已明确接入的当前扩展端口外不会自动获得业务语义。`script-profile` 等未来能力需要宿主明确接入；`background-jobs` 不会被当作专项脚本选择器。代码插件默认关闭，启用后需重启服务；运行状态可在 `/api/status` 的 `configuredEnabled`、`runtimeEnabled`、`state`、`minHostVersion`、`runtimeErrorCode`、`hasFrontend` 和 `frontendApiVersion` 字段中查看。宿主版本低于 `minHostVersion` 时使用 `state=Incompatible` 与 `runtimeErrorCode=plugin_incompatible_host`，不会解析专项插件、注册其能力或加载 managed-code 程序集；Plugin API 不兼容使用 `plugin_incompatible_api`。插件商店列表与详情另提供 `compatibilityCode`，使用 `host_version_too_low`、`plugin_api_incompatible` 或 `invalid_version` 区分更新阻断原因。前端描述中的 `defaultLocale` 与 `localization` 只包含该插件已声明并通过校验的资源。
 
@@ -62,10 +72,14 @@
 
 ## 请求来源与本机交互
 
-Plugin API 2.2 只定义 `General`、`HostFilePicker`、`NativeConfigEditor` 三类访问。每条 `PluginWebApiRoute` 必须显式设置 `Access`；声明式 UI 的读取、保存和每个动作分别显式设置访问类，缺失或未知值使注册失败。`PluginWebApiRequest.ConnectionKind` 由实际传输对端确定为 `Local`、`Remote` 或 `Unknown`，不采信 Host、Origin、Referer 或转发头。General 在三种来源均可用；后两类只允许 Local，在读取参数、请求体或执行回调前拒绝 Remote/Unknown。SDK 包及程序集继续为 2.0.0，与接口 2.2 独立治理。
+访问类别、来源判定与 host.getCapabilities 见[访问契约](access.md)。
 
-Frontend API 1.7 的 `host.getCapabilities(signal?)` 返回冻结只读的 schema 1 对象：`connectionKind` 为 local/remote/unknown，`operations` 精确包含 general、hostFilePicker、nativeConfigEditor，每项有 allowed 与 denyReason。拒绝原因分别为 host_file_picker_requires_local、native_config_editor_requires_local、client_origin_unverified。缓存绑定同源、认证和当前 Host 实例；重连或重启使旧读取失效。它用于呈现界面，后端每次操作仍重新判断来源。
+路由处理器接收 `RouteSurface`：`element`、`routeToken`、`segments`、`signal`。必须在 element 内挂载，返回清理函数（或最终返回函数的 Promise）；路由离开、替换或插件停止时先中止 signal，再执行清理。不得查询宿主私有页面容器。
 
-原生文件选择只能禁用“浏览”按钮，路径输入仍可编辑并保存。普通账号、脚本、队列、计划、运行、历史、插件安装与诊断是 General；诊断 ZIP 写入宿主受控 staging，返回明确路径。脚本文件读取只在已批准脚本根、配置位置及游戏程序父目录范围内，拒绝链接与路径穿越，不枚举宿主磁盘。
+## 卡片 renderer
 
-路由处理器接收 `RouteSurface`：`element`、`routeToken`、`segments`、`signal`。必须在 element 内挂载，返回清理函数（或最终返回函数的 Promise）；路由离开、替换或插件停止时先中止 signal，再执行清理。不得查询宿主私有页面容器。公开 18 个 slot 与 39 个元素保持既有名称。
+Frontend API 1.7 的 `host.dashboard.registerCard(localId, renderer)` 只登记浏览器 renderer，不创建后端目录资格。surface 包含 element、完整 cardId、signal 与只读 context。普通状态更新保持同一 renderer；移除、路由离开和注销先 abort 再执行一次 cleanup，晚到异步 cleanup 立即释放。插件退出或激活失败由 Host 释放 owner 注册。
+
+## 外部导航
+
+`host.navigation.openExternal(url)` 允许合法 HTTPS URL，拒绝用户信息和控制字符。桌面请求经可信 frame 的 preload/main IPC 交给系统默认浏览器；Web 用户点击创建独立标签，移除 opener 并设置 no-referrer。插件负责核实业务官方域和精确链接。调用失败返回可见错误，不在数据刷新时自动打开。

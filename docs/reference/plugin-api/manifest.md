@@ -2,7 +2,7 @@
 
 ## 目录结构
 
-```
+```text
 NexusPipeline-Plugins/plugins/
 ├── general/
 │   ├── GameCheckIn/              # managed-code 源码；name = game-checkin
@@ -25,11 +25,11 @@ NexusPipeline-Plugins/plugins/
 - 官方仓库由每个源码插件目录的 `plugin.json`、`store.json` 和 CI 生成的 `packages/`、根目录 `catalog.json` 组成；客户端只信任固定官方源，下载后再次检查 manifest。`catalog.json` 中的包地址、SHA256、大小和生成时间属于生成事实。
 - 数据化插件默认启用，managed-code 插件默认禁用。用户选择会写入 `AppSettings.PluginPreferences`，启停在重启后生效。
 
-
-
 ## plugin.json（根文件）
 
 运行时 manifest 使用 schema 2，至少声明 `schemaVersion: 2`、小写 kebab-case 的 `name`、严格区分大小写的 `artifactName`、受限 Nexus 版本 `version` 和插件类型。版本格式为 `major.minor.patch`、`major.minor.patch-beta.N` 或 `major.minor.patch-rc.N`，排序遵循 `beta < rc < stable`。需要本地化时，增加 `localization.defaultLocale` 与 `localization.locales`，资源必须随 ZIP 放在 `i18n/` 目录。`artifactName` 必须与源码目录、宿主安装目录、`packages/` 目录及 ZIP 前缀完全一致。
+
+以下是包形态示意，不代表当前 BetterGI 的发行配置；实际版本与能力以插件 manifest 为准。
 
 ```json
 {
@@ -41,10 +41,10 @@ NexusPipeline-Plugins/plugins/
   "description": "BetterGenshinImpact 专项脚本实例配置接管（自动推导主程序、配置、日志路径与自启动参数）",
   "version": "0.1.0",
   "kind": "data-specialized",
-  "minHostVersion": "0.12.8",
+  "minHostVersion": "0.17.4",
   "resolve": "data/resolve.json",
   "judgeScript": "data/judge.js",
-  "configEditor": "data/config-editor.js"
+  "configEditor": "data/editor.js"
 }
 ```
 
@@ -65,9 +65,7 @@ NexusPipeline-Plugins/plugins/
 
 `self-managed-pc-launch` 的持久化启动开关、参数和等待时间保持用户设置；能力只在 PC 模式生成运行时宿主启动计划约束，切换到模拟器模式时可恢复原设置。
 
-
-
-### 配置诊断与编辑准备
+## 配置诊断与编辑准备
 
 配置编辑提交和脚本实例保存后的检查统一使用 taskProtocol `discover.configAssessment`。没有声明 taskProtocol 的旧包不运行旧校验；若仍声明 `configValidator`，Host 拒绝加载并保留已有文件与用户快照。
 
@@ -91,11 +89,9 @@ NexusPipeline-Plugins/plugins/
 }
 ```
 
-可用 API 为 `nexus.listFiles()`、`nexus.readFile(path)`、`nexus.writeFile(path, content)`、`nexus.exists(path)`、`nexus.toast(message, kind)` 和 `nexus.notify(title, body, kind)`。文件参数必须是受控根目录内的相对路径；配置校验器访问 `@extra<序号>/` 时保持只读，配置编辑器访问对应工作副本时允许写入。读写单文件上限为 2 MiB，执行时长上限为 5 秒，并限制文件列表和反馈数量。写入采用单文件原子替换；接口不提供删除文件、多文件事务、网络、进程、PowerShell、Node.js、Python、CLR 或环境变量能力。
+可用 API 为 `nexus.listFiles()`、`nexus.readFile(path)`、`nexus.writeFile(path, content)`、`nexus.exists(path)`、`nexus.toast(message, kind)` 和 `nexus.notify(title, body, kind)`。文件参数必须是受控根目录内的相对路径；配置编辑器仅允许写入 `@extra<序号>/` 对应工作副本，主配置保持只读。读写单文件上限为 2 MiB，执行时长上限为 5 秒，并限制文件列表和反馈数量。写入采用单文件原子替换；接口不提供删除文件、多文件事务、网络、进程、PowerShell、Node.js、Python、CLR 或环境变量能力。
 
 候选响应同时返回实际使用的 `inputName`，调用方按该名称把候选传入复用编辑会话；用户绑定在编辑成功保存后提交，取消或失败不会改变已有绑定，避免在多输入 profile 中凭字段顺序推测输入。
-
-
 
 ## 构建与部署
 

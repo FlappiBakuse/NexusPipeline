@@ -36,6 +36,7 @@ def source_entries(root: Path) -> list[tuple[str, str, bytes]]:
         modes[match[2]] = match[1]
     names = sorted(set(modes) | set(filter(None, git(root, 'ls-files', '--others', '--exclude-standard', '-z').split('\0'))))
     entries = []
+    seen = set()
     for name in names:
         path = root / name
         if not path.exists():
@@ -47,10 +48,14 @@ def source_entries(root: Path) -> list[tuple[str, str, bytes]]:
                 break
             if parent.is_symlink() or parent.is_junction():
                 raise ValueError('Linked source input')
-        entries.append((name, modes.get(name, '100644'), path.read_bytes()))
+        # Windows Git may retain the old spelling of an unstaged case-only rename.
+        actual = path.resolve().relative_to(root.resolve()).as_posix()
+        if actual not in seen:
+            entries.append((actual, modes.get(name, '100644'), path.read_bytes()))
+            seen.add(actual)
     if not entries:
         raise ValueError('Empty source input')
-    return entries
+    return sorted(entries)
 
 
 def fingerprint(entries: list[tuple[str, str, bytes]]) -> str:

@@ -29,17 +29,14 @@ export function checkContracts(root) {
     const targets = [
       ["src/NexusPipeline.Plugin.Abstractions/PluginApi.cs", /public const string Text\s*=\s*"([\d.]+)"\s*;/g, frontend],
       ["frontend/src/plugin-bridge/runtime.ts", /export const FRONTEND_API_VERSION\s*=\s*"([\d.]+)"\s*;/g, frontend],
-      ["docs/reference/plugin-api/managed.md", /当前 managed 插件精确声明 Plugin API `([\d.]+)`/g, managed],
-      ["docs/reference/plugin-api/managed.md", /Frontend API 独立维持 `([\d.]+)`/g, frontend],
-      ["docs/reference/plugin-api/frontend.md", /^## 前端插件运行时（Frontend API ([\d.]+)）$/gm, frontend],
-      ["docs/reference/plugin-api/frontend.md", /Frontend API `([\d.]+)` 精确版本/g, frontend],
-      ["docs/reference/plugin-api/frontend.md", /只有 `([\d.]+)` 被接受/g, frontend],
-      ["docs/testing/policy.md", /^- Frontend API ([\d.]+) 的宿主外部契约/gm, frontend],
+      ["docs/reference/plugin-api/managed.md", /^\| plugin-api \| ([\d.]+) \|$/gm, managed],
+      ["docs/reference/plugin-api/managed.md", /^\| frontend-api \| ([\d.]+) \|$/gm, frontend],
+      ["docs/reference/plugin-api/frontend.md", /^\| frontend-api \| ([\d.]+) \|$/gm, frontend],
     ];
     for (const [file, expression, expected] of targets) {
       const text = read(file), matches = [...text.matchAll(expression)];
       if (matches.length !== 1) {
-        results.push({ rule: "GOV-DOC-01", status: file.startsWith("docs/") ? "REVIEW" : "NOT_CHECKED", file, reason: "Designated current claim is ambiguous/missing; inspect its wording", expected });
+        results.push({ rule: "GOV-DOC-01", status: file.startsWith("docs/") ? "REVIEW" : "NOT_CHECKED", file, reason: "Designated contract row is ambiguous/missing", expected });
       } else {
         const actual = matches[0][1];
         results.push({ rule: "GOV-DOC-01", status: actual === expected ? "PASS" : "FAIL", file,

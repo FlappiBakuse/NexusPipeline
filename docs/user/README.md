@@ -12,7 +12,7 @@
 
 普通模式下，双击根 NexusPipeline.exe 或选择托盘“打开管理页面”会打开或激活同一桌面窗口，窗口 X 仅隐藏，托盘退出才停止 Host。登录自启动通过 `service` 入口运行，设置“登录自启动时显示客户端”决定是否自动显示桌面。托盘“轻量模式”可即时切换：启用前确认关闭当前桌面，写盘失败或无法确认桌面退出时保留失败提示；关闭轻量模式只保存设置，下次选择“打开管理页面”才启动桌面。它运行后台服务、托盘和 Web UI，不启动 Electron。轻量模式的首次双击和登录启动均由 `openDesktopOnStartup` 决定是否自动打开默认浏览器；关闭时保持后台，再次双击或使用托盘仍可打开网页。服务或更新重启不重复打开网页。两种模式的远程访问均由 `allowRemoteAccess` 和现役认证控制；轻量模式可在网页中重启服务，MCP 仍由自身开关控制。网页设置页的「高级设置」卡片可单独保存「允许逐次配置修复」，每次修复仍需明确预览和应用。
 
-程序需要 .NET Desktop Runtime 10 x64 和 ASP.NET Core Runtime 10 x64。安装器在缺少依赖时会逐项询问并从固定微软地址下载校验后的包。便携版保留 .NET 的缺运行时提示，两个准确下载按钮见可离线打开的 [[运行依赖说明](https://github.com/FlappiBakuse/NexusPipeline/blob/main/docs/user/README.md#安装和依赖)](../../frontend/public/help/runtime-prerequisites.html)。安装 .NET 依赖可能需要系统授权；取消后可重新运行安装器。
+程序需要 .NET Desktop Runtime 10 x64 和 ASP.NET Core Runtime 10 x64。安装器在缺少依赖时会逐项询问并从固定微软地址下载校验后的包。便携版保留 .NET 的缺运行时提示，两个准确下载按钮见可离线打开的 [运行依赖说明](../../frontend/public/help/runtime-prerequisites.html)。安装 .NET 依赖可能需要系统授权；取消后可重新运行安装器。
 
 ## 今日概览布局
 
@@ -42,7 +42,7 @@ OK 启动器在任务结束后仍显示窗口，不单独判为失败。若其 `
 
 从商店单独安装并启用 MaaFrameworkDriver，重启后在脚本编辑器选择 `maa-framework` 和批准项目根。读取 PI 项目，选择 Controller、Resource、任务顺序与选项；先预览，再逐次授权并保存独立配置。绑定用户后加入现有队列，开始、取消和历史仍使用原有入口。原 MaaEnd／MaaStellaSora 专项不会自动转换。
 
-Win32 显式选择匹配窗口，ADB 指定准确客户端和 serial。可只读导入已支持的 MXU 实例或 MaaPiCli 配置；源文件不会写入。受支持的 MXU 单个 PC 启动动作可在明确确认后映射到 Host 游戏启动设置。Agent／pretask 是项目代码，进程隔离不提供文件或网络沙箱；引擎完成仍可能显示未核验。框架范围与项目注意事项见 [官方 Plugins 仓库](https://github.com/FlappiBakuse/NexusPipeline-Plugins) 的 `docs/MAAFRAMEWORK_DRIVER.md`，驱动上架状态以商店实际目录为准。
+Win32 显式选择匹配窗口，ADB 指定准确客户端和 serial。可只读导入已支持的 MXU 实例或 MaaPiCli 配置；源文件不会写入。受支持的 MXU 单个 PC 启动动作可在明确确认后映射到 Host 游戏启动设置。Agent／pretask 是项目代码，进程隔离不提供文件或网络沙箱；引擎完成仍可能显示未核验。框架范围与项目注意事项见 [官方 Plugins 仓库](https://github.com/FlappiBakuse/NexusPipeline-Plugins) 的 [MaaFramework 指南](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/docs/frameworks/maa-framework-driver.md)，驱动上架状态以商店实际目录为准。
 
 ## 配置修复
 
