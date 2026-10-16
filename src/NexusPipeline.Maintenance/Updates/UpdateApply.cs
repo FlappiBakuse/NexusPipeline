@@ -651,13 +651,6 @@ internal static class UpdateApply
         WriteRequiredText(Path.Combine(backup, BackupReadyMarker), journal.TransactionId!);
     }
 
-    private static void EnsureOptionalAssetTargetIsSafe(string path)
-    {
-        if (Directory.Exists(path)) throw new IOException($"应用说明文件目标是目录，拒绝覆盖：{path}");
-        if (File.Exists(path) && (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
-            throw new IOException($"应用说明文件目标是重解析点，拒绝覆盖：{path}");
-    }
-
     private static void CopySnapshotItem(string source, string target)
     {
         if (!Directory.Exists(source) && !File.Exists(source))

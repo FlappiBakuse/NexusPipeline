@@ -19,7 +19,6 @@ internal sealed class QueueCommands
 {
     private readonly IQueueRepository _queues;
     private readonly IQueueMutationState _state;
-    private readonly IQueueScheduleSnapshotReader _scheduleSnapshot;
     private readonly IQueuePlansChanged _plansChanged;
     private readonly IQueueMutationAdmission _admission;
     private readonly IScriptRepository _scripts;
@@ -30,7 +29,6 @@ internal sealed class QueueCommands
     internal QueueCommands(
         IQueueRepository queues,
         IQueueMutationState state,
-        IQueueScheduleSnapshotReader scheduleSnapshot,
         IQueuePlansChanged plansChanged,
         IQueueMutationAdmission admission,
         IScriptRepository scripts,
@@ -40,7 +38,6 @@ internal sealed class QueueCommands
     {
         _queues = queues;
         _state = state;
-        _scheduleSnapshot = scheduleSnapshot;
         _plansChanged = plansChanged;
         _admission = admission;
         _scripts = scripts;

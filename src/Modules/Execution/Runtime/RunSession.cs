@@ -54,10 +54,7 @@ internal class RunSession
     }
 
     /// <summary>每尝试脚本日志段（按尝试分批落盘）。</summary>
-    protected StringBuilder _scriptFullLog => _results.FullLog;
-    protected bool _scriptLogTruncated { get => _results.IsTruncated; set => _results.IsTruncated = value; }
     protected int _attemptLogStart { get => _results.AttemptStart; set => _results.AttemptStart = value; }
-    protected List<string> _attemptLogSegments => _results.AttemptSegments;
 
     public List<string> AttemptLogs => _results.AttemptSegments;
 
@@ -66,21 +63,12 @@ internal class RunSession
     internal string Mode => _mode;
     internal string? UserName => _userName;
     internal string? UserKey => _userKey;
-    internal ResolvedScriptUser? ResolvedUser => _resolvedUser;
     internal CancellationToken Token => _token;
-    internal StringBuilder ScriptFullLog => _results.FullLog;
-    internal bool ScriptLogTruncated { get => _results.IsTruncated; set => _results.IsTruncated = value; }
     internal RunBudget? Budget { get => _budget; set => _budget = value; }
-    internal ResolvedScriptUser? ActiveUser { get => _activeUser; set => _activeUser = value; }
-    internal int AttemptLogStart { get => _results.AttemptStart; set => _results.AttemptStart = value; }
     internal ResultCollector Results => _results;
-    internal bool GameFronted { get => _gameFronted; set => _gameFronted = value; }
     internal ProcessOwnership? ProcessOwnership { get => _processOwnership; set => _processOwnership = value; }
-    internal List<string>? PendingReplaceConfigs { get => _pendingReplaceConfigs; set => _pendingReplaceConfigs = value; }
     internal ConfigRunSession? ConfigRun { get => _configRun; set => _configRun = value; }
     internal bool FirstSyncDone { get => _firstSyncDone; set => _firstSyncDone = value; }
-    internal bool PreRunCompletedSuccessfully { get => _preRunCompletedSuccessfully; set => _preRunCompletedSuccessfully = value; }
-    internal Action<string>? StatusChanged => _statusChanged;
     internal Action<string, LogLevel>? LogLine => _logLine;
 
     internal void ReportStatus(string status) => _statusChanged?.Invoke(status);

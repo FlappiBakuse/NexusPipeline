@@ -170,7 +170,6 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
         }
     }
 
-    internal bool HasConfigEditor => _configEditorPath is not null;
 
     internal ConfigEditorDescriptor? ReadConfigEditor()
     {

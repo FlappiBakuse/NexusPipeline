@@ -369,17 +369,6 @@ internal sealed class PluginWebApiRegistry
         return new CallbackDisposable(() => Remove(token));
     }
 
-    public IReadOnlyList<PluginWebApiRegistration> Snapshot()
-    {
-        lock (_sync)
-        {
-            return _registrations.Values.OrderBy(item => item.PluginName, StringComparer.OrdinalIgnoreCase)
-                .ThenBy(item => item.Route.Method, StringComparer.OrdinalIgnoreCase)
-                .ThenBy(item => item.Route.Route, StringComparer.OrdinalIgnoreCase)
-                .ToArray();
-        }
-    }
-
     public bool TryGet(string pluginName, string method, string route, out PluginWebApiRegistration? registration)
     {
         string normalized = NormalizeRoute(route);

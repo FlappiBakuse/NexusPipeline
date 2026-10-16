@@ -288,19 +288,6 @@ internal sealed class RuntimeQueueMutationState : IQueueMutationState
     }
 }
 
-/// <summary>Scheduler only receives a copied queue snapshot for plan construction.</summary>
-internal sealed class RuntimeQueueScheduleSnapshotReader : IQueueScheduleSnapshotReader
-{
-    private readonly IQueueRepository _queues;
-
-    public RuntimeQueueScheduleSnapshotReader(IQueueRepository queues)
-    {
-        _queues = queues;
-    }
-
-    public IReadOnlyList<DispatchQueue> SnapshotForScheduling() => _queues.Snapshot();
-}
-
 /// <summary>队列模块只读取用户参与计数，不直接依赖 Users 模块。</summary>
 internal sealed class RuntimeQueueUserParticipationReader : IQueueUserParticipationReader
 {

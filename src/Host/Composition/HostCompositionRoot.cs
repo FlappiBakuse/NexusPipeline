@@ -154,8 +154,6 @@ internal class HostCompositionRoot
         collection.AddSingleton<UserAssetService>();
         collection.AddSingleton<IQueueDataMaintenance>(provider => new QueueDataMaintenance(
             provider.GetRequiredService<PluginManager>()));
-        collection.AddSingleton<IQueueScheduleSnapshotReader>(provider => new RuntimeQueueScheduleSnapshotReader(
-            provider.GetRequiredService<IQueueRepository>()));
         collection.AddSingleton<IQueueUserParticipationReader>(_ => new RuntimeQueueUserParticipationReader(_entityState));
         collection.AddSingleton<ISettingsProvider>(_settingsState);
         collection.AddSingleton<IControlPlaneStatusReader, ControlPlaneStatusAdapter>();
@@ -228,7 +226,6 @@ internal class HostCompositionRoot
         collection.AddSingleton<ExecutionDispatcher>();
         collection.AddSingleton<IConfigEditAdmission>(provider => provider.GetRequiredService<ExecutionDispatcher>());
         collection.AddSingleton<IExecutionService>(provider => provider.GetRequiredService<ExecutionDispatcher>());
-        collection.AddSingleton<IFrozenQueueExecutionService>(provider => provider.GetRequiredService<ExecutionDispatcher>());
         collection.AddSingleton<IAdmissionCoordination>(provider => provider.GetRequiredService<ExecutionDispatcher>());
         collection.AddSingleton<ISchedulerStateStore>(_ => new FileSchedulerStateStore());
         collection.AddSingleton<Scheduler>(provider => new Scheduler(
@@ -265,7 +262,6 @@ internal class HostCompositionRoot
         collection.AddSingleton<QueueCommands>(provider => new QueueCommands(
             provider.GetRequiredService<IQueueRepository>(),
             provider.GetRequiredService<IQueueMutationState>(),
-            provider.GetRequiredService<IQueueScheduleSnapshotReader>(),
             provider.GetRequiredService<IQueuePlansChanged>(),
             provider.GetRequiredService<IQueueMutationAdmission>(),
             provider.GetRequiredService<IScriptRepository>(),
@@ -413,13 +409,11 @@ internal class HostCompositionRoot
 
     public ExecutionDispatcher Center => Resolve<ExecutionDispatcher>();
 
-    public ExecutionValidator Validator => Resolve<ExecutionValidator>();
 
     public RunHistoryService History => Resolve<RunHistoryService>();
 
     public PluginManager Plugins => Resolve<PluginManager>();
 
-    public NotificationDispatcher Notifications => Resolve<NotificationDispatcher>();
 
     public Scheduler Scheduler => Resolve<Scheduler>();
 
@@ -433,7 +427,7 @@ internal class HostCompositionRoot
     internal NexusPipeline.Host.Desktop.IDesktopHost Desktop => Resolve<NexusPipeline.Host.Desktop.IDesktopHost>();
 
     /// <summary>由 Host 组合根一次性组装 MCP 的显式只读/命令依赖集合。</summary>
-    internal McpToolContext CreateMcpToolContext(Func<bool>? requestRestart)
+    internal McpToolContext CreateMcpToolContext()
     {
         return new McpToolContext(
             Resolve<ISettingsProvider>(),
@@ -441,19 +435,16 @@ internal class HostCompositionRoot
             Center,
             History,
             Plugins,
-            Resolve<PluginRepositoryService>(),
             Resolve<ScriptQueries>(),
             Resolve<QueueQueries>(),
             Resolve<UserQueries>(),
             Resolve<ScriptCommands>(),
             Resolve<UserCommands>(),
-            Resolve<PluginUserGlobalSettingsService>(),
             Resolve<DiagnosticsService>(),
             Resolve<UpdateService>(),
             Resolve<UpdateAutomationService>(),
             Resolve<ExecutionExplainService>(),
-            Resolve<HostVersionInfo>(),
-            requestRestart);
+            Resolve<HostVersionInfo>());
     }
 
     /// <summary>服务解析出口：按类型解析已注册服务；未注册类型抛出异常。</summary>

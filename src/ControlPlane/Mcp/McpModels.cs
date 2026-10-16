@@ -2,7 +2,6 @@ using System.ComponentModel;
 using System.Text.Json.Nodes;
 using NexusPipeline.Modules.Execution;
 using NexusPipeline.Modules.History;
-using NexusPipeline.Modules.Plugins.Repository;
 using NexusPipeline.Modules.Queues;
 using NexusPipeline.Modules.Scheduling;
 using NexusPipeline.Modules.Scripts;
@@ -394,52 +393,6 @@ internal static class McpViews
             settings.PluginAutoUpdateEnabled,
             settings.UpdateChannel,
             settings.UpdateSourceUrl,
-        };
-    }
-
-    public static object PluginStore(PluginStoreSnapshot snapshot)
-    {
-        return new
-        {
-            snapshot.Available,
-            snapshot.Stale,
-            fetchedAt = snapshot.FetchedAt.ToString("O"),
-            snapshot.Error,
-            plugins = snapshot.Plugins.Select(plugin => new
-            {
-                plugin.Name,
-                artifactName = plugin.ArtifactName,
-                plugin.DisplayName,
-                gameName = plugin.GameName,
-                plugin.Description,
-                plugin.Version,
-                kind = plugin.Kind,
-                apiVersion = plugin.ApiVersion,
-                plugin.Capabilities,
-                minHostVersion = plugin.MinHostVersion,
-                plugin.Installed,
-                plugin.InstalledName,
-                plugin.InstalledVersion,
-                plugin.UpdateAvailable,
-                plugin.Compatible,
-                plugin.CompatibilityReason,
-                plugin.ManagedByStore,
-                plugin.PendingAction,
-                plugin.PendingVersion,
-                plugin.Status,
-                authors = plugin.Authors.Select(author => new { name = author.Name, url = author.Url }).ToList(),
-                tags = plugin.Tags,
-                homepage = plugin.Homepage,
-                createdAt = plugin.CreatedAt,
-                updatedAt = plugin.UpdatedAt,
-                hasReadme = plugin.HasReadme,
-                changelog = plugin.Changelog.Select(change => new
-                {
-                    change.Version,
-                    change.Date,
-                    change.Items,
-                }).ToList(),
-            }).ToList(),
         };
     }
 

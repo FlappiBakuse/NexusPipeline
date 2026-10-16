@@ -207,23 +207,4 @@ internal sealed class McpReadOnlyTools
     [Description("读取更新检查、下载和应用状态。")]
     public CallToolResult GetUpdateStatus() => McpToolResult.Success(_context.GetUpdateStatus());
 
-    private async Task<CallToolResult> ReadPluginStoreAsync(bool forceRefresh)
-    {
-        try
-        {
-            PluginStoreSnapshot snapshot = await _context.PluginRepository
-                .GetStoreAsync(forceRefresh)
-                .ConfigureAwait(false);
-            return snapshot.Available
-                ? McpToolResult.Success(McpViews.PluginStore(snapshot))
-                : McpToolResult.Failure(
-                    "repository_unavailable",
-                    snapshot.Error ?? "插件仓库暂不可用",
-                    messageKey: "api.error.repository_unavailable");
-        }
-        catch (Exception ex)
-        {
-            return McpToolResult.Exception(ex);
-        }
-    }
 }

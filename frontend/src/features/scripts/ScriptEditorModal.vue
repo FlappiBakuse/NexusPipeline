@@ -282,9 +282,6 @@ function openImportPicker() {
 function toggleJudge() {
   draft.judgeScriptEnabled = !draft.judgeScriptEnabled;
 }
-function toggleField(field: "launchGame" | "forceCloseGame" | "autoUpdateConfig") {
-  draft[field] = !draft[field];
-}
 async function browseDraftPath(
   field: "rootPath" | "mainExe" | "configPath" | "logPath" | "gameExe",
   kind: "file" | "folder",

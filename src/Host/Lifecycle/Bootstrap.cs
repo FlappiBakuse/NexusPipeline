@@ -248,7 +248,7 @@ internal sealed class Bootstrap
             return null;
         }
         var mcp = new McpHost(
-            _runtime.CreateMcpToolContext(() => TryRequestRestart(Audit.Mcp)));
+            _runtime.CreateMcpToolContext());
         return mcp.TryStart(_runtime.Settings.McpPort) ? mcp : null;
     }
 

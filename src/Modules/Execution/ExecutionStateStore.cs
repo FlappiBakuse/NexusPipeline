@@ -140,24 +140,6 @@ internal sealed class ExecutionStateStore
         }
     }
 
-    internal IReadOnlyList<ExecutionAdmissionEntry> ActiveAdmissions
-    {
-        get
-        {
-            lock (_sync)
-            {
-                return _active
-                    .Select(exec => new ExecutionAdmissionEntry(
-                        exec.Id,
-                        exec.Kind,
-                        exec.TargetId,
-                        exec.TargetName,
-                        _admissions[exec.Id]))
-                    .ToList();
-            }
-        }
-    }
-
     /// <summary>返回诊断所需的协调状态快照；不暴露可变运行对象或准入 profile。</summary>
     internal ExecutionStateSnapshot SnapshotState()
     {

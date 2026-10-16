@@ -798,8 +798,6 @@ internal sealed class PluginManager : IPluginCapabilityResolver, IPluginAvailabi
         out PluginUiContributionRegistration? registration) =>
         _uiContributions.TryGet(pluginName, contributionId, out registration);
 
-    internal IReadOnlyList<PluginWebApiRegistration> WebApiContributions =>
-        _webApi.Snapshot();
 
     internal bool TryGetWebApi(
         string pluginName,
