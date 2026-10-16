@@ -1,5 +1,6 @@
 import { spawn as defaultSpawn, execFile } from "node:child_process";
 import { quoteWindowsArg } from "./windows-command.mjs";
+import { scheduleHeavy } from "./local-resources.mjs";
 
 let runnerState = {
   pendingCleanups: 0,
@@ -37,6 +38,10 @@ function positiveTimeout(value, fallback) {
  * cleanup deadline is reached and the finalizer can preserve the evidence.
  */
 export function runProcess(command, args, options = {}) {
+  return scheduleHeavy(command, args, options, runOwnedProcess);
+}
+
+function runOwnedProcess(command, args, options = {}) {
   return new Promise(resolve => {
     if (options.signal?.aborted) return resolve(130);
     const available = options.budget?.remainingMs() ?? Infinity;

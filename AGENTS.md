@@ -51,7 +51,7 @@ HTTP 只处理路由、认证、参数、用例调用和响应映射；图标、
 
 正式发行程序保持 `app.manifest` 的 `requireAdministrator`；自动化功能测试统一使用 `NexusTestHost=true`、`asInvoker` 的隔离测试构建。测试继承启动终端的权限：普通终端直接运行，GitHub 托管 Windows runner 使用其默认管理员环境。测试入口不要求提权，不触发 UAC，不降权，不按权限跳过用例；实际权限写入日志。
 
-核心验证入口为 `node tests/run.mjs ci --group backend`、`ci --group frontend`；`smoke` 并行运行这两组，记录从命令开始的实际耗时，不设执行时间预算。测试只在原字节隔离副本中构建，输出及依赖缓存使用外部测试目录。`tests/policy.json` 固定选择与预期用例；原生 TRX／Vitest JSON、场景和用例集合、计数、源码指纹、计时字段和清理都必须匹配，零用例、意外 skip、缺报告、取消和超时不得成功。普通测试不自动运行全仓语法扫描、文档链接或全部工具自测；这些按改动显式运行。
+核心验证入口为 `node tests/run.mjs ci --group backend`、`ci --group frontend`；`smoke` 并行运行这两组，记录从命令开始的实际耗时，不设执行时间预算。测试只在原字节隔离副本中构建，输出及依赖缓存使用外部测试目录。本机低负载模式可使用独占增量槽位及精确身份准备缓存，实际源码指纹、原生用例和清理标准保持；入口见 docs/testing/commands.md。`tests/policy.json` 固定选择与预期用例；原生 TRX／Vitest JSON、场景和用例集合、计数、源码指纹、计时字段和清理都必须匹配，零用例、意外 skip、缺报告、取消和超时不得成功。普通测试不自动运行全仓语法扫描、文档链接或全部工具自测；这些按改动显式运行。
 
 `daily` 在两个独立 Host 槽位中运行执行、配置恢复、控制面和真实分钟调度四组 E2E，记录完整父命令实际耗时，不设执行时间预算；预期场景不得缺失。`integration` 保留 UI/System Smoke 诊断，其中受控 API 响应不得冒称真实业务。`release` 单独执行生产 requireAdministrator 构建与清单校验。GitHub PR 只运行固定 `Host / 构建检查`，单 job `timeout-minutes: 10`，按完整变更闭包执行真实生产编译及适用 A01–A05 静态约束，不运行项目测试。纯文档和纯本机测试输入产生明确无需构建的成功结果；未知生产共享输入扩大闭包。本机验证与手动完整发行不受该十分钟时限约束。完整候选和实际发布分别手动触发，main push 不自动构建候选或发布。准确命令见 `docs/testing/commands.md`。
 
@@ -71,7 +71,7 @@ Preview 同版本 hash 变化可更新；hash 相同不因 sourceCommit 变化�
 
 专项插件只声明宿主支持的能力，前端代码写在 Host；专项不包含 frontend 对象、frontend-module、web/frontend 浏览器代码或 .NET 程序集。后端 judge/configEditor 脚本保持有效；configValidator 已退役，声明旧字段的包显式拒绝，配置诊断通过 taskProtocol discover.configAssessment，不改用户快照。managed 插件可通过 Frontend API 1.7、公开 slot/route 和 `nxp-*` Native Custom Elements 扩展。未声明能力不得静默当作支持。
 
-`frontend/` 是唯一宿主前端源码；Vite 最终输出以只读资源内嵌 Host；发行载荷为根 `NexusPipeline.exe`、其原字节副本 `NexusPipeline Update.exe`、`README.md`、`resources/desktop/` 和 `resources/payload-manifest.json`。`frontend/src/platform` 管平台服务，`app/bootstrap.ts` 管启动，`features/<domain>` 管业务。桥接仅通过 `plugin-bridge/host-adapter.ts` 使用宿主平台；app/features/ui 经 `@bridge/index` facade，不依赖 bridge 私有实现。插件不引用 Vue 私有组件/class。
+`frontend/` 是唯一宿主前端源码；Vite 最终输出以只读资源内嵌 Host；发行载荷为根 `NexusPipeline.exe`、独立更新程序 `NexusPipeline.update.exe`、`README.md`、`resources/desktop/` 和 `resources/payload-manifest.json`。`frontend/src/platform` 管平台服务，`app/bootstrap.ts` 管启动，`features/<domain>` 管业务。桥接仅通过 `plugin-bridge/host-adapter.ts` 使用宿主平台；app/features/ui 经 `@bridge/index` facade，不依赖 bridge 私有实现。插件不引用 Vue 私有组件/class。
 
 复用 `ui/primitives` 与既有 CSS 变量、紧凑列表。页面适配 360/768/1280 视口，触控目标至少 40px，公共数字输入的紧凑增减按钮按设计规范登记为例外；保持主题、焦点、ARIA 与可访问性。轮询/订阅经生命周期管理，离开页面释放。运行目标 Args 的路径与参数使用现役解析协议，不私自把命令行引号规则搬进持久化字段。
 

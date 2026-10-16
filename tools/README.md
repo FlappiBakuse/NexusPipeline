@@ -15,6 +15,7 @@
 | `installation-generation.mjs` | `Directory.Build.props` 中代际 → 当前名称和登记身份 | 测试运行器；只读；生产 helper 使用相同工程属性 | 安装代际单元及原生平台契约 |
 | `pe_manifest.py` | 实际 PE → 嵌入的权限清单及运行标记 | 生产/Test Host/installer 校验；只读文件 | Release 与 installer 工具测试 |
 | `check-doc-links.mjs` | 当前 Markdown、docs map → 链接/片段和路径诊断 | `host.docs` 与显式文档检查；Node；只读 | 文档门禁 |
+| `local-work.mjs` | 命令与本机 resource root → 串行资源 reservation、原命令退出码 | 本机测试/验收包装；Node；不改变产品构建与发布标准 | `tests/support/local-resources.test.mjs` |
 | `source-hash.mjs` | 明确源码根 → 源码文件集合和指纹 | runner/候选来源；Node；只读 | runner 身份与 staging 测试 |
 | `tests/` | 上述工具的受控输入 → 原生 unittest 报告 | CI control 门禁；Python；临时数据只在外部测试根 | `node tests/run.mjs gate --id host.release-contract` |
 
