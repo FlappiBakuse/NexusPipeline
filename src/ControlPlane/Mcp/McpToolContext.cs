@@ -1,4 +1,9 @@
 using NexusPipeline.ControlPlane.Contracts;
+using NexusPipeline.Modules.Queues.UseCases;
+using NexusPipeline.Modules.Users.Contracts;
+using NexusPipeline.Modules.Configuration.Editing;
+using NexusPipeline.Modules.Scripts.Contracts;
+using NexusPipeline.Modules.Dashboard;
 using NexusPipeline.Modules.Diagnostics;
 using NexusPipeline.Modules.Execution;
 using NexusPipeline.Modules.History;
@@ -45,8 +50,18 @@ internal sealed class McpToolContext
         UpdateService updateService,
         UpdateAutomationService updateAutomation,
         ExecutionExplainService executionExplain,
-        HostVersionInfo hostVersion)
+        HostVersionInfo hostVersion,
+        QueueCommands queueCommands,
+        ITaskQueryProjection taskQueries,
+        ConfigEditCommands configEdits,
+        IProviderConfigurationOperations providerConfigurations,
+        DashboardService dashboard)
     {
+        QueueCommands = queueCommands;
+        TaskQueries = taskQueries;
+        ConfigEdits = configEdits;
+        ProviderConfigurations = providerConfigurations;
+        Dashboard = dashboard;
         Settings = settings;
         Scheduler = scheduler;
         Center = center;
@@ -69,6 +84,12 @@ internal sealed class McpToolContext
             updateAutomation,
             hostVersion);
     }
+
+    internal QueueCommands QueueCommands { get; }
+    internal ITaskQueryProjection TaskQueries { get; }
+    internal ConfigEditCommands ConfigEdits { get; }
+    internal IProviderConfigurationOperations ProviderConfigurations { get; }
+    internal DashboardService Dashboard { get; }
 
     public ISettingsProvider Settings { get; }
 

@@ -82,8 +82,7 @@ internal static partial class CliCommandRouter
             {
                 return CliExitCodes.For("invalid_arguments");
             }
-            CliOutput.WriteSuccess(match);
-            return 0;
+            return ReturnApi(client.Get($"/api/plugins/{Escape(match!["name"]?.ToString() ?? reference)}/detail"));
         }
         string name = match!["name"]?.ToString() ?? reference;
         if (!EnsureOptions(args))

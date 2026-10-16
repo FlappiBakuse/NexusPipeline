@@ -310,7 +310,7 @@ internal static partial class CliCommandRouter
         }
         else
         {
-            string[] allowed = action.Equals("update", StringComparison.OrdinalIgnoreCase)
+            string[] allowed = action is "add" or "update"
                 ? new[] { "file" }
                 : Array.Empty<string>();
             if (!EnsurePositionals(args, 5, CliText.Get("error.requires_target", "{usage}需要一个目标", ("usage", "user binding 操作")))

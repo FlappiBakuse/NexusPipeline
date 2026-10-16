@@ -27,6 +27,8 @@ internal sealed class CliApiClient
 {
     public int? Port { get; private set; }
 
+    internal string? ETag { get; private set; }
+
     public CliApiResponse Get(string path) => Send("GET", path, null);
 
     public CliApiResponse Post(string path, JsonNode? body = null) => Send("POST", path, body);
@@ -34,6 +36,34 @@ internal sealed class CliApiClient
     public CliApiResponse Put(string path, JsonNode? body) => Send("PUT", path, body);
 
     public CliApiResponse Delete(string path, JsonNode? body = null) => Send("DELETE", path, body);
+
+    internal CliApiResponse Download(string path, string destination)
+    {
+        try
+        {
+            string full = CliArtifactOutput.ValidateDestination(destination);
+            Port ??= CliTransport.EnsureService();
+            if (Port is null) return Failure(503, null, "service_unavailable");
+            using var response = CliTransport.Get(Port.Value, path);
+            if (!response.IsSuccessStatusCode)
+            {
+                var error = Parse(response.Content.ReadAsStringAsync().GetAwaiter().GetResult());
+                return Failure((int)response.StatusCode, error, error?["code"]?.ToString() ?? MapCode((int)response.StatusCode));
+            }
+            if (response.StatusCode == System.Net.HttpStatusCode.NoContent)
+                return CliApiResponse.Success(204, new JsonObject { ["available"] = false });
+            byte[] bytes = response.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult();
+            string hash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bytes));
+            using var stream = new MemoryStream(bytes);
+            CliArtifactOutput.SaveAsync(stream, full, bytes.Length, hash, maxBytes: 16 * 1024 * 1024).GetAwaiter().GetResult();
+            return CliApiResponse.Success(200, new JsonObject { ["path"] = full, ["sizeBytes"] = bytes.Length,
+                ["sha256"] = hash, ["contentType"] = response.Content.Headers.ContentType?.ToString() });
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return CliApiResponse.Failure(400, null, null, "validation_error", e.Message);
+        }
+    }
 
     internal JsonNode CopyDiagnosticArtifact(JsonNode receipt, string destination)
     {
@@ -55,7 +85,8 @@ internal sealed class CliApiClient
         return result;
     }
 
-    private CliApiResponse Send(string method, string path, JsonNode? body)
+    internal CliApiResponse Send(string method, string path, JsonNode? body, IReadOnlyDictionary<string, string>? headers = null,
+        byte[]? bytes = null, string? contentType = null)
     {
         if (Port is null)
         {
@@ -68,11 +99,14 @@ internal sealed class CliApiClient
 
         try
         {
-            using HttpResponseMessage response = CliTransport.Send(Port.Value, method, path, body, LocaleContext.Current);
+            using HttpResponseMessage response = CliTransport.Send(Port.Value, method, path, body, LocaleContext.Current, headers, bytes, contentType);
+            ETag = response.Headers.ETag?.ToString();
             string raw = response.Content.ReadAsStringAsync().GetAwaiter().GetResult();
             JsonNode? node = Parse(raw);
             if (response.IsSuccessStatusCode)
             {
+                if (!string.IsNullOrWhiteSpace(raw) && node is null)
+                    return CliApiResponse.Failure((int)response.StatusCode, null, null, "validation_error", "响应不是 JSON；二进制下载请指定 --output");
                 return CliApiResponse.Success((int)response.StatusCode, node);
             }
 

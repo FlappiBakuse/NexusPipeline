@@ -230,6 +230,12 @@ internal static class CliTransport
         {
             return PluginRepositoryTimeout;
         }
+        if (apiPath.StartsWith("/api/plugin-api/", StringComparison.OrdinalIgnoreCase)
+            || apiPath.StartsWith("/api/plugin-contributions/", StringComparison.OrdinalIgnoreCase)
+            || apiPath.StartsWith("/api/scripts/probe", StringComparison.OrdinalIgnoreCase)
+            || apiPath.Contains("/task-plan", StringComparison.OrdinalIgnoreCase)
+            || apiPath.Contains("/config-repair", StringComparison.OrdinalIgnoreCase)) return TimeSpan.FromSeconds(40);
+        if (apiPath == "/api/native-dialog") return TimeSpan.FromMinutes(10);
         return DefaultControlTimeout;
     }
 
@@ -252,12 +258,22 @@ internal static class CliTransport
         string method,
         string apiPath,
         JsonNode? body,
-        string? locale = null)
+        string? locale = null,
+        IReadOnlyDictionary<string, string>? headers = null,
+        byte[]? bytes = null, string? contentType = null)
     {
-        using var client = new HttpClient { Timeout = TimeoutFor(method, apiPath) };
+        using var handler = new HttpClientHandler { AllowAutoRedirect = false, UseProxy = false };
+        using var client = new HttpClient(handler) { Timeout = TimeoutFor(method, apiPath), MaxResponseContentBufferSize = 16 * 1024 * 1024 };
         using var request = new HttpRequestMessage(new HttpMethod(method), $"http://127.0.0.1:{port}{apiPath}");
         request.Headers.TryAddWithoutValidation("X-Nexus-Locale", locale ?? LocaleCatalog.HostLocale);
-        if (body is not null)
+        if (headers is not null)
+            foreach (var header in headers) request.Headers.Add(header.Key, header.Value);
+        if (bytes is not null)
+        {
+            request.Content = new ByteArrayContent(bytes);
+            request.Content.Headers.ContentType = System.Net.Http.Headers.MediaTypeHeaderValue.Parse(contentType ?? "application/octet-stream");
+        }
+        else if (body is not null)
         {
             request.Content = new StringContent(body.ToJsonString(JsonOpts.Web), Encoding.UTF8, "application/json");
         }

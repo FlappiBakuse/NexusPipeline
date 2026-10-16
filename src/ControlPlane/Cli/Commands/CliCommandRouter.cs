@@ -45,6 +45,8 @@ internal static partial class CliCommandRouter
 
         try
         {
+            int? additional = ExecuteExtended(parsed);
+            if (additional is not null) return additional.Value;
             string command = parsed.Positionals[0].ToLowerInvariant();
             if (CommandHandlers.TryGetValue(command, out Func<CliArguments, int>? handler))
             {
@@ -57,6 +59,10 @@ internal static partial class CliCommandRouter
                         "未知命令：{command}",
                         ("command", parsed.Positionals[0])))
                 .AlsoWriteUsage();
+        }
+        catch (Exception ex) when (ex is InvalidDataException or System.Text.Json.JsonException or FormatException)
+        {
+            return CliOutput.WriteFailure("validation_error", "输入内容或格式无效");
         }
         catch (Exception ex)
         {

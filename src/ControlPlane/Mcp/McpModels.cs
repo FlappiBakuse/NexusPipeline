@@ -21,6 +21,8 @@ internal sealed class McpScriptInput
     [Description("专项插件名；空字符串表示通用脚本。")]
     public string PluginType { get; set; } = "";
 
+    public Dictionary<string, string>? PluginInputs { get; set; }
+
     public string RootPath { get; set; } = "";
 
     public string MainExe { get; set; } = "";
@@ -67,6 +69,7 @@ internal sealed class McpScriptInput
         {
             Name = Name.Trim(),
             PluginType = PluginType.Trim(),
+            PluginInputs = new Dictionary<string, string>(PluginInputs ?? new(), StringComparer.OrdinalIgnoreCase),
             RootPath = RootPath.Trim(),
             MainExe = MainExe.Trim(),
             Args = Args,
@@ -229,6 +232,12 @@ internal static class McpViews
             script.Name,
             script.Index,
             script.PluginType,
+            script.PluginInputs,
+            script.ExecutionProviderId,
+            script.ExecutionProviderConfigId,
+            script.ExecutionProviderConfigRevision,
+            script.ConfigurationRevision,
+            script.RequiresReconfiguration,
             script.RootPath,
             script.MainExe,
             script.Args,
@@ -353,6 +362,7 @@ internal static class McpViews
             settings.AutoStart,
             settings.MinimizeToTray,
             settings.LightweightMode,
+            settings.AllowConfigRepair,
             settings.OpenDesktopOnStartup,
             settings.HistoryRetentionDays,
             settings.WebPort,
@@ -385,6 +395,7 @@ internal static class McpViews
             settings.SmtpSubjectPrefix,
             settings.SmtpTimeout,
             settings.LogLevel,
+            settings.HostLocale,
             // MCP 始终 loopback；远程 Web 开关和令牌设置不作为 MCP 写入项，但读取时保留脱敏状态。
             settings.AllowRemoteAccess,
             accessToken = Mask(settings.AccessToken),

@@ -6,34 +6,43 @@
 
 | Capability | Web | CLI | MCP |
 |---|---|---|---|
-| 脚本读取 | `GET /api/scripts` | `script list/get` | `list_scripts` |
-| 脚本类型图标 | `GET /api/scripts/type-icons/{typeId}` | 由 Web 承担 | 由 Web 承担 |
-| 脚本写入 | 脚本 CRUD API（新建/更新专项脚本实例的响应顶层附带 `validation`：script-save 语境的配置校验结果，含角落通知；通用脚本、无绑定用户或无可运行的任务协议诊断时缺省） | `script create/update/delete`（不附带校验） | `create_script` / `update_script`（删除走 CLI） |
-| 专项配置探测 | `POST /api/scripts/probe`（专项插件按根目录 + `pluginInputs` 用户输入推导，响应含插件声明的 inputs 表单 schema） | 由 Web 承担 | 由 CLI/Web 承担 |
-| 用户读取 | `GET /api/users` | `user list/get` | `list_users` |
-| 用户写入 | 用户 CRUD API | `user create/update/delete` | `create_user`（改名/删除走 CLI） |
-| 用户绑定 | `/api/users/{id}/bindings` | `user bindings ...` | `add_binding` / `update_binding`（删除走 CLI） |
+| 脚本读取 | `GET /api/scripts` | `script list/get` | `list_scripts` / `get_script` |
+| 脚本类型图标 | `GET /api/scripts/type-icons/{typeId}` | `script type-icon --output` | 由 CLI/Web 承担 |
+| 脚本写入 | 脚本 CRUD API（新建/更新专项脚本实例的响应顶层附带 `validation`：script-save 语境的配置校验结果，含角落通知；通用脚本、无绑定用户或无可运行的任务协议诊断时缺省） | `script create/update/delete`（返回同一校验投影） | `create_script` / `update_script`（删除走 CLI） |
+| 专项配置探测 | `POST /api/scripts/probe`（专项插件按根目录 + `pluginInputs` 用户输入推导，响应含插件声明的 inputs 表单 schema） | `script probe --plugin --root [--file inputs.json]` | `probe_script` |
+| 用户读取 | `GET /api/users` | `user list/get` | `list_users` / `get_user` |
+| 用户写入 | 用户 CRUD API | `user create/update/delete` | `create_user` / `update_user`（删除走 CLI） |
+| 用户绑定 | `/api/users/{id}/bindings` | `user binding ...` | `add_binding` / `update_binding`（删除走 CLI） |
 | 用户绑定配置编辑 | `/api/users/{id}/bindings/{scriptId}/edit-config`（仅回环请求） | `user binding config ...` | 由 CLI/Web 承担 |
 | 用户全局设置 | `/api/users/{id}/global-settings` | `user global-settings get/update` | 由 CLI/Web 承担 |
-| 队列读取 | `GET /api/queues` | `queue list/get` | `list_queues` |
-| 队列写入 | 队列 CRUD API | `queue create/update/delete` | 由 CLI 承担 |
+| 队列读取 | `GET /api/queues` | `queue list/get` | `list_queues` / `get_queue` |
+| 队列写入 | 队列 CRUD API | `queue create/update/delete` | `create_queue` / `update_queue`（仅安全队列） |
 | 运行 | 调度中心/Control API | `run script/queue` | `run_script` / `run_queue` |
 | 运行计划解释 | `POST /api/dispatch/explain/script`、`POST /api/dispatch/explain/queue`（只读） | `run script/queue --dry-run` | `explain_script_run` / `explain_queue_run` |
 | 取消 | `/api/cancel`、系统操作取消 | `run cancel` | `cancel_run` / `cancel_system_action` |
 | 运行观察 | `/api/status`、`/api/events`（SSE）、运行详情 | `status`、run 轮询 | `get_status` / `list_runs` / `get_run` |
-| Provider 配置初始化 | `POST /api/provider-configurations`、`GET /api/provider-configurations`、`GET /api/provider-configurations/{operationId}`、`POST /api/provider-configurations/{operationId}/cancel` | 由 Web/HTTP 承担 | 由 Web/HTTP 承担 |
-| 历史 | `/api/history/summary`（范围、脚本、队列、用户、状态筛选）→ `/api/history/dates` → `/api/history/users?date=...` → `/api/history?date=...&userKey=...`；详情 `/api/history/detail`；截图 `/api/history/image` | `history ... --status <status>` | `list_history(status=...)` |
-| 本机路径选择 | `POST /api/native-dialog`（仅回环请求） | — | — |
+| Provider 配置初始化 | `POST /api/provider-configurations`、`GET /api/provider-configurations`、`GET /api/provider-configurations/{operationId}`、`POST /api/provider-configurations/{operationId}/cancel` | `provider-config start/list/get/cancel` | `list_provider_configurations`（只读） |
+| 历史 | `/api/history/summary`（范围、脚本、队列、用户、状态筛选）→ `/api/history/dates` → `/api/history/users?date=...` → `/api/history?date=...&userKey=...`；详情 `/api/history/detail`；截图 `/api/history/image` | `history list/dates/users/summary/get/image`，支持范围、用户键及状态筛选 | `list_history` / `get_history` / `get_history_summary` |
+| 本机路径选择 | `POST /api/native-dialog`（仅回环请求） | `native-dialog --file`；路径也可直接传入其他命令 | — |
 | 插件读取 | `GET /api/plugins` | `plugin list/get` | `list_plugins` |
-| 插件商店/安装/开关/批量更新 | 插件页 + Control API（`POST /api/plugins/store/update-all`） | `plugin install/update/uninstall/enable/disable` | 由 CLI/Web 承担 |
+| 插件商店/安装/开关/批量更新 | 插件页 + Control API（`POST /api/plugins/store/update-all`） | `plugin install/update/uninstall/enable/disable`、`plugin store list/get/refresh/update-all` | 由 CLI/Web 承担 |
 | 插件用户设置 | 贡献接口 | `plugin user-settings ...` | 由 CLI/Web 承担 |
-| 客户端会话 | `POST /api/client-sessions`（Web）；桌面由已验证 IPC 签发 | — | — |
+| 客户端会话 | `POST /api/client-sessions`（Web）；桌面由已验证 IPC 签发 | `client-session create/get/revoke`（Web 能力） | — |
 | 插件网页登录 | 已验证桌面 IPC 发起；`GET /api/browser-login/{operationId}` 查状态、`DELETE` 取消 | — | — |
-| 设置读取 | 设置 API | `settings get` | `get_settings`（密钥脱敏） |
+| 设置读取 | 设置 API | `settings get` | `get_settings`（密钥脱敏，包含配置修复开关和宿主语言） |
 | 设置写入 | 设置 API | `settings update` | 由 CLI/Web 承担（MCP 只读） |
 | 系统诊断 | `GET /api/diagnostics`；`POST /api/diagnostics/export`；受管 artifact 下载 | `doctor`、`doctor export --output <新文件>` | `get_diagnostics` |
 | 通知截图开关 | 设置 API（`webhookScreenshotEnabled` / `smtpScreenshotEnabled`） | `settings update` | `get_settings` 只读返回开关状态 |
-| 更新 | 更新 API | `update check/download/apply` | `get_update_status` |
+| 更新 | 更新 API | `update status/check/download/cancel/apply` | `get_update_status` |
+| 任务摘要与计划 | 用户页任务概览、绑定任务预览、运行报告 | `user task-summaries`、`user binding task-plan`、`run tasks` | `get_task_summaries` / `get_task_plan` / `get_run_tasks` |
+| 配置修复 | 预览后按 token 提交 | `user binding repair-preview/repair` | `preview_config_repair`（只读） |
+| 配置编辑状态 | 编辑会话与绑定快照状态 | `script edit-sessions`、`user binding config-status` | 由 CLI/Web 承担 |
+| 今日概览布局 | 卡片目录、可见卡片与顺序 | `dashboard cards/get/update` | `get_dashboard`（只读） |
+| 扩展页面与贡献 | 插件页面、卡片、配置字段和动作 | `plugin frontend`、`plugin ui query/save/action`、`plugin request` | 不提供通用插件调用 |
+| 运行截图 | execution-preview 二进制 | `run preview --plugin --output` | 由 CLI/Web 承担 |
+| 资源约束与文件浏览 | `/api/limits`、`/api/fs/browse` | `limits`、`fs browse` | 由 CLI/Web 承担 |
+| 访问令牌回读 | 设置专用读取入口 | `settings access-token` | 禁止 |
+
 
 HTTP 更新状态与 MCP `get_update_status` 提供可空的 `lastApplyFailure`，字段为 `transactionId`、`targetVersion`、`code` 和 `atUtc`。它投影最近一次有效失败结果，仅在目标版本高于当前运行版本时显示；旧结果和未知文件保持原字节。
 
@@ -50,6 +59,22 @@ GameCheckIn 的独立签到页面由插件导航注册；状态读取位于 `GET
 网页登录使用固定 flow、限定采集字段与独立临时 Electron 会话。外站页面不能调用 Nexus IPC；候选通过只读身份验证及窗口清理后才对当前编辑器生效。`X-Nxp-Client-Session` 由宿主验证并注入插件请求，JSON 中自报客户端身份无效。Web 会话保存在当前页面内存，不能获取 native 能力。详见[网页登录与客户端会话](plugin-api/browser-login.md)。
 
 GameCheckIn 的 `credentials/editors`、`credentials/editors/state`、`credentials/draft`、`credentials/lease` 与 `credentials/login/prepare` 管理本客户端的编辑会话和字段代次。`POST tasks/credential/read` 是唯一明文回读入口；自动来源凭据先经 `POST tasks/credential/reveal/confirm` 主动确认，授权最多 24 小时且随当前 Host/客户端会话失效。普通任务 DTO、候选状态、轮询和诊断保持脱敏；专用响应使用 `no-store`。任务保存引用后端候选句柄，成功提交才消费，取消编辑保留已保存值。
+
+## 命令输入与前端对应关系
+
+CLI 管理宿主持久化状态、执行生命周期和插件公开接口；每次写入仍经 Control API 的校验、租约和原子持久化。命令帮助可用 `NexusPipeline.exe help --json` 查询。所有新增命令沿用 `--json` envelope 和非零失败退出码；JSON 文件可用 `--file -` 从标准输入读取。
+
+- `script probe --plugin <id> --root <path> --file <inputs.json>` 的文件只含输入键值对象；创建/更新脚本文件中的对应字段仍为 `pluginInputs`。
+- `provider-config start --file <request.json>` 接收前端同一初始化请求，返回操作 ID；用 `get <operationId>` 查询并用 `cancel <operationId>` 取消。取消响应表示已请求，最终状态和清理须继续查询。
+- `user binding task-plan/config-status/repair-preview <user> <script>` 支持稳定 ID 或唯一名称；`repair` 的文件包含预览返回的 `token`，过期时由后端拒绝。绑定排序使用 `user binding reorder <user> --ids <完整脚本ID列表>`。
+- `dashboard get` 返回 `{etag,snapshot}`；`dashboard update --etag <原始带引号ETag> --file <json>` 的正文只含 `schemaVersion`、`catalogRevision`、`visibleCardIds`。同语言读取后再修改，遇到冲突重新读取，不能覆盖并发编辑。
+- `history summary/dates/list` 接受 `--from`、`--to`、`--days`、`--script`、`--queue`、`--user-key`、`--status`；`history users --date YYYY-MM-DD` 读取当日用户索引。历史 ID 和用户键按记录使用，不因当前对象改名或删除而重新解析。
+- 图标、历史截图和运行预览用 `--output <新文件>` 下载，拒绝已有文件、链接或缺失父目录；输出回执含长度及 SHA256。预览尚未产生图像时返回 `available=false`，不创建文件。
+- `plugin ui query --file <json>` 读取指定 slot/context；`save <plugin> <contribution>` 与 `action <plugin> <contribution> <action>` 使用同一声明式贡献请求。插件自身路由由 `plugin request <plugin> <GET|POST|PUT|PATCH|DELETE> <相对路径>` 调用，JSON 用 `--file`，上传用 `--binary <文件> --content-type <mime>`，下载用 `--output`；路径不能跳出指定插件。请求仍受插件注册的访问策略限制。
+- 需要编辑会话的插件请求先用 `client-session create --json` 获取 Web 会话，将输出保存在调用者管理的文件，再以 `--session-file <json>` 传给插件命令；结束后 `client-session revoke --session-file <json>`。会话文件含凭据，不进入版本库。CLI 不伪造桌面身份，不能启动受信任 Electron 网页登录或获取 native 能力。
+- 网页路由、弹窗开合、浏览器显示语言/外观偏好和窗口控制属于当前前端客户端状态，没有宿主全局写入命令。原生选择器仍需本机用户交互；自动化调用直接提供路径。运行观察可使用 `status`、`run list/get/tasks` 轮询，不依赖页面 SSE 连接。
+
+MCP 的队列创建/修改只接受 `completionAction=none`，修改已有危险队列也会拒绝；删除、秘密读写、安装开关、配置修复提交、Provider 初始化、重启和电源操作保持在 CLI/Web。`get_history` 返回记录和每次尝试最多 200 行日志尾部；完整日志及截图由 CLI/Web 获取。脚本更新省略 `pluginInputs` 时保留原输入，显式空对象表示清空；Provider 配置身份由初始化事务维护。
 
 ## 行为护栏
 

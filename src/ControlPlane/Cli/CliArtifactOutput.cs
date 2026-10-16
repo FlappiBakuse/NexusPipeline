@@ -16,9 +16,9 @@ internal static class CliArtifactOutput
         return full;
     }
 
-    internal static async Task SaveAsync(Stream source, string destination, long sizeBytes, string sha256, CancellationToken token = default)
+    internal static async Task SaveAsync(Stream source, string destination, long sizeBytes, string sha256, CancellationToken token = default, int maxBytes = MaxBytes)
     {
-        if (sizeBytes is < 0 or > MaxBytes || sha256.Length != 64 || !sha256.All(char.IsAsciiHexDigitLower))
+        if ((sizeBytes < 0 || sizeBytes > maxBytes) || sha256.Length != 64 || !sha256.All(char.IsAsciiHexDigitLower))
             throw new InvalidDataException("诊断包回执无效");
         string full = ValidateDestination(destination);
         using var output = new FileStream(full, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None);

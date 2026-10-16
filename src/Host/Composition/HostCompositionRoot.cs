@@ -444,7 +444,12 @@ internal class HostCompositionRoot
             Resolve<UpdateService>(),
             Resolve<UpdateAutomationService>(),
             Resolve<ExecutionExplainService>(),
-            Resolve<HostVersionInfo>());
+            Resolve<HostVersionInfo>(),
+            Resolve<QueueCommands>(),
+            Resolve<ITaskQueryProjection>(),
+            Resolve<ConfigEditCommands>(),
+            Resolve<ProviderConfigurationOperations>(),
+            Resolve<NexusPipeline.Modules.Dashboard.DashboardService>());
     }
 
     /// <summary>服务解析出口：按类型解析已注册服务；未注册类型抛出异常。</summary>
