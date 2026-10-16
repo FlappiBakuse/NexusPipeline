@@ -776,6 +776,12 @@
       ],
       "filter": "FullyQualifiedName~NexusPipeline.Tests.ControlPlane.|FullyQualifiedName~NexusPipeline.Tests.Platform.|FullyQualifiedName~.ClientAccessPolicyTests.",
       "caseIds": [
+        "NexusPipeline.Tests.ControlPlane.BrowserLoginTests.BrowserAdmissionRequiresTrustedClientReadyFlowAndPluginBinding",
+        "NexusPipeline.Tests.ControlPlane.BrowserLoginTests.BrowserSuccessPublishesOnlyAfterCleanupAndActivation",
+        "NexusPipeline.Tests.ControlPlane.BrowserLoginTests.CancelDuringActivationCompensatesBeforeAnyPublicSuccess",
+        "NexusPipeline.Tests.ControlPlane.BrowserLoginTests.CaptureScopeFailuresRetryButCleanupOrActivationFailuresRevokeCandidates",
+        "NexusPipeline.Tests.ControlPlane.BrowserLoginTests.ClientSessionsNeverGrantNativeToHttpAndRevokeOnAuthorityOrDesktopExit",
+        "NexusPipeline.Tests.ControlPlane.BrowserLoginTests.SessionRevocationAndEditorCancellationTerminatePendingValidation",
         "NexusPipeline.Tests.ControlPlane.ClientAccessPolicyTests.CapabilitiesExposeOnlyTheThreeValidatedOperationsWithoutCaching",
         "NexusPipeline.Tests.ControlPlane.ClientAccessPolicyTests.NatOriginsRequireAuthenticatedRemoteTransportAndExactHttpAuthority",
         "NexusPipeline.Tests.ControlPlane.ClientAccessPolicyTests.RegistrationsRejectMissingUnknownAndConflictingAccessAndFreezeActions",
