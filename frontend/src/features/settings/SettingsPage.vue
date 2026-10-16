@@ -1,9 +1,14 @@
 <script setup lang="ts">
+import { takePreparedData } from "../../platform/navigation-preparation";
+import { loadSettingsPage } from "./first-screen";
+import { pageScrollViewportKey } from '../../platform/page-scroll';
+const initialData = takePreparedData<Awaited<ReturnType<typeof loadSettingsPage>>>("settings");
 import NxpConfirmDialog from "../../ui/composites/NxpConfirmDialog.vue";
 import { useConfirmation } from "../../ui/confirmation";
 const { message: confirmMessage, confirm, resolve: resolveConfirm } = useConfirmation();
 import {
   computed,
+  inject,
   nextTick,
   onBeforeUnmount,
   onMounted,
@@ -68,6 +73,8 @@ const secretDraft = reactive<Record<string, string>>({
 });
 const saving = ref(false);
 const root = ref<HTMLElement | null>(null);
+const getPageViewport = inject(pageScrollViewportKey, () => null);
+let categorySelection = 0;
 const pluginCategories = ref<{ id: string; label: string }[]>([]);
 const panelOrder = ref<string[]>([]);
 const builtInPanels = [
@@ -124,22 +131,28 @@ function publishSettingsPanelState() {
   );
 }
 async function selectCategory(id: string) {
+  const selection = ++categorySelection;
+  const viewport = getPageViewport();
+  const categoryBar = root.value?.querySelector<HTMLElement>('.settings-categories');
+  const originalTop = categoryBar?.getBoundingClientRect().top;
   const closing = openPanel.value === id && pinnedPanel.value === id;
   pinnedPanel.value = closing ? null : id;
   openPanel.value = closing ? null : id;
   publishSettingsPanelState();
-  if (closing) return;
   await nextTick();
-  const card = Array.from(root.value?.querySelectorAll<HTMLElement>("[data-settings-panel]") || [])
-    .find(item => item.dataset.settingsPanel === id);
-  (card?.matches('nxp-collapsible-card') ? card.firstElementChild : card)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+  if (disposed || selection !== categorySelection || !viewport || originalTop === undefined || !categoryBar) return;
+  const shift = categoryBar.getBoundingClientRect().top - originalTop;
+  if (Math.abs(shift) > .5) viewport.scrollTo({ top: viewport.scrollTop + shift, behavior: 'instant' });
 }
 function togglePanel(id: string) {
+  categorySelection++;
   openPanel.value = openPanel.value === id ? null : id;
   if (!openPanel.value && pinnedPanel.value === id) pinnedPanel.value = null;
   publishSettingsPanelState();
 }
 function handleExternalSettingsPanelToggle(event: Event) {
+  categorySelection++;
   const panelId = (event as CustomEvent<{ panelId?: unknown }>).detail?.panelId;
   if (panelId !== null && typeof panelId !== "string") return;
   if (panelId !== null && !categories.value.some(category => category.id === panelId)) return;
@@ -479,6 +492,7 @@ function syncPluginCategories() {
     cards.add(card);
     if (!pluginPanelListeners.has(card)) {
       const listener: EventListener = event => {
+        categorySelection++;
         const expanded = (event as CustomEvent<unknown[]>).detail?.[0];
         if (typeof expanded !== 'boolean') return;
         openPanel.value = expanded ? card.dataset.settingsPanel! : null;
@@ -514,6 +528,14 @@ function observePluginCategories() {
   syncPluginCategories();
 }
 
+if (initialData) {
+  Object.assign(settings, initialData.settings || {});
+  confirmedAllowConfigRepair = initialData.settings?.allowConfigRepair === true;
+  applyRemoteAddresses(initialData);
+  loaded.value = true;
+  loading.value = false;
+}
+
 onMounted(async () => {
   disposed = false;
   unregisterDirtyGuard = registerRecoveryDirtyGuard(() =>
@@ -523,7 +545,7 @@ onMounted(async () => {
   window.addEventListener(settingsPanelToggleEvent, handleExternalSettingsPanelToggle);
   setTopbarTitle(t("shell.settings", {}, "Settings"));
   try {
-    const data = (await api("GET", "/api/settings")) as {
+    const data = (initialData || await loadSettingsPage()) as {
       settings?: Settings;
       status?: { remote?: { internalAddress?: string | null; publicAddress?: string | null; port?: number } };
     };
@@ -544,6 +566,7 @@ onMounted(async () => {
   }
 });
 onBeforeUnmount(() => {
+  categorySelection++;
   disposed = true;
   tokenRevision++;
   tokenReadController?.abort();

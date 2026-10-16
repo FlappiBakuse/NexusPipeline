@@ -606,6 +606,8 @@ pre.logbox { max-height: 280px; padding: 13px; border: 1px solid var(--border); 
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
+  .nxp-loading-progress > span, .navigation-progress > span { animation-duration: 1.4s !important; animation-iteration-count: infinite !important; }
+  .nxp-spinner, .spinner, button.busy::after { animation-duration: .8s !important; animation-iteration-count: infinite !important; }
   #ambient-particles { opacity: .55; }
 }
 

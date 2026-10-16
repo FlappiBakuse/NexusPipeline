@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { takePreparedData } from "../../platform/navigation-preparation";
+import { loadDashboardPage } from "./first-screen";
+const initialData = takePreparedData<Awaited<ReturnType<typeof loadDashboardPage>>>("dashboard");
 import { vNxpSurface } from "../../ui/surface";
 import NxpConfirmDialog from "../../ui/composites/NxpConfirmDialog.vue";
 import { useConfirmation } from "../../ui/confirmation";
@@ -278,12 +281,18 @@ async function loadHistorySummary() {
   }
 }
 
+if (initialData) {
+  status.value = { running: [], plugins: [], ...initialData.status };
+  editor.committed = initialData.layout.data;
+  editor.etag = initialData.layout.etag;
+  loading.value = false;
+}
+
 onMounted(() => {
   disposed = false;
   setTopbarTitle(t("dashboard.dashboard"));
-  void load();
+  if (initialData) { void paintSlots(); slotsPainted = true; } else { void load(); void editor.refresh(); }
   void loadHistorySummary();
-  void editor.refresh();
   releaseDirty = registerRecoveryDirtyGuard(() => editor.editing || editor.saving || editor.pending);
   releaseTraffic = onServiceTrafficChanged(paused => { if (paused) editor.pause(); else void editor.refresh(); });
   releaseLocale = onLocaleChanged(() => { editor.disconnect(); void editor.refresh(); });

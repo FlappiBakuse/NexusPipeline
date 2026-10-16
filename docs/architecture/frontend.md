@@ -42,7 +42,11 @@ frontend/src/app/App.vue → router / stores / features / ui
 
 ## 路由与业务事务
 
-RouterView 保持挂载，以 route.fullPath 标识页面代际。导航卸载上一页面并挂载目标页面；入场动画不控制路由挂载，连续切换以最后提交的路由为准。
+RouterView 以 route.fullPath 标识页面代际。shell 启动完成后安装导航准备门禁，各 features 的 first-screen 模块读取目标页首屏数据；准备完成才提交路由，页面同步消费一次数据，不在挂载后重复读取。准备期间原页保留但业务操作不可用，侧边栏继续接受选择；超过 200 毫秒显示顶部进度条，30 秒未完成则保留原页并提供重试。失败与超时不提交目标路由，连续切换中被替代的请求和候选 surface 取消，晚到结果不得覆盖当前页面。
+
+导航准备使用独立 AbortSignal，不占用当前页的请求代际。正式提交时才进入新的 page-state 代际并释放上一页轮询与请求。首屏结果仅保存在本次导航内存中，消费后释放，不持久化、不缓存编辑草稿或明文凭据；各页面继续管理后续刷新、事件与写入。历史深链接准备指定记录，非关键 slot、图片和次级详情不阻塞首屏。
+
+插件 route 复用 Frontend API 的异步 handler，候选 element 尚未连接文档，handler 完成后由 PluginRouteHost 接管。取消先中止 surface.signal，再执行一次 cleanup；正式进入后才发送 page-enter/page-updated 通知。插件自己的轮询在 element 连接文档后启动；离开旧页的全局通知不能释放别的候选 surface。
 
 新业务进入 features 对应领域，页面负责请求调度与高层编排，复杂事务放同域 components，请求放 services，纯转换放 utils。业务不得操作页面外 DOM；卸载时释放轮询、订阅和在途请求。app、features、ui 和 platform 通过 @bridge/index 使用插件能力，不引用桥接私有实现。
 

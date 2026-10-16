@@ -282,7 +282,8 @@
         "src/plugin-bridge/contract.test.ts",
         "src/plugin-bridge/dashboard.test.ts",
         "src/stores/shell.test.ts",
-        "src/ui/primitives/NxpTextInput.test.ts"
+        "src/ui/primitives/NxpTextInput.test.ts",
+        "src/platform/navigation-preparation.test.ts"
       ],
       "caseIds": [
         "Frontend API 1.7 contract aborts a route before cleaning it exactly once when its registration is disposed",
@@ -349,6 +350,14 @@
         "management page write protection counts pending writes through their response and never aborts them for refresh",
         "management page write protection holds a close permit across save and consume and rejects writes until release",
         "management page write protection rechecks writes and navigation after the browser confirmation was shown",
+        "navigation preparation aborts superseded work and rejects its late result",
+        "navigation preparation cancels the deadline even when component loading has not reached preparation",
+        "navigation preparation commits fresh data once without loading it again",
+        "navigation preparation keeps plugin navigation on the committed route after a rejected navigation",
+        "navigation preparation releases a prepared plugin when navigation is cancelled",
+        "navigation preparation retains a retry target after failure and fetches new data on retry",
+        "navigation preparation times out unresponsive work and cleans up a late plugin",
+        "navigation preparation transfers plugin cleanup to the committed page owner",
         "plugin list search and ordering indexes localized names without mixing romanized fields",
         "plugin list search and ordering matches full pinyin, initials, case, separators and original names",
         "plugin list search and ordering puts missing and invalid dates last and breaks date ties by canonical name",

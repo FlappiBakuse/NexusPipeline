@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { takePreparedData } from "../../platform/navigation-preparation";
+import { loadHistoryPage, initialHistoryRange } from "./first-screen";
+const initialData = takePreparedData<Awaited<ReturnType<typeof loadHistoryPage>>>("history");
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { api, isAbortError } from "../../platform/api";
 import { t } from "../../platform/i18n";
@@ -14,14 +17,9 @@ import HistoryDetail from "./components/HistoryDetail.vue";
 import { formatHistoryDate, statusLabel } from "./utils/historyFormat";
 import type { HistoryDate, HistoryRecord, HistoryStatus, HistoryUser } from "./utils/historyTypes";
 
-const today = new Date();
-const pad = (value: number) => String(value).padStart(2, "0");
-const todayValue = () => `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
-const start = new Date(today);
-start.setDate(start.getDate() - 29);
-
-const from = ref(`${start.getFullYear()}-${pad(start.getMonth() + 1)}-${pad(start.getDate())}`);
-const to = ref(todayValue());
+const initialRange = initialHistoryRange();
+const from = ref(initialRange.from);
+const to = ref(initialRange.to);
 const dates = ref<HistoryDate[]>([]);
 const expanded = ref(new Set<string>());
 const usersByDate = ref(new Map<string, HistoryUser[]>());
@@ -249,8 +247,28 @@ async function openLinkedRecord() {
   } finally { if (own === requestId) loading.value = false; }
 }
 
+if (initialData) {
+  from.value = initialData.from; to.value = initialData.to;
+  dates.value = initialData.dates;
+  unsupportedCount.value = initialData.unsupportedCount;
+  const first = initialData.dates[0]?.date;
+  if (initialData.record) {
+    const record = initialData.record;
+    selectedDate.value = first || ""; selectedUserKey.value = record.userId || record.userName || "";
+    selectedUserName.value = record.userName || "";
+    expanded.value = new Set(first ? [first] : []);
+    if (first) usersByDate.value.set(first, [{ userKey: selectedUserKey.value, userName: selectedUserName.value, count: 1 }]);
+    records.value = [record]; detail.value = record;
+  } else if (!mobile && first) {
+    selectedDate.value = first; expanded.value.add(first);
+    usersByDate.value.set(first, initialData.users);
+  }
+  loading.value = false;
+}
+
 onMounted(() => {
   setTopbarTitle(t("shell.history"));
+  if (initialData) return;
   if (new URLSearchParams(window.location.hash.split('?')[1] || '').has('recordId')) void openLinkedRecord();
   else void loadDates();
 });

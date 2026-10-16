@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { takePreparedData } from "../../platform/navigation-preparation";
+import { loadScriptsPage } from "./first-screen";
+const initialData = takePreparedData<Awaited<ReturnType<typeof loadScriptsPage>>>("scripts");
 import { vNxpSurface } from "../../ui/surface";
 import ScriptTypeIcon from "./ScriptTypeIcon.vue";
 import NxpOverflowText from "../../ui/primitives/NxpOverflowText.vue";
@@ -26,7 +29,7 @@ import NxpModal from "../../ui/primitives/NxpModal.vue";
 import NxpSortableList from "../../ui/composites/NxpSortableList.vue";
 import ScriptCard from "./ScriptCard.vue";
 import ScriptEditorModal from "./ScriptEditorModal.vue";
-import { deleteScript, listScripts, getStatus, listProviderConfigurations, type ProviderConfigurationStatus, reorderScripts as reorderScriptsRequest } from "./services/scriptsApi";
+import { deleteScript, listScripts, listProviderConfigurations, type ProviderConfigurationStatus, reorderScripts as reorderScriptsRequest } from "./services/scriptsApi";
 import { openEventStream, type EventStreamHandle } from "../../platform/events";
 import type { Script, ScriptPlugin } from "./utils/scriptTypes";
 
@@ -132,10 +135,7 @@ async function load() {
   loading.value = true;
   error.value = "";
   try {
-    const [scriptData, status] = (await Promise.all([
-      listScripts(),
-      getStatus(),
-    ])) as [Script[], { plugins?: ScriptPlugin[] }];
+    const [scriptData, status] = await loadScriptsPage();
     if (disposed) return;
     scripts.value = Array.isArray(scriptData) ? scriptData : [];
     plugins.value = Array.isArray(status?.plugins) ? status.plugins : [];
@@ -171,10 +171,17 @@ async function paintListSlots() {
       primaryId: slot.dataset.pluginPrimaryId || "",
     });
 }
+if (initialData) {
+  const [scriptData, status] = initialData;
+  scripts.value = Array.isArray(scriptData) ? scriptData : [];
+  plugins.value = Array.isArray(status?.plugins) ? status.plugins : [];
+  loading.value = false;
+}
+
 onMounted(() => {
   disposed = false;
   setTopbarTitle(t("common.script_instance"));
-  void load();
+  if (initialData) void paintListSlots(); else void load();
   void refreshConfigurations().catch(() => {});
   configurationEvents = openEventStream({
     onReady: () => refreshConfigurations(), onMissed: () => refreshConfigurations(),

@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { takePreparedData } from "../../platform/navigation-preparation";
+import { loadDispatchPage } from "./first-screen";
+const initialData = takePreparedData<Awaited<ReturnType<typeof loadDispatchPage>>>("dispatch");
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { api, isAbortError } from "../../platform/api";
 import { openEventStream, type RealtimeSseEvent, type EventStreamHandle } from "../../platform/events";
@@ -125,11 +128,7 @@ async function loadInitial() {
   loading.value = true;
   error.value = "";
   try {
-    const [nextStatus, nextScripts, nextQueues] = await Promise.all([
-      api("GET", "/api/status"),
-      api("GET", "/api/scripts"),
-      api("GET", "/api/queues"),
-    ]) as [DispatchStatus, Script[], Queue[]];
+    const [nextStatus, nextScripts, nextQueues] = await loadDispatchPage();
     if (disposed || id !== requestSerial) return;
     status.value = { running: [], plugins: [], ...nextStatus };
     scripts.value = Array.isArray(nextScripts) ? nextScripts : [];
@@ -349,12 +348,20 @@ function explainQueueClass(value?: string) {
   return value || t("dispatch.not_tracked");
 }
 
+if (initialData) {
+  const [nextStatus, nextScripts, nextQueues] = initialData;
+  status.value = { running: [], plugins: [], ...nextStatus };
+  scripts.value = Array.isArray(nextScripts) ? nextScripts : [];
+  queues.value = Array.isArray(nextQueues) ? nextQueues : [];
+  loading.value = false;
+}
+
 onMounted(async () => {
   disposed = false;
   pageToken = state.routeToken;
   setTopbarTitle(t("dispatch.scheduler"));
   await initPluginRuntime();
-  await loadInitial();
+  if (initialData) await paintPluginSlots(); else await loadInitial();
   if (disposed) return;
   await notifyPluginPageEnter({ hash: "dispatch", page: "dispatch", segments: ["dispatch"], token: pageToken, container: root.value });
   startStatusPolling();

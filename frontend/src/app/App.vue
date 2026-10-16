@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, provide, ref, watch } from "vue";
-import { RouterLink, RouterView, useRoute } from "vue-router";
+import { RouterLink, RouterView, useRoute, useRouter } from "vue-router";
 import { useShellStore } from "../stores/shell";
 import BootLoadingState from "./BootLoadingState.vue";
 import TokenPrompt from "./TokenPrompt.vue";
@@ -8,7 +8,9 @@ import { bootstrapFrontend } from "./bootstrap";
 import { applyTranslations, t } from "../platform/i18n";
 import { setNavOpen } from "../platform/shell";
 import { cycleTheme } from "../platform/shell";
-import { enterPage } from "../platform/page-state";
+import { navigationPreparation } from "../platform/navigation-preparation";
+import { installNavigationPreparation } from './navigation';
+import { pageScrollViewportKey } from '../platform/page-scroll';
 import { isAbortError } from "../platform/api";
 import { initAutoScroll } from "../platform/auto-scroll";
 import { registerTokenPromptRenderer } from "../platform/auth";
@@ -33,6 +35,16 @@ function configurationChanged(userId: string) {
   configEditCompletion.value = { userId, revision: (configEditCompletion.value?.revision || 0) + 1 };
 }
 const route = useRoute();
+const mainScroll = ref<InstanceType<typeof NxpScrollArea> | null>(null);
+provide(pageScrollViewportKey, () => mainScroll.value?.getViewport() ?? null);
+const router = useRouter();
+const navigationStatus = navigationPreparation.status;
+let prepareInitialRoute: (() => Promise<void>) | undefined;
+let stopNavigationPreparation: (() => void) | undefined;
+async function retryNavigation() {
+  if (shell.booted) await router.push(navigationStatus.retryTarget);
+  else await prepareInitialRoute?.();
+}
 const shell = useShellStore();
 const desktop=desktopBridge();
 const shutdownNotice=ref(false);
@@ -93,13 +105,10 @@ function closeOnDesktopResize() {
   if (window.innerWidth > 820 && shell.navOpen) closeNav();
 }
 
-// 路由提交后终止上一页面的轮询/请求代际，并关闭移动端抽屉。
-watch(() => route.fullPath, () => {
-  enterPage(segments.value[0] || "dashboard");
-  if (shell.navOpen) closeNav();
-});
+watch(() => navigationStatus.ready, ready => { if (ready) shell.markBooted(); });
 
 onBeforeUnmount(() => {
+  stopNavigationPreparation?.();
   stopEvents?.();stopRefresh?.();
   stopShutdownNotice?.();
   stopServiceObserver?.();
@@ -135,7 +144,11 @@ onMounted(async () => {
   try {
     const booted = await bootstrapFrontend();
     if (booted) {
-      shell.markBooted();
+      const navigation = installNavigationPreparation(router);
+      prepareInitialRoute = navigation.prepareInitial;
+      stopNavigationPreparation = navigation.dispose;
+      await prepareInitialRoute();
+      if (navigationStatus.ready) shell.markBooted();
       applyTranslations();
       scheduleAutoScroll();
       stopServiceObserver = startServiceObserver(shell);
@@ -156,12 +169,16 @@ function openNav() {
   shell.navOpen = true;
   setNavOpen(true);
 }
+function onSidebarClick(event: MouseEvent) {
+  const link = event.target instanceof Element ? event.target.closest('a') : null;
+  if (link?.getAttribute('href')?.startsWith('#/')) closeNav();
+}
 </script>
 
 <template>
   <div v-if="desktop" class="desktop-titlebar"><span>NexusPipeline</span><span class="desktop-connection" role="status">{{ shell.identityConnection === 'offline' ? t('shell.recovery.disconnected') : '' }}</span></div>
   <div class="app-shell" :class="{ 'nav-open': shell.navOpen, 'desktop-shell': !!desktop }" :inert="shell.recoveryPhase === 'navigating' || shutdownNotice">
-    <aside id="sidebar" class="sidebar" :aria-label="t('shell.nav.main')" data-i18n-aria-label="shell.nav.main" :inert="isMobile && !shell.navOpen" :aria-hidden="isMobile ? (shell.navOpen ? 'false' : 'true') : undefined">
+    <aside id="sidebar" class="sidebar" :aria-label="t('shell.nav.main')" data-i18n-aria-label="shell.nav.main" :inert="isMobile && !shell.navOpen" :aria-hidden="isMobile ? (shell.navOpen ? 'false' : 'true') : undefined" @click="onSidebarClick">
       <div class="brand"><div class="brand-mark" aria-hidden="true">N</div><div class="brand-copy"><strong>NexusPipeline</strong><span data-i18n="shell.brand_suffix"></span></div></div>
       <div class="sidebar-navigation">
       <div class="nav-caption" data-i18n="shell.workbench"></div>
@@ -183,10 +200,15 @@ function openNav() {
     <div class="nav-backdrop" @click.capture="closeNav"><NxpButton type="button" :aria-label="t('shell.close_navigation')" data-i18n-aria-label="shell.close_navigation" @pointerdown="closeNav" @click.stop="closeNav" /></div>
     <div class="page-shell">
       <header class="topbar"><NxpIconButton class="menu-button" :label="t('shell.open_navigation')" data-i18n-aria-label="shell.open_navigation" :expanded="shell.navOpen" aria-controls="sidebar" @click="openNav"><NxpIcon name="menu" /></NxpIconButton><div class="topbar-context"><span class="topbar-product" data-i18n="shell.product"></span><span id="topbar-title" class="sr-only" data-i18n="shell.dashboard"></span></div><div class="topbar-actions"><NxpIconButton :label="t('shell.theme_toggle')" data-i18n-aria-label="shell.theme_toggle" @click="cycleTheme"><span id="theme-icon" data-theme-icon aria-hidden="true"><NxpIcon name="theme" /></span></NxpIconButton></div></header>
-      <NxpScrollArea class="page-main-scroll" :class="{ 'page-main-scroll-fill': fillPage }" :aria-label="t('shell.main_content')">
+      <div v-if="navigationStatus.progress" class="navigation-progress" role="progressbar" :aria-label="t('common.loading')"><span /></div>
+      <div v-if="navigationStatus.error" class="navigation-error" role="alert">
+        <span>{{ t(navigationStatus.error === 'timeout' ? 'shell.navigation.timeout' : 'shell.navigation.failed') }}</span>
+        <NxpButton type="button" @click="retryNavigation">{{ t('common.retry') }}</NxpButton>
+      </div>
+      <NxpScrollArea ref="mainScroll" class="page-main-scroll" :class="{ 'page-main-scroll-fill': fillPage }" :aria-label="t('shell.main_content')" :aria-busy="navigationStatus.pending">
         <p v-if="preferencesUnavailable" class="desktop-preferences-warning" role="status">{{ t('shell.desktop.preferences_unavailable') }}</p>
         <RouterView v-if="shell.booted" v-slot="{ Component, route: viewRoute }">
-          <div :key="viewRoute.fullPath" class="app-page" :class="{ 'app-page-fill': fillPage }">
+          <div :key="viewRoute.fullPath" class="app-page" :class="{ 'app-page-fill': fillPage }" :inert="navigationStatus.pending">
             <component :is="Component" />
           </div>
         </RouterView>

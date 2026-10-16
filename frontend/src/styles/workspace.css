@@ -45,6 +45,12 @@ body { font-size: 14px; line-height: 1.55; }
 }
 
 .desktop-preferences-warning { margin: 12px 20px; padding: 12px; border: 1px solid var(--warn); border-radius: 10px; color: var(--warn); }
+.page-shell { position: relative; }
+.navigation-progress { position: absolute; z-index: 5; top: 0; left: 0; right: 0; height: 3px; overflow: hidden; pointer-events: none; background: var(--content-card-soft); }
+.navigation-progress > span { display: block; width: 42%; height: 100%; background: var(--accent); animation: nxp-navigation-progress 1.4s ease-in-out infinite; }
+@keyframes nxp-navigation-progress { 0% { transform: translateX(-120%); } 100% { transform: translateX(240%); } }
+.navigation-error { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: var(--nx-space-2); padding: var(--nx-space-2) var(--nx-space-4); color: var(--warn); }
+.settings-cards { overflow-anchor: none; }
 @media (max-width: 767px) {
   #view, .view-root { padding: 20px 16px 28px; }
   .sidebar { width: 222px; }

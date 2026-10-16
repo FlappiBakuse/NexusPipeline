@@ -424,7 +424,10 @@
         "frontend/src/app",
         "frontend/src/platform",
         "frontend/src/plugin-bridge",
-        "frontend/src/ui"
+        "frontend/src/ui",
+        "frontend/src/app/navigation.ts",
+        "frontend/src/platform/navigation-preparation.ts",
+        "frontend/src/platform/page-scroll.ts"
       ],
       "authorityFor": [
         "frontend-architecture"

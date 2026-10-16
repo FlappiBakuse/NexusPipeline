@@ -74,7 +74,7 @@
 
 访问类别、来源判定与 host.getCapabilities 见[访问契约](access.md)。
 
-路由处理器接收 `RouteSurface`：`element`、`routeToken`、`segments`、`signal`。必须在 element 内挂载，返回清理函数（或最终返回函数的 Promise）；路由离开、替换或插件停止时先中止 signal，再执行清理。不得查询宿主私有页面容器。
+路由处理器接收 `RouteSurface`：`element`、`routeToken`、`segments`、`signal`。必须在 element 内挂载，返回清理函数（或最终返回函数的 Promise）。导航准备时 element 可以尚未连接文档；异步 handler 在首屏可呈现后完成，轮询等只属于当前可见页的工作应在 element 连接文档后启动。每个 surface 独立管理组件，不用全局页面清理替代本 surface 的 signal/cleanup；路由离开、替换或插件停止时先中止 signal，再执行清理。不得查询宿主私有页面容器。
 
 ## 卡片 renderer
 
