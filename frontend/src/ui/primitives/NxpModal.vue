@@ -128,7 +128,7 @@ onBeforeUnmount(() => {
       <section ref="panel" class="nxp-modal-panel secondary-surface" data-nxp-surface-context="dialog" :class="[props.panelClass, { 'nxp-modal-panel--wide': props.size === 'wide', 'is-secondary': props.surface === 'secondary', 'nxp-modal-panel--with-footer': props.footer || Boolean($slots.footer) }]" tabindex="-1" :data-locked="props.locked ? '' : undefined">
         <header v-if="title || closeable || $slots.header" class="nxp-modal-header">
           <slot name="header"><h2 v-if="title" class="nxp-modal-title">{{ title }}</h2></slot>
-          <button v-if="closeable" class="icon-button nxp-modal-close" type="button" :aria-label="props.closeLabel" :disabled="locked" @click="onBackdropClick"><NxpIcon name="close" class-name="nxp-modal-close-icon" /></button>
+          <button v-if="closeable" class="icon-button nxp-modal-close" type="button" :aria-label="props.closeLabel" @click="emit('close')"><NxpIcon name="close" class-name="nxp-modal-close-icon" /></button>
         </header>
         <NxpScrollArea class="nxp-modal-body" :class="props.bodyClass" viewport-class="nxp-modal-viewport"><slot /></NxpScrollArea>
         <footer v-if="props.footer || $slots.footer" class="nxp-modal-footer"><slot name="footer" /></footer>
