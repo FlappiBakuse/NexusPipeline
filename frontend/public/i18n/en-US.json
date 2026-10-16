@@ -1446,5 +1446,15 @@
   "execution.success_with_partial_verification": "Run succeeded: known tasks completed; other tasks were not individually verified.",
   "execution.unconfirmed_worker": "Normal completion of the automation process has not been confirmed.",
   "execution.owned_process_nonzero": "The automation process exited with a nonzero code.",
-  "api.error.no_enabled_bindings": "No runnable account bindings: no account is bound, or the account/script binding is disabled. Enable the binding in Accounts & Configuration and check the run plan."
+  "api.error.no_enabled_bindings": "No runnable account bindings: no account is bound, or the account/script binding is disabled. Enable the binding in Accounts & Configuration and check the run plan.",
+  "dispatch.plan.ready": "Ready to run",
+  "dispatch.plan.attention": "Needs attention",
+  "dispatch.plan.blocked": "Cannot run",
+  "dispatch.plan.summary_ready": "Checks passed. All accounts meet the current run requirements.",
+  "dispatch.plan.summary_attention": "Some tasks will be skipped or need attention. Review the reasons below.",
+  "dispatch.plan.summary_blocked": "This plan cannot run normally. Resolve the issues below first.",
+  "dispatch.plan.no_users": "No available account bindings. Enable the account and its script instance.",
+  "dispatch.plan.no_tasks": "This plan has no tasks to run.",
+  "dispatch.plan.missing_script": "Script instance missing",
+  "dispatch.plan.daily_limit": "Successful today: {successful} / {maximum}"
 }

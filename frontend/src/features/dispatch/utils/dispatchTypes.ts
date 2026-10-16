@@ -131,12 +131,15 @@ export function appendRunningLogEntries(
 }
 
 export interface DispatchPlanTask {
+  scriptId?: string;
   scriptName?: string;
   taskId?: string;
   userCount?: number;
 }
 
 export interface DispatchPlanUser {
+  scriptId?: string;
+  userId?: string;
   userName?: string;
   status?: string;
   successfulRunsToday?: number;

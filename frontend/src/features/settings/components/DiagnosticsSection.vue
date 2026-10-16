@@ -4,6 +4,8 @@ import { api, isAbortError } from "../../../platform/api";
 import { t } from "../../../platform/i18n";
 import { toast } from "../../../platform/toast";
 import NxpBadge from "../../../ui/primitives/NxpBadge.vue";
+import NxpLoadingState from "../../../ui/composites/NxpLoadingState.vue";
+import NxpEmptyState from "../../../ui/primitives/NxpEmptyState.vue";
 import NxpButton from "../../../ui/primitives/NxpButton.vue";
 import type { DiagnosticCheck, DiagnosticsData } from "../utils/settingsTypes";
 
@@ -37,8 +39,7 @@ function statusLabel(value?: string) {
     `diagnostics.status.${value || "unknown"}`,
     {},
     { pass: "Normal", warn: "Attention", fail: "Failed", skipped: "Skipped" }[value || ""] ||
-      value ||
-      "Unknown",
+      (value && value !== "unknown" ? value : t("common.unknown")),
   );
 }
 function checkLabel(id?: string) {
@@ -64,6 +65,20 @@ function diagnosticText(code?: string, args?: Record<string, unknown>, fallback 
   if (code.endsWith(".detail")) return t("diagnostics.detail", {}, fallback);
   if (code.endsWith(".remediation")) return t("diagnostics.remediation", {}, fallback);
   return fallback;
+}
+
+function groupStatus(items: DiagnosticCheck[]) {
+  if (items.some(check => check.status === "fail")) return "fail";
+  if (items.some(check => check.status === "warn")) return "warn";
+  if (items.every(check => check.status === "pass")) return "pass";
+  return items.every(check => ["pass", "skipped"].includes(check.status || "")) ? "skipped" : "unknown";
+}
+function checkSummary(check: DiagnosticCheck) {
+  return diagnosticText(check.summaryCode, check.summaryArgs, statusLabel(check.status));
+}
+function checkDetail(check: DiagnosticCheck) {
+  const detail = requiresDetail(check) ? diagnosticText(check.detailCode, check.detailArgs) : "";
+  return detail === checkSummary(check) ? "" : detail;
 }
 
 async function loadDiagnostics() {
@@ -96,87 +111,37 @@ defineExpose({ reload: loadDiagnostics });
 
 <template>
   <div class="diagnostics-section">
-    <div id="diagnostics-status" class="diagnostics-status" data-testid="diagnostics-status" aria-live="polite">
-      <p v-if="loading" class="muted">{{ t("settings.loading_diagnostics") }}</p>
-      <p v-else-if="diagnostics?.error" class="callout callout-warning">{{ diagnostics.error }}</p>
-      <template v-else-if="diagnostics"
-        ><div class="diagnostics-overview">
-          <div class="diagnostics-overview-status">
-            <span class="diagnostics-overview-label">{{ t("diagnostics.overall", {}, "Overall status") }}</span
-            ><NxpBadge :tone="statusTone(diagnostics.overallStatus || 'warn')">{{ statusLabel(diagnostics.overallStatus || "warn") }}</NxpBadge
-            ><span class="muted">v{{ diagnostics.hostVersion || "" }}</span>
+    <div id="diagnostics-status" class="assessment-layout" data-testid="diagnostics-status" aria-live="polite" :aria-busy="loading">
+      <NxpLoadingState v-if="loading" :title="t('settings.loading_diagnostics')" />
+      <NxpEmptyState v-else-if="diagnostics?.error" :title="diagnostics.error" tone="danger" />
+      <template v-else-if="diagnostics">
+        <header class="assessment-overview">
+          <div class="assessment-overview-title">
+            <div class="diagnostics-overview-copy"><strong>{{ t('diagnostics.overall') }}</strong><p>{{ attentionCount > 0 ? t('settings.diagnostics.overview_attention', { total: checks.length, count: attentionCount }) : t('settings.diagnostics.overview_clear', { total: checks.length, count: 0 }) }}</p></div>
+            <NxpBadge :tone="statusTone(diagnostics.overallStatus)">{{ statusLabel(diagnostics.overallStatus) }}</NxpBadge>
           </div>
-          <span class="muted diagnostics-overview-meta">{{
-            attentionCount > 0
-              ? t("settings.diagnostics.overview_attention", { total: checks.length, count: attentionCount })
-              : t("settings.diagnostics.overview_clear", { total: checks.length, count: 0 })
-          }}</span>
-        </div>
-        <div class="diagnostics-table" role="table" :aria-label="t('settings.diagnostics.system_checks')">
-          <div class="sr-only" role="row">
-            <span role="columnheader">{{ t("common.check") }}</span
-            ><span role="columnheader">{{ t("common.status") }}</span
-            ><span role="columnheader">{{ t("settings.diagnostics") }}</span>
-          </div>
-          <section
-            v-for="group in groupedChecks"
-            :key="group.key"
-            class="diagnostics-group"
-            role="rowgroup"
-            :aria-label="group.label"
-            :data-diagnostic-category="group.key"
-          >
-            <div class="diagnostics-group-heading">
-              <div class="diagnostics-group-heading-main">
-                <h4>{{ group.label }}</h4>
-                <NxpBadge tone="muted">{{ group.checks.length }}</NxpBadge>
+        </header>
+        <section v-for="(group, groupIndex) in groupedChecks" :key="group.key" class="assessment-group" :aria-label="group.label" :data-diagnostic-category="group.key">
+          <header class="assessment-group-heading"><span class="assessment-index" aria-hidden="true">{{ groupIndex + 1 }}</span><h4>{{ group.label }}</h4><NxpBadge :tone="statusTone(groupStatus(group.checks))">{{ statusLabel(groupStatus(group.checks)) }}</NxpBadge></header>
+          <div role="table" :aria-label="group.label">
+            <div class="assessment-row assessment-table-header" role="row"><span role="columnheader">{{ t('common.check') }}</span><span role="columnheader">{{ t('common.status') }}</span><span role="columnheader">{{ t('diagnostics.detail') }}</span></div>
+            <div v-for="(check, checkIndex) in group.checks" :key="`${check.id}-${checkIndex}`" class="assessment-row" role="row" :data-diagnostic-status="check.status || 'unknown'">
+              <div role="cell"><strong :title="check.id || undefined">{{ checkLabel(check.id) }}</strong></div>
+              <div class="assessment-outcome" role="cell"><NxpBadge :tone="statusTone(check.status)">{{ statusLabel(check.status) }}</NxpBadge></div>
+              <div class="assessment-explanation diagnostic-check-info" role="cell">
+                <p>{{ checkSummary(check) }}</p>
+                <p v-if="checkDetail(check)">{{ checkDetail(check) }}</p>
+                <p v-if="requiresDetail(check) && check.remediationCode" class="diagnostic-check-remediation"><strong>{{ t('diagnostics.remediation') }}：</strong>{{ diagnosticText(check.remediationCode, check.remediationArgs) }}</p>
               </div>
             </div>
-            <div
-              v-for="(check, checkIndex) in group.checks"
-              :key="`${check.id || 'unknown'}-${checkIndex}`"
-              class="diagnostic-row"
-              role="row"
-              :data-diagnostic-status="check.status || 'unknown'"
-            >
-              <div class="diagnostic-check-name" role="cell">
-                <div class="diagnostic-check-title-line">
-                  <strong class="diagnostic-check-title" :title="check.id || undefined">{{ checkLabel(check.id) }}</strong
-                  ><NxpBadge tone="muted">{{ group.label }}</NxpBadge>
-                </div>
-                <span v-if="check.id" class="sr-only">{{ t("diagnostics.identifier", { id: check.id }, `Diagnostic ID: ${check.id}`) }}</span>
-              </div>
-              <div class="diagnostic-check-status" role="cell">
-                <NxpBadge :tone="statusTone(check.status)">{{ statusLabel(check.status) }}</NxpBadge>
-              </div>
-              <div class="diagnostic-check-info" role="cell">
-                <div class="diagnostic-check-summary">
-                  <span class="diagnostic-info-label">{{ t("diagnostics.summary", {}, "Summary") }}</span
-                  ><span>{{ diagnosticText(check.summaryCode, check.summaryArgs, statusLabel(check.status)) }}</span>
-                </div>
-                <div v-if="requiresDetail(check) && check.detailCode" class="diagnostic-check-detail">
-                  <span class="diagnostic-info-label">{{ t("diagnostics.detail", {}, "Details") }}</span
-                  ><span>{{ diagnosticText(check.detailCode, check.detailArgs) }}</span>
-                </div>
-                <div v-if="requiresDetail(check) && check.remediationCode" class="diagnostic-check-remediation">
-                  <span class="diagnostic-info-label">{{ t("diagnostics.remediation", {}, "Recommendation") }}</span
-                  ><span>{{ diagnosticText(check.remediationCode, check.remediationArgs) }}</span>
-                </div>
-              </div>
-            </div>
-          </section>
-          <div v-if="!checks.length" class="diagnostics-empty" role="row">
-            {{ t("diagnostics.empty", {}, "No diagnostic results") }}
           </div>
-        </div></template
-      >
+        </section>
+        <NxpEmptyState v-if="!checks.length" :title="t('diagnostics.empty')" />
+      </template>
     </div>
     <div class="row-actions diagnostics-actions">
-      <NxpButton class="ghost" type="button" data-testid="load-diagnostics" :disabled="loading" @click="loadDiagnostics">
-        {{ t("settings.refresh_diagnostics") }}</NxpButton>
-      <NxpButton class="ghost" type="button" data-testid="export-diagnostics" @click="exportDiagnostics">
-        {{ t("settings.diagnostics.export_help") }}
-      </NxpButton>
+      <NxpButton class="ghost" type="button" data-testid="load-diagnostics" :busy="loading" @click="loadDiagnostics">{{ t('settings.refresh_diagnostics') }}</NxpButton>
+      <NxpButton class="ghost" type="button" data-testid="export-diagnostics" @click="exportDiagnostics">{{ t('settings.diagnostics.export_help') }}</NxpButton>
     </div>
   </div>
 </template>

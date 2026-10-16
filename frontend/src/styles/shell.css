@@ -486,69 +486,31 @@ pre.logbox { max-height: 280px; padding: 13px; border: 1px solid var(--border); 
 .modal-body { min-height: 0; flex: 1 1 auto; padding: 0 clamp(18px, 3vw, 30px) 0; overscroll-behavior: contain; }
 .modal-footer { display: flex; flex: 0 0 auto; flex-wrap: wrap; justify-content: flex-end; gap: var(--action-gap); margin: 0; padding: var(--space-4) clamp(18px, 3vw, 30px) clamp(18px, 3vw, 30px); border-top: 1px solid var(--border); }
 .settings-list { display: grid; gap: 0; margin: var(--space-3) 0 var(--space-5); border: 1px solid var(--content-card-border); border-radius: var(--radius-lg); overflow: hidden; background: var(--content-card); }
-.diagnostics-overview { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); margin: var(--space-3) 0; padding: 14px 16px; border: 1px solid var(--content-card-border); border-radius: var(--radius-lg); background: linear-gradient(135deg, var(--content-card-soft), var(--content-card)); }
-.diagnostics-overview-status { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; }
-.diagnostics-overview-label { color: var(--text); font-size: 13px; font-weight: 750; }
-.diagnostics-overview-meta { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; padding-left: 14px; border-left: 1px solid var(--border); text-align: right; }
-.diagnostics-table { margin: var(--space-3) 0 var(--space-5); overflow: visible; border: 0; border-radius: 0; background: transparent; }
-.diagnostics-table-header, .diagnostic-row { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(86px, .42fr) minmax(0, 1.58fr); gap: var(--space-4); min-width: 0; }
-.diagnostics-table-header { padding: 10px 14px; border: 1px solid var(--content-card-border); border-radius: var(--radius-md); background: var(--content-card-soft); color: var(--muted); font-size: 11px; font-weight: 750; letter-spacing: .04em; }
-.diagnostics-group { margin-top: var(--space-4); }
-.diagnostics-group-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: 0 4px 7px; }
-.diagnostics-group-heading-main { display: flex; min-width: 0; align-items: center; gap: 8px; }
-.diagnostics-group-heading h4 { margin: 0; color: var(--text); font-size: 13px; }
-.diagnostic-row { position: relative; align-items: stretch; margin-top: var(--space-2); padding: 14px; border: 1px solid var(--content-card-border); border-radius: var(--radius-lg); background: var(--content-card); box-shadow: 0 2px 6px rgba(0, 0, 0, .08); }
-.diagnostic-row[data-diagnostic-status="pass"] { border-left: 3px solid var(--ok); }
-.diagnostic-row[data-diagnostic-status="warn"] { border-left: 3px solid var(--warn); }
-.diagnostic-row[data-diagnostic-status="fail"] { border-left: 3px solid var(--bad); }
-.diagnostic-row[data-diagnostic-status="skipped"] { border-left: 3px solid var(--faint); }
-.diagnostic-row:hover { border-color: var(--content-control-border); background: var(--content-card-hover); }
-.diagnostic-check-name, .diagnostic-check-summary, .diagnostic-check-info { min-width: 0; }
-.diagnostic-check-name { display: grid; gap: 3px; }
-.diagnostic-check-title-line { display: flex; min-width: 0; align-items: center; flex-wrap: wrap; gap: 7px; }
-.diagnostic-check-title { overflow-wrap: anywhere; }
-.diagnostic-check-id { display: block; font-size: 11px; overflow-wrap: anywhere; }
-.diagnostic-check-status { display: flex; align-items: center; align-self: stretch; min-width: 0; }
-.diagnostic-check-info { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--content-card-soft); color: var(--muted); font-size: 12px; }
-.diagnostic-check-summary, .diagnostic-check-detail, .diagnostic-check-remediation { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 5px 8px; line-height: 1.55; overflow-wrap: anywhere; }
-.diagnostic-check-summary { color: var(--text); font-weight: 650; }
-.diagnostic-check-remediation { padding-top: 7px; border-top: 1px solid var(--border); color: var(--accent); }
-.diagnostic-info-label { color: var(--faint); font-size: 11px; font-weight: 700; }
-.diagnostics-empty { padding: 18px 14px; color: var(--muted); font-size: 13px; }
-.execution-plan { display: grid; gap: var(--space-3); margin: var(--space-3) 0 0; min-width: 0; }
-.execution-plan-summary { display: grid; grid-template-columns: minmax(0, 1.05fr) repeat(3, minmax(0, 1fr)); align-items: stretch; gap: var(--space-4); }
-.execution-plan-summary-main { display: grid; min-width: 0; min-height: 64px; align-content: center; grid-template-columns: auto minmax(0, 1fr); gap: 4px 8px; padding: 12px 14px; border: 1px solid var(--content-card-border); border-radius: var(--radius-md); background: var(--content-card); }
-.execution-plan-summary-badge { grid-column: 1 / -1; justify-self: start; }
-.execution-plan-summary-label { color: var(--muted); font-size: 11px; }
-.execution-plan-summary-main strong { min-width: 0; overflow-wrap: anywhere; font-size: 14px; }
-.execution-plan-summary-stat { display: grid; min-width: 0; align-content: center; gap: 4px; padding: 10px 12px; border: 1px solid var(--content-card-border); border-radius: var(--radius-md); background: var(--content-card); line-height: 1.5; }
-.execution-plan-summary-stat .k { flex: 0 0 auto; color: var(--muted); font-size: 11px; }
-.execution-plan-summary-stat > :last-child { min-width: 0; overflow-wrap: anywhere; }
-.execution-plan-stat-value { color: var(--text); font-size: 13px; }
-.execution-plan-stat-subvalue { font-size: 11px; }
-.execution-plan-section { overflow: hidden; border: 1px solid var(--content-card-border); border-radius: var(--radius-lg); background: var(--content-card); box-shadow: 0 2px 7px rgba(0, 0, 0, .08); }
-.execution-plan-section-heading { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); padding: 13px 14px; background: var(--content-card-soft); }
-.execution-plan-section-heading-main { display: flex; min-width: 0; align-items: center; flex-wrap: wrap; gap: 8px; }
-.execution-plan-section-heading h4 { margin: 0; font-size: 14px; }
-.execution-plan-table-header, .execution-plan-row { display: grid; gap: var(--space-3); min-width: 0; }
-.execution-plan-task-header, .execution-plan-task-row { grid-template-columns: minmax(0, 1fr) minmax(120px, .4fr); }
-.execution-plan-user-header, .execution-plan-user-row { grid-template-columns: minmax(160px, 1fr) minmax(96px, .48fr) minmax(132px, .82fr) minmax(220px, 1.45fr); }
-.execution-plan-table-header { padding: 10px 14px; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); background: var(--content-card-soft); color: var(--muted); font-size: 11px; font-weight: 750; letter-spacing: .04em; }
-.execution-plan-row { align-items: stretch; min-height: 58px; padding: 14px; border-bottom: 1px solid var(--border); line-height: 1.55; }
-.execution-plan-section > .execution-plan-row:last-child { border-bottom: 0; }
-.execution-plan-row:hover { background: transparent; }
-.execution-plan-name { min-width: 0; color: var(--text); font-weight: 700; overflow-wrap: anywhere; }
-.execution-plan-task-main { display: flex; min-width: 0; align-items: center; gap: 10px; }
-.execution-plan-task-index { display: inline-flex; flex: 0 0 auto; width: 28px; height: 28px; align-items: center; justify-content: center; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-size: 12px; font-weight: 800; }
-.execution-plan-task-copy { display: grid; min-width: 0; gap: 3px; }
-.execution-plan-task-id { color: var(--faint); font-size: 11px; font-weight: 400; overflow-wrap: anywhere; }
-.execution-plan-task-copy strong, .execution-plan-task-copy .mono { min-width: 0; overflow-wrap: anywhere; }
-.execution-plan-status { padding-top: 1px; }
-.execution-plan-users { align-self: center; }
-.execution-plan-task-row .execution-plan-users { text-align: left; }
-.execution-plan-today { overflow-wrap: anywhere; }
-.execution-plan-reason { line-height: 1.55; overflow-wrap: anywhere; }
-.execution-plan-warning { margin: 0; }
+.assessment-layout { display: grid; gap: var(--space-4); min-width: 0; }
+.assessment-overview { padding-bottom: var(--space-3); border-bottom: 1px solid var(--border); }
+.assessment-overview-title { display: flex; align-items: center; gap: var(--space-3); }
+.assessment-overview-title strong { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 18px; }
+.assessment-overview p { margin: var(--space-2) 0 0; color: var(--muted); line-height: 1.6; }
+.assessment-overview .execution-plan-admission { color: var(--bad); }
+.assessment-group { min-width: 0; overflow: hidden; border: 1px solid var(--content-card-border); border-radius: var(--radius-md); }
+.assessment-group-heading { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-3); background: var(--content-card-soft); }
+.assessment-group-heading h4 { flex: 1; min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.assessment-index { display: inline-grid; place-items: center; flex: 0 0 auto; width: 28px; height: 28px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); }
+.assessment-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(100px, .6fr) minmax(0, 1.5fr); align-items: center; gap: var(--space-3); padding: var(--space-3); border-top: 1px solid var(--border); }
+.assessment-row > * { min-width: 0; overflow-wrap: anywhere; }
+.assessment-table-header { color: var(--muted); font-size: 12px; }
+.execution-plan-account { display: grid; gap: var(--space-1); }
+.execution-plan-account .muted { font-size: 12px; }
+.assessment-outcome, .assessment-table-header > :nth-child(2) { text-align: center; }
+.assessment-explanation { line-height: 1.6; color: var(--muted); text-align: right; }
+.assessment-table-header > :last-child { text-align: right; }
+.execution-plan-notes { margin: 0; padding: var(--space-3) var(--space-4) var(--space-3) var(--space-6); color: var(--muted); line-height: 1.6; }
+@media (max-width: 560px) {
+  .assessment-table-header { display: none; }
+  .assessment-row:not(.assessment-table-header) { grid-template-columns: minmax(0, 1fr) auto; }
+  .assessment-explanation { grid-column: 1 / -1; }
+}
+
 .toast { position: fixed; left: 50%; top: 64px; transform: translateX(-50%); z-index: 200; max-width: min(420px, calc(100vw - 32px)); padding: 13px 16px; border: 1px solid var(--content-control-border); border-radius: 8px; background: var(--content-card); box-shadow: var(--shadow); color: var(--text); font-size: 13px; }
 .toast.error { border-color: var(--bad); }
 @keyframes toast-shake {
@@ -622,25 +584,7 @@ pre.logbox { max-height: 280px; padding: 13px; border: 1px solid var(--border); 
   .nested-panel { padding-right: 0; padding-left: 0; border-right: 0; border-left: 0; border-radius: 0; }
   .stats-inline { grid-template-columns: minmax(0, 1fr); }
   .detail .kv { grid-template-columns: 78px minmax(0, 1fr); }
-  .diagnostics-overview { align-items: flex-start; flex-direction: column; gap: 6px; }
-  .diagnostics-overview-meta { flex-basis: auto; padding-left: 0; border-left: 0; text-align: left; }
-  .diagnostics-table-header { display: none; }
-  .diagnostic-row { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name status" "info info"; row-gap: 8px; padding: 14px; }
-  .diagnostic-check-name { grid-area: name; }
-  .diagnostic-check-status { grid-area: status; justify-self: end; }
-  .diagnostic-check-info { grid-area: info; }
-  .diagnostic-check-summary, .diagnostic-check-detail, .diagnostic-check-remediation { grid-template-columns: minmax(0, 1fr); gap: 2px; }
   .form-grid.settings-service-grid-primary, .form-grid.settings-service-grid-locale { grid-template-columns: minmax(0, 1fr); }
-  .execution-plan-summary { grid-template-columns: minmax(0, 1fr); gap: 6px; }
-  .execution-plan-task-row { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name users"; row-gap: 8px; padding: 14px; }
-  .execution-plan-task-row .execution-plan-name { grid-area: name; }
-  .execution-plan-task-row .execution-plan-users { grid-area: users; justify-self: end; text-align: right; }
-  .execution-plan-user-row { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name status" "today today" "reason reason"; row-gap: 8px; padding: 14px; }
-  .execution-plan-user-row .execution-plan-name { grid-area: name; }
-  .execution-plan-user-row .execution-plan-status { grid-area: status; justify-self: end; }
-  .execution-plan-user-row .execution-plan-today { grid-area: today; }
-  .execution-plan-user-row .execution-plan-reason { grid-area: reason; }
-  .execution-plan-table-header { display: none; }
   .field-btn-row { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--action-gap); }
   .field-btn-row > div { grid-column: 1 / -1; }
   .field-btn-row button { width: 100%; padding-inline: 8px; }
@@ -1529,3 +1473,12 @@ html[data-desktop="true"] :is(.nxp-modal, .modal-mask, .limits-warning, .history
 
 .diagnostics-actions { display: flex; width: 100%; flex-wrap: wrap; justify-content: flex-end; margin-top: var(--space-4); }
 @media (prefers-reduced-motion: reduce) { .scroll-inner { animation: none !important; } }
+
+.diagnostic-check-info { display: grid; gap: var(--space-2); }
+.diagnostic-check-info p { margin: 0; }
+.diagnostic-check-remediation { color: var(--text); }
+.diagnostic-check-remediation strong { font-weight: 650; }
+.diagnostics-overview-copy { min-width: 0; flex: 1; }
+.diagnostics-overview-copy p { margin: 0; }
+.diagnostics-section .assessment-overview-title { align-items: center; }
+.diagnostics-section .assessment-overview-title > .nxp-badge { flex-shrink: 0; }
