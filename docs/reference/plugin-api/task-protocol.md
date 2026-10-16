@@ -1,12 +1,30 @@
 # 专项任务协议
 
-宿主只接受 data-specialized 的 `taskProtocol.version = "0.2.0"`，最低 Host 为 `0.16.15`。完整作者契约、生产适配器源文件、生成器与源码派生夹具由 [官方插件仓库](https://github.com/FlappiBakuse/NexusPipeline-Plugins) 的 `docs/author/TASK_PROTOCOL.md` 维护。
+宿主接受 data-specialized 的 `taskProtocol.version = "0.3.0"`（最低 Host `0.17.4`）和独立的 `0.2.0` 分支（最低 Host `0.16.15`）。完整作者契约、生产适配器源文件、生成器与源码派生夹具由 [官方插件仓库](https://github.com/FlappiBakuse/NexusPipeline-Plugins) 的 `docs/author/TASK_PROTOCOL.md` 维护。Plugin API 仍为 2.2，Frontend API 仍为 1.7。
 
 宿主责任按现役模块划分：Plugins 验证 manifest 和冻结脚本；Configuration 提供只读 JSON/YAML 视图、CAS 选择补丁与恢复 journal；Execution 按当前运行日志归并任务事实；History 保存不可变 TaskReport、最近结果索引及崩溃检查点；Notifications 统一格式化任务分类；Host 组合适配器协调用户查询。
 
 ## 协议版本与日常语义
 
-现役日常任务协议保留独立线版本 `0.2.0`，生成 `schemaVersion: 2`、`semanticsVersion: daily-flow-v1` 报告；旧任务协议明确拒绝。managed 提供者独立使用 schema 1 / provider-execution-v1。新包最低 Host 为 0.16.15，manifest 同样声明 `repairRules`（无修复时为空数组）。
+`0.3.0` 生成 `schemaVersion: 3`、`semanticsVersion: daily-flow-v2` 报告；`0.2.0` 继续生成 schema 2 / daily-flow-v1，旧报告按原语义读取，不补写覆盖度或改写历史文件。更早专项协议明确拒绝。managed 提供者独立使用 schema 1 / provider-execution-v1。manifest 声明 `repairRules`（无修复时为空数组）。
+
+### 识别范围与运行结果（0.3.0）
+
+任务必须声明 `recognition: known|opaque`、`lifecycleRole: prepare|business|finalize` 和 `selectionPolicy: managed|preserve`。opaque 只能 preserve，不声明观察、重试或配置写权限，不计入已核验业务分母。无法建立稳定任务身份时，用 `verification.opaqueScopes` 中的 `{id,resourceId,enabled,reasonCode}` 表示受限未知范围。coverage 按任务及范围声明为 complete/partial/opaque；它不直接决定整次运行状态。
+
+只读资源返回 `readOutcome: parsed|opaque|integrity_mismatch`。结构解析失败可返回 opaque；越界路径、链接和硬资源预算仍失败。配置规则必须声明 `category: compatibility|known_configuration_issue|safety|protocol_fault`；compatibility 不得声明 critical_when_applicable，也不能产生 block。0.3.0 的 configAssessment.schemaVersion 为字符串 `"2"`，0.2.0 保持 `"1"`。
+
+已知任务无失败且本次受管自动化工作进程正常退出时，包含未知范围的整次结果可为 success；未知任务自身保持 unknown。实际进程完成证据绑定本次进程身份及保留句柄，未完整确认的进程家族、纯启动器退出、非零退出、取消、超时、观察故障和恢复冲突都不能据此转为成功。整次成功可计入现役实例成功额度，已核验完成数只统计有证据的 known 业务。
+
+schema 3 的 `verification` 包含 `mode`、`knownTaskCount`、`opaqueTaskCount`、`opaqueScopeCount`、`unverifiedTaskIds`、`opaqueScopeIds`、`reasonCodes`、`completion`、`unknownRetainedOnRetry`。completion 为 `{status,basis,exitCode}`：normal/owned_worker_exit/0，failed/owned_process_nonzero/非零，或 unconfirmed/unconfirmed_worker/null。任务及范围引用有界，不存配置原文。历史、通知和总览分别显示整次结果与核验事实，不能用未知项数量把 success 改为 partial。
+
+### 保留选择的重试（0.3.0）
+
+selective 的启动范围包含安全失败目标、已核实依赖及重试单元、原启用 prepare/finalize 和原启用 opaque，按原任务顺序投影。独立成功业务关闭；原关闭的任务不自动开启。插件返回 `targetTaskIds`、`launchScopeTaskIds`、`preservedLifecycleTaskIds`、`preservedOpaqueTaskIds`、`preservedOpaqueScopeIds`，Host 独立核对，保留字段不赋予写权限。
+
+每个 selectionField 必须以 `taskIds` 声明 known managed 所有者。仅修改这些已授权选择；平面选择列表中，已知字符串值对应所有者的 sourceKey，未知元素的值、相对顺序及重复次数必须一致。并行布尔列表可额外提供 `taskIndices: {taskId:index}`，须完整对应所有者且索引互不重复；定位父节点仍使用稳定身份或完整 guard。Host 只允许改这些索引的布尔值，数组长度和其余值不变。重试不得重置 cursor/进度，恢复只处理选择事务写过的字段，保留上游正常写回的其他内容。
+
+完全 opaque 且已确认非零退出时可使用 `original_rerun`，只在现役有限重试预算内原样重启，不写配置，也不声称原生断点续跑能力。混合已知任务不能使用该模式。取消、预算耗尽、partial 保护和具体依赖顺序冲突优先。
 
 每个新任务冻结 `completionPolicy`（flow/authoritative）、`workflowRole`（daily/technical/manual_only）、`observationContract`（ruleSetId/sources/rules）和 `retryPolicy`（mode/resourceConsumption/limitRefs）。观察必须给出与状态对应的 `factKind`，证据只能引用冻结来源和规则。插件不能提交 Host 证据。未结束、日志缺口和观察器错误由 Host 留存独立 `hostEvidence`，结果通过 `hostEvidenceRefs` 引用，不能伪造为上游日志。
 
@@ -14,9 +32,9 @@ flow 的正常结束不能抵消同范围未恢复错误；权威父任务成功
 
 新协议日常消费失败参与原有有限重试预算，`retryRisk` 不再作为 safe-only 门槛。`selective` 使用声明的 `selective_config` 策略，仍经 CAS/journal 和补丁后重新发现；`native_resume` 不写选择配置，复核冻结任务及行为签名后按原启用范围启动。重试报告区分 `targetTaskIds` 与 `launchScopeTaskIds`。原生续跑中的跳过不能清除前次失败事实。
 
-日常报告保存自身状态 `ownStatus`，用于当前事务恢复时重新计算父子状态；旧日常报告不加载。业务汇总与运行/配置恢复维度分开存储；正常跳过不并入实际完成计数，全部跳过不累计成功额度。
+日常报告保存自身状态 `ownStatus`，用于当前事务恢复时重新计算父子状态。业务汇总与运行/配置恢复维度分开存储；正常跳过不并入实际完成计数，全部跳过不累计成功额度。
 
-`taskProtocol` 要求 `localization: {defaultLocale, messages}`；messages 将 locale 映射到包内 `data/i18n/*.json` 平面字符串词典。最多 16 个语言、每个语言 4096 项，全部词典共 256 KiB；路径、重解析点、重复 key 和词条长度均校验。阶段输入与输出精确为 0.2.0。
+`taskProtocol` 要求 `localization: {defaultLocale, messages}`；messages 将 locale 映射到包内 `data/i18n/*.json` 平面字符串词典。最多 16 个语言、每个语言 4096 项，全部词典共 256 KiB；路径、重解析点、重复 key 和词条长度均校验。各阶段输入输出必须精确匹配本次协商版本。
 
 ### 启动进程与输出声明
 
@@ -49,7 +67,7 @@ flow 的正常结束不能抵消同范围未恢复错误；权威父任务成功
 | `GET /api/history/detail?id={recordId}&metadata=true` | 通过稳定 ID 查元数据，不受页面日期过滤限制 |
 | `#/history?recordId={recordId}` | 打开指定历史记录 |
 
-协议错误、缺证据和日志缺口不会转为成功。成功次数配额仅计入实际有成功业务任务的成功运行；全正常跳过不消耗配额。恢复成功后聚合可以回到绿色，旧尝试仍保留失败证据。
+协议错误、已知范围缺证据和日志缺口不会转为成功。成功次数配额按整次 success 计算，包括已确认正常结束的降级运行；全正常跳过不消耗配额。恢复成功后聚合可以回到绿色，旧尝试仍保留失败证据。
 
 ## 维护和验证
 

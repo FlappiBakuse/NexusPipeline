@@ -2,6 +2,7 @@ import { mount } from '@vue/test-utils';
 import { describe, expect, it, vi } from 'vitest';
 import TaskReportPanel from './TaskReportPanel.vue';
 import type { TaskReport } from '../utils/taskTypes';
+import { taskOutcomeLabel } from '../utils/taskLabels';
 import zh from '../../../../public/i18n/zh-CN.json';
 
 vi.mock('../../../platform/i18n', () => ({
@@ -26,6 +27,16 @@ function report(status: string, schemaVersion = 2): TaskReport {
 }
 
 describe('daily report projection', () => {
+  it('explains host recognition outcomes without claiming unknown tasks succeeded', () => {
+    const recognition = { ...report('succeeded'), schemaVersion: 3, semanticsVersion: 'daily-flow-v2' };
+    expect(taskOutcomeLabel('execution.success_with_partial_verification', 0, recognition,
+      'execution.success_with_partial_verification')).toBe('运行成功：已知任务完成，其他任务未逐项核验。');
+    expect(taskOutcomeLabel('', 0, recognition, 'execution.success_process_exit_only'))
+      .toBe('运行成功：自动化进程正常结束，任务未逐项核验。');
+    expect(taskOutcomeLabel('execution.unconfirmed_worker', 0, recognition, 'execution.unconfirmed_worker'))
+      .toBe('尚未确认自动化进程正常结束。');
+    expect(taskOutcomeLabel('third-party literal', 0, recognition, 'external.reason')).toBe('third-party literal');
+  });
   it('rejects missing or mismatched semantics without exposing old task facts', () => {
     for (const invalid of [undefined, 'unknown', 'provider-execution-v1']) {
       const old = report('succeeded');

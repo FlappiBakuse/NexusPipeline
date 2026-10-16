@@ -34,8 +34,6 @@ internal static class ApplicationHost
     [STAThread]
     public static int Run(string[] args)
     {
-        try { ApplicationExecutionRoot.Configure(args); }
-        catch (Exception error) { Console.Error.WriteLine(error.Message); return 2; }
         AppDomain.CurrentDomain.UnhandledException += (_, e) => Logger.Fatal($"未处理异常：{e.ExceptionObject}");
         Application.ThreadException += (_, e) => Logger.Fatal($"UI 线程异常：{e.Exception}");
         bool stdoutRedirected = Console.IsOutputRedirected;
@@ -74,15 +72,6 @@ internal static class ApplicationHost
 
         // machine mode 必须在初始化之前生效，stdout 从第一字节起只承载 JSON envelope。
         CliOutput.Configure(args);
-#if NEXUS_INSTALLER_METADATA_HELPER
-        if (args.Length >= 2 && args[0] == "installer-state"
-            && (args[1].StartsWith("metadata-", StringComparison.Ordinal) || args[1] is "space-plan" or "ensure-owning-service"))
-            return RunInstallerStateCli(args.Skip(1).ToArray());
-        return 2;
-#else
-        // Installer metadata helpers act on the explicit instance root and never initialize a second Host.
-        if (args.FirstOrDefault() == "installer-state") return RunInstallerStateCli(args.Skip(1).ToArray());
-
         // 帮助只依赖参数契约，允许在未提权或运行时配置尚未建立时查询。
         if (args.Any(argument => argument is "--help" or "-h")
             || args.FirstOrDefault()?.Equals("help", StringComparison.OrdinalIgnoreCase) == true)
@@ -90,6 +79,8 @@ internal static class ApplicationHost
             return CliCommandRouter.Run(args);
         }
 
+        try { InstallerMetadataCheckpoint.RequireStartupAllowed(AppPaths.AppRoot); }
+        catch (IOException error) { Console.Error.WriteLine(error.Message); return 1; }
         int initializationResult = RuntimeInitializer.Initialize();
         if (initializationResult != 0)
         {
@@ -136,12 +127,6 @@ internal static class ApplicationHost
                         ReadRestartWebOnly(args),
                         ReadRestartKeepWebOnlyAlive(args),
                         ReadUpdateResumeIntent(args));
-                case "apply-update":
-                    return RunUpdateApplyCli(args.Skip(1).ToArray(), runtime.UpdateService);
-                case "installer-update":
-                    return RunInstallerUpdateCli(runtime, args.Skip(1).ToArray());
-                case "recover-update":
-                    return UpdateApply.RunRecoveryWorker(ReadRestartWebOnly(args), StartupPipeline.SingleInstanceMutexName);
                 case "register":
                     WindowsScheduledTaskRegistration.Register();
                     return 0;
@@ -156,7 +141,6 @@ internal static class ApplicationHost
         {
             runtime.DisposeAsync().AsTask().GetAwaiter().GetResult();
         }
-#endif
     }
 
     /// <summary>读取重启交接标识；旧进程未传该参数时为空，按普通重启启动。</summary>
@@ -202,140 +186,4 @@ internal static class ApplicationHost
         return arguments.ToArray();
     }
 
-    /// <summary>更新工作进程入口，仅由宿主更新流程拉起。</summary>
-    private static int RunUpdateApplyCli(string[] args, UpdateService updates)
-    {
-        string? staged = null;
-        bool webOnly = false;
-        for (int i = 0; i < args.Length; i++)
-        {
-            if (args[i].Equals("--staged", StringComparison.OrdinalIgnoreCase) && i + 1 < args.Length)
-            {
-                staged = args[i + 1];
-                i++;
-            }
-            else if (args[i].Equals("--web", StringComparison.OrdinalIgnoreCase))
-            {
-                webOnly = true;
-            }
-        }
-        if (string.IsNullOrWhiteSpace(staged))
-        {
-            Console.WriteLine(CliText.Get(
-                "apply.usage",
-                "用法：NexusPipeline.exe apply-update --staged <暂存目录>"));
-            return 1;
-        }
-        try
-        {
-            return UpdateApply.RunApplyWorker(staged, updates.VerifyApplyTarget, webOnly, StartupPipeline.SingleInstanceMutexName);
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine(CliText.Get(
-                "apply.failed",
-                "更新应用失败：{detail}",
-                ("detail", ex.Message)));
-            return 1;
-        }
-    }
-
-    private static Dictionary<string, string> ReadInstallerOptions(string[] args)
-    {
-        var options = new Dictionary<string, string>(StringComparer.Ordinal);
-        for (int i = 0; i < args.Length; i += 2)
-        {
-            if (i + 1 >= args.Length || !args[i].StartsWith("--", StringComparison.Ordinal) || !options.TryAdd(args[i], args[i + 1]))
-                throw new InvalidDataException("installer.arguments");
-        }
-        return options;
-    }
-
-    private static int RunInstallerStateCli(string[] args)
-    {
-        try
-        {
-            if (args.Length == 0) throw new InvalidDataException("installer.command");
-            var options = ReadInstallerOptions(args.Skip(1).ToArray());
-            string root = options["--root"];
-            switch (args[0])
-            {
-                case "ensure-owning-service":
-                    InstallerServiceHandoff.EnsureOwningService(root);
-                    break;
-                case "register":
-                    InstallationOwnership.Register(root, options["--version"], options["--manifest"]); break;
-                case "uninstall":
-                    using (var singleInstance = StartupPipeline.AcquireSingleInstanceMutex())
-                    {
-                        if (singleInstance is null) throw new IOException("installer.instance_running");
-                        InstallationOwnership.Uninstall(root, options.GetValueOrDefault("--delete-data") == "true");
-                    }
-                    break;
-                case "metadata-begin":
-                    InstallerMetadataCheckpoint.Begin(root, options["--transaction"],
-                        options["--version"], options["--image-hash"], bool.Parse(options["--upgrade"]));
-                    break;
-                case "metadata-recover":
-                    Console.WriteLine(InstallerMetadataCheckpoint.RecoverPending(root));
-                    break;
-                case "metadata-observe":
-                    InstallerMetadataCheckpoint.Observe(root, options["--transaction"]);
-                    break;
-                case "metadata-preposition":
-                    InstallerMetadataCheckpoint.Preposition(root, options["--transaction"]);
-                    break;
-                case "metadata-resolve":
-                    string resolution = InstallerMetadataCheckpoint.Resolve(root, options["--transaction"],
-                        bool.Parse(options["--launched"]), int.Parse(options["--child-exit"]),
-                        bool.Parse(options["--registration"]));
-                    Console.WriteLine(resolution);
-                    return resolution == "Committed" ? 0 : 10;
-                default: throw new InvalidDataException("installer.command");
-            }
-            return 0;
-        }
-        catch (Exception ex) { Console.Error.WriteLine(ex.Message); return 1; }
-    }
-
-    private static int RunInstallerUpdateCli(HostRuntime runtime, string[] args)
-    {
-        try
-        {
-            var options = ReadInstallerOptions(args);
-            string staged = options["--staged"], version = options["--version"], hash = options["--image-hash"], transaction = options["--transaction"], packageHash = options["--package-hash"];
-            var request = new JsonObject { ["stagedDir"] = staged, ["version"] = version, ["imageHash"] = hash, ["transactionId"] = transaction, ["packageHash"] = packageHash };
-            // The copied helper never occupies the replaceable program. An existing owning service keeps admission authority.
-            using (var singleInstance = StartupPipeline.AcquireSingleInstanceMutex())
-            {
-                if (singleInstance is null)
-                {
-                    int? port = CliTransport.FindServicePort(runtime.Settings.WebPort);
-                    if (port is null) throw new IOException("installer.owning_service_unavailable");
-                    using var response = CliTransport.Send(port.Value, "POST", "/api/update/installer-apply", request);
-                    if (!response.IsSuccessStatusCode) throw new IOException("installer.maintenance_rejected:" + response.StatusCode);
-                }
-                else
-                {
-                    var result = runtime.UpdateService.RequestInstallerApply(staged, version, hash, transaction, Audit.System, packageHash);
-                    if (!result.Succeeded) throw new IOException(result.Code + ":" + result.Error);
-                }
-            }
-            DateTime deadline = DateTime.UtcNow.AddSeconds(240);
-            string path = UpdateApply.TransactionResultPath(transaction);
-            while (DateTime.UtcNow < deadline)
-            {
-                if (File.Exists(path))
-                {
-                    using var document = JsonDocument.Parse(File.ReadAllText(path));
-                    if (document.RootElement.GetProperty("TransactionId").GetString() != transaction) throw new IOException("installer.result_identity");
-                    if (document.RootElement.GetProperty("Succeeded").GetBoolean()) return 0;
-                    throw new IOException(document.RootElement.GetProperty("Code").GetString());
-                }
-                Thread.Sleep(100);
-            }
-            throw new TimeoutException("installer.transaction_timeout: preserved journal/backup/staging");
-        }
-        catch (Exception ex) { Console.Error.WriteLine(ex.Message); return 1; }
-    }
 }

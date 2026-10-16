@@ -72,7 +72,8 @@ internal sealed partial class TaskRunReducer
         if (!Daily) return;
         NexusPipeline.Modules.Plugins.TaskProtocolValidation.Require(kind is "missing_terminal" or "missing_logs"
             or "log_gap" or "format_mismatch" or "observer_error" or "process_exit" or "timeout", "host failure kind");
-        string[] affected = _selected.Where(id => _effective[id].Status is "pending" or "running").ToArray();
+        string[] affected = _selected.Where(id => (!RecognitionAware || _tasks[id].Recognition == "known")
+            && _effective[id].Status is "pending" or "running").ToArray();
         if (affected.Length == 0) return;
         string eventId = Guid.NewGuid().ToString("N");
         _hostFailures.Add(new(kind, _attemptId, eventId, affected));
@@ -96,6 +97,11 @@ internal sealed partial class TaskRunReducer
             if (lifecycle == "cancelled")
             {
                 _effective[id] = state with { Status = "cancelled", ReasonCode = "tasks.host_cancelled", ReasonText = null };
+                continue;
+            }
+            if (RecognitionAware && _tasks[id].Recognition == "opaque")
+            {
+                _effective[id] = state with { Status = "unknown", ReasonCode = "tasks.not_individually_verified", ReasonText = null };
                 continue;
             }
             string kind = state.Status == "running" ? "missing_terminal" : "missing_logs";

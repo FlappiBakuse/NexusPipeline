@@ -153,6 +153,33 @@ foreach (string file in files)
                 ConfigInputName = launch["configInputName"]?.GetValue<string>(),
                 ConfigInputValue = launch["configInputValue"]?.GetValue<string>(),
             };
+        if (fixture["readFailureResourceIds"] is JsonArray readFailureResourceIds)
+            foreach (string resourceId in readFailureResourceIds.Select(node => node!.GetValue<string>()))
+                foreach (string category in new[] { "resource_limit", "safety_conflict", "integrity_mismatch" })
+                {
+                    int reads = 0;
+                    bool rejected = false;
+                    string ReadResource(string id)
+                    {
+                        if (id != resourceId) return view.ReadResource(id, protocol.Version);
+                        reads++;
+                        return category switch
+                        {
+                            "resource_limit" => throw new InvalidDataException("resource_limit: injected read budget"),
+                            "safety_conflict" => throw new IOException("injected unsafe read"),
+                            _ => "{\"document\":null,\"format\":\"text\",\"readOutcome\":\"integrity_mismatch\"}",
+                        };
+                    }
+                    try
+                    {
+                        await TaskProtocolScriptRunner.ExecuteAsync<TaskDiscovery>(protocol.DiscoverScript,
+                            new { protocolVersion = protocol.Version, phase = "discover", configResources = view.ConfigResources,
+                                locale = "zh-CN", executionContext = context },
+                            id => view.ReadConfig(id, protocol.Version), ReadResource, true, default);
+                    }
+                    catch (Exception error) when (error.Message.Contains(category, StringComparison.Ordinal)) { rejected = true; }
+                    Check(reads > 0 && rejected, artifact + " optional resource must retain " + category);
+                }
         if (fixture["admissionError"] is { } admissionError)
         {
             string expectedError = admissionError.GetValue<string>();
@@ -164,7 +191,7 @@ foreach (string file in files)
                 await TaskDiscoveryService.DiscoverAsync(protocol, view, manifest["name"]?.GetValue<string>() ?? artifact,
                     manifest["version"]!.GetValue<string>(), "fixture-user", "fixture-script", "zh-CN", true, default, context);
             }
-            catch (InvalidDataException ex) when (ex.Message.Contains(expectedError, StringComparison.Ordinal)) { rejected = true; }
+            catch (Exception ex) when (ex.Message.Contains(expectedError, StringComparison.Ordinal)) { rejected = true; }
             Check(rejected, "expected admission rejection: " + expectedError);
             foreach (var original in originalBytes) Check(File.ReadAllBytes(original.Key).AsSpan().SequenceEqual(original.Value), "admission preserves configuration bytes");
             if (!example) artifacts.Add(artifact);
@@ -324,10 +351,20 @@ foreach (string file in files)
                     configResources = view.ConfigResources, executionContext = context }, view.ReadConfig, view.ReadResource, false, default);
             var safe = reducer.SelectRetry(2, lifecycle == "cancelled", false);
             string decision = retry["decision"]!.GetValue<string>();
+            if (protocol.Version == "0.3.0")
+            {
+                Check(reducer.Results.Where(result => plan.Tasks.Single(task => task.Id == result.TaskId).Recognition == "opaque")
+                    .All(result => result.Evidence.Length == 0 && result.Status is "unknown" or "cancelled"), "opaque facts remain unverified");
+                foreach (var (field, expected) in new[] {
+                    ("preservedLifecycleTaskIds", safe.PreservedLifecycleTaskIds),
+                    ("preservedOpaqueTaskIds", safe.PreservedOpaqueTaskIds),
+                    ("preservedOpaqueScopeIds", safe.PreservedOpaqueScopeIds) })
+                    Check(retry[field]!.AsArray().Select(value => value!.GetValue<string>()).SequenceEqual(expected), "retry preservation " + field);
+            }
             if (decision == "native_resume")
             {
-                Check(protocol.Version == "0.2.0" && safe.Decision == "selective", "native retry qualification");
-                Check(plan.Tasks.Where(t => t.Enabled).All(t => t.RetryPolicy?.Mode == "native_resume"), "native retry declaration");
+                Check(protocol.Version is "0.2.0" or "0.3.0" && safe.Decision == "selective", "native retry qualification");
+                Check(plan.Tasks.Where(t => t.Enabled && t.Recognition != "opaque").All(t => t.RetryPolicy?.Mode == "native_resume"), "native retry declaration");
                 Check(retry["filePatches"]!.AsArray().Count == 0, "native retry preserves configuration");
                 Check(retry["launchScopeTaskIds"]!.AsArray().Select(n => n!.GetValue<string>()).SequenceEqual(selected), "native full launch scope");
                 Check(retry["targetTaskIds"]!.AsArray().Select(n => n!.GetValue<string>()).Order().SequenceEqual(reducer.RetryTargets.Order()), "native failed targets");
@@ -338,7 +375,9 @@ foreach (string file in files)
             {
                 Check(retry["includedTaskIds"]!.AsArray().Select(n => n!.GetValue<string>()).SequenceEqual(safe.IncludedTaskIds), "retry scope");
                 var before = view.ConfigResources.ToDictionary(r => r.Id, r => view.Snapshot(r.Id));
-                transaction.Apply(view, TaskProtocolJson.Read<TaskConfigPatch[]>(retry["filePatches"]!.ToJsonString()));
+                var patches = TaskProtocolJson.Read<TaskConfigPatch[]>(retry["filePatches"]!.ToJsonString());
+                if (protocol.Version == "0.3.0") TaskRetryPatchValidation.Validate(plan, patches);
+                transaction.Apply(view, patches);
                 if (fixture["retryDocuments"] is JsonObject expectedDocuments)
                     foreach (var (resourceId, expectedDocument) in expectedDocuments)
                     {

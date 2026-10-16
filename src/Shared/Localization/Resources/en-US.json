@@ -604,5 +604,15 @@
   "tray.page_result.save-failed": "The mode could not be saved. The window remains open.",
   "tray.page_result.close-unconfirmed": "Desktop process exit could not be confirmed. Try again.",
   "tray.page_result.compensation-failed": "Desktop exit and mode recovery could not be confirmed. The menu shows the saved mode. Check the configuration and try again.",
-  "tray.page_result.unowned": "Desktop process ownership could not be confirmed."
+  "tray.page_result.unowned": "Desktop process ownership could not be confirmed.",
+  "notification.tasks.verification.complete": "All tasks recognized: {known}.",
+  "notification.tasks.verification.partial": "{known} recognized tasks; {opaque} tasks and {scopes} scopes were not individually verified.",
+  "notification.tasks.verification.opaque": "Not individually verified: {opaque} tasks and {scopes} scopes.",
+  "notification.tasks.completion.normal": "The automation process exited normally; this does not verify individual unknown tasks.",
+  "notification.tasks.completion.failed": "The automation process exited with a nonzero code.",
+  "notification.tasks.completion.unconfirmed": "Normal completion of the automation process has not been confirmed.",
+  "execution.success_process_exit_only": "Run succeeded: the automation process exited normally; tasks were not individually verified.",
+  "execution.success_with_partial_verification": "Run succeeded: known tasks completed; other tasks were not individually verified.",
+  "execution.owned_process_nonzero": "The automation process exited with a nonzero code.",
+  "execution.unconfirmed_worker": "Normal completion of the automation process has not been confirmed."
 }

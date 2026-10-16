@@ -195,6 +195,10 @@
     "Shared .NET runtime installation has separate system space requirements.",
     "共享 .NET 运行时安装另有系统磁盘空间要求。"
   ],
+  "ManualAdoptionNetwork": [
+    "If application files were manually replaced, Setup downloads official packages to verify ownership before repairing installation metadata. An Internet connection is required for this verification.",
+    "如果曾手动覆盖程序文件，安装器会先联网下载官方包核验归属，再修复安装登记；此项核验需要网络连接。"
+  ],
   "SpaceSummary": [
     "Program files: %1 MiB. Additional free space: %2",
     "程序文件：%1 MiB。安装过程中至少需要的可用空间：%2"

@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType><TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
+    <Version>0.17.4</Version><AssemblyName>NexusPipeline.uninstall</AssemblyName>
+    <ApplicationManifest>../app.installer-helper.manifest</ApplicationManifest><ApplicationIcon>../NexusPipeline.ico</ApplicationIcon>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(NexusTestHost)' == 'true'"><ApplicationManifest>../app.test.manifest</ApplicationManifest><DefineConstants>$(DefineConstants);NEXUS_TEST_HOST</DefineConstants></PropertyGroup>
+  <PropertyGroup Condition="'$(NexusToolBuildIdentityPath)' == '' and '$(NexusToolBuildIdentityDirectory)' != ''"><NexusToolBuildIdentityPath>$(NexusToolBuildIdentityDirectory)/uninstaller.json</NexusToolBuildIdentityPath></PropertyGroup>
+  <ItemGroup><ProjectReference Include="../NexusPipeline.Maintenance/NexusPipeline.Maintenance.csproj" />
+    <InternalsVisibleTo Include="NexusPipeline.Tests" />
+    <EmbeddedResource Include="$(NexusToolBuildIdentityPath)" LogicalName="NexusPipeline.Maintenance.BuildIdentity" Condition="'$(NexusToolBuildIdentityPath)' != ''" />
+  </ItemGroup>
+  <Target Name="RequireToolIdentity" BeforeTargets="PrepareForBuild" Condition="'$(NexusTestHost)' != 'true'"><Error Condition="'$(NexusToolBuildIdentityPath)' == '' or !Exists('$(NexusToolBuildIdentityPath)')" Text="Pass the frozen maintenance tool identity." /></Target>
+</Project>

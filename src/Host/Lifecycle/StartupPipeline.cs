@@ -100,7 +100,7 @@ internal static class StartupPipeline
                 desktop.ShowAsync("startup").GetAwaiter().GetResult();
 
 #if NEXUS_TEST_HOST
-            StartTestHostExitMonitor();
+            using var testExitMonitor = StartTestHostExitMonitor();
 #endif
             Application.Run(new TrayApp(runtime));
             ShutdownHosted(runtime, web, mcp, "NexusPipeline 已退出。");
@@ -140,20 +140,7 @@ internal static class StartupPipeline
     }
 
     /// <summary>返回当前宿主实例使用的单实例互斥体名称；Test Host 按系统测试运行时隔离，生产保持固定名称。</summary>
-    internal static string SingleInstanceMutexName
-    {
-        get
-        {
-#if NEXUS_TEST_HOST
-            string scope = Environment.GetEnvironmentVariable("NEXUS_SYSTEM_RUNTIME_NAME")?.Trim() ?? "";
-            return string.IsNullOrWhiteSpace(scope)
-                ? "NexusPipeline.TestHost.SingleInstance"
-                : $"NexusPipeline.TestHost.SingleInstance.{scope}";
-#else
-            return "NexusPipeline.SingleInstance";
-#endif
-        }
-    }
+    internal static string SingleInstanceMutexName => NexusPipeline.Maintenance.InstanceMutex.Name;
 
     /// <summary>
     /// 创建单实例互斥体并取得所有权：处理「服务被强杀后互斥体被遗弃」——构造函数会抛
@@ -479,29 +466,20 @@ internal static class StartupPipeline
         }
     }
 
-    private static void StartTestHostExitMonitor()
+    private static System.Windows.Forms.Timer? StartTestHostExitMonitor()
     {
         string? exitFile = TestHostExitFilePath();
-        if (exitFile is null) return;
-        _ = Task.Run(async () =>
+        if (exitFile is null) return null;
+        // Queue the signal on the UI loop so an early receipt cannot consume it before Application.Run starts.
+        var timer = new System.Windows.Forms.Timer { Interval = 100 };
+        timer.Tick += (_, _) =>
         {
-            while (true)
-            {
-                if (File.Exists(exitFile))
-                {
-                    try
-                    {
-                        Application.Exit();
-                    }
-                    catch (Exception ex)
-                    {
-                        Logger.Debug($"Test Host 退出信号处理失败：{ex.Message}");
-                    }
-                    return;
-                }
-                await Task.Delay(100).ConfigureAwait(false);
-            }
-        });
+            if (!File.Exists(exitFile)) return;
+            timer.Stop();
+            Application.Exit();
+        };
+        timer.Start();
+        return timer;
     }
 #endif
 

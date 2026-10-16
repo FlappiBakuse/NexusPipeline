@@ -3,7 +3,8 @@ import { resolveTaskText } from "./taskText";
 import type { TaskDiagnostic, TaskDisplaySnapshot, TaskReport } from "./taskTypes";
 
 export function dailyTaskReport(report?: TaskReport): boolean {
-  return report?.schemaVersion === 2 && report.semanticsVersion === 'daily-flow-v1';
+  return report?.schemaVersion === 2 && report.semanticsVersion === 'daily-flow-v1'
+    || report?.schemaVersion === 3 && report.semanticsVersion === 'daily-flow-v2';
 }
 
 export function providerTaskReport(report?: TaskReport): boolean {
@@ -29,6 +30,10 @@ export function taskDiagnosticLabel(item: TaskDiagnostic, snapshot?: TaskDisplay
 
 /** Third-party diagnostic text remains literal. */
 export function taskOutcomeLabel(value?: string, unknownCount?: number, report?: TaskReport, reasonCode?: string): string {
+  const executionReasons = ['execution.success_process_exit_only', 'execution.success_with_partial_verification',
+    'execution.unconfirmed_worker', 'execution.owned_process_nonzero'];
+  if (report?.schemaVersion === 3 && currentTaskReport(report) && reasonCode && executionReasons.includes(reasonCode))
+    return t(reasonCode, {}, value || reasonCode);
   if (!value) return "-";
   if (!currentTaskReport(report)) return value;
   const source = reasonCode?.startsWith("tasks.") ? reasonCode : value;

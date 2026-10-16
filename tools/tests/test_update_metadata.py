@@ -26,7 +26,7 @@ class UpdateMetadataTests(unittest.TestCase):
 
     def validate(self, data):
         self.file.write_text(json.dumps(data), encoding="utf-8")
-        validate_channels(self.root, "0.17.3")
+        validate_channels(self.root, "0.17.3", schema=1)
 
     def test_bounded_bridge_and_empty_initial_channels_are_valid(self):
         self.validate(self.data)
@@ -50,4 +50,27 @@ class UpdateMetadataTests(unittest.TestCase):
     def test_duplicate_keys_fail_before_metadata_is_accepted(self):
         self.file.write_text('{"schemaVersion":1,"schemaVersion":1}', encoding="utf-8")
         with self.assertRaisesRegex(ValueError, "Duplicate"):
-            validate_channels(self.root)
+            validate_channels(self.root, schema=1)
+
+    def test_v2_requires_exact_assets_capabilities_and_baseline_hint(self):
+        path = self.root / 'metadata/updates/v2/channels.json'
+        path.parent.mkdir()
+        target = {'releaseTag': 'v0.17.4', 'readerProtocol': 2, 'basePayloadManifestSha256': 'a' * 64,
+                  'requiredCapabilities': ['payload-manifest-v2', 'single-delta-v1', 'transaction-recovery-v1'],
+                  'assets': {key: 'NexusPipeline-v0.17.4-win-x64-' + suffix for key, suffix in
+                             (('setup', 'Setup.exe'), ('portable', 'Portable.zip'), ('update', 'Update.zip'))}}
+        data = {'schemaVersion': 2, 'channels': {'stable': {'previousPublishedTarget': None, 'pendingTarget': None},
+                'prerelease': {'previousPublishedTarget': None, 'pendingTarget': target}}}
+        path.write_text(json.dumps(data), encoding='utf-8')
+        validate_channels(self.root, '0.17.4')
+        for fault in ('asset', 'capabilities', 'baseline', 'schema', 'field'):
+            changed = copy.deepcopy(data)
+            pending = changed['channels']['prerelease']['pendingTarget']
+            if fault == 'asset': pending['assets']['setup'] = 'NexusPipeline-v0.17.4-win-x64-setup.exe'
+            if fault == 'capabilities': pending['requiredCapabilities'] = ['payload-manifest-v1']
+            if fault == 'baseline': pending['basePayloadManifestSha256'] = '../unknown'
+            if fault == 'schema': changed['schemaVersion'] = 1
+            if fault == 'field': pending['script'] = 'execute'
+            path.write_text(json.dumps(changed), encoding='utf-8')
+            with self.subTest(fault=fault), self.assertRaises(ValueError):
+                validate_channels(self.root, '0.17.4')

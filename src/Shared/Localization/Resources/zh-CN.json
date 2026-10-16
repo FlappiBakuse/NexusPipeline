@@ -604,5 +604,15 @@
   "tray.page_result.save-failed": "轻量模式保存失败，当前窗口保持打开。",
   "tray.page_result.close-unconfirmed": "未能确认桌面客户端已退出，请重试。",
   "tray.page_result.compensation-failed": "桌面关闭和模式回退未能确认。菜单显示已保存的实际模式，请检查配置后重试。",
-  "tray.page_result.unowned": "桌面进程归属未能确认，操作未完成。"
+  "tray.page_result.unowned": "桌面进程归属未能确认，操作未完成。",
+  "notification.tasks.verification.complete": "已识别全部任务：{known} 项。",
+  "notification.tasks.verification.partial": "已识别 {known} 项；另有 {opaque} 项任务和 {scopes} 个范围未逐项核验。",
+  "notification.tasks.verification.opaque": "未逐项核验：{opaque} 项任务、{scopes} 个范围。",
+  "notification.tasks.completion.normal": "已确认自动化进程正常结束；这不代表未知任务逐项成功。",
+  "notification.tasks.completion.failed": "自动化进程以非零退出码结束。",
+  "notification.tasks.completion.unconfirmed": "尚未确认自动化进程正常结束。",
+  "execution.success_process_exit_only": "运行成功：自动化进程正常结束，任务未逐项核验。",
+  "execution.success_with_partial_verification": "运行成功：已知任务完成，其他任务未逐项核验。",
+  "execution.owned_process_nonzero": "自动化进程以非零退出码结束。",
+  "execution.unconfirmed_worker": "尚未确认自动化进程正常结束。"
 }

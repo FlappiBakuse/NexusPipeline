@@ -100,7 +100,9 @@ internal sealed class TaskSelectionTransaction
     {
         RecoverPending();
         var staged = new List<StagedFile>();
-        foreach (var group in _journal.Fields.GroupBy(f => f.Path, StringComparer.OrdinalIgnoreCase))
+        // Untouched selections may have been maintained by the upstream worker.
+        foreach (var group in _journal.Fields.Where(field => !JsonNode.DeepEquals(field.Current, field.Original))
+            .GroupBy(f => f.Path, StringComparer.OrdinalIgnoreCase))
         {
             TaskConfigView.ValidatePath(group.Key);
             byte[] current = ReadBounded(group.Key);

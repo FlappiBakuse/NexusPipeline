@@ -13,7 +13,7 @@ namespace NexusPipeline.Modules.Configuration.Paths;
 internal static class ConfigPaths
 {
     /// <summary>会话事务工作区目录名。</summary>
-    public const string WorkDirName = "work";
+    public const string WorkDirName = NexusPipeline.Modules.Configuration.Recovery.ConfigUpdateAdmission.WorkDirectoryName;
 
     public static string UserDir(string scriptId, string userKey)
     {

@@ -6,6 +6,79 @@ namespace NexusPipeline.Tests.Updates;
 
 public sealed class UpdateTaskTests
 {
+    [Theory]
+    [InlineData("NexusPipeline.update.exe", true)]
+    [InlineData("NexusPipeline Update.exe", false)]
+    [InlineData("NexusPipeline.uninstall.exe", false)]
+    [InlineData("unknown.exe", false)]
+    public void FullPackageAdmitsOnlyTheCurrentUpdaterEntry(string entry, bool allowed)
+    {
+        string root = Path.Combine(Path.GetTempPath(), "nxp-package-entry-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            string zip = Path.Combine(root, "package.zip"), stage = Path.Combine(root, "staging");
+            using (var archive = System.IO.Compression.ZipFile.Open(zip, System.IO.Compression.ZipArchiveMode.Create))
+                foreach (string name in new[] { "NexusPipeline.exe", entry })
+                {
+                    using var writer = new StreamWriter(archive.CreateEntry(name).Open());
+                    writer.Write("controlled package bytes");
+                }
+            string? error = UpdatePackage.Extract(zip, stage);
+            Assert.Equal(allowed, error is null);
+            if (allowed) Assert.Equal("controlled package bytes", File.ReadAllText(Path.Combine(stage, entry)));
+            else Assert.False(Directory.Exists(stage));
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [Fact]
+    public void ExpandedJournalPersistsTransportAndDerivesImmutableApplicationScopes()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "nxp-expanded-journal-" + Guid.NewGuid().ToString("N"));
+        string staging = Path.Combine(root, "staging"), journal = Path.Combine(root, "task.json");
+        Directory.CreateDirectory(staging);
+        try
+        {
+            foreach (string name in new[] { "NexusPipeline.exe", UpdateRecipe.UpdateEntry, "README.md", ApplicationPayload.ManifestPath, ApplicationPayload.DesktopEntry })
+            {
+                string path = Path.Combine(staging, name);
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                File.WriteAllText(path, name);
+            }
+            var assets = new[] { "Portable.zip", "Setup.exe", "Update.zip" }.Select((suffix, index) =>
+                new UpdateReleaseAsset(index + 1, "NexusPipeline-v0.17.4-win-x64-" + suffix, "https://fixture.example/" + suffix, 20, new string('a', 64))).ToArray();
+            var task = MakeTask("apply", "0.17.4", staging) with {
+                JournalSchemaVersion = 3, PayloadSchemaVersion = 2,
+                StagingInventory = UpdateInventory.Capture(staging), PreviousPayload = null,
+                ReleaseEvidence = new(1, "v0.17.4", new string('b', 64), UpdateMigrationRegistry.NoStoreChangeRoute, assets) { Protocol = 2 },
+                TransportReceipt = new("delta", assets[2], new string('c', 64), new string('d', 64), 20, 10),
+            };
+            task.Write(journal);
+            var received = UpdateTask.Read(journal)!;
+            Assert.Equal(task, received);
+            Assert.Equal(5, received.ApplicationScopes.Length);
+            Assert.Contains(UpdateRecipe.UpdateEntry, received.ApplicationScopes);
+            Assert.Contains("resources/desktop", received.ApplicationScopes);
+            Assert.Throws<InvalidDataException>(() => (received with { JournalSchemaVersion = 2 }).Write(journal));
+            Assert.Throws<InvalidDataException>(() => (received with { TransportReceipt = received.TransportReceipt! with { RecipeSha256 = new string('e', 64) } }).Write(journal));
+            Assert.Throws<InvalidDataException>(() => (received with { TransportReceipt = null }).Validate());
+            Assert.Throws<InvalidDataException>(() => (received with { ReleaseEvidence = received.ReleaseEvidence! with { Protocol = 1 } }).Validate());
+            Assert.Equal(task, UpdateTask.Read(journal));
+            string retiredJournal = Path.Combine(root, "retired-task.json");
+            var retired = task with { JournalSchemaVersion = 4, RemovedApplicationFiles = new([
+                new ApplicationPayloadFile(ApplicationPayload.LegacyUpdateEntry, 17, new string('e',64), "update-entry")]) };
+            retired.Write(retiredJournal);
+            Assert.Equal(retired, UpdateTask.Read(retiredJournal));
+            Assert.Contains(ApplicationPayload.LegacyUpdateEntry, retired.ApplicationScopes);
+            Assert.Equal(6, retired.ApplicationScopes.Length);
+            Assert.Throws<InvalidDataException>(() => (retired with { RemovedApplicationFiles = new([
+                new ApplicationPayloadFile(ApplicationPayload.LegacyUpdateEntry, 18, new string('f',64), "update-entry")]) }).Write(retiredJournal));
+            Assert.Equal(retired, UpdateTask.Read(retiredJournal));
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
     [Fact]
     public void FailureResultRequiresTheTransactionAndPreservedDesktopIntent()
     {
@@ -254,7 +327,7 @@ public sealed class UpdateTaskTests
     {
         string root = Path.Combine(Path.GetTempPath(), "nxp-created-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
-        string stage = Path.Combine(root, "staging"), file = Path.Combine(stage, "resources", "known.bin");
+        string stage = Path.Combine(root, "staging"), file = Path.Combine(stage, new string('a', 100), new string('b', 100), "resources", "known.bin");
         var artifacts = new UpdateCreatedArtifacts(root);
         artifacts.EnsureDirectory(Path.GetDirectoryName(file)!);
         File.WriteAllText(file, "created");
@@ -264,7 +337,7 @@ public sealed class UpdateTaskTests
         artifacts.FileCreated(zip, new FileInfo(zip).Length, UpdateApply.ImageHash(zip));
         try
         {
-            string unknown = Path.Combine(stage, "resources", "user-empty");
+            string unknown = Path.Combine(Path.GetDirectoryName(file)!, "user-empty");
             Directory.CreateDirectory(unknown);
             Assert.Throws<IOException>(() => artifacts.Cleanup());
             Assert.True(File.Exists(zip)); Assert.Equal("created", File.ReadAllText(file));

@@ -18,6 +18,7 @@ export default defineConfig({
     },
   },
   test: {
+    ...(process.env.NEXUS_TEST_LOW_RESOURCE === "1" ? { maxWorkers: 1, minWorkers: 1 } : {}),
     environment: "jsdom",
     include: ["src/**/*.test.ts"],
   },

@@ -110,6 +110,7 @@ internal sealed class StatusToolQuery
             pendingVersion = status.PendingVersion,
             pendingStatus = status.PendingStatus,
             pendingError = status.PendingError,
+            installerToolsWarning = status.InstallerToolsWarning,
             automation = new
             {
                 checkEnabled = automation.CheckEnabled,

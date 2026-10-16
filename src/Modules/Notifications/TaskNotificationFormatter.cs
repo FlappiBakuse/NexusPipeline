@@ -9,7 +9,9 @@ internal static class TaskNotificationFormatter
     internal static IReadOnlyList<string> Format(JsonObject report, string? historyId = null)
     {
         bool daily = report["schemaVersion"]?.GetValue<int>() == 2
-            && report["semanticsVersion"]?.GetValue<string>() == "daily-flow-v1";
+            && report["semanticsVersion"]?.GetValue<string>() == "daily-flow-v1"
+            || report["schemaVersion"]?.GetValue<int>() == 3
+            && report["semanticsVersion"]?.GetValue<string>() == "daily-flow-v2";
         TaskDisplaySnapshot? display = null;
         if ((report["displaySnapshot"] ?? report["originalPlan"]?["displaySnapshot"]) is JsonObject frozen)
             try { display = TaskProtocolJson.Read<TaskDisplaySnapshot>(frozen.ToJsonString()); }
@@ -47,6 +49,16 @@ internal static class TaskNotificationFormatter
         string Reason(JsonObject item) => TaskDisplaySnapshot.Resolve(item["reasonText"] as JsonObject, display,
             LocaleContext.Current, item["reasonCode"]?.GetValue<string>() ?? "");
         var lines = new List<string>();
+        if (report["schemaVersion"]?.GetValue<int>() == 3 && report["verification"] is JsonObject verification)
+        {
+            string mode = verification["mode"]!.GetValue<string>();
+            lines.Add(HostLocalization.TranslateNamed("notification.tasks.verification." + mode, mode,
+                new Dictionary<string, object?> { ["known"] = verification["knownTaskCount"]!.GetValue<int>(),
+                    ["opaque"] = verification["opaqueTaskCount"]!.GetValue<int>(),
+                    ["scopes"] = verification["opaqueScopeCount"]!.GetValue<int>() }));
+            string completion = verification["completion"]!["status"]!.GetValue<string>();
+            lines.Add(Text("completion." + completion, completion));
+        }
         void Category(string key, string fallback, IEnumerable<string> values, bool mandatory = false)
         {
             var entries = values.Select(value => Compact(value, 120)).ToArray();

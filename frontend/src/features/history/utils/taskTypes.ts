@@ -9,6 +9,9 @@ export interface TaskDefinition {
   id: string; name: string; parentId: string | null; role: string; enabled: boolean;
   detection: string; retryRisk: string; order: number; countsAsUnit?: boolean;
   nameText?: TaskTextRef;
+  recognition?: 'known' | 'opaque';
+  lifecycleRole?: 'prepare' | 'business' | 'finalize';
+  selectionPolicy?: 'managed' | 'preserve';
   completionPolicy?: 'flow' | 'authoritative';
   workflowRole?: 'daily' | 'technical' | 'manual_only';
   observationContract?: { ruleSetId: string; sources: string[]; rules: Array<{ id: string; kind: string }> };
@@ -34,6 +37,7 @@ export interface TaskPlan {
   displaySnapshot?: TaskDisplaySnapshot;
   configAssessment?: TaskConfigAssessment;
   currentReadiness?: TaskReadiness;
+  verification?: { opaqueScopes: Array<{ id: string; enabled: boolean; reasonCode: string }> };
 }
 export interface TaskResult {
   taskId: string; status: string; reasonCode: string; lastAttemptId: string;
@@ -44,6 +48,12 @@ export interface TaskResult {
   evidence: Array<{ sourceId: string; epoch: number; sequence: number; ruleId: string }>;
 }
 export interface TaskReport {
+  verification?: {
+    mode: 'complete' | 'partial' | 'opaque'; knownTaskCount: number; opaqueTaskCount: number;
+    opaqueScopeCount: number; unverifiedTaskIds: string[]; opaqueScopeIds: string[]; reasonCodes: string[];
+    completion: { status: 'normal' | 'failed' | 'unconfirmed'; basis: string; exitCode: number | null };
+    unknownRetainedOnRetry: boolean;
+  };
   resultBasis?: string;
   semanticsVersion?: string;
   hostEvidence?: Array<{ kind: string; attemptId: string; hostEventId: string; taskIds: string[] }>;

@@ -3,6 +3,7 @@ import path from "node:path";
 import os from "node:os";
 import { getProcessRunnerState } from "./process-runner.mjs";
 import { sha256, validateResult } from "./report.mjs";
+import { ensureNpmInputs } from "./npm-inputs.mjs";
 
 export async function runCore({ group, policy, policyBytes, workspace, runRoot, runId, budget, run }) {
   const selected = policy.groups[group];
@@ -48,9 +49,7 @@ export async function runCore({ group, policy, policyBytes, workspace, runRoot, 
     } else {
       const frontend = path.join(workspace.directory, "frontend");
       const npm = process.platform === "win32" ? "npm.cmd" : "npm";
-      if (!fs.existsSync(path.join(frontend, "node_modules", ".package-lock.json"))) {
-        await step("准备锁定前端依赖", npm, ["ci", "--no-audit", "--no-fund"], frontend);
-      }
+      await ensureNpmInputs(frontend, async (command, args) => { await step("准备锁定前端依赖", command, args, frontend); return 0; });
       await step("检查前端类型", npm, ["run", "typecheck"], frontend);
       await step("验证核心状态与桥接", npm, ["run", "test", "--", ...selected.files,
         "--reporter=json", "--outputFile", rawReport], frontend);
@@ -85,6 +84,8 @@ export async function runCore({ group, policy, policyBytes, workspace, runRoot, 
     boundaries: selected.boundaries,
     cleanup: { status: cleanup.cleanupComplete ? "complete" : "failed",
       remainingOwnedProcessCount: cleanup.cleanupComplete ? 0 : null, notes: cleanup.cleanupFailures },
+    resources: { staging: workspace.staging, invocationQueueMs: Number(process.env.NEXUS_TEST_QUEUE_MS || 0),
+      invocationElapsedMs: budget.elapsedMs + Number(process.env.NEXUS_TEST_QUEUE_MS || 0) },
     artifacts: [logPath, rawReport, normalized].filter(file => fs.existsSync(file)), primaryFailure: failure,
   };
   if (code === 0) {

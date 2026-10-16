@@ -34,7 +34,7 @@ internal static class RunOutcomeProjector
         };
         string business = "unverified";
         JsonObject? counts = report?["summary"]?["counts"] as JsonObject;
-        if (semantics == TaskReportSemantics.DailyFlow)
+        if (semantics is TaskReportSemantics.DailyFlow or TaskReportSemantics.RecognitionFlow)
             business = report!["summary"]?["outcome"]?.GetValue<string>() switch
             {
                 "failed" => "verified_failed", "partial" => "partial",
@@ -42,6 +42,8 @@ internal static class RunOutcomeProjector
                 "no_tasks" => "inapplicable", "cancelled" => "cancelled", "blocked" => "blocked",
                 _ => "pending",
             };
+        if (semantics == TaskReportSemantics.RecognitionFlow && report?["verification"]?["mode"]?.GetValue<string>() is "partial" or "opaque"
+            && business is "verified_succeeded" or "satisfied" or "inapplicable") business = "unverified";
         // Authenticated engine events are not independent business verification.
         if (semantics == TaskReportSemantics.ProviderExecution)
             business = report?["instanceJudgement"]?["status"]?.GetValue<string>() switch {

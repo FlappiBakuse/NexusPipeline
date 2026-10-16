@@ -104,6 +104,12 @@ function configSettingHint(check: TaskConfigCheck) {
     </header>
     <p v-if="!plan" class="muted">{{ t('tasks.plan_unavailable') }}</p>
     <template v-else>
+      <p v-if="report?.schemaVersion === 2" class="task-footnote">{{ t('tasks.verification.historical_unrecorded') }}</p>
+      <div v-if="report?.schemaVersion === 3 && report.verification" class="task-footnote" role="status">
+        <p>{{ t(`tasks.verification.${report.verification.mode}`, { known: report.verification.knownTaskCount, opaque: report.verification.opaqueTaskCount, scopes: report.verification.opaqueScopeCount }) }}</p>
+        <p>{{ t(`tasks.completion.${report.verification.completion.status}`) }}</p>
+        <p v-if="report.verification.unknownRetainedOnRetry">{{ t('tasks.verification.retained_on_retry') }}</p>
+      </div>
       <div v-if="report?.admissionBlocked" class="task-admission-blocked" role="alert">
         <strong>{{ t('tasks.admission_blocked') }}</strong>
         <span>{{ t('tasks.admission_blocked_help') }}</span>

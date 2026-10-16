@@ -22,6 +22,7 @@ let authBlocked = false;
 
 const completionActionText = computed(() => {
   const state = updateStatus.value?.state || "idle";
+  if (updateStatus.value?.updateBlockCode === "manual-adoption-pending") return t("settings.update.adoption_pending");
   if (updateStatus.value?.manualUpdateRequired) {
     return t("settings.update.manual_required", { version: updateStatus.value.latest || "" });
   }
@@ -30,6 +31,7 @@ const completionActionText = computed(() => {
   }
   if (state === "checking") return t("settings.update.checking");
   if (state === "downloading") return t("settings.update.downloading");
+  if (state === "cancelling") return t("settings.update.cancelling");
   if (state === "ready") return t("settings.update.ready_confirm");
   if (state === "applying") return t("settings.update.applying");
   if (updateStatus.value?.available)
@@ -58,7 +60,7 @@ const applyFailureText = computed(() => {
     ? `settings.update.failure.${failure.code}` : "settings.update.failure.generic";
   return t("settings.update.apply_failed", { version: failure.targetVersion, current: updateStatus.value?.current || "", reason: t(key) });
 });
-const canCheckUpdate = computed(() => !["checking", "downloading", "ready", "applying"].includes(updateStatus.value?.state || "idle"));
+const canCheckUpdate = computed(() => !["checking", "downloading", "cancelling", "ready", "applypending", "applying", "recoverypending"].includes(updateStatus.value?.state || "idle"));
 
 function errorText(reason: unknown) {
   return reason instanceof Error ? reason.message : String(reason);
@@ -84,7 +86,7 @@ function scheduleUpdatePoll() {
   const delay = pollFailures > 0
     ? Math.min(60000, 2500 * 2 ** Math.min(5, pollFailures - 1))
     :
-    state === "checking" || state === "downloading" || state === "applying"
+    state === "checking" || state === "downloading" || state === "cancelling" || state === "applying"
       ? 1000
       : updateStatus.value?.automation?.checkEnabled === true
         ? Math.max(1000, Math.min(60000, (Date.parse(updateStatus.value?.automation?.nextCheckAt || "") || Date.now() + 60000) - Date.now()))
@@ -180,8 +182,12 @@ defineExpose({ reload: loadUpdateStatus });
     </div>
     <p class="muted update-state-copy">{{ completionActionText }}</p>
     <p v-if="pendingText" class="muted" role="status">{{ pendingText }}</p>
+    <p v-if="updateStatus?.installerToolsWarning" class="callout callout-warning" role="status">{{ t("settings.update.installer_tools_repair") }}</p>
     <p v-if="applyFailureText" class="callout callout-warning" role="alert">{{ applyFailureText }}</p>
-    <p v-if="updateStatus?.manualUpdateRequired" class="callout callout-warning update-manual-warning" data-testid="update-manual-warning">
+    <p v-if="updateStatus?.updateBlockCode === 'manual-adoption-pending'" class="callout callout-warning" role="status">
+      {{ t("settings.update.adoption_help") }}
+    </p>
+    <p v-else-if="updateStatus?.manualUpdateRequired" class="callout callout-warning update-manual-warning" data-testid="update-manual-warning">
       {{ t("settings.update.manual_required_help", { version: updateStatus.latest || "" }) }}
       <a v-if="updateStatus.migrationUrl" :href="String(updateStatus.migrationUrl)" target="_blank" rel="noopener noreferrer">
         {{ t("settings.update.open_migration") }}

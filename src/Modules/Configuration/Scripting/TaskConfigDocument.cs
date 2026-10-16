@@ -32,6 +32,10 @@ internal sealed class TaskConfigDocument
         if (format == "json")
         {
             TaskConfigMetrics.Count(1);
+            var reader = new Utf8JsonReader(Encoding.UTF8.GetBytes(_text), new JsonReaderOptions { MaxDepth = int.MaxValue });
+            while (reader.Read())
+                if (reader.CurrentDepth >= 32 && reader.TokenType is JsonTokenType.StartObject or JsonTokenType.StartArray)
+                    throw new InvalidDataException("resource_limit: config depth");
             using var json = JsonDocument.Parse(_text, new JsonDocumentOptions { MaxDepth = 32 });
         }
         TaskConfigMetrics.Count(2);

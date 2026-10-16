@@ -15,7 +15,7 @@ def main():
     parser=argparse.ArgumentParser(allow_abbrev=False)
     for name in ('source','repository','output','electron-archive'):
         parser.add_argument('--'+name,type=Path,required=True)
-    parser.add_argument('--version',choices=['0.17.0','0.17.1'],required=True)
+    parser.add_argument('--version',choices=['0.17.0','0.17.1','0.17.5'],required=True)
     parser.add_argument('--partner-sha',required=True)
     parser.add_argument('--full-locales',action='store_true')
     parser.add_argument('--full-dependencies',type=Path)
@@ -23,6 +23,12 @@ def main():
     if args.output.exists():parser.error('Fixture output already exists')
     source=args.output/'source'
     subprocess.run(['git','clone','--local','--no-hardlinks',str(args.repository),str(source)],check=True)
+    tracked=subprocess.check_output(['git','ls-files','-z'],cwd=source).decode().split('\0')
+    for relative in filter(None,tracked):
+        destination=source/relative
+        if not (args.source/relative).is_file() and destination.is_file():
+            if not destination.resolve().is_relative_to(source.resolve()):raise ValueError('Fixture deletion escaped its checkout')
+            destination.unlink()
     shutil.copytree(args.source,source,dirs_exist_ok=True,ignore=shutil.ignore_patterns('.git','bin','obj','node_modules','out','.nxp-cache-identity','.nxp-test-lease.json','.generated'))
     project=source/'src/NexusPipeline.csproj'
     text=project.read_text(encoding='utf-8')
@@ -68,13 +74,14 @@ def main():
     commit=subprocess.check_output(['git','-C',str(source),'rev-parse','HEAD'],text=True).strip()
     script='import {workingTreeSha} from '+json.dumps((source/'tests/control-inputs.mjs').as_uri())+';process.stdout.write(workingTreeSha(process.argv[1]));'
     tree=subprocess.check_output(['node','--input-type=module','-e',script,str(source)],text=True).strip()
-    inputs=prepare(source,args.output/'inputs',source_sha=commit,source_tree_sha=tree,partner_sha=args.partner_sha,workflow_sha=commit,electron_archive=args.electron_archive)
+    inputs=prepare(source,args.output/'inputs',source_sha=commit,source_tree_sha=tree,partner_sha=args.partner_sha,workflow_sha=commit,electron_archive=args.electron_archive,test_host=True)
     application=args.output/'application'
     subprocess.run(['dotnet','publish',str(project),'-c','Release','-r','win-x64','--self-contained','false',
         '-p:PublishSingleFile=true','-p:DebugType=none','-p:DebugSymbols=false','-p:NexusTestHost=true','-p:UseSharedCompilation=false','--disable-build-servers',
-        '-p:NexusFrontendProps='+inputs['frontendProps'],'-p:NexusBuildIdentityPath='+inputs['identity'],'-o',str(application),'--nologo'],cwd=source,check=True)
+        '-p:NexusFrontendProps='+inputs['frontendProps'],'-p:NexusBuildIdentityPath='+inputs['identity'],'-p:NexusUpdaterRecoveryPath='+inputs['updater'],'-o',str(application),'--nologo'],cwd=source,check=True)
     shutil.copytree(inputs['desktopBundle'],application/'resources/desktop')
     shutil.copy2(source/'README.md',application/'README.md')
+    shutil.copy2(inputs['updater'],application/'NexusPipeline.update.exe')
     record=read_identity(Path(inputs['identity']));manifest=create(application,record,source)
     complete={'version':args.version,'buildId':record['buildId'],'sourceTreeSha':tree,'manifestSha256':hashlib.sha256((application/'resources/payload-manifest.json').read_bytes()).hexdigest(),
         'imageSha256':hashlib.sha256((application/'NexusPipeline.exe').read_bytes()).hexdigest(),'fullLocales':args.full_locales,'classification':'LOCAL_DIAGNOSTIC'}

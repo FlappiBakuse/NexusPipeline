@@ -381,9 +381,19 @@
       ],
       "codePaths": [
         "src/Modules/Updates",
+        "src/NexusPipeline.Maintenance",
+        "src/NexusPipeline.Updater",
+        "src/NexusPipeline.Uninstaller",
+        "tools/NexusPipeline.InstallerMetadata",
         "metadata/updates",
         "tools/update_metadata.py",
-        "update-policy.json"
+        "tools/update_recipe.py",
+        "tools/update_packages.py",
+        "tools/update_baseline.py",
+        "tests/NexusPipeline.UpdateTests",
+        "tests/system/prepare-maintenance.py",
+        "update-policy.json",
+        "src/NexusPipeline.Maintenance/Platform/Storage/VolumeSpaceProbe.cs"
       ],
       "testDomains": [
         "hostAreas.update",
@@ -763,7 +773,12 @@
       ],
       "codePaths": [
         "tests/run.mjs",
-        ".github/workflows/ci.yml"
+        ".github/workflows/ci.yml",
+        "tools/local-work.mjs",
+        "tests/support/workspace.mjs",
+        "tests/support/local-resources.mjs",
+        "tests/support/npm-inputs.mjs",
+        "tests/support/prepared-artifact.mjs"
       ],
       "testDomains": [
         "governanceDomains.tooling"
@@ -1058,7 +1073,7 @@
       "codePaths": [
         "tools/build_identity.py",
         "tools/schemas",
-        "src/Modules/Updates/ApplicationBuildIdentity.cs"
+        "src/NexusPipeline.Maintenance/Updates/ApplicationBuildIdentity.cs"
       ],
       "testDomains": [
         "backend.updates-restart",
@@ -1085,7 +1100,7 @@
       "codePaths": [
         "desktop",
         "src/Host/Desktop",
-        "src/Modules/Updates/ApplicationPayload.cs",
+        "src/NexusPipeline.Maintenance/Updates/ApplicationPayload.cs",
         "tools/application_build.py"
       ],
       "testDomains": [

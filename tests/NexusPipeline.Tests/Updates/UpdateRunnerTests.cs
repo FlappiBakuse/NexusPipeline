@@ -18,6 +18,14 @@ public sealed class UpdateRunnerTests
         Assert.Throws<IOException>(() => plan.RequireAvailable(plan.PeakAdditionalBytes - 1));
         Assert.Throws<InvalidDataException>(() => UpdateStoragePlan.Create(-1, 1, 1, 1, 1));
         Assert.Throws<OverflowException>(() => UpdateStoragePlan.Create(1, 1, long.MaxValue, 1, 1));
+        var primary = new NexusPipeline.Platform.Storage.VolumeSpace("D:\\", plan.PeakAdditionalBytes + 1024L * 1024 * 1024, 4096);
+        var manager = new NexusPipeline.Platform.Storage.VolumeSpace("C:\\", primary.AvailableBytes, 65536);
+        plan.RequireAvailable([primary, manager]);
+        Assert.Throws<IOException>(() => plan.RequireAvailable([primary, manager with { AvailableBytes = plan.PeakAdditionalBytes }]));
+        Assert.Throws<IOException>(() => plan.RequireAvailable([primary with { AvailableBytes = plan.PeakAdditionalBytes }, manager]));
+        Assert.Throws<InvalidDataException>(() => plan.RequireAvailable([primary with { AllocationUnitBytes = 0 }]));
+        var actual = NexusPipeline.Platform.Storage.VolumeSpaceProbe.Read(Path.GetTempPath());
+        Assert.True(actual.AllocationUnitBytes > 0); Assert.True(actual.AvailableBytes >= 0);
     }
     private static UpdateRunnerFrame Hello => new("hello", Guid.NewGuid().ToString("N"), new('a', 64), 1, 0,
         new('b', 64), UpdateTargetManifest.Capabilities, [], null, null, null);

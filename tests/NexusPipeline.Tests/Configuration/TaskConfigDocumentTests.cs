@@ -1,12 +1,53 @@
 using System.Text;
 using System.Text.Json.Nodes;
 using NexusPipeline.Modules.Configuration.Scripting;
+using NexusPipeline.Modules.Execution.Judgement;
 using Xunit;
 
 namespace NexusPipeline.Tests.Configuration;
 
 public sealed class TaskConfigDocumentTests
 {
+    [Fact]
+    public void StructuredReadKeepsUnknownResourcesOpaqueAndPreservesLegacyAndSafetyBoundaries()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "structured-read-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            string good = Path.Combine(root, "good.json"), unknown = Path.Combine(root, "unknown.yaml");
+            File.WriteAllText(good, "{\"enabled\":true}");
+            byte[] bytes = Encoding.UTF8.GetBytes("a: &private 1\nb: *private\n");
+            File.WriteAllBytes(unknown, bytes);
+            var view = TaskConfigViewFactory.Capture(root, root, [], []);
+            Assert.Equal(0, view.ParseCount);
+            var known = JsonNode.Parse(view.ReadConfig("config:good.json", "0.3.0"))!;
+            Assert.Equal("parsed", known["readOutcome"]!.GetValue<string>());
+            Assert.True(known["document"]!["enabled"]!.GetValue<bool>());
+            Assert.Equal(1, view.ParseCount);
+            var opaque = JsonNode.Parse(view.ReadConfig("config:unknown.yaml", "0.3.0"))!;
+            Assert.Equal("opaque", opaque["readOutcome"]!.GetValue<string>());
+            Assert.Null(opaque["document"]);
+            Assert.DoesNotContain("private", opaque.ToJsonString());
+            Assert.ThrowsAny<Exception>(() => view.ReadConfig("config:unknown.yaml", "0.2.0"));
+            Assert.Null(JsonNode.Parse(view.ReadConfig("config:good.json", "0.2.0"))!["readOutcome"]);
+            Assert.Throws<InvalidDataException>(() => view.ReadResource("config:good.json", "0.3.0"));
+            Assert.Throws<InvalidDataException>(() => view.ReadConfig("undeclared", "0.3.0"));
+            Assert.Throws<InvalidDataException>(() => view.ReadConfig("config:good.json", "0.4.0"));
+            view.VerifyUnchanged();
+            Assert.Equal(bytes, File.ReadAllBytes(unknown));
+            File.AppendAllText(unknown, "changed: true");
+            Assert.Throws<InvalidDataException>(() => view.VerifyUnchanged());
+            string deep = Path.Combine(root, "deep.json");
+            File.WriteAllText(deep, new string('[', 33) + "true" + new string(']', 33));
+            var limited = new TaskConfigView();
+            limited.AddConfig("deep", deep, "json");
+            Assert.StartsWith("resource_limit:", Assert.Throws<InvalidDataException>(() => limited.ReadConfig("deep", "0.3.0")).Message);
+            Assert.StartsWith("resource_limit:", Assert.Throws<InvalidDataException>(() => limited.VerifyUnchanged()).Message);
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
     [Theory]
     [InlineData("json", "{\"前文\":\"中文😀\",\"enabled\":false,\"other\":42}", "false", "true")]
     [InlineData("yaml", "前文: 中文😀\nenabled: false # keep\nother: 42\n", "false", "true")]
@@ -58,7 +99,7 @@ public sealed class TaskConfigDocumentTests
     }
 
     [Fact]
-    public void LargePublicDefinitionsDoNotExpandWritableConfigurationLimits()
+    public async Task LargePublicDefinitionsDoNotExpandWritableConfigurationLimits()
     {
         string root = Path.Combine(Path.GetTempPath(), "resource-limit-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
@@ -66,6 +107,17 @@ public sealed class TaskConfigDocumentTests
         File.WriteAllText(file, "{\"task\":[]}" + new string(' ', 2207014));
         var view = new TaskConfigView();
         view.AddResource("interface", file, "text");
+        string large = "{\"items\":[" + string.Join(',', Enumerable.Repeat("\"" + new string('界', 90) + "\"", 8000)) + "]}";
+        string catalog = Path.Combine(root, "catalog.json");
+        File.WriteAllText(catalog, large);
+        view.AddResource("catalog", catalog, "text");
+        var result = await TaskProtocolScriptRunner.ExecuteAsync<JsonObject>(
+            "const a=JSON.parse(nexus.readResource('interface').document); const b=JSON.parse(nexus.readResource('catalog').document); console.log(JSON.stringify({tasks:a.task.length,items:b.items.length,last:b.items[7999]}));",
+            new { protocolVersion = "0.3.0" }, id => view.ReadConfig(id, "0.3.0"),
+            id => view.ReadResource(id, "0.3.0"), true, default);
+        Assert.Equal(0, result["tasks"]!.GetValue<int>());
+        Assert.Equal(8000, result["items"]!.GetValue<int>());
+        Assert.Equal(new string('界', 90), result["last"]!.GetValue<string>());
         Assert.Contains("interface", view.DeclaredResourceIds);
         Assert.Throws<InvalidDataException>(() => view.AddConfig("config:test.json", file, "json"));
         File.WriteAllBytes(file, new byte[8 * 1024 * 1024 + 1]);

@@ -134,7 +134,8 @@ internal static class ApiUpdateHandler
             pendingVersion = status.PendingVersion,
             pendingStatus = status.PendingStatus,
             pendingError = status.PendingError,
-            errorCode = string.IsNullOrWhiteSpace(status.Error) ? null : "update_failed",
+            installerToolsWarning = status.InstallerToolsWarning,
+            errorCode = status.ErrorCode,
             lastApplyFailure = status.LastApplyFailure?.ToPublicView(),
             automation = new
             {

@@ -6,62 +6,6 @@ using NexusPipeline.Shared.Logging;
 
 namespace NexusPipeline.Platform.Processes;
 
-/// <summary>用于进程清理的稳定身份：PID 单独不足以证明仍是同一个进程。</summary>
-internal readonly record struct ProcessIdentity(int Pid, DateTime StartTime, string ImageName)
-{
-    public bool Matches(ProcessIdentity other)
-    {
-        return Pid == other.Pid
-            && StartTime == other.StartTime
-            && string.Equals(ImageName, other.ImageName, StringComparison.OrdinalIgnoreCase);
-    }
-
-    public static ProcessIdentity? Capture(Process process)
-    {
-        try
-        {
-            process.Refresh();
-            if (process.HasExited)
-            {
-                return null;
-            }
-            string imageName;
-            try
-            {
-                imageName = ReadImagePath(process.Id) ?? process.MainModule?.FileName ?? process.ProcessName + ".exe";
-            }
-            catch
-            {
-                imageName = process.ProcessName + ".exe";
-            }
-            return new ProcessIdentity(process.Id, process.StartTime.ToUniversalTime(), imageName);
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private static string? ReadImagePath(int pid)
-    {
-        using SafeProcessHandle handle = OpenProcess(0x1000 /* QUERY_LIMITED_INFORMATION */, false, pid);
-        if (handle.IsInvalid) return null;
-        var path = new StringBuilder(1024);
-        uint size = (uint)path.Capacity;
-        if (QueryFullProcessImageName(handle, 0, path, ref size)) return path.ToString();
-        if (Marshal.GetLastWin32Error() != 122) return null;
-        path = new StringBuilder(32768); size = (uint)path.Capacity;
-        return QueryFullProcessImageName(handle, 0, path, ref size) ? path.ToString() : null;
-    }
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern SafeProcessHandle OpenProcess(uint access, [MarshalAs(UnmanagedType.Bool)] bool inherit, int processId);
-
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool QueryFullProcessImageName(SafeProcessHandle process, uint flags, StringBuilder image, ref uint size);
-}
-
 /// <summary>
 /// 进程退出安全窗口。一次 IsExeRunning=false 只代表当前采样为空，连续窗口结束后才允许配置恢复。
 /// </summary>
@@ -111,7 +55,7 @@ internal sealed class StableExitWindow
 /// 本次 Attempt 的进程所有权。Job Object 负责保留 launcher 已退出后的普通子进程，
 /// Toolhelp/identity 作为外部 watchdog 的补充观察来源。
 /// </summary>
-internal sealed class ProcessOwnership : IDisposable
+internal sealed partial class ProcessOwnership : IDisposable
 {
     private const int JobObjectBasicProcessIdList = 3;
 
@@ -165,6 +109,7 @@ internal sealed class ProcessOwnership : IDisposable
             else
             {
                 HasAssignedProcess = true;
+                if (ProcessIdentity.Capture(process) is { } identity) RetainExitHandle(process, identity);
             }
             return assigned;
         }
@@ -199,6 +144,7 @@ internal sealed class ProcessOwnership : IDisposable
                 if (identity is not null && Path.IsPathFullyQualified(identity.Value.ImageName))
                 {
                     identities.Add(identity.Value);
+                    RetainExitHandle(process, identity.Value);
                 }
                 else if (process.HasExited)
                 {
@@ -261,6 +207,7 @@ internal sealed class ProcessOwnership : IDisposable
             return;
         }
         _disposed = true;
+        ReleaseExitHandles();
         _job.Dispose();
     }
 

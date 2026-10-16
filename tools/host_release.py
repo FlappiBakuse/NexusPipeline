@@ -17,16 +17,18 @@ from xml.etree import ElementTree
 
 try:
     from .pe_manifest import verify_embedded_manifest
-    from .update_components import asset_names as component_asset_names, generate as generate_components, verify as verify_components
+    from .update_recipe import asset_names as public_asset_names, RECIPE_PATH, GUIDES, parse as parse_recipe, verify as verify_recipe
+    from .update_packages import generate as generate_packages, verify as verify_packages
 except ImportError:
     from pe_manifest import verify_embedded_manifest
-    from update_components import asset_names as component_asset_names, generate as generate_components, verify as verify_components
+    from update_recipe import asset_names as public_asset_names, RECIPE_PATH, GUIDES, parse as parse_recipe, verify as verify_recipe
+    from update_packages import generate as generate_packages, verify as verify_packages
 
 
 REPOSITORY = "FlappiBakuse/NexusPipeline"
 VERSION_PATTERN = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(beta|rc)\.(0|[1-9]\d*))?$")
 PROTECTED_NAMES = {"config", "data", "history", "logs", ".nxp", "outputs", "user-assets", ".nxp-update", ".nxp-backup"}
-PAYLOAD_ROOTS = {"NexusPipeline.exe", "README.md", "resources", "plugins"}
+PAYLOAD_ROOTS = {"NexusPipeline.exe", "NexusPipeline.update.exe", "README.md", "resources", "plugins"}
 TEXT_SUFFIXES = {".css", ".html", ".js", ".json", ".md", ".mjs", ".txt", ".xml", ".yaml", ".yml"}
 MAX_PACKAGE_ENTRIES = 4096
 MAX_PACKAGE_UNCOMPRESSED_BYTES = 512 * 1024 * 1024
@@ -166,6 +168,7 @@ def archive_production(
     build_tool: str = "host_release.py",
     manifest_path: Path | None = None,
     zip_compression_level: int = 9,
+    baseline: tuple[dict, list[dict]] | None = None,
 ) -> dict[str, Any]:
     production_root = production_root.resolve()
     output_dir = output_dir.resolve()
@@ -175,7 +178,7 @@ def archive_production(
     tag = normalized_tag(tag)
     version = tag[1:]
     output_dir.mkdir(parents=True, exist_ok=True)
-    zip_path = output_dir / f"NexusPipeline-{tag}-win-x64.zip"
+    zip_path = output_dir / f"NexusPipeline-{tag}-win-x64-Portable.zip"
     _require(not zip_path.exists(), "生产 ZIP 已存在，拒绝覆盖")
     files = []
     for path in production_root.rglob("*"):
@@ -186,7 +189,7 @@ def archive_production(
     folded = [name.casefold() for name, _ in files]
     _require(len(folded) == len(set(folded)), "生产载荷大小写路径冲突")
     files.sort(key=lambda item: (item[0].casefold(), item[0]))
-    _require({name for name, _ in files if "/" not in name} == {"NexusPipeline.exe", "README.md"}, "生产载荷根文件不符")
+    _require({name for name, _ in files if "/" not in name} == {"NexusPipeline.exe", "NexusPipeline.update.exe", "README.md"}, "生产载荷根文件不符")
     _require(any(name.startswith("plugins/EmulatorSupport/") for name, _ in files)
              and any(name.startswith("plugins/LiveScreenshot/") for name, _ in files)
              and any(name == "resources/payload-manifest.json" for name, _ in files), "生产载荷目录缺失")
@@ -203,18 +206,10 @@ def archive_production(
     application_manifest = json.loads((production_root / "resources/payload-manifest.json").read_bytes())
     validate_application(production_root, application_manifest, application, source_root)
     payload_files = []
-    with zipfile.ZipFile(zip_path, "x", compression=zipfile.ZIP_DEFLATED, compresslevel=zip_compression_level) as archive:
-        for relative, path in files:
-            info = zipfile.ZipInfo(relative, date_time=(1980, 1, 1, 0, 0, 0))
-            info.create_system = 0
-            info.external_attr = 0o644 << 16
-            info.compress_type = zipfile.ZIP_DEFLATED
-            info.compress_level = zip_compression_level
-            digest = hashlib.sha256(); size = 0
-            with path.open('rb') as source, archive.open(info, 'w') as target:
-                while chunk := source.read(1024 * 1024):
-                    size += len(chunk); digest.update(chunk); target.write(chunk)
-            payload_files.append({"path": relative, "sizeBytes": size, "sha256": digest.hexdigest()})
+    for relative, path in files:
+        with path.open('rb') as stream: digest = hashlib.file_digest(stream, 'sha256').hexdigest()
+        payload_files.append({"path": relative, "sizeBytes": path.stat().st_size, "sha256": digest})
+    generate_packages(production_root, output_dir, tag, application_manifest, payload_files, baseline=baseline)
     with zip_path.open('rb') as stream: digest = hashlib.file_digest(stream, 'sha256').hexdigest()
     metadata = {
         "schemaVersion": 1,
@@ -234,7 +229,6 @@ def archive_production(
         "payloadFiles": payload_files,
     }
     (output_dir / "build-metadata.json").write_text(json.dumps(metadata, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
-    generate_components(production_root, output_dir, tag, application_manifest, payload_files, source_root)
     with zip_path.open('rb') as stream: _require(hashlib.file_digest(stream, 'sha256').hexdigest() == digest, "生产 ZIP 二次 SHA256 校验失败")
     return {"zip": str(zip_path), "metadata": metadata}
 
@@ -293,12 +287,16 @@ def build_production(
     inputs = prepare_application(root, output_dir.resolve() / "application-inputs", source_sha=source_sha,
         source_tree_sha=git_output(root, "rev-parse", "HEAD^{tree}"), partner_sha=partner_sha,
         workflow_sha=workflow_sha or source_sha, electron_archive=electron_archive)
-    _run_checked([dotnet, "publish", str(root / "src" / "NexusPipeline.csproj"), "--configuration", "Release", "--runtime", "win-x64", "--self-contained", "false", "-p:PublishSingleFile=true", "-p:DebugType=none", "-p:DebugSymbols=false", "-p:NexusTestHost=false", "-p:NexusFrontendProps=" + inputs["frontendProps"], "-p:NexusBuildIdentityPath=" + inputs["identity"], "--output", str(production_root)], root, runner)
+    _run_checked([dotnet, "publish", str(root / "src" / "NexusPipeline.csproj"), "--configuration", "Release", "--runtime", "win-x64", "--self-contained", "false", "-p:PublishSingleFile=true", "-p:DebugType=none", "-p:DebugSymbols=false", "-p:NexusTestHost=false", "-p:NexusFrontendProps=" + inputs["frontendProps"], "-p:NexusBuildIdentityPath=" + inputs["identity"], "-p:NexusUpdaterRecoveryPath=" + inputs["updater"], "--output", str(production_root)], root, runner)
     verify_embedded_manifest(production_root / "NexusPipeline.exe", "requireAdministrator")
-    if "@@LAUNCH_CODE@@" in (root / "tools" / "installer.iss.in").read_text(encoding="utf-8"):
-        helper_root = output_dir.resolve() / "installer-helper"
-        _run_checked([dotnet, "publish", str(root / "src" / "NexusPipeline.csproj"), "--configuration", "Release", "--runtime", "win-x64", "--self-contained", "false", "-p:PublishSingleFile=true", "-p:DebugType=none", "-p:DebugSymbols=false", "-p:NexusTestHost=false", "-p:NexusInstallerMetadataHelper=true", "--output", str(helper_root)], root, runner)
-        verify_embedded_manifest(helper_root / "nxp-metadata-helper.exe", "asInvoker")
+    helper_root = output_dir.resolve() / "installer-helper"
+    helper_root.mkdir()
+    shutil.copy2(inputs['metadataHelper'], helper_root / 'nxp-metadata-helper.exe')
+    shutil.copy2(inputs['uninstaller'], helper_root / 'NexusPipeline.uninstall.exe')
+    shutil.copy2(inputs['updater'], production_root / 'NexusPipeline.update.exe')
+    verify_embedded_manifest(Path(inputs['updater']), 'requireAdministrator')
+    verify_embedded_manifest(Path(inputs['uninstaller']), 'asInvoker')
+    verify_embedded_manifest(Path(inputs['metadataHelper']), 'asInvoker')
     shutil.copytree(inputs["desktopBundle"], production_root / "resources" / "desktop")
     shutil.copy2(root / "README.md", production_root / "README.md")
     if bundled_phase is None:
@@ -312,12 +310,18 @@ def build_production(
     except ImportError:
         from application_payload import create as create_application_manifest
     create_application_manifest(production_root, json.loads(Path(inputs["identity"]).read_bytes()), root)
+    try:
+        from .update_baseline import acquire as acquire_baseline
+    except ImportError:
+        from update_baseline import acquire as acquire_baseline
+    baseline = acquire_baseline(output_dir.resolve() / 'baseline', project_version(root))
     return archive_production(
         production_root,
         output_dir,
         "v" + project_version(root),
         source_sha=source_sha,
         manifest_path=root / "src" / "app.manifest",
+        baseline=baseline,
     )
 
 
@@ -448,9 +452,9 @@ def assemble_candidate_from_phases(root: Path, host_phase: Path, installer_phase
              and not git_output(root, "status", "--porcelain=v1", "--untracked-files=all"),
              "候选装配必须使用干净的固定源码")
     tag = "v" + project_version(root)
-    zip_name = f"NexusPipeline-{tag}-win-x64.zip"
-    setup_name = f"NexusPipeline-{tag}-win-x64-setup.exe"
-    host_files = (zip_name, "build-metadata.json", *sorted(component_asset_names(tag)))
+    zip_name = f"NexusPipeline-{tag}-win-x64-Portable.zip"
+    setup_name = f"NexusPipeline-{tag}-win-x64-Setup.exe"
+    host_files = (zip_name, "build-metadata.json", f"NexusPipeline-{tag}-win-x64-Update.zip")
     installer_files = (setup_name, "installer-build-metadata.json")
     for directory, names in ((host_phase, host_files), (installer_phase, installer_files)):
         _require(directory.is_dir() and not directory.is_symlink()
@@ -468,9 +472,7 @@ def assemble_candidate_from_phases(root: Path, host_phase: Path, installer_phase
 
 
 def candidate_asset_names(tag: str) -> set[str]:
-    zip_name = f"NexusPipeline-{tag}-win-x64.zip"
-    setup_name = f"NexusPipeline-{tag}-win-x64-setup.exe"
-    return {zip_name, setup_name, *component_asset_names(tag),
+    return {*public_asset_names(tag),
             "build-metadata.json", "installer-build-metadata.json"}
 
 
@@ -481,7 +483,7 @@ def verify_received_installer(output_dir: Path, root: Path, zip_metadata: dict[s
         from .host_installer import INNO_COMPILER_SHA256, INNO_DISTRIBUTION_SHA256, dependency_pair
     except ImportError:
         from host_installer import INNO_COMPILER_SHA256, INNO_DISTRIBUTION_SHA256, dependency_pair
-    setup_name = f"NexusPipeline-{expected_tag}-win-x64-setup.exe"
+    setup_name = f"NexusPipeline-{expected_tag}-win-x64-Setup.exe"
     setup = output_dir / setup_name
     metadata_path = output_dir / "installer-build-metadata.json"
     _require(all(path.is_file() and not path.is_symlink() for path in (setup, metadata_path)),
@@ -544,14 +546,14 @@ def write_candidate_manifest(
     _require(not git_output(root, "status", "--porcelain=v1", "--untracked-files=all"), "candidate 源码工作树不干净")
     tree_sha = git_output(root, "rev-parse", f"{source_sha}^{{tree}}")
     tag = "v" + project_version(root)
-    zip_name = f"NexusPipeline-{tag}-win-x64.zip"
+    zip_name = f"NexusPipeline-{tag}-win-x64-Portable.zip"
     expected = candidate_asset_names(tag)
     actual = {path.name for path in output_dir.iterdir()}
     _require(actual == expected and all((output_dir / name).is_file() and not (output_dir / name).is_symlink() for name in expected),
              f"Host candidate 文件集合无效：{sorted(actual)}")
     metadata = verify_received_package(output_dir / zip_name, output_dir / "build-metadata.json",
                                        expected_source_sha=source_sha, expected_tag=tag)
-    verify_components(output_dir, output_dir / zip_name, metadata, root)
+    verify_packages(output_dir, output_dir / zip_name, metadata)
     _verify_candidate_build_inputs(metadata, source_sha, tree_sha, partner_sha, workflow_sha)
     verify_received_installer(output_dir, root, metadata, expected_source_sha=source_sha, expected_tag=tag)
     files = [
@@ -630,7 +632,7 @@ def validate_candidate_data(
     _require(candidate["producer"] == expected_producer, "Host candidate 原 producer 身份不符")
     tag = "v" + project_version(root, expected_source_sha)
     _require(candidate["releaseLabel"] == tag, "Host candidate 版本标签不符")
-    zip_name = f"NexusPipeline-{tag}-win-x64.zip"
+    zip_name = f"NexusPipeline-{tag}-win-x64-Portable.zip"
     names = candidate_asset_names(tag)
     actual = {path.name for path in output_dir.iterdir()}
     _require(actual == names | {"candidate.json"}, "Host candidate 存在缺失或未列入的文件")
@@ -649,7 +651,7 @@ def validate_candidate_data(
                  f"Host candidate inventory 摘要或大小不符：{name}")
     metadata = verify_received_package(output_dir / zip_name, output_dir / "build-metadata.json",
                                        expected_source_sha=expected_source_sha, expected_tag=tag)
-    verify_components(output_dir, output_dir / zip_name, metadata, root)
+    verify_packages(output_dir, output_dir / zip_name, metadata)
     _verify_candidate_build_inputs(metadata, expected_source_sha, candidate["sourceTreeSha"],
                                    expected_partner_sha, expected_producer["workflowSha"])
     verify_received_installer(output_dir, root, metadata, expected_source_sha=expected_source_sha, expected_tag=tag)
@@ -672,17 +674,15 @@ def extract_candidate_artifact(archive_path: Path, output_dir: Path, *, expected
         with zipfile.ZipFile(archive_path) as archive:
             infos = archive.infolist()
             names = [info.filename for info in infos]
-            _require(len(infos) == 9 and len(set(names)) == 9 and "candidate.json" in names
+            _require(len(infos) == 6 and len(set(names)) == 6 and "candidate.json" in names
                      and "build-metadata.json" in names and "installer-build-metadata.json" in names,
                      "candidate artifact 文件集合无效")
             for info in infos:
                 name = info.filename
                 _require("/" not in name and "\\" not in name and name not in {".", ".."}
                          and (name in {"candidate.json", "build-metadata.json", "installer-build-metadata.json"}
-                              or re.fullmatch(r"NexusPipeline-v[0-9A-Za-z.+-]+-win-x64\.zip", name) is not None
-                              or re.fullmatch(r"NexusPipeline-v[0-9A-Za-z.+-]+-win-x64-(host-core|desktop-app|desktop-runtime)\.zip", name) is not None
-                              or re.fullmatch(r"NexusPipeline-v[0-9A-Za-z.+-]+-win-x64-update\.json", name) is not None
-                              or re.fullmatch(r"NexusPipeline-v[0-9A-Za-z.+-]+-win-x64-setup\.exe", name) is not None),
+                              or re.fullmatch(r"NexusPipeline-v[0-9A-Za-z.+-]+-win-x64-(Portable|Update)\.zip", name) is not None
+                              or re.fullmatch(r"NexusPipeline-v[0-9A-Za-z.+-]+-win-x64-Setup\.exe", name) is not None),
                          f"candidate artifact 路径无效：{name}")
                 mode = (info.external_attr >> 16) & 0o170000
                 _require(not info.is_dir() and mode in {0, 0o100000}
@@ -729,7 +729,7 @@ def _safe_package_entry(name: str, *, inner_plugin: bool = False) -> str:
     parts = normalized.split("/")
     _require(all(part not in {"", ".", ".."} for part in parts), f"生产 ZIP 条目路径非法：{name}")
     if not inner_plugin:
-        _require(parts[0] in PAYLOAD_ROOTS, f"生产 ZIP 含非应用根路径：{name}")
+        _require(parts[0] in PAYLOAD_ROOTS or normalized in GUIDES | {RECIPE_PATH}, f"生产 ZIP 含非应用根路径：{name}")
     _require(all(not any(ord(char) < 32 or char in '<>:"|?*' for char in part) and not part.endswith((" ", ".")) and part.split('.', 1)[0].upper() not in WINDOWS_RESERVED_NAMES for part in parts), f"生产 ZIP 条目路径非法：{name}")
     if not inner_plugin:
         _require(parts[0].casefold() not in {name.casefold() for name in PROTECTED_NAMES}, f"生产 ZIP 包含受保护运行数据：{name}")
@@ -760,7 +760,7 @@ def _validate_package_layout(infos: list[zipfile.ZipInfo]) -> dict[str, zipfile.
     for name in folded_names:
         parts = name.split('/')
         _require(not any('/'.join(parts[:index]) in files for index in range(1, len(parts))), f"生产 ZIP 文件/目录冲突：{name}")
-    _require({name for name in files if name.endswith('.exe')} == {'nexuspipeline.exe', 'resources/desktop/nexuspipeline.desktop.exe'}, "生产 ZIP 的 Host 与桌面入口集合不符")
+    _require({name for name in files if name.endswith('.exe')} == {'nexuspipeline.exe', 'nexuspipeline.update.exe', 'resources/desktop/nexuspipeline.desktop.exe'}, "生产 ZIP 的 Host 与桌面入口集合不符")
     return names
 
 
@@ -821,6 +821,12 @@ def verify_received_package(
     try:
         with zipfile.ZipFile(package_path) as archive:
             names = _validate_package_layout(archive.infolist())
+            recipe_info = names.get(RECIPE_PATH)
+            _require(recipe_info is not None and recipe_info.file_size <= 2 * 1024 * 1024, "生产 ZIP 配方缺失或过大")
+            transport = parse_recipe(archive.read(recipe_info))
+            _require(transport['packageKind'] == 'portable' and transport['target']['version'] == expected_tag[1:], "生产 ZIP 配方身份不符")
+            verify_recipe(package_path, transport)
+            names = {name: info for name, info in names.items() if name not in GUIDES | {RECIPE_PATH}}
             exe = names.get("NexusPipeline.exe")
             _require(exe is not None and not exe.filename.endswith(("/", "\\")), "生产 ZIP 必须包含根目录 NexusPipeline.exe")
             _require("payloadFiles" in metadata, "生产 ZIP 缺少完整文件清单")
@@ -871,7 +877,7 @@ def verify_received_package(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="NexusPipeline Host production release boundary")
-    parser.add_argument("command", nargs="?", choices=("release", "verify-package", "verify-installer", "verify-components", "candidate", "extract-candidate", "inspect-candidate", "validate-candidate", "build-frontend", "build-bundled", "build-host", "assemble-candidate"), default="release")
+    parser.add_argument("command", nargs="?", choices=("release", "verify-package", "verify-installer", "verify-packages", "candidate", "extract-candidate", "inspect-candidate", "validate-candidate", "build-frontend", "build-bundled", "build-host", "assemble-candidate"), default="release")
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--tag")
     parser.add_argument("--source-sha")
@@ -982,16 +988,16 @@ def main(argv: list[str] | None = None) -> int:
         result = verify_received_package(args.package, args.metadata, expected_source_sha=args.expected_source_sha, expected_tag=args.expected_tag)
         print(json.dumps(result, ensure_ascii=False, sort_keys=True))
         return 0
-    if args.command in {"verify-installer", "verify-components"}:
+    if args.command in {"verify-installer", "verify-packages"}:
         for value, label in ((args.output, "--output"), (args.expected_source_sha, "--expected-source-sha"),
                              (args.expected_tag, "--expected-tag")):
             _require(value is not None, f"{label} is required")
         tag = normalized_tag(args.expected_tag)
-        zip_name = f"NexusPipeline-{tag}-win-x64.zip"
+        zip_name = f"NexusPipeline-{tag}-win-x64-Portable.zip"
         zip_metadata = verify_received_package(args.output / zip_name, args.output / "build-metadata.json",
                                                expected_source_sha=args.expected_source_sha, expected_tag=tag)
-        if args.command == "verify-components":
-            result = verify_components(args.output, args.output / zip_name, zip_metadata, root)
+        if args.command == "verify-packages":
+            result = verify_packages(args.output, args.output / zip_name, zip_metadata)
             print(json.dumps(result, ensure_ascii=False, sort_keys=True))
             return 0
         result = verify_received_installer(args.output, root, zip_metadata,
@@ -1027,7 +1033,7 @@ def main(argv: list[str] | None = None) -> int:
         helper_dir = output / "installer-helper"
         if helper_dir.is_dir() and helper_dir.resolve().parent == output:
             shutil.rmtree(helper_dir)
-        for name in (f"NexusPipeline-v{project_version(root)}-win-x64-setup.exe",
+        for name in (f"NexusPipeline-v{project_version(root)}-win-x64-Setup.exe",
                      "installer-build-metadata.json"):
             (installer_dir / name).replace(output / name)
         _require(installer_dir.is_dir() and installer_dir.resolve().parent == output,

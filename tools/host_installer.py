@@ -78,7 +78,7 @@ def dependency_pair(path: Path) -> dict[str, dict]:
     by_framework = {item.get("framework"): item for item in items}
     _require(set(by_framework) == {"Microsoft.WindowsDesktop.App", "Microsoft.AspNetCore.App"}, "依赖框架不完整")
     for item in items:
-        _require(item.get("version") == "10.0.12" and item.get("rid") == "win-x64", "依赖版本或架构不符")
+        _require(item.get("version") == "10.0.13" and item.get("rid") == "win-x64", "依赖版本或架构不符")
         _require(isinstance(item.get("url"), str) and item["url"].startswith("https://builds.dotnet.microsoft.com/dotnet/"),
                  "依赖下载 URL 非固定微软官方包")
         _require(re.fullmatch(r"[0-9a-f]{64}", item.get("sha256", "")) is not None, "依赖 SHA256 无效")
@@ -87,7 +87,7 @@ def dependency_pair(path: Path) -> dict[str, dict]:
 
 def render_script(template: str, *, production_root: Path, output_dir: Path,
                   metadata: dict, files: list[dict], dependencies: dict[str, dict],
-                  metadata_helper: Path | None = None) -> str:
+                  metadata_helper: Path | None = None, uninstaller: Path | None = None) -> str:
     version = metadata.get("version")
     _require(isinstance(version, str) and re.fullmatch(r"\d+\.\d+\.\d+", version) is not None,
              "安装器版本无效")
@@ -127,6 +127,11 @@ def render_script(template: str, *, production_root: Path, output_dir: Path,
                  "安装器元数据辅助程序缺失")
         file_lines.append(f'Source: "{metadata_helper}"; DestDir: "{{tmp}}"; '
                           'DestName: "nxp-metadata-helper.exe"; Flags: dontcopy noencryption')
+    if '@@UNINSTALLER_SHA256@@' in template:
+        _require(uninstaller is not None and uninstaller.is_file(), '独立卸载程序缺失')
+        verify_embedded_manifest(uninstaller, 'asInvoker')
+        file_lines.append(f'Source: "{uninstaller}"; DestDir: "{{app}}"; DestName: "NexusPipeline.uninstall.exe"; Flags: ignoreversion uninsneveruninstall; Check: IsFreshInstall')
+        file_lines.append(f'Source: "{uninstaller}"; DestDir: "{{tmp}}"; DestName: "nxp-target-uninstaller.exe"; Flags: dontcopy noencryption')
     stage_checks: list[str] = []
     for item in files:
         relative = item["path"]
@@ -146,6 +151,8 @@ def render_script(template: str, *, production_root: Path, output_dir: Path,
             file_lines.append(f'Source: "{source}"; DestDir: "{stage_parent}"; Flags: {flags}; Check: IsTrustedUpgrade')
             stage_checks.append(f"  VerifyStagedFile('{relative.replace('/', chr(92))}', '{item['sha256']}');")
     replacements = {
+        "@@UNINSTALLER_SHA256@@": sha256(uninstaller) if uninstaller else "",
+        "@@UPDATER_SHA256@@": next((item['sha256'] for item in files if item['path'] == 'NexusPipeline.update.exe'), ""),
         "@@GENERATION@@": installation_generation(),
         "@@ICON_FILE@@": str(Path(__file__).resolve().parents[1] / 'src/NexusPipeline.ico'),
         "@@WIZARD_IMAGE@@": str(output_dir / 'wizard.png'),
@@ -153,7 +160,7 @@ def render_script(template: str, *, production_root: Path, output_dir: Path,
         "@@SPACE_FILES@@": '\n'.join(f"  AddPayloadSpace('{item['path'].replace(chr(39), chr(39) * 2)}', {item['sizeBytes']}, {'True' if item['path'].startswith('plugins/') else 'False'});" for item in files),
         "@@UNINSTALLER_BYTES@@": str(metadata.get('uninstallerBytes', 0)),
         "@@SETUP_WORK_BYTES@@": str(metadata.get('setupWorkBytes', 0)),
-        "@@CORE_BYTES@@": str(next(item['sizeBytes'] for item in files if item['path'] == 'NexusPipeline.exe')),
+        "@@CORE_BYTES@@": str(uninstaller.stat().st_size if uninstaller else 0),
         "@@METADATA_HELPER_BYTES@@": str(metadata_helper.stat().st_size if metadata_helper else 0),
         "@@DESKTOP_SIZE@@": str(dependencies['Microsoft.WindowsDesktop.App'].get('sizeBytes', 0)),
         "@@ASPNET_SIZE@@": str(dependencies['Microsoft.AspNetCore.App'].get('sizeBytes', 0)),
@@ -190,15 +197,15 @@ def build_installer(production_root: Path, metadata_path: Path, dependency_path:
     metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
     _require(isinstance(metadata, dict) and isinstance(metadata.get("tag"), str)
              and isinstance(metadata.get("sourceSha"), str), "生产 ZIP 元数据身份无效")
-    package = metadata_path.parent / f"NexusPipeline-{metadata['tag']}-win-x64.zip"
+    package = metadata_path.parent / f"NexusPipeline-{metadata['tag']}-win-x64-Portable.zip"
     verify_received_package(package, metadata_path,
                             expected_source_sha=metadata["sourceSha"], expected_tag=metadata["tag"])
     helper = metadata_path.parent / "installer-helper" / "nxp-metadata-helper.exe"
-    return compile_payload(production_root, metadata, dependency_path, compiler, output_dir, template_path, helper)
+    return compile_payload(production_root, metadata, dependency_path, compiler, output_dir, template_path, helper, helper.parent / "NexusPipeline.uninstall.exe")
 
 
 def compile_payload(production_root: Path, metadata: dict, dependency_path: Path, compiler: Path,
-                    output_dir: Path, template_path: Path, helper: Path) -> dict:
+                    output_dir: Path, template_path: Path, helper: Path, uninstaller: Path | None = None) -> dict:
     """Compile verified bytes; callers own production or local provenance validation."""
     _require(not output_dir.exists(), "安装器输出目录已存在，拒绝覆盖")
     _require(compiler.is_file() and sha256(compiler) == INNO_COMPILER_SHA256, "Inno Setup 编译器字节不符")
@@ -215,7 +222,7 @@ def compile_payload(production_root: Path, metadata: dict, dependency_path: Path
                 'setupWorkBytes': (compiler.parent / 'Setup.e32').stat().st_size * 2}
     script = render_script(template, production_root=production_root,
                            output_dir=output_dir, metadata=metadata, files=files,
-                           dependencies=dependencies, metadata_helper=helper)
+                           dependencies=dependencies, metadata_helper=helper, uninstaller=uninstaller)
     script_path = output_dir / "installer.generated.iss"
     script_path.write_text(script, encoding="utf-8")
     command = [str(compiler), "/Q", str(script_path)]
@@ -223,7 +230,7 @@ def compile_payload(production_root: Path, metadata: dict, dependency_path: Path
     (output_dir / "iscc.stdout.log").write_text(completed.stdout, encoding="utf-8")
     (output_dir / "iscc.stderr.log").write_text(completed.stderr, encoding="utf-8")
     _require(completed.returncode == 0, f"Inno Setup 编译失败，退出码 {completed.returncode}")
-    setup = output_dir / f"NexusPipeline-v{metadata['version']}-win-x64-setup.exe"
+    setup = output_dir / f"NexusPipeline-v{metadata['version']}-win-x64-Setup.exe"
     _require(set(path.name for path in output_dir.iterdir()) == {
         script_path.name, "iscc.stdout.log", "iscc.stderr.log", setup.name, "wizard.png", "wizard-small.png",
     }, "安装器输出文件集合不符")

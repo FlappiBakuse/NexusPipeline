@@ -50,9 +50,15 @@ internal static class Program
             {
                 properties["NexusFrontendProps"] = Path.GetFullPath(args[4]);
                 properties["NexusBuildIdentityPath"] = Path.GetFullPath(args[6]);
+                properties["NexusUpdaterRecoveryPath"] = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(args[6]))!, "maintenance", "updater", "NexusPipeline.update.exe");
+                properties["NexusToolBuildIdentityDirectory"] = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(args[6]))!, "maintenance");
             }
             using var workspace = MSBuildWorkspace.Create(properties);
-            var project = await workspace.OpenProjectAsync(Path.Combine(root, "src", "NexusPipeline.csproj"));
+            _ = await workspace.OpenProjectAsync(Path.Combine(root, "src", "NexusPipeline.csproj"));
+            foreach (string extra in new[] { "src/NexusPipeline.Updater/NexusPipeline.Updater.csproj", "src/NexusPipeline.Uninstaller/NexusPipeline.Uninstaller.csproj", "tools/NexusPipeline.InstallerMetadata/NexusPipeline.InstallerMetadata.csproj" })
+                if (File.Exists(Path.Combine(root, extra.Replace('/', Path.DirectorySeparatorChar)))) _ = await workspace.OpenProjectAsync(Path.Combine(root, extra.Replace('/', Path.DirectorySeparatorChar)));
+            foreach (var project in workspace.CurrentSolution.Projects.Where(project => project.Name is "NexusPipeline" or "NexusPipeline.Maintenance" or "NexusPipeline.Updater" or "NexusPipeline.Uninstaller" or "NexusPipeline.InstallerMetadata"))
+            {
             var compilation = await project.GetCompilationAsync()
                 ?? throw new InvalidOperationException($"Compilation unavailable: {mode}");
             var errors = compilation.GetDiagnostics().Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error).Take(20).ToArray();
@@ -64,7 +70,7 @@ internal static class Program
             {
                 var file = tree.FilePath;
                 var relative = Path.GetRelativePath(root, file).Replace('\\', '/');
-                if (relative.StartsWith("../", StringComparison.Ordinal) || !relative.StartsWith("src/", StringComparison.Ordinal))
+                if (relative.StartsWith("../", StringComparison.Ordinal) || !relative.StartsWith("src/", StringComparison.Ordinal) && !relative.StartsWith("tools/NexusPipeline.InstallerMetadata/", StringComparison.Ordinal))
                     continue;
                 var sourceOwner = Owner(relative);
                 if (sourceOwner is null) continue;
@@ -81,13 +87,17 @@ internal static class Program
                     if (targetSymbol is null) continue;
                     var sourceLocation = targetSymbol.Locations.FirstOrDefault(location => location.IsInSource);
                     var targetOwner = sourceLocation?.SourceTree is { } targetTree
-                        ? Owner(Path.GetRelativePath(root, targetTree.FilePath).Replace('\\', '/')) : null;
+                        ? Owner(Path.GetRelativePath(root, targetTree.FilePath).Replace('\\', '/')) : targetSymbol.ContainingAssembly?.Name switch { "NexusPipeline.Maintenance" => "Maintenance", "NexusPipeline.update" => "Updater", "NexusPipeline.uninstall" => "Uninstaller", "NexusPipeline" when sourceOwner is "Maintenance" or "Updater" or "Uninstaller" or "InstallerMetadata" => "Host", _ => null };
                     var line = name.GetLocation().GetLineSpan().StartLinePosition.Line + 1;
                     if (sourceOwner != "Host" && sourceOwner != "Composition"
                         && targetSymbol.ToDisplayString() is "System.IServiceProvider" or "Microsoft.Extensions.DependencyInjection.IServiceCollection")
                         violations.Add(new Violation("A03", mode, relative, line, targetSymbol.ToDisplayString()));
                     if (targetOwner is null || sourceOwner == targetOwner) continue;
                     edges.Add(new Edge(sourceOwner, targetOwner));
+                    if (sourceOwner is "Maintenance" or "Updater" or "Uninstaller" or "InstallerMetadata"
+                        && targetOwner is "Host" or "Composition" or "ControlPlane" or "Updater" or "Uninstaller" or "InstallerMetadata"
+                        || sourceOwner == "Maintenance" && targetOwner.StartsWith("Modules.", StringComparison.Ordinal))
+                        violations.Add(new Violation("A01", mode, relative, line, targetSymbol.ToDisplayString()));
                     if (sourceOwner.StartsWith("Modules.", StringComparison.Ordinal)
                         && targetOwner is "Host" or "Composition" or "ControlPlane"
                         || sourceOwner is "Platform" or "Shared" && targetOwner.StartsWith("Modules.", StringComparison.Ordinal))
@@ -106,6 +116,13 @@ internal static class Program
                 .Where(tree => Path.GetRelativePath(root, tree.FilePath).Replace('\\', '/').StartsWith("src/", StringComparison.Ordinal))
                 .Select(tree => Path.GetRelativePath(root, tree.FilePath).Replace('\\', '/') + "\0" + tree.GetText())
                 .Order(StringComparer.Ordinal));
+            sourceFingerprints[mode + ":" + project.Name] = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(input))).ToLowerInvariant();
+        }
+            }
+        foreach (string mode in modes)
+        {
+            string input = string.Join("\n", sourceFingerprints.Where(pair => pair.Key.StartsWith(mode + ":", StringComparison.Ordinal))
+                .OrderBy(pair => pair.Key, StringComparer.Ordinal).Select(pair => pair.Key + "\0" + pair.Value));
             sourceFingerprints[mode] = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(input))).ToLowerInvariant();
         }
         Directory.CreateDirectory(Path.GetDirectoryName(report)!);
@@ -126,6 +143,10 @@ internal static class Program
 
     private static string? Owner(string relative)
     {
+        if (relative.StartsWith("tools/NexusPipeline.InstallerMetadata/", StringComparison.Ordinal)) return "InstallerMetadata";
+        if (relative.StartsWith("src/NexusPipeline.Maintenance/", StringComparison.Ordinal)) return "Maintenance";
+        if (relative.StartsWith("src/NexusPipeline.Updater/", StringComparison.Ordinal)) return "Updater";
+        if (relative.StartsWith("src/NexusPipeline.Uninstaller/", StringComparison.Ordinal)) return "Uninstaller";
         var parts = relative.Split('/');
         if (parts.Length < 3 || parts[0] != "src") return null;
         if (parts[1] == "Modules" && parts.Length > 3) return "Modules." + parts[2];

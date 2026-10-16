@@ -99,10 +99,9 @@ begin
   Manager := ExpandConstant('{localappdata}\NexusPipeline.Generations\@@GENERATION@@\installer');
   OldUninstall := UninstallerSize(Manager);
   RootUninstall := UninstallerSize(WizardDirValue);
-  AppBytes := ProgramAllocated + InstanceOldAllocatedBytes + @@UNINSTALLER_BYTES@@ * 2 + RecordBytes + OldUninstall;
-  // The retained uninstall helper is the production Host copy, not the temporary metadata tool.
-  ManagerBytes := OldUninstall + RootUninstall + Allocated(@@CORE_BYTES@@, AllocationUnit(Manager)) + RecordBytes + 4 * 1024 * 1024;
-  TemporaryBytes := @@SETUP_WORK_BYTES@@ + Allocated(@@METADATA_HELPER_BYTES@@, AllocationUnit(ExpandConstant('{tmp}'))) + SpaceDownloadBytes;
+  AppBytes := ProgramAllocated + InstanceOldAllocatedBytes + @@UNINSTALLER_BYTES@@ * 2 + Allocated(@@CORE_BYTES@@, AllocationUnit(WizardDirValue)) + RecordBytes + OldUninstall;
+  ManagerBytes := OldUninstall + RootUninstall + Allocated(@@CORE_BYTES@@, AllocationUnit(Manager)) * 3 + RecordBytes + 4 * 1024 * 1024;
+  TemporaryBytes := @@SETUP_WORK_BYTES@@ + Allocated(@@METADATA_HELPER_BYTES@@, AllocationUnit(ExpandConstant('{tmp}'))) + Allocated(@@CORE_BYTES@@, AllocationUnit(ExpandConstant('{tmp}'))) + SpaceDownloadBytes;
   AddSpace(WizardDirValue, AppBytes);
   AddSpace(Manager, ManagerBytes);
   AddSpace(ExpandConstant('{tmp}'), TemporaryBytes);

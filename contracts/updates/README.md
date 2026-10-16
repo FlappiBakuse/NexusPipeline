@@ -1,5 +1,15 @@
 # 更新协议
 
+包内配方、reader 2 的字段及文件集合规则见[应用传输配方](recipe.md)。
+
+## reader 2 与当前事务
+
+默认入口为 `metadata/updates/v2/channels.json`；公开资产精确为 Setup、Portable、Update。每个资产先核验官方 Release Assets API 的 ID、名称、尺寸和 SHA256，再解析包内配方。新应用载荷使用 payload schema 2，新更新事务使用 journal schema 3。journal 冻结运输方式、资产身份、配方摘要、源清单摘要、网络／复用字节，以及由完整载荷推导的交换范围和安装 helper 原存在状态。恢复使用冻结收据，不能重新解析 latest 替换候选。
+
+手动覆盖后的安装归属需要独立官方 Release 摘要和实际包字节证明。`ManualAdoptionPending` 与普通运行分开；人工检查在维护租约下验证 Update 的覆盖资格和 Portable 的完整载荷，随后通过 DPAPI 检查点、helper 更新、身份文件和 HKCU 锚点完成可恢复登记。不能用本地自描述 manifest 直接认领新文件。新实现卸载入口遇到未登记的 Host 字节时拒绝写入。
+
+## reader 1 兼容合同
+
 `metadata/updates/channels.json` 是有界发现 envelope。schema 1 严格包含 `schemaVersion`、`channels` 和 `bridges`；channels 仅含 stable、prerelease，每个渠道仅含 previousPublishedTarget、pendingTarget。槽位可以为空；目标包含 releaseTag、manifestAssetName、readerProtocol、requiredCapabilities。字段、类型、重复键、对象深度和响应长度由 reader 校验。当前 reader 支持协议 1。bridges 最多 8 项；每项严格包含 sourceReaderProtocol、sourceCapabilities、targetReaderProtocol、targetCapabilities、entryTarget。sourceCapabilities 必须与本机完整能力集合相同，目标协议必须精确匹配所需 readerProtocol，targetCapabilities 必须覆盖目标要求；entryTarget 使用相同目标结构且必须能由当前 reader 读取。只有版本严格高于本机且低于最终目标的桥接才可选择，按版本从高到低核验，禁止递归桥接和循环。桥接 Release、渠道、完整资产、GitHub digest 与目标清单采用相同验证流程，未来清单不会交给旧 reader 解析；桥接安装后重新发现最终目标。未发布或校验失败的桥接保留上一可用目标。当前渠道未声明实际桥接发行。
 
 入口不包含执行命令、下载脚本或自身源码提交。reader 按固定仓库的 tag 查询 Release，再分页读取该 Release 的 Assets API，最多 400 个资产、5 页；同名资产和重复 ID 均拒绝。GitHub 的 digest、尺寸、资产 ID 和 uploaded 状态是资产身份依据。目标清单的完整字节必须先通过该摘要，随后才解析其内容。默认源不枚举历史 Release；自定义源保持独立同源限制，旧数组格式只接受具有同等资产摘要与身份的完整包。
@@ -10,4 +20,4 @@
 
 runner 使用目标 Host 的 `--update-migration-runner` 专用入口，跳过普通 Host 初始化。父协调器通过当前用户命名管道核对真实客户端 PID、进程映像与开始时间、EXE 摘要、一次性随机数、事务 ID、构建身份、协议、能力和单调序号。runner 只处理已注册路线，返回输出清单；父协调器确认进程退出及输出后负责最终交换。此接口约束不表示 Windows 进程沙箱。
 
-新协议 journal schema 2 在现役应用备份、交换、启动回执和回滚之外，冻结 Release ID、tag、全部资产 ID/尺寸/digest、路线及 runner 收据。当前无存储变化路线的输入/输出清单为空。恢复不重新解析 latest 或从同名 URL 取得新候选；未知 journal、活跃或无法确认结束的 runner、未知文件变化均保留现场。旧完整包和安装器继续使用 schema 1。
+reader 1 的 journal schema 2 在应用备份、交换、启动回执和回滚之外，冻结 Release ID、tag、全部资产 ID/尺寸/digest、路线及 runner 收据。无存储变化路线的输入/输出清单为空。恢复不重新解析 latest 或从同名 URL 取得新候选；未知 journal、活跃或无法确认结束的 runner、未知文件变化均保留现场。已知 schema 1/2 现场由明确 reader 恢复，不改写成新事务格式。

@@ -59,7 +59,7 @@ internal sealed class UpdateAutomationService
         : this(
             settings,
             updates.GetStatus,
-            auditSource => updates.CheckAsync(auditSource),
+            auditSource => updates.CheckAsync(auditSource, reconcileManualAdoption: false),
             auditSource => updates.StartDownload(auditSource),
             updates.RequestImmediateApplyWithLease,
             idlePolicy.TryAcquire,
@@ -386,7 +386,7 @@ internal sealed class UpdateAutomationService
 
     private TimeSpan NextWait(UpdateStatusSnapshot status)
     {
-        if (status.State is UpdateState.Checking or UpdateState.Downloading)
+        if (status.State is UpdateState.Checking or UpdateState.Downloading or UpdateState.Cancelling)
         {
             return TimeSpan.FromSeconds(1);
         }

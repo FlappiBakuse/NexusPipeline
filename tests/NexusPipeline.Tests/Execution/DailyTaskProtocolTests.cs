@@ -5,8 +5,200 @@ using Xunit;
 
 namespace NexusPipeline.Tests.Execution;
 
-public class DailyTaskProtocolTests
+public partial class DailyTaskProtocolTests
 {
+    [Fact]
+    public async Task RecognitionSuccessPreservesUnknownFactsAndRoundTripsTheNewReport()
+    {
+        foreach (bool known in new[] { false, true })
+        {
+            var task = Task("daily") with { Recognition = "known", LifecycleRole = "business", SelectionPolicy = "managed" };
+            var opaque = task with { Id = "opaque", SourceKey = "opaque", RetryUnitId = "opaque", Recognition = "opaque",
+                SelectionPolicy = "preserve", CountsAsUnit = false, RequiredForParent = false, Detection = "unsupported",
+                CompletionPolicy = null, WorkflowRole = null, ObservationContract = null, RetryPolicy = null };
+            var discovery = new TaskDiscovery { ProtocolVersion = "0.3.0", Type = "discovery", Coverage = known ? "partial" : "opaque",
+                Tasks = known ? [task, opaque] : [opaque], Diagnostics = [], Verification = new([]),
+                ConfigAssessment = new("2", [new("fixture", "satisfied", "info", "none", new() { ["kind"] = "binding" }, [], [])]) };
+            string observer = """
+                console.log(JSON.stringify({protocolVersion:'0.3.0',type:'observation',runId:input.runId,attemptId:input.attemptId,
+                  runBoundary:'open',boundaryEvidence:[],diagnostics:[],observations:input.originalPlan.tasks.some(t=>t.id==='daily')
+                    ? input.logBatch.records.map(function(line,index){return {id:'o-'+line.sequence,taskId:'daily',executionOrdinal:1,
+                      status:index===0?'running':'succeeded',factKind:index===0?'scope_started':'flow_ended',reasonCode:'fixture',
+                      evidence:[{sourceId:line.sourceId,epoch:line.epoch,sequence:line.sequence,ruleId:index===0?'start':'end'}]};}) : []}));
+                """;
+            var protocol = new TaskProtocolDescriptor("0.3.0", "console.log(" + TaskProtocolJson.Write(TaskProtocolJson.Write(discovery)) + ");", observer, "", [])
+                { ConfigRules = [new("fixture", true, "advisory_or_contextual") { Category = "compatibility" }] };
+            string root = Path.Combine(Path.GetTempPath(), "nexus-result-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(root);
+            try
+            {
+                string config = Path.Combine(root, "settings.json"); File.WriteAllText(config, "{}");
+                var script = new NexusPipeline.Modules.Scripts.ScriptInstance { Id = "script", RootPath = root, ConfigPath = config, PluginType = "fixture" };
+                var spec = new NexusPipeline.Modules.Scripts.Contracts.ResolvedScriptSpec(script, "1", new(false, "", "", "", ""), "fixture") { TaskProtocol = protocol };
+                string id = Guid.NewGuid().ToString("N");
+                var run = new TaskProtocolRun(spec, id, "user", Path.Combine(root, "selection"));
+                await run.BeginAsync(1, default);
+                run.Append("file", "start\nend\n");
+                Assert.Null((await run.ObserveAsync(true, default)).JudgeError);
+                run.SetProcessCompletion(new("normal", "owned_worker_exit", 0));
+                var result = run.Finish(NexusPipeline.Modules.Execution.RunAttemptResult.Partial("observed"), 1);
+                Assert.Equal("success", result.Status);
+                Assert.Equal(known ? "execution.success_with_partial_verification" : "execution.success_process_exit_only", result.ReasonCode);
+                var report = run.Snapshot()!;
+                Assert.Equal("unknown", report["finalTaskResults"]!.AsArray().Single(node => node!["taskId"]!.GetValue<string>() == "opaque")!["status"]!.GetValue<string>());
+                Assert.Equal(known ? 1 : 0, report["summary"]!["counts"]!["succeeded"]!.GetValue<int>());
+                var record = new NexusPipeline.Modules.History.RunRecord { Id = id, StartTime = DateTime.Now, EndTime = DateTime.Now, Status = result.Status,
+                    ScriptInstanceId = "script", UserId = "user", TaskReport = report };
+                string path = Path.Combine(root, "record.json");
+                File.WriteAllText(path, System.Text.Json.JsonSerializer.Serialize(record));
+                var read = NexusPipeline.Modules.History.RunRecordFormat.Read(File.ReadAllText(path));
+                Assert.Equal(3, read.TaskReport!["schemaVersion"]!.GetValue<int>());
+                Assert.Equal(report.ToJsonString(), read.TaskReport.ToJsonString());
+                string historyPath = Path.Combine(root, "history");
+                var history = new NexusPipeline.Modules.History.RunHistoryService(historyPath);
+                Assert.Null(history.Save(record, []).PersistenceWarning);
+                Assert.Null(history.Save(new NexusPipeline.Modules.History.RunRecord
+                {
+                    Id = Guid.NewGuid().ToString("N"), StartTime = record.StartTime.AddSeconds(-1), EndTime = record.EndTime!.Value.AddSeconds(-1),
+                    UserId = "user", ScriptInstanceId = "script", Status = "skipped",
+                }, []).PersistenceWarning);
+                var reopened = new NexusPipeline.Modules.History.RunHistoryService(historyPath);
+                Assert.Equal(1, reopened.GetSuccessfulRunsByUser(record.StartTime.Date, "script")["user"]);
+                Assert.Equal("ok", reopened.LatestTasks().Single(item => item.RecordId == record.Id).Tone);
+                var malformed = report.DeepClone().AsObject();
+                malformed["verification"]!["opaqueTaskCount"] = 0;
+                Assert.False(NexusPipeline.Modules.History.RunRecordFormat.IsCurrentReport(malformed));
+                malformed = report.DeepClone().AsObject(); malformed["verification"]!["completion"]!["exitCode"] = 9;
+                Assert.False(NexusPipeline.Modules.History.RunRecordFormat.IsCurrentReport(malformed));
+                var verification = TaskRunVerification.Create(TaskProtocolJson.Read<TaskPlan>(report["originalPlan"]!.ToJsonString()),
+                    new("failed", "owned_process_nonzero", 7), false);
+                Assert.Equal("failed", verification.Resolve(new("ok", "completed", new() { ["succeeded"] = known ? 1 : 0 }, false)).Status);
+                foreach (string field in new[] { "tasks", "verification" })
+                {
+                    malformed = report.DeepClone().AsObject(); malformed["originalPlan"]![field] = null;
+                    Assert.False(NexusPipeline.Modules.History.RunRecordFormat.IsCurrentReport(malformed));
+                }
+                malformed = report.DeepClone().AsObject(); malformed["finalTaskResults"]!.AsArray()[0] = null;
+                Assert.False(NexusPipeline.Modules.History.RunRecordFormat.IsCurrentReport(malformed));
+                malformed = report.DeepClone().AsObject();
+                malformed["attemptReports"]!.AsArray()[0]!["taskResults"]!.AsArray()
+                    .Single(node => node!["taskId"]!.GetValue<string>() == "opaque")!["status"] = "succeeded";
+                Assert.False(NexusPipeline.Modules.History.RunRecordFormat.IsCurrentReport(malformed));
+                malformed = report.DeepClone().AsObject(); malformed["finalTaskResults"]!.AsArray()[0]!["taskId"] = "unowned-task";
+                Assert.False(NexusPipeline.Modules.History.RunRecordFormat.IsCurrentReport(malformed));
+                foreach (string field in new[] { "selectionPolicy", "lifecycleRole", "retryUnitId" })
+                {
+                    malformed = report.DeepClone().AsObject();
+                    malformed["originalPlan"]!["tasks"]!.AsArray().Single(node => node!["id"]!.GetValue<string>() == "opaque")![field] = "invalid";
+                    Assert.False(NexusPipeline.Modules.History.RunRecordFormat.IsCurrentReport(malformed));
+                }
+                malformed = report.DeepClone().AsObject();
+                malformed["originalPlan"]!["tasks"]!.AsArray()[0]!["dependencies"] = new System.Text.Json.Nodes.JsonArray("missing");
+                Assert.False(NexusPipeline.Modules.History.RunRecordFormat.IsCurrentReport(malformed));
+                malformed = report.DeepClone().AsObject();
+                malformed["originalPlan"]!["tasks"]!.AsArray()[0]!["dependencies"] = new System.Text.Json.Nodes.JsonArray(
+                    malformed["originalPlan"]!["tasks"]!.AsArray()[0]!["id"]!.GetValue<string>());
+                Assert.False(NexusPipeline.Modules.History.RunRecordFormat.IsCurrentReport(malformed));
+            }
+            finally { Directory.Delete(root, true); }
+        }
+    }
+
+    [Fact]
+    public async Task CompatibilityAssessmentKeepsOpaqueDiscoveryRunnableAndSafetyStillBlocks()
+    {
+        var check = new TaskConfigCheck("shape", "unknown", "warning", "warn",
+            new() { ["kind"] = "binding" }, [], [])
+            { ReasonText = new() { ["kind"] = "literal", ["value"] = "Unknown structure" } };
+        var discovery = new TaskDiscovery { ProtocolVersion = "0.3.0", Type = "discovery", Coverage = "opaque",
+            Tasks = [], Diagnostics = [], Verification = new([new("scope", "config:settings.json", true, "unknown_structure")]),
+            ConfigAssessment = new("2", [check]) };
+        var protocol = new TaskProtocolDescriptor("0.3.0", "console.log(" + TaskProtocolJson.Write(TaskProtocolJson.Write(discovery)) + ");", "", "", [])
+            { ConfigRules = [new("shape", true, "advisory_or_contextual") { Category = "compatibility" }] };
+        string root = Path.Combine(Path.GetTempPath(), "nexus-recognition-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            string config = Path.Combine(root, "settings.json"); File.WriteAllText(config, "{unknown syntax");
+            var view = NexusPipeline.Modules.Configuration.Scripting.TaskConfigViewFactory.Capture(config, root, [], []);
+            var plan = await TaskDiscoveryService.DiscoverAsync(protocol, view, "fixture", "1", "user", "script", "en-US", true, default);
+            Assert.Equal("unknown", plan.CurrentReadiness!.State);
+            Assert.Equal("daily-flow-v2", plan.SemanticsVersion);
+            Assert.Equal("scope", Assert.Single(plan.Verification!.OpaqueScopes).Id);
+            Assert.Equal("{unknown syntax", File.ReadAllText(config));
+            var blocking = discovery with { ConfigAssessment = new("2", [check with { ExecutionEffect = "block" }]) };
+            var critical = protocol with { ConfigRules = [new("shape", true, "critical_when_applicable") { Category = "compatibility" }] };
+            Assert.Throws<InvalidDataException>(() => TaskProtocolValidation.ConfigAssessment(blocking, critical, new HashSet<string>(), new HashSet<string>()));
+            critical = critical with { ConfigRules = [critical.ConfigRules[0] with { Category = "safety" }],
+                DiscoverScript = "console.log(" + TaskProtocolJson.Write(TaskProtocolJson.Write(blocking)) + ");" };
+            var blocked = await TaskDiscoveryService.DiscoverAsync(critical, view, "fixture", "1", "user", "script", "en-US", true, default);
+            Assert.Equal("blocked", blocked.CurrentReadiness!.State);
+            Assert.Throws<InvalidDataException>(() => TaskProtocolValidation.ConfigAssessment(discovery,
+                protocol with { Version = "0.2.0" }, new HashSet<string>(), new HashSet<string>()));
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [Fact]
+    public async Task ObserverFailureAfterSuccessfulEvidenceCannotBecomeSuccessfulRun()
+    {
+        var discovery = new TaskDiscovery { ProtocolVersion = "0.2.0", Type = "discovery", Coverage = "complete",
+            Tasks = [Task("daily")], Diagnostics = [],
+            ConfigAssessment = new("1", [new("fixture", "satisfied", "info", "none", new() { ["kind"] = "binding" }, [], [])]) };
+        string observer = """
+            if (input.isFinalCall) throw new Error('fixture observer failure');
+            console.log(JSON.stringify({protocolVersion:'0.2.0',type:'observation',runId:input.runId,attemptId:input.attemptId,
+              runBoundary:'open',boundaryEvidence:[],diagnostics:[],observations:input.logBatch.records.map(function(line,index){
+                return {id:'observation-'+line.sequence,taskId:'daily',status:index===0?'running':'succeeded',executionOrdinal:1,
+                  factKind:index===0?'scope_started':'flow_ended',reasonCode:'fixture',
+                  evidence:[{sourceId:line.sourceId,epoch:line.epoch,sequence:line.sequence,ruleId:index===0?'start':'end'}]};})}));
+            """;
+        var protocol = new TaskProtocolDescriptor("0.2.0", "console.log(" + TaskProtocolJson.Write(TaskProtocolJson.Write(discovery)) + ");", observer, "", [])
+            { ConfigRules = [new("fixture", true, "advisory_or_contextual")] };
+        string root = Path.Combine(Path.GetTempPath(), "nexus-observer-fault-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            string config = Path.Combine(root, "settings.json"); File.WriteAllText(config, "{}");
+            var script = new NexusPipeline.Modules.Scripts.ScriptInstance { Id = "script", RootPath = root, ConfigPath = config, PluginType = "fixture" };
+            var spec = new NexusPipeline.Modules.Scripts.Contracts.ResolvedScriptSpec(script, "1", new(false, "", "", "", ""), "fixture") { TaskProtocol = protocol };
+            var run = new TaskProtocolRun(spec, "run", "user", Path.Combine(root, "selection"));
+            await run.BeginAsync(1, default);
+            run.Append("file", "start\nend\n");
+            Assert.Null((await run.ObserveAsync(false, default)).JudgeError);
+            Assert.NotNull((await run.ObserveAsync(true, default)).JudgeError);
+            var result = run.Finish(NexusPipeline.Modules.Execution.RunAttemptResult.Partial("observed"), 1);
+            Assert.Equal("failed", result.Status);
+            Assert.Equal("succeeded", run.Snapshot()!["finalTaskResults"]![0]!["status"]!.GetValue<string>());
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [Fact]
+    public void RecognitionContractKeepsOpaqueScopesOutsideObservationAndSelectionAuthority()
+    {
+        var known = Task("known") with { Recognition = "known", LifecycleRole = "business", SelectionPolicy = "managed" };
+        var opaque = known with { Id = "opaque", SourceKey = "opaque", RetryUnitId = "opaque", Recognition = "opaque",
+            SelectionPolicy = "preserve", CountsAsUnit = false, RequiredForParent = false, Detection = "unsupported",
+            CompletionPolicy = null, WorkflowRole = null, ObservationContract = null, RetryPolicy = null };
+        var discovery = new TaskDiscovery { ProtocolVersion = "0.3.0", Type = "discovery", Coverage = "partial",
+            Tasks = [known, opaque], Diagnostics = [], Verification = new([]),
+            SelectionFields = [new("config:a.json", new("enabled"), "selection") { TaskIds = ["known"] }] };
+        TaskProtocolValidation.Discovery(discovery);
+        TaskProtocolValidation.Discovery(discovery with { Coverage = "opaque", Tasks = [opaque], SelectionFields = [] });
+        TaskProtocolValidation.Discovery(discovery with { Coverage = "opaque", Tasks = [], SelectionFields = [],
+            Verification = new([new("scope", "config:a.json", true, "unknown_structure")]) });
+        Assert.Throws<InvalidDataException>(() => TaskProtocolValidation.Discovery(discovery with { Coverage = "complete" }));
+        Assert.Throws<InvalidDataException>(() => TaskProtocolValidation.Discovery(discovery with { Verification = null }));
+        Assert.Throws<InvalidDataException>(() => TaskProtocolValidation.Discovery(discovery with { ProtocolVersion = "0.2.0" }));
+        Assert.Throws<InvalidDataException>(() => TaskProtocolValidation.Discovery(discovery with
+            { SelectionFields = [discovery.SelectionFields[0] with { TaskIds = ["opaque"] }] }));
+        foreach (var invalid in new[] { opaque with { CountsAsUnit = true }, opaque with { SelectionPolicy = "managed" },
+            opaque with { ObservationContract = known.ObservationContract }, opaque with { ConfigRef = "enabled" },
+            known with { LifecycleRole = "finalize" } })
+            Assert.Throws<InvalidDataException>(() => TaskProtocolValidation.Discovery(discovery with { Tasks = [invalid] }));
+    }
+
     [Fact]
     public void SelfManagedPcLaunchBlocksHostLaunchButPreservesEmulatorAndGenericLaunch()
     {
@@ -44,11 +236,42 @@ public class DailyTaskProtocolTests
     {
         reducer.Accept(new TaskObservationBatch
         {
-            ProtocolVersion = "0.2.0", Type = "observation", RunId = "run", AttemptId = attempt,
+            ProtocolVersion = reducer.OriginalPlan.ProtocolVersion, Type = "observation", RunId = "run", AttemptId = attempt,
             RunBoundary = "open", BoundaryEvidence = [], Diagnostics = [],
             Observations = [new() { Id = sequence.ToString(), TaskId = id, Status = status, FactKind = kind,
                 ExecutionOrdinal = ordinal, ReasonCode = "fixture", SkipKind = status == "skipped" ? "satisfied" : null, Evidence = [new("file", 0, sequence, rule)] }],
         }, new([new("file", 0, sequence, "合成日志")], false));
+    }
+
+    [Fact]
+    public void OpaqueExecutionNeverInventsTaskSuccessAndKnownLifecycleFailuresRemainVisible()
+    {
+        var business = Task("business") with { Recognition = "known", LifecycleRole = "business", SelectionPolicy = "managed" };
+        var opaque = business with { Id = "opaque", SourceKey = "opaque", RetryUnitId = "opaque", Recognition = "opaque",
+            SelectionPolicy = "preserve", CountsAsUnit = false, RequiredForParent = false, Detection = "unsupported",
+            CompletionPolicy = null, WorkflowRole = null, ObservationContract = null, RetryPolicy = null };
+        var finalize = business with { Id = "finalize", SourceKey = "finalize", RetryUnitId = "finalize",
+            Role = "cleanup", WorkflowRole = "technical", LifecycleRole = "finalize", CountsAsUnit = false };
+        foreach (bool failed in new[] { false, true })
+        {
+            var plan = new TaskPlan("0.3.0", "plan", "run", "fixture", "1", DateTimeOffset.UtcNow,
+                "signature", "partial", [business, opaque, finalize], [])
+                { SemanticsVersion = "daily-flow-v2", Verification = new([]) };
+            var reducer = TaskRunReducer.CreateDaily("run", plan);
+            reducer.BeginAttempt("attempt", 1, plan.Tasks.Select(task => task.Id));
+            Assert.Throws<InvalidDataException>(() => Observe(reducer, "opaque", "succeeded", "flow_ended", "end", 1));
+            Observe(reducer, "business", "running", "scope_started", "start", 2);
+            Observe(reducer, "business", "succeeded", "flow_ended", "end", 3);
+            Observe(reducer, "finalize", "running", "scope_started", "start", 4);
+            Observe(reducer, "finalize", failed ? "failed" : "succeeded", failed ? "business_failed" : "flow_ended", failed ? "fail" : "end", 5);
+            reducer.FinishAttempt("completed");
+            Assert.Equal("unknown", reducer.Results.Single(result => result.TaskId == "opaque").Status);
+            Assert.Empty(reducer.Results.Single(result => result.TaskId == "opaque").Evidence);
+            var summary = reducer.Summarize("completed");
+            Assert.Equal(1, summary.Counts["total"]);
+            Assert.Equal(1, summary.Counts["succeeded"]);
+            Assert.Equal(failed ? "bad" : "ok", summary.Tone);
+        }
     }
 
     [Fact]

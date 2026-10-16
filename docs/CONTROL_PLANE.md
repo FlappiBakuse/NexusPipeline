@@ -37,6 +37,8 @@
 
 HTTP 更新状态与 MCP `get_update_status` 提供可空的 `lastApplyFailure`，字段为 `transactionId`、`targetVersion`、`code` 和 `atUtc`。它投影最近一次有效失败结果，仅在目标版本高于当前运行版本时显示；旧结果和未知文件保持原字节。
 
+更新状态 `cancelling` 表示原操作 IO 与拥有文件清理仍在结束，期间拒绝新的检查、下载或应用。可空 `installerToolsWarning` 表示安装专用工具需要 Setup 修复；不将缺失工具假造为 Host 副本。
+
 更新状态投影在发现候选版本后补充 `policyVerified`、`canDownload`、`manualUpdateRequired`、`updateBlockCode`、`barrierVersion`、`migrationUrl` 和 `policyError`。`updateBlockCode=breaking-update` 时，页面显示手动下载安装包与配置迁移指引，下载、下次启动应用和自动应用入口均被后端拒绝；策略无法验证时使用 `policy-unavailable` 并保持 fail-closed。
 
 插件读取的本地列表、商店列表和详情投影均可提供 additive 字段 `createdAt`；该字段来自 catalog 的可选创建日期，缺失时返回空值，`updatedAt` 继续表示最新 changelog 日期。
@@ -91,3 +93,5 @@ GameCheckIn 的 `credentials/editors`、`credentials/editors/state`、`credentia
 宿主加载插件后以最多三个并行下载在后台预取类型图标，不等待弹窗打开，不阻塞启动；停止宿主时取消预取并等待清理。Scripts 服务使用宿主代理下载，仅允许完整 SHA 固定的 HTTPS raw 来源并拒绝重定向，大小上限为 2 MiB、超时 10 秒。经摘要验证的图像缓存于 `.nxp/cache/script-type-icons/`，缓存命中无需联网；并发下载共享任务，单个客户端取消不影响其他请求。网络或校验失败使用项目图标，后续弹窗请求可以重试；缓存写入失败仍返回已经验证的图像。上游图标字节不包含在源码和发行包中。
 
 今日概览布局：`GET /api/dashboard/cards`、`GET /api/dashboard/layout`、`PUT /api/dashboard/layout`（General）。GET layout 的完整语言表示带强 ETag；PUT 正文为 schemaVersion/catalogRevision/visibleCardIds，必须携同语言 If-Match。目录冲突 409 优先于表示冲突 412，缺前置条件 428，非法值 400，超限 413，持久化失败/坏文件 503。成功 PUT 无 ETag，后续 GET 取得新基线。SSE 提供 dashboard.layout.changed 和 dashboard.catalog.changed 失效通知。详见[卡片 owner](architecture/dashboard.md)。
+
+专项任务新报告采用 schema 3 / daily-flow-v2，运行与历史接口保留 verification 的识别覆盖、未知项及实际 worker 完成依据。已知任务无失败且实际执行正常结束、恢复成功时，含未知项的主状态仍为 success；历史筛选、成功配额和通知沿用该真实主状态。未知项只读显示为未核验，旧 schema 2 不补造覆盖信息。

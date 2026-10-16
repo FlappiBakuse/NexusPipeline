@@ -12,6 +12,35 @@ namespace NexusPipeline.Tests.Updates;
 public sealed class InstallationGenerationTests
 {
     [Fact]
+    public void ProtectedInventoryPreservesLegacyUninstallerPathsAndOwnsTheUpdateEntry()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "identity-contract");
+        var files = new[] { new InstalledPayloadFile("NexusPipeline.exe", new('a', 64)),
+            new InstalledPayloadFile(UpdateRecipe.UpdateEntry, new('a', 64)),
+            new InstalledPayloadFile(ApplicationPayload.ManifestPath, new('b', 64)) };
+        var identity = new InstallerInstanceIdentity(1, Guid.NewGuid().ToString("N"), root, "fixture-user",
+            DateTimeOffset.UtcNow, "active", "0.17.4", files);
+        string seal = InstallationOwnership.Seal(identity);
+        var wire = JsonNode.Parse(System.Security.Cryptography.ProtectedData.Unprotect(Convert.FromBase64String(seal),
+            null, System.Security.Cryptography.DataProtectionScope.CurrentUser))!.AsObject();
+        Assert.DoesNotContain(wire["PayloadFiles"]!.AsArray(), file => file!["Path"]!.GetValue<string>() == UpdateRecipe.UpdateEntry);
+        Assert.Equal(UpdateRecipe.UpdateEntry, wire["AuxiliaryPayloadFiles"]![0]!["Path"]!.GetValue<string>());
+        var restored = InstallationOwnership.Unseal(seal, root, identity.InstanceId, identity.WindowsUserId);
+        Assert.Equal(files.OrderBy(file => file.Path, StringComparer.Ordinal), restored.PayloadFiles);
+        Assert.Null(restored.AuxiliaryPayloadFiles);
+        string RawSeal(JsonObject value) => Convert.ToBase64String(System.Security.Cryptography.ProtectedData.Protect(
+            System.Text.Encoding.UTF8.GetBytes(value.ToJsonString()), null, System.Security.Cryptography.DataProtectionScope.CurrentUser));
+        var duplicate = wire.DeepClone().AsObject();
+        duplicate["PayloadFiles"]!.AsArray().Add(duplicate["AuxiliaryPayloadFiles"]![0]!.DeepClone());
+        Assert.Throws<InvalidDataException>(() => InstallationOwnership.Unseal(RawSeal(duplicate), root, identity.InstanceId, identity.WindowsUserId));
+        var unknown = wire.DeepClone().AsObject();
+        unknown["AuxiliaryPayloadFiles"]![0]!["Path"] = "unknown.exe";
+        Assert.Throws<InvalidDataException>(() => InstallationOwnership.Unseal(RawSeal(unknown), root, identity.InstanceId, identity.WindowsUserId));
+        var old = identity with { Version = "0.17.3", PayloadFiles = files.Where(file => file.Path != UpdateRecipe.UpdateEntry).ToArray() };
+        Assert.Equal(old.PayloadFiles, InstallationOwnership.Unseal(InstallationOwnership.Seal(old), root, old.InstanceId, old.WindowsUserId).PayloadFiles);
+    }
+
+    [Fact]
     public void RegisterAndUninstallUseOnlyOwnedGenerationMetadata()
     {
         string id = Guid.NewGuid().ToString("N");
@@ -57,6 +86,12 @@ public sealed class InstallationGenerationTests
             Directory.CreateDirectory(Path.Combine(app, "data"));
             string data = Path.Combine(app, "data", "user.json");
             File.WriteAllText(data, "preserved data");
+            File.WriteAllText(image, "manually copied image");
+            Assert.Throws<IOException>(() => InstallationOwnership.Uninstall(app, false));
+            Assert.Equal("manually copied image", File.ReadAllText(image));
+            Assert.Equal("preserved data", File.ReadAllText(data));
+            Assert.Equal("active", InstallationOwnership.Read(app)!.State);
+            File.WriteAllText(image, "new image");
             InstallationOwnership.Uninstall(app, false);
             Assert.False(File.Exists(image));
             Assert.False(Directory.Exists(Path.Combine(app, "resources")));

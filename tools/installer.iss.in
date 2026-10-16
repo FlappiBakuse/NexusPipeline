@@ -27,7 +27,7 @@ DirExistsWarning=no
 UsePreviousGroup=no
 DisableProgramGroupPage=yes
 OutputDir=@@OUTPUT_DIR@@
-OutputBaseFilename=NexusPipeline-v@@VERSION@@-win-x64-setup
+OutputBaseFilename=NexusPipeline-v@@VERSION@@-win-x64-Setup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -50,7 +50,7 @@ Name: bundledplugins; Description: "{cm:BundledPlugins}"
 
 [Icons]
 Name: "{group}\NexusPipeline v@@VERSION@@"; Filename: "{app}\NexusPipeline.exe"; IconFilename: "{app}\NexusPipeline.exe"
-Name: "{group}\NexusPipeline Uninstall"; Filename: "{uninstallexe}"; IconFilename: "{app}\NexusPipeline.exe"
+Name: "{group}\NexusPipeline Uninstall"; Filename: "{app}\NexusPipeline.uninstall.exe"; IconFilename: "{app}\NexusPipeline.exe"
 Name: "{autodesktop}\NexusPipeline v@@VERSION@@"; Filename: "{app}\NexusPipeline.exe"; IconFilename: "{app}\NexusPipeline.exe"; Tasks: desktopicon
 
 [Files]
@@ -64,6 +64,7 @@ var
   SpaceLabel: TNewStaticText;
   SpaceSummary: String;
   SetupMutex: Integer;
+  InstanceGuard: Integer;
   TransactionId: String;
   MetadataHelperPath: String;
   DependencyDownloadPage: TDownloadWizardPage;
@@ -103,8 +104,25 @@ function NativeLastError: Integer;
 
 @@LAUNCH_CODE@@
 
+function ReleaseMutex(Handle: Integer): Boolean;
+  external 'ReleaseMutex@kernel32.dll stdcall';
+function WaitForSingleObject(Handle: Integer; Milliseconds: Integer): Integer;
+  external 'WaitForSingleObject@kernel32.dll stdcall';
+function GetCurrentProcessId: Integer;
+  external 'GetCurrentProcessId@kernel32.dll stdcall';
+
+procedure ReleaseInstanceGuard;
+begin
+  if InstanceGuard <> 0 then begin
+    ReleaseMutex(InstanceGuard);
+    CloseHandle(InstanceGuard);
+    InstanceGuard := 0;
+  end;
+end;
+
 procedure DeinitializeSetup;
 begin
+  ReleaseInstanceGuard;
   if SetupMutex <> 0 then CloseHandle(SetupMutex);
 end;
 
@@ -199,20 +217,23 @@ begin
     'if ($h -ne $k.IdentityDigest) { exit 1 }' + #13#10 +
     '$b = [Security.Cryptography.ProtectedData]::Unprotect([Convert]::FromBase64String($s),$null,[Security.Cryptography.DataProtectionScope]::CurrentUser)' + #13#10 +
     '$i = [Text.Encoding]::UTF8.GetString($b) | ConvertFrom-Json' + #13#10 +
-    'if ($i.SchemaVersion -ne 1 -or $i.InstanceId -ne $k.InstanceId -or $i.WindowsUserId -ne [Security.Principal.WindowsIdentity]::GetCurrent().User.Value -or [IO.Path]::GetFullPath($i.AppRoot).TrimEnd(''\'') -ne [IO.Path]::GetFullPath($Root).TrimEnd(''\'') -or $i.State -notin @(''active'',''retained-data'')) { exit 1 }' + #13#10 +
+    'if ($i.SchemaVersion -notin @(1,2) -or $i.InstanceId -ne $k.InstanceId -or $i.WindowsUserId -ne [Security.Principal.WindowsIdentity]::GetCurrent().User.Value -or [IO.Path]::GetFullPath($i.AppRoot).TrimEnd(''\'') -ne [IO.Path]::GetFullPath($Root).TrimEnd(''\'') -or $i.State -notin @(''active'',''retained-data'',''manual-adoption-pending'')) { exit 1 }' + #13#10 +
+    'if ($CheckHelper -eq ''true'' -and $i.State -ne ''active'') { exit 1 }' + #13#10 +
     '$oldBytes=0L; $oldAllocated=0L; $seen=@{}' + #13#10 +
-    'if (@($i.PayloadFiles).Count -gt 20000 -or $AllocationUnit -le 0) { exit 1 }' + #13#10 +
-    'foreach ($f in $i.PayloadFiles) {' + #13#10 +
-    'if ($f.Path -notmatch ''^(NexusPipeline\.exe|README\.md|resources/payload-manifest\.json|resources/desktop/[^:]+)$'' -or $f.Path -match ''(^|/)\.\.(/|$)|[\\\x00-\x1f]'' -or $f.Sha256 -notmatch ''^[0-9a-fA-F]{64}$'' -or $seen.ContainsKey($f.Path)) { exit 1 }; $seen[$f.Path]=$true' + #13#10 +
+    '$all=@($i.PayloadFiles); if ($null -ne $i.AuxiliaryPayloadFiles) { if (@($i.AuxiliaryPayloadFiles).Count -ne 1 -or $i.AuxiliaryPayloadFiles[0].Path -ne ''NexusPipeline Update.exe'') { exit 1 }; $all+=@($i.AuxiliaryPayloadFiles) }' + #13#10 +
+    'if ($all.Count -gt 20000 -or $AllocationUnit -le 0) { exit 1 }' + #13#10 +
+    'foreach ($f in $all) {' + #13#10 +
+    'if ($f.Path -notmatch ''^(NexusPipeline\.exe|NexusPipeline\.update\.exe|NexusPipeline Update\.exe|README\.md|resources/payload-manifest\.json|resources/desktop/[^:]+)$'' -or $f.Path -match ''(^|/)\.\.(/|$)|[\\\x00-\x1f]'' -or $f.Sha256 -notmatch ''^[0-9a-fA-F]{64}$'' -or $seen.ContainsKey($f.Path)) { exit 1 }; $seen[$f.Path]=$true' + #13#10 +
     '$p=[IO.Path]::GetFullPath((Join-Path $Root $f.Path)); if (-not $p.StartsWith([IO.Path]::GetFullPath($Root).TrimEnd(''\'')+''\'',[StringComparison]::OrdinalIgnoreCase)) { exit 1 }' + #13#10 +
     'for ($part=$p; $part; $part=[IO.Path]::GetDirectoryName($part)) { if ((Test-Path -LiteralPath $part) -and ((Get-Item -LiteralPath $part -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) { exit 1 } }' + #13#10 +
-    'if ($i.State -eq ''active'' -and [IO.File]::Exists($p)) { $n=([IO.FileInfo]$p).Length; $oldBytes+=$n; $oldAllocated += ($n+$AllocationUnit-1)-(($n+$AllocationUnit-1)%$AllocationUnit) }' + #13#10 +
+    'if ($i.State -ne ''retained-data'' -and [IO.File]::Exists($p)) { $n=([IO.FileInfo]$p).Length; $oldBytes+=$n; $oldAllocated += ($n+$AllocationUnit-1)-(($n+$AllocationUnit-1)%$AllocationUnit) }' + #13#10 +
     '}' + #13#10 +
     'if ($CheckHelper -eq ''true'') {' + #13#10 +
-    '$exe = Join-Path $m ''nexus-installer-helper.exe''' + #13#10 +
+    '$exe = if ($i.SchemaVersion -eq 2) { $i.InstallerTools.Worker.Path } else { Join-Path $m ''nexus-installer-helper.exe'' }' + #13#10 +
     'if ((Get-Item -LiteralPath $exe).Attributes -band [IO.FileAttributes]::ReparsePoint) { exit 1 }' + #13#10 +
-    '$expected = @($i.PayloadFiles | Where-Object Path -eq ''NexusPipeline.exe'')' + #13#10 +
-    'if ($expected.Count -ne 1 -or (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash -ne $expected[0].Sha256) { exit 1 }' + #13#10 +
+    '$expected = @(if ($i.SchemaVersion -eq 2) { $i.InstallerTools.Worker } else { $i.PayloadFiles | Where-Object Path -eq ''NexusPipeline.exe'' })' + #13#10 +
+    '$hash=[Security.Cryptography.SHA256]::Create(); $stream=[IO.File]::OpenRead($exe); try { $actual=[BitConverter]::ToString($hash.ComputeHash($stream)).Replace(''-'','''').ToLowerInvariant() } finally { $stream.Dispose(); $hash.Dispose() }' + #13#10 +
+    'if ($expected.Count -ne 1 -or $actual -ne $expected[0].Sha256) { exit 1 }' + #13#10 +
     '}' + #13#10 + '[IO.File]::WriteAllText($ResultFile,"[instance]`r`nstate=$($i.State)`r`noldCoreBytes=$oldBytes`r`noldAllocatedBytes=$oldAllocated`r`n",[Text.Encoding]::ASCII)' + #13#10 + '} catch { exit 1 }' + #13#10, False) then Exit;
   Params := '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + Script + '" -Root "' + Path + '" -CheckHelper ';
   if CheckHelper then Params := Params + 'true' else Params := Params + 'false';
@@ -224,7 +245,7 @@ begin
       Result := GetIniString('instance', 'state', '', ResultFile);
       InstanceOldCoreBytes := StrToInt64Def(GetIniString('instance', 'oldCoreBytes', '', ResultFile), -1);
       InstanceOldAllocatedBytes := StrToInt64Def(GetIniString('instance', 'oldAllocatedBytes', '', ResultFile), -1);
-      if ((Result <> 'active') and (Result <> 'retained-data')) or (InstanceOldCoreBytes < 0) or (InstanceOldAllocatedBytes < 0) then Result := '';
+      if ((Result <> 'active') and (Result <> 'retained-data') and (Result <> 'manual-adoption-pending')) or (InstanceOldCoreBytes < 0) or (InstanceOldAllocatedBytes < 0) then Result := '';
       if not CheckHelper and (Result <> '') then begin InstanceProbeKey := ProbeKey; InstanceProbeState := Result; end;
     end;
   except
@@ -336,7 +357,7 @@ var
 begin
   Result := False;
   if not IsWin64 then Exit;
-  if not StrToVersion('10.0.12', Minimum) or not StrToVersion('10.1.0', Maximum) then Exit;
+  if not StrToVersion('10.0.13', Minimum) or not StrToVersion('10.1.0', Maximum) then Exit;
   Dotnet := ExpandConstant('{commonpf64}\dotnet\dotnet.exe');
   ExpectedPath := ExpandConstant('{commonpf64}\dotnet\shared\') + Framework;
   if not FileExists(Dotnet) or HasLinkInPath(Dotnet) then Exit;
@@ -503,6 +524,7 @@ function UpdateReadyMemo(Space, NewLine, MemoUserInfoInfo, MemoDirInfo, MemoType
 begin
   UpdateSpaceDisplay(nil);
   Result := MemoDirInfo + NewLine + MemoTasksInfo + NewLine + SpaceSummary + NewLine + CustomMessage('RuntimeSpaceSeparate');
+  Result := Result + NewLine + CustomMessage('ManualAdoptionNetwork');
 end;
 
 function PrepareToInstall(var NeedsRestart: Boolean): String;
@@ -542,10 +564,10 @@ begin
   if SpaceSummary = '' then begin Result := CustomMessage('SpaceUnavailable'); Exit; end;
   if GetIniInt('space', 'enough', 0, 0, 1, ExpandConstant('{tmp}\nxp-space.ini')) <> 1 then begin Result := CustomMessage('SpaceInsufficient'); Exit; end;
   Result := InstallFramework('Microsoft.WindowsDesktop.App', '.NET Desktop Runtime 10 x64',
-    '@@DESKTOP_URL@@', 'windowsdesktop-runtime-10.0.12-win-x64.exe', '@@DESKTOP_SHA256@@', NeedsRestart);
+    '@@DESKTOP_URL@@', 'windowsdesktop-runtime-10.0.13-win-x64.exe', '@@DESKTOP_SHA256@@', NeedsRestart);
   if Result <> '' then Exit;
   Result := InstallFramework('Microsoft.AspNetCore.App', 'ASP.NET Core Runtime 10 x64',
-    '@@ASPNET_URL@@', 'aspnetcore-runtime-10.0.12-win-x64.exe', '@@ASPNET_SHA256@@', NeedsRestart);
+    '@@ASPNET_URL@@', 'aspnetcore-runtime-10.0.13-win-x64.exe', '@@ASPNET_SHA256@@', NeedsRestart);
   if Result <> '' then Exit;
   TransactionId := Copy(GetSHA256OfString(Path + GetDateTimeString('yyyymmddhhnnss', #0, #0) +
     IntToStr(Random(2147483647)) + IntToStr(Random(2147483647))), 1, 32);
@@ -559,20 +581,31 @@ begin
     Result := CustomMessage('RecoveryPending');
     Exit;
   end;
-  if UpgradeMode then begin
+  if UpgradeMode then
+  begin
     Code := 0;
     OwnerStarted := ShellExec('runas', MetadataHelperPath,
-      'installer-state ensure-owning-service --root "' + Path + '"', Path,
+      'installer-state require-stopped --root "' + Path + '"', Path,
       SW_HIDE, ewWaitUntilTerminated, Code);
     if not OwnerStarted or (Code <> 0) then begin
       Result := InstallerLaunchFailure(OwnerStarted, Code);
       Exit;
     end;
   end;
+  if InstanceGuard = 0 then begin
+    InstanceGuard := CreateMutexW(0, False, 'NexusPipeline.SingleInstance');
+    Code := -1;
+    if InstanceGuard <> 0 then Code := WaitForSingleObject(InstanceGuard, 0);
+    if (InstanceGuard = 0) or ((Code <> 0) and (Code <> 128)) then begin
+      if InstanceGuard <> 0 then CloseHandle(InstanceGuard);
+      InstanceGuard := 0;
+      Result := CustomMessage('UninstallHostRunning'); Exit;
+    end;
+  end;
   if UpgradeMode then
-    RequireInstallerMetadata('begin', ' --version @@VERSION@@ --image-hash @@EXE_SHA256@@ --upgrade true')
+    RequireInstallerMetadata('begin', ' --version @@VERSION@@ --image-hash @@EXE_SHA256@@ --upgrade true --setup-pid ' + IntToStr(GetCurrentProcessId))
   else
-    RequireInstallerMetadata('begin', ' --version @@VERSION@@ --image-hash @@EXE_SHA256@@ --upgrade false');
+    RequireInstallerMetadata('begin', ' --version @@VERSION@@ --image-hash @@EXE_SHA256@@ --upgrade false --setup-pid ' + IntToStr(GetCurrentProcessId));
   RequireInstallerMetadata('preposition', '');
 end;
 
@@ -623,15 +656,18 @@ begin
     if UpgradeMode then begin
       Staged := AddBackslash(Path) + '.nxp-update\staging\@@VERSION@@';
       VerifyStagedPayload;
+      ExtractTemporaryFile('nxp-target-uninstaller.exe');
+      RequireInstallerMetadata('stage-tool', ' --source "' + ExpandConstant('{tmp}\nxp-target-uninstaller.exe') + '" --sha256 @@UNINSTALLER_SHA256@@');
       if not ForceDirectories(AddBackslash(Path) + '.nxp\runtime\workers') then RaiseException(CustomMessage('HandoffCopyFailed'));
       Helper := AddBackslash(Path) + '.nxp\runtime\workers\update-' + TransactionId + '.exe';
       if FileExists(Helper) then RaiseException(CustomMessage('HandoffCopyFailed'));
-      if not FileCopy(AddBackslash(Path) + 'NexusPipeline.exe', Helper, True) then
+      if not FileCopy(AddBackslash(Staged) + 'NexusPipeline.update.exe', Helper, True) then
         RaiseException(CustomMessage('HandoffCopyFailed'));
-      if CompareText(GetSHA256OfFile(Helper), GetSHA256OfFile(AddBackslash(Path) + 'NexusPipeline.exe')) <> 0 then
+      if CompareText(GetSHA256OfFile(Helper), '@@UPDATER_SHA256@@') <> 0 then
         RaiseException(CustomMessage('HandoffHashFailed'));
+      ReleaseInstanceGuard;
       ApplyInstallerLaunch(Helper,
-        'installer-update --app-root "' + Path + '" --staged "' + Staged + '" --version @@VERSION@@ --image-hash @@EXE_SHA256@@ --package-hash @@PACKAGE_SHA256@@ --transaction ' + TransactionId,
+        'installer-transition --app-root "' + Path + '" --staged "' + Staged + '" --version @@VERSION@@ --image-hash @@EXE_SHA256@@ --package-hash @@PACKAGE_SHA256@@ --transaction ' + TransactionId,
         Path, Launched, Resolved, Code);
       InstallationQualified := True;
       DeleteFile(Helper);
@@ -643,7 +679,8 @@ begin
     Manifest := ExpandConstant('{tmp}\nxp-payload-manifest.json');
     if not SaveStringToFile(Manifest, '@@PAYLOAD_MANIFEST@@', False) then
       RaiseException(CustomMessage('ManifestWriteFailed'));
-    Launched := ShellExec('runas', AddBackslash(Path) + 'NexusPipeline.exe',
+    if CompareText(GetSHA256OfFile(AddBackslash(Path) + 'NexusPipeline.uninstall.exe'), '@@UNINSTALLER_SHA256@@') <> 0 then RaiseException(CustomMessage('HandoffHashFailed'));
+    Launched := ShellExec('runas', MetadataHelperPath,
       'installer-state register --root "' + Path + '" --version @@VERSION@@ --manifest "' + Manifest + '"',
       Path, SW_HIDE, ewWaitUntilTerminated, Code);
     Resolution := ResolveInstallerMetadata(Launched, Code, True);
@@ -651,6 +688,7 @@ begin
     if not Launched or (Code <> 0) or (Resolution <> 0) then
       RaiseException(CustomMessage('OwnershipRegisterFailed'));
     InstallationQualified := True;
+    ReleaseInstanceGuard;
   except
     Failure := GetExceptionMessage;
     if not Resolved then begin
@@ -661,6 +699,7 @@ begin
     RaiseException(Failure);
   end;
 end;
+
 
 function InitializeUninstall: Boolean;
 var
@@ -692,7 +731,7 @@ var
 begin
   if CurUninstallStep = usPostUninstall then begin
     if UninstallQualified and DeleteInstanceData then begin
-      Helper := ExpandConstant('{localappdata}\NexusPipeline.Generations\@@GENERATION@@\installer\nexus-installer-helper.exe');
+      Helper := ExpandConstant('{localappdata}\NexusPipeline.Generations\@@GENERATION@@\installer\nexus-uninstall-worker.exe');
       if FileExists(Helper) and not HasLinkInPath(Helper) and
          (CompareText(GetSHA256OfFile(Helper), UninstallHelperHash) = 0) then
         if not DeleteFile(Helper) then Log('Owned uninstall helper could not be removed: ' + Helper);
@@ -709,10 +748,11 @@ begin
   if (ProtectedInstanceState(Path, True) <> 'active') or
      CheckForMutexes('NexusPipeline.SingleInstance') then
     RaiseException(CustomMessage('UninstallStateChanged'));
-  Helper := ExpandConstant('{localappdata}\NexusPipeline.Generations\@@GENERATION@@\installer\nexus-installer-helper.exe');
+  Helper := ExpandConstant('{localappdata}\NexusPipeline.Generations\@@GENERATION@@\installer\nexus-uninstall-worker.exe');
   UninstallHelperHash := GetSHA256OfFile(Helper);
-  Params := 'installer-state uninstall --root "' + Path + '" --delete-data ';
+  Params := 'remove-owned --root "' + Path + '" --delete-data ';
   if DeleteInstanceData then Params := Params + 'true' else Params := Params + 'false';
+  Params := Params + ' --native-pid ' + IntToStr(GetCurrentProcessId());
   if not ShellExec('runas', Helper, Params, Path, SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then
     RaiseException(CustomMessage('UninstallFailed'));
   UninstallQualified := True;

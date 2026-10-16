@@ -23,7 +23,8 @@ internal static class TaskDiscoveryService
             new { protocolVersion = protocol.Version, phase = "discover", origin = preview ? "preview" : "run",
                 pluginId, userId, scriptInstanceId = scriptId, configResources = view.ConfigResources, locale,
                 executionContext = context },
-            view.ReadConfig, view.ReadResource, preview, token, probe.Inspect).ConfigureAwait(false);
+            id => view.ReadConfig(id, protocol.Version), id => view.ReadResource(id, protocol.Version),
+            preview, token, probe.Inspect).ConfigureAwait(false);
         TaskProtocolValidation.Discovery(result);
         TaskProtocolValidation.Require(result.ProtocolVersion == protocol.Version, "negotiated discovery version");
         TaskProtocolValidation.ConfigAssessment(
@@ -47,7 +48,8 @@ internal static class TaskDiscoveryService
         return new(protocol.Version, Guid.NewGuid().ToString("N"), preview ? "preview" : "run", pluginId,
             pluginVersion, DateTimeOffset.UtcNow, signature, result.Coverage,
             TaskProtocolJson.Copy(result.Tasks), TaskProtocolJson.Copy(result.Diagnostics))
-        { SemanticsVersion = "daily-flow-v1",
+        { SemanticsVersion = protocol.Version == "0.3.0" ? "daily-flow-v2" : "daily-flow-v1",
+            Verification = result.Verification is null ? null : TaskProtocolJson.Copy(result.Verification),
             SelectionFields = TaskProtocolJson.Copy(result.SelectionFields),
             DisplaySnapshot = protocol.Localization is { } texts ? (texts with { PluginId = pluginId, PluginVersion = pluginVersion })
                 .Select(result.Tasks.Select(t => t.NameText)

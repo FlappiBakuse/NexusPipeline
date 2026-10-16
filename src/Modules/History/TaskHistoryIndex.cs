@@ -94,7 +94,9 @@ internal partial class RunHistoryService
             && (prior.EndTime > end || prior.EndTime == end && string.CompareOrdinal(prior.RecordId, record.Id) > 0
                 || prior.Deleted && prior.RecordId == record.Id)) return;
         _latestTaskIndex[key] = new(record.UserId, record.ScriptInstanceId, record.Id, end, record.Status,
-            record.TaskReport?["summary"]?["tone"]?.GetValue<string>(),
+            record.TaskReport?["schemaVersion"]?.GetValue<int>() == 3
+                ? record.Status switch { "success" => "ok", "failed" => "bad", "partial" => "warn", _ => "muted" }
+                : record.TaskReport?["summary"]?["tone"]?.GetValue<string>(),
             record.TaskReport?["originalPlan"]?["signature"]?.GetValue<string>(), false);
     }
 

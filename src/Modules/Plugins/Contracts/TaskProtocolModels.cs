@@ -29,6 +29,12 @@ internal sealed record TaskDefinition
     public TaskObservationContract? ObservationContract { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public TaskRetryPolicy? RetryPolicy { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Recognition { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? LifecycleRole { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SelectionPolicy { get; init; }
 }
 
 internal sealed record TaskObservationRule(string Id, string Kind);
@@ -41,7 +47,15 @@ internal sealed record TaskDiagnostic(string Code, string Message, string? TaskI
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public System.Text.Json.Nodes.JsonObject? ReasonText { get; init; }
 }
-internal sealed record TaskSelectionField(string ResourceId, System.Text.Json.Nodes.JsonArray Selector, string Purpose);
+internal sealed record TaskSelectionField(string ResourceId, System.Text.Json.Nodes.JsonArray Selector, string Purpose)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string[]? TaskIds { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, int>? TaskIndices { get; init; }
+}
+internal sealed record TaskOpaqueScope(string Id, string ResourceId, bool Enabled, string ReasonCode);
+internal sealed record TaskVerificationPlan(TaskOpaqueScope[] OpaqueScopes);
 internal sealed record TaskBehaviorField(string ResourceId, System.Text.Json.Nodes.JsonArray Selector);
 internal sealed record TaskEvidence(string SourceId, int Epoch, long Sequence, string RuleId);
 internal sealed record TaskLogRecord(string SourceId, int Epoch, long Sequence, string Text);
@@ -58,6 +72,8 @@ internal sealed record TaskDiscovery
     public TaskBehaviorField[] BehaviorFields { get; init; } = [];
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public TaskConfigAssessment? ConfigAssessment { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public TaskVerificationPlan? Verification { get; init; }
 }
 
 internal sealed record TaskPlan(string ProtocolVersion, string PlanId, string Origin, string PluginId,
@@ -74,6 +90,8 @@ internal sealed record TaskPlan(string ProtocolVersion, string PlanId, string Or
     public TaskConfigAssessment? ConfigAssessment { get; init; }
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public TaskReadiness? CurrentReadiness { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public TaskVerificationPlan? Verification { get; init; }
 }
 
 internal sealed record TaskObservation

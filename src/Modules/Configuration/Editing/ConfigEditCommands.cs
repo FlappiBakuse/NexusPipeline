@@ -893,7 +893,7 @@ internal sealed partial class ConfigEditCommands
                     "脚本程序无法完全退出（可能持续自重启），请先在托盘退出脚本后重试");
             }
 
-            if (action == "done" && session.Spec?.TaskProtocol?.Version == "0.2.0"
+            if (action == "done" && session.Spec?.TaskProtocol?.Version is "0.2.0" or "0.3.0"
                 && session.Spec.ConfigEditor is ConfigEditorDescriptor commitEditor)
             {
                 var commitMark = session.Mark ?? throw new InvalidOperationException("配置编辑会话标记缺失");
@@ -976,7 +976,7 @@ internal sealed partial class ConfigEditCommands
         ResolvedScriptUser user,
         ResolvedScriptSpec? spec)
     {
-        if (spec?.TaskProtocol?.Version == "0.2.0" && _taskProtocolAssessment is not null)
+        if (spec?.TaskProtocol?.Version is "0.2.0" or "0.3.0" && _taskProtocolAssessment is not null)
         {
             try
             {

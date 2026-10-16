@@ -3,7 +3,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using NexusPipeline.Platform.Networking;
 
-namespace NexusPipeline.Host.Composition;
+namespace NexusPipeline.Maintenance.Testing;
 
 internal static class TestHostTransport
 {
