@@ -43,6 +43,8 @@
       "NexusPipeline.Tests.ControlPlane.EmbeddedFrontendTests.GetHeadEtagsAndCacheHeadersMatchTheIndexedBytes",
       "NexusPipeline.Tests.ControlPlane.EmbeddedFrontendTests.StaticWritesAreRejectedBeforeReadingAnyResource",
       "NexusPipeline.Tests.ControlPlane.EmbeddedFrontendTests.TraversalReservedPathsAndMissingChunksCannotUseSpaFallback",
+      "NexusPipeline.Tests.ControlPlane.RemoteAuthenticationThrottleTests.ConcurrentFailuresLockEachAddressAndSuccessCannotBypassItsWindow",
+      "NexusPipeline.Tests.ControlPlane.RemoteAuthenticationThrottleTests.SuccessfulRequestCannotEraseConcurrentCompletedFailureWindow",
       "NexusPipeline.Tests.ControlPlane.WebApiContractTests.RouteRegistry_ContainsTheCompletePublicResourceSet",
       "NexusPipeline.Tests.ControlPlane.WebApiContractTests.RouteRegistry_PreservesRawPluginApiLimitAndJsonDefaults",
       "NexusPipeline.Tests.ControlPlane.WebApiContractTests.SettingsProjection_MasksEverySecretAndKeepsNonSecretValues",
