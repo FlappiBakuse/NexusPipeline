@@ -273,59 +273,36 @@ internal sealed class SettingsCommands
         return null;
     }
 
-    private static void SetSecret(AppSettings settings, string key, string value)
-    {
-        string encrypted = SecretStore.Encrypt(value);
-        switch (key)
-        {
-            case "webhookUrl":
-                settings.WebhookUrl = encrypted;
-                break;
-            case "webhookSecret":
-                settings.WebhookSecret = encrypted;
-                break;
-            case "smtpPassword":
-                settings.SmtpPassword = encrypted;
-                break;
-            case "proxyPassword":
-                settings.ProxyPassword = encrypted;
-                break;
-            case "accessToken":
-                settings.AccessToken = encrypted;
-                break;
-            case "feishuAppSecret":
-                settings.FeishuAppSecret = encrypted;
-                break;
-            case "slackBotToken":
-                settings.SlackBotToken = encrypted;
-                break;
-        }
-    }
+    private static void SetSecret(AppSettings settings, string key, string value) =>
+        AssignSecret(settings, key, SecretStore.Encrypt(value));
 
-    private static void ClearSecret(AppSettings settings, string key)
+    private static void ClearSecret(AppSettings settings, string key) =>
+        AssignSecret(settings, key, "");
+
+    private static void AssignSecret(AppSettings settings, string key, string storedValue)
     {
         switch (key)
         {
             case "webhookUrl":
-                settings.WebhookUrl = "";
+                settings.WebhookUrl = storedValue;
                 break;
             case "webhookSecret":
-                settings.WebhookSecret = "";
+                settings.WebhookSecret = storedValue;
                 break;
             case "smtpPassword":
-                settings.SmtpPassword = "";
+                settings.SmtpPassword = storedValue;
                 break;
             case "proxyPassword":
-                settings.ProxyPassword = "";
+                settings.ProxyPassword = storedValue;
                 break;
             case "accessToken":
-                settings.AccessToken = "";
+                settings.AccessToken = storedValue;
                 break;
             case "feishuAppSecret":
-                settings.FeishuAppSecret = "";
+                settings.FeishuAppSecret = storedValue;
                 break;
             case "slackBotToken":
-                settings.SlackBotToken = "";
+                settings.SlackBotToken = storedValue;
                 break;
         }
     }
