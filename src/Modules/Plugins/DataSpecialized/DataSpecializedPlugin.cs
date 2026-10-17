@@ -7,13 +7,6 @@ using NexusPipeline.Shared.Logging;
 
 namespace NexusPipeline.Modules.Plugins.DataSpecialized;
 
-/// <summary>
-/// 数据化专项插件：纯目录形态 plugins/&lt;artifactName&gt;/——
-/// plugin.json（根文件：元数据 + 引用 data 文件）、data/resolve.json（推导配置）、data/judge.{js,py}（判断脚本）。
-/// 推导规则：require 全部满足（file 相对脚本根目录；searchUpward=true 时逐级向上搜索）才推导成功；
-/// paths 模板占位符 {var}（绑定文件绝对路径）/ {rel:var}（相对脚本根目录的相对路径）；
-/// 可选 inputs 声明用户输入变量，模板中以 {input:名称} 内联替换（可与相对路径文本自由组合，不与绑定占位符混用）。
-/// </summary>
 internal sealed record ConfigEditorDescriptor(
     string PluginName,
     string PluginDirectory,
@@ -99,7 +92,6 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
 
     internal readonly HashSet<string> _capabilityKeys = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>从插件目录加载（plugin.json 解析 + data 引用校验）；目录无效返回 null（调用方记警告，不崩溃）。</summary>
     /// <summary>判断脚本语言：data/judge.{js|py} 按扩展名（默认 javascript）。</summary>
     public string JudgeScriptLanguage
     {
@@ -155,7 +147,6 @@ internal sealed class DataSpecializedPlugin : IProfileResolver
             declarations,
             provided,
             referencedInputs);
-    /// <summary>解析 resolve.json 的 inputs 声明；可选段，声明无效时返回错误原因。</summary>
     internal string ReadJudgeScript()
     {
         try

@@ -1,9 +1,7 @@
-using NexusPipeline.ControlPlane.Http;
 using NexusPipeline.Modules.Execution.Contracts;
 using NexusPipeline.Modules.Configuration.Contracts;
 using NexusPipeline.Modules.Execution.Realtime;
 using NexusPipeline.Modules.Queues;
-using NexusPipeline.Modules.Scheduling;
 using NexusPipeline.Modules.Scripts;
 using NexusPipeline.Shared.Logging;
 

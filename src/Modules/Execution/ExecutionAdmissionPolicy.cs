@@ -1,4 +1,3 @@
-using NexusPipeline.Host.Composition;
 namespace NexusPipeline.Modules.Execution;
 
 internal enum ExecutionAdmissionFailureCode
