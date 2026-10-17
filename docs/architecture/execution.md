@@ -2,6 +2,8 @@
 
 Execution 拥有冻结计划、准入、运行与尝试生命周期。配置恢复、判定和通知由各 owner 承担；本页说明它们的调用顺序与资源释放条件。
 
+`ExecutionCoordinator` 按运行、尝试、provider 和目标跟踪分为同名 partial 文件；`ExecutionRunner` 分入口、用户执行和结果，`ExecutionStateStore` 分准入、维护、完成操作和租约。每个类型仍持有唯一状态与锁，分文件不建立第二个运行 owner。
+
 ## 脚本运行完整链路
 
 一次「脚本实例 × 用户」的运行由 `ExecutionRunner` 驱动。入口先由 `ExecutionPlanBuilder` 从仓储快照构建计划，再经 `ExecutionValidator` 完成运行前校验；`ExecutionDispatcher` 将计划 profile 交给 `ExecutionStateStore`，由 `ExecutionAdmissionPolicy` 在同一临界区完成资格矩阵、资源租约和完成操作兼容性判断。通过后由 `ExecutionCoordinator.RunAsync` 编排，队列、手动和 CLI 入口均直接汇聚到 `ExecutionDispatcher`；`RunSession` 只保存状态，单次尝试由协调器直接执行：
