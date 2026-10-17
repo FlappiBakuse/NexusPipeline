@@ -27,15 +27,7 @@ node tests/run.mjs gate --id host.ci-policy
 
 `ci` 必须指定一个已知分组。backend 选择真实后端规则、文件事务、执行与调度窄测试；frontend 运行类型检查及核心状态、用户配置请求与公开桥接测试。`tests/policy.json` 中的预期用例与实际原生报告严格匹配。新增或更名选中用例时同步清单，不能删除失败用例以绕过验证。
 
-正式 PR 门禁由 plan 将逻辑义务合并为执行单元，按准备依赖划分 control 与 Windows batch。构建、测试、插件 profile、命令和完整 CI job 均不设执行时间或作业数量预算上限；policy 与门禁注册表使用 null 表示无限制，估算耗时只供观察。实际耗时仍记录准备、子命令、原生测试、真实场景、报告、上传和收尾。源码身份、预期用例和场景、原始证据及进程清理仍必须完整；功能失败、取消或缺少报告不能成功。操作协议和进程退出观察仍保留有限等待，用于识别功能失败。
-
-配对核验继续严格检查实际 commit、tree、policy、input lock 和可信 main 登记；核验子进程不设执行时间预算。
-
 `daily` 使用两个独立 Host 槽位，先启动真实分钟调度，另一槽运行执行和配置，空闲槽接续控制面；共享准备、四组工作及清理全部计时，不设总执行时间预算。支持 `--group execution|config|control|schedule` 进行明确的单组诊断。每组保留 `evidence.json`，父级 `daily-evidence.json` 只有全部预期组及清理通过才成功。
-
-批次中的 execution、config、control 按实际选中集合共享 Test Host 构建和两个运行槽位，每组使用独立进程、端口、数据和运行身份。分钟调度单独分配；不需要浏览器的批次只准备 API Test Host。本机批次报告逐份核对 `finite-H-E01.json`、`finite-H-E02.json`、`finite-H-E03.json` 中对应选中场景的原生结果与清理证据。
-
-完整应用批次共用一次前端与 Electron 准备。计划已包含独立 `host.frontend.typecheck` 提供者时，其他应用构建复用该义务，本机批次报告仍核验其真实原生收据；独立 gate 和 release 继续自行类型检查。后端和架构同批时，架构工具及桌面输入在独立输出图中提前准备，原生后端先完成自己的引用图，随后执行两种模式的 Roslyn 检查。桌面观察与新旧应用夹具各用独立目录，并行准备；全部子任务、原生报告和清理继承同一父截止，超时或任一失败均使批次失败。
 
 | 场景 | 真实证明 | 外部替代 |
 |---|---|---|
@@ -108,6 +100,14 @@ python -m unittest discover -s tools/tests -p test_pe_manifest.py
 固定对端插件的编辑用例由其 `tests/policy.json` 声明的 `editorCaseIds` 约束，保留旧版 BetterGI/ZZZ 的两项编辑用例。MaaStellaSora 的旧 MXU 协议没有编辑入口；新版 MFA 协议要求真实编辑脚本的选择、保留无关设置与重复执行证据，入口读取实际 manifest，缺少声明或文件即失败。
 
 ## 本机批次诊断
+
+本机按需诊断由 plan 将逻辑义务合并为执行单元，按准备依赖划分 control 与 Windows batch。本机批次中的构建、测试、插件 profile 和命令不设执行时间预算上限；policy 与门禁注册表使用 null 表示无限制，估算耗时只供观察。实际耗时仍记录准备、子命令、原生测试、真实场景、报告、上传和收尾。源码身份、预期用例和场景、原始证据及进程清理仍必须完整；功能失败、取消或缺少报告不能成功。操作协议和进程退出观察仍保留有限等待，用于识别功能失败。
+
+配对核验继续严格检查实际 commit、tree、policy、input lock 和可信 main 登记；核验子进程不设执行时间预算。
+
+批次中的 execution、config、control 按实际选中集合共享 Test Host 构建和两个运行槽位，每组使用独立进程、端口、数据和运行身份。分钟调度单独分配；不需要浏览器的批次只准备 API Test Host。本机批次报告逐份核对 `finite-H-E01.json`、`finite-H-E02.json`、`finite-H-E03.json` 中对应选中场景的原生结果与清理证据。
+
+完整应用批次共用一次前端与 Electron 准备。计划已包含独立 `host.frontend.typecheck` 提供者时，其他应用构建复用该义务，本机批次报告仍核验其真实原生收据；独立 gate 和 release 继续自行类型检查。后端和架构同批时，架构工具及桌面输入在独立输出图中提前准备，原生后端先完成自己的引用图，随后执行两种模式的 Roslyn 检查。桌面观察与新旧应用夹具各用独立目录，并行准备；全部子任务、原生报告和清理均纳入父命令计时，功能失败、取消或清理不完整均使批次失败。
 
 `node tests/run.mjs gate --id host.integration.installation-adoption` 验证手动覆盖后的安装归属登记与中断恢复。运行前设置绝对路径 `NEXUS_ADOPTION_BASELINE_PACKAGE`（官方 0.17.3 完整包）和 `NEXUS_ADOPTION_BASELINE_RELEASE`（独立取得的官方 Release API JSON，包含资产 digest）；入口只读核对旧包，使用当前源码构建 asInvoker Test Host。19 个固定场景覆盖辅助程序存在／缺失时的五个登记阶段、维护暂停的三个提交阶段、独立证明后补回缺失的共同入口与 README，以及未知辅助程序、离线和自行修改清单的拒绝路径，以及完整还原原载荷后维护恢复的中断路径；成功登记场景还验证卸载保留用户数据。HTTP、Setup 资产和注册表隔离范围为受控夹具；结果不代表官方在线发布、真实 Setup 安装或 UAC 验收。失败现场保留在本轮外部报告目录。
 
