@@ -1,4 +1,3 @@
-using NexusPipeline.ControlPlane.Http;
 using NexusPipeline.Modules.History.Contracts;
 using NexusPipeline.Modules.Plugins.Contracts;
 using NexusPipeline.Modules.Scripts.Contracts;
@@ -151,7 +150,7 @@ internal sealed class ExecutionExplainService
                 NullIfEmpty(script.LogPath)));
         }
 
-        if (plan.Tasks.Count > 0 && plan.Tasks.All(task => task.Script is not null && task.ResolvedUsers?.Count == 0))
+        if (ExecutionUserEligibility.HasNoEnabledBindings(plan.Tasks))
             failure = ExecutionValidator.NoEnabledBindings(plan.Queue.Name);
 
         return BuildResult(
