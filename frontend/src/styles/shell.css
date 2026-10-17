@@ -719,7 +719,6 @@ body[data-secondary-surface-transparency="off"] :is(.secondary-surface, .overflo
 .history-range-search { position: relative; flex: 0 0 auto; min-width: 0; }
 .history-range-search > .field-label { margin: 0 0 6px; }
 .history-range-picker { position: relative; min-width: 0; }
-.history-range-search .history-range-popover { right: auto; left: 0; width: min(560px, calc(100vw - 32px)); min-width: 0; max-width: calc(100vw - 32px); }
 
 .history-date-card { --nx-collapsible-header-height: 48px; --nx-collapsible-header-padding: 10px; --nx-collapsible-body-padding: 0; }
 .history-date-card.nxp-collapsible-card { border: 0; background: transparent; border-radius: var(--radius-md); }
