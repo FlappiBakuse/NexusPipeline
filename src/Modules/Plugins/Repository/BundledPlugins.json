@@ -5,37 +5,37 @@
     {
       "name": "emulator-support",
       "artifactName": "EmulatorSupport",
-      "version": "0.2.2",
+      "version": "0.2.3",
       "kind": "managed-code",
       "apiVersion": "2.2",
       "minHostVersion": "0.17.2",
-      "packageSha256": "016a1a4a623348b4a021580f609b0e4981157d63f27c54a5ef2c87b8783c6341",
-      "packageSizeBytes": 86007,
+      "packageSha256": "9a2796ed0fc922aa85f0b9a937c6e6a60f30f19fb894a89d2b82a140c43c3571",
+      "packageSizeBytes": 87095,
       "files": [
         {
           "path": "NexusPipeline.Plugin.EmulatorSupport.deps.json",
           "sizeBytes": 480,
-          "sha256": "4b01d8752aa8810ffb0714ac2cfdc33a690d06c7037b730230061b92c4fa235e"
+          "sha256": "6f35ede08ec757290cd57b9a14f3d3e94177ba5c75ec1adf77004285d84be1e7"
         },
         {
           "path": "NexusPipeline.Plugin.EmulatorSupport.dll",
           "sizeBytes": 82432,
-          "sha256": "e856455e5074c3710889080b1a0e6225184b9dcb4c9b72c79a2fb10db3f96714"
+          "sha256": "eb173003badd60c283f6704756fdad0eb936c210c2f5af17eb3414702992ead4"
         },
         {
           "path": "README.md",
           "sizeBytes": 1073,
-          "sha256": "061a9cbcf703428d1f78f9576ef975b90ac8a314a0b501fd3695d8be4dfdf9f6"
+          "sha256": "fd98289cde47c4164249ab6754cc96db8489ca4cae9af495543de5cc255e1496"
         },
         {
           "path": "plugin.json",
           "sizeBytes": 475,
-          "sha256": "8f0b9645b12c1fa261864a05191afa2d460614f1c13f6b43ecda093727bd7ede"
+          "sha256": "733e88e23d1d69e5814cee99883c400d5ec6949d94b1d7e1577eac0123fd9867"
         },
         {
           "path": "store.json",
-          "sizeBytes": 913,
-          "sha256": "307c1d85c405aa2b5d2e9c5258f6a65a15378c6445102cdc0c9c83ffef841af2"
+          "sizeBytes": 2001,
+          "sha256": "1a38949392331931debb6e8dead5743118da60b1fd3d14d76210b68bb7f34b93"
         }
       ]
     },
