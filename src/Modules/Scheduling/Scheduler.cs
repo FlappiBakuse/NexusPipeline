@@ -17,6 +17,7 @@ namespace NexusPipeline.Modules.Scheduling;
 internal sealed class Scheduler : IDisposable, IQueueScheduleProjection, ISchedulerIdleReader, IUserScheduleProjection
 {
     private readonly object _sync = new();
+    private readonly object _lifecycleSync = new();
 
     private readonly SchedulerRetryQueue _retryQueue;
 
@@ -81,44 +82,37 @@ internal sealed class Scheduler : IDisposable, IQueueScheduleProjection, ISchedu
 
     public void Start()
     {
-        if (_loop is not null)
+        lock (_lifecycleSync)
         {
-            return;
+            if (_loop is not null || _stateFence.RecoveryBlocked) return;
+            RevalidatePendingPlans();
+            var lifetime = new CancellationTokenSource();
+            _cts = lifetime;
+            _loop = Task.Run(() => LoopAsync(lifetime.Token));
+            Logger.Info("调度器已启动。");
         }
-        RevalidatePendingPlans();
-        _cts = new CancellationTokenSource();
-        _loop = Task.Run(() => LoopAsync(_cts.Token));
-        Logger.Info("调度器已启动。");
     }
 
-    public bool IsRunning => _loop is not null && !_loop.IsCompleted;
+    public bool IsRunning { get { lock (_lifecycleSync) return _loop is not null && !_loop.IsCompleted; } }
 
     public void Stop()
     {
-        try
+        lock (_lifecycleSync)
         {
             _cts?.Cancel();
-        }
-        catch
-        {
-        }
-        try
-        {
+            // The checkpoint and a replacement loop must follow the final tick of this lifetime.
+            _loop?.GetAwaiter().GetResult();
             _cts?.Dispose();
+            _cts = null;
+            _loop = null;
+            SaveState(force: true);
         }
-        catch
-        {
-        }
-        _cts = null;
-        _loop = null;
-        // 正常 Stop 是显式的 durable checkpoint：把最新 watermark 与 recovery state 一起写入，
-        // 让本进程内已经完成的 occurrence 可以安全越过 replay fence。
-        SaveState(force: true);
     }
 
     /// <summary>用户修改队列、脚本或用户后调用，显式重校验尚未准入的冻结计划。</summary>
     public void RevalidatePendingPlans()
     {
+        if (_stateFence.RecoveryBlocked) return;
         ScheduledOccurrence[] pending = _retryQueue
             .SnapshotPending(item => item.Status is "Triggered" or "Waiting")
             .ToArray();
@@ -193,6 +187,8 @@ internal sealed class Scheduler : IDisposable, IQueueScheduleProjection, ISchedu
     /// </summary>
     public AutoUpdateIdleBlocker? GetAutoUpdateBlocker(TimeSpan horizon, DateTime? nowOverride = null)
     {
+        if (_stateFence.RecoveryBlocked)
+            return new AutoUpdateIdleBlocker("schedule_state_unknown", "调度恢复状态未知，请修复保留的状态文件并重启", null, null);
         DateTime now = nowOverride ?? DateTime.Now;
         DateTime until = now.Add(horizon < TimeSpan.Zero ? TimeSpan.Zero : horizon);
         IReadOnlyList<DispatchQueue> queues = _queues.Snapshot();
@@ -349,7 +345,7 @@ internal sealed class Scheduler : IDisposable, IQueueScheduleProjection, ISchedu
 
     private async Task LoopAsync(CancellationToken token)
     {
-        while (true)
+        while (!token.IsCancellationRequested)
         {
             try
             {
@@ -372,6 +368,7 @@ internal sealed class Scheduler : IDisposable, IQueueScheduleProjection, ISchedu
 
     private void Tick()
     {
+        if (_stateFence.RecoveryBlocked) return;
         string today = DateTime.Now.ToString("yyyy-MM-dd");
         if (!string.Equals(_lastCleanupDate, today, StringComparison.Ordinal))
         {

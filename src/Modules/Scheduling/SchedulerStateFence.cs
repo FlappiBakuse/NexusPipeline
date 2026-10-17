@@ -36,6 +36,7 @@ internal sealed class SchedulerStateFence
     internal DateTime? LastSchedulerCheck { get; set; }
 
     internal bool StartupRunsIssued { get; private set; }
+    internal bool RecoveryBlocked { get; private set; }
 
     internal void MarkStartupRunsIssuedLocked()
     {
@@ -62,7 +63,8 @@ internal sealed class SchedulerStateFence
         }
         catch (Exception ex)
         {
-            Logger.Warn($"[调度] 读取 scheduler-state.json 失败，按空状态启动：{ex.Message}");
+            RecoveryBlocked = true;
+            Logger.Warn($"[调度] 读取 scheduler-state.json 失败，已阻止自动调度并保留原文件；修复状态后重启：{ex.Message}");
             return;
         }
         LastSchedulerCheck = state.LastSchedulerCheck;
@@ -120,6 +122,7 @@ internal sealed class SchedulerStateFence
 
     internal void Save(bool force = false)
     {
+        if (RecoveryBlocked) return;
         // 同一 scheduler 可能同时收到 tick、准入和完成回调；序列化整个快照-写入过程，
         // 避免较旧 snapshot 在较新 snapshot 之后完成而覆盖 durable replay fence。
         lock (_saveSync)

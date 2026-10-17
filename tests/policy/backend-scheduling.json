@@ -9,10 +9,12 @@
       "NexusPipeline.Tests.Scheduling.SchedulerTests.AutoUpdateBlocker_IgnoresScheduledOccurrenceBeforeCurrentMinuteDespiteStaleWatermark",
       "NexusPipeline.Tests.Scheduling.SchedulerTests.AutoUpdateBlocker_IncludesOccurrenceAtFiveMinuteBoundary",
       "NexusPipeline.Tests.Scheduling.SchedulerTests.AutoUpdateBlocker_StopsForStartupQueueBeforeFirstTick",
+      "NexusPipeline.Tests.Scheduling.SchedulerTests.CorruptStateBlocksAutomaticDispatchAndPreservesEvidenceUntilRepaired",
       "NexusPipeline.Tests.Scheduling.SchedulerTests.ScheduledTrigger_DoesNotBackfillMissedOccurrence",
       "NexusPipeline.Tests.Scheduling.SchedulerTests.ScheduledTrigger_DoesNotBackfillOccurrenceAfterRestartWithStaleWatermark",
       "NexusPipeline.Tests.Scheduling.SchedulerTests.ScheduledTrigger_DurableWatermarkPreventsCompletedMinuteReplay",
-      "NexusPipeline.Tests.Scheduling.SchedulerTests.StartupTrigger_RemainsPendingAfterTransientAdmissionConflict"
+      "NexusPipeline.Tests.Scheduling.SchedulerTests.StartupTrigger_RemainsPendingAfterTransientAdmissionConflict",
+      "NexusPipeline.Tests.Scheduling.SchedulerTests.StopDrainsCurrentTickBeforeRestartAndCheckpoint"
     ],
     "boundaries": {
       "real": [
