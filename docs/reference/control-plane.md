@@ -70,6 +70,7 @@ CLI 管理宿主持久化状态、执行生命周期和插件公开接口；每�
 - `dashboard get` 返回 `{etag,snapshot}`；`dashboard update --etag <原始带引号ETag> --file <json>` 的正文只含 `schemaVersion`、`catalogRevision`、`visibleCardIds`。同语言读取后再修改，遇到冲突重新读取，不能覆盖并发编辑。
 - `history summary/dates/list` 接受 `--from`、`--to`、`--days`、`--script`、`--queue`、`--user-key`、`--status`；`history users --date YYYY-MM-DD` 读取当日用户索引。历史 ID 和用户键按记录使用，不因当前对象改名或删除而重新解析。
 - 图标、历史截图和运行预览用 `--output <新文件>` 下载，拒绝已有文件、链接或缺失父目录；输出回执含长度及 SHA256。预览尚未产生图像时返回 `available=false`，不创建文件。
+- 二进制下载与 JSON 请求使用相同错误映射：超时为 `timeout` / 408，连接失败为 `service_unavailable` / 503；服务端冲突码统一为 CLI 稳定码并保留参数。配置编辑准备、启动、提交、交换及输入绑定失败返回稳定 `execution_failed`，具体原因保留在 message。
 - `plugin ui query --file <json>` 读取指定 slot/context；`save <plugin> <contribution>` 与 `action <plugin> <contribution> <action>` 使用同一声明式贡献请求。插件自身路由由 `plugin request <plugin> <GET|POST|PUT|PATCH|DELETE> <相对路径>` 调用，JSON 用 `--file`，上传用 `--binary <文件> --content-type <mime>`，下载用 `--output`；路径不能跳出指定插件。请求仍受插件注册的访问策略限制。
 - 需要编辑会话的插件请求先用 `client-session create --json` 获取 Web 会话，将输出保存在调用者管理的文件，再以 `--session-file <json>` 传给插件命令；结束后 `client-session revoke --session-file <json>`。会话文件含凭据，不进入版本库。CLI 不伪造桌面身份，不能启动受信任 Electron 网页登录或获取 native 能力。
 - 网页路由、弹窗开合、浏览器显示语言/外观偏好和窗口控制属于当前前端客户端状态，没有宿主全局写入命令。原生选择器仍需本机用户交互；自动化调用直接提供路径。运行观察可使用 `status`、`run list/get/tasks` 轮询，不依赖页面 SSE 连接。

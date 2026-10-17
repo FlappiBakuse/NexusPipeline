@@ -48,7 +48,9 @@ internal sealed class CliApiClient
             if (!response.IsSuccessStatusCode)
             {
                 var error = Parse(response.Content.ReadAsStringAsync().GetAwaiter().GetResult());
-                return Failure((int)response.StatusCode, error, error?["code"]?.ToString() ?? MapCode((int)response.StatusCode));
+                var errorObject = error as JsonObject;
+                string code = NormalizeCode(errorObject?["code"]?.ToString() ?? MapCode((int)response.StatusCode));
+                return Failure((int)response.StatusCode, error, code, errorObject?["args"]?.DeepClone());
             }
             if (response.StatusCode == System.Net.HttpStatusCode.NoContent)
                 return CliApiResponse.Success(204, new JsonObject { ["available"] = false });
@@ -58,6 +60,14 @@ internal sealed class CliApiClient
             CliArtifactOutput.SaveAsync(stream, full, bytes.Length, hash, maxBytes: 16 * 1024 * 1024).GetAwaiter().GetResult();
             return CliApiResponse.Success(200, new JsonObject { ["path"] = full, ["sizeBytes"] = bytes.Length,
                 ["sha256"] = hash, ["contentType"] = response.Content.Headers.ContentType?.ToString() });
+        }
+        catch (TaskCanceledException)
+        {
+            return Failure(408, null, "timeout");
+        }
+        catch (HttpRequestException)
+        {
+            return Failure(503, null, "service_unavailable");
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException)
         {

@@ -11,6 +11,8 @@
       "NexusPipeline.Tests.ControlPlane.BrowserLoginTests.CaptureScopeFailuresRetryButCleanupOrActivationFailuresRevokeCandidates",
       "NexusPipeline.Tests.ControlPlane.BrowserLoginTests.ClientSessionsNeverGrantNativeToHttpAndRevokeOnAuthorityOrDesktopExit",
       "NexusPipeline.Tests.ControlPlane.BrowserLoginTests.SessionRevocationAndEditorCancellationTerminatePendingValidation",
+      "NexusPipeline.Tests.ControlPlane.CliDownloadTests.DownloadMapsTransportErrorsAndLeavesNoDestination",
+      "NexusPipeline.Tests.ControlPlane.CliDownloadTests.DownloadPreservesErrorArgumentsNoContentAndCreateNewOutput",
       "NexusPipeline.Tests.ControlPlane.ClientAccessPolicyTests.CapabilitiesExposeOnlyTheThreeValidatedOperationsWithoutCaching",
       "NexusPipeline.Tests.ControlPlane.ClientAccessPolicyTests.NatOriginsRequireAuthenticatedRemoteTransportAndExactHttpAuthority",
       "NexusPipeline.Tests.ControlPlane.ClientAccessPolicyTests.RegistrationsRejectMissingUnknownAndConflictingAccessAndFreezeActions",
