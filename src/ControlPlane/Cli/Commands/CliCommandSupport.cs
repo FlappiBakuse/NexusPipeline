@@ -109,8 +109,7 @@ internal static partial class CliCommandRouter
             .OfType<JsonObject>()
             .Select(item => new CliTarget(
                 item["id"]?.ToString() ?? "",
-                item["name"]?.ToString() ?? "",
-                item))
+                item["name"]?.ToString() ?? ""))
             .Where(item => item.Id.Length > 0)
             .ToList();
         TargetResolution<CliTarget> resolution = TargetResolver.Resolve(candidates, reference, item => item.Id, item => item.Name);
@@ -295,25 +294,6 @@ internal static partial class CliCommandRouter
         return false;
     }
 
-    private static bool TryRequireOption(CliArguments args, string name, string label, out string value, out int error, bool allowEmpty)
-    {
-        value = "";
-        if (!args.TryGet(name, out string? raw) || raw is null || (!allowEmpty && string.IsNullOrWhiteSpace(raw)))
-        {
-            error = CliOutput.WriteFailure(
-                "invalid_arguments",
-                CliText.Get(
-                    "error.missing_option",
-                    "缺少 --{name}（{label}）",
-                    ("name", name),
-                    ("label", CliText.Label(label))));
-            return false;
-        }
-        value = raw;
-        error = 0;
-        return true;
-    }
-
     private static string? Positional(CliArguments args, int index)
     {
         return args.Positionals.Count > index ? args.Positionals[index] : null;
@@ -391,6 +371,6 @@ internal static partial class CliCommandRouter
         return 0;
     }
 
-    private sealed record CliTarget(string Id, string Name, JsonObject Data);
+    private sealed record CliTarget(string Id, string Name);
 
 }

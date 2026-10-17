@@ -41,13 +41,6 @@ namespace NexusPipeline.ControlPlane.Http;
 /// <summary>HTTP 服务骨架：监听、请求分发、静态文件。业务路由见各 ApiXxxHandler（[ApiRoute] 反射扫描注册）。</summary>
 internal sealed class WebServer : IDisposable
 {
-    private delegate Task ApiRouteHandler(
-        HttpListenerContext context,
-        string method,
-        string[] seg,
-        string body,
-        CancellationToken cancellationToken);
-
     /// <summary>请求体大小上限（10MB，防超大 body 内存压力）。</summary>
     private const int MaxRequestBodyBytes = 10 * 1024 * 1024;
 
