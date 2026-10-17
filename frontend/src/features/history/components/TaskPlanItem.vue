@@ -53,7 +53,7 @@ watch(() => props.focusTaskId, id => {
     <div v-if="children.length" class="task-plan-children">
       <TaskPlanItem v-for="child in children" :key="child.id" :task="child" :tasks="tasks" :report="report" :display-snapshot="displaySnapshot" :focus-task-id="focusTaskId" :depth="depth + 1" :ancestors="[...ancestors, task.id]" />
     </div>
-    <dl v-else-if="!isParent" class="task-plan-facts">
+    <dl v-else-if="!report && !isParent" class="task-plan-facts">
       <div><dt>{{ t('tasks.detection') }}</dt><dd>{{ label('detection', task.detection) }}</dd></div>
       <div><dt>{{ t('tasks.risk') }}</dt><dd>{{ label('risk', task.retryRisk) }}</dd></div>
       <div><dt>{{ t('tasks.role') }}</dt><dd>{{ label('role', task.role) }}</dd></div>
@@ -89,6 +89,7 @@ watch(() => props.focusTaskId, id => {
 </template>
 
 <style scoped>
+.task-card[data-nxp-surface-kind="card"][data-nxp-surface-tone] { background: var(--content-card-soft); }
 .task-card { --nx-collapsible-header-height: calc(var(--nx-control-height) + var(--nx-space-4)); --nx-collapsible-header-padding: var(--nx-space-3); --nx-collapsible-body-padding: var(--nx-space-4); }
 .task-attempt { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--nx-color-border); font-size: 12px; }
 .task-attempt p { line-height: 1.6; }

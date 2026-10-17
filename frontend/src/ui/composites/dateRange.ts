@@ -69,13 +69,6 @@ export function daysInMonth(value: string) {
   return createLocalDate(year, month + 1, 0).getDate();
 }
 
-export function normalizeRange(from: string, to: string): DateRangeDraft {
-  const safeFrom = normalizeDateKey(from);
-  const safeTo = normalizeDateKey(to);
-  if (!safeFrom || !safeTo || safeFrom <= safeTo) return { from: safeFrom, to: safeTo };
-  return { from: safeTo, to: safeFrom };
-}
-
 export function chooseRangeDate(
   draft: DateRangeDraft,
   anchor: RangeAnchor,

@@ -202,11 +202,12 @@ watch(() => props.open, value => {
 .nxp-date-range-display > [data-nxp-date-range-label] { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nxp-date-range-icon { position: absolute; top: 50%; right: 12px; display: inline-flex; pointer-events: none; transform: translateY(-50%); color: var(--accent, var(--nx-color-primary)); }
 .nxp-date-range-icon-svg { width: 16px; height: 16px; }
-.nxp-date-range-popover { position: absolute; top: calc(100% + 8px); left: 0; z-index: 70; display: grid; container-name: nxp-date-range-popover; container-type: inline-size; min-width: min(100%, 520px); gap: var(--space-3, var(--nx-space-3, 12px)); padding: var(--space-3, var(--nx-space-3, 12px)); border: 1px solid var(--content-control-border, var(--nx-color-border)); border-radius: var(--radius-md, var(--nx-radius-md, 8px)); background: var(--content-card, var(--nx-color-surface)); box-shadow: var(--shadow, 0 16px 40px rgb(0 0 0 / 28%)); }
+.nxp-date-range-popover { position: absolute; top: calc(100% + 8px); right: auto; left: 0; z-index: 70; display: grid; width: min(640px, calc(100vw - 32px)); min-width: 0; max-width: calc(100vw - 32px); gap: var(--space-3, var(--nx-space-3, 12px)); padding: var(--space-3, var(--nx-space-3, 12px)); border: 1px solid var(--content-control-border, var(--nx-color-border)); border-radius: var(--radius-md, var(--nx-radius-md, 8px)); background: var(--content-card, var(--nx-color-surface)); box-shadow: var(--shadow, 0 16px 40px rgb(0 0 0 / 28%)); }
 .nxp-date-range-toolbar { display: grid; grid-template-columns: 40px minmax(0, 1fr) 40px; align-items: center; gap: var(--space-2, var(--nx-space-2, 8px)); }
 .nxp-date-range-toolbar strong { min-width: 0; color: var(--text, var(--nx-color-text)); font-size: 13px; text-align: center; }
 .nxp-date-range-toolbar button { min-width: 40px; min-height: 40px; padding: 0; font-size: 20px; line-height: 1; }
-.nxp-date-range-months { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3, var(--nx-space-3, 12px)); }
+/* Seven 40px date targets plus six 3px gaps must fit before another month shares the row. */
+.nxp-date-range-months { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 298px), 1fr)); gap: var(--space-3, var(--nx-space-3, 12px)); }
 .nxp-date-range-month { min-width: 0; }
 .nxp-date-range-month h4 { margin: 0 0 8px; color: var(--text, var(--nx-color-text)); font-size: 12px; text-align: center; }
 .nxp-date-range-grid { display: grid; grid-template-columns: repeat(7, minmax(40px, 1fr)); gap: 3px; }
@@ -229,8 +230,5 @@ watch(() => props.open, value => {
 @media (max-width: 560px) {
   .nxp-date-range-footer { align-items: stretch; flex-direction: column; }
   .nxp-date-range-footer .primary { width: 100%; }
-}
-@container nxp-date-range-popover (max-width: 495px) {
-  .nxp-date-range-months { grid-template-columns: minmax(0, 1fr); }
 }
 </style>

@@ -59,6 +59,25 @@ try {
     assert.equal(record.userId, users[index % 4].id);
     assert.equal((await json("GET", `api/dispatch/${run.id}`)).status, run.status);
   }
+
+  const disabled = targets[4], disabledUser = users[0];
+  await json("PUT", `api/users/${disabledUser.id}/bindings/${disabled.script.id}`, { enabled: false });
+  const singlePlan = (await json("POST", "api/dispatch/explain/script", { scriptId: disabled.script.id })).result;
+  assert.equal(singlePlan.admissible, false);
+  assert.equal(singlePlan.admissionFailure.code, "no_enabled_bindings");
+  assert.equal((await json("POST", "api/dispatch/script", { scriptId: disabled.script.id }, 409)).code, "no_enabled_bindings");
+  await json("PUT", `api/queues/${queues[0].id}`, { ...queues[0], tasks: [
+    { scriptInstanceId: targets[2].script.id, index: 0 }, { scriptInstanceId: disabled.script.id, index: 1 }] });
+  const mixedRun = await settled((await json("POST", "api/dispatch/queue", { queueId: queues[0].id })).runId);
+  const skipped = mixedRun.records.find(record => record.scriptInstanceId === disabled.script.id);
+  assert.equal(skipped.status, "skipped");
+  assert.equal(skipped.resultCode, "run.no_enabled_users");
+  assert.equal((await json("GET", `api/history/detail?id=${skipped.id}`)).record.status, "skipped");
+  await json("PUT", `api/users/${users[2].id}/bindings/${targets[2].script.id}`, { enabled: false });
+  const queuePlan = (await json("POST", "api/dispatch/explain/queue", { queueId: queues[0].id })).result;
+  assert.equal(queuePlan.admissible, false);
+  assert.equal(queuePlan.tasks.length, 2);
+  assert.equal((await json("POST", "api/dispatch/queue", { queueId: queues[0].id }, 409)).code, "no_enabled_bindings");
 } finally { await browser?.close(); await runtime.stopRuntime(); }
 report("H-E01", { runs, queries, scriptCount: targets.length, queueCount: queues.length, userCount: users.length,
   real: ["browser queue selection and dispatch", "execution admission", "cancel process tree", "history identity"],

@@ -1,6 +1,6 @@
 # 专项任务协议
 
-宿主接受 data-specialized 的 `taskProtocol.version = "0.3.0"`（最低 Host `0.17.4`）和独立的 `0.2.0` 分支（最低 Host `0.16.15`）。完整作者契约、生产适配器源文件、生成器与源码派生夹具由 [官方插件仓库](https://github.com/FlappiBakuse/NexusPipeline-Plugins) 的 `docs/author/TASK_PROTOCOL.md` 维护。Plugin API 仍为 2.2，Frontend API 仍为 1.7。
+宿主接受 data-specialized 的 `taskProtocol.version = "0.3.0"`（最低 Host `0.17.4`）和独立的 `0.2.0` 分支（最低 Host `0.16.15`）。完整作者契约、生产适配器源文件、生成器与源码派生夹具由 [官方插件作者指南](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/docs/author/task-protocol.md) 维护。Plugin API 仍为 2.2，Frontend API 仍为 1.7。
 
 宿主责任按现役模块划分：Plugins 验证 manifest 和冻结脚本；Configuration 提供只读 JSON/YAML 视图、CAS 选择补丁与恢复 journal；Execution 按当前运行日志归并任务事实；History 保存不可变 TaskReport、最近结果索引及崩溃检查点；Notifications 统一格式化任务分类；Host 组合适配器协调用户查询。
 
@@ -107,16 +107,17 @@ node tests\run.mjs integration
 
 环境目标可声明 `source: {kind: "mainConfig", selector: [...]}`，仅在绑定捕获恰好一份主配置时解析，文件改名不改变归属；目录多配置或无配置时返回未检查，不从附加配置或其他账号回退。可选 `defaultValue`、`secondaryDefaultValue` 必须为有界字符串且对应单层属性 selector，只用于该属性不存在，显式 null、空值和错误类型不能被默认值掩盖。ADB 端口 selector 接受整数或字符串，地址组合仍只作格式/相等比较，不联网探测。默认值必须有锁定上游依据。
 
-Host 联调工具的 `--runtime-installations <matrix.json>` 从显式 `cases`（id/artifact/root/expectedEvaluation）只读捕获官方安装资源，账号配置仍为合成夹具；`output` 指向不存在的报告路径。先传 `--plugin-root <插件检出>`；不能用合成资源集合代替安装来源证据。运行前用 `dotnet build <Host>/tools/NexusPipeline.TaskProtocolTests -m:1 -p:NexusTestHost=true` 构建，随后运行对应 Test Host 输出 DLL。旧 validator 对比实验结果保留在历史报告，不再提供执行入口。
+Host 联调工具的 `--runtime-installations <matrix.json>` 从显式 `cases`（id/artifact/root/expectedEvaluation）只读捕获官方安装资源，账号配置仍为合成夹具；`output` 指向不存在的报告路径。先传 `--plugin-root <插件检出>`；不能用合成资源集合代替安装来源证据。运行前用 `dotnet build <Host>/tools/NexusPipeline.TaskProtocolTests -m:1 -p:NexusTestHost=true` 构建，随后运行对应 Test Host 输出 DLL。
 
+## 保存诊断与去重
 
 保存诊断保留完整 `validation.diagnostics`；每项 `shouldNotify` 为 false 时，前端不重复弹出提示。Host 在当前进程内按绑定、规则范围、快照修订、上下文与词典身份去重；修复后再次出现或修订改变会重新提醒。缓存最多保留 1024 个绑定，重启或容量淘汰后可再次提示，不改历史事实。配置整体修订是进程密钥生成的 HMAC 标识，不是可枚举内容摘要；选择事务的单资源 CAS 令牌仍只属于其冻结视图。
 
 保存脚本实例与完成配置编辑使用包声明的 `discover` 配置诊断；诊断失败不回退旧接口。声明 `configValidator` 的旧包被拒绝并提示升级或卸载，现有用户快照保持不变。一个绑定的反馈不会因另一个绑定文字相同而被去重。
 
-### 配置修复
+## 配置修复
 
-当前 `0.2.0` 修复声明覆盖八个专项。仅对当前用户已保存的主配置或附加配置快照操作；支持 JSON/YAML 单字段、路径绑定和有限的 MXU/MFA 任务列表修复。每次预览返回一项变更，明确应用后自动重读计划；仍有其他变更时继续显示下一项预览。开关默认关闭，插件脚本不能借此直接写现场配置。
+配置修复由当前 manifest 的 repairRules 声明；接受的 taskProtocol 分支仍须分别满足本页版本与 schema 约束。仅对当前用户已保存的主配置或附加配置快照操作；支持 JSON/YAML 单字段、路径绑定和有限的 MXU/MFA 任务列表修复。每次预览返回一项变更，明确应用后自动重读计划；仍有其他变更时继续显示下一项预览。开关默认关闭，插件脚本不能借此直接写现场配置。
 
 `repairRules` 限定为最多 8 条，必须关联已声明的 `configRules`。`kind` 为 `replace_enum`（仅匹配列出的旧值）、`normalize_enum`（`fromValues` 是保留值，其他字符串改成 `toValue`）、`bind_game_path`、`mxu_tasks`、`mxu_preactions`、`mfa_tasks` 或 `enable_boolean`（缺失/false → true）。类型错误不猜测修复。资源仅允许 `config:$main`、快照内相对 `config:<文件>` 和 `extra:0`；`{instance}` 只接受已解析的稳定实例 ID。`skipWhen` 支持单字段布尔条件，用于云游戏等不适用范围。`preconditions` 限定快照类型、独占资源与附加配置条件。
 
@@ -131,7 +132,3 @@ Host 联调工具的 `--runtime-installations <matrix.json>` 从显式 `cases`�
 `executionContext.gameTarget.ready` 是可选的宿主只读布尔值：仅 MaaEnd 与 MaaStellaSora 的 PC 运行前准入在 `LaunchGame=false` 时填入。`true` 表示按本次配置的游戏进程名找到了可见窗口；`false` 表示该时点未找到。预览、其他模式及旧宿主没有此字段，插件须按未知处理，不能把缺失当作 `false`。它不证明 MXU/MFA 控制器已成功连接，也不能替代启动后 stdout/超时监控。
 
 `executionContext.queue` 在队列运行时还可提供 `nextTargetRelation`（`same` / `different` / `unknown`）和 `nextLaunchOwner`（`host` / `upstream` / `already_running` / `unknown`）。只有同一目标且下一项依赖已有窗口，才将“关闭游戏和软件”判为确定冲突；不明责任保持告警。跨队列静态预览不能把其中一个后继上下文写成永久配置错误。数据化插件可在 `resolve.json` 声明 `outputEncoding` 为 `utf-8`、`windows-936` 或 `system-default`，通用进程读取器按声明解码 stdout/stderr；缺省保持旧行为。
-
-0.2.0 修复策略由当前冻结的 configEditor 以 config-repair 调用返回 selector/value；该调用仅提供 input、当前用户快照只读 readConfig 与 proposeRepair，不开放文件、进程或网络。Host 校验字段和 MXU 当前实例归属，绑定 editor 内容到令牌并使用现役 CAS、备份和 journal。BAAH 的附加软件快照可将缺失/false 的 SAVE_LOG_TO_FILE 修复为 true。
-
-不支持的历史索引原字节保留，任务摘要 API 返回 HTTP 409 / unsupported_history_index。当前历史记录标记 SchemaVersion=1；旧记录不解析，用户使用完整备份的旧版查看。历史清理仅删除当前记录完整确权的运行目录，未知附件、旧记录、外部日志和输出保留。

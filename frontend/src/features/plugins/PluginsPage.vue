@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { takePreparedData } from "../../platform/navigation-preparation";
+import { loadPluginsPage } from "./first-screen";
+const initialData = takePreparedData<Awaited<ReturnType<typeof loadPluginsPage>>>("plugins");
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import { api, isAbortError } from "../../platform/api";
 import { filterAndSortPlugins, defaultPluginViewState, isPluginViewStateActive } from "../../platform/plugin-list";
@@ -216,10 +219,16 @@ function onEscape(event: KeyboardEvent) {
   if (event.key === "Escape" && filterOpen.value) filterOpen.value = false;
 }
 
+if (initialData) {
+  list.local.plugins = Array.isArray(initialData) ? initialData : [];
+  list.local.loaded = true;
+  reconcile("local");
+}
+
 onMounted(() => {
   setTopbarTitle(t("common.plugin"));
   window.addEventListener("keydown", onEscape);
-  void loadList("local");
+  if (initialData) void loadDetail("local"); else void loadList("local");
 });
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", onEscape);

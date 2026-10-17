@@ -23,10 +23,9 @@ body { font-size: 14px; line-height: 1.55; }
 .dashboard-state h3 { font-size: 19px; }
 .workspace-page :is(.script-card, .queue-card, .global-user-card) { min-width: 0; }
 .workspace-page :is(.script-name, .queue-name, .user-name) { font-weight: 650; }
-.workspace-page .dispatch-runbar { border-radius: var(--radius-lg); padding: 20px; gap: 16px; }
+.workspace-page .dispatch-runbar { border-radius: var(--radius-lg); padding: 20px; gap: var(--nx-space-2); }
 .workspace-page .running-execution { min-width: 0; }
-.workspace-page .plugin-browser { gap: 18px; }
-.workspace-page .history-browser { gap: 18px; }
+.workspace-page :is(.plugin-browser, .browser-layout) { gap: 18px; }
 .page-settings { display: flex; flex-direction: column; gap: var(--space-5); }
 .page-settings > :is(.nxp-page-header, .callout, .settings-categories, .settings-cards, .plugin-slot) { margin-block: 0; }
 .settings-categories { display: flex; flex-wrap: wrap; gap: var(--space-2); }
@@ -42,10 +41,16 @@ body { font-size: 14px; line-height: 1.55; }
 @media (max-height: 480px) {
   .page-main-scroll-fill > .nxp-scroll-viewport { overflow: auto; }
   .app-page-fill { flex: 0 0 auto; }
-  .app-page-fill :is(.plugin-browser, .history-browser) { flex: 0 0 auto; min-height: 320px; }
+  .app-page-fill :is(.plugin-browser, .browser-layout) { flex: 0 0 auto; min-height: 320px; }
 }
 
 .desktop-preferences-warning { margin: 12px 20px; padding: 12px; border: 1px solid var(--warn); border-radius: 10px; color: var(--warn); }
+.page-shell { position: relative; }
+.navigation-progress { position: absolute; z-index: 5; top: 0; left: 0; right: 0; height: 3px; overflow: hidden; pointer-events: none; background: var(--content-card-soft); }
+.navigation-progress > span { display: block; width: 42%; height: 100%; background: var(--accent); animation: nxp-navigation-progress 1.4s ease-in-out infinite; }
+@keyframes nxp-navigation-progress { 0% { transform: translateX(-120%); } 100% { transform: translateX(240%); } }
+.navigation-error { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: var(--nx-space-2); padding: var(--nx-space-2) var(--nx-space-4); color: var(--warn); }
+.settings-cards { overflow-anchor: none; }
 @media (max-width: 767px) {
   #view, .view-root { padding: 20px 16px 28px; }
   .sidebar { width: 222px; }

@@ -1,6 +1,6 @@
 # 历史索引
 
-本目录只保存已发布版本的历史说明。当前产品行为、代码定位和未完成验证分别以[架构索引](../architecture/README.md)、代码与 [STATUS.md](../STATUS.md) 为准；架构取舍的理由单独记录在[决策索引](../decisions/README.md)。
+本目录只保存已发布版本的历史说明。当前产品行为、代码定位和未完成验证分别以[架构索引](../architecture/README.md)、代码与 [未完成问题](../status.md) 为准；架构取舍的理由单独记录在[决策索引](../decisions/README.md)。
 
 | 范围 | 内容 |
 |---|---|

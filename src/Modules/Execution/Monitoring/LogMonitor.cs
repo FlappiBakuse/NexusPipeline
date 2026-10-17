@@ -91,8 +91,6 @@ internal class LogMonitor : IDisposable
 
     public DateTime LastWrite { get; private set; } = DateTime.Now;
 
-    /// <summary>诊断用 checkpoint 当前占用字节数；不参与日志读取协议。</summary>
-    internal int CheckpointBytes => _checkpointLength;
 
     internal static LogCandidateSnapshot? CaptureSnapshot(string path)
     {

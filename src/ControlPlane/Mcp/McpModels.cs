@@ -2,7 +2,6 @@ using System.ComponentModel;
 using System.Text.Json.Nodes;
 using NexusPipeline.Modules.Execution;
 using NexusPipeline.Modules.History;
-using NexusPipeline.Modules.Plugins.Repository;
 using NexusPipeline.Modules.Queues;
 using NexusPipeline.Modules.Scheduling;
 using NexusPipeline.Modules.Scripts;
@@ -21,6 +20,8 @@ internal sealed class McpScriptInput
 
     [Description("专项插件名；空字符串表示通用脚本。")]
     public string PluginType { get; set; } = "";
+
+    public Dictionary<string, string>? PluginInputs { get; set; }
 
     public string RootPath { get; set; } = "";
 
@@ -68,6 +69,7 @@ internal sealed class McpScriptInput
         {
             Name = Name.Trim(),
             PluginType = PluginType.Trim(),
+            PluginInputs = new Dictionary<string, string>(PluginInputs ?? new(), StringComparer.OrdinalIgnoreCase),
             RootPath = RootPath.Trim(),
             MainExe = MainExe.Trim(),
             Args = Args,
@@ -230,6 +232,12 @@ internal static class McpViews
             script.Name,
             script.Index,
             script.PluginType,
+            script.PluginInputs,
+            script.ExecutionProviderId,
+            script.ExecutionProviderConfigId,
+            script.ExecutionProviderConfigRevision,
+            script.ConfigurationRevision,
+            script.RequiresReconfiguration,
             script.RootPath,
             script.MainExe,
             script.Args,
@@ -354,6 +362,7 @@ internal static class McpViews
             settings.AutoStart,
             settings.MinimizeToTray,
             settings.LightweightMode,
+            settings.AllowConfigRepair,
             settings.OpenDesktopOnStartup,
             settings.HistoryRetentionDays,
             settings.WebPort,
@@ -386,6 +395,7 @@ internal static class McpViews
             settings.SmtpSubjectPrefix,
             settings.SmtpTimeout,
             settings.LogLevel,
+            settings.HostLocale,
             // MCP 始终 loopback；远程 Web 开关和令牌设置不作为 MCP 写入项，但读取时保留脱敏状态。
             settings.AllowRemoteAccess,
             accessToken = Mask(settings.AccessToken),
@@ -394,52 +404,6 @@ internal static class McpViews
             settings.PluginAutoUpdateEnabled,
             settings.UpdateChannel,
             settings.UpdateSourceUrl,
-        };
-    }
-
-    public static object PluginStore(PluginStoreSnapshot snapshot)
-    {
-        return new
-        {
-            snapshot.Available,
-            snapshot.Stale,
-            fetchedAt = snapshot.FetchedAt.ToString("O"),
-            snapshot.Error,
-            plugins = snapshot.Plugins.Select(plugin => new
-            {
-                plugin.Name,
-                artifactName = plugin.ArtifactName,
-                plugin.DisplayName,
-                gameName = plugin.GameName,
-                plugin.Description,
-                plugin.Version,
-                kind = plugin.Kind,
-                apiVersion = plugin.ApiVersion,
-                plugin.Capabilities,
-                minHostVersion = plugin.MinHostVersion,
-                plugin.Installed,
-                plugin.InstalledName,
-                plugin.InstalledVersion,
-                plugin.UpdateAvailable,
-                plugin.Compatible,
-                plugin.CompatibilityReason,
-                plugin.ManagedByStore,
-                plugin.PendingAction,
-                plugin.PendingVersion,
-                plugin.Status,
-                authors = plugin.Authors.Select(author => new { name = author.Name, url = author.Url }).ToList(),
-                tags = plugin.Tags,
-                homepage = plugin.Homepage,
-                createdAt = plugin.CreatedAt,
-                updatedAt = plugin.UpdatedAt,
-                hasReadme = plugin.HasReadme,
-                changelog = plugin.Changelog.Select(change => new
-                {
-                    change.Version,
-                    change.Date,
-                    change.Items,
-                }).ToList(),
-            }).ToList(),
         };
     }
 

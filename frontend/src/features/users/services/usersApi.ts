@@ -3,11 +3,6 @@ import { api } from "../../../platform/api";
 /** Users 域的请求封装：页面与 feature 组件通过它访问用户、绑定、全局设置、
  *  插件贡献和配置编辑事务端点，避免 URL 拼接散落在各组件。 */
 
-export interface UserBadgePayload {
-  userId?: string;
-  badges?: Array<{ pluginName?: string; id?: string; label?: string; tone?: string; title?: string }>;
-}
-
 export function listUsers(signal?: AbortSignal): Promise<any> {
   return api("GET", "/api/users", undefined, signal);
 }

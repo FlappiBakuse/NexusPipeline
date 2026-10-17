@@ -5,6 +5,7 @@ type CollapseState = {
 };
 
 const activeTransitions = new WeakMap<HTMLElement, CollapseState>();
+const reducedMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
 
 function clearStyles(element: Element) {
   const node = element as HTMLElement;
@@ -54,6 +55,7 @@ function begin(element: HTMLElement, done: () => void) {
 }
 
 function beforeEnter(element: Element) {
+  if (reducedMotion()) { cancel(element); return; }
   const node = element as HTMLElement;
   node.style.maxHeight = "0px";
   node.style.opacity = "0";
@@ -61,6 +63,7 @@ function beforeEnter(element: Element) {
 }
 
 function enter(element: Element, done: () => void) {
+  if (reducedMotion()) { cancel(element); done(); return; }
   const node = element as HTMLElement;
   begin(node, done);
   void node.offsetHeight;
@@ -70,6 +73,7 @@ function enter(element: Element, done: () => void) {
 }
 
 function beforeLeave(element: Element) {
+  if (reducedMotion()) { cancel(element); return; }
   const node = element as HTMLElement;
   node.style.maxHeight = `${node.scrollHeight}px`;
   node.style.opacity = "1";
@@ -77,6 +81,7 @@ function beforeLeave(element: Element) {
 }
 
 function leave(element: Element, done: () => void) {
+  if (reducedMotion()) { cancel(element); done(); return; }
   const node = element as HTMLElement;
   begin(node, done);
   void node.offsetHeight;
@@ -100,6 +105,7 @@ function cancel(element: Element) {
 <template>
   <Transition
     name="app-collapse"
+    :css="!reducedMotion()"
     @before-enter="beforeEnter"
     @enter="enter"
     @after-enter="clearStyles"
@@ -127,5 +133,8 @@ function cancel(element: Element) {
   max-height: 0;
   opacity: 0;
   transform: translateY(-4px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-collapse-enter-active, .app-collapse-leave-active { transition: none; }
 }
 </style>

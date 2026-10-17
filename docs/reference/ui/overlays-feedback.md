@@ -2,6 +2,8 @@
 
 本页定义 menu、tooltip、modal、dialog popover、确认对话框、toast、spinner、加载和空状态。弹层组件负责其内部键盘与焦点生命周期；调用方负责 `open` 状态和业务结果。
 
+系统减少动画时，加载横条、spinner 和按钮忙碌标识仍持续播放，保证工作状态可辨认；页面、弹层和折叠卡片的装饰过渡关闭。公共折叠卡片立即完成布局与清理，不等待 transitionend。
+
 ## 菜单与提示
 
 | 元件 | 属性（类型；默认值） | 事件 | slot 与生命周期 |
@@ -15,9 +17,11 @@
 
 | 元件 | 属性（类型；默认值） | 事件 | slot 与行为 |
 |---|---|---|---|
-| `nxp-modal` | `open` boolean；`false`；`title`/`ariaLabel` string；空；`closeLabel` string；`Close`；`closeable` boolean；`true`；`locked` boolean；`false`；`size`: `default\|wide`；`default`；`surface`: `default\|secondary`；`default`；`footer` boolean；`false`；`panelClass`/`bodyClass` string；空 | `close`: `[]` | `header`、默认 body、`footer` slot。打开时聚焦首个可聚焦元素，关闭时归还打开前焦点；Escape 和可关闭背景点击触发 close，`locked=true` 时不允许关闭。 |
+| `nxp-modal` | `open` boolean；`false`；`title`/`ariaLabel` string；空；`closeLabel` string；`Close`；`closeable` boolean；`true`；`locked` boolean；`false`；`size`: `default\|wide`；`default`；`surface`: `default\|secondary`；`default`；`footer` boolean；`false`；`panelClass`/`bodyClass` string；空 | `close`: `[]` | `header`、默认 body、`footer` slot。打开时聚焦首个可聚焦元素，关闭时归还打开前焦点；Escape 和背景点击触发 close，`locked=true` 仅阻止这两种隐式关闭，标题栏按钮仍发出 close 请求。`closeable=false` 隐藏标题栏关闭按钮并禁用背景与 Escape 关闭。 |
 | `nxp-dialog-popover` | `open` boolean；`false`；`id` string；未提供；`ariaLabel`/`closeLabel` string；空；`closeable` boolean；`true`；`labelledby` string；空 | `close`: `[]` | 默认 slot 是浮层内容。它使用 `role=dialog`；打开时聚焦内容，关闭/卸载时归还原焦点。定位由调用方提供。 |
 | `nxp-confirm-dialog` | `open` boolean；`false`；`title` string，必填；`message` string；空；`confirmLabel`/`cancelLabel` string；`Confirm`/`Cancel`；`confirmTone`: `primary\|danger`；`primary`；`busy` boolean；`false` | `close`、`cancel`、`confirm`: `[]` | 默认 slot 是补充内容。`busy=true` 时锁定 modal、隐藏关闭路径并阻止 cancel；confirm 事件由调用方决定异步提交。 |
+
+二级编辑页面将保存、取消等事务按钮放入 `footer` slot，不放在可滚动正文中；普通只读详情可使用标题栏关闭。Vue 使用 `#footer`，公开元素使用 `footer=true` 和 `slot="footer"`。
 
 Modal 默认 body 使用 `nxp-scroll-area`，调用方可以通过 `bodyClass` 指定自己的语义 class；该 class 只作为当前内容布局钩子，不应依赖内部滚动器的私有节点。
 
@@ -37,4 +41,4 @@ Modal 的滚动内容末尾保留 24px 空白，滚轮与键盘滚动可将最�
 - 调用方在 `open` 变化后保留组件实例，组件负责打开时捕获焦点、关闭时恢复焦点；卸载时同样清理事件监听和浮层定位。
 - 同一页面的 menu、select、time picker 和日期/对话浮层通过公开的 overlay 协调行为避免同时展开；业务代码不直接派发内部协调事件。
 - `close` 只表示组件明确报告的关闭请求；异步业务是否成功、是否继续保持 open 由调用方决定。
-- `locked` 或 `busy` 用于不可中断的事务窗口，调用方仍应在完成或失败后更新状态。
+- `locked` 防止背景或 Escape 误关闭，不禁用显式关闭按钮。不可中断的事务窗口使用 `closeable=false` 并由调用方阻止取消；确认对话框的 `busy` 已包含该行为。调用方仍应在完成或失败后更新状态。

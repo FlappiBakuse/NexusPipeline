@@ -1,3 +1,4 @@
+import { readJsonInput } from "./json-parts.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
@@ -36,7 +37,7 @@ export function pathRule(root, change, baseSha) {
       || !file.startsWith("tests/fixtures/") && /(^|\/)(node_modules|bin|obj)\//.test(file))
     return { ...result, status: "FAIL", reason: "Runtime/build output is not source" };
   const jsonRole = !file.endsWith(".json") || /^(tests\/fixtures\/|frontend\/public\/i18n\/|tools\/schemas\/|metadata\/updates\/|contracts\/updates\/)/.test(file)
-    || file === "docs/map.json" || /^(src|frontend|desktop)\/.*\/(?:i18n|schemas)\//.test(file);
+    || (file === "docs/map.json" || file.startsWith("docs/map/")) || /^(src|frontend|desktop)\/.*\/(?:i18n|schemas)\//.test(file);
   if (baseSha && (owner.startsWith("Modules/") || owner.startsWith("Frontend/features/"))) {
     const directory = owner.startsWith("Modules/") ? "src/" + owner : "frontend/src/features/" + owner.split("/").at(-1);
     if (!git(root, "ls-tree", "-d", "--name-only", baseSha, "--", directory))
@@ -70,7 +71,7 @@ export function contextFor(root, { paths = [], keywords = [], owners = [], partn
   const facts = checkContracts(root);
   const apiFacts = { pluginApi: facts.find(fact => fact.file === "docs/reference/plugin-api/managed.md")?.expected,
     frontendApi: facts.find(fact => fact.file === "frontend/src/plugin-bridge/runtime.ts")?.expected };
-  const navigation = JSON.parse(fs.readFileSync(repositoryPath(root, "", "docs/map.json"), "utf8"));
+  const navigation = readJsonInput(root, "docs/map.json").value;
   const terms = [...keywords, ...owners].map(value => value.toLowerCase());
   const topics = navigation.topics.filter(topic => paths.some(file => (topic.codePaths || []).some(code => file === code || file.startsWith(code + "/") || code.startsWith(file + "/")))
     || terms.some(term => JSON.stringify(topic).toLowerCase().includes(term)));
@@ -92,9 +93,9 @@ export function contextFor(root, { paths = [], keywords = [], owners = [], partn
     || /^## 3\./.test(section) && paths.some(file => file.startsWith("src/"))
     || /^## 5\./.test(section) && (partnerRoot || paths.some(file => file.startsWith("frontend/")) || terms.some(term => /ui|frontend|plugin/.test(term))));
   return { apiFacts, agents: { file: "AGENTS.md", headings: agents.split(/\r?\n/).filter(line => /^#{1,3} /.test(line)), sections },
-    topics, testDomains: [...new Set(topics.flatMap(topic => topic.testDomains || []))].sort(),
+    topics, validationPaths: [...new Set(topics.flatMap(topic => topic.validationPaths || []))].sort(),
     publicElements, uiReference: "docs/reference/ui/README.md", uiReview: "Host imports internal Nxp components; plugins consume public nxp-* elements. Explain why candidates cannot be reused and choose primitive/composite/feature-local.",
-    partner: partnerRoot ? { root: path.resolve(partnerRoot), lock: JSON.parse(fs.readFileSync(repositoryPath(partnerRoot, "", "host.lock.json"), "utf8")), head: git(partnerRoot, "rev-parse", "HEAD"), sourceFingerprint: sourceFingerprint(partnerRoot) }
+    partner: partnerRoot ? { root: path.resolve(partnerRoot), lock: JSON.parse(fs.readFileSync(repositoryPath(partnerRoot, "", "contracts/host-compatibility.json"), "utf8")), head: git(partnerRoot, "rev-parse", "HEAD"), sourceFingerprint: sourceFingerprint(partnerRoot) }
       : { status: "NOT_CHECKED", reason: "No explicit Plugins path" } };
 }
 

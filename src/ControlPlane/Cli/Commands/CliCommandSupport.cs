@@ -109,8 +109,7 @@ internal static partial class CliCommandRouter
             .OfType<JsonObject>()
             .Select(item => new CliTarget(
                 item["id"]?.ToString() ?? "",
-                item["name"]?.ToString() ?? "",
-                item))
+                item["name"]?.ToString() ?? ""))
             .Where(item => item.Id.Length > 0)
             .ToList();
         TargetResolution<CliTarget> resolution = TargetResolver.Resolve(candidates, reference, item => item.Id, item => item.Name);
@@ -295,25 +294,6 @@ internal static partial class CliCommandRouter
         return false;
     }
 
-    private static bool TryRequireOption(CliArguments args, string name, string label, out string value, out int error, bool allowEmpty)
-    {
-        value = "";
-        if (!args.TryGet(name, out string? raw) || raw is null || (!allowEmpty && string.IsNullOrWhiteSpace(raw)))
-        {
-            error = CliOutput.WriteFailure(
-                "invalid_arguments",
-                CliText.Get(
-                    "error.missing_option",
-                    "缺少 --{name}（{label}）",
-                    ("name", name),
-                    ("label", CliText.Label(label))));
-            return false;
-        }
-        value = raw;
-        error = 0;
-        return true;
-    }
-
     private static string? Positional(CliArguments args, int index)
     {
         return args.Positionals.Count > index ? args.Positionals[index] : null;
@@ -361,6 +341,26 @@ internal static partial class CliCommandRouter
         string usage = CliText.Get(
             "help.usage",
             "用法：NexusPipeline.exe <命令> [子命令] [参数]\n\n基础：status、doctor（含 export）\n资源：script、user、queue、run、history、settings、plugin（含 store/user-settings）、update、system-action\n\n机器接口：所有正式命令支持 --json；复杂对象使用 --file <json|->，--file - 从 stdin 读取。\n目标解析：ID 精确优先；名称唯一匹配；同名返回 ambiguous_target。\n进程入口：manage、service、web、restart、register、unregister、apply-update。");
+        usage += "\n\n补充命令 / Additional commands:\n"
+            + "  script probe --plugin <id> --root <path> [--file <inputs.json|->]\n"
+            + "  script edit-sessions | type-icon <typeId> --output <new-file>\n"
+            + "  user task-summaries | badges\n"
+            + "  user binding reorder <user> --ids <script-ids>\n"
+            + "  user binding task-plan|config-status|repair-preview <user> <script>\n"
+            + "  user binding repair <user> <script> --file <token.json|->\n"
+            + "  provider-config list|get <operationId>|start --file <request.json|->|cancel <operationId>\n"
+            + "  dashboard cards|get|update --etag <etag> --file <layout.json|->\n"
+            + "  run tasks <runId> | preview <runId> --plugin <id> --output <new-file>\n"
+            + "  history summary|dates|users|list [--from YYYY-MM-DD --to YYYY-MM-DD] [--date YYYY-MM-DD] [--days N] [--script id --queue id --user-key key --status status]\n"
+            + "  history image <recordId> --attempt <n> --screenshot <id> --output <new-file>\n"
+            + "  settings access-token\n"
+            + "  plugin get <id> | store get <id> | store update-all | frontend\n"
+            + "  plugin ui query --file <request.json|->\n"
+            + "  plugin ui save <plugin> <contribution> --file <request.json|->\n"
+            + "  plugin ui action <plugin> <contribution> <action> --file <request.json|->\n"
+            + "  plugin request <plugin> <GET|POST|PUT|PATCH|DELETE> <relative-path> [--file <json|->] [--output <new-file>] [--binary <file> --content-type <mime>] [--session-file <json>]\n"
+            + "  client-session create|get|revoke [--session-file <json>]\n"
+            + "  limits | fs browse [--path <path>] | native-dialog --file <request.json|->\n";
         if (CliOutput.MachineMode)
         {
             CliOutput.WriteSuccess(new JsonObject { ["usage"] = usage });
@@ -371,6 +371,6 @@ internal static partial class CliCommandRouter
         return 0;
     }
 
-    private sealed record CliTarget(string Id, string Name, JsonObject Data);
+    private sealed record CliTarget(string Id, string Name);
 
 }

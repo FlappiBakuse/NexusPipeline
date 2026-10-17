@@ -1,14 +1,16 @@
 # 配置编辑与交换
 
+本页维护用户快照、编辑与运行交换的事务边界；中断现场的恢复资格见[恢复专题](recovery.md)，脚本字段与修复调用见[数据化契约](../reference/plugin-api/data-specialized.md)和[任务协议](../reference/plugin-api/task-protocol.md)。
+
 ## 配置会话边界
 
-
+Configuration 拥有快照与交换事务，执行协调器和配置编辑用例通过会话进入。运行与编辑共享 ScriptConfigGate；先冻结账号、路径、形态和归属，再写入恢复标记，最后操作现场。只有提交成功才能发布快照或绑定；取消、失败与恢复不能采用另一账号的配置。
 
 ## 运行时目录与快照
 
-```
+```text
 data/{脚本Id}/{UserId}/
-├── store/            唯一权威用户配置快照（可重建）
+├── store/            唯一权威用户配置快照（持久用户数据，不作为缓存清理）
 ├── store-meta.json   快照归属元数据（schema/generation、配置定位/形态与 profile 指纹）
 ├── .session          会话主标记（崩溃恢复用）
 ├── .session.bak      会话冗余标记（主标记损坏时使用）
@@ -24,21 +26,11 @@ data/{脚本Id}/{UserId}/
 
 通用判断脚本属于宿主配置资产，路径为 `config/judge-scripts/<scriptId>.js|py`。源码通过临时文件原子替换；脚本实例删除、语言切换和未引用资产会进入 `orphaned/` 隔离目录。专项判断脚本保留在插件目录，由 `PluginType + RootPath` 解析当前 profile。
 
-运行期截图保存在内存中的 `RunScreenshotStore`；每次 Attempt 独立保留最多 8 张，超出后按 FIFO 淘汰。PC 游戏目标在运行期间由宿主以约 1 秒间隔维护一张最近有效的原分辨率 JPEG 帧，缓存最多保留 2 秒且只属于当前 Attempt。截图请求先尝试当前游戏窗口；窗口已消失或当前进程句柄不可用时，若最近帧仍在有效期内则直接使用该帧。缓存只存在内存中，运行结束释放，不增加关闭游戏前的等待或抢拍阶段。运行收尾时，当前各 Attempt 保留的截图与 JSON、Attempt 日志一起写入独立运行目录：
-
-```text
-history/YYYY-MM-DD/<用户昵称>/<脚本实例名称>-<HH-mm-ss>/
-├── HH-mm-ss.json
-├── HH-mm-ss-1.log
-├── HH-mm-ss-1-s1.jpg
-└── HH-mm-ss-2-s1.jpg
-```
+运行期截图与日志由执行域管理，落盘布局见[历史与持久化](persistence-history.md#历史与日志落盘)。
 
 `NexusUser.Id` 是配置数据目录、运行期配置交换和恢复扫描的唯一存储键；`NexusUser.Name` 用于展示和当前用户查找。配置交换会话使用当前全局用户绑定的 ID 目录，磁盘 `.session` 的 `UserId` 字段记录会话所属用户。
 
-附加配置路径使用冻结的路径与文件/目录形态参与会话；宿主在修改前写入 manifest，并以 stage、backup、commit 事务完成快照交换。准备失败、启动中断或收尾失败时按 manifest 恢复，无法确认归属的现场保留并告警。历史详情中的受保护图片由前端通过带认证的 Blob 请求加载，Object URL 随弹窗关闭释放。
-
-
+附加配置路径使用冻结的路径与文件/目录形态参与会话；宿主在修改前写入 manifest，并以 stage、backup、commit 事务完成快照交换。准备失败、启动中断或收尾失败时按 manifest 恢复，无法确认归属的现场保留并告警。
 
 ## 运行前后交换与编辑
 
@@ -67,16 +59,12 @@ flowchart LR
 
 配置路径的准备步骤按声明顺序执行；任一路径失败时，宿主逆序还原本次已准备路径并阻断运行，避免主配置在附加配置不完整时启动。运行前写入的会话标记同时覆盖主配置与附加配置现场。
 
-
-
 ## 失败尝试的配置替换
 
 - 判断脚本返回 `failed` + `replaceConfigs`（相对 script 目录路径）时：宿主把 script 目录内对应文件复制覆盖到 config 对应位置；替换在**尝试收尾、杀进程确认退出后应用**，避免进程仍持有配置文件时出现文件占用或半写窗口。**首次替换前**备份原文件到 swap-backup（`.meta` 记录 configPath 与新增文件清单）。
 - config 为单文件时，replaceConfigs 项必须等于该文件名（忽略大小写）才允许替换。
 - 本次尝试失败后，进程确认退出即可直接复用当前活动 config；`replaceConfigs` 在下一次尝试开始前继续应用。
 - 运行结束从 swap-backup 还原全部被替换文件、删除替换期间新增的文件、清空 script 目录（有用户时配置交换亦还原，备份为双保险）。
-
-
 
 ## 运行结果同步到快照
 
@@ -89,11 +77,11 @@ flowchart LR
 | ① 首次检测 | 运行开始 `ScaledSeconds(15)` 后主监控循环内**一次性**同步，`attempt.Number==1` 才执行 | 捕获脚本启动后自行更新的任务配置；**关/开模式共有**；并入主循环避免与收尾还原竞态；前置稳定性双采样（两次采样不一致 = 脚本仍在写 → 跳过，等待下次运行） |
 | ② 收尾同步 | 每次运行收尾（成功/失败/达最大次数/**cancelled**/总超时）在 finally 中执行 | 仅 `AutoUpdateConfig=true`；config 此刻为脚本最终态；在**插队还原与配置交换还原之前**执行 |
 
-**同步语义**（`UserConfigManager.SyncConfigToStore` → `ConfigSwapSession`，`WithSwapLock` 内）：
+**同步语义**（`ConfigRunSession` → `ConfigSwapSession.SyncConfigToStore`，`WithSwapLock` 内）：
 
 - **增量事务**：先扫描 config 与 store 建立 O(N) 差异清单，只把新增/变更文件写入 `stage/`，把将被替换/删除的旧文件写入 `rollback/`，再写入 manifest；逐文件提交后写 `commit.json`，最后更新 generation 元数据。未变化文件始终保留在原 store 中。
 - **插队文件（swap-backup/.meta 清单内）**：有还原描述（`script/config-restore.json`）时**先还原任务启停为初始值再写入**（初始启停 + 运行后计数/其他字段，供下次运行延续）；无还原描述时从旧 store 保留原文件，不写入插队编排产物。
-- **还原描述契约**（专项判断脚本首次触发时写入，跨尝试只写一次，随 `CleanupScriptArea` 清空；宿主仅执行不解析插件语义）：`{"files":[{"file":"相对config路径","toggles":[{"type":"array","path":"instances[id=main].tasks","keyField":"id","enabledField":"enabled","initial":{...}}|{"type":"map","path":"TaskEnabledList","initial":{...}}|{"type":"boolArray","path":"TASK_ORDER_GROUP.ALL_PIPELINES[0].TASK_ONOFF","initial":[...]}]}]}`——array 按 keyField 匹配 initial 设 enabledField（**未覆盖元素不动**）、map 逐键设布尔（**未覆盖键不动**）、boolArray 按下标还原布尔数组（短于 initial 视为失败）；路径 DSL 支持 `标识符[下标].标识符` 与 `标识符[key=value].标识符`。契约全文见 [Plugin API 数据化契约](../reference/plugin-api/data-specialized.md) 的「配置还原描述」。
+- **还原描述**：宿主执行插件提供的启停还原描述，不推断插件业务；字段、路径 DSL 和未覆盖项语义统一见[配置还原契约](../reference/plugin-api/data-specialized.md#配置还原描述config-restorejson)。
 
 **守护机制**（防止坏态写入并污染快照）：
 
@@ -104,14 +92,13 @@ flowchart LR
 
 **与既有机制的关系**：收尾顺序固定为「自动更新同步 → 插队还原（swap-backup → config）→ 配置交换还原（original → config）」——同步读的是脚本最终态，插队/交换还原在同步之后把 config 还原为运行前现场；store 则保留同步后的「启停还原 + 计数延续」内容供下次运行。
 
-
 ## 框架变更后的重新配置
 
 专项插件在 manifest 中声明 `configurationRevision` 标识破坏性配置变化。此标识独立于插件版本，普通升级保持不变。脚本声明保存已确认的修订；当前修订不同则在脚本实例显示“需重新设置”，执行协调器在启动进程之前阻断。用户有效保存脚本设置后确认当前修订，尚未保存本用户快照仍禁止运行。
 
 新快照建立前禁止自动采用原生目录运行，用户通过“编辑配置”选择稳定 MFA 实例并保存。脚本实例可以先创建，用户级实例选择留在配置编辑阶段；不会按当前页面绑定。用户选择首次“复用配置”后，只有一个候选时自动提交该稳定 ID；多个候选由用户选择，候选变化拒绝后不无限重试，绑定仍仅在保存成功时提交。配置预览只显示启用任务，不显示待执行状态；“重新检查”统一刷新发现与准入。
 
-配置契约变更要求人工重建；旧快照和旧恢复 journal 原字节保留并阻断相关写入，不提供自动迁移或版本重置。配置编辑及重试继续使用原有 CAS、journal 和账号隔离机制。
+配置契约变更要求人工重建；旧快照和旧恢复 journal 原字节保留并阻断相关写入，不猜测跨配置契约的字段转换或重置版本。配置编辑及重试继续使用原有 CAS、journal 和账号隔离机制。
 
 验证入口为 `ConfigurationRevisionTests`、`ConfigContractTests`、`ConfigStoreMetadataTests`、`ConfigRecoveryIsolationTests` 和 TaskProtocolTests account-isolation；真实游戏运行与原生进程交接不由这些隔离测试推定。
 
@@ -125,6 +112,6 @@ flowchart LR
 
 任务计划预览每次重新读取快照并生成新的检查结果；与历史运行的任务签名不同，不代表本次检查过期。页面闲置不按时间标记过期；配置或绑定变化后刷新，运行前仍重新准入。
 
-MaaStellaSora 通过插件 configEditor 在配置编辑准备阶段设置已交换 appsettings.json 的一次性 NoAutoStart 标志，避免打开 MFA 编辑界面触发自动运行；其他字段保留，现役编辑事务负责取消与原字节恢复。正常执行不调用此编辑准备脚本。0.2.0 编辑会话完成时，在进程确认退出后、提交快照前调用冻结 editor 的 config-edit-commit 阶段，仍只允许附加工作副本写入；失败保留会话，取消不调用。MFA 提交源码清除一次性 NoAutoStart，避免提前关闭编辑器遗留禁止启动标志，实例启动路径与操作保持用户设置。
+项目特有的编辑准备与提交设置由插件 editor 负责，见[配置编辑作者指南](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/docs/author/config-editor.md)。Host 负责冻结 editor、限制写入范围和提交事务；准备失败回滚，提交失败保留会话，取消不调用提交阶段。
 
-0.2.0 修复策略由当前冻结的 configEditor 以 config-repair 调用返回 selector/value；该调用仅提供 input、当前用户快照只读 readConfig 与 proposeRepair，不开放文件、进程或网络。Host 校验字段和 MXU 当前实例归属，绑定 editor 内容到令牌并使用现役 CAS、备份和 journal。BAAH 的附加软件快照可将缺失/false 的 SAVE_LOG_TO_FILE 修复为 true。
+修复调用的字段、沙箱与令牌绑定见[任务协议](../reference/plugin-api/task-protocol.md#配置修复)；本专题维护配置交换和恢复事务。

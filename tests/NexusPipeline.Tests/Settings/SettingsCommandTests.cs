@@ -82,6 +82,29 @@ public sealed class SettingsCommandTests
             Assert.False(loaded.AllowRemoteAccess);
             Assert.True(NexusPipeline.Platform.Security.SecretStore.TryDecrypt(loaded.AccessToken, out string? secondToken));
             Assert.Equal("owned-remote-token", secondToken);
+            (string Key, Func<AppSettings, string> Read)[] secrets =
+            [
+                ("webhookUrl", settings => settings.WebhookUrl),
+                ("webhookSecret", settings => settings.WebhookSecret),
+                ("smtpPassword", settings => settings.SmtpPassword),
+                ("proxyPassword", settings => settings.ProxyPassword),
+                ("accessToken", settings => settings.AccessToken),
+                ("feishuAppSecret", settings => settings.FeishuAppSecret),
+                ("slackBotToken", settings => settings.SlackBotToken),
+            ];
+            foreach (var (key, read) in secrets)
+            {
+                string value = "synthetic-" + key;
+                Assert.True(command.Update(new JsonObject { ["secretKey"] = key, ["secretValue"] = value }).Success);
+                string encrypted = read(AppSettingsStore.Load(ConfigLoadMode.ReadOnly));
+                Assert.StartsWith("enc:", encrypted);
+                Assert.True(NexusPipeline.Platform.Security.SecretStore.TryDecrypt(encrypted, out string? decrypted));
+                Assert.Equal(value, decrypted);
+                Assert.True(command.Update(new JsonObject { ["secretKey"] = key.ToUpperInvariant(), ["secretValue"] = "ignored" }).Success);
+                Assert.Equal(encrypted, read(state.Current));
+                Assert.True(command.Update(new JsonObject { ["secretKey"] = key, ["secretValue"] = "  " }).Success);
+                Assert.Equal("", read(AppSettingsStore.Load(ConfigLoadMode.ReadOnly)));
+            }
         }
         finally
         {

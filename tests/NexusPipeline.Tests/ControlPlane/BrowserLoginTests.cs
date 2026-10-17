@@ -9,6 +9,81 @@ namespace NexusPipeline.Tests.ControlPlane;
 
 public sealed class BrowserLoginTests
 {
+    [Fact]
+    public async Task SweepAndDisposeRetireOperationsOnlyAfterTerminalWaitersFinish()
+    {
+        foreach (bool dispose in new[] { false, true })
+        {
+            var clock = new BrowserClock();
+            using var service = new BrowserLoginService(clock);
+            using var lifetime = new CancellationTokenSource();
+            var client = new PluginClientSessionContext("host", "client", "desktop", true) { Lifetime = lifetime.Token };
+            var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            int terminals = 0;
+            using var registration = service.Register("owner", Flow(), Complete, async (_, _, _) =>
+            { Interlocked.Increment(ref terminals); entered.TrySetResult(); await release.Task; }, _ => { });
+            string id = Begin(service, client);
+            var cancelling = service.CancelAsync(client, id);
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            try
+            {
+                if (dispose) service.Dispose();
+                else
+                {
+                    clock.Advance(TimeSpan.FromMinutes(21));
+                    var deadline = DateTime.UtcNow.AddSeconds(8);
+                    while (DateTime.UtcNow < deadline)
+                    {
+                        try { service.Status(client, id); }
+                        catch (InvalidOperationException) { break; }
+                        await Task.Delay(20);
+                    }
+                }
+                Assert.Throws<InvalidOperationException>(() => service.Status(client, id));
+                Assert.False(cancelling.IsCompleted);
+                lifetime.Cancel();
+            }
+            finally { release.TrySetResult(); }
+            await cancelling.WaitAsync(TimeSpan.FromSeconds(3));
+            Assert.Equal(1, terminals);
+            lifetime.Cancel();
+        }
+    }
+
+    private sealed class BrowserClock : TimeProvider
+    {
+        private long _ticks;
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+        public override long GetTimestamp() => Interlocked.Read(ref _ticks);
+        public override DateTimeOffset GetUtcNow() => DateTimeOffset.UnixEpoch.AddTicks(GetTimestamp());
+        internal void Advance(TimeSpan span) => Interlocked.Add(ref _ticks, span.Ticks);
+    }
+
+    [Fact]
+    public void DisposedCancelledOperationsDoNotRemainRootedByLiveClientLifetime()
+    {
+        using var lifetime = new CancellationTokenSource();
+        var client = new PluginClientSessionContext("host", "client", "desktop", true) { Lifetime = lifetime.Token };
+        var reference = CreateDisposedCancelledService(client);
+        for (int count = 0; count < 3 && reference.IsAlive; count++)
+        {
+            GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();
+        }
+        Assert.False(reference.IsAlive);
+        Assert.False(lifetime.IsCancellationRequested);
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static WeakReference CreateDisposedCancelledService(PluginClientSessionContext client)
+    {
+        var service = new BrowserLoginService();
+        using var registration = service.Register("owner", Flow(), Complete, (_, _, _) => ValueTask.CompletedTask, _ => { });
+        service.CancelAsync(client, Begin(service, client)).GetAwaiter().GetResult();
+        service.Dispose();
+        return new WeakReference(service);
+    }
+
     private static PluginBrowserLoginFlow Flow(bool ready = true) => new("example", "Example", "1", "https://example.com/login",
         ["https://example.com"], [], [new(".example.com", "/", "session")], [], ready);
     private static PluginBrowserCapture Capture() => new([new(".example.com", "/", "session", "private-cookie")], [], DateTimeOffset.UtcNow);

@@ -1,0 +1,31 @@
+{
+  "backend.scheduling": {
+    "scenarioIds": [
+      "host.backend.scheduling"
+    ],
+    "filter": "FullyQualifiedName~NexusPipeline.Tests.Scheduling.",
+    "caseIds": [
+      "NexusPipeline.Tests.Scheduling.SchedulerTests.AutoUpdateBlocker_IgnoresScheduledOccurrenceAfterHorizon",
+      "NexusPipeline.Tests.Scheduling.SchedulerTests.AutoUpdateBlocker_IgnoresScheduledOccurrenceBeforeCurrentMinuteDespiteStaleWatermark",
+      "NexusPipeline.Tests.Scheduling.SchedulerTests.AutoUpdateBlocker_IncludesOccurrenceAtFiveMinuteBoundary",
+      "NexusPipeline.Tests.Scheduling.SchedulerTests.AutoUpdateBlocker_StopsForStartupQueueBeforeFirstTick",
+      "NexusPipeline.Tests.Scheduling.SchedulerTests.CorruptStateBlocksAutomaticDispatchAndPreservesEvidenceUntilRepaired",
+      "NexusPipeline.Tests.Scheduling.SchedulerTests.ScheduledTrigger_DoesNotBackfillMissedOccurrence",
+      "NexusPipeline.Tests.Scheduling.SchedulerTests.ScheduledTrigger_DoesNotBackfillOccurrenceAfterRestartWithStaleWatermark",
+      "NexusPipeline.Tests.Scheduling.SchedulerTests.ScheduledTrigger_DurableWatermarkPreventsCompletedMinuteReplay",
+      "NexusPipeline.Tests.Scheduling.SchedulerTests.StartupTrigger_RemainsPendingAfterTransientAdmissionConflict",
+      "NexusPipeline.Tests.Scheduling.SchedulerTests.StopDrainsCurrentTickBeforeRestartAndCheckpoint"
+    ],
+    "boundaries": {
+      "real": [
+        "production C# rules, file transactions, coordinator and provider runner"
+      ],
+      "substituted": [
+        "external provider worker and dependency ports"
+      ],
+      "notProven": [
+        "browser/CLI/MCP/store-download/restart/scheduler E2E"
+      ]
+    }
+  }
+}

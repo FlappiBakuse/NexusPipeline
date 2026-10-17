@@ -1,5 +1,7 @@
 # 通知与可观测性
 
+Notifications 负责运行结果分发，Diagnostics 负责只读诊断；网络出口由 Platform 提供。各服务不得把通知或诊断失败改写为业务成功。
+
 ## 通知分发
 
 ```mermaid
@@ -18,8 +20,6 @@ flowchart LR
 - 判断脚本返回的 `notifyText` 替换脚本级通知正文（`CustomNotifyText`，不落盘）；`notifyScreenshotId` 选择最终 Attempt 的脚本级通知附图，单个 Attempt 的截图池最多 8 张且 FIFO 淘汰；队列级汇总不使用运行截图。
 - 多通道并存（内置 Webhook/SMTP 独立开关并行），单通道异常隔离不阻塞；密钥 DPAPI 加密（`enc:` 前缀）存 settings.json。
 - Webhook 截图由全局开关控制；Discord 支持 multipart 附件，企业微信支持图片消息，飞书和 Slack 使用各自的最小应用级上传凭据，Generic 通过模板图片占位符接入。SMTP 截图作为 JPEG MIME 附件发送。
-
-
 
 ## 宿主代理设置与网络边界
 

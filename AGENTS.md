@@ -14,9 +14,9 @@ NexusPipeline（枢链）是 Windows 本地自动化脚本管家：.NET 10/C# Wi
 | 模块、约束与代码定位 | `docs/architecture/README.md`、`docs/map.json` |
 | 环境、构建、发布 | `docs/development/README.md` |
 | 测试政策与完整命令 | `docs/testing/README.md` → `docs/testing/commands.md` |
-| Web/CLI/MCP 的能力与状态 | `docs/CONTROL_PLANE.md` |
+| Web/CLI/MCP 的能力与状态 | `docs/reference/control-plane.md` |
 | Plugin SDK、manifest、Frontend API | `docs/reference/plugin-api/README.md` |
-| 当前未完成问题 | `docs/STATUS.md` |
+| 当前未完成问题 | `docs/status.md` |
 | 已发布历史 | `CHANGELOG.md` |
 
 涉及 Plugin API、manifest、专项能力、前端桥接或官方插件装配时，同时检查官方插件仓库相应文件。联调检出路径通过测试入口参数/环境变量显式提供；缺少联调依赖时记录具体缺失，继续不依赖它的工作，不伪造契约通过。
@@ -90,3 +90,5 @@ README 描述当前产品，架构文档描述现役结构，TESTING 描述实�
 本机未提交树验收使用 `tools/local_acceptance.py build`，要求外部独占目录并保全原 Git index/ref。详细输入、产物和发布边界见 `docs/development/local-acceptance.md`。专用秘密读取仍须正常鉴权、脱敏普通 DTO 与 no-store；明文不进入日志、诊断和公共状态。
 
 前端设计专项仅在仓外本地执行，覆盖全部宿主页与官方插件页面；语义卡片最多三层，第四层违规，深数据不截断。真实浏览器专项为本机验收必要条件，不加入 PR CI 或核心功能门禁，不提交专项脚本、截图或报告。公共规范与必要功能回归按产品代码维护。
+
+文档名称、职责、格式、权威来源与验证遵循[文档维护规范](docs/development/documentation.md)。

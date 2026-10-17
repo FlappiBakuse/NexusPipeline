@@ -1,0 +1,142 @@
+[
+  {
+    "id": "testing.index",
+    "path": "testing/README.md",
+    "summary": "测试层级、职责与入口总览",
+    "topics": [
+      "测试",
+      "Unit",
+      "System Smoke",
+      "UI Smoke"
+    ],
+    "aliases": [
+      "测试入口",
+      "测试分层"
+    ],
+    "codePaths": [
+      "tests/run.mjs",
+      "tools/check-doc-links.mjs"
+    ],
+    "authorityFor": [
+      "testing-navigation"
+    ],
+    "status": "current",
+    "validationPaths": [
+      "tools/check-doc-links.mjs",
+      "tests/policy.json"
+    ]
+  },
+  {
+    "id": "testing.commands",
+    "path": "testing/commands.md",
+    "summary": "smoke、integration 与 release 三个入口命令",
+    "topics": [
+      "命令",
+      "门禁",
+      "构建",
+      "回归"
+    ],
+    "aliases": [
+      "测试命令",
+      "质量门禁"
+    ],
+    "codePaths": [
+      "tests/run.mjs",
+      ".github/workflows/ci.yml",
+      "tools/local-work.mjs",
+      "tests/support/workspace.mjs",
+      "tests/support/local-resources.mjs",
+      "tests/support/npm-inputs.mjs",
+      "tests/support/prepared-artifact.mjs"
+    ],
+    "authorityFor": [
+      "test-commands"
+    ],
+    "status": "current",
+    "validationPaths": [
+      "tools/check-doc-links.mjs",
+      "tests/policy.json"
+    ]
+  },
+  {
+    "id": "testing.domains",
+    "path": "testing/domains.md",
+    "summary": "CI 作业、候选校验与测试清理边界",
+    "topics": [
+      "CI",
+      "候选",
+      "隔离",
+      "清理"
+    ],
+    "aliases": [
+      "CI 清理",
+      "测试隔离"
+    ],
+    "codePaths": [
+      ".github/workflows/ci.yml",
+      "tests/run.mjs"
+    ],
+    "authorityFor": [
+      "test-domain-selection"
+    ],
+    "status": "current",
+    "validationPaths": [
+      "tools/check-doc-links.mjs",
+      "tests/policy.json"
+    ]
+  },
+  {
+    "id": "testing.policy",
+    "path": "testing/policy.md",
+    "summary": "最低有效测试层级、UI Smoke 预算与行为断言政策",
+    "topics": [
+      "测试政策",
+      "UI Smoke",
+      "断言",
+      "覆盖"
+    ],
+    "aliases": [
+      "测试归属",
+      "测试治理"
+    ],
+    "codePaths": [
+      "AGENTS.md"
+    ],
+    "authorityFor": [
+      "test-policy"
+    ],
+    "status": "current",
+    "validationPaths": [
+      "tools/check-doc-links.mjs",
+      "tests/policy.json"
+    ]
+  },
+  {
+    "id": "testing.fixtures",
+    "path": "testing/fixtures.md",
+    "summary": "当前格式、恢复协议与测试夹具边界",
+    "topics": [
+      "夹具",
+      "当前格式",
+      "恢复",
+      "故障注入"
+    ],
+    "aliases": [
+      "测试数据",
+      "恢复契约"
+    ],
+    "codePaths": [
+      "tests/fixtures",
+      "src/Modules/Configuration",
+      "src/Modules/Plugins/Repository"
+    ],
+    "authorityFor": [
+      "current-format-fixtures"
+    ],
+    "status": "current",
+    "validationPaths": [
+      "tools/check-doc-links.mjs",
+      "tests/policy.json"
+    ]
+  }
+]

@@ -1,4 +1,3 @@
-using NexusPipeline.Host.Composition;
 namespace NexusPipeline.Modules.Execution;
 
 internal enum ExecutionAdmissionFailureCode
@@ -11,6 +10,7 @@ internal enum ExecutionAdmissionFailureCode
     ExecutionGroupClosing,
     ProcessConflict,
     HostMaintenance,
+    NoEnabledBindings,
 }
 
 internal enum AdmissionFailureDisposition
@@ -47,6 +47,7 @@ internal sealed record ExecutionAdmissionFailure(
         ExecutionAdmissionFailureCode.ExecutionGroupClosing => "execution_group_closing",
         ExecutionAdmissionFailureCode.ProcessConflict => "process_conflict",
         ExecutionAdmissionFailureCode.HostMaintenance => "host_maintenance",
+        ExecutionAdmissionFailureCode.NoEnabledBindings => "no_enabled_bindings",
         _ => "execution_admission_failed",
     };
 }

@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { takePreparedData } from "../../platform/navigation-preparation";
+import { loadUsersPage } from "./first-screen";
+const initialData = takePreparedData<Awaited<ReturnType<typeof loadUsersPage>>>("users");
 import { vNxpSurface } from "../../ui/surface";
 import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { api, isAbortError } from "../../platform/api";
@@ -20,7 +23,7 @@ import { configEditContextKey } from "./composables/configEditContext";
 import GlobalManagementModal from "./components/GlobalManagementModal.vue";
 import UserManagementModal from "./components/UserManagementModal.vue";
 import { useCountdownRefresh } from "./composables/useCountdownRefresh";
-import { listUserBadges, listUsers, listScripts, getStatus, createUser as createUserRequest, deleteUser, reorderUsers as reorderUsersRequest, uploadAvatar as uploadAvatarRequest } from "./services/usersApi";
+import { createUser as createUserRequest, deleteUser, reorderUsers as reorderUsersRequest, uploadAvatar as uploadAvatarRequest } from "./services/usersApi";
 import type { Badge, Plugin, Script, User, UserBadges } from "./utils/userTypes";
 
 const users = ref<User[]>([]);
@@ -57,7 +60,7 @@ async function refreshTaskSummaries() {
   const controller = new AbortController(); taskController = controller;
   try {
     const tasks = await api("GET", "/api/users/task-summaries", undefined, controller.signal) as TaskUserSummary[];
-    if (!disposed) taskSummaries.value = new Map(tasks.map(item => [item.userId, item]));
+    if (!disposed) taskSummaries.value = new Map(tasks.map((item: TaskUserSummary) => [item.userId, item]));
   } catch (reason) {
     if (!disposed && !isAbortError(reason)) taskSummaries.value = new Map();
   } finally {
@@ -132,20 +135,14 @@ async function load() {
   loading.value = true;
   error.value = "";
   try {
-    const [userData, scriptData, status, badgeData, tasks] = (await Promise.all([
-      listUsers(),
-      listScripts(),
-      getStatus(),
-      listUserBadges(),
-      api("GET", "/api/users/task-summaries"),
-    ])) as [User[], Script[], { plugins?: Plugin[] }, UserBadges[], TaskUserSummary[]];
+    const [userData, scriptData, status, badgeData, tasks] = await loadUsersPage();
     if (disposed) return;
     users.value = Array.isArray(userData) ? userData : [];
-    taskSummaries.value = new Map((Array.isArray(tasks) ? tasks : []).map(item => [item.userId, item]));
+    taskSummaries.value = new Map((Array.isArray(tasks) ? tasks : []).map((item: TaskUserSummary) => [item.userId, item]));
     scripts.value = Array.isArray(scriptData) ? scriptData : [];
     plugins.value = Array.isArray(status?.plugins) ? status.plugins : [];
     badgesByUser.value = new Map(
-      (Array.isArray(badgeData) ? badgeData : []).map((item) => [
+      (Array.isArray(badgeData) ? badgeData : []).map((item: UserBadges) => [
         String(item?.userId || ""),
         Array.isArray(item?.badges) ? item.badges : [],
       ]),
@@ -300,11 +297,21 @@ async function paintListSlots() {
     });
 }
 
+if (initialData) {
+  const [userData, scriptData, status, badgeData, tasks] = initialData;
+  users.value = Array.isArray(userData) ? userData : [];
+  scripts.value = Array.isArray(scriptData) ? scriptData : [];
+  plugins.value = Array.isArray(status?.plugins) ? status.plugins : [];
+  taskSummaries.value = new Map((Array.isArray(tasks) ? tasks : []).map((item: TaskUserSummary) => [item.userId, item]));
+  badgesByUser.value = new Map((Array.isArray(badgeData) ? badgeData : []).map((item: UserBadges) => [String(item?.userId || ""), Array.isArray(item?.badges) ? item.badges : []]));
+  loading.value = false;
+}
+
 onMounted(() => {
   disposed = false;
   setTopbarTitle(t("users.user_management"));
   countdownTimer = setInterval(refreshCountdowns, 1000);
-  void load();
+  if (initialData) { refreshCountdowns(); void paintListSlots(); } else void load();
   taskStream = openEventStream({
     onEvent: event => { if (event.type === "task-report-changed" || event.type === "run.status") scheduleTaskRefresh(); },
     onReady: refreshTaskSummaries,

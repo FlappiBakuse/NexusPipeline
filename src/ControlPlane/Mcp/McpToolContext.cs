@@ -1,9 +1,13 @@
 using NexusPipeline.ControlPlane.Contracts;
+using NexusPipeline.Modules.Queues.UseCases;
+using NexusPipeline.Modules.Users.Contracts;
+using NexusPipeline.Modules.Configuration.Editing;
+using NexusPipeline.Modules.Scripts.Contracts;
+using NexusPipeline.Modules.Dashboard;
 using NexusPipeline.Modules.Diagnostics;
 using NexusPipeline.Modules.Execution;
 using NexusPipeline.Modules.History;
 using NexusPipeline.Modules.Plugins;
-using NexusPipeline.Modules.Plugins.Repository;
 using NexusPipeline.Modules.Plugins.Runtime;
 using NexusPipeline.Modules.Queues.Queries;
 using NexusPipeline.Modules.Queues;
@@ -37,35 +41,35 @@ internal sealed class McpToolContext
         ExecutionDispatcher center,
         RunHistoryService history,
         PluginManager plugins,
-        PluginRepositoryService pluginRepository,
         ScriptQueries scriptQueries,
         QueueQueries queueQueries,
         UserQueries userQueries,
         ScriptCommands scriptCommands,
         UserCommands userCommands,
-        PluginUserGlobalSettingsService userGlobalSettings,
         DiagnosticsService diagnostics,
         UpdateService updateService,
         UpdateAutomationService updateAutomation,
         ExecutionExplainService executionExplain,
         HostVersionInfo hostVersion,
-        Func<bool>? requestRestart)
+        QueueCommands queueCommands,
+        ITaskQueryProjection taskQueries,
+        ConfigEditCommands configEdits,
+        IProviderConfigurationOperations providerConfigurations,
+        DashboardService dashboard)
     {
+        QueueCommands = queueCommands;
+        TaskQueries = taskQueries;
+        ConfigEdits = configEdits;
+        ProviderConfigurations = providerConfigurations;
+        Dashboard = dashboard;
         Settings = settings;
         Scheduler = scheduler;
         Center = center;
         History = history;
         Plugins = plugins;
-        PluginRepository = pluginRepository;
-        ScriptQueries = scriptQueries;
-        QueueQueries = queueQueries;
-        UserQueries = userQueries;
         ScriptCommands = scriptCommands;
         UserCommands = userCommands;
-        UserGlobalSettings = userGlobalSettings;
         Diagnostics = diagnostics;
-        UpdateService = updateService;
-        UpdateAutomation = updateAutomation;
         ExecutionExplain = executionExplain;
         HostVersion = hostVersion;
         _targetResolver = new McpTargetResolver(scriptQueries, queueQueries, userQueries);
@@ -79,8 +83,13 @@ internal sealed class McpToolContext
             updateService,
             updateAutomation,
             hostVersion);
-        RequestRestart = requestRestart;
     }
+
+    internal QueueCommands QueueCommands { get; }
+    internal ITaskQueryProjection TaskQueries { get; }
+    internal ConfigEditCommands ConfigEdits { get; }
+    internal IProviderConfigurationOperations ProviderConfigurations { get; }
+    internal DashboardService Dashboard { get; }
 
     public ISettingsProvider Settings { get; }
 
@@ -92,32 +101,15 @@ internal sealed class McpToolContext
 
     public PluginManager Plugins { get; }
 
-    public PluginRepositoryService PluginRepository { get; }
-
-    public ScriptQueries ScriptQueries { get; }
-
-    public QueueQueries QueueQueries { get; }
-
-    public UserQueries UserQueries { get; }
-
     internal ScriptCommands ScriptCommands { get; }
 
     internal UserCommands UserCommands { get; }
 
-    internal PluginUserGlobalSettingsService UserGlobalSettings { get; }
-
     public DiagnosticsService Diagnostics { get; }
-
-    public UpdateService UpdateService { get; }
-
-    public UpdateAutomationService UpdateAutomation { get; }
 
     public ExecutionExplainService ExecutionExplain { get; }
 
     internal HostVersionInfo HostVersion { get; }
-
-
-    public Func<bool>? RequestRestart { get; }
 
     public IReadOnlyList<ScriptInstance> Scripts => _targetResolver.Scripts;
 
@@ -138,11 +130,5 @@ internal sealed class McpToolContext
     public object GetDiagnostics() => Diagnostics.CreateSnapshot();
 
     public object GetUpdateStatus() => _statusQuery.BuildUpdateStatus();
-
-    public static OperationResult<T> NotFound<T>(string message) =>
-        OperationResult<T>.Failure("not_found", message, OperationErrorKind.NotFound);
-
-    public static OperationResult<T> Forbidden<T>(string code, string message) =>
-        OperationResult<T>.Failure(code, message, OperationErrorKind.Forbidden);
 
 }

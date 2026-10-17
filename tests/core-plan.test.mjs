@@ -1,3 +1,4 @@
+import { readJsonInput } from "../tools/json-parts.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -5,7 +6,7 @@ import path from "node:path";
 import { coreUnits, requiresPartner, allocateUnits } from "./core-plan.mjs";
 const root = path.resolve(import.meta.dirname, "..");
 const registry = JSON.parse(fs.readFileSync(path.join(root, "tests/gates.json")));
-const policy = JSON.parse(fs.readFileSync(path.join(root, "tests/policy.json")));
+const policy = readJsonInput(root, "tests/policy.json").value;
 
 test("all applicable obligations have exactly one predeclared native provider", () => {
   const selected = registry.gates.flatMap(gate => ["scope", "aggregate", "release"].includes(gate.kind) ? []

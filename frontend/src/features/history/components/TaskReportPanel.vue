@@ -7,7 +7,7 @@ import NxpScrollArea from "../../../ui/primitives/NxpScrollArea.vue";
 import NxpDismissibleNotice from "../../../ui/composites/NxpDismissibleNotice.vue";
 import TaskPlanItem from "./TaskPlanItem.vue";
 import { resolveTaskText } from "../utils/taskText";
-import { taskDiagnosticLabel, currentTaskReport, providerTaskReport, dailyTaskReport, taskStatusLabel } from "../utils/taskLabels";
+import { taskDiagnosticLabel, currentTaskReport, providerTaskReport, taskStatusLabel } from "../utils/taskLabels";
 import type { TaskConfigCheck, TaskDefinition, TaskPlan, TaskReport } from "../utils/taskTypes";
 const props = defineProps<{
   plan?: TaskPlan;
@@ -32,11 +32,6 @@ const noticeDismissed = ref(false);
 watch(() => [props.plan, props.stale], () => { noticeDismissed.value = false; });
 const focusTaskId = ref("");
 const businessTasks = computed(() => tasks.value.filter(task => !task.parentId && task.role === 'business' && task.countsAsUnit !== false));
-// Preview counts come from the plan; completed reports use the frozen Host summary.
-const businessTotal = computed(() => report.value?.summary?.counts.total ?? businessTasks.value.length);
-const finished = computed(() => report.value?.summary?.counts.total !== undefined
-  ? (report.value?.summary?.counts.succeeded || 0) + (dailyTaskReport(report.value) ? 0 : (report.value?.summary?.counts.skipped || 0))
-  : businessTasks.value.filter(task => ['succeeded', 'skipped'].includes(status(task.id))).length);
 const unverified = computed(() => report.value?.summary?.counts.unknown || 0);
 const activeAssessment = computed(() => report.value?.admissionBlocked?.configAssessment || plan.value?.configAssessment);
 const activeReadiness = computed(() => report.value?.admissionBlocked?.readiness || plan.value?.currentReadiness);
@@ -98,18 +93,12 @@ function configSettingHint(check: TaskConfigCheck) {
       <p v-if="stale" class="task-warning-copy">{{ t('tasks.stale') }}</p>
       <p v-if="plan.coverage !== 'complete'" class="task-warning-copy">{{ t('tasks.coverage_help') }}</p>
     </NxpDismissibleNotice>
-    <header class="task-report-header">
-      <div><h3>{{ t('tasks.title') }}</h3><p v-if="plan">{{ t(report ? 'tasks.progress' : 'tasks.enabled_count', { count: businessTotal, done: finished }) }}</p></div>
+    <header v-if="!report" class="task-report-header">
+      <div><h3>{{ t('tasks.title') }}</h3><p v-if="plan">{{ t('tasks.enabled_count', { count: businessTasks.length }) }}</p></div>
       <NxpBadge v-if="plan && layout !== 'steps'" :tone="plan.coverage === 'complete' ? 'ok' : 'muted'">{{ t(`tasks.coverage.${plan.coverage}`) }}</NxpBadge>
     </header>
     <p v-if="!plan" class="muted">{{ t('tasks.plan_unavailable') }}</p>
     <template v-else>
-      <p v-if="report?.schemaVersion === 2" class="task-footnote">{{ t('tasks.verification.historical_unrecorded') }}</p>
-      <div v-if="report?.schemaVersion === 3 && report.verification" class="task-footnote" role="status">
-        <p>{{ t(`tasks.verification.${report.verification.mode}`, { known: report.verification.knownTaskCount, opaque: report.verification.opaqueTaskCount, scopes: report.verification.opaqueScopeCount }) }}</p>
-        <p>{{ t(`tasks.completion.${report.verification.completion.status}`) }}</p>
-        <p v-if="report.verification.unknownRetainedOnRetry">{{ t('tasks.verification.retained_on_retry') }}</p>
-      </div>
       <div v-if="report?.admissionBlocked" class="task-admission-blocked" role="alert">
         <strong>{{ t('tasks.admission_blocked') }}</strong>
         <span>{{ t('tasks.admission_blocked_help') }}</span>
@@ -158,10 +147,10 @@ function configSettingHint(check: TaskConfigCheck) {
       </div>
       <p v-if="providerTaskReport(report) && report?.summary?.recovered && layout !== 'steps'" class="task-notice">{{ t('tasks.recovered') }}</p>
       <p v-if="report && unverified && report.lifecycleOutcome === 'completed'" class="task-footnote">{{ t('tasks.outcome.unverified_count', { count: unverified }) }}</p>
-      <ul v-if="diagnostics.length" class="task-plan-notes" :aria-label="t('tasks.plan_notes')">
+      <ul v-if="!report && diagnostics.length" class="task-plan-notes" :aria-label="t('tasks.plan_notes')">
         <li v-for="(item, index) in diagnostics" :key="index">
           <span v-if="diagnosticOwnerName(item.taskId)">{{ diagnosticOwnerName(item.taskId) }} · </span>
-          {{ taskDiagnosticLabel(item, report?.displaySnapshot || plan.displaySnapshot) }}
+          {{ taskDiagnosticLabel(item, plan.displaySnapshot) }}
         </li>
       </ul>
     </template>

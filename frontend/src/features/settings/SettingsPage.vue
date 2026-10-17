@@ -1,9 +1,14 @@
 <script setup lang="ts">
+import { takePreparedData } from "../../platform/navigation-preparation";
+import { loadSettingsPage } from "./first-screen";
+import { pageScrollViewportKey } from '../../platform/page-scroll';
+const initialData = takePreparedData<Awaited<ReturnType<typeof loadSettingsPage>>>("settings");
 import NxpConfirmDialog from "../../ui/composites/NxpConfirmDialog.vue";
 import { useConfirmation } from "../../ui/confirmation";
 const { message: confirmMessage, confirm, resolve: resolveConfirm } = useConfirmation();
 import {
   computed,
+  inject,
   nextTick,
   onBeforeUnmount,
   onMounted,
@@ -45,6 +50,8 @@ const loaded = ref(false);
 const loading = ref(true);
 const error = ref("");
 const openPanel = ref<string | null>("service");
+const pinnedPanel = ref<string | null>(null);
+const pluginPanelListeners = new Map<HTMLElement, EventListener>();
 const shell = useShellStore();
 const token = ref("");
 let savedToken = "";
@@ -66,6 +73,8 @@ const secretDraft = reactive<Record<string, string>>({
 });
 const saving = ref(false);
 const root = ref<HTMLElement | null>(null);
+const getPageViewport = inject(pageScrollViewportKey, () => null);
+let categorySelection = 0;
 const pluginCategories = ref<{ id: string; label: string }[]>([]);
 const panelOrder = ref<string[]>([]);
 const builtInPanels = [
@@ -109,19 +118,45 @@ function panelExpanded(id: string) {
 }
 function publishSettingsPanelState() {
   if (typeof window === "undefined") return;
+  root.value?.querySelectorAll<HTMLElement>("[data-settings-panel]").forEach(card => {
+    card.dataset.settingsPinned = String(card.dataset.settingsPanel === pinnedPanel.value);
+  });
+  for (const card of pluginPanelListeners.keys()) {
+    (card as HTMLElement & { expanded: boolean }).expanded = card.dataset.settingsPanel === openPanel.value;
+  }
   window.dispatchEvent(
     new CustomEvent(settingsPanelStateEvent, {
       detail: { panelId: openPanel.value },
     }),
   );
 }
+async function selectCategory(id: string) {
+  const selection = ++categorySelection;
+  const viewport = getPageViewport();
+  const categoryBar = root.value?.querySelector<HTMLElement>('.settings-categories');
+  const originalTop = categoryBar?.getBoundingClientRect().top;
+  const closing = openPanel.value === id && pinnedPanel.value === id;
+  pinnedPanel.value = closing ? null : id;
+  openPanel.value = closing ? null : id;
+  publishSettingsPanelState();
+  await nextTick();
+  await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+  if (disposed || selection !== categorySelection || !viewport || originalTop === undefined || !categoryBar) return;
+  const shift = categoryBar.getBoundingClientRect().top - originalTop;
+  if (Math.abs(shift) > .5) viewport.scrollTo({ top: viewport.scrollTop + shift, behavior: 'instant' });
+}
 function togglePanel(id: string) {
+  categorySelection++;
   openPanel.value = openPanel.value === id ? null : id;
+  if (!openPanel.value && pinnedPanel.value === id) pinnedPanel.value = null;
   publishSettingsPanelState();
 }
 function handleExternalSettingsPanelToggle(event: Event) {
+  categorySelection++;
   const panelId = (event as CustomEvent<{ panelId?: unknown }>).detail?.panelId;
   if (panelId !== null && typeof panelId !== "string") return;
+  if (panelId !== null && !categories.value.some(category => category.id === panelId)) return;
+  if (panelId === null && pinnedPanel.value === openPanel.value) pinnedPanel.value = null;
   openPanel.value = panelId;
   publishSettingsPanelState();
 }
@@ -448,21 +483,41 @@ function syncPluginCategories() {
   if (disposed) return;
   const ids = new Set(builtInPanels.map(([id]) => id));
   const next: { id: string; label: string }[] = [];
+  const cards = new Set<HTMLElement>();
   root.value?.querySelectorAll<HTMLElement>('[data-plugin-slot="settings.cards"] nxp-collapsible-card[data-settings-panel]').forEach(card => {
     const id = card.dataset.settingsPanel?.trim();
     const label = card.title.trim();
     if (!id || !label || ids.has(id)) return;
     ids.add(id);
+    cards.add(card);
+    if (!pluginPanelListeners.has(card)) {
+      const listener: EventListener = event => {
+        categorySelection++;
+        const expanded = (event as CustomEvent<unknown[]>).detail?.[0];
+        if (typeof expanded !== 'boolean') return;
+        openPanel.value = expanded ? card.dataset.settingsPanel! : null;
+        if (!expanded && pinnedPanel.value === card.dataset.settingsPanel) pinnedPanel.value = null;
+        publishSettingsPanelState();
+      };
+      card.addEventListener('toggle', listener);
+      pluginPanelListeners.set(card, listener);
+    }
     next.push({ id, label });
   });
+  for (const [card, listener] of pluginPanelListeners) {
+    if (cards.has(card)) continue;
+    card.removeEventListener('toggle', listener);
+    pluginPanelListeners.delete(card);
+  }
   if (JSON.stringify(next) !== JSON.stringify(pluginCategories.value)) pluginCategories.value = next;
   const order = [...new Set(Array.from(root.value?.querySelectorAll<HTMLElement>("[data-settings-panel]") || [])
     .map(card => card.dataset.settingsPanel?.trim() || "").filter(id => ids.has(id)))];
   if (JSON.stringify(order) !== JSON.stringify(panelOrder.value)) panelOrder.value = order;
   if (openPanel.value && !ids.has(openPanel.value)) {
     openPanel.value = null;
-    publishSettingsPanelState();
   }
+  if (pinnedPanel.value && !ids.has(pinnedPanel.value)) pinnedPanel.value = null;
+  publishSettingsPanelState();
 }
 
 function observePluginCategories() {
@@ -471,6 +526,14 @@ function observePluginCategories() {
   pluginCategoryObserver = new MutationObserver(syncPluginCategories);
   pluginCategoryObserver.observe(root.value, { childList: true, subtree: true, attributes: true, attributeFilter: ["title", "data-settings-panel"] });
   syncPluginCategories();
+}
+
+if (initialData) {
+  Object.assign(settings, initialData.settings || {});
+  confirmedAllowConfigRepair = initialData.settings?.allowConfigRepair === true;
+  applyRemoteAddresses(initialData);
+  loaded.value = true;
+  loading.value = false;
 }
 
 onMounted(async () => {
@@ -482,7 +545,7 @@ onMounted(async () => {
   window.addEventListener(settingsPanelToggleEvent, handleExternalSettingsPanelToggle);
   setTopbarTitle(t("shell.settings", {}, "Settings"));
   try {
-    const data = (await api("GET", "/api/settings")) as {
+    const data = (initialData || await loadSettingsPage()) as {
       settings?: Settings;
       status?: { remote?: { internalAddress?: string | null; publicAddress?: string | null; port?: number } };
     };
@@ -503,6 +566,7 @@ onMounted(async () => {
   }
 });
 onBeforeUnmount(() => {
+  categorySelection++;
   disposed = true;
   tokenRevision++;
   tokenReadController?.abort();
@@ -510,6 +574,8 @@ onBeforeUnmount(() => {
   savedToken = "";
   pluginCategoryObserver?.disconnect();
   pluginCategoryObserver = null;
+  for (const [card, listener] of pluginPanelListeners) card.removeEventListener('toggle', listener);
+  pluginPanelListeners.clear();
   unregisterDirtyGuard?.();
   unregisterDirtyGuard = null;
   window.removeEventListener(settingsPanelToggleEvent, handleExternalSettingsPanelToggle);
@@ -534,7 +600,7 @@ onBeforeUnmount(() => {
       />
       <ServiceRestartNotice :before-restart="beforeRestart" />
       <nav class="settings-categories" :aria-label="t('settings.categories')">
-        <NxpButton v-for="category in categories" :key="category.id" type="button" :aria-pressed="panelExpanded(category.id)" @click="togglePanel(category.id)">{{ category.label }}</NxpButton>
+        <NxpButton v-for="category in categories" :key="category.id" type="button" :aria-pressed="panelExpanded(category.id)" @click="selectCategory(category.id)">{{ category.label }}</NxpButton>
       </nav>
       <div class="settings-cards" data-testid="settings-cards">
         <SettingsServiceSection

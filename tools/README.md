@@ -2,6 +2,8 @@
 
 产品测试由 `node tests/run.mjs` 编排，完整命令见[测试命令](../docs/testing/commands.md)。构建入口只在仓库外的原字节隔离副本运行；本机输出、缓存、报告和候选目录通过参数及进程环境提供。
 
+## 工具入口
+
 | 入口或资源 | 输入与输出 | 调用者、平台与副作用 | 验证 |
 |---|---|---|---|
 | `NexusPipeline.Architecture/` | 当前 C# 工程 → 模块依赖与组合边界诊断 | backend 架构组；.NET 10；只读源码 | backend 核心组与架构反例 |
@@ -18,5 +20,7 @@
 | `local-work.mjs` | 命令与本机 resource root → 串行资源 reservation、原命令退出码 | 本机测试/验收包装；Node；不改变产品构建与发布标准 | `tests/support/local-resources.test.mjs` |
 | `source-hash.mjs` | 明确源码根 → 源码文件集合和指纹 | runner/候选来源；Node；只读 | runner 身份与 staging 测试 |
 | `tests/` | 上述工具的受控输入 → 原生 unittest 报告 | CI control 门禁；Python；临时数据只在外部测试根 | `node tests/run.mjs gate --id host.release-contract` |
+
+## 使用与结果解释
 
 这些目录包含命令入口、可导入模块、工程和静态资源。CLI 参数及发行阶段以当前 parser 和[发布指南](../docs/development/release.md)为准；生成候选、验证通过和实际发布分别记录。

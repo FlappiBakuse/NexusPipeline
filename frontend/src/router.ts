@@ -30,7 +30,7 @@ export function createNexusRouter(history = createWebHashHistory()) {
     routes,
     scrollBehavior: () => ({ top: 0 }),
   });
-  instance.afterEach(to => syncPluginNavActive(`#${to.fullPath}`));
+  instance.afterEach((to, _from, failure) => { if (!failure) syncPluginNavActive(`#${to.fullPath}`); });
   return instance;
 }
 

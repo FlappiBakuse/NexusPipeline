@@ -1,30 +1,42 @@
 # Managed Plugin API
 
+<!-- contract:versions -->
+| Contract | Version |
+|---|---|
+| plugin-api | 2.2 |
+| frontend-api | 1.7 |
+<!-- /contract:versions -->
+
 通用 `BrowserLogin`、可信客户端事实和浏览器生命周期见[客户端会话与网页登录](browser-login.md)。
+
+## 适用版本与包示例
 
 当前 managed 插件精确声明 Plugin API `2.2`，最低 Host `0.17.2`，并以 .NET 10 编译。SDK 包和程序集版本为 `2.0.0`。宿主在激活前检查目标框架、SDK 引用与清单；旧 API、未来 minor、旧运行时程序集和包内复制的宿主 SDK 均拒绝加载。
 
 `IPluginHostContext` 直接暴露全部现役端口。插件通过这些明确端口工作，不检查旧接口继承链。`ExecutionProviders` 的冻结计划、配置门禁、worker 与事件协议见[执行 provider](execution-provider.md)。Frontend API 独立维持 `1.7`。
 
 ```text
-plugins/GameCheckIn/
+plugins/Example/
 ├── plugin.json
-└── CheckInPlugin.dll
+├── ExamplePlugin.dll
+└── web/
+    ├── main.js
+    └── style.css
 ```
 
 ```json
 {
   "schemaVersion": 2,
-  "name": "check-in",
-  "artifactName": "GameCheckIn",
+  "name": "example",
+  "artifactName": "Example",
   "displayName": "用户脚本扩展",
   "description": "提供通用的用户级扩展设置",
   "version": "0.1.0",
   "kind": "managed-code",
   "apiVersion": "2.2",
-  "minHostVersion": "0.17.0",
-  "entryAssembly": "CheckInPlugin.dll",
-  "entryType": "CheckInPlugin.EntryPoint",
+  "minHostVersion": "0.17.2",
+  "entryAssembly": "ExamplePlugin.dll",
+  "entryType": "ExamplePlugin.EntryPoint",
   "capabilities": ["background-jobs", "ui-contributions", "frontend-module"],
   "frontend": {
     "apiVersion": "1.7",
@@ -33,6 +45,8 @@ plugins/GameCheckIn/
   }
 }
 ```
+
+## 生命周期与用户服务
 
 入口类型实现 `INexusPlugin` 的 `InitializeAsync`、`StartAsync`、`StopAsync` 生命周期；`IPluginHostContext` 提供插件日志、JSON 配置、DPAPI 密钥、宿主通知和后台任务调度。后台任务通过 `IPluginJobScheduler.Register` 注册，插件停止时统一取消，单任务异常不会穿透宿主。
 
@@ -46,17 +60,13 @@ plugins/GameCheckIn/
 
 宿主通用设置接口为 `GET /api/plugin-contributions/user-global/{userId}` 与 `PUT /api/plugin-contributions/user-global/{userId}/{pluginName}/{contributionId}`。插件未启用或贡献不存在返回 `404 contribution_not_found`，贡献处理器异常返回 `500 plugin_error`。
 
-GameCheckIn v0.3.1 使用插件自有的独立任务、任务级平台凭据和本机时区计划，不再注册用户全局签到设置或依赖用户运行事件。通知由宿主全局渠道发送，任务可以覆盖 SMTP 收件人，留空时继承宿主全局收件人。v0.3.1 使用全新的任务存储格式，不导入 v0.3.0 创建的任务数据；用户需要在“签到”页面重新创建任务并填写凭据。
-
 用户列表徽章接口为 `GET /api/plugin-contributions/user-list-badges`，一次返回全部用户的徽章快照。每个徽章由宿主投影为 `pluginName`、`pluginDisplayName`、`id`、`label`、`tone`、`title` 和 `order`；`tone` 仅允许 `muted`、`blue`、`ok`、`warn`、`bad`，无效徽章会被记录并丢弃，不影响用户列表。
 
-
-
-### 通用扩展端口
+## 通用扩展端口
 
 `IPluginHostContext` 提供 `Ui`、`ScopedData`、`WebApi` 和 `History`。这些端口只使用稳定的字符串、JSON DTO 和取消令牌，不暴露宿主 DI 容器、领域模型或 `HttpListenerContext`。
 
-#### 声明式 UI
+### 声明式 UI
 
 `context.Ui.Register(new PluginUiContribution(...))` 可向以下稳定 slot 注册 Form、Badge 或 Card：
 
@@ -85,25 +95,23 @@ shell.nav
 
 读取结果、保存值和动作返回值均经过字段名、数量、类型、长度和只读字段校验。`secret` 读取只返回 `{configured:true|false}`，保存使用 `{action:"keep"}`、`{action:"set",value:"..."}` 或 `{action:"clear"}`；`status` 字段为只读。处理器异常、超时或无效返回会隔离在对应贡献内。
 
-#### 作用域数据
+### 作用域数据
 
 `IPluginScopedDataStore` 以插件为顶级隔离边界，scope 只允许安全的 ASCII 段，数据保存于 `config/plugins/<插件名>/scopes/`。建议使用以下约定：`global`、`user/<userId>`、`script/<scriptId>`、`queue/<queueId>`、`user-script/<userId>/<scriptId>`。读写接口支持 JSON 和泛型对象，宿主拒绝绝对路径、反斜杠、`.`、`..` 及越界段。
 
 删除全局用户、脚本实例、调度队列或用户脚本绑定时，宿主会清理对应作用域文件。历史数据中的插件展示快照与插件作用域数据相互独立；卸载插件不会回写或重写历史记录。
 
-#### 插件自有 Web API
+### 插件自有 Web API
 
 插件可通过 `context.WebApi.Register(new PluginWebApiRoute("GET", "health", handler) { Access = PluginWebApiAccess.General })` 注册自己的路由。最终地址为 `/api/plugin-api/{pluginName}/health`，支持 `GET`、`POST`、`PUT`、`PATCH`、`DELETE`。handler 收到 `PluginWebApiRequest`（方法、规范化相对路由、查询字典、可选 JSON body），返回 `PluginWebApiResponse.Json(...)` 或 `PluginWebApiResponse.Empty(204)`。
 
 宿主为每次调用设置 30 秒超时，并限制 JSON 响应为 2 MiB；未知路由、无效状态码、超时、异常和无效 JSON 响应均使用 `{ "ok": false, "code": "plugin_error", "args": {} }` 形式处理。错误响应只包含稳定机器码和机器可读参数，不传递本地化句子或异常文本；前端和调用方根据自身语言资源显示文字。路由只能由注册它的插件访问，路径段拒绝空段、反斜杠及 `.`/`..`。
 
-#### 历史展示
+### 历史展示
 
 `context.History.Register(new PluginHistoryContribution(...))` 可在运行历史保存前生成纯文本展示快照。快照只允许标题、徽章和字段，单个插件贡献最多 16 KiB，全部插件单次运行最多 64 KiB；处理器最多执行 5 秒。快照写入 `RunRecord.PluginHistory`，不参与状态、尝试次数、结果和通知判定，插件卸载后仍可由历史页面展示。
 
-
-
-### 插件本地化
+## 插件本地化
 
 `IPluginHostContext.I18n` 提供插件自有资源查表、占位符替换和按当前请求语言进行的日期/时间/数字格式化。宿主只传入规范化的 `zh-CN` 或 `en-US` 请求语言，插件资源缺失时回退到 `defaultLocale`，再回退到调用方提供的 `fallback`。插件本地化资源不会复用宿主词典，也不会改变机器 ID、配置键或持久化结构。
 
@@ -121,9 +129,7 @@ managed-code 插件可以在 `plugin.json` 声明：
 
 资源文件是有限大小的扁平 JSON 对象，所有 locale 的 key 集合必须一致；资源路径必须位于插件目录的 `i18n/` 下。声明式 UI、用户列表徽章和历史展示可以用 `PluginLocalizedText(Key, Fallback)` 携带语义引用，宿主按请求语言投影展示值，历史落盘保存引用和回退文本。
 
-
-
-### 二进制资产存储
+## 二进制资产存储
 
 `IPluginHostContext.Assets` 提供按插件命名空间与逻辑 scope 隔离的二进制资产存储。宿主负责路径逃逸防护、原子写入和宿主级绝对上限；资产的业务配额、去重策略与语义由插件自行决定。
 
@@ -142,9 +148,7 @@ ValueTask<IReadOnlyList<PluginAssetInfo>> ListAsync(string scope, CancellationTo
 - 宿主级绝对上限：单资产 16 MiB、单 scope 512 个资产、单 scope 512 MiB。写入使用同目录临时文件加原子替换，失败时不留 `.part` 残留。
 - 插件应自行实现业务配额、清理策略与资产语义；卸载插件不自动删除其资产。
 
-
-
-### 二进制 Web API 传输
+## 二进制 Web API 传输
 
 插件 Web API 的请求与响应在 JSON 之外支持二进制传输。
 
@@ -154,9 +158,7 @@ ValueTask<IReadOnlyList<PluginAssetInfo>> ListAsync(string scope, CancellationTo
 - 传输上限：请求体 16 MiB、JSON 响应 2 MiB、二进制响应 16 MiB。二进制响应附带 `X-Content-Type-Options: nosniff` 与 `Cache-Control: no-store`。
 - 路由仍位于 `/api/plugin-api/{插件名}/{route}`，按 method 与完整 route 精确匹配；查询参数通过 `Query` 传递。
 
-
-
-### 模拟器支持扩展
+## 模拟器支持扩展
 
 `IPluginHostContext.EmulatorSupport` 允许 managed-code 插件注册模拟器识别 provider。注册只在该插件运行期间有效，插件停止或初始化失败时会撤销；provider 的 `Id` 使用小写 kebab-case，`Priority` 决定稳定探测顺序。
 
@@ -164,18 +166,10 @@ provider 的 `ProbeAsync(adbEndpoint, cancellationToken, timeoutSeconds)` 返回
 
 Generic ADB 与 MuMuManager 保留在宿主。雷电、夜神和 BlueStacks 的专属识别、驱动命令与实例关闭由官方可选插件 `EmulatorSupport` 提供；使用这三家模拟器的厂商专属行为前，需要安装并启用该扩展。数据化专项插件的 `emulator` capability 仍只声明脚本实例支持「安卓模拟器」启动方式，不负责注册 provider。
 
-
-
-### 通知收件人覆盖
+## 通知收件人覆盖
 
 `IPluginHostContext.Notifications` 提供通知收件人覆盖能力。插件调用 `IPluginNotificationService.SendAsync` 时，可以在 `PluginNotification.SmtpTo` 提供可选 SMTP 收件人；空值或空白值继承宿主全局 SMTP 收件人。SMTP 服务器、发件人、凭据与渠道开关仍由宿主管理，Webhook 继续使用宿主全局配置。
 
 ## 请求来源与本机交互
 
-Plugin API 2.2 只定义 `General`、`HostFilePicker`、`NativeConfigEditor` 三类访问。每条 `PluginWebApiRoute` 必须显式设置 `Access`；声明式 UI 的读取、保存和每个动作分别显式设置访问类，缺失或未知值使注册失败。`PluginWebApiRequest.ConnectionKind` 由实际传输对端确定为 `Local`、`Remote` 或 `Unknown`，不采信 Host、Origin、Referer 或转发头。General 在三种来源均可用；后两类只允许 Local，在读取参数、请求体或执行回调前拒绝 Remote/Unknown。SDK 包及程序集继续为 2.0.0，与接口 2.2 独立治理。
-
-Frontend API 1.7 的 `host.getCapabilities(signal?)` 返回冻结只读的 schema 1 对象：`connectionKind` 为 local/remote/unknown，`operations` 精确包含 general、hostFilePicker、nativeConfigEditor，每项有 allowed 与 denyReason。拒绝原因分别为 host_file_picker_requires_local、native_config_editor_requires_local、client_origin_unverified。缓存绑定同源、认证和当前 Host 实例；重连或重启使旧读取失效。它用于呈现界面，后端每次操作仍重新判断来源。
-
-原生文件选择只能禁用“浏览”按钮，路径输入仍可编辑并保存。普通账号、脚本、队列、计划、运行、历史、插件安装与诊断是 General；诊断 ZIP 写入宿主受控 staging，返回明确路径。脚本文件读取只在已批准脚本根、配置位置及游戏程序父目录范围内，拒绝链接与路径穿越，不枚举宿主磁盘。
-
-路由处理器接收 `RouteSurface`：`element`、`routeToken`、`segments`、`signal`。必须在 element 内挂载，返回清理函数（或最终返回函数的 Promise）；路由离开、替换或插件停止时先中止 signal，再执行清理。不得查询宿主私有页面容器。公开 18 个 slot 与 39 个元素保持既有名称。
+Web API 与声明式 UI 的访问类别、来源判定及能力查询见[访问契约](access.md)。浏览器路由 surface 与清理见[Frontend API](frontend.md)。

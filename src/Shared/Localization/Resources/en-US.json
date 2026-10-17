@@ -614,5 +614,6 @@
   "execution.success_process_exit_only": "Run succeeded: the automation process exited normally; tasks were not individually verified.",
   "execution.success_with_partial_verification": "Run succeeded: known tasks completed; other tasks were not individually verified.",
   "execution.owned_process_nonzero": "The automation process exited with a nonzero code.",
-  "execution.unconfirmed_worker": "Normal completion of the automation process has not been confirmed."
+  "execution.unconfirmed_worker": "Normal completion of the automation process has not been confirmed.",
+  "api.error.no_enabled_bindings": "No runnable account bindings: no account is bound, or the account/script binding is disabled. Enable the binding in Accounts & Configuration and check the run plan."
 }

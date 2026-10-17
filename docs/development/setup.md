@@ -12,8 +12,6 @@
 - 正式程序以管理员身份运行，构建产物带 `requireAdministrator` 清单；本地与 CI 的功能测试统一使用 `NexusTestHost=true` 的 asInvoker Test Host，完整性等级只用于诊断，不选择或过滤测试。
 - `tests/e2e/` 已声明 Playwright 依赖；安装和运行方式见[测试命令](../testing/commands.md)。
 
-
-
 ## 从源码编译
 
 在项目根目录设置本次外部构建根与唯一 run ID，然后执行：
@@ -41,15 +39,11 @@ build.cmd
 
 网页默认地址为 `http://127.0.0.1:58731/`；端口被占用时按顺序寻找可用端口。首次运行会创建当前运行时目录并执行崩溃恢复扫描。
 
-
-
 ## 测试入口
 
-测试分层与归属见[测试索引](../testing/README.md)和[测试政策](../testing/policy.md)，三个入口命令、隔离 Test Host 与运行输出见[测试命令](../testing/commands.md)。统一入口为 `node tests\run.mjs smoke`、`integration` 或 `release`：本地改动先跑 `smoke`；涉及进程、端口、解释器、模拟器、插件或更新事务时再跑 `integration`。
+先按变更选择现役核心组；测试分层与归属见[测试索引](../testing/README.md)和[测试政策](../testing/policy.md)，核心回归、日常 E2E、显式诊断、隔离 Test Host 与运行输出见[测试命令](../testing/commands.md)。
 
 GitHub PR 使用固定 `Host / 构建检查`，十分钟内按生产影响闭包编译及静态检查，不运行测试。本机按改动执行必要测试。完整候选和发布通过 `release.yml` 分别手动选择 `candidate` / `publish-only`，main push 不触发完整构建。
-
-
 
 ## 调试技巧
 
@@ -91,8 +85,6 @@ GitHub PR 使用固定 `Host / 构建检查`，十分钟内按生产影响闭包
 - `ConfigSwapSyncTests`：快照同步、还原描述和事务镜像；
 - `ProcessTreeTests`、执行准入和更新测试：进程清理、资源租约和更新状态机。
 
-
-
 ## 运行时数据
 
 | 位置 | 内容 |
@@ -110,8 +102,6 @@ GitHub PR 使用固定 `Host / 构建检查`，十分钟内按生产影响闭包
 `.nxp-update/`、`.nxp-backup/`、`.nxp-version` 和根目录 update worker 属于更新事务协议，继续留在安装根目录；它们与 `.nxp/` 当前运行状态目录职责分离。
 
 磁盘 JSON 使用 PascalCase，Web API 返回 camelCase。测试和调试应使用隔离 runtime，不能把运行时数据写入项目根目录。
-
-
 
 ## 常见故障排查
 

@@ -1,3 +1,4 @@
+import { readJsonInput } from "../tools/json-parts.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import {execFileSync} from "node:child_process";
@@ -35,7 +36,7 @@ export function validatePairCheckout(root, file, plan, partnerRoot) {
   for (const [directory, source] of [[root,own], ...(partnerRoot ? [[partnerRoot,partner]] : [])]) {
     const lock = "tests/inputs.lock.json";
     if (git(directory,"rev-parse","HEAD") !== source.testedSha || git(directory,"rev-parse","HEAD^{tree}") !== source.treeSha
-        || git(directory,"status","--porcelain") || fileDigest(path.join(directory,"tests/policy.json")) !== source.policyDigest
+        || git(directory,"status","--porcelain") || readJsonInput(directory, "tests/policy.json").digest !== source.policyDigest
         || fileDigest(path.join(directory,lock)) !== source.inputLockDigest)
       throw new Error("Pair checkout, policy or input lock differs");
   }

@@ -19,6 +19,7 @@ const props = withDefaults(defineProps<{
 
 const shell = ref<HTMLElement | null>(null);
 const viewport = ref<HTMLElement | null>(null);
+defineExpose({ getViewport: () => viewport.value });
 const metrics = reactive({
   vertical: false,
   horizontal: false,

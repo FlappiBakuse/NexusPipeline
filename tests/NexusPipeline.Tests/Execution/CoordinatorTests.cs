@@ -2,12 +2,74 @@ using Xunit;
 using NexusPipeline.Modules.Execution;
 using NexusPipeline.Modules.History;
 using NexusPipeline.Modules.Scripts;
+using System.Diagnostics;
+using NexusPipeline.Tests.Support;
 
 namespace NexusPipeline.Tests.Execution;
 
 /// <summary>执行协调核心链路：准入登记、重试预算、宿主错误记录。</summary>
 public sealed class CoordinatorTests
 {
+    [Fact]
+    public Task CancellationObserverFailureStillStopsOwnedWritersAndReleasesAttemptResources() => VerifyOwnedFaultAsync(false);
+
+    [Fact]
+    public Task StartupObserverFailureStillStopsOwnedWritersBeforeReturningFailure() => VerifyOwnedFaultAsync(true);
+
+    private static async Task VerifyOwnedFaultAsync(bool startupFailure)
+    {
+        string root = Path.Combine(Path.GetTempPath(), "nxp-attempt-cleanup-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        string executable = Path.Combine(root, "owned-script.exe");
+        File.Copy(Path.Combine(Environment.SystemDirectory, "cmd.exe"), executable);
+        var script = new ScriptInstance { Id = Guid.NewGuid().ToString("N"), Name = "cleanup fixture", MainExe = executable,
+            RootPath = root, Args = "/d /q /c \"ping.exe -n 120 127.0.0.1 >nul\"", GameMode = "pc", LaunchGame = false };
+        using var stop = new CancellationTokenSource();
+        Process? started = null;
+        var coordinator = new ExecutionCoordinator(script, "manual", "", "", null, stop.Token, null,
+            status =>
+            {
+                const string prefix = "脚本已启动（PID ";
+                if (!status.StartsWith(prefix, StringComparison.Ordinal)) return;
+                int pid = int.Parse(status[prefix.Length..].TrimEnd('）'));
+                started = Process.GetProcessById(pid);
+                if (startupFailure) throw new IOException("injected startup observer failure");
+                stop.Cancel();
+            }, null, null, new PluginAvailabilityPolicyTestsFixture.EmptyUserRepository(),
+            new PluginAvailabilityPolicyTestsFixture.EmptyEmulatorSupportProviderResolver());
+        var milestones = new HashSet<CancellationMilestone>();
+        coordinator.CancellationMilestoneChanged += (milestone, _) => { milestones.Add(milestone); throw new IOException("injected observer failure"); };
+        try
+        {
+            if (startupFailure)
+            {
+                var result = await coordinator.RunAttemptCoreAsync(new RunAttempt { Number = 1, StartTime = DateTime.Now }).WaitAsync(TimeSpan.FromSeconds(15));
+                Assert.Equal("failed", result.Status);
+            }
+            else
+            {
+                var record = await coordinator.RunAsync().WaitAsync(TimeSpan.FromSeconds(15));
+                Assert.Equal("cancelled", record.Status);
+                Assert.Contains(CancellationMilestone.Restoring, milestones);
+                Assert.Contains(CancellationMilestone.RestoreFinished, milestones);
+            }
+            Assert.NotNull(started);
+            Assert.True(started!.HasExited);
+            Assert.Null(coordinator.ProcessOwnership);
+        }
+        finally
+        {
+            if (started is not null)
+            {
+                if (!started.HasExited) { started.Kill(entireProcessTree: true); started.WaitForExit(); }
+                started.Dispose();
+            }
+            coordinator.ProcessOwnership?.Dispose();
+            coordinator.DisposeScreenshots();
+            Directory.Delete(root, true);
+        }
+    }
+
     [Fact]
     public void RegistrationGuardsAndLifecycleHistoryArePreserved()
     {

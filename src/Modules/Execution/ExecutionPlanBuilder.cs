@@ -1,9 +1,7 @@
-using NexusPipeline.ControlPlane.Http;
 using NexusPipeline.Modules.Execution.Contracts;
 using NexusPipeline.Modules.Plugins.Contracts;
 using NexusPipeline.Modules.Queues.Contracts;
 using NexusPipeline.Modules.Queues;
-using NexusPipeline.Modules.Scheduling;
 using NexusPipeline.Modules.Scripts.Contracts;
 using NexusPipeline.Modules.Scripts.Resolution;
 using NexusPipeline.Modules.Scripts.Validation;
@@ -323,6 +321,9 @@ internal sealed class ExecutionPlanBuilder
                     resolvedSpec);
             })
             .ToList();
+
+        if (!allowFailedSpec && ExecutionUserEligibility.HasNoEnabledBindings(tasks))
+            throw new ExecutionAdmissionException(ExecutionValidator.NoEnabledBindings(queue.Name));
 
         PlannedQueueTask? blocked = checkProcessConflicts
             ? tasks.FirstOrDefault(task => task.Script is not null && ExecutionValidator.IsScriptRunning(task.Script))

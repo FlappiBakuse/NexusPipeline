@@ -1,3 +1,4 @@
+import { readJsonInput } from "../tools/json-parts.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -6,7 +7,7 @@ import {coreUnits, allocateUnits} from "./core-plan.mjs";
 import {planForChanges, readRegistry} from "./scope-plan.mjs";
 const root=path.resolve(import.meta.dirname,"..");
 const {registry}=readRegistry(root);
-const policy=JSON.parse(fs.readFileSync(path.join(root,"tests/policy.json")));
+const policy=readJsonInput(root, "tests/policy.json").value;
 test("empty or unknown inputs preserve the entire applicable core",()=>{
   for(const changes of [[],[{status:"M",path:"unknown.extension"}]]) {
     const plan=planForChanges(root,changes,registry,policy);

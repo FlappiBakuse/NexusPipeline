@@ -17,7 +17,7 @@ namespace NexusPipeline.ControlPlane.Mcp;
 
 /// <summary>默认暴露的只读 MCP 工具。</summary>
 [McpServerToolType]
-internal sealed class McpReadOnlyTools
+internal sealed partial class McpReadOnlyTools
 {
     private readonly McpToolContext _context;
 
@@ -134,7 +134,8 @@ internal sealed class McpReadOnlyTools
         [Description("分页偏移，不能小于 0。")]
         int offset = 0,
         [Description("可选状态：success、failed、partial、cancelled 或 skipped。")]
-        string? status = null)
+        string? status = null,
+        [Description("可选历史用户键；保留历史中的身份，不按当前名称重新解析。 ")] string? userKey = null)
     {
         if (days < 1 || days > AppFixedLimits.HistoryRetentionDaysMax)
         {
@@ -184,7 +185,7 @@ internal sealed class McpReadOnlyTools
             DateTime.Now.AddMinutes(5),
             scriptId,
             queueId,
-            status: normalizedStatus);
+            userKey: userKey, status: normalizedStatus);
         return McpToolResult.Success(new
         {
             total = records.Count,
@@ -207,23 +208,4 @@ internal sealed class McpReadOnlyTools
     [Description("读取更新检查、下载和应用状态。")]
     public CallToolResult GetUpdateStatus() => McpToolResult.Success(_context.GetUpdateStatus());
 
-    private async Task<CallToolResult> ReadPluginStoreAsync(bool forceRefresh)
-    {
-        try
-        {
-            PluginStoreSnapshot snapshot = await _context.PluginRepository
-                .GetStoreAsync(forceRefresh)
-                .ConfigureAwait(false);
-            return snapshot.Available
-                ? McpToolResult.Success(McpViews.PluginStore(snapshot))
-                : McpToolResult.Failure(
-                    "repository_unavailable",
-                    snapshot.Error ?? "插件仓库暂不可用",
-                    messageKey: "api.error.repository_unavailable");
-        }
-        catch (Exception ex)
-        {
-            return McpToolResult.Exception(ex);
-        }
-    }
 }

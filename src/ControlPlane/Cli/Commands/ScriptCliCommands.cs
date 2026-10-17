@@ -92,7 +92,7 @@ internal static partial class CliCommandRouter
             case "probe":
             {
                 if (!EnsurePositionals(args, 2, CliText.Get("error.extra_arguments", "{usage} 不接受额外参数", ("usage", "script probe")))
-                    || !EnsureOptions(args, "plugin", "root"))
+                    || !EnsureOptions(args, "plugin", "root", "file"))
                 {
                     return CliExitCodes.For("invalid_arguments");
                 }
@@ -101,9 +101,10 @@ internal static partial class CliCommandRouter
                 {
                     return error;
                 }
+                JsonObject? inputs = null;
+                if (args.Has("file") && !TryReadJsonObject(args, out inputs, out error)) return error;
                 return ReturnApi(client.Post("/api/scripts/probe", Object(
-                    ("pluginType", plugin),
-                    ("rootPath", root))));
+                    ("pluginType", plugin), ("rootPath", root), ("inputs", inputs))));
             }
             default:
                 return CliOutput.WriteFailure(

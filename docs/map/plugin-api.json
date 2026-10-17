@@ -1,0 +1,242 @@
+[
+  {
+    "id": "plugin-api.index",
+    "path": "reference/plugin-api/README.md",
+    "summary": "Manifest、managed、Frontend 与 data-specialized 契约入口",
+    "topics": [
+      "Plugin API",
+      "manifest",
+      "Frontend API",
+      "契约"
+    ],
+    "aliases": [
+      "插件接口",
+      "插件 SDK"
+    ],
+    "codePaths": [
+      "src/NexusPipeline.Plugin.Abstractions",
+      "frontend/src/plugin-bridge"
+    ],
+    "authorityFor": [
+      "plugin-api-navigation"
+    ],
+    "status": "current",
+    "validationPaths": [
+      "tools/check-doc-links.mjs",
+      "tests/policy.json"
+    ]
+  },
+  {
+    "id": "plugin-api.manifest",
+    "path": "reference/plugin-api/manifest.md",
+    "summary": "plugin.json、store.json、资源路径、能力与发行包格式",
+    "topics": [
+      "manifest",
+      "plugin.json",
+      "store.json",
+      "发行包"
+    ],
+    "aliases": [
+      "插件清单",
+      "包格式"
+    ],
+    "codePaths": [
+      "src/Modules/Plugins",
+      "src/NexusPipeline.Plugin.Abstractions"
+    ],
+    "authorityFor": [
+      "plugin-manifest-contract"
+    ],
+    "status": "current",
+    "validationPaths": [
+      "tools/check-doc-links.mjs",
+      "tests/policy.json"
+    ]
+  },
+  {
+    "id": "plugin-api.managed",
+    "path": "reference/plugin-api/managed.md",
+    "summary": "managed-code C# 生命周期、宿主服务与当前 Plugin API",
+    "topics": [
+      "managed-code",
+      "C#",
+      "Plugin API",
+      "宿主服务"
+    ],
+    "aliases": [
+      "代码插件",
+      "Managed Plugin"
+    ],
+    "codePaths": [
+      "src/NexusPipeline.Plugin.Abstractions",
+      "src/Modules/Plugins"
+    ],
+    "authorityFor": [
+      "managed-plugin-contract"
+    ],
+    "status": "current",
+    "validationPaths": [
+      "tools/check-doc-links.mjs",
+      "tests/policy.json"
+    ]
+  },
+  {
+    "id": "plugin-api.execution-provider",
+    "path": "reference/plugin-api/execution-provider.md",
+    "summary": "独立执行 provider、冻结计划、worker IPC、启动目标与结构化结果",
+    "topics": [
+      "provider",
+      "worker",
+      "IPC",
+      "执行扩展"
+    ],
+    "aliases": [
+      "Maa worker",
+      "Plugin API"
+    ],
+    "codePaths": [
+      "src/NexusPipeline.Plugin.Abstractions/ExecutionProviderApi.cs",
+      "src/Modules/Execution/ProviderWorkerPort.cs",
+      "src/Modules/Plugins/Runtime/PluginExecutionProviderRegistry.cs"
+    ],
+    "authorityFor": [
+      "execution-provider-contract"
+    ],
+    "status": "current",
+    "validationPaths": [
+      "tools/check-doc-links.mjs",
+      "tests/policy.json"
+    ]
+  },
+  {
+    "id": "plugin-api.frontend",
+    "path": "reference/plugin-api/frontend.md",
+    "summary": "当前 Frontend API、activate、路由、slot、公共元素与清理",
+    "topics": [
+      "Frontend API",
+      "activate",
+      "slot",
+      "生命周期"
+    ],
+    "aliases": [
+      "前端插件",
+      "浏览器插件"
+    ],
+    "codePaths": [
+      "frontend/src/plugin-bridge",
+      "frontend/src/ui",
+      "frontend/src/router.ts"
+    ],
+    "authorityFor": [
+      "frontend-plugin-contract"
+    ],
+    "status": "current",
+    "validationPaths": [
+      "tools/check-doc-links.mjs",
+      "tests/policy.json"
+    ]
+  },
+  {
+    "id": "plugin-api.data-specialized",
+    "path": "reference/plugin-api/data-specialized.md",
+    "summary": "resolve、judge、只读探针、截图与 config-restore.json",
+    "topics": [
+      "data-specialized",
+      "resolve",
+      "judge",
+      "config-restore"
+    ],
+    "aliases": [
+      "数据专项插件",
+      "判断脚本"
+    ],
+    "codePaths": [
+      "src/Modules/Plugins",
+      "src/Modules/Execution/Judgement",
+      "src/Modules/Configuration"
+    ],
+    "authorityFor": [
+      "data-specialized-plugin-contract"
+    ],
+    "status": "current",
+    "validationPaths": [
+      "tools/check-doc-links.mjs",
+      "tests/policy.json"
+    ]
+  },
+  {
+    "id": "plugin-api.task-protocol",
+    "path": "reference/plugin-api/task-protocol.md",
+    "summary": "专项任务只读预览、日志事实、选择重试、恢复和历史",
+    "topics": [
+      "任务协议",
+      "taskProtocol",
+      "选择重试"
+    ],
+    "aliases": [
+      "专项任务"
+    ],
+    "codePaths": [
+      "src/Modules/Plugins/TaskProtocolManifest.cs",
+      "src/Modules/Execution/Judgement/TaskProtocolRun.cs",
+      "src/Modules/Configuration/Exchange/TaskSelectionTransaction.cs"
+    ],
+    "authorityFor": [
+      "task-protocol-host"
+    ],
+    "status": "current",
+    "validationPaths": [
+      "tools/check-doc-links.mjs",
+      "tests/policy.json"
+    ]
+  },
+  {
+    "id": "plugin-api.browser-login",
+    "path": "reference/plugin-api/browser-login.md",
+    "summary": "认证客户端、固定网页登录 flow、限定采集与清理补偿契约",
+    "topics": [
+      "网页登录",
+      "客户端会话",
+      "凭据",
+      "Electron"
+    ],
+    "aliases": [
+      "BrowserLogin",
+      "ClientSessions"
+    ],
+    "codePaths": [
+      "src/NexusPipeline.Plugin.Abstractions/BrowserLogin.cs",
+      "src/Modules/BrowserLogin",
+      "src/Modules/ClientSessions",
+      "desktop/src/main/browser-login.ts",
+      "frontend/src/platform/browser-login.ts"
+    ],
+    "authorityFor": [
+      "browser-login-contract"
+    ],
+    "status": "current",
+    "validationPaths": [
+      "tools/check-doc-links.mjs",
+      "tests/policy.json"
+    ]
+  },
+  {
+    "id": "reference.plugin-api.access",
+    "path": "reference/plugin-api/access.md",
+    "summary": "请求来源与本机交互",
+    "topics": [
+      "请求来源与本机交互"
+    ],
+    "aliases": [],
+    "codePaths": [
+      "tools/check-doc-links.mjs"
+    ],
+    "validationPaths": [
+      "tools/check-doc-links.mjs"
+    ],
+    "authorityFor": [
+      "document.reference.plugin-api.access"
+    ],
+    "status": "current"
+  }
+]

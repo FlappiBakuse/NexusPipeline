@@ -1,5 +1,9 @@
 # 自动更新
 
+更新域负责发现与资格判断，独立 Maintenance/Updater 负责应用交接，Host 提供维护准入和启动回执。本页说明这些 owner 的事务协作；字段与配方定义见[更新协议](../../contracts/updates/README.md)。
+
+## 发现与候选校验
+
 默认更新源读取 `metadata/updates/v2/channels.json` 的两槽声明。pendingTarget 只有在 Release 已公开、渠道正确、分页资产身份与协议要求有效时才成为可用版本；其尚未发布、损坏或要求未知能力时，独立校验 previousPublishedTarget 并保留待发布状态。没有上一目标时保持当前安装，不枚举历史 Release，也不推荐降级。旧 `metadata/updates/channels.json` 保留 reader 1 发现合同，不向旧 reader 投放新配方。
 
 reader 2 将 Setup、Portable、Update 三个公开资产绑定到同一次 Release 的资产 ID、尺寸和 GitHub digest。Portable 与 Update 内的 schema 1 配方冻结 included/reused/removed 文件及目标 payload schema 2 清单。当前安装的精确基线匹配且差异包更小时使用 Update；传输不可用或合法配方的基线不匹配只允许一次 Portable 回退。摘要、路径、文件集合、能力或迁移路线错误直接阻断。重建后完整核对 PE、ASAR、前端构建身份及 payload manifest；Portable 的预装插件仅核验，不覆盖已有插件目录。reader 1 的组件解析保留给明确的旧协议目标。
@@ -38,11 +42,13 @@ schema 2 手动覆盖首次启动将旧归属标为 `manual-adoption-pending`，
 
 “闲时自动更新”默认关闭，且要求定期检查开关同时启用。两项开关均开启时，启动恢复完成后先检查宿主更新（检查最多 30 秒、下载最多 5 分钟）；可下载的新版本会在宿主服务初始化前暂存并应用，已有 `Ready` 暂存也会应用，然后由更新器重新启动程序。启动检查、下载或应用失败时继续运行当前版本；同一目标失败后冷却 12 小时，人工更新操作可重置冷却。策略屏障阻断下载。运行期间仍保留原有闲时更新：更新包可先下载并校验为 `Ready`，真正应用前必须通过 `AutoUpdateIdlePolicy` 取得 `HostMaintenanceLease`，再在同一准入协调域内确认没有活动运行、编辑会话、待执行系统操作、待准入/等待中的调度 occurrence、未触发的启动队列，并且未来 5 分钟内没有 scheduled occurrence。调度器的 occurrence 注册与队列变更共享该协调域，避免检查与维护租约之间的竞态。启动恢复无法证明文件安全时停止服务启动。
 
-插件自动更新使用独立的 `PluginAutoUpdateEnabled` 开关。启动时在宿主更新恢复完成后、插件待处理事务应用及 `LoadAll` 前，检查并暂存所有符合官方 catalog、宿主兼容且有新版本的已安装插件，包括已禁用插件；手动安装的插件仅在 artifact 与 catalog 精确匹配时参与。检查最多 30 秒、下载最多 5 分钟，失败不会阻断当前插件加载。运行期每 12 小时检查并下载，在取得同一维护租约后安全重启以应用；插件启用偏好在更新后保留。
+插件自动更新使用独立的 `PluginAutoUpdateEnabled` 开关。启动时在宿主更新恢复完成后、插件待处理事务应用及 `LoadAll` 前，检查并暂存所有符合官方 catalog、宿主兼容且有新版本的已安装插件，包括已禁用插件；更新必须有可信安装归属，且 artifact、通道和当前目录身份匹配；仅名称相同的手动安装目录不得接管。检查最多 30 秒、下载最多 5 分钟，失败不会阻断当前插件加载。运行期每 12 小时检查并下载，在取得同一维护租约后安全重启以应用；插件启用偏好在更新后保留。
 
 运行期自动化等待信息通过更新状态 API 和 MCP `get_update_status` 的 additive `automation` 投影提供，包括检查开关、上次/下次自动检查、是否等待闲时和阻止原因。渠道或更新源变化会使发现结果进入 pending invalidation；正在进行或已 Ready 的事务保留给当前人工处理，自动化不会应用已失效的发现结果。
 
-更新检查发现候选版本后，`UpdateService` 通过独立策略域读取 canonical `metadata/updates/legacy-policy.json`。策略必须通过 schema、仓库标识、版本顺序、屏障 code 和迁移 URL 校验；网络失败、响应超限或策略无效时保持发现结果并禁止内置下载。对当前版本到目标版本区间内的最早屏障，状态 API 和 MCP 返回 `manualUpdateRequired`、`updateBlockCode=breaking-update`、`barrierVersion` 与可选 `migrationUrl`，下载、启动前自动应用、下次启动应用和闲时自动应用均被拒绝。策略验证成功且未命中屏障时才允许下载；策略缓存只用于带 HTTP validator 的后续验证，网络失败不会授权旧缓存。
+更新检查发现候选版本后，`UpdateEngine` 通过独立策略域读取 canonical `metadata/updates/legacy-policy.json`。策略必须通过 schema、仓库标识、版本顺序、屏障 code 和迁移 URL 校验；网络失败、响应超限或策略无效时保持发现结果并禁止内置下载。对当前版本到目标版本区间内的最早屏障，状态 API 和 MCP 返回 `manualUpdateRequired`、`updateBlockCode=breaking-update`、`barrierVersion` 与可选 `migrationUrl`，下载、启动前自动应用、下次启动应用和闲时自动应用均被拒绝。策略验证成功且未命中屏障时才允许下载；策略缓存只用于带 HTTP validator 的后续验证，网络失败不会授权旧缓存。
+
+## 载荷交换与回滚
 
 旧安装允许缺少根目录 `README.md`；已存在的说明文件仍按清单校验。备份清单固定说明文件的存在状态，回滚恢复原字节或原先缺失状态。候选包、交换后的新安装及启动回执要求完整载荷。应用请求在停止桌面前校验旧安装，worker 在宿主退出后重新核验。
 
@@ -60,11 +66,15 @@ journal 记录 staging、backup 的文件和目录精确清单、每文件长度
 
 v0.17.0 使用独立安装代际 `g0170`，不接管 `g01615` 的目录、注册表登记及管理辅助程序。`update-policy.json` 的 `0.17.0` 独立屏障要求旧版用户按新目录安装指南迁移；旧目录和配置原地保留。同路径 Setup 升级只接收当前代际、本 Windows 用户已登记且身份匹配的安装目录。文件归属清单包含 Host、桌面完整运行时及载荷清单自身；安装、更新和卸载使用同一应用边界。
 
+## 发行输入与迁移路线
+
 候选构建对同一 production staging 生成 `NexusPipeline-v<V>-win-x64-Setup.exe`、`-Portable.zip` 和 `-Update.zip`。`candidate.json` 记录这三项公开资产与两份内部构建元数据；公开发行不包含 SHA 侧文件或独立配方资产，发行说明末尾列出资产摘要表。publisher 从原成功 run 下载服务端指定 artifact，核对来源、tree、依赖与编译器锁、完整资产字节，再发布并远端逐项回读；不从发行页按 latest 重新取包。
 
 target manifest 按完整文件清单与构建身份重建 staging。未变组件仅复用当前安装中逐文件核验通过的内容；组件传输失败允许一次完整 ZIP 回退，身份、摘要或载荷错误直接失败。下载前同时计算新 staging、旧载荷备份、下载和工作空间的卷上峰值，应用仍执行同一维护租约与恢复事务。
 
 当前迁移路线为 `g0170-no-store-change-v1`，数据 store 集合为空，保留用户数据原地不变。候选的 target runner 在正常宿主、插件及桌面初始化前通过私有管道完成实际映像身份、nonce、协议、能力和路线核验。`UpdateDataMigration` 提供独立副本、跨 schema 路线、输出清单、切换、恢复和提交框架；实际业务 schema 变更须先由对应 owner 登记并验证，不从无数据变更路线推定支持其他格式。
+
+## 中断恢复与配置门禁
 
 启动恢复发现未完成的 apply journal 且 immutable backup 包含宿主 exe 时，当前启动实例不会直接覆盖自己的映像；它会拉起独立 recovery worker，等待当前实例释放单实例互斥体后还原 backup、写入 `RollbackConfirmed` 并重拉宿主，旧版本启动收尾再删除 backup 与 journal。回滚失败时现场继续保留并由下一次启动重试。
 
@@ -83,3 +93,15 @@ target manifest 按完整文件清单与构建身份重建 staging。未变组�
 手动覆盖维护暂停期间，若用户完整还原原登记版本的应用载荷，新 Setup 先复核原 DPAPI/HKCU 锚点和每个受管文件摘要，再通过可恢复的双 seal 检查点恢复旧维护状态。旧载荷未完整还原、未知 helper 或归属变化时保留暂停与现场。
 
 旧 `NexusPipeline Update.exe` 只在来源清单证明其归属时加入 schema 4 的不可变移除收据。交换后不保留旧入口，回滚恢复原字节或原缺失状态；未知同名文件不认领。官方 v0.17.3 首跳使用 Setup 或全新 Portable；需要工具迁移的配方 `manualCoverSupported=false`，同版本自动发现继续拒绝。
+
+## 安装提交与元数据补偿
+
+Setup 的文件解压完成不等于安装成功。新装须完成实例归属登记；升级须等独立 worker 返回成功，且新 Host 启动核对及事务提交完成。登记或交接异常时完成页显示“安装未完成”，即使 Inno 已结束文件安装，进程仍返回非零退出码 12，并保留诊断和恢复现场。
+
+Setup 在 Inno 写入 ARP 与原生 `unins*.exe/.dat/.msg` 之前保存当前用户实例的窄元数据检查点（DPAPI 状态、原字节备份和摘要）。写入后先观察 ARP 与原生卸载器，再启动独立 worker。未启动或确认回滚时，按检查点恢复原登记和原卸载器；事务与新程序身份均确认提交时保留新登记。提交后仅清理失败时仍按提交处理，Setup 继续返回失败供诊断。阶段不明、外部字节改动或补偿失败时保留检查点，拒绝覆盖；下次可信 Setup 会先恢复可判定的检查点。初装登记失败同样撤回 Inno 成功登记，程序与用户数据保留供诊断。测试入口及原始证据要求见[测试命令](../testing/commands.md)。
+
+登记检查点调用 Setup 内嵌的 asInvoker 辅助程序，其入口限于安装元数据和旧实例后台服务交接。覆盖安装在写入 Inno 元数据之前核对当前用户归属与旧载荷哈希，确认该根目录记录的进程与本机控制端口已经就绪；未运行的旧实例通过 `runas` 启动后台服务，不打开管理页面。实际维护准入、任务结束与更新退出仍由旧服务执行。正式 Host 保持 `requireAdministrator`，独立更新 worker 仍由 `runas` 启动。worker 的授权请求被拒后，补偿不再发出第二次提权请求。安装元数据辅助程序不进入 Portable 或通用 Update；共同载荷包含可见 Update 入口。
+
+删除数据卸载解除当前实例的归属登记和保护身份，Inno 在 helper 退出后按其已核验摘要移除该 helper。保留数据卸载继续绑定原根。仅有已卸载的残留登记、原根不存在或为空、管理目录不存在或为空且无 ARP 时，可安装到新的空目录或原空根；开始安装前先以当前用户 DPAPI 保全原登记，再解除这条失效登记。未知登记值、子键、文件、链接或有效身份不适用此恢复，安装数据和未知文件不会被接管。
+
+卸载先检查当前确权清单中的全部应用路径，任一路径包含链接就整体拒绝，不能先删除其他应用文件再发现链接。管理身份核对使用本次安装器的临时结果文件，仅接受 DPAPI 解封、当前用户、目录和 helper 摘要全部核验后的状态；不明非空目录在静默模式下直接失败并记日志。内置更新刷新当前载荷确权清单，旧卸载器据此移除新程序，保留不在清单中的用户文件。

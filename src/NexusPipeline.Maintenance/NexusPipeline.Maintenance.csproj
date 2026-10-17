@@ -2,7 +2,7 @@
   <PropertyGroup>
     <TargetFramework>net10.0-windows</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
-    <Version>0.17.4</Version><NexusGenerateInstallationGeneration>true</NexusGenerateInstallationGeneration>
+    <Version>0.17.5</Version><NexusGenerateInstallationGeneration>true</NexusGenerateInstallationGeneration>
     <NoWarn>CA1416</NoWarn>
   </PropertyGroup>
   <PropertyGroup Condition="'$(NexusTestHost)' == 'true'"><DefineConstants>$(DefineConstants);NEXUS_TEST_HOST</DefineConstants></PropertyGroup>

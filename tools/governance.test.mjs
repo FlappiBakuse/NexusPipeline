@@ -19,7 +19,7 @@ function fixture(callback) {
       write(file, fs.readFileSync(path.join(source, file)));
     const register = fs.readFileSync(path.join(root, "frontend/src/ui/register.ts"), "utf8");
     for (const match of register.matchAll(/^import \w+ from "(\.\/[^\"]+\.vue)";/gm)) write(path.posix.normalize("frontend/src/ui/" + match[1]), "<template><div /></template>");
-    write("docs/map.json", JSON.stringify({ schemaVersion: 1, topics: [{ id: "ui", path: "reference/plugin-api/frontend.md", codePaths: ["frontend/src/ui"], testDomains: ["ui"], authorityFor: ["public-ui"] }] }));
+    write("docs/map.json", JSON.stringify({ schemaVersion: 1, topics: [{ id: "ui", path: "reference/plugin-api/frontend.md", codePaths: ["frontend/src/ui"], validationPaths: ["tools/check-doc-links.mjs"], authorityFor: ["public-ui"] }] }));
     callback(root, write);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 }
@@ -29,28 +29,28 @@ test("T01-T03: designated API claims reject drift and preserve historical/negati
   write("docs/history.md", "Frontend API 1.5\n");
   write("tests/old.test.ts", 'expect(api("1.5")).toBe(false);');
   assert.ok(checkContracts(root).every(rule => rule.status === "PASS"));
-  const file = "docs/testing/policy.md", current = fs.readFileSync(path.join(root, file), "utf8");
-  write(file, current.replace("Frontend API 1.7 的宿主外部契约", "Frontend API 1.5 的宿主外部契约"));
+  const file = "docs/reference/plugin-api/frontend.md", current = fs.readFileSync(path.join(root, file), "utf8");
+  write(file, current.replace("| frontend-api | 1.7 |", "| frontend-api | 1.5 |"));
   assert.equal(checkContracts(root).find(rule => rule.file === file).status, "FAIL");
-  write(file, current.replace("Frontend API 1.7 的宿主外部契约", "当前前端的外部契约"));
+  write(file, current.replace("| frontend-api | 1.7 |", "当前前端的外部契约"));
   assert.equal(checkContracts(root).find(rule => rule.file === file).status, "REVIEW");
   write("src/NexusPipeline.Plugin.Abstractions/PluginApi.cs", "// cannot extract facts");
   assert.equal(checkContracts(root).at(-1).status, "NOT_CHECKED");
 }));
 
 test("T04-T05: normalized internal parent path is allowed; outside/missing targets fail before reading", () => fixture((root, write) => {
-  write("CONTRIBUTING.md", "# Guide\n");
+  write("CONTRIBUTING.md", "# Guide\n\nFixture content.\n");
   assert.equal(repositoryPath(root, "docs", "../CONTRIBUTING.md"), path.join(root, "CONTRIBUTING.md"));
   assert.throws(() => repositoryPath(root, "docs", "../../external.md"));
   assert.throws(() => repositoryPath(root, "docs", "missing.md"));
-  write("AGENTS.md", "# Fixture\n");
-  write("docs/reference/plugin-api/managed.md", "当前 managed 插件精确声明 Plugin API `2.2`\nFrontend API 独立维持 `1.7`\n");
-  write("docs/reference/plugin-api/frontend.md", "## 前端插件运行时（Frontend API 1.7）\nFrontend API `1.7` 精确版本；只有 `1.7` 被接受\n");
-  write("docs/testing/policy.md", "- Frontend API 1.7 的宿主外部契约\n");
+  for (const file of ["AGENTS.md", "docs/testing/policy.md"]) write(file, "# Fixture\n\nFixture content.\n");
+  write("docs/reference/plugin-api/managed.md", "# Managed\n\n| plugin-api | 2.2 |\n| frontend-api | 1.7 |\n");
+  write("docs/reference/plugin-api/frontend.md", "# Frontend\n\n| frontend-api | 1.7 |\n");
+  const topics = ["reference/plugin-api/managed.md", "reference/plugin-api/frontend.md", "testing/policy.md"].map((file, i) => ({ id: `doc${i}`, path: file }));
   const run = () => spawnSync(process.execPath, [path.join(source, "tools/check-doc-links.mjs"), "--root", root], { encoding: "utf8" });
-  write("docs/map.json", JSON.stringify({ schemaVersion: 1, topics: [{ id: "guide", path: "../CONTRIBUTING.md" }] }));
+  write("docs/map.json", JSON.stringify({ schemaVersion: 1, topics: [...topics, { id: "guide", path: "../CONTRIBUTING.md" }] }));
   assert.equal(run().status, 0);
-  write("docs/map.json", JSON.stringify({ schemaVersion: 1, topics: [{ id: "guide", path: "../../external.md" }] }));
+  write("docs/map.json", JSON.stringify({ schemaVersion: 1, topics: [...topics, { id: "guide", path: "../../external.md" }] }));
   const result = run(); assert.equal(result.status, 1); assert.match(result.stderr, /GOV-DOC-02/);
 }));
 
@@ -95,7 +95,7 @@ test("T14: legal semantic edge growth is REVIEW, same graph PASS, existing viola
 test("T17-T18: preflight reads real UI imports/navigation with explicit missing partner", () => fixture(root => {
   const context = contextFor(root, { paths: ["frontend/src/ui/composites/New.vue"], keywords: ["button"] });
   assert.ok(context.publicElements.find(element => element.element === "nxp-button" && element.layer === "primitive"));
-  assert.ok(context.testDomains.includes("ui")); assert.equal(context.partner.status, "NOT_CHECKED");
+  assert.ok(context.validationPaths.includes("tools/check-doc-links.mjs")); assert.equal(context.partner.status, "NOT_CHECKED");
 }));
 
 test("T19-T20: version scope requires review, retained exemptions pass and added exemptions review", () => fixture((root, write) => {

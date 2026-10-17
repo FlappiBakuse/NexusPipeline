@@ -1,5 +1,4 @@
 using NexusPipeline.Modules.Scripts.Contracts;
-using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
 using System.Reflection;
@@ -41,54 +40,10 @@ namespace NexusPipeline.ControlPlane.Http;
 /// <summary>HTTP 服务骨架：监听、请求分发、静态文件。业务路由见各 ApiXxxHandler（[ApiRoute] 反射扫描注册）。</summary>
 internal sealed class WebServer : IDisposable
 {
-    private delegate Task ApiRouteHandler(
-        HttpListenerContext context,
-        string method,
-        string[] seg,
-        string body,
-        CancellationToken cancellationToken);
-
     /// <summary>请求体大小上限（10MB，防超大 body 内存压力）。</summary>
     private const int MaxRequestBodyBytes = 10 * 1024 * 1024;
 
-    /// <summary>认证失败锁定：连续失败次数与锁定截止时间（按远端 IP，防令牌爆破）。</summary>
-    private const int MaxAuthFailsBeforeLock = 5;
-
-    private const int AuthLockSeconds = 60;
-
-    /// <summary>：无活动条目保留宽限（超过即清理，防远端 IP 字典无限增长）。</summary>
-    private const int AuthFailIdlePruneSeconds = 600;
-
-    private sealed class AuthFailState
-    {
-        public int Fails;
-
-        public long LockedUntil;
-
-        public long LastActive;
-    }
-
-    private static readonly ConcurrentDictionary<string, AuthFailState> AuthFails = new();
-
-    private static long _lastAuthPruneTicks;
-
-    /// <summary>：每 60 秒清理一次「超过宽限无活动」的远端认证失败条目（锁定中条目保留至锁定过期）。
-    /// 仅在远程访问开启且收到请求时触发，避免后台空闲轮询。</summary>
-    private static void PruneAuthFails(long now)
-    {
-        if (now - Interlocked.Read(ref _lastAuthPruneTicks) < TimeSpan.FromSeconds(60).Ticks)
-        {
-            return;
-        }
-        Interlocked.Exchange(ref _lastAuthPruneTicks, now);
-        foreach (KeyValuePair<string, AuthFailState> pair in AuthFails)
-        {
-            if (now - pair.Value.LastActive > TimeSpan.FromSeconds(AuthFailIdlePruneSeconds).Ticks)
-            {
-                AuthFails.TryRemove(pair.Key, out _);
-            }
-        }
-    }
+    private static readonly RemoteAuthenticationThrottle RemoteAuthentication = new();
 
     /// <summary>API 路由表：启动时反射扫描带 [ApiRoute] 的 handler 类/方法注册；新增 API 无需改路由表。</summary>
     private static readonly IReadOnlyDictionary<string, ApiRouteCatalog.RouteDefinition> RouteMetadata =
@@ -574,42 +529,14 @@ internal sealed class WebServer : IDisposable
             return true;
         }
         if (!RemoteAccessBound) { detail = "未开启远程访问"; return false; }
-        string ip = remote.ToString();
-        long now = DateTime.UtcNow.Ticks;
-        PruneAuthFails(now);
-        if (AuthFails.TryGetValue(ip, out AuthFailState? state) && state.LockedUntil > now)
+        return RemoteAuthentication.Authorize(remote.ToString(), () =>
         {
-            detail = $"失败次数过多，已锁定（剩余 {TimeSpan.FromTicks(state.LockedUntil - now).TotalSeconds:F0} 秒）";
-            return false;
-        }
-        string? token = null;
-        if (_accessToken.TryDecrypt(settings.AccessToken, out string? plain) && !string.IsNullOrWhiteSpace(plain))
-        {
-            token = plain;
-        }
-        string? auth = context.Request.Headers["Authorization"];
-        // （P13）：令牌比较改常量时间（此前字符串 Ordinal 比较非常量时间，可被时序侧信道探测）。
-        bool ok = token is not null && auth is not null && TokenEquals(auth, "Bearer " + token);
-        if (ok)
-        {
-            AuthFails.TryRemove(ip, out _);
-            detail = $"远程请求 {remote}，令牌匹配";
-            return true;
-        }
-        AuthFailState current = AuthFails.GetOrAdd(ip, _ => new AuthFailState());
-        current.LastActive = now;
-        current.Fails++;
-        if (current.Fails >= MaxAuthFailsBeforeLock)
-        {
-            current.LockedUntil = now + TimeSpan.FromSeconds(AuthLockSeconds).Ticks;
-            current.Fails = 0;
-            detail = $"远程请求 {remote}，令牌不匹配（已触发锁定 {AuthLockSeconds} 秒）";
-        }
-        else
-        {
-            detail = $"远程请求 {remote}，令牌不匹配/缺失（失败 {current.Fails}/{MaxAuthFailsBeforeLock}）";
-        }
-        return false;
+            string? token = null;
+            if (_accessToken.TryDecrypt(settings.AccessToken, out string? plain) && !string.IsNullOrWhiteSpace(plain))
+                token = plain;
+            string? auth = context.Request.Headers["Authorization"];
+            return token is not null && auth is not null && TokenEquals(auth, "Bearer " + token);
+        }, DateTime.UtcNow.Ticks, out detail);
     }
 
     /// <summary>常量时间令牌比较（P13）：FixedTimeEquals 要求等长字节，先比较长度再定长比较。</summary>

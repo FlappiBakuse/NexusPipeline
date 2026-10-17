@@ -38,12 +38,6 @@ export function historyTodayValue(now: Date = new Date()) {
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 }
 
-export function historyMonthKey(value: string, now: Date = new Date()) {
-  const pad = (value: number) => String(value).padStart(2, "0");
-  const [year, month] = String(value || "").split("-").map(Number);
-  return Number.isFinite(year) && Number.isFinite(month) ? `${year}-${pad(month)}` : `${now.getFullYear()}-${pad(now.getMonth() + 1)}`;
-}
-
 export function statusTone(value?: string): "ok" | "warn" | "bad" | "blue" | "muted" {
   if (value === "success") return "ok";
   if (value === "partial" || value === "cancelled" || value === "skipped") return "warn";

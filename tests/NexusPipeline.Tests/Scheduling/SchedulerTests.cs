@@ -20,6 +20,92 @@ namespace NexusPipeline.Tests.Scheduling;
 public class SchedulerTests
 {
     [Fact]
+    public async Task CorruptStateBlocksAutomaticDispatchAndPreservesEvidenceUntilRepaired()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "nxp-schedule-corrupt-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        string path = Path.Combine(root, "scheduler-state.json");
+        try
+        {
+            var queue = new DispatchQueue { Id = "corrupt-startup", Name = "fixture", AutoRunMode = "startup",
+                Tasks = [new() { Id = "task", ScriptInstanceId = "missing-script" }] };
+            var queues = new TestQueueRepository(queue);
+            var commands = new TestExecutionService(false);
+            var validator = new ExecutionValidator(new EmptyScriptRepository(), queues, new EmptyUserRepository(), new AllowAllPluginAvailability());
+            string occurrence = "{\"Key\":\"corrupt-startup\\nstartup\",\"QueueId\":\"corrupt-startup\",\"QueueName\":\"fixture\",\"OccurrenceKey\":\"startup\",\"OriginalTriggerTime\":\"2026-10-17T10:00:00\",\"IsStartup\":true,\"Status\":\"Waiting\",\"RetryCount\":0,\"LastReason\":\"\",\"NextAttemptAt\":\"2026-10-17T10:00:00\",\"Plan\":null}";
+            foreach (string raw in new[] { "{", "null", "{}", "{\"LastSchedulerCheck\":null,\"Occurrences\":null}",
+                "{\"schemaVersion\":2,\"LastSchedulerCheck\":null,\"Occurrences\":[]}",
+                "{\"LastSchedulerCheck\":null,\"Occurrences\":[{\"QueueId\":\"corrupt-startup\",\"OccurrenceKey\":\"startup\",\"OriginalTriggerTime\":\"2026-10-17T10:00:00\"}]}",
+                $"{{\"LastSchedulerCheck\":null,\"Occurrences\":[{occurrence},{occurrence}]}}",
+                $"{{\"LastSchedulerCheck\":null,\"Occurrences\":[{occurrence.Replace("corrupt-startup\\nstartup", "wrong-identity")}]}}",
+                $"{{\"LastSchedulerCheck\":null,\"Occurrences\":[{occurrence.Replace("\"RetryCount\":0", "\"RetryCount\":-1")}]}}" })
+            {
+                await File.WriteAllTextAsync(path, raw);
+                using (var scheduler = new Scheduler(queues, new EmptyHistoryStore(), new TestSettingsProvider(), commands,
+                    validator, stateStore: new FileSchedulerStateStore(path)))
+                {
+                    scheduler.TickForTest();
+                    Assert.Equal("schedule_state_unknown", scheduler.GetAutoUpdateBlocker(TimeSpan.Zero)?.Code);
+                    scheduler.Start();
+                    await Task.Delay(100);
+                    scheduler.Stop();
+                }
+                Assert.Equal(0, commands.Attempts);
+                Assert.Equal(raw, await File.ReadAllTextAsync(path));
+            }
+            new FileSchedulerStateStore(path).Save(new SchedulerPersistedState());
+            Assert.Empty(new FileSchedulerStateStore(path).Load().Occurrences);
+            new FileSchedulerStateStore(path).Save(new SchedulerPersistedState
+            {
+                Occurrences = [new PersistedScheduledOccurrence
+                {
+                    Key = "corrupt-startup\nstartup", QueueId = queue.Id, QueueName = queue.Name,
+                    OccurrenceKey = "startup", OriginalTriggerTime = DateTime.Now, IsStartup = true,
+                    Status = "Waiting", NextAttemptAt = DateTime.Now,
+                }],
+            });
+            using var repaired = new Scheduler(queues, new EmptyHistoryStore(), new TestSettingsProvider(), commands,
+                validator, stateStore: new FileSchedulerStateStore(path));
+            repaired.TickForTest();
+            await EventuallyAsync(() => commands.SuccessfulStarts == 1);
+        }
+        finally { Directory.Delete(root, true); }
+    }
+
+    [Fact]
+    public async Task StopDrainsCurrentTickBeforeRestartAndCheckpoint()
+    {
+        var queues = new TestQueueRepository(new DispatchQueue { Id = "lifecycle" });
+        using var history = new BlockingHistoryStore();
+        var state = new MemorySchedulerStateStore();
+        using var scheduler = new Scheduler(queues, history, new TestSettingsProvider(), new TestExecutionService(false),
+            new ExecutionValidator(new EmptyScriptRepository(), queues, new EmptyUserRepository(), new AllowAllPluginAvailability()), stateStore: state);
+        scheduler.Start();
+        await history.Entered.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        var stopping = Task.Run(scheduler.Stop);
+        try
+        {
+            Assert.NotSame(stopping, await Task.WhenAny(stopping, Task.Delay(150)));
+            Assert.Equal(0, state.SaveCount);
+        }
+        finally { history.Release.Set(); await stopping.WaitAsync(TimeSpan.FromSeconds(3)); }
+        Assert.False(scheduler.IsRunning);
+        scheduler.Start();
+        scheduler.Stop();
+        Assert.True(state.SaveCount > 0);
+    }
+
+    private sealed class BlockingHistoryStore : IHistoryStore, IDisposable
+    {
+        internal TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal ManualResetEventSlim Release { get; } = new(false);
+        public void Cleanup(int retentionDays) { Entered.TrySetResult(); if (!Release.Wait(TimeSpan.FromSeconds(5))) throw new TimeoutException(); }
+        public HistorySaveResult Save(RunRecord record, List<string> logs, IReadOnlyList<RunScreenshot> screenshots) => new(record.Clone(), null);
+        public IReadOnlyDictionary<string, int> GetSuccessfulRunsByUser(DateTime date, string scriptInstanceId) => new Dictionary<string, int>();
+        public void Dispose() => Release.Dispose();
+    }
+
+    [Fact]
     public void AutoUpdateBlocker_IncludesOccurrenceAtFiveMinuteBoundary()
     {
         DateTime now = new(2026, 1, 5, 10, 0, 0);

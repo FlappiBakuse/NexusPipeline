@@ -1,111 +1,21 @@
-import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { checkContracts, repositoryPath } from "./doc-contracts.mjs";
+import { checkContracts } from "./doc-contracts.mjs";
+import { checkDocuments } from "./markdown-docs.mjs";
 
-/**
- * Markdown 内链与片段校验。只检查本仓库内的相对链接；
- * 跨仓库链接（NexusPipeline-Plugins）与外部 URL 不在本入口的判定范围。
- */
-
-const options = process.argv.slice(2);
-if (options.length && (options.length !== 2 || options[0] !== "--root")) throw new Error("Usage: check-doc-links.mjs [--root repository]");
-const projectRoot = options.length ? path.resolve(options[1]) : path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-// tests/.artifacts 与 .generated 是运行产物，其中的插件 README 相对链接在 runtime 内必然失效。
-const SKIP_DIRECTORIES = new Set([".git", "node_modules", "bin", "obj", "release", "dist", ".generated", ".artifacts"]);
-const EXTERNAL = /^[a-z][a-z0-9+.-]*:/iu;
-const LINK = /!?\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/gu;
-const HEADING = /^(#{1,6})\s+(.+?)\s*#*\s*$/gmu;
-const HTML_ANCHOR = /\b(?:id|name)\s*=\s*["']([^"']+)["']/giu;
-
-function walkMarkdown(directory) {
-  const files = [];
-  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
-    if (entry.isDirectory()) {
-      if (!SKIP_DIRECTORIES.has(entry.name)) files.push(...walkMarkdown(path.join(directory, entry.name)));
-    } else if (entry.isFile() && entry.name.toLowerCase().endsWith(".md")) {
-      files.push(path.join(directory, entry.name));
-    }
-  }
-  return files;
+const options = {};
+const args = process.argv.slice(2);
+for (let i = 0; i < args.length; i += 2) {
+  if (!["--root", "--partner-root"].includes(args[i]) || !args[i + 1] || options[args[i]]) throw new Error("Usage: check-doc-links [--root repository] [--partner-root repository]");
+  options[args[i]] = path.resolve(args[i + 1]);
 }
-
-// GitHub 的锚点规则：小写、去掉标点、空格转连字符；重复标题追加 -1、-2。
-function slugify(value) {
-  return value.normalize("NFKC").toLowerCase()
-    .replace(/<[^>]*>/gu, "")
-    .replace(/[^\p{L}\p{N}\s-]/gu, "")
-    .trim().replace(/\s+/gu, "-");
+const root = options["--root"] || path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const result = checkDocuments(root, { partnerRoot: options["--partner-root"] });
+for (const rule of checkContracts(root)) {
+  console.error(JSON.stringify(rule));
+  if (["FAIL", "NOT_CHECKED", "REVIEW"].includes(rule.status)) result.failures.push(`${rule.rule} ${rule.file || ""}: ${rule.reason || "contract mismatch"}`);
 }
-
-function collectAnchors(text) {
-  const anchors = new Set();
-  const counts = new Map();
-  for (const match of text.matchAll(HEADING)) {
-    const base = slugify(match[2]);
-    if (!base) continue;
-    const count = counts.get(base) || 0;
-    counts.set(base, count + 1);
-    anchors.add(count ? `${base}-${count}` : base);
-  }
-  for (const match of text.matchAll(HTML_ANCHOR)) anchors.add(match[1]);
-  return anchors;
-}
-
-function lineNumber(text, index) {
-  return text.slice(0, index).split(/\r?\n/u).length;
-}
-
-const documents = walkMarkdown(projectRoot);
-const anchorsByFile = new Map(documents.map(file => [file, collectAnchors(fs.readFileSync(file, "utf8"))]));
-const failures = [];
-let checked = 0;
-
-for (const file of documents) {
-  const relative = path.relative(projectRoot, file).replaceAll("\\", "/");
-  const text = fs.readFileSync(file, "utf8");
-  for (const match of text.matchAll(LINK)) {
-    const raw = match[1];
-    if (EXTERNAL.test(raw) || raw.startsWith("/") || raw.startsWith("//")) continue;
-    const hash = raw.indexOf("#");
-    const targetPath = decodeURIComponent((hash < 0 ? raw : raw.slice(0, hash)).split("?", 1)[0]);
-    const fragment = hash < 0 ? "" : decodeURIComponent(raw.slice(hash + 1));
-    const location = `${relative}:${lineNumber(text, match.index)}`;
-    const resolved = path.resolve(path.dirname(file), targetPath || path.basename(file));
-    if (targetPath && !fs.existsSync(resolved)) {
-      failures.push(`${location} 链接目标不存在：${raw}`);
-      continue;
-    }
-    checked += 1;
-    if (!fragment) continue;
-    const anchors = anchorsByFile.get(resolved);
-    if (anchors && !anchors.has(fragment)) failures.push(`${location} 片段不存在：${raw}`);
-  }
-}
-
-const navigation = JSON.parse(fs.readFileSync(path.join(projectRoot, "docs/map.json"), "utf8"));
-const topicIds = new Set();
-if (navigation.schemaVersion !== 1 || !Array.isArray(navigation.topics) || !navigation.topics.length)
-  failures.push("docs/map.json: invalid navigation schema");
-for (const topic of navigation.topics || []) {
-  if (!topic.id || topicIds.has(topic.id)) failures.push(`docs/map.json: duplicate/empty topic ${topic.id}`);
-  topicIds.add(topic.id);
-  for (const [base, relative] of [["docs", topic.path], ...(topic.codePaths || []).map(value => ["", value])]) {
-    try { repositoryPath(projectRoot, base, relative); }
-    catch (error) { failures.push(`GOV-DOC-02 docs/map.json: ${error.message}`); }
-  }
-}
-
-const contracts = checkContracts(projectRoot);
-for (const result of contracts) {
-  console.error(JSON.stringify(result));
-  if (["FAIL", "NOT_CHECKED"].includes(result.status)) failures.push(`${result.rule} ${result.file || ""}: ${result.reason || `${result.actual} != ${result.expected}`}`);
-}
-
-if (failures.length > 0) {
-  console.error(`文档内链检查失败（${failures.length} 项）：`);
-  for (const failure of failures) console.error(`  ${failure}`);
-  process.exitCode = 1;
-} else {
-  console.error(`文档内链检查通过：校验 ${checked} 个本地链接；契约 REVIEW=${contracts.filter(result => result.status === "REVIEW").length}（REVIEW 仍需审核）`);
-}
+for (const notice of result.notices) console.error(JSON.stringify({ status: "REVIEW", reason: notice }));
+for (const failure of result.failures) console.error(failure);
+console.error(JSON.stringify({ status: result.failures.length ? "FAIL" : "PASS", documents: result.documents, links: result.checked, crossRepositoryLinks: result.crossChecked, partner: options["--partner-root"] ? "CHECKED" : "NOT_CHECKED" }));
+process.exitCode = result.failures.length ? 1 : 0;

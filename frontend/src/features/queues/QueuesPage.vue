@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { takePreparedData } from "../../platform/navigation-preparation";
+import { loadQueuesPage } from "./first-screen";
+const initialData = takePreparedData<Awaited<ReturnType<typeof loadQueuesPage>>>("queues");
 import { vNxpSurface } from "../../ui/surface";
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { api, isAbortError } from "../../platform/api";
@@ -265,11 +268,7 @@ async function load() {
   loading.value = true;
   error.value = "";
   try {
-    const [queueData, scriptData, status] = await Promise.all([
-      api("GET", "/api/queues"),
-      api("GET", "/api/scripts"),
-      api("GET", "/api/status"),
-    ]);
+    const [queueData, scriptData, status] = await loadQueuesPage();
     if (disposed) return;
     queues.value = Array.isArray(queueData) ? queueData : [];
     scripts.value = Array.isArray(scriptData) ? scriptData : [];
@@ -367,10 +366,18 @@ async function removeQueue() {
   }
 }
 
+if (initialData) {
+  const [queueData, scriptData, status] = initialData;
+  queues.value = Array.isArray(queueData) ? queueData : [];
+  scripts.value = Array.isArray(scriptData) ? scriptData : [];
+  plugins.value = Array.isArray(status?.plugins) ? status.plugins : [];
+  loading.value = false;
+}
+
 onMounted(() => {
   disposed = false;
   setTopbarTitle(t("common.schedule_queues"));
-  void load();
+  if (initialData) void paintListSlots(); else void load();
   refreshCountdowns();
   countdownTimer = setInterval(refreshCountdowns, 1000);
 });

@@ -21,6 +21,8 @@ internal sealed class BrowserLoginService : IDisposable
         internal long Created;
         internal CancellationTokenRegistration Cancellation;
         internal int State, CancelRequested;
+        internal int Users;
+        internal bool Retired, ResourcesDisposed;
         internal string? CancellationReason;
         internal PluginBrowserLoginResult? Result;
     }
@@ -78,6 +80,7 @@ internal sealed class BrowserLoginService : IDisposable
             var op = new Operation(flow, invocation) { CreatedAt = _time.GetUtcNow(), Created = _time.GetTimestamp() };
             _operations.Add(id, op);
             op.Cancellation = client.Lifetime.Register(() => { _ = CancelAsync(op, "client_session_expired"); });
+            if (op.State >= 4) op.Cancellation.Unregister();
             return Descriptor(op);
         }
     }
@@ -94,7 +97,8 @@ internal sealed class BrowserLoginService : IDisposable
     }
     internal async Task<PluginBrowserLoginResult> CompleteAsync(PluginClientSessionContext client, string id, PluginBrowserCapture capture)
     {
-        var op = Find(client, id);
+        using var use = Use(client, id);
+        var op = use.Operation;
         if (Interlocked.CompareExchange(ref op.State, 1, 0) != 0) return new(false, Error: "browser_operation_busy");
         try
         {
@@ -132,7 +136,8 @@ internal sealed class BrowserLoginService : IDisposable
 
     internal async Task CleanedAsync(PluginClientSessionContext client, string id, bool cleaned)
     {
-        var op = Find(client, id);
+        using var use = Use(client, id);
+        var op = use.Operation;
         await op.TerminalGate.WaitAsync().ConfigureAwait(false);
         try
         {
@@ -164,8 +169,11 @@ internal sealed class BrowserLoginService : IDisposable
     }
     private async Task CancelAsync(Operation op, string error)
     {
+        using var use = Use(op);
+        if (use is null) return;
         lock (_sync) { if (op.State >= 4) return; op.CancelRequested = 1; op.CancellationReason ??= error; }
-        op.Stop.Cancel();
+        // A failing consumer cancellation callback must not prevent candidate revocation.
+        try { op.Stop.Cancel(); } catch { }
         try { CancelRequested?.Invoke(op.Invocation.ClientSession.ClientSessionId, op.Invocation.OperationId); } catch { }
         await op.TerminalGate.WaitAsync().ConfigureAwait(false);
         try { if (op.State < 4) await FinishFailedAsync(op, op.CancellationReason!).ConfigureAwait(false); }
@@ -177,6 +185,7 @@ internal sealed class BrowserLoginService : IDisposable
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         try { await op.Flow.Terminal(op.Invocation, PluginBrowserLoginTerminal.Cancelled, deadline.Token).AsTask().WaitAsync(deadline.Token).ConfigureAwait(false); }
         catch { op.State = 6; }
+        finally { op.Cancellation.Unregister(); }
     }
     private Operation Find(PluginClientSessionContext client, string id)
     {
@@ -187,12 +196,71 @@ internal sealed class BrowserLoginService : IDisposable
     private void Sweep()
     {
         Operation[] expired;
+        Operation[] retired;
         lock (_sync)
         {
+            if (_disposed) return;
             expired = _operations.Values.Where(o => o.State < 4 && _time.GetElapsedTime(o.Created) >= TimeSpan.FromMinutes(15)).ToArray();
-            foreach (string key in _operations.Where(p => p.Value.State >= 4 && _time.GetElapsedTime(p.Value.Created) >= TimeSpan.FromMinutes(20)).Select(p => p.Key).ToArray()) _operations.Remove(key);
+            retired = _operations.Values.Where(o => o.State >= 4 && _time.GetElapsedTime(o.Created) >= TimeSpan.FromMinutes(20)).ToArray();
         }
         foreach (var op in expired) _ = CancelAsync(op, "browser_operation_expired");
+        foreach (var op in retired) Retire(op);
+    }
+
+    private OperationUse Use(PluginClientSessionContext client, string id)
+    {
+        lock (_sync)
+        {
+            var op = Find(client, id);
+            op.Users++;
+            return new(this, op);
+        }
+    }
+    private OperationUse? Use(Operation op)
+    {
+        lock (_sync)
+        {
+            if (op.Retired) return null;
+            op.Users++;
+            return new(this, op);
+        }
+    }
+    private void Release(Operation op)
+    {
+        bool dispose;
+        lock (_sync) { op.Users--; dispose = ClaimDisposal(op); }
+        if (dispose) DisposeResources(op);
+    }
+    private void Retire(Operation op)
+    {
+        bool dispose;
+        lock (_sync)
+        {
+            if (op.Retired) return;
+            op.Retired = true;
+            _operations.Remove(op.Invocation.OperationId);
+            dispose = ClaimDisposal(op);
+        }
+        if (dispose) DisposeResources(op);
+    }
+    private static bool ClaimDisposal(Operation op)
+    {
+        if (!op.Retired || op.Users != 0 || op.ResourcesDisposed) return false;
+        op.ResourcesDisposed = true;
+        return true;
+    }
+    private static void DisposeResources(Operation op)
+    {
+        // Retirement stops new users; an in-flight callback or gate waiter must release its use first.
+        op.Cancellation.Unregister();
+        op.Stop.Dispose();
+        op.TerminalGate.Dispose();
+    }
+    private sealed class OperationUse(BrowserLoginService owner, Operation operation) : IDisposable
+    {
+        private BrowserLoginService? _owner = owner;
+        internal Operation Operation => operation;
+        public void Dispose() => Interlocked.Exchange(ref _owner, null)?.Release(operation);
     }
     private static string SafeError(string? error) => error is { Length: > 0 and <= 64 } && error.All(c => char.IsAsciiLetterLower(c) || c is '_' or >= '0' and <= '9') ? error : "browser_validation_failed";
     private static bool Origin(string value) => Uri.TryCreate(value, UriKind.Absolute, out var uri) && uri.Scheme == "https" && uri.UserInfo == "" && uri.AbsolutePath == "/" && uri.Query == "" && uri.Fragment == "" && uri.GetLeftPart(UriPartial.Authority) == value;
@@ -237,10 +305,14 @@ internal sealed class BrowserLoginService : IDisposable
     }
     public void Dispose()
     {
-        Operation[] active;
-        lock (_sync) { if (_disposed) return; _disposed = true; _flows.Clear(); active = _operations.Values.Where(o => o.State < 4).ToArray(); }
+        Operation[] operations;
+        lock (_sync) { if (_disposed) return; _disposed = true; _flows.Clear(); operations = _operations.Values.ToArray(); }
         _sweep.Dispose();
-        foreach (var op in active) _ = CancelAsync(op, "service_stopping");
+        foreach (var op in operations)
+        {
+            if (op.State < 4) _ = CancelAsync(op, "service_stopping");
+            Retire(op);
+        }
     }
     private sealed class Registration(Action dispose) : IDisposable { private Action? _dispose = dispose; public void Dispose() => Interlocked.Exchange(ref _dispose, null)?.Invoke(); }
 }

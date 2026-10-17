@@ -38,10 +38,8 @@ internal sealed class HostRuntime : IAsyncDisposable
 
     public AppSettings Settings => _composition.Settings;
     public ExecutionDispatcher Center => _composition.Center;
-    public ExecutionValidator Validator => _composition.Validator;
     public RunHistoryService History => _composition.History;
     public PluginManager Plugins => _composition.Plugins;
-    public NotificationDispatcher Notifications => _composition.Notifications;
     public Scheduler Scheduler => _composition.Scheduler;
     public UpdateService UpdateService => _composition.UpdateService;
     public UpdateAutomationService UpdateAutomation => _composition.UpdateAutomation;
@@ -63,8 +61,8 @@ internal sealed class HostRuntime : IAsyncDisposable
         }
     }
 
-    internal McpToolContext CreateMcpToolContext(Func<bool>? requestRestart)
-        => _composition.CreateMcpToolContext(requestRestart);
+    internal McpToolContext CreateMcpToolContext()
+        => _composition.CreateMcpToolContext();
 
     internal void ReloadSettings(ConfigLoadMode mode = ConfigLoadMode.Repair)
         => _composition.ReloadSettings(mode);

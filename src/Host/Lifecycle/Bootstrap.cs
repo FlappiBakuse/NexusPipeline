@@ -248,7 +248,7 @@ internal sealed class Bootstrap
             return null;
         }
         var mcp = new McpHost(
-            _runtime.CreateMcpToolContext(() => TryRequestRestart(Audit.Mcp)));
+            _runtime.CreateMcpToolContext());
         return mcp.TryStart(_runtime.Settings.McpPort) ? mcp : null;
     }
 
@@ -354,7 +354,7 @@ internal sealed class Bootstrap
                     : RequestRestartExit(),
                 delay: duration => Thread.Sleep(TestHooks.ScaledMs((int)Math.Max(1, duration.TotalMilliseconds))),
                 launchDelay: TimeSpan.FromSeconds(1),
-                abortHandoff: handoff => _runtime.Get<NexusPipeline.Host.Desktop.IDesktopHost>().AbortHostRestartAsync(handoff).GetAwaiter().GetResult());
+                abortHandoff: handoff => _runtime.Desktop.AbortHostRestartAsync(handoff).GetAwaiter().GetResult());
             return _restartCoordinator;
         }
     }
@@ -364,7 +364,7 @@ internal sealed class Bootstrap
 
     private bool LaunchRestartChild(string handoffId)
     {
-        _runtime.Get<NexusPipeline.Host.Desktop.IDesktopHost>().PrepareHostRestartAsync(handoffId).GetAwaiter().GetResult();
+        _runtime.Desktop.PrepareHostRestartAsync(handoffId).GetAwaiter().GetResult();
         string exePath = Environment.ProcessPath ?? "";
         if (string.IsNullOrWhiteSpace(exePath))
         {
@@ -437,7 +437,7 @@ internal sealed class Bootstrap
         // waited for active runs/edit sessions through CanStopServices; force is
         // reserved for a failed startup/Dispose path where no public work may leak.
         Guarded("插件自动更新停止", _pluginAutoUpdateService.Stop);
-        Guarded("桌面停止", () => _runtime.Get<NexusPipeline.Host.Desktop.IDesktopHost>().StopForHostExitAsync().GetAwaiter().GetResult());
+        Guarded("桌面停止", () => _runtime.Desktop.StopForHostExitAsync().GetAwaiter().GetResult());
         Guarded("更新自动化停止", _updates.Stop);
         Guarded("调度器停止", _runtime.Scheduler.Stop);
         Guarded("脚本类型图标停止", () => _scriptTypeIcons.StopWarmupAsync().GetAwaiter().GetResult());

@@ -277,14 +277,20 @@ internal sealed class RuntimeWorkers : IAsyncDisposable
         return false;
     }
 
-    /// <summary>先收拢后台 worker（消费残留结果并停止），再允许宿主进入进程清理与配置收尾，防止旧 Attempt 继续写入状态或文件。</summary>
+    /// <summary>排空并停止两个后台 worker 后才允许配置替换与恢复，防止旧 Attempt 继续写入状态或文件。</summary>
     public async Task StopAsync()
     {
-        if (!_operationToken.IsCancellationRequested)
-            await ConsumeJudgeResultAsync().ConfigureAwait(false);
-        ConsumeConfigSyncResult();
-        await _judgeWorker.StopAsync().ConfigureAwait(false);
-        await _configSyncWorker.StopAsync().ConfigureAwait(false);
+        try
+        {
+            if (!_operationToken.IsCancellationRequested)
+                await ConsumeJudgeResultAsync().ConfigureAwait(false);
+            ConsumeConfigSyncResult();
+        }
+        finally
+        {
+            try { await _judgeWorker.StopAsync().ConfigureAwait(false); }
+            finally { await _configSyncWorker.StopAsync().ConfigureAwait(false); }
+        }
     }
 
     public async ValueTask DisposeAsync()

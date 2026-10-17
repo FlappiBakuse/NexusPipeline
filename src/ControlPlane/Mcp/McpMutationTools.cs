@@ -18,7 +18,7 @@ namespace NexusPipeline.ControlPlane.Mcp;
 
 /// <summary>默认可用的执行、配置和安全设置 MCP 工具。</summary>
 [McpServerToolType]
-internal sealed class McpMutationTools
+internal sealed partial class McpMutationTools
 {
     private readonly McpToolContext _context;
 
@@ -92,6 +92,9 @@ internal sealed class McpMutationTools
     [Description("提交一个调度队列运行并立即返回 runId。队列引用支持稳定 ID 或唯一名称；使用 get_run 轮询状态。")]
     public CallToolResult RunQueue([Description("队列稳定 ID 或唯一名称。")]
         string queueReference)
+        => _context.Center.WithAdmissionCoordination(() => RunQueueCore(queueReference));
+
+    private CallToolResult RunQueueCore(string queueReference)
     {
         OperationResult<DispatchQueue> queue = _context.ResolveQueue(queueReference);
         if (!queue.Succeeded)
@@ -216,7 +219,7 @@ internal sealed class McpMutationTools
             return McpToolResult.From(target);
         }
         return McpToolResult.From(
-            _context.ScriptCommands.Update(target.Value!.Id, input.ToModel(), Audit.Mcp),
+            _context.ScriptCommands.Update(target.Value!.Id, ScriptReplacement(target.Value!, input), Audit.Mcp),
             value => value is null ? null : McpViews.Script(value, _context.Users));
     }
 
@@ -310,6 +313,17 @@ internal sealed class McpMutationTools
                 ConfigInputsSpecified: input.ConfigInputs is not null),
             Audit.Mcp);
         return McpToolResult.From(result, value => value is null ? null : McpViews.Binding(value));
+    }
+
+    private static ScriptInstance ScriptReplacement(ScriptInstance current, McpScriptInput input)
+    {
+        var replacement = input.ToModel();
+        if (input.PluginInputs is null) replacement.PluginInputs = new(current.PluginInputs);
+        // Provider identities are committed by the provider configuration transaction, never by MCP input.
+        replacement.ExecutionProviderId = current.ExecutionProviderId;
+        replacement.ExecutionProviderConfigId = current.ExecutionProviderConfigId;
+        replacement.ExecutionProviderConfigRevision = current.ExecutionProviderConfigRevision;
+        return replacement;
     }
 
 }

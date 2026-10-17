@@ -51,7 +51,6 @@ config/    data/    history/    logs/    plugins/    .nxp/
 
 同格式、未跨越更新屏障的普通更新仍可使用内置更新。此类更新如需手动替换程序，只替换 `NexusPipeline.exe`、`resources/desktop/`、`resources/payload-manifest.json` 和 `README.md`，保留运行时目录及已有 `plugins/`。
 
-
 ## 快速开始
 
 以 BetterGI 为例：
@@ -99,11 +98,11 @@ MCP 仅监听本机 loopback；运行队列若带有休眠、重启、关机或�
 | [docs/user/README.en.md](docs/user/README.en.md) | Key user limits in English |
 | [CHANGELOG.md](CHANGELOG.md) | 版本变更与升级注意事项 |
 | [docs/architecture/README.md](docs/architecture/README.md) | 运行流程、持久化和模块边界 |
-| [docs/CONTROL_PLANE.md](docs/CONTROL_PLANE.md) | Web、CLI、MCP 能力入口 |
+| [docs/reference/control-plane.md](docs/reference/control-plane.md) | Web、CLI、MCP 能力入口 |
 | [docs/development/README.md](docs/development/README.md) | 构建、调试、协作与发布 |
 | [docs/testing/README.md](docs/testing/README.md) | 测试层级与质量门禁 |
 | [docs/reference/plugin-api/README.md](docs/reference/plugin-api/README.md) | 插件开发接口 |
-| [docs/STATUS.md](docs/STATUS.md) | 后续计划与已知问题 |
+| [docs/status.md](docs/status.md) | 后续计划与已知问题 |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | 贡献指南 |
 | [SECURITY.md](SECURITY.md) | 安全问题报告 |
 

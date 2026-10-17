@@ -1,0 +1,35 @@
+{
+  "backend.settings-notifications": {
+    "scenarioIds": [
+      "host.backend.settings-notifications"
+    ],
+    "filter": "FullyQualifiedName~NexusPipeline.Tests.Settings.|FullyQualifiedName~NexusPipeline.Tests.Platform.RemoteAccessAddressTests|FullyQualifiedName~NexusPipeline.Tests.Platform.FirewallRuleTests|FullyQualifiedName~NexusPipeline.Tests.Host.SettingsChangedEffectsTests",
+    "caseIds": [
+      "NexusPipeline.Tests.Host.SettingsChangedEffectsTests.SecretEditsDoNotRepeatWindowsSettingsButRelevantChangesDo",
+      "NexusPipeline.Tests.Platform.FirewallRuleTests.RuleUpdateUsesOneAddOnlyAfterSetFailsAndRejectsInvalidPorts",
+      "NexusPipeline.Tests.Platform.FirewallRuleTests.TestHostDryRunDoesNotInvokeTheWindowsCommand",
+      "NexusPipeline.Tests.Platform.RemoteAccessAddressTests.NatAndReservedAddressesCannotInventAPublicEndpoint",
+      "NexusPipeline.Tests.Platform.RemoteAccessAddressTests.PreferredGatewayProducesOneInternalAndOnePublicAddress",
+      "NexusPipeline.Tests.Settings.SettingsCommandTests.DesktopModeAndTokenClearSaveFailureKeepPublishedState",
+      "NexusPipeline.Tests.Settings.SettingsCommandTests.DesktopModePersistsOnlyItsFieldAndRejectsStaleCompensation",
+      "NexusPipeline.Tests.Settings.SettingsCommandTests.DurableSaveFailureDoesNotPublishSettingsOrNotify",
+      "NexusPipeline.Tests.Settings.SettingsCommandTests.DurableSavePublishesOneStateAndNotifiesOnce",
+      "NexusPipeline.Tests.Settings.SettingsCommandTests.FileOnlyAndRetiredNotificationFieldsRejectWholePatch",
+      "NexusPipeline.Tests.Settings.SettingsCommandTests.RemoteSettingsAndEncryptedTokenSurviveReloadTogether",
+      "NexusPipeline.Tests.Settings.SettingsFormatTests.CurrentChannelsRoundTripWithoutRewritingDuringLoad",
+      "NexusPipeline.Tests.Settings.SettingsFormatTests.DesktopStartupDefaultAppliesOnlyWhenFieldIsAbsent",
+      "NexusPipeline.Tests.Settings.SettingsFormatTests.UnsupportedNotificationInputsAreRejectedWithoutChangingOriginalFiles"
+    ],
+    "boundaries": {
+      "real": [
+        "production C# rules, file transactions, coordinator and provider runner"
+      ],
+      "substituted": [
+        "external provider worker and dependency ports"
+      ],
+      "notProven": [
+        "browser/CLI/MCP/store-download/restart/scheduler E2E"
+      ]
+    }
+  }
+}
