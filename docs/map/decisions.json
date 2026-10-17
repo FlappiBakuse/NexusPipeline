@@ -1,0 +1,68 @@
+[
+  {
+    "id": "decisions.v0166",
+    "path": "decisions/adr-0166-001.md",
+    "summary": "本轮架构边界、公共 UI、当前格式与测试治理决定",
+    "topics": [
+      "ADR",
+      "决策",
+      "架构边界",
+      "测试治理"
+    ],
+    "aliases": [
+      "开发决定",
+      "版本决策"
+    ],
+    "codePaths": [
+      "frontend/src/ui/register.ts",
+      "frontend/src/ui/composites",
+      "tests/run.mjs"
+    ],
+    "authorityFor": [
+      "v0166-development-decision"
+    ],
+    "status": "current",
+    "validationPaths": [
+      "tools/check-doc-links.mjs",
+      "tests/policy.json"
+    ]
+  },
+  {
+    "id": "decisions.adr-0169-001",
+    "path": "decisions/adr-0169-001.md",
+    "summary": "ADR-0169-001 · 执行事实、角色与恢复准入",
+    "topics": [
+      "ADR-0169-001 · 执行事实、角色与恢复准入"
+    ],
+    "aliases": [],
+    "codePaths": [
+      "tools/check-doc-links.mjs"
+    ],
+    "validationPaths": [
+      "tools/check-doc-links.mjs"
+    ],
+    "authorityFor": [
+      "document.decisions.adr-0169-001"
+    ],
+    "status": "historical"
+  },
+  {
+    "id": "decisions.index",
+    "path": "decisions/README.md",
+    "summary": "决策记录",
+    "topics": [
+      "决策记录"
+    ],
+    "aliases": [],
+    "codePaths": [
+      "tools/check-doc-links.mjs"
+    ],
+    "validationPaths": [
+      "tools/check-doc-links.mjs"
+    ],
+    "authorityFor": [
+      "document.decisions.index"
+    ],
+    "status": "current"
+  }
+]

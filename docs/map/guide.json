@@ -1,0 +1,114 @@
+[
+  {
+    "id": "user.guide",
+    "path": "user/README.md",
+    "summary": "安装、依赖、取消、日志、结果、配置修复、升级与卸载",
+    "topics": [
+      "用户指南",
+      "安装",
+      "取消",
+      "日志",
+      "升级",
+      "卸载"
+    ],
+    "aliases": [
+      "FAQ",
+      "常见问题",
+      "使用指南"
+    ],
+    "codePaths": [
+      "README.md",
+      "frontend/public/help/runtime-prerequisites.html"
+    ],
+    "authorityFor": [
+      "user-operations"
+    ],
+    "status": "current",
+    "validationPaths": [
+      "tools/check-doc-links.mjs",
+      "tests/policy.json"
+    ]
+  },
+  {
+    "id": "user.guide.en",
+    "path": "user/README.en.md",
+    "summary": "English entry for installation, unverified outcomes, repair and data retention",
+    "topics": [
+      "English guide",
+      "installation",
+      "unverified",
+      "upgrade"
+    ],
+    "aliases": [
+      "user guide English"
+    ],
+    "codePaths": [
+      "README.md"
+    ],
+    "authorityFor": [
+      "user-operations-english"
+    ],
+    "status": "current",
+    "validationPaths": [
+      "tools/check-doc-links.mjs",
+      "tests/policy.json"
+    ]
+  },
+  {
+    "id": "index",
+    "path": "README.md",
+    "summary": "NexusPipeline 文档",
+    "topics": [
+      "NexusPipeline 文档"
+    ],
+    "aliases": [],
+    "codePaths": [
+      "tools/check-doc-links.mjs"
+    ],
+    "validationPaths": [
+      "tools/check-doc-links.mjs"
+    ],
+    "authorityFor": [
+      "document.index"
+    ],
+    "status": "current"
+  },
+  {
+    "id": "reference.control-plane",
+    "path": "reference/control-plane.md",
+    "summary": "控制面能力现状（Control Plane）",
+    "topics": [
+      "控制面能力现状（Control Plane）"
+    ],
+    "aliases": [],
+    "codePaths": [
+      "tools/check-doc-links.mjs"
+    ],
+    "validationPaths": [
+      "tools/check-doc-links.mjs"
+    ],
+    "authorityFor": [
+      "document.reference.control-plane"
+    ],
+    "status": "current"
+  },
+  {
+    "id": "status",
+    "path": "status.md",
+    "summary": "项目状态（Status）",
+    "topics": [
+      "项目状态（Status）"
+    ],
+    "aliases": [],
+    "codePaths": [
+      "tools/check-doc-links.mjs"
+    ],
+    "validationPaths": [
+      "tools/check-doc-links.mjs"
+    ],
+    "authorityFor": [
+      "document.status"
+    ],
+    "status": "current"
+  }
+]

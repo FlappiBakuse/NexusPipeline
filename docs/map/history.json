@@ -1,0 +1,47 @@
+[
+  {
+    "id": "history.index",
+    "path": "history/README.md",
+    "summary": "已发布历史、版本事实与历史入口",
+    "topics": [
+      "历史",
+      "版本",
+      "CHANGELOG"
+    ],
+    "aliases": [
+      "版本历史",
+      "发布历史"
+    ],
+    "codePaths": [
+      "CHANGELOG.md",
+      "docs/history/README.md"
+    ],
+    "authorityFor": [
+      "history-navigation"
+    ],
+    "status": "current",
+    "validationPaths": [
+      "tools/check-doc-links.mjs",
+      "tests/policy.json"
+    ]
+  },
+  {
+    "id": "history.changelog-earlier",
+    "path": "history/changelog-earlier.md",
+    "summary": "v0.16 版本历史",
+    "topics": [
+      "v0.16 版本历史"
+    ],
+    "aliases": [],
+    "codePaths": [
+      "tools/check-doc-links.mjs"
+    ],
+    "validationPaths": [
+      "tools/check-doc-links.mjs"
+    ],
+    "authorityFor": [
+      "document.history.changelog-earlier"
+    ],
+    "status": "historical"
+  }
+]

@@ -1,4 +1,5 @@
 """Validate current-attempt reports and completed Actions jobs without running product code."""
+from json_parts import read_json_input
 import hashlib
 import json
 import os
@@ -9,11 +10,9 @@ from datetime import datetime
 
 root, reports = Path(sys.argv[1]), Path(sys.argv[2])
 kind = sys.argv[3]
-policy_bytes = (root / "tests/policy.json").read_bytes()
-if policy_bytes.startswith(b"\xef\xbb\xbf"):
-    raise ValueError("Policy has a UTF-8 BOM")
-policy_bytes = policy_bytes.replace(b"\r\n", b"\n")
-policy = json.loads(policy_bytes)
+policy_input = read_json_input(root, "tests/policy.json")
+policy_bytes = policy_input["bytes"]
+policy = policy_input["value"]
 attempt = os.environ["GITHUB_RUN_ATTEMPT"]
 run = os.environ["GITHUB_RUN_ID"]
 sha = os.environ["GITHUB_SHA"]
@@ -58,7 +57,7 @@ if kind == "host":
         expected = policy["groups"][group]
         require(report["runId"] == f"{run}-{attempt}-{group}", "Foreign run/attempt")
         require(report["source"]["commitSha"] == sha and not report["source"]["workingTreeDirty"], "Foreign or dirty source")
-        require(report["policySha256"] == hashlib.sha256(policy_bytes).hexdigest(), "Foreign policy")
+        require(report["policySha256"] == policy_input["digest"], "Foreign policy")
         require(report["status"] == "PASS" and report["exitCode"] == 0, "Failed report")
         require(same(report["scope"]["completedCaseIds"], expected["caseIds"]), "Missing cases")
         require(same(report["scope"]["completedScenarioIds"], expected["scenarioIds"]), "Missing scenarios")
@@ -79,7 +78,7 @@ else:
         require(report["runId"] == f"{run}-{attempt}-{name}", "Foreign run/attempt")
         require(report["source"]["commitSha"] == sha and not report["source"]["workingTreeDirty"], "Foreign source")
         require(report["partner"]["commitSha"] == scope["hostSha"] and not report["partner"]["workingTreeDirty"], "Foreign Host input")
-        require(report["policySha256"] == hashlib.sha256(policy_bytes).hexdigest(), "Foreign policy")
+        require(report["policySha256"] == policy_input["digest"], "Foreign policy")
         require(report["status"] == "PASS" and report["exitCode"] == 0 and report["cleanup"]["cleanupComplete"], "Failed invocation")
         require(0 <= report["elapsedMs"], "Invocation qualification exceeded")
         require(len(report["plugins"]) == 1, "Unexpected plugin selection")

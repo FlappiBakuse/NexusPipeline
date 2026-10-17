@@ -1,0 +1,410 @@
+[
+  {
+    "id": "architecture.index",
+    "path": "architecture/README.md",
+    "summary": "架构专题入口与模块责任边界",
+    "topics": [
+      "架构",
+      "模块",
+      "代码定位",
+      "专题"
+    ],
+    "aliases": [
+      "设计文档",
+      "系统架构"
+    ],
+    "codePaths": [
+      "tools/check-doc-links.mjs"
+    ],
+    "authorityFor": [
+      "architecture-navigation"
+    ],
+    "status": "current",
+    "validationPaths": [
+      "tools/check-doc-links.mjs",
+      "tests/policy.json"
+    ]
+  },
+  {
+    "id": "architecture.overview",
+    "path": "architecture/overview.md",
+    "summary": "产品边界、核心概念、依赖方向和跨模块不变量",
+    "topics": [
+      "产品边界",
+      "核心概念",
+      "模块",
+      "设计约束"
+    ],
+    "aliases": [
+      "设计理念",
+      "系统概览"
+    ],
+    "codePaths": [
+      "src/Host",
+      "src/Host/Composition/HostCompositionRoot.cs"
+    ],
+    "authorityFor": [
+      "product-boundary",
+      "architecture-module-map"
+    ],
+    "status": "current",
+    "validationPaths": [
+      "tools/check-doc-links.mjs",
+      "tests/policy.json"
+    ]
+  },
+  {
+    "id": "architecture.execution",
+    "path": "architecture/execution.md",
+    "summary": "运行计划、尝试、取消、超时、进程清理与资源租约",
+    "topics": [
+      "运行",
+      "执行",
+      "取消",
+      "超时",
+      "租约"
+    ],
+    "aliases": [
+      "运行流程",
+      "执行失败"
+    ],
+    "codePaths": [
+      "src/Modules/Execution",
+      "src/Modules/Execution/Runtime/RunSession.cs",
+      "src/Modules/Execution/ExecutionDispatcher.cs"
+    ],
+    "authorityFor": [
+      "execution-lifecycle"
+    ],
+    "status": "current",
+    "validationPaths": [
+      "tools/check-doc-links.mjs",
+      "tests/policy.json"
+    ]
+  },
+  {
+    "id": "architecture.configuration",
+    "path": "architecture/configuration.md",
+    "summary": "配置会话、快照、交换、编辑隔离、provider 初始化事务与结果同步",
+    "topics": [
+      "配置",
+      "编辑",
+      "交换",
+      "快照",
+      "配置契约迁移",
+      "provider 初始化",
+      "配置修订"
+    ],
+    "aliases": [
+      "配置编辑",
+      "配置交换",
+      "配置恢复"
+    ],
+    "codePaths": [
+      "src/Modules/Configuration",
+      "src/Modules/Configuration/Exchange/ConfigSwapPrimitives.cs",
+      "src/Modules/Configuration/Editing/ConfigRepairPolicy.cs",
+      "tests/NexusPipeline.Tests/Configuration/ConfigRepairTests.cs",
+      "tools/NexusPipeline.TaskProtocolTests/ConfigRepairProbe.cs"
+    ],
+    "authorityFor": [
+      "configuration-editing",
+      "configuration-snapshot"
+    ],
+    "status": "current",
+    "validationPaths": [
+      "tools/check-doc-links.mjs",
+      "tests/policy.json"
+    ]
+  },
+  {
+    "id": "architecture.recovery",
+    "path": "architecture/recovery.md",
+    "summary": "当前格式下的事务身份、现场保全、启动恢复与人工处理边界",
+    "topics": [
+      "恢复",
+      "保全",
+      "事务",
+      "崩溃"
+    ],
+    "aliases": [
+      "配置恢复",
+      "安装恢复"
+    ],
+    "codePaths": [
+      "src/Modules/Configuration/Recovery",
+      "src/Modules/Configuration/Snapshots",
+      "src/Modules/Plugins/Repository"
+    ],
+    "authorityFor": [
+      "current-recovery"
+    ],
+    "status": "current",
+    "validationPaths": [
+      "tools/check-doc-links.mjs",
+      "tests/policy.json"
+    ]
+  },
+  {
+    "id": "architecture.scheduling",
+    "path": "architecture/scheduling.md",
+    "summary": "occurrence、调度 fence、队列执行与重试窗口",
+    "topics": [
+      "调度",
+      "队列",
+      "occurrence",
+      "去重"
+    ],
+    "aliases": [
+      "调度恢复",
+      "重复执行"
+    ],
+    "codePaths": [
+      "src/Modules/Scheduling"
+    ],
+    "authorityFor": [
+      "scheduling-occurrence"
+    ],
+    "status": "current",
+    "validationPaths": [
+      "tools/check-doc-links.mjs",
+      "tests/policy.json"
+    ]
+  },
+  {
+    "id": "architecture.judgement-logs",
+    "path": "architecture/judgement-logs.md",
+    "summary": "判断脚本、关键字、日志增量、输入冻结与超时",
+    "topics": [
+      "判定",
+      "判断脚本",
+      "日志",
+      "超时"
+    ],
+    "aliases": [
+      "完成判定",
+      "日志监控"
+    ],
+    "codePaths": [
+      "src/Modules/Execution/Judgement",
+      "src/Modules/Execution/Monitoring"
+    ],
+    "authorityFor": [
+      "judgement-and-log-monitoring"
+    ],
+    "status": "current",
+    "validationPaths": [
+      "tools/check-doc-links.mjs",
+      "tests/policy.json"
+    ]
+  },
+  {
+    "id": "architecture.persistence-history",
+    "path": "architecture/persistence-history.md",
+    "summary": "运行历史、日志、运行状态目录与文件布局",
+    "topics": [
+      "持久化",
+      "历史",
+      "运行状态",
+      "文件布局"
+    ],
+    "aliases": [
+      "数据落盘",
+      "历史记录"
+    ],
+    "codePaths": [
+      "src/Modules/History",
+      "src/Modules/Configuration/Snapshots",
+      "CHANGELOG.md"
+    ],
+    "authorityFor": [
+      "persistence-and-history"
+    ],
+    "status": "current",
+    "validationPaths": [
+      "tools/check-doc-links.mjs",
+      "tests/policy.json"
+    ]
+  },
+  {
+    "id": "architecture.observability",
+    "path": "architecture/observability.md",
+    "summary": "通知渠道、代理出口、诊断与敏感信息边界",
+    "topics": [
+      "通知",
+      "代理",
+      "诊断",
+      "网络"
+    ],
+    "aliases": [
+      "可观测性",
+      "消息通知"
+    ],
+    "codePaths": [
+      "src/Modules/Notifications",
+      "src/Modules/Diagnostics",
+      "src/Platform"
+    ],
+    "authorityFor": [
+      "observability-and-notification"
+    ],
+    "status": "current",
+    "validationPaths": [
+      "tools/check-doc-links.mjs",
+      "tests/policy.json"
+    ]
+  },
+  {
+    "id": "architecture.control",
+    "path": "architecture/control.md",
+    "summary": "Web、CLI、MCP、实时事件与重启控制面",
+    "topics": [
+      "控制面",
+      "Web",
+      "CLI",
+      "MCP",
+      "实时事件"
+    ],
+    "aliases": [
+      "管理接口",
+      "控制接口"
+    ],
+    "codePaths": [
+      "src/ControlPlane",
+      "src/Modules/Execution/Realtime"
+    ],
+    "authorityFor": [
+      "control-plane-architecture"
+    ],
+    "status": "current",
+    "validationPaths": [
+      "tools/check-doc-links.mjs",
+      "tests/policy.json"
+    ]
+  },
+  {
+    "id": "architecture.plugins",
+    "path": "architecture/plugins.md",
+    "summary": "插件发现、安装事务、能力注册与生命周期所有权",
+    "topics": [
+      "插件",
+      "安装",
+      "更新",
+      "生命周期"
+    ],
+    "aliases": [
+      "插件运行时",
+      "pending 安装"
+    ],
+    "codePaths": [
+      "src/Modules/Plugins",
+      "src/Modules/Plugins/Repository/PluginInstallRecovery.cs",
+      "src/NexusPipeline.Plugin.Abstractions"
+    ],
+    "authorityFor": [
+      "plugin-runtime-ownership"
+    ],
+    "status": "current",
+    "validationPaths": [
+      "tools/check-doc-links.mjs",
+      "tests/policy.json"
+    ]
+  },
+  {
+    "id": "architecture.update",
+    "path": "architecture/update.md",
+    "summary": "更新源、策略、下载校验、替换、重启与闲时应用",
+    "topics": [
+      "更新",
+      "校验",
+      "替换",
+      "重启"
+    ],
+    "aliases": [
+      "自动更新",
+      "更新事务"
+    ],
+    "codePaths": [
+      "src/Modules/Updates",
+      "src/NexusPipeline.Maintenance",
+      "src/NexusPipeline.Updater",
+      "src/NexusPipeline.Uninstaller",
+      "tools/NexusPipeline.InstallerMetadata",
+      "metadata/updates",
+      "tools/update_metadata.py",
+      "tools/update_recipe.py",
+      "tools/update_packages.py",
+      "tools/update_baseline.py",
+      "tests/NexusPipeline.UpdateTests",
+      "tests/system/prepare-maintenance.py",
+      "update-policy.json",
+      "src/NexusPipeline.Maintenance/Platform/Storage/VolumeSpaceProbe.cs"
+    ],
+    "authorityFor": [
+      "update-lifecycle"
+    ],
+    "status": "current",
+    "validationPaths": [
+      "tools/check-doc-links.mjs",
+      "tests/policy.json"
+    ]
+  },
+  {
+    "id": "architecture.frontend",
+    "path": "architecture/frontend.md",
+    "summary": "Vue 分层、平台服务、插件桥接与公共 UI 边界",
+    "topics": [
+      "前端",
+      "Vue",
+      "桥接",
+      "公共 UI"
+    ],
+    "aliases": [
+      "前端架构",
+      "Frontend 边界"
+    ],
+    "codePaths": [
+      "frontend/src/app",
+      "frontend/src/platform",
+      "frontend/src/plugin-bridge",
+      "frontend/src/ui",
+      "frontend/src/app/navigation.ts",
+      "frontend/src/platform/navigation-preparation.ts",
+      "frontend/src/platform/page-scroll.ts"
+    ],
+    "authorityFor": [
+      "frontend-architecture"
+    ],
+    "status": "current",
+    "validationPaths": [
+      "tools/check-doc-links.mjs",
+      "tests/policy.json"
+    ]
+  },
+  {
+    "id": "architecture.dashboard",
+    "path": "architecture/dashboard.md",
+    "summary": "卡片目录、持久化提交、编辑草稿与同步",
+    "topics": [
+      "Dashboard",
+      "卡片",
+      "外链"
+    ],
+    "aliases": [],
+    "codePaths": [
+      "src/Modules/Dashboard",
+      "src/Modules/Plugins/Runtime/PluginDashboardCardRegistry.cs",
+      "frontend/src/plugin-bridge/dashboard.ts",
+      "frontend/src/features/dashboard",
+      "src/ControlPlane/Http/ApiDashboardHandler.cs"
+    ],
+    "authorityFor": [
+      "dashboard-cards"
+    ],
+    "status": "current",
+    "validationPaths": [
+      "tools/check-doc-links.mjs",
+      "tests/policy.json"
+    ]
+  }
+]

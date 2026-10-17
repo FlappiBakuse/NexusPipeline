@@ -1,3 +1,4 @@
+import { readJsonInput } from "../tools/json-parts.mjs";
 import {controlManifest as readControlManifest,sourceFingerprint} from "./control-inputs.mjs";
 import {validatePairCheckout} from "./ci-inputs.mjs";
 import fs from "node:fs";
@@ -24,13 +25,13 @@ export function loadBatch(root,args) {
   const plan=JSON.parse(bytes);
   if(plan.schemaVersion!==2||plan.repository!=="Host"||plan.capacityStatus!=="PLANNED")
     throw new Error("Invalid or CAPACITY_EXCEEDED batch plan");
-  const policy=JSON.parse(fs.readFileSync(path.join(root,"tests/policy.json")));
+  const policy=readJsonInput(root, "tests/policy.json").value;
   const {registry}=readRegistry(root);
   const actualManifest=readControlManifest(root);
   if(digest(actualManifest)!==digest(plan.controlManifest)||hash(JSON.stringify(actualManifest))!==plan.policyDigest) throw new Error("Control input fingerprint differs from plan");
   const partnerRoot=options["--partner-root"] ? path.resolve(options["--partner-root"]) : process.env.NEXUS_PARTNER_ROOT;
   validatePairCheckout(root,file,plan,partnerRoot);
-  const partnerPolicy=partnerRoot ? JSON.parse(fs.readFileSync(path.join(partnerRoot,"tests/policy.json"))) : plan.partnerPolicySnapshot ?? null;
+  const partnerPolicy=partnerRoot ? readJsonInput(partnerRoot, "tests/policy.json").value : plan.partnerPolicySnapshot ?? null;
   if(plan.partnerPolicyDigest!== (partnerPolicy?hash(JSON.stringify(partnerPolicy)):null)) throw new Error("Partner policy differs from plan");
   const routing=planForChanges(root,plan.changes,registry,policy);
   if(!same(routing.selected.map(item=>item.id),plan.selected.map(item=>item.id))) throw new Error("Selected obligations differ from semantic plan");

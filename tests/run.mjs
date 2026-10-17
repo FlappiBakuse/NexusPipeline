@@ -1,3 +1,4 @@
+import { readJsonInput } from "../tools/json-parts.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -24,8 +25,9 @@ if (process.argv[2] === "plan") {
   try { runScopeCommand(projectRoot, process.argv.slice(3)); process.exit(0); }
   catch (error) { console.error(error.stack || error.message); process.exit(2); }
 }
-const policyBytes = fs.readFileSync(path.join(projectRoot, "tests", "policy.json"));
-const policy = JSON.parse(policyBytes);
+const policyInput = readJsonInput(projectRoot, "tests/policy.json");
+const policyBytes = policyInput.bytes;
+const policy = policyInput.value;
 if (policy.invocationBudgetMs !== null || policy.qualificationMs !== null || policy.cleanupReserveMs !== 0) throw new Error("Invalid Host timing policy");
 const batchContext = process.argv[2] === "batch" ? loadBatch(projectRoot,process.argv.slice(3)) : null;
 let executionRoot = projectRoot;
@@ -122,7 +124,7 @@ function runSelectedCore(group) {
   const artifactRoot = process.env.NEXUS_TEST_ARTIFACT_ROOT;
   if (!artifactRoot) throw new Error("核心测试需要 NEXUS_TEST_ARTIFACT_ROOT 指向已登记归属的外部测试目录");
   workspace ??= stageWorkspace(projectRoot, artifactRoot, invocationBudget);
-  return runCore({ group, policy, policyBytes, workspace, runRoot, runId, budget: invocationBudget, run });
+  return runCore({ group, policy, policyBytes, policyDigest: policyInput.digest, workspace, runRoot, runId, budget: invocationBudget, run });
 }
 
 async function buildFrontendBundle({typechecked=false,logRoot=runRoot}={}) {
@@ -296,7 +298,7 @@ async function runBatch() {
         const selected={caseIds:unit.expectedCaseIds,scenarioIds:unit.expectedScenarioIds,
           filter:[...new Set(unit.expectedCaseIds.map(id=>`FullyQualifiedName=${id.split("(")[0]}`))].join("|"),
           boundaries:{real:["production C# rules and transactions"],substituted:["controlled provider ports"]}};
-        code=await runCore({group:"backend.batch",policy:{...policy,groups:{...policy.groups,"backend.batch":selected}},policyBytes,workspace,runRoot,runId,budget:invocationBudget,run});
+        code=await runCore({group:"backend.batch",policy:{...policy,groups:{...policy.groups,"backend.batch":selected}},policyBytes, policyDigest: policyInput.digest,workspace,runRoot,runId,budget:invocationBudget,run});
         const summary=JSON.parse(fs.readFileSync(path.join(runRoot,"backend.batch/summary.json")));
         result.completedCaseIds=summary.scope.completedCaseIds;result.completedScenarioIds=summary.scope.completedScenarioIds;
         result.real=summary.boundaries.real;result.substituted=summary.boundaries.substituted;
@@ -637,7 +639,7 @@ async function runGate(id) {
     return withFrontend ? prepareTestHostUi() : publishTestHost({ withFrontend: false });
   }
   if (id === "host.ci-policy") {
-    let code = await run(process.execPath, ["--test", "tests/scope-plan.test.mjs", "tests/core-plan.test.mjs", "tests/batch-plan.test.mjs", "tests/support/budget.test.mjs", "tests/support/test-runtime.test.mjs"]);
+    let code = await run(process.execPath, ["--test", "tests/json-parts.test.mjs", "tests/scope-plan.test.mjs", "tests/core-plan.test.mjs", "tests/batch-plan.test.mjs", "tests/support/budget.test.mjs", "tests/support/test-runtime.test.mjs"]);
     if (code) return code;
     return run(pythonCommand, ["tests/support/unittest-runner.py", "--suite", "ci", "--report", path.join(runRoot, "python-ci.json")]);
   }

@@ -1,0 +1,65 @@
+{
+  "backend.control": {
+    "scenarioIds": [
+      "host.backend.control"
+    ],
+    "filter": "FullyQualifiedName~NexusPipeline.Tests.ControlPlane.|FullyQualifiedName~NexusPipeline.Tests.Platform.|FullyQualifiedName~.ClientAccessPolicyTests.",
+    "caseIds": [
+      "NexusPipeline.Tests.ControlPlane.BrowserLoginTests.BrowserAdmissionRequiresTrustedClientReadyFlowAndPluginBinding",
+      "NexusPipeline.Tests.ControlPlane.BrowserLoginTests.BrowserSuccessPublishesOnlyAfterCleanupAndActivation",
+      "NexusPipeline.Tests.ControlPlane.BrowserLoginTests.CancelDuringActivationCompensatesBeforeAnyPublicSuccess",
+      "NexusPipeline.Tests.ControlPlane.BrowserLoginTests.CaptureScopeFailuresRetryButCleanupOrActivationFailuresRevokeCandidates",
+      "NexusPipeline.Tests.ControlPlane.BrowserLoginTests.ClientSessionsNeverGrantNativeToHttpAndRevokeOnAuthorityOrDesktopExit",
+      "NexusPipeline.Tests.ControlPlane.BrowserLoginTests.SessionRevocationAndEditorCancellationTerminatePendingValidation",
+      "NexusPipeline.Tests.ControlPlane.ClientAccessPolicyTests.CapabilitiesExposeOnlyTheThreeValidatedOperationsWithoutCaching",
+      "NexusPipeline.Tests.ControlPlane.ClientAccessPolicyTests.NatOriginsRequireAuthenticatedRemoteTransportAndExactHttpAuthority",
+      "NexusPipeline.Tests.ControlPlane.ClientAccessPolicyTests.RegistrationsRejectMissingUnknownAndConflictingAccessAndFreezeActions",
+      "NexusPipeline.Tests.ControlPlane.ClientAccessPolicyTests.RemotePickerRejectsBeforeAnyDirectoryProbeOrNativeCallback",
+      "NexusPipeline.Tests.ControlPlane.ClientAccessPolicyTests.ScriptBrowserListsOnlyDeclaredRootsAndCannotEscapeToSiblingOrLinkedDirectories",
+      "NexusPipeline.Tests.ControlPlane.ClientAccessPolicyTests.TransportIdentityNormalizesLoopbackAndIgnoresForwardingHeaders",
+      "NexusPipeline.Tests.ControlPlane.DesktopProtocolTests.AuthenticationBindsBothNoncesAndCannotReflectDirection",
+      "NexusPipeline.Tests.ControlPlane.DesktopProtocolTests.ExplicitStartupAndRestoreIntentsOverrideThePreference",
+      "NexusPipeline.Tests.ControlPlane.DesktopProtocolTests.LightweightActivationWaitsForActualPortAndReportsBrowserFailure",
+      "NexusPipeline.Tests.ControlPlane.DesktopProtocolTests.LightweightStartupHonorsPreferenceAndSuppressesRestartOpening",
+      "NexusPipeline.Tests.ControlPlane.DesktopProtocolTests.LoginTaskSyncUpdatesOnlyVerifiedOwnedActions",
+      "NexusPipeline.Tests.ControlPlane.DesktopProtocolTests.ManagementRefreshFreezesCurrentConnectionsWithoutReplay",
+      "NexusPipeline.Tests.ControlPlane.DesktopProtocolTests.ModeSwitchWithoutDesktopPersistsAndDisablingRemainsLazy",
+      "NexusPipeline.Tests.ControlPlane.DesktopProtocolTests.ProcessIdentityIsStableBeforeTheImageLoaderRuns",
+      "NexusPipeline.Tests.ControlPlane.DesktopProtocolTests.ProcessMonitorContinuesAfterTransientSnapshotFailure",
+      "NexusPipeline.Tests.ControlPlane.DesktopProtocolTests.RealNamedPipeUsesKernelPeerIdentityAndBoundedFrames",
+      "NexusPipeline.Tests.ControlPlane.DesktopProtocolTests.RestartAbortMatchesTheHandoffAndAllowsLaterAssetReplacement",
+      "NexusPipeline.Tests.ControlPlane.DesktopProtocolTests.UnknownSessionFilesRetainTheirBytes",
+      "NexusPipeline.Tests.ControlPlane.DesktopProtocolTests.UpdateAbortRequiresTheSameTransactionAndRestoresPendingShow",
+      "NexusPipeline.Tests.ControlPlane.DesktopSessionStoreTests.FailedLaunchTicketRemovalOnlyDeletesTheKeyCreatedByThisAttempt",
+      "NexusPipeline.Tests.ControlPlane.DesktopSessionStoreTests.PrivateSessionCreationAndSignatureRejectTamperedRecord",
+      "NexusPipeline.Tests.ControlPlane.DiagnosticArtifactTests.CliArtifactOutputSupportsChinesePathsAndNeverOverwritesAnExistingTarget",
+      "NexusPipeline.Tests.ControlPlane.DiagnosticArtifactTests.ManagedArtifactRejectsUnknownIdsOutsidePathsAndChangedBytes",
+      "NexusPipeline.Tests.ControlPlane.EmbeddedFrontendTests.CorruptResourcesAndConflictingIndexEntriesFailClosed",
+      "NexusPipeline.Tests.ControlPlane.EmbeddedFrontendTests.EmbeddedBytesKeepTheirRawIdentityWithoutDiskFiles",
+      "NexusPipeline.Tests.ControlPlane.EmbeddedFrontendTests.GetHeadEtagsAndCacheHeadersMatchTheIndexedBytes",
+      "NexusPipeline.Tests.ControlPlane.EmbeddedFrontendTests.StaticWritesAreRejectedBeforeReadingAnyResource",
+      "NexusPipeline.Tests.ControlPlane.EmbeddedFrontendTests.TraversalReservedPathsAndMissingChunksCannotUseSpaFallback",
+      "NexusPipeline.Tests.ControlPlane.WebApiContractTests.RouteRegistry_ContainsTheCompletePublicResourceSet",
+      "NexusPipeline.Tests.ControlPlane.WebApiContractTests.RouteRegistry_PreservesRawPluginApiLimitAndJsonDefaults",
+      "NexusPipeline.Tests.ControlPlane.WebApiContractTests.SettingsProjection_MasksEverySecretAndKeepsNonSecretValues",
+      "NexusPipeline.Tests.ControlPlane.WebApiContractTests.UserAvatarValidation_MapsMimeAndBase64ErrorsToStableCodes",
+      "NexusPipeline.Tests.Platform.FirewallRuleTests.RuleUpdateUsesOneAddOnlyAfterSetFailsAndRejectsInvalidPorts",
+      "NexusPipeline.Tests.Platform.FirewallRuleTests.TestHostDryRunDoesNotInvokeTheWindowsCommand",
+      "NexusPipeline.Tests.Platform.OutboundHttpTests.ControlledTransportEnforcesIdentityRequestsAndRestartReceipts",
+      "NexusPipeline.Tests.Platform.OutboundHttpTests.InjectedTransportPreservesUriAndReadsCurrentProxyOptions",
+      "NexusPipeline.Tests.Platform.RemoteAccessAddressTests.NatAndReservedAddressesCannotInventAPublicEndpoint",
+      "NexusPipeline.Tests.Platform.RemoteAccessAddressTests.PreferredGatewayProducesOneInternalAndOnePublicAddress"
+    ],
+    "boundaries": {
+      "real": [
+        "production C# rules, file transactions, coordinator and provider runner"
+      ],
+      "substituted": [
+        "external provider worker and dependency ports"
+      ],
+      "notProven": [
+        "browser/CLI/MCP/store-download/restart/scheduler E2E"
+      ]
+    }
+  }
+}

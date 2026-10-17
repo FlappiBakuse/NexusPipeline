@@ -1,3 +1,4 @@
+import { readJsonInput } from "./json-parts.mjs";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -235,7 +236,7 @@ export function checkDocuments(root, { partnerRoot } = {}) {
       }
     } catch (error) { failures.push(`${path.relative(root, file)}:${link.line}: ${error.message}`); }
   }
-  const navigation = JSON.parse(fs.readFileSync(path.join(root, "docs/map.json"), "utf8"));
+  const navigation = readJsonInput(root, "docs/map.json").value;
   const ids = new Set(), authority = new Set(), mapped = new Set();
   if (navigation.schemaVersion !== 1 || !navigation.topics?.length) failures.push("GOV-DOC-02 invalid navigation schema");
   for (const topic of navigation.topics || []) {

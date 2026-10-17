@@ -1,0 +1,233 @@
+[
+  {
+    "id": "development.index",
+    "path": "development/README.md",
+    "summary": "开发环境、工作流和版本发布入口",
+    "topics": [
+      "开发",
+      "构建",
+      "发布",
+      "协作"
+    ],
+    "aliases": [
+      "开发文档",
+      "开发流程"
+    ],
+    "codePaths": [
+      "docs/development/README.md",
+      "build.cmd",
+      "tests/run.mjs"
+    ],
+    "authorityFor": [
+      "development-navigation"
+    ],
+    "status": "current",
+    "validationPaths": [
+      "tools/check-doc-links.mjs",
+      "tests/policy.json"
+    ]
+  },
+  {
+    "id": "development.setup",
+    "path": "development/setup.md",
+    "summary": "本地环境、构建、调试、运行时数据与故障排查",
+    "topics": [
+      "环境",
+      "构建",
+      "运行",
+      "调试"
+    ],
+    "aliases": [
+      "环境要求",
+      "从源码编译"
+    ],
+    "codePaths": [
+      "src/NexusPipeline.csproj",
+      "build.cmd",
+      "frontend/package.json"
+    ],
+    "authorityFor": [
+      "development-environment"
+    ],
+    "status": "current",
+    "validationPaths": [
+      "tools/check-doc-links.mjs",
+      "tests/policy.json"
+    ]
+  },
+  {
+    "id": "development.workflow",
+    "path": "development/workflow.md",
+    "summary": "协作、提交拆分、版本边界与文档治理",
+    "topics": [
+      "协作",
+      "提交",
+      "版本",
+      "治理"
+    ],
+    "aliases": [
+      "提交规范",
+      "协作流程"
+    ],
+    "codePaths": [
+      "AGENTS.md",
+      "CONTRIBUTING.md",
+      "tools/governance.mjs",
+      "tools/doc-contracts.mjs",
+      "tools/governance.test.mjs"
+    ],
+    "authorityFor": [
+      "development-workflow"
+    ],
+    "status": "current",
+    "validationPaths": [
+      "tools/check-doc-links.mjs",
+      "tests/policy.json"
+    ]
+  },
+  {
+    "id": "development.release",
+    "path": "development/release.md",
+    "summary": "Pre-release 发布、资产校验、清理与发布后收尾",
+    "topics": [
+      "发布",
+      "Pre-release",
+      "资产",
+      "SHA256"
+    ],
+    "aliases": [
+      "发布流程",
+      "发行流程"
+    ],
+    "codePaths": [
+      "build.cmd",
+      ".github/workflows/release.yml"
+    ],
+    "authorityFor": [
+      "development-release"
+    ],
+    "status": "current",
+    "validationPaths": [
+      "tools/check-doc-links.mjs",
+      "tests/policy.json"
+    ]
+  },
+  {
+    "id": "development.build-identity",
+    "path": "development/build-identity.md",
+    "summary": "冻结输入、规范字节、Host 与桌面构建身份",
+    "topics": [
+      "构建身份",
+      "buildInputs",
+      "buildId",
+      "frontendHash"
+    ],
+    "aliases": [
+      "desktop-build"
+    ],
+    "codePaths": [
+      "tools/build_identity.py",
+      "tools/schemas",
+      "src/NexusPipeline.Maintenance/Updates/ApplicationBuildIdentity.cs"
+    ],
+    "authorityFor": [
+      "build-identity"
+    ],
+    "status": "current",
+    "validationPaths": [
+      "tools/check-doc-links.mjs",
+      "tests/policy.json"
+    ]
+  },
+  {
+    "id": "development.desktop",
+    "path": "development/desktop-client.md",
+    "summary": "Electron 生命周期、窗口、安全 IPC、嵌入 Vue 和完整应用构建",
+    "topics": [
+      "桌面",
+      "Electron",
+      "窗口",
+      "应用载荷"
+    ],
+    "aliases": [
+      "workspace"
+    ],
+    "codePaths": [
+      "desktop",
+      "src/Host/Desktop",
+      "src/NexusPipeline.Maintenance/Updates/ApplicationPayload.cs",
+      "tools/application_build.py"
+    ],
+    "authorityFor": [
+      "desktop-client"
+    ],
+    "status": "current",
+    "validationPaths": [
+      "tools/check-doc-links.mjs",
+      "tests/policy.json"
+    ]
+  },
+  {
+    "id": "development.local-acceptance",
+    "path": "development/local-acceptance.md",
+    "summary": "冻结双仓未提交源，构建本机验收 Host、桌面、Setup 和全部插件",
+    "topics": [
+      "本机验收",
+      "冻结源",
+      "未提交构建"
+    ],
+    "aliases": [],
+    "codePaths": [
+      "tools/local_acceptance.py",
+      "tools/host_installer.py",
+      "tools/installer-space.iss",
+      "tools/installer_artwork.py"
+    ],
+    "authorityFor": [
+      "local-acceptance-build"
+    ],
+    "status": "current",
+    "validationPaths": [
+      "tools/check-doc-links.mjs",
+      "tests/policy.json"
+    ]
+  },
+  {
+    "id": "development.documentation",
+    "path": "development/documentation.md",
+    "summary": "文档维护规范",
+    "topics": [
+      "文档维护规范"
+    ],
+    "aliases": [],
+    "codePaths": [
+      "tools/check-doc-links.mjs"
+    ],
+    "validationPaths": [
+      "tools/check-doc-links.mjs"
+    ],
+    "authorityFor": [
+      "document.development.documentation"
+    ],
+    "status": "current"
+  },
+  {
+    "id": "development.frontend-design",
+    "path": "development/frontend-design.md",
+    "summary": "前端设计规范",
+    "topics": [
+      "前端设计规范"
+    ],
+    "aliases": [],
+    "codePaths": [
+      "tools/check-doc-links.mjs"
+    ],
+    "validationPaths": [
+      "tools/check-doc-links.mjs"
+    ],
+    "authorityFor": [
+      "document.development.frontend-design"
+    ],
+    "status": "current"
+  }
+]

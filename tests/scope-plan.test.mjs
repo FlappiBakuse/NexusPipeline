@@ -1,3 +1,4 @@
+import { readJsonInput } from "../tools/json-parts.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -10,7 +11,7 @@ import {workingTreeSha} from './control-inputs.mjs';
 
 const root = path.resolve(import.meta.dirname, "..");
 const { registry } = readRegistry(root);
-const policy = JSON.parse(fs.readFileSync(path.join(root, "tests/policy.json"), "utf8"));
+const policy = readJsonInput(root, "tests/policy.json").value;
 const ids = changes => planForChanges(root, changes, registry, policy).selected.map(item => item.id);
 const change = name => [{ status: "M", path: name }];
 

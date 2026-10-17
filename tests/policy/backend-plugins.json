@@ -1,0 +1,52 @@
+{
+  "backend.plugins": {
+    "scenarioIds": [
+      "host.backend.plugins"
+    ],
+    "filter": "FullyQualifiedName~NexusPipeline.Tests.Plugins.",
+    "caseIds": [
+      "NexusPipeline.Tests.Plugins.ManagedPluginContractTests.EntryMetadataRejectsOldFrameworkAndSdkWithoutChangingBytes",
+      "NexusPipeline.Tests.Plugins.TaskFixtureTests.DuplicateAndCaseCollidingIdsFailClosed",
+      "NexusPipeline.Tests.Plugins.TaskFixtureTests.EmptyAndUngroupedRootsFailClosed",
+      "NexusPipeline.Tests.Plugins.TaskFixtureTests.LinkedDirectoryIsRejectedAndTargetPreserved",
+      "NexusPipeline.Tests.Plugins.TaskFixtureTests.NestedFixturesKeepStableIdsAndExcludeResourceSets",
+      "NexusPipeline.Tests.Plugins.TaskFixtureTests.ResourceSetsCannotEscapeSharedScope",
+      "NexusPipeline.Tests.Plugins.PluginActivationPreferencesTests.ExistingCaseInsensitivePreferenceAndFailedSaveLeaveStateUnchanged",
+      "NexusPipeline.Tests.Plugins.PluginActivationPreferencesTests.FirstInstallSavesEnabledAndReplayPreservesLaterDisable",
+      "NexusPipeline.Tests.Plugins.PluginInstallRecoveryTests.ApplyPending_CompletesSwapWhenJournalWriteWasInterrupted",
+      "NexusPipeline.Tests.Plugins.PluginInstallRecoveryTests.ApplyPending_CorruptJournalIsRetainedAndDoesNotCreateRecoverySideEffects",
+      "NexusPipeline.Tests.Plugins.PluginInstallRecoveryTests.ApplyPending_CorruptOwnershipIsRetainedAndDoesNotCreateRecoveryDirectories",
+      "NexusPipeline.Tests.Plugins.PluginInstallRecoveryTests.ApplyPending_FailedStageKeepsJournalForRetry",
+      "NexusPipeline.Tests.Plugins.PluginInstallRecoveryTests.ApplyPending_InstallsAndUninstallsPluginTransactionally",
+      "NexusPipeline.Tests.Plugins.PluginInstallRecoveryTests.ApplyPending_LockedJournalRetainsOperationUntilNextStartupAttempt",
+      "NexusPipeline.Tests.Plugins.PluginInstallRecoveryTests.ApplyPending_ManagedInstallKeepsActivationIntentUntilPreferenceCommit",
+      "NexusPipeline.Tests.Plugins.PluginInstallRecoveryTests.ApplyPending_CurrentInstallWithoutActivationIntent",
+      "NexusPipeline.Tests.Plugins.PluginInstallRecoveryTests.ApplyPending_ThreeWayDirectoryConflictRetainsAllOwnedScenes",
+      "NexusPipeline.Tests.Plugins.PluginInstallRecoveryTests.ApplyPending_UninstallAfterOwnershipCommitFinishesWithoutDeletingUnrelatedData",
+      "NexusPipeline.Tests.Plugins.PluginInstallRecoveryTests.ApplyPending_UnownedUpdateRetainsLocalAndStaging",
+      "NexusPipeline.Tests.Plugins.PluginInstallRecoveryTests.ReadOwnership_RejectsOldRecordAndPreservesBytes",
+      "NexusPipeline.Tests.Plugins.PluginInstallRecoveryTests.ReadPending_RejectsOldOperationAndPreservesAllFiles",
+      "NexusPipeline.Tests.Plugins.PluginManagerTests.LoadAll_DoesNotExposeRemovedBuiltInPlugins",
+      "NexusPipeline.Tests.Plugins.PluginManagerTests.ManagementProjection_IsCachedUntilInvalidated",
+      "NexusPipeline.Tests.Plugins.PluginRepositoryCatalogTests.CompareVersions_UsesNumericSemverOrdering",
+      "NexusPipeline.Tests.Plugins.PluginRepositoryCatalogTests.CompatibilityEvaluator_DistinguishesHostApiAndInvalidVersionFailures",
+      "NexusPipeline.Tests.Plugins.PluginRepositoryCatalogTests.IsCanonicalPluginId_EnforcesLowerKebabCase",
+      "NexusPipeline.Tests.Plugins.PluginRepositoryCatalogTests.TryParse_RejectsUnsafeHomepageArtifactNameNonSemverAndDuplicateEntries",
+      "NexusPipeline.Tests.Plugins.PluginRepositoryCatalogTests.TryParse_Schema2_ParsesArtifactChangelogAndPresentationMetadata",
+      "NexusPipeline.Tests.Plugins.PluginRepositoryCatalogTests.TryParse_ValidOfficialCatalog_ReturnsNormalizedEntry",
+      "NexusPipeline.Tests.Plugins.PluginRepositoryCatalogTests.UpdateEligibility_RequiresStoreOwnershipAndCurrentInstallableUpdate",
+      "NexusPipeline.Tests.Plugins.PluginRepositoryCatalogTests.ValidatePackageUrl_AcceptsOfficialRawAndRejectsEverythingElse"
+    ],
+    "boundaries": {
+      "real": [
+        "production C# rules, file transactions, coordinator and provider runner"
+      ],
+      "substituted": [
+        "external provider worker and dependency ports"
+      ],
+      "notProven": [
+        "browser/CLI/MCP/store-download/restart/scheduler E2E"
+      ]
+    }
+  }
+}

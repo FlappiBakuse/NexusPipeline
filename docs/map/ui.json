@@ -1,0 +1,137 @@
+[
+  {
+    "id": "ui.catalog",
+    "path": "reference/ui/README.md",
+    "summary": "公开 nxp-* Native Custom Elements 的分组目录与消费边界",
+    "topics": [
+      "UI",
+      "nxp-*",
+      "Native Custom Elements",
+      "公共元件"
+    ],
+    "aliases": [
+      "公共 UI",
+      "UI 组件"
+    ],
+    "codePaths": [
+      "frontend/src/ui/register.ts",
+      "frontend/src/ui"
+    ],
+    "authorityFor": [
+      "public-ui-catalog"
+    ],
+    "status": "current",
+    "validationPaths": [
+      "tools/check-doc-links.mjs",
+      "tests/policy.json"
+    ]
+  },
+  {
+    "id": "ui.actions-inputs",
+    "path": "reference/ui/actions-inputs.md",
+    "summary": "按钮、图标、字段、文本数字、文件与路径输入契约",
+    "topics": [
+      "按钮",
+      "输入",
+      "字段",
+      "文件"
+    ],
+    "aliases": [
+      "动作控件",
+      "输入控件"
+    ],
+    "codePaths": [
+      "frontend/src/ui/primitives",
+      "frontend/src/ui/register.ts"
+    ],
+    "authorityFor": [
+      "public-ui-actions-inputs"
+    ],
+    "status": "current",
+    "validationPaths": [
+      "tools/check-doc-links.mjs",
+      "tests/policy.json"
+    ]
+  },
+  {
+    "id": "ui.selection",
+    "path": "reference/ui/selection.md",
+    "summary": "开关、选择、范围、颜色、时间、日期范围与 tabs 契约",
+    "topics": [
+      "选择",
+      "日期",
+      "开关",
+      "tabs"
+    ],
+    "aliases": [
+      "选择控件",
+      "日期控件"
+    ],
+    "codePaths": [
+      "frontend/src/ui/primitives",
+      "frontend/src/ui/composites/NxpDateRangePicker.vue"
+    ],
+    "authorityFor": [
+      "public-ui-selection"
+    ],
+    "status": "current",
+    "validationPaths": [
+      "tools/check-doc-links.mjs",
+      "tests/policy.json"
+    ]
+  },
+  {
+    "id": "ui.overlays-feedback",
+    "path": "reference/ui/overlays-feedback.md",
+    "summary": "menu、tooltip、modal、popover、确认、toast 与状态反馈契约",
+    "topics": [
+      "弹层",
+      "反馈",
+      "modal",
+      "toast"
+    ],
+    "aliases": [
+      "对话框",
+      "提示反馈"
+    ],
+    "codePaths": [
+      "frontend/src/ui/primitives",
+      "frontend/src/ui/composites"
+    ],
+    "authorityFor": [
+      "public-ui-overlays-feedback"
+    ],
+    "status": "current",
+    "validationPaths": [
+      "tools/check-doc-links.mjs",
+      "tests/policy.json"
+    ]
+  },
+  {
+    "id": "ui.layout-lists",
+    "path": "reference/ui/layout-lists.md",
+    "summary": "卡片、标题、实体行、排序、分页与滚动契约",
+    "topics": [
+      "布局",
+      "列表",
+      "排序",
+      "分页"
+    ],
+    "aliases": [
+      "列表控件",
+      "布局控件"
+    ],
+    "codePaths": [
+      "frontend/src/ui/composites",
+      "frontend/src/ui/primitives"
+    ],
+    "authorityFor": [
+      "public-ui-layout-lists"
+    ],
+    "status": "current",
+    "validationPaths": [
+      "tools/check-doc-links.mjs",
+      "tests/policy.json"
+    ]
+  }
+]

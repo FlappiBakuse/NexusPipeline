@@ -1,4 +1,5 @@
 """Validate immutable cross-repository PR inputs using read-only GitHub evidence."""
+from json_parts import load_json_input
 import argparse
 import base64
 import hashlib
@@ -74,11 +75,11 @@ def api(route):
 
 
 def file_digest(read, repo, sha, name):
-    blob = read(f"/repos/{repo}/contents/{name}?ref={sha}")
-    require(blob.get("type") == "file" and blob.get("encoding") == "base64", "Invalid input blob")
-    raw = base64.b64decode(blob["content"])
-    require(not raw.startswith(b"\xef\xbb\xbf"), "Input BOM")
-    return hashlib.sha256(raw.decode("utf-8").replace("\r\n", "\n").encode("utf-8")).hexdigest()
+    def read_bytes(relative):
+        blob = read(f"/repos/{repo}/contents/{relative}?ref={sha}")
+        require(blob.get("type") == "file" and blob.get("encoding") == "base64", "Invalid input blob")
+        return base64.b64decode(blob["content"])
+    return load_json_input(name, read_bytes)["digest"]
 
 
 def control_digest(read, repo, sha):

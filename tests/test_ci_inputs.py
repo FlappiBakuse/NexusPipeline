@@ -43,6 +43,23 @@ class InputPairTests(unittest.TestCase):
     def read(self, route):
         return copy.deepcopy(self.responses[route])
 
+    def test_partitioned_policy_pins_every_remote_fragment_at_tested_sha(self):
+        source = self.pair["sources"][0]
+        prefix = f"/repos/{source['repository']}/contents/"
+        suffix = f"?ref={source['testedSha']}"
+        manifest = {"schemaVersion": 1, "partitionVersion": 1, "parts": [
+            {"path": "tests/policy/backend.json", "section": "groups"}]}
+        self.responses[prefix + "tests/policy.json" + suffix]["content"] = base64.b64encode(json.dumps(manifest).encode()).decode()
+        self.responses[prefix + "tests/policy/backend.json" + suffix] = {
+            "type": "file", "encoding": "base64", "content": base64.b64encode(b'{"backend":{"caseIds":["first"]}}').decode()}
+        pair = inputs.create_pair([1, 2], self.read)
+        for item in pair["sources"]:
+            self.responses[f"/repos/{item['repository']}/pulls/{item['prNumber']}"]["body"] = block(pair)
+        inputs.validate_pair(pair, self.read)
+        self.responses[prefix + "tests/policy/backend.json" + suffix]["content"] = base64.b64encode(b'{"backend":{"caseIds":["second"]}}').decode()
+        with self.assertRaises(ValueError):
+            inputs.validate_pair(pair, self.read)
+
     def test_canonical_fixed_vector_and_duplicate_unknown_fields(self):
         self.assertEqual(inputs.canonical({"z": [1, "中文"], "a": {"b": 2}}),
                          '{"a":{"b":2},"z":[1,"中文"]}'.encode())

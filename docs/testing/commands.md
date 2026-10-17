@@ -27,6 +27,8 @@ node tests/run.mjs gate --id host.ci-policy
 
 `ci` 必须指定一个已知分组。backend 选择真实后端规则、文件事务、执行与调度窄测试；frontend 运行类型检查及核心状态、用户配置请求与公开桥接测试。`tests/policy.json` 中的预期用例与实际原生报告严格匹配。新增或更名选中用例时同步清单，不能删除失败用例以绕过验证。
 
+规范清单位于 `tests/policy.json`，各分组及用例在 `tests/policy/` 按职责维护。Node 读取器 `tools/json-parts.mjs` 与 Python 读取器 `tests/json_parts.py` 合并为原有 schema 1 对象；全局预算、CI batch policy 和有限场景仍在规范清单。报告及跨仓固定输入指纹包含清单和全部声明分片，固定 Git/API 来源的分片使用同一 SHA；缺片或冲突不能退回空策略。
+
 `daily` 使用两个独立 Host 槽位，先启动真实分钟调度，另一槽运行执行和配置，空闲槽接续控制面；共享准备、四组工作及清理全部计时，不设总执行时间预算。支持 `--group execution|config|control|schedule` 进行明确的单组诊断。每组保留 `evidence.json`，父级 `daily-evidence.json` 只有全部预期组及清理通过才成功。
 
 | 场景 | 真实证明 | 外部替代 |

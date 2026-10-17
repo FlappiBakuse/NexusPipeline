@@ -1,3 +1,4 @@
+import { readJsonInput } from "../tools/json-parts.mjs";
 import {controlManifest as readControlManifest,sourceFingerprint} from "./control-inputs.mjs";
 import fs from "node:fs";
 import path from "node:path";
@@ -86,6 +87,10 @@ export function planForChanges(root, changes, registry, policy) {
   const names = owner === "plugins" ? allPluginNames(policy) : [];
   const classifyHost = (name, status) => {
     const reason = `${status} ${name}`;
+    if (["tools/json-parts.mjs", "tests/json_parts.py", "tests/json-parts.test.mjs"].includes(name)) {
+      host("ci-policy", reason); host("docs", reason); return;
+    }
+    if (name === "docs/map.json" || name.startsWith("docs/map/")) { host("docs", reason); return; }
     if (name.startsWith("tests/support/") || name === "tests/batch-runner.mjs") {
       fullCore(`execution adapter: ${reason}`); return;
     }
@@ -186,12 +191,12 @@ export function planForChanges(root, changes, registry, policy) {
 
 export function createScopePlan(root, options = {}) {
   const { registry, digest } = readRegistry(root);
-  const policy = JSON.parse(fs.readFileSync(path.join(root, "tests/policy.json"), "utf8"));
+  const policy = readJsonInput(root, "tests/policy.json").value;
   const identity = collectChanges(root, options);
   const routing = planForChanges(root, identity.changes, registry, policy);
   const controlManifest=readControlManifest(root);
   const batchIdentity = {...identity, partnerSha:options.partnerSha ?? null, ...(options.inputPair ? {inputPair:options.inputPair} : {}), controlManifest};
-  const partnerPolicy = options.partnerPolicy ?? (options.partnerRoot ? JSON.parse(fs.readFileSync(path.join(options.partnerRoot,"tests/policy.json"))) : null);
+  const partnerPolicy = options.partnerPolicy ?? (options.partnerRoot ? readJsonInput(options.partnerRoot, "tests/policy.json").value : null);
   const partnerPolicyDigest = partnerPolicy ? hash(JSON.stringify(partnerPolicy)) : null;
   const allocation = allocateUnits(coreUnits(routing.selected,registry,policy,partnerPolicy),{...batchIdentity,partnerPolicyDigest},policy.ciBatchPolicy);
   return { schemaVersion: 2, repository: registry.repository, policyDigest: hash(JSON.stringify(controlManifest)), digestFormat: "utf8-lf-v1",

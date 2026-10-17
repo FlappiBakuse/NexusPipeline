@@ -5,7 +5,7 @@ import { getProcessRunnerState } from "./process-runner.mjs";
 import { sha256, validateResult } from "./report.mjs";
 import { ensureNpmInputs } from "./npm-inputs.mjs";
 
-export async function runCore({ group, policy, policyBytes, workspace, runRoot, runId, budget, run }) {
+export async function runCore({ group, policy, policyBytes, policyDigest = sha256(policyBytes), workspace, runRoot, runId, budget, run }) {
   const selected = policy.groups[group];
   const backend = group === "backend" || group.startsWith("backend.");
   const gateId = group.startsWith("backend.") ? `host.${group}` : group === "frontend" ? "host.frontend.state" : null;
@@ -22,7 +22,7 @@ export async function runCore({ group, policy, policyBytes, workspace, runRoot, 
   let failure = null;
   const plan = {
     runId, repository: "FlappiBakuse/NexusPipeline", source: workspace.source,
-    partner: null, policySha256: sha256(policyBytes), profile: group, plugin: null,
+    partner: null, policySha256: policyDigest, profile: group, plugin: null,
     scenarioIds: selected.scenarioIds, caseIds: selected.caseIds, budgetMs: policy.invocationBudgetMs,
     qualificationMs: policy.qualificationMs,
   };
