@@ -14,6 +14,8 @@
 
 `manifest.name` 是稳定的小写 kebab-case 逻辑身份，用于配置、密钥、偏好和脚本声明；`artifactName` 是严格区分大小写的源码、安装与发行物理身份。schema 2 的安装目录为 `plugins/<ArtifactName>/`，必须与 manifest 一致。
 
+管理器的 summary、历史和前端资产投影位于同名 partial 文件，共享同一运行集合与快照缓存。安装恢复按内置种子、状态读写、安装、卸载和路径职责分文件，保留单一 Sync 及 schema 3 阶段顺序。UI、Web API、历史贡献注册、scope 存储与验证各有对应文件，不共用通用注册中心。
+
 ## 发现、缓存与通道
 
 官方来源固定为 NexusPipeline-Plugins。catalog 只作为索引，运行时事实来自 manifest，展示信息来自 store 与 README。目录校验包括 schema、重复身份、兼容性、官方 URL、包大小和摘要。
