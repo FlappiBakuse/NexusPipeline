@@ -111,7 +111,7 @@ internal sealed partial class ConfigEditCommands
                     commitMark, editMode, session.Spec.ConfigInputName, session.Spec.ConfigInputValue,
                     trigger: "config-edit-commit");
                 if (!string.IsNullOrWhiteSpace(result.Error))
-                    return Validation<ConfigEditCompleted>("execution_failed", "配置编辑提交脚本失败：" + result.Error);
+                    return Validation<ConfigEditCompleted>(code: "execution_failed", message: "配置编辑提交脚本失败：" + result.Error);
             }
 
             Stopwatch swapTimer = Stopwatch.StartNew();
@@ -130,7 +130,7 @@ internal sealed partial class ConfigEditCommands
             if (swapError is not null)
             {
                 return Validation<ConfigEditCompleted>(
-                    "execution_failed",
+                    code: "execution_failed", message:
                     (action == "done" ? "提交" : "取消") + "失败：" + swapError);
             }
 
@@ -145,7 +145,7 @@ internal sealed partial class ConfigEditCommands
                 if (!bindingResult.Succeeded)
                 {
                     return Validation<ConfigEditCompleted>(
-                        "execution_failed",
+                        code: "execution_failed", message:
                         "配置输入绑定提交失败：" + (bindingResult.ErrorMessage ?? "未知错误"));
                 }
                 ConfigSessionMark.Clear(session.Script.Id, sessionUserKey);

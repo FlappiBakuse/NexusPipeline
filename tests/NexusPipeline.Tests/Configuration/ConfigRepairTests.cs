@@ -17,6 +17,9 @@ using NexusPipeline.Modules.Settings;
 using NexusPipeline.Modules.Settings.Contracts;
 using NexusPipeline.Modules.Users;
 using NexusPipeline.Modules.Users.Contracts;
+using NexusPipeline.Modules.Users.UseCases;
+using NexusPipeline.Host.State;
+using NexusPipeline.Host.Composition.Adapters;
 using NexusPipeline.Tests.Support;
 using Xunit;
 
@@ -24,6 +27,111 @@ namespace NexusPipeline.Tests.Configuration;
 
 public sealed class ConfigRepairTests
 {
+    [Fact]
+    public void EditCompletionFailuresPreserveStableCodeAndRecoverableSession()
+    {
+        ConfigSwapSession.ConfigureRecovery(_ => null, () => []);
+        foreach (int failure in new[] { 0, 1, 2 })
+        {
+            string root = Path.Combine(Path.GetTempPath(), "nxp-edit-complete-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(root);
+            var declaration = new ScriptInstance { Id = Guid.NewGuid().ToString("N"), PluginType = "fixture", RootPath = root };
+            var plugins = new Capabilities(root);
+            plugins.Profile.ExtraConfigPaths = [];
+            plugins.Profile.ConfigEditor = failure == 0 ? Editor("throw new Error('commit-fixture');") : null;
+            if (failure != 0) plugins.Profile.TaskProtocol = null;
+            File.WriteAllText(plugins.Profile.MainExe, "non-running fixture");
+            Directory.CreateDirectory(plugins.Profile.ConfigPath);
+            string site = Path.Combine(plugins.Profile.ConfigPath, "original.json");
+            File.WriteAllText(site, "{\"preserve\":true}");
+            var user = new NexusUser { Name = "completion", Bindings = [new() { ScriptInstanceId = declaration.Id }] };
+            var resolver = new ScriptSpecResolver(plugins, plugins);
+            var spec = resolver.Resolve(declaration);
+            var admission = new Admission();
+            var users = new UserCommands(new RuntimeUserMutationState(new AutomationDefinitionState()), new MissingBindingAdmission(),
+                null!, null!, null!, null!, null!, null!, null!);
+            var commands = new ConfigEditCommands(admission, new Scripts(declaration), new Users(user), plugins, plugins, resolver, users);
+            try
+            {
+                Assert.Null(ConfigEditSessionService.PrepareForEditReuse(declaration.Id, user.Id, spec.Script.ConfigPath,
+                    ConfigSessionMark.FromScript(spec.Script)));
+                var mark = ConfigSessionMark.TryRead(declaration.Id, user.Id)!;
+                if (failure == 2)
+                {
+                    mark.PendingConfigInput = new() { Name = "instance", Value = "chosen" };
+                    mark.Write();
+                }
+                ConfigEditSessionRegistry.EditSessions[declaration.Id] = new EditSession
+                {
+                    Script = spec.Script, Spec = spec, User = new(user.Id, user.Name, user.Bindings[0]), Mark = mark,
+                };
+                if (failure == 1)
+                {
+                    File.WriteAllText(ConfigSessionMark.MarkFile(declaration.Id, user.Id), "{corrupt-fixture");
+                    File.WriteAllText(ConfigSessionMark.BackupMarkFile(declaration.Id, user.Id), "{corrupt-fixture");
+                }
+                var result = commands.Complete(declaration.Id, user.Id, "done");
+                Assert.False(result.Succeeded);
+                Assert.Equal("execution_failed", result.Error!.Code);
+                Assert.Contains(failure switch { 0 => "配置编辑提交脚本失败", 1 => "提交失败", _ => "配置输入绑定提交失败" }, result.Error.Message);
+                Assert.True(ConfigEditSessionRegistry.EditSessions.ContainsKey(declaration.Id));
+                Assert.Equal(0, admission.EndCount);
+                Assert.Equal("{\"preserve\":true}", File.ReadAllText(site));
+                Assert.True(File.Exists(ConfigSessionMark.MarkFile(declaration.Id, user.Id)));
+            }
+            finally
+            {
+                ConfigEditSessionRegistry.EditSessions.TryRemove(declaration.Id, out _);
+                File.Delete(ConfigSessionMark.MarkFile(declaration.Id, user.Id));
+                File.Delete(ConfigSessionMark.BackupMarkFile(declaration.Id, user.Id));
+                Directory.Delete(root, true);
+            }
+        }
+    }
+
+    private sealed class MissingBindingAdmission : IUserMutationAdmission
+    {
+        public void WithCoordination(Action action) => action();
+    }
+
+    [Fact]
+    public void EditPreparationAndLaunchFailuresPreserveCodeMessageAndRollback()
+    {
+        ConfigSwapSession.ConfigureRecovery(_ => null, () => []);
+        foreach (bool editorFailure in new[] { true, false })
+        {
+            string root = Path.Combine(Path.GetTempPath(), "nxp-edit-failure-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(root);
+            var declaration = new ScriptInstance { Id = Guid.NewGuid().ToString("N"), PluginType = "fixture", RootPath = root };
+            var plugins = new Capabilities(root);
+            plugins.Profile.TaskProtocol = null;
+            plugins.Profile.ExtraConfigPaths = [];
+            plugins.Profile.ConfigEditor = editorFailure ? Editor("throw new Error('prepare-fixture');") : null;
+            File.WriteAllText(plugins.Profile.MainExe, "invalid executable fixture");
+            Directory.CreateDirectory(plugins.Profile.ConfigPath);
+            string site = Path.Combine(plugins.Profile.ConfigPath, "original.json");
+            File.WriteAllText(site, "{\"preserve\":true}");
+            var user = new NexusUser { Name = "failure", Bindings = [new() { ScriptInstanceId = declaration.Id }] };
+            var admission = new Admission();
+            var commands = new ConfigEditCommands(admission, new Scripts(declaration), new Users(user), plugins,
+                plugins, new ScriptSpecResolver(plugins, plugins), null!);
+            try
+            {
+                var result = commands.Start(declaration.Id, user.Id, "fresh");
+                Assert.False(result.Succeeded);
+                Assert.Equal("execution_failed", result.Error!.Code);
+                Assert.Contains(editorFailure ? "配置编辑准备脚本失败" : "主程序启动失败", result.Error.Message);
+                Assert.Equal("{\"preserve\":true}", File.ReadAllText(site));
+                Assert.Null(ConfigSessionMark.TryRead(declaration.Id, user.Id));
+                Assert.Equal(1, admission.EndCount);
+            }
+            finally
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
     private static ConfigEditorDescriptor Editor(string? script = null) => new("fixture", "", "editor.js", script ?? """
         const {rule, document, context} = nexus.input;
         const previous = document[rule.selector[0]] ?? (rule.kind === 'mfa_tasks' ? nexus.readConfig('config:config.json')?.['Instance.default.TaskItems'] : undefined);
@@ -257,10 +365,11 @@ public sealed class ConfigRepairTests
     }
     private sealed class Admission : IConfigEditAdmission
     {
+        internal int EndCount { get; private set; }
         public bool TryExecuteLeaseMutation(string id, string? user, Action mutation, out IReadOnlyList<ExecutionLeaseReference> leases, out string? code)
         { leases = []; code = null; mutation(); return true; }
         public bool TryBeginEditSession(string id, string user, string path, out string? conflict) { conflict = null; return true; }
-        public void EndEditSession(string id, string user) { }
+        public void EndEditSession(string id, string user) { EndCount++; }
     }
     private sealed class Capabilities : IPluginCapabilityResolver, IPluginAvailability
     {

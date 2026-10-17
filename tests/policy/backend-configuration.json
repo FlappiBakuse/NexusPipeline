@@ -9,6 +9,8 @@
       "NexusPipeline.Tests.Configuration.ConfigContractTests.SamePathContractChangePreservesOldSnapshotAndSiteBeforeSwap",
       "NexusPipeline.Tests.Configuration.ConfigInstanceSelectionTests.StrictInstanceCanBeDeclaredBeforeUserSelectsItWithoutImplicitAdoption",
       "NexusPipeline.Tests.Configuration.ConfigRepairTests.CommandsRepairMainAndExtraSnapshotsWithBackupCasAndAccountIsolation",
+      "NexusPipeline.Tests.Configuration.ConfigRepairTests.EditCompletionFailuresPreserveStableCodeAndRecoverableSession",
+      "NexusPipeline.Tests.Configuration.ConfigRepairTests.EditPreparationAndLaunchFailuresPreserveCodeMessageAndRollback",
       "NexusPipeline.Tests.Configuration.ConfigRepairTests.FiniteScalarRepairsPreserveSafeActionsCommentsAndBoundGamePath",
       "NexusPipeline.Tests.Configuration.ConfigRepairTests.MaaRepairsInsertFirstLaunchDisablePowerAndKeepOtherInstancesAndArguments",
       "NexusPipeline.Tests.Configuration.ConfigStoreTransactionTests.Apply_CommitWriteFailureRollsBackStoreBeforeReturningError",

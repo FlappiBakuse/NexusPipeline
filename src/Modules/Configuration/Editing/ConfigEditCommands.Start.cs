@@ -357,7 +357,7 @@ internal sealed partial class ConfigEditCommands
                         target.Spec?.ExtraConfigPaths);
                     ConfigWorkDirMaintenance.SweepIdleWorkDir(target.Script.Id, target.UserKey);
                     return Validation<ConfigEditStarted>(
-                        "execution_failed",
+                        code: "execution_failed", message:
                         "配置编辑准备脚本失败：" + editorResult.Error
                         + (rollbackError is null ? "，配置已还原" : "，配置还原失败：" + rollbackError));
                 }
@@ -397,7 +397,7 @@ internal sealed partial class ConfigEditCommands
                     ConfigWorkDirMaintenance.SweepIdleWorkDir(target.Script.Id, target.UserKey);
                 }
                 return Validation<ConfigEditStarted>(
-                    "execution_failed",
+                    code: "execution_failed", message:
                     "主程序启动失败：" + ex.Message + "，配置已还原，可修正后重试");
             }
 
