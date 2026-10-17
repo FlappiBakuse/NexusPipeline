@@ -109,10 +109,22 @@ internal sealed class ScriptProcessSession : IDisposable
             }
             return new ScriptProcessSession(process, ownership, launchExe, preservedLauncher, rootRole);
         }
-        catch
+        catch (Exception error)
         {
-            process?.Dispose();
-            ownership?.Dispose();
+            bool confirmed = process is null;
+            try
+            {
+                if (process is not null)
+                    confirmed = SystemActions.KillOwnedProcessTree(ownership, process.Id, launchExe, "脚本",
+                        excludeProcessBaseName: string.IsNullOrWhiteSpace(script.GameExe) ? null : script.GameExe);
+            }
+            catch { confirmed = false; }
+            finally
+            {
+                try { process?.Dispose(); }
+                finally { ownership?.Dispose(); }
+            }
+            if (!confirmed) throw new ScriptProcessStartException(error);
             throw;
         }
     }
@@ -168,7 +180,10 @@ internal sealed class ScriptProcessSession : IDisposable
 
     public void Dispose()
     {
-        Process.Dispose();
-        Ownership?.Dispose();
+        try { Process.Dispose(); }
+        finally { Ownership?.Dispose(); }
     }
 }
+
+internal sealed class ScriptProcessStartException(Exception inner)
+    : Exception("脚本启动后进程清理未确认", inner);

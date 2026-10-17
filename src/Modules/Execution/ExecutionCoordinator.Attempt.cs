@@ -149,6 +149,12 @@ internal sealed partial class ExecutionCoordinator : RunSession
                 _resolvedSpec?.OutputEncoding ?? "");
             _processOwnership = processSession.Ownership;
         }
+        catch (ScriptProcessStartException ex)
+        {
+            _processOwnership = null;
+            _configRun?.MarkProcessCleanupUnconfirmed(ex.Message);
+            return await FinishEarlyAsync(RunAttemptResult.Fatal(ex.Message, "run.process_cleanup_unconfirmed")).ConfigureAwait(false);
+        }
         catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 740)
         {
             _processOwnership = null;
@@ -160,48 +166,22 @@ internal sealed partial class ExecutionCoordinator : RunSession
             return await FinishEarlyAsync(RunAttemptResult.Failed($"脚本启动失败：{ex.Message}")).ConfigureAwait(false);
         }
 
-        // 统一游戏窗口前置——无论 LaunchGame 配置（true 由宿主启动、false 由启动器/用户拉起），
-        // 只要检测到游戏进程存在即前置其窗口（截图识别需要游戏画面在最前；游戏启动方式复杂由脚本适配，宿主不重复启动）。
-        // 模拟器模式跳过（adb 命令行工具，无窗口前置需求）。
-        if (!EmulatorSupport.IsEmulator(_script))
-        {
-            BringGameToFrontIfRunning();
-        }
-
-        var attemptMonitor = new AttemptMonitor(_script.PluginType is "maaend" or "maas");
-        void OnConsoleData(string? data, LogLevel level)
-        {
-            if (_token.IsCancellationRequested) return;
-            if (data is not null) attemptMonitor.ObserveConsoleLine(data);
-            if (string.IsNullOrWhiteSpace(data))
-            {
-                return;
-            }
-            if (ShouldPublishConsoleData(_script.LogPath))
-            {
-                LogLevel observedLevel = LogLevelUtil.ParseObserved(data, level);
-                if (_attemptLogLine is not null) _attemptLogLine(data, observedLevel, attempt.Number);
-                else _logLine?.Invoke(data, observedLevel);
-                if (TaskProtocolRun is not null)
-                {
-                    TaskProtocolRun.Append("stdout", data + "\n");
-                    AppendScriptLog(data);
-                }
-            }
-        }
-
-        processSession.AttachOutput(OnConsoleData);
+        LogMonitor? monitor = null;
+        RuntimeWorkers? workers = null;
+        RunAttemptResult? result = null;
 
         bool KillScriptAndConfirm()
         {
             if (killAttempted) return cleanupConfirmed;
             killAttempted = true;
-            bool confirmed = processSession.KillAndConfirm(finalizer, excludeGame);
-            // Single-instance launchers may route the request to an older GUI;
-            // its embedded worker is outside the new Job. Never restore managed
-            // configuration while that exact installed runtime is active/unknown.
-            if (confirmed && processSession.PreservedLauncher is not null && (_script.PluginType is "oknte" or "okww"))
-                confirmed = OkRuntimeActivityProbe.Observe(_script.PluginType, _script.RootPath) == "inactive";
+            bool confirmed;
+            try
+            {
+                confirmed = processSession.KillAndConfirm(finalizer, excludeGame);
+                if (confirmed && processSession.PreservedLauncher is not null && (_script.PluginType is "oknte" or "okww"))
+                    confirmed = OkRuntimeActivityProbe.Observe(_script.PluginType, _script.RootPath) == "inactive";
+            }
+            catch { confirmed = false; }
             if (!confirmed)
             {
                 cleanupConfirmed = false;
@@ -210,145 +190,191 @@ internal sealed partial class ExecutionCoordinator : RunSession
             return confirmed;
         }
 
-        // 启动前已存在的残留日志即使被启动后追加写刷新 LastWriteTime，也只从 Attempt 起点长度续读。
-        string? resolvedBeforeStart = string.IsNullOrWhiteSpace(_script.LogPath) ? null : LogPattern.ResolveFile(_script.LogPath);
-        LogMonitor? monitor = logEnv.CreateMonitor(resolvedBeforeStart);
-        var judge = new SessionJudge(_script);
-        bool scriptMode = judge.ScriptMode;
-        RunAttemptResult? result = null;
-
-        string attemptId = $"{_script.Id}:{attempt.Number}:{attempt.StartTime.Ticks}";
-
-        JudgeSnapshot CaptureJudgeSnapshot(int generation)
-        {
-            string scriptDir = _configRun?.ScriptDir
-                ?? ConfigPaths.ScriptDir(_script.Id, _resolvedUser?.UserKey);
-            List<JudgeScriptInputFile> files = JudgeScriptRunner.CollectFiles(_script.ConfigPath, scriptDir)
-                .Select(file => new JudgeScriptInputFile
-                {
-                    Root = file.Root,
-                    Path = file.Path,
-                    Abs = file.Abs,
-                })
-                .ToList();
-            var (logText, logTruncated) = Results.SnapshotAttemptTail(JudgeScriptRunner.MaxJudgeLogChars);
-            ScriptInstance scriptSnapshot = _script.Clone();
-            ResolvedScriptUser? userSnapshot = _activeUser is null
-                ? null
-                : new ResolvedScriptUser(
-                    _activeUser.UserId,
-                    _activeUser.UserName,
-                    _activeUser.Binding.Clone());
-            string inputJson = JudgeScriptRunner.BuildInput(
-                scriptSnapshot,
-                userSnapshot,
-                files,
-                scriptDir,
-                logText,
-                logTruncated,
-                _screenshotStore.MetadataForAttempt(attempt.Number));
-            return new JudgeSnapshot(
-                attemptId,
-                attempt.Number,
-                generation,
-                logText,
-                DateTime.Now,
-                scriptSnapshot,
-                userSnapshot,
-                scriptDir,
-                inputJson,
-                files);
-        }
-
-        // Judge/配置同步单飞 worker 与最终判定请求收敛在 RuntimeWorkers；终局状态转移收敛在 AttemptTerminator。
-        var workers = new RuntimeWorkers(
-            attemptId,
-            attempt.Number,
-            OperationToken,
-            modeText,
-            _script.Name,
-            judge,
-            status => _statusChanged?.Invoke(status),
-            CaptureJudgeSnapshot,
-            replace => _pendingReplaceConfigs = replace,
-            request =>
-            {
-                OperationToken.ThrowIfCancellationRequested();
-                _configRun?.SyncToStore(request.FirstCheck);
-                OperationToken.ThrowIfCancellationRequested();
-            },
-             (attemptNumber, trigger, captureToken) => _screenshotStore.CaptureAsync(attemptNumber, trigger, captureToken),
-             _http,
-             TaskProtocolRun is null ? null : TaskProtocolRun.ObserveAsync);
-        var terminator = new AttemptTerminator(workers, judge, status => _statusChanged?.Invoke(status));
-        await using var workersScope = workers;
-
-        AttemptMonitorLoopResult monitorLoop = await new AttemptMonitorLoop().RunAsync(
-            this,
-            attempt,
-            modeText,
-            attemptId,
-            processSession,
-            launchExe,
-            excludeGame,
-            logEnv,
-            monitor,
-            attemptMonitor,
-            judge,
-            scriptMode,
-            workers,
-            terminator,
-            _screenshotStore,
-            () => OperationToken,
-            () => _budgetExpired || _budget?.IsExpired == true,
-            KillScriptAndConfirm,
-            BringGameToFrontIfRunning,
-            ScheduleRecentPcScreenshot,
-            NeedsRecentPcScreenshotCache(_script, _resolvedSpec)).ConfigureAwait(false);
-        result = monitorLoop.Result;
-        monitor = monitorLoop.Monitor;
-
-        // Issue the owned-process stop before waiting for a potentially busy Judge or
-        // config worker. Recovery still waits until the workers have truly exited.
-        if (_token.IsCancellationRequested)
-            CancellationMilestoneChanged?.Invoke(CancellationMilestone.StopIssued, null);
-        bool stopped = KillScriptAndConfirm();
-        if (_token.IsCancellationRequested && stopped)
-            CancellationMilestoneChanged?.Invoke(CancellationMilestone.OwnedProcessesExited, null);
-        await workers.StopAsync().ConfigureAwait(false);
-        if (_token.IsCancellationRequested)
-            CancellationMilestoneChanged?.Invoke(CancellationMilestone.WorkersQuiesced, null);
-
-        monitor?.Dispose();
-        monitor = null;
-
-        if (!cleanupConfirmed)
-        {
-            _pendingReplaceConfigs = null;
-            result = RunAttemptResult.Fatal("脚本进程清理未确认，已保留配置现场并阻断后续操作");
-        }
-
-        // （P6）：配置替换延迟到杀进程确认退出后应用（此前判断脚本触发时进程可能仍在运行，
-        // 复制覆盖 config 存在文件占用/半写窗口）；仅本次尝试失败时应用，重试循环将使用新配置。
-        if (cleanupConfirmed && _pendingReplaceConfigs is not null && _pendingReplaceConfigs.Count > 0 && result?.Status == "failed")
-        {
-            Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」应用判断脚本替换配置（{_pendingReplaceConfigs.Count} 个文件），重试将使用新配置。");
-            _configRun?.ApplyReplacements(_pendingReplaceConfigs);
-        }
-        _pendingReplaceConfigs = null;
-
-        RunAttemptResult finalResult = result ?? RunAttemptResult.Failed("未知原因：未能取得运行结果");
-        finalResult.OutputIncomplete |= processSession.OutputIncomplete;
-        // 运行收尾后释放进程句柄与 owned Job Object。
-        processSession.Dispose();
         try
         {
-            await finalizer.CleanupGameAsync(finalResult, attempt.Number, Math.Max(1, _script.MaxAttempts)).ConfigureAwait(false);
+            // 统一游戏窗口前置——无论 LaunchGame 配置（true 由宿主启动、false 由启动器/用户拉起），
+            // 只要检测到游戏进程存在即前置其窗口（截图识别需要游戏画面在最前；游戏启动方式复杂由脚本适配，宿主不重复启动）。
+            // 模拟器模式跳过（adb 命令行工具，无窗口前置需求）。
+            if (!EmulatorSupport.IsEmulator(_script))
+            {
+                BringGameToFrontIfRunning();
+            }
+
+            var attemptMonitor = new AttemptMonitor(_script.PluginType is "maaend" or "maas");
+            void OnConsoleData(string? data, LogLevel level)
+            {
+                if (_token.IsCancellationRequested) return;
+                if (data is not null) attemptMonitor.ObserveConsoleLine(data);
+                if (string.IsNullOrWhiteSpace(data))
+                {
+                    return;
+                }
+                if (ShouldPublishConsoleData(_script.LogPath))
+                {
+                    LogLevel observedLevel = LogLevelUtil.ParseObserved(data, level);
+                    if (_attemptLogLine is not null) _attemptLogLine(data, observedLevel, attempt.Number);
+                    else _logLine?.Invoke(data, observedLevel);
+                    if (TaskProtocolRun is not null)
+                    {
+                        TaskProtocolRun.Append("stdout", data + "\n");
+                        AppendScriptLog(data);
+                    }
+                }
+            }
+
+            processSession.AttachOutput(OnConsoleData);
+
+            // 启动前已存在的残留日志即使被启动后追加写刷新 LastWriteTime，也只从 Attempt 起点长度续读。
+            string? resolvedBeforeStart = string.IsNullOrWhiteSpace(_script.LogPath) ? null : LogPattern.ResolveFile(_script.LogPath);
+            monitor = logEnv.CreateMonitor(resolvedBeforeStart);
+            var judge = new SessionJudge(_script);
+            bool scriptMode = judge.ScriptMode;
+
+            string attemptId = $"{_script.Id}:{attempt.Number}:{attempt.StartTime.Ticks}";
+
+            JudgeSnapshot CaptureJudgeSnapshot(int generation)
+            {
+                string scriptDir = _configRun?.ScriptDir
+                    ?? ConfigPaths.ScriptDir(_script.Id, _resolvedUser?.UserKey);
+                List<JudgeScriptInputFile> files = JudgeScriptRunner.CollectFiles(_script.ConfigPath, scriptDir)
+                    .Select(file => new JudgeScriptInputFile
+                    {
+                        Root = file.Root,
+                        Path = file.Path,
+                        Abs = file.Abs,
+                    })
+                    .ToList();
+                var (logText, logTruncated) = Results.SnapshotAttemptTail(JudgeScriptRunner.MaxJudgeLogChars);
+                ScriptInstance scriptSnapshot = _script.Clone();
+                ResolvedScriptUser? userSnapshot = _activeUser is null
+                    ? null
+                    : new ResolvedScriptUser(
+                        _activeUser.UserId,
+                        _activeUser.UserName,
+                        _activeUser.Binding.Clone());
+                string inputJson = JudgeScriptRunner.BuildInput(
+                    scriptSnapshot,
+                    userSnapshot,
+                    files,
+                    scriptDir,
+                    logText,
+                    logTruncated,
+                    _screenshotStore.MetadataForAttempt(attempt.Number));
+                return new JudgeSnapshot(
+                    attemptId,
+                    attempt.Number,
+                    generation,
+                    logText,
+                    DateTime.Now,
+                    scriptSnapshot,
+                    userSnapshot,
+                    scriptDir,
+                    inputJson,
+                    files);
+            }
+
+            // Judge/配置同步单飞 worker 与最终判定请求收敛在 RuntimeWorkers；终局状态转移收敛在 AttemptTerminator。
+            workers = new RuntimeWorkers(
+                attemptId,
+                attempt.Number,
+                OperationToken,
+                modeText,
+                _script.Name,
+                judge,
+                status => _statusChanged?.Invoke(status),
+                CaptureJudgeSnapshot,
+                replace => _pendingReplaceConfigs = replace,
+                request =>
+                {
+                    OperationToken.ThrowIfCancellationRequested();
+                    _configRun?.SyncToStore(request.FirstCheck);
+                    OperationToken.ThrowIfCancellationRequested();
+                },
+                 (attemptNumber, trigger, captureToken) => _screenshotStore.CaptureAsync(attemptNumber, trigger, captureToken),
+                 _http,
+                 TaskProtocolRun is null ? null : TaskProtocolRun.ObserveAsync);
+            var terminator = new AttemptTerminator(workers, judge, status => _statusChanged?.Invoke(status));
+
+            AttemptMonitorLoopResult monitorLoop = await new AttemptMonitorLoop().RunAsync(
+                this,
+                attempt,
+                modeText,
+                attemptId,
+                processSession,
+                launchExe,
+                excludeGame,
+                logEnv,
+                monitor,
+                attemptMonitor,
+                judge,
+                scriptMode,
+                workers,
+                terminator,
+                _screenshotStore,
+                () => OperationToken,
+                () => _budgetExpired || _budget?.IsExpired == true,
+                KillScriptAndConfirm,
+                BringGameToFrontIfRunning,
+                ScheduleRecentPcScreenshot,
+                NeedsRecentPcScreenshotCache(_script, _resolvedSpec)).ConfigureAwait(false);
+            result = monitorLoop.Result;
+            monitor = monitorLoop.Monitor;
+
+        }
+        catch (OperationCanceledException)
+        {
+            result = RunAttemptResult.Cancelled("运行已取消");
+        }
+        catch (Exception ex)
+        {
+            Logger.Warn($"[执行] 尝试初始化或监控异常：{ex.GetType().Name}");
+            result = RunAttemptResult.Fatal("尝试运行异常：" + ex.Message, "run.attempt_failed");
         }
         finally
         {
-            _processOwnership = null;
+            // Every path after process creation stops owned writers before workers and configuration recovery.
+            ReportCancellation(CancellationMilestone.StopIssued);
+            bool stopped = KillScriptAndConfirm();
+            if (stopped) ReportCancellation(CancellationMilestone.OwnedProcessesExited);
+            try
+            {
+                if (workers is not null) await workers.StopAsync().ConfigureAwait(false);
+                ReportCancellation(CancellationMilestone.WorkersQuiesced);
+            }
+            catch
+            {
+                cleanupConfirmed = false;
+                _configRun?.MarkProcessCleanupUnconfirmed("运行 worker 收尾结果未确认");
+            }
+            try { monitor?.Dispose(); }
+            catch { Logger.Warn("[执行收尾] 日志监控释放失败。"); }
+            if (!cleanupConfirmed)
+            {
+                _pendingReplaceConfigs = null;
+                result = RunAttemptResult.Fatal("脚本进程或运行 worker 清理未确认，已保留配置现场并阻断后续操作");
+            }
+            try
+            {
+                if (cleanupConfirmed && _pendingReplaceConfigs is { Count: > 0 } && result?.Status == "failed")
+                {
+                    Logger.Info($"[{modeText}运行] 脚本「{_script.Name}」应用判断脚本替换配置（{_pendingReplaceConfigs.Count} 个文件），重试将使用新配置。");
+                    _configRun?.ApplyReplacements(_pendingReplaceConfigs);
+                }
+            }
+            catch (Exception ex) { result = RunAttemptResult.Fatal("判断脚本配置替换失败：" + ex.Message); }
+            finally
+            {
+                _pendingReplaceConfigs = null;
+                result ??= RunAttemptResult.Failed("未知原因：未能取得运行结果");
+                result.OutputIncomplete |= processSession.OutputIncomplete;
+                try { processSession.Dispose(); }
+                finally
+                {
+                    try { await finalizer.CleanupGameAsync(result, attempt.Number, Math.Max(1, _script.MaxAttempts)).ConfigureAwait(false); }
+                    finally { _processOwnership = null; }
+                }
+            }
         }
-        return finalResult;
+        return result!;
     }
 }

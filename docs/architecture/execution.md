@@ -6,6 +6,8 @@ Execution 拥有冻结计划、准入、运行与尝试生命周期。配置恢�
 
 ## 脚本运行完整链路
 
+主程序创建后的所有退出路径共用收尾边界：先确认本次 owned writers 停止，再排空判断和配置 worker、释放日志监控，最后处理配置替换、进程句柄及游戏收尾。启动、监控初始化或观察者异常也遵循此顺序；进程或 worker 收尾未确认时保留配置现场并阻断替换、恢复及重试。
+
 一次「脚本实例 × 用户」的运行由 `ExecutionRunner` 驱动。入口先由 `ExecutionPlanBuilder` 从仓储快照构建计划，再经 `ExecutionValidator` 完成运行前校验；`ExecutionDispatcher` 将计划 profile 交给 `ExecutionStateStore`，由 `ExecutionAdmissionPolicy` 在同一临界区完成资格矩阵、资源租约和完成操作兼容性判断。通过后由 `ExecutionCoordinator.RunAsync` 编排，队列、手动和 CLI 入口均直接汇聚到 `ExecutionDispatcher`；`RunSession` 只保存状态，单次尝试由协调器直接执行：
 
 ```mermaid

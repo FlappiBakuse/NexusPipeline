@@ -122,10 +122,9 @@ internal sealed partial class ExecutionCoordinator : RunSession
         var retryPolicy = new RetryPolicy(_script.MaxAttempts);
         int maxAttempts = retryPolicy.MaxAttempts;
         record.MaxAttempts = maxAttempts;
-        _attemptChanged?.Invoke(1, maxAttempts);
-
         try
         {
+            _attemptChanged?.Invoke(1, maxAttempts);
             // 配置运行会话在 try 内创建并准备，任何 Prepare 异常都统一进入幂等 FinalizeRun。
             _configRun = new ConfigRunSession(
                 _script.Id,
@@ -423,8 +422,7 @@ internal sealed partial class ExecutionCoordinator : RunSession
             // 判断脚本目录清理 → 配置交换还原。
             if (_configRun is not null)
             {
-                if (_token.IsCancellationRequested)
-                    CancellationMilestoneChanged?.Invoke(CancellationMilestone.Restoring, null);
+                ReportCancellation(CancellationMilestone.Restoring);
                 _configRun.OriginAttempt = record.Attempts;
                 string? restoreError = _configRun.FinalizeRun(_script.AutoUpdateConfig);
                 if (restoreError is not null)
@@ -439,9 +437,8 @@ internal sealed partial class ExecutionCoordinator : RunSession
                     record.ResultDetail += msg;
                     Logger.Error($"[错误] 脚本「{_script.Name}」用户「{user?.UserName ?? _userName ?? ""}」配置还原失败：{restoreError}");
                 }
-                if (_token.IsCancellationRequested)
-                    CancellationMilestoneChanged?.Invoke(CancellationMilestone.RestoreFinished,
-                        restoreError is null ? "配置恢复完成" : "配置恢复失败，现场已保留");
+                ReportCancellation(CancellationMilestone.RestoreFinished,
+                    restoreError is null ? "配置恢复完成" : "配置恢复失败，现场已保留");
             }
             // 取消可能在同步恢复期间到达；仍须完成恢复，但不能将该次运行记为正常完成。
             if (_token.IsCancellationRequested && record.Status is "success" or "partial" or "unverified")

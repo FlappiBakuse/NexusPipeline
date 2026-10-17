@@ -226,6 +226,13 @@ internal sealed partial class ExecutionCoordinator : RunSession
         return _budget?.RemainingSeconds ?? double.PositiveInfinity;
     }
 
+    private void ReportCancellation(CancellationMilestone milestone, string? message = null)
+    {
+        if (!_token.IsCancellationRequested) return;
+        try { CancellationMilestoneChanged?.Invoke(milestone, message); }
+        catch { Logger.Warn("[执行收尾] 取消观察者失败，继续资源收尾。"); }
+    }
+
     private RunAttemptResult? CheckTotalTimeout()
     {
         return RemainingRunSeconds() <= 0
