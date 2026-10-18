@@ -16,7 +16,7 @@
 
 已知任务无失败且本次受管自动化工作进程正常退出时，包含未知范围的整次结果可为 success；未知任务自身保持 unknown。实际进程完成证据绑定本次进程身份及保留句柄，未完整确认的进程家族、纯启动器退出、非零退出、取消、超时、观察故障和恢复冲突都不能据此转为成功。整次成功可计入现役实例成功额度，已核验完成数只统计有证据的 known 业务。
 
-schema 3 的 `verification` 包含 `mode`、`knownTaskCount`、`opaqueTaskCount`、`opaqueScopeCount`、`unverifiedTaskIds`、`opaqueScopeIds`、`reasonCodes`、`completion`、`unknownRetainedOnRetry`。completion 为 `{status,basis,exitCode}`：normal/owned_worker_exit/0，failed/owned_process_nonzero/非零，或 unconfirmed/unconfirmed_worker/null。任务及范围引用有界，不存配置原文。历史、通知和总览分别显示整次结果与核验事实，不能用未知项数量把 success 改为 partial。
+schema 3 的 `verification` 包含 `mode`、`knownTaskCount`、`opaqueTaskCount`、`opaqueScopeCount`、`unverifiedTaskIds`、`opaqueScopeIds`、`reasonCodes`、`completion`、`unknownRetainedOnRetry`。completion 为 `{status,basis,exitCode}`：normal/owned_worker_exit/0、normal/verified_task_boundary/null、failed/owned_process_nonzero/非零，或 unconfirmed/unconfirmed_worker/null。verified_task_boundary 只在全部启用任务已逐项核验、没有启用的未知配置范围、运行结束边界明确且已观察 worker 正常退出或宿主受控停止已确认时使用；不虚构退出码，不覆盖已确认的进程失败、取消或清理失败。任务及范围引用有界，不存配置原文。历史、通知和总览分别显示整次结果与核验事实，不能用未知项数量把 success 改为 partial。
 
 ### 保留选择的重试（0.3.0）
 

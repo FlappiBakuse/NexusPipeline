@@ -100,6 +100,8 @@ public sealed class ProcessCompletionTests
                 Assert.Equal(running.TotalProcesses + (child ? 1u : 0u), completed.TotalProcesses);
                 var outcome = TaskExecutionCompletion.FromOwnedProcesses(completed, root.Identity, ProcessRole.AutomationWorker, null);
                 Assert.Equal(child ? "unconfirmed" : code == 0 ? "normal" : "failed", outcome.Status);
+                Assert.Equal(code == 0 ? "normal" : "failed", outcome.ConfirmBoundary(true, false).Status);
+                Assert.Equal(outcome.Status, outcome.ConfirmBoundary(false, false).Status);
                 if (code == 0)
                     Assert.Equal("unconfirmed", TaskExecutionCompletion.FromOwnedProcesses(completed, root.Identity, ProcessRole.GameLauncher, null).Status);
             }

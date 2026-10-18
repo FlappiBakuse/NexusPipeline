@@ -287,8 +287,17 @@ internal sealed class AttemptMonitorLoop
                 if (judge.IsMarker
                     && (DateTime.Now - judge.MarkerSeenAt!.Value).TotalSeconds >= TestHooks.ScaledSeconds(ExitGraceSecondsAfterMarker))
                 {
-                    if (session.TaskProtocolRun is not null && killScriptAndConfirm())
+                    if (session.TaskProtocolRun is not null)
                     {
+                        var beforeStop = TaskExecutionCompletion.FromOwnedProcesses(
+                            session.ProcessOwnership?.ObserveCompletion(), processSession.StartedIdentity, processSession.RootRole,
+                            excludeGame, OkRuntimeActivityProbe.WorkerImages(session.Script.PluginType, session.Script.RootPath));
+                        if (!killScriptAndConfirm())
+                        {
+                            state.Result = RunAttemptResult.Fatal("脚本进程清理未确认，已阻断配置替换与重试");
+                            break;
+                        }
+                        session.TaskProtocolRun.ConfirmBoundaryStop(beforeStop);
                         session.TaskProtocolRun.SetTerminationReason("marker_timeout");
                         state.Result = terminator.OnScriptExited(state.Monitor is null, true, false, true);
                         continue;
