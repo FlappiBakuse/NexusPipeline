@@ -20,6 +20,46 @@ def select(files, *prefixes):
     return [[f['path'], f['sha256']] for f in files if any(f['path'] == p or f['path'].startswith(p + '/') for p in prefixes)]
 
 
+def stage_local_bundled(production: Path, host: Path, builds: list) -> dict:
+    import bundled_plugins
+    import host_release
+    policy = json.loads((host/'src/Modules/Plugins/Repository/BundledPlugins.json').read_bytes())
+    selections = policy.get('plugins', [])
+    if (policy.get('schemaVersion') != 1 or policy.get('repository') != bundled_plugins.REPOSITORY
+            or len(selections) != 2 or {item.get('artifactName') for item in selections} != bundled_plugins.ARTIFACTS):
+        raise ValueError('Invalid local bundled selection')
+    target = production/'plugins'
+    if target.exists():
+        raise ValueError('Bundled destination already exists')
+    resolved = []
+    for selection in selections:
+        artifact = selection['artifactName']
+        matches = [item for item in builds if item['artifactName'] == artifact]
+        if len(matches) != 1:
+            raise ValueError('Missing local bundled build: ' + artifact)
+        report = matches[0]
+        package = Path(report['package']); guard(package)
+        if report['status'] != 'PASS' or digest(package) != report['sha256'] or package.stat().st_size != report['sizeBytes']:
+            raise ValueError('Local bundled package changed: ' + artifact)
+        files = []
+        with zipfile.ZipFile(package) as archive:
+            plugin = json.loads(archive.read('plugin.json'))
+            if plugin['artifactName'] != artifact or plugin['version'] != report['version'] or plugin['kind'] != 'managed-code':
+                raise ValueError('Local bundled manifest mismatch: ' + artifact)
+            for entry in archive.infolist():
+                name = host_release._safe_package_entry(entry.filename, inner_plugin=True)
+                data = archive.read(entry)
+                destination = target/artifact/name
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                with destination.open('xb') as stream:
+                    stream.write(data)
+                files.append({'path': name, 'sizeBytes': len(data), 'sha256': hashlib.sha256(data).hexdigest()})
+        fields = ('name', 'artifactName', 'version', 'kind', 'apiVersion', 'minHostVersion')
+        resolved.append({**{field: plugin[field] for field in fields}, 'packageSha256': report['sha256'],
+                         'packageSizeBytes': report['sizeBytes'], 'files': sorted(files, key=lambda item: item['path'])})
+    return {'schemaVersion': 1, 'repository': bundled_plugins.REPOSITORY, 'plugins': resolved}
+
+
 def toolchain():
     return [sys.version, sys.platform, os.environ.get('PROCESSOR_ARCHITECTURE'),
             *[subprocess.check_output(command, text=True).strip() for command in
@@ -84,6 +124,22 @@ def build(host: Path, plugins: Path, output: Path, cache: Path):
             'runtime':[runtime,select(hf,'desktop/runtime-profile.json','desktop/runtime-files.json','src/NexusPipeline.ico'),rules]}
         import application_build, application_payload, application_reader, host_release, pe_manifest
         version=host_release.project_version(source)
+        builds=[]
+        shared=select(pf,'tools','contracts','schemas','tests/architecture')
+        shared += [[f['path'],f['sha256']] for f in pf if '/' not in f['path'] or
+                   f['path'].startswith('plugins/general/') and f['path'].endswith(('/package.json','/package-lock.json','.npmrc'))]
+        sdk=select(hf,'src/NexusPipeline.Plugin.Abstractions')
+        sdk += [[f['path'],f['sha256']] for f in hf if '/' not in f['path']]
+        for file in sorted((partner/'plugins').glob('*/*/plugin.json')):
+            m=json.loads(file.read_bytes());artifact=m['artifactName']
+            def package(target):
+                target.mkdir()
+                command([sys.executable,partner/'tools/repo.py','package','--root',partner,'--artifact',artifact,
+                         '--output',target/'package','--report',target/'report.json','--host-root',source],partner)
+            result=cc.prepare('plugin-'+artifact,[select(pf,file.parent.relative_to(partner).as_posix()),shared,
+                sdk if m['kind']=='managed-code' else None,rules,tc],package)
+            report=json.loads((result/'report.json').read_bytes())
+            builds.append({**report,'package':str(result/'package'/report['fileName'])})
         # The full source identity is embedded in Host and maintenance tools, but not in reusable component code.
         def application(target):
             target.mkdir()
@@ -96,7 +152,7 @@ def build(host: Path, plugins: Path, output: Path, cache: Path):
                 partner_sha=pi['baseSourceCommit'],workflow_sha=hi['baseSourceCommit'],electron_archive=archive,
                 component_cache=cc,cache_inputs=desktop_inputs)
             production=target/'software';production.mkdir()
-            bundled=host_release.stage_bundled_plugins(production,partner,source/'src/Modules/Plugins/Repository/BundledPlugins.json')
+            bundled=stage_local_bundled(production, source, builds)
             bundled_path=target/'BundledPlugins.json';bundled_path.write_text(json.dumps(bundled),encoding='utf-8')
             command(['dotnet','publish','src/NexusPipeline.csproj','-c','Release','-r','win-x64','--self-contained','false',
                 '-p:PublishSingleFile=true','-p:DebugType=none','-p:DebugSymbols=false','-p:UseSharedCompilation=false','--disable-build-servers',
@@ -115,23 +171,7 @@ def build(host: Path, plugins: Path, output: Path, cache: Path):
             (target/'identity.json').write_text(json.dumps(identity),encoding='utf-8')
             shutil.rmtree(target/'inputs')
         application_output=cc.prepare('application',[hi['sourceManifestSha256'],hi['baseSourceCommit'],pi['baseSourceCommit'],
-            select(pf,'catalog.json','metadata','packages'),tc],application)
-        builds=[]
-        shared=select(pf,'tools','contracts','schemas','tests/architecture')
-        shared += [[f['path'],f['sha256']] for f in pf if '/' not in f['path'] or
-                   f['path'].startswith('plugins/general/') and f['path'].endswith(('/package.json','/package-lock.json','.npmrc'))]
-        sdk=select(hf,'src/NexusPipeline.Plugin.Abstractions')
-        sdk += [[f['path'],f['sha256']] for f in hf if '/' not in f['path']]
-        for file in sorted((partner/'plugins').glob('*/*/plugin.json')):
-            m=json.loads(file.read_bytes());artifact=m['artifactName']
-            def package(target):
-                target.mkdir()
-                command([sys.executable,partner/'tools/repo.py','package','--root',partner,'--artifact',artifact,
-                         '--output',target/'package','--report',target/'report.json','--host-root',source],partner)
-            result=cc.prepare('plugin-'+artifact,[select(pf,file.parent.relative_to(partner).as_posix()),shared,
-                sdk if m['kind']=='managed-code' else None,rules,tc],package)
-            report=json.loads((result/'report.json').read_bytes())
-            builds.append({**report,'package':str(result/'package'/report['fileName'])})
+            [[item['artifactName'], item['sha256']] for item in builds if item['artifactName'] in ('EmulatorSupport', 'LiveScreenshot')],tc],application)
         for root,original in ((host,hi),(plugins,pi)):
             actual=[[n,mode,len(raw),hashlib.sha256(raw).hexdigest()] for n,mode,raw in source_entries(root)]
             expected=[[f['path'],f['mode'],f['sizeBytes'],f['sha256']] for f in original['files']]
