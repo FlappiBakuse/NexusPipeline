@@ -33,6 +33,8 @@ def scope(paths: list[str]) -> dict:
         else:
             targets.update(('frontend', 'desktop', 'host', 'architecture', 'bundled'))
         reasons.append(path)
+    if 'host' in targets:
+        targets.add('bundled')
     return {'targets': sorted(targets), 'reasons': reasons, 'nodeRequired': bool(targets),
             'dotnetRequired': bool(targets), 'partnerRequired': 'bundled' in targets}
 
@@ -115,7 +117,14 @@ def run(root: Path, selected: dict, output: Path, partner: Path | None) -> None:
             inputs = prepare_compilation(source, output / 'inputs', source_sha=selected['checkoutSha'],
                                          source_tree_sha=selected['sourceTreeSha'], partner_sha=selected['partnerSha'],
                                          workflow_sha=selected['checkoutSha'])
-            properties = ['-p:NexusTestHost=false', '-p:UseSharedCompilation=false',
+            if partner is None or git(partner, 'rev-parse', 'HEAD') != selected['partnerSha'] or git(partner, 'status', '--porcelain'):
+                raise ValueError('Bundled validation requires the fixed clean Plugins checkout')
+            from host_release import stage_bundled_plugins
+            (output / 'bundled').mkdir()
+            resolved = stage_bundled_plugins(output / 'bundled', partner, source / 'src/Modules/Plugins/Repository/BundledPlugins.json')
+            resolved_path = output / 'bundled' / 'BundledPlugins.json'
+            resolved_path.write_text(json.dumps(resolved, sort_keys=True) + '\n', encoding='utf-8')
+            properties = ['-p:NexusBundledPluginsManifest=' + str(resolved_path), '-p:NexusTestHost=false', '-p:UseSharedCompilation=false',
                           '-p:NexusFrontendProps=' + inputs['frontendProps'], '-p:NexusBuildIdentityPath=' + inputs['identity'], '-p:NexusUpdaterRecoveryPath=' + inputs['updater']]
             command('Host production compilation', ['dotnet', 'build', 'src/NexusPipeline.csproj', '-c', 'Release',
                     '-r', 'win-x64', '--nologo', '--disable-build-servers', *properties, '--output', output / 'host'], source)
@@ -125,12 +134,6 @@ def run(root: Path, selected: dict, output: Path, partner: Path | None) -> None:
             command('A01-A04 production semantics', ['dotnet', output / 'architecture/NexusPipeline.Architecture.dll', source,
                     '--report', output / 'architecture-backend.json', '--frontend-props', inputs['frontendProps'],
                     '--build-identity', inputs['identity'], '--mode', 'production'], source)
-            if 'bundled' in targets:
-                if partner is None or git(partner, 'rev-parse', 'HEAD') != selected['partnerSha'] or git(partner, 'status', '--porcelain'):
-                    raise ValueError('Bundled validation requires the fixed clean Plugins checkout')
-                from host_release import stage_bundled_plugins
-                (output / 'bundled').mkdir()
-                stage_bundled_plugins(output / 'bundled', partner, source / 'src/Modules/Plugins/Repository/BundledPlugins.json')
         report['status'] = 'PASS'
     finally:
         report['elapsedSeconds'] = time.monotonic() - started

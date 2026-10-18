@@ -799,15 +799,22 @@ async function runRelease() {
   const releaseDir = path.join(runRoot, "production");
   if (fs.existsSync(releaseDir)) throw new Error("Production output already exists");
   fs.mkdirSync(releaseDir, { recursive: true });
+  const partner = process.env.NEXUS_PARTNER_ROOT;
+  if (!partner || !path.isAbsolute(partner)) throw new Error("Fixed partner checkout is required for bundled stable packages");
+  const bundled = path.join(runRoot, "bundled");
+  code = await run(pythonCommand, ["tools/bundled_plugins.py", "--policy", path.join(executionRoot, "src/Modules/Plugins/Repository/BundledPlugins.json"),
+    "--plugins-root", partner, "--output", bundled]);
+  if (code !== 0) return code;
   code = await run("dotnet", [
     "publish", "src\\NexusPipeline.csproj", "-c", "Release", "-r", "win-x64", "--self-contained", "false",
     "-p:PublishSingleFile=true", "-p:DebugType=none", "-p:DebugSymbols=false", "-p:NexusTestHost=false",
     `-p:NexusFrontendProps=${applicationInputs.frontendProps}`,`-p:NexusBuildIdentityPath=${applicationInputs.identity}`,`-p:NexusUpdaterRecoveryPath=${applicationInputs.updater}`,
+    `-p:NexusBundledPluginsManifest=${path.join(bundled, "BundledPlugins.json")}`,
     "-p:UseSharedCompilation=false", "--disable-build-servers", "-o", releaseDir, "--nologo",
   ], { timeoutMs: 20 * 60 * 1000 });
   if (code !== 0) return code;
   code=await assembleApplication(releaseDir);if(code) return code;
-  fs.mkdirSync(path.join(releaseDir,"plugins"),{recursive:true});
+  fs.cpSync(path.join(bundled,"plugins"),path.join(releaseDir,"plugins"),{recursive:true});
   console.error(`[生产构建] ${releaseDir}`);
   return verifyManifest(path.join(releaseDir, "NexusPipeline.exe"), "requireAdministrator");
 }

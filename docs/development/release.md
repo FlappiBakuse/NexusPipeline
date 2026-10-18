@@ -43,6 +43,12 @@ gh workflow run release.yml --ref main -f operation=publish-only -f tag=<已有 
 
 新版本需先在受保护 `main` 的对应合并提交完成候选验收；获授权后才能创建并推送指向该提交的 tag。已有 tag 不因发布工具修复而移动。Release Notes 依据该 tag 的真实变更写入 UTF-8 无 BOM 文件；独立下载 ZIP 并按服务端 digest 复核后，再按授权更新 Release 正文并检查更新可见性。控制工具修复通过正常源码 PR 和 `Host / 构建检查`；恢复始终使用原候选，已有资产必须字节一致。
 
+### 预装插件解析
+
+源码 `src/Modules/Plugins/Repository/BundledPlugins.json` 只选择 EmulatorSupport 和 LiveScreenshot，不固定版本。候选在一次 source plan 固定的 Plugins SHA 中读取稳定 catalog 与对应 ZIP，检查 catalog 投影、包摘要与大小、最低宿主版本、manifest 身份及安全条目，再生成含精确版本和逐文件摘要的 `BundledPlugins.json`。生成清单与插件载荷一起进入 bundled 阶段；生产编译通过 `NexusBundledPluginsManifest` 嵌入同一份清单，首次安装仍按精确字节确权。
+
+本机验收及 PR 生产编译使用相同解析器。消费阶段核对固定两仓 SHA、完整阶段指纹和清单与载荷对应关系；writer 只复用已验证候选，不重新获取最新 catalog 或包。稳定 catalog 发布新插件版本后，下次 Host 候选自动选择该快照中的版本；不改变已构建候选或已公开发行物。
+
 ### 资产与 SHA 规则
 
 | 项目 | 规则 |

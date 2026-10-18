@@ -289,48 +289,5 @@ class HostReleaseTests(unittest.TestCase):
                 )
 
 
-class BundledCatalogTests(unittest.TestCase):
-    def test_legacy_and_canonical_catalogs_preserve_pinned_bytes_and_reject_drift(self):
-        from tools.host_release import stage_bundled_plugins
-        for mode in ('legacy', 'canonical', 'catalog-drift', 'package-drift'):
-            with self.subTest(mode=mode), tempfile.TemporaryDirectory(prefix='nxp-bundled-catalog-') as temporary:
-                root = Path(temporary)
-                partner = root / 'partner'
-                production = root / 'production'
-                production.mkdir()
-                items, entries = [], []
-                for artifact in ('EmulatorSupport', 'LiveScreenshot'):
-                    raw = json.dumps({'name': artifact.lower()}).encode()
-                    package = partner / 'packages' / artifact / (artifact + '-1.2.3.zip')
-                    package.parent.mkdir(parents=True)
-                    with zipfile.ZipFile(package, 'w') as archive:
-                        archive.writestr('plugin.json', raw)
-                    digest = hashlib.sha256(package.read_bytes()).hexdigest()
-                    items.append({'artifactName': artifact, 'version': '1.2.3', 'packageSha256': digest,
-                                  'packageSizeBytes': package.stat().st_size,
-                                  'files': [{'path': 'plugin.json', 'sizeBytes': len(raw), 'sha256': hashlib.sha256(raw).hexdigest()}]})
-                    entries.append({'artifactName': artifact, 'version': '1.2.3', 'sha256': digest, 'sizeBytes': package.stat().st_size})
-                projection = partner / 'catalog.json'
-                projection.write_text(json.dumps({'plugins': entries}), encoding='utf-8')
-                if mode != 'legacy':
-                    canonical = partner / 'metadata/catalog/stable.json'
-                    canonical.parent.mkdir(parents=True)
-                    canonical.write_bytes(projection.read_bytes())
-                    if mode == 'catalog-drift':
-                        canonical.write_text('{}', encoding='utf-8')
-                if mode == 'package-drift':
-                    package.write_bytes(package.read_bytes() + b'changed')
-                manifest = root / 'bundled.json'
-                manifest.write_text(json.dumps({'schemaVersion': 1, 'repository': 'FlappiBakuse/NexusPipeline-Plugins', 'plugins': items}), encoding='utf-8')
-                if mode.endswith('drift'):
-                    with self.assertRaises(HostReleaseError):
-                        stage_bundled_plugins(production, partner, manifest)
-                else:
-                    stage_bundled_plugins(production, partner, manifest)
-                    for artifact in ('EmulatorSupport', 'LiveScreenshot'):
-                        with zipfile.ZipFile(partner / 'packages' / artifact / (artifact + '-1.2.3.zip')) as archive:
-                            self.assertEqual((production / 'plugins' / artifact / 'plugin.json').read_bytes(), archive.read('plugin.json'))
-
-
 if __name__ == "__main__":
     unittest.main()

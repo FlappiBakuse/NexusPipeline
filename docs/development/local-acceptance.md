@@ -20,7 +20,7 @@ python tools/local_acceptance.py build --host-root "<Host源码绝对路径>" --
 
 ## 装配与运行
 
-真实生产 Host、桌面、Updater、Uninstaller 与元数据 helper 使用冻结源；Host 和 Updater 为 requireAdministrator，Uninstaller 与元数据 helper 为 asInvoker。工具只引用有限 Maintenance，不引用 Host。Host 只嵌入可信 updater 恢复资源。ZIP 和 Setup 继续使用同一载荷清单与两个固定稳定内置插件。所有现役插件另从同一冻结 Host SDK 构建，装配到 `acceptance/`，不改变正式分发的预装范围。软件普通运行不传 `--app-root`。GameCheckIn 可使用现有 `plugin enable game-checkin` 保存偏好，再从此实例托盘退出并启动；以插件页确认 configuredEnabled/runtimeEnabled。
+真实生产 Host、桌面、Updater、Uninstaller 与元数据 helper 使用冻结源；Host 和 Updater 为 requireAdministrator，Uninstaller 与元数据 helper 为 asInvoker。工具只引用有限 Maintenance，不引用 Host。Host 只嵌入可信 updater 恢复资源。ZIP 和 Setup 继续使用同一载荷清单与两个按固定 Plugins 快照动态解析的稳定内置插件。所有现役插件另从同一冻结 Host SDK 构建，装配到 `acceptance/`，不改变正式分发的预装范围。软件普通运行不传 `--app-root`。GameCheckIn 可使用现有 `plugin enable game-checkin` 保存偏好，再从此实例托盘退出并启动；以插件页确认 configuredEnabled/runtimeEnabled。
 
 ## 结果与发行边界
 

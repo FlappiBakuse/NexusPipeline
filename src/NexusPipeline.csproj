@@ -29,6 +29,7 @@
     <EmbeddedResource Include="$(NexusBuildIdentityPath)" LogicalName="NexusPipeline.Desktop.BuildIdentity" />
   </ItemGroup>
   <Target Name="RequireFrontendInputs" BeforeTargets="PrepareForBuild" Condition="'$(NexusTestHost)' != 'true'">
+    <Error Condition="'$(DesignTimeBuild)' != 'true' and ('$(NexusBundledPluginsManifest)' == '' or !Exists('$(NexusBundledPluginsManifest)'))" Text="Resolve stable bundled packages and pass NexusBundledPluginsManifest." />
     <Error Condition="'$(NexusUpdaterRecoveryPath)' == '' or !Exists('$(NexusUpdaterRecoveryPath)')" Text="Build the independent updater and pass NexusUpdaterRecoveryPath." />
     <Error Condition="'$(NexusFrontendProps)' == '' or !Exists('$(NexusFrontendProps)')" Text="Build the frontend and pass NexusFrontendProps from tools/embed_frontend.py." />
     <Error Condition="'$(NexusBuildIdentityPath)' == '' or !Exists('$(NexusBuildIdentityPath)')" Text="Pass the frozen desktop-build.json as NexusBuildIdentityPath." />
@@ -58,7 +59,8 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Shared\Localization\Resources\*.json" />
-    <EmbeddedResource Include="Modules\Plugins\Repository\BundledPlugins.json" />
+    <EmbeddedResource Include="Modules\Plugins\Repository\BundledPlugins.json" Condition="'$(NexusBundledPluginsManifest)' == ''" />
+    <EmbeddedResource Include="$(NexusBundledPluginsManifest)" LogicalName="NexusPipeline.Modules.Plugins.Repository.BundledPlugins.json" Condition="'$(NexusBundledPluginsManifest)' != ''" />
     <EmbeddedResource Include="NexusPipeline.ico" LogicalName="NexusPipeline.ScriptTypeIcon" />
     <EmbeddedResource Include="..\desktop\runtime-files.json" LogicalName="NexusPipeline.Desktop.RuntimeFiles" />
   </ItemGroup>

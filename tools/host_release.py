@@ -114,48 +114,12 @@ def _safe_archive_name(path: Path, production_root: Path) -> str:
     return relative
 
 
-def stage_bundled_plugins(production_root: Path, plugins_root: Path, manifest_path: Path) -> None:
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    _require(manifest.get("schemaVersion") == 1 and manifest.get("repository") == "FlappiBakuse/NexusPipeline-Plugins", "预装插件清单来源无效")
-    items = manifest.get("plugins")
-    _require(isinstance(items, list) and {item.get("artifactName") for item in items} == {"EmulatorSupport", "LiveScreenshot"} and len(items) == 2, "预装插件身份无效")
-    projection = plugins_root / "catalog.json"
-    catalog_path = plugins_root / "metadata/catalog/stable.json"
-    _require(projection.is_file() and not projection.is_symlink() and not catalog_path.is_symlink(), "官方稳定 catalog 路径无效")
-    if catalog_path.exists():
-        _require(catalog_path.is_file() and catalog_path.read_bytes() == projection.read_bytes(), "官方稳定 catalog canonical 与根投影不一致")
-    else:
-        # Protected Plugins revisions before catalog relocation expose only the root projection.
-        catalog_path = projection
-    catalog = json.loads(catalog_path.read_text(encoding="utf-8-sig"))
-    target_root = production_root / "plugins"
-    _require(not target_root.exists(), "生产 staging 已存在插件目录")
-    target_root.mkdir()
-    for item in items:
-        artifact = item["artifactName"]
-        version = item["version"]
-        package = plugins_root / "packages" / artifact / f"{artifact}-{version}.zip"
-        _require(package.is_file() and not package.is_symlink(), f"官方稳定插件包缺失：{artifact}")
-        raw = package.read_bytes()
-        _require(len(raw) == item["packageSizeBytes"] and hashlib.sha256(raw).hexdigest() == item["packageSha256"], f"官方稳定插件包字节不符：{artifact}")
-        entry = next((entry for entry in catalog.get("plugins", []) if entry.get("artifactName") == artifact), None)
-        _require(entry is not None and entry.get("version") == version and entry.get("sha256") == item["packageSha256"] and entry.get("sizeBytes") == len(raw), f"官方稳定 catalog 不匹配：{artifact}")
-        declared = {file["path"]: file for file in item["files"]}
-        _require(len(declared) == len(item["files"]), f"预装清单文件重复：{artifact}")
-        target = target_root / artifact
-        target.mkdir()
-        with zipfile.ZipFile(package) as archive:
-            infos = archive.infolist()
-            _require({info.filename for info in infos} == set(declared) and all(not info.is_dir() for info in infos), f"预装插件条目集合不符：{artifact}")
-            for info in infos:
-                name = _safe_package_entry(info.filename, inner_plugin=True)
-                file = declared[name]
-                _require(info.file_size == file["sizeBytes"] and info.file_size <= MAX_SINGLE_ENTRY_BYTES, f"预装插件条目大小不符：{artifact}/{name}")
-                data = archive.read(info)
-                _require(hashlib.sha256(data).hexdigest() == file["sha256"], f"预装插件条目摘要不符：{artifact}/{name}")
-                destination = target.joinpath(*name.split("/"))
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                destination.write_bytes(data)
+def stage_bundled_plugins(production_root: Path, plugins_root: Path, manifest_path: Path) -> dict:
+    try:
+        from .bundled_plugins import stage
+    except ImportError:
+        from bundled_plugins import stage
+    return stage(production_root, plugins_root, manifest_path)
 
 
 def archive_production(
@@ -287,7 +251,16 @@ def build_production(
     inputs = prepare_application(root, output_dir.resolve() / "application-inputs", source_sha=source_sha,
         source_tree_sha=git_output(root, "rev-parse", "HEAD^{tree}"), partner_sha=partner_sha,
         workflow_sha=workflow_sha or source_sha, electron_archive=electron_archive)
-    _run_checked([dotnet, "publish", str(root / "src" / "NexusPipeline.csproj"), "--configuration", "Release", "--runtime", "win-x64", "--self-contained", "false", "-p:PublishSingleFile=true", "-p:DebugType=none", "-p:DebugSymbols=false", "-p:NexusTestHost=false", "-p:NexusFrontendProps=" + inputs["frontendProps"], "-p:NexusBuildIdentityPath=" + inputs["identity"], "-p:NexusUpdaterRecoveryPath=" + inputs["updater"], "--output", str(production_root)], root, runner)
+    production_root.mkdir(parents=True)
+    if bundled_phase is None:
+        _require(plugins_root is not None, "必须显式提供官方 Plugins 检出路径")
+        resolved = stage_bundled_plugins(production_root, plugins_root.resolve(), root / "src/Modules/Plugins/Repository/BundledPlugins.json")
+        resolved_path = output_dir.resolve() / "BundledPlugins.json"
+        resolved_path.write_text(json.dumps(resolved, sort_keys=True) + "\n", encoding="utf-8")
+    else:
+        consume_bundled_phase(root, bundled_phase, production_root, source_sha=source_sha, partner_sha=partner_sha)
+        resolved_path = bundled_phase.resolve() / "BundledPlugins.json"
+    _run_checked([dotnet, "publish", str(root / "src" / "NexusPipeline.csproj"), "--configuration", "Release", "--runtime", "win-x64", "--self-contained", "false", "-p:PublishSingleFile=true", "-p:DebugType=none", "-p:DebugSymbols=false", "-p:NexusTestHost=false", "-p:NexusFrontendProps=" + inputs["frontendProps"], "-p:NexusBuildIdentityPath=" + inputs["identity"], "-p:NexusUpdaterRecoveryPath=" + inputs["updater"], "-p:NexusBundledPluginsManifest=" + str(resolved_path), "--output", str(production_root)], root, runner)
     verify_embedded_manifest(production_root / "NexusPipeline.exe", "requireAdministrator")
     helper_root = output_dir.resolve() / "installer-helper"
     helper_root.mkdir()
@@ -299,12 +272,6 @@ def build_production(
     verify_embedded_manifest(Path(inputs['metadataHelper']), 'asInvoker')
     shutil.copytree(inputs["desktopBundle"], production_root / "resources" / "desktop")
     shutil.copy2(root / "README.md", production_root / "README.md")
-    if bundled_phase is None:
-        _require(plugins_root is not None, "必须显式提供官方 Plugins 检出路径")
-        stage_bundled_plugins(production_root, plugins_root.resolve(), root / "src" / "Modules" / "Plugins" / "Repository" / "BundledPlugins.json")
-    else:
-        consume_bundled_phase(root, bundled_phase, production_root,
-                              source_sha=source_sha, partner_sha=bundled_partner_sha)
     try:
         from .application_payload import create as create_application_manifest
     except ImportError:
@@ -401,10 +368,11 @@ def build_bundled_phase(root: Path, plugins_root: Path, output: Path, *,
              and git_output(plugins_root, "rev-parse", "HEAD") == partner_sha,
              "预装插件阶段源码身份不符")
     output.mkdir(parents=True)
-    stage_bundled_plugins(output, plugins_root,
-                          root / "src" / "Modules" / "Plugins" / "Repository" / "BundledPlugins.json")
+    resolved = stage_bundled_plugins(output, plugins_root,
+                                    root / "src/Modules/Plugins/Repository/BundledPlugins.json")
+    (output / "BundledPlugins.json").write_text(json.dumps(resolved, sort_keys=True) + "\n", encoding="utf-8")
     files = []
-    for item in sorted((output / "plugins").rglob("*")):
+    for item in sorted(output.rglob("*")):
         _require(not item.is_symlink(), "预装插件阶段包含链接")
         if item.is_file():
             files.append({"path": item.relative_to(output).as_posix(),
@@ -428,7 +396,9 @@ def consume_bundled_phase(root: Path, phase: Path, production_root: Path, *,
              and manifest["sourceSha"] == (source_sha or git_output(root, "rev-parse", "HEAD"))
              and manifest["partnerSha"] == partner_sha, "预装插件阶段来源不符")
     actual = []
-    for item in sorted((phase / "plugins").rglob("*")):
+    for item in sorted(phase.rglob("*")):
+        if item == phase / "phase.json":
+            continue
         _require(not item.is_symlink(), "预装插件阶段包含链接")
         if item.is_file():
             actual.append({"path": item.relative_to(phase).as_posix(),
@@ -436,6 +406,16 @@ def consume_bundled_phase(root: Path, phase: Path, production_root: Path, *,
                            "sizeBytes": item.stat().st_size})
     _require(actual == manifest["files"] and 0 < len(actual) <= 512,
              "预装插件阶段文件字节不符")
+    resolved = json.loads((phase / "BundledPlugins.json").read_bytes())
+    expected = sorted([{"path": f"plugins/{plugin['artifactName']}/{file['path']}",
+                        "sha256": file['sha256'], "sizeBytes": file['sizeBytes']}
+                       for plugin in resolved['plugins'] for file in plugin['files']], key=lambda item: item['path'])
+    _require({item['path'] for item in actual} == {'BundledPlugins.json', *(item['path'] for item in expected)}
+             and sorted([item for item in actual if item['path'].startswith('plugins/')], key=lambda item: item['path']) == expected
+             and resolved.get('schemaVersion') == 1 and resolved.get('repository') == "FlappiBakuse/NexusPipeline-Plugins"
+             and len(resolved['plugins']) == 2
+             and {item['artifactName'] for item in resolved['plugins']} == {"EmulatorSupport", "LiveScreenshot"},
+             "预装插件解析清单与阶段载荷不一致")
     target = production_root / "plugins"
     _require(not target.exists(), "生产 staging 已存在插件目录")
     shutil.copytree(phase / "plugins", target)
