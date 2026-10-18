@@ -46,6 +46,8 @@ internal sealed class DesktopCoordinator(Func<bool> requestExit, bool lightweigh
     {
         if (_listener is not null) return;
         browserLogin.CancelRequested += OnBrowserCancelRequested;
+        string relocation = _store.RecoverRelocated();
+        if (relocation is not ("empty" or "current")) Logger.Warn("desktop_session_relocation: " + relocation);
         var saved = _store.Load();
         if (saved is { } owned)
         {
@@ -86,7 +88,13 @@ internal sealed class DesktopCoordinator(Func<bool> requestExit, bool lightweigh
                 if (!opened) Logger.Warn("browser_launch_failed");
                 return opened;
             }
-            if (_unowned || HostInstance.Identity is null) return false;
+            if (_unowned)
+            {
+                _pendingShow = false;
+                Logger.Warn("桌面会话无法安全接管，已保留现场并尝试在浏览器打开管理页面。退出旧实例后可重新启动桌面。");
+                return openBrowser(new Uri($"http://127.0.0.1:{_port}/"));
+            }
+            if (HostInstance.Identity is null) return false;
             if (_session?.Main.IsAlive() == true)
             {
                 if (_desktopPipe is not null)
