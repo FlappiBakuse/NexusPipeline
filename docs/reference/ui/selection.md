@@ -18,7 +18,7 @@
 |---|---|---|---|
 | `nxp-range` | `modelValue` number/string；`0`；`min` number；`0`；`max` number；`100`；`step` number；`1`；`disabled` boolean；`false`；`ariaLabel` string；空 | `update:modelValue`、`change`: `[number]` | 原生 range 的当前值转为 number；范围和步长由原生控件执行。`0` 是有效值。 |
 | `nxp-color-picker` | `modelValue` string；`#76a7ff`；`disabled` boolean；`false`；`ariaLabel` string；`颜色` | `update:modelValue`、`change`: `[string]` | 颜色输入返回文本值；可识别的 3/6 位十六进制会用于颜色预览，非法文本的预览回退为黑色，原始文本仍由调用方收到。 |
-| `nxp-time-picker` | `id` string；空；`modelValue` string；空；`disabled` boolean；`false`；`ariaLabel` string；`时间` | `update:modelValue`、`change`: `[string]` | 选择器以 `HH:mm` 文本提交；面板内时/分变化立即提交。Escape、外部点击或打开另一个浮层会关闭；禁用时不打开。 |
+| `nxp-time-picker` | `id` string；空；`modelValue` string；空；`disabled` boolean；`false`；`ariaLabel` string；`时间` | `update:modelValue`、`change`: `[string]` | 时间文本与箭头使用一个可聚焦按钮，Enter/Space 或点击任意部位打开。选择器以 `HH:mm` 文本提交；面板内时/分变化立即提交。Escape、外部点击或打开另一个浮层会关闭；禁用时不打开。 |
 
 ## 日期范围
 

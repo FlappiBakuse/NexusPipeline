@@ -13,7 +13,7 @@
   --nx-gap-field: var(--nx-space-4);
   --nx-gap-section: var(--nx-space-5);
   --nx-control-height: 40px;
-  --nx-drag-handle-size: 32px;
+  --nx-drag-handle-size: 24px;
   --nx-drag-handle-touch-size: 40px;
   --nx-drag-handle-glyph-size: 20px;
   --nx-motion-ease: cubic-bezier(.2, .8, .2, 1);

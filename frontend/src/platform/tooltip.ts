@@ -4,6 +4,7 @@ let anchor: HTMLElement | null = null;
 let timer: number | null = null;
 let bound = false;
 let sequence = 0;
+let frame: number | null = null;
 
 interface TooltipContext {
   target: HTMLElement;
@@ -35,6 +36,8 @@ function removeTargetDescription(): void {
 
 export function hideTooltip(): void {
   clearTimer();
+  if (frame !== null) window.cancelAnimationFrame(frame);
+  frame = null;
   removeTargetDescription();
   tooltip?.remove();
   tooltip = null;
@@ -42,11 +45,27 @@ export function hideTooltip(): void {
   anchor = null;
 }
 
+function visibleAnchorRect(element: HTMLElement): DOMRect | null {
+  if (!element.isConnected || !element.getClientRects().length) return null;
+  const rect = element.getBoundingClientRect();
+  let left = Math.max(0, rect.left), top = Math.max(0, rect.top);
+  let right = Math.min(window.innerWidth, rect.right), bottom = Math.min(window.innerHeight, rect.bottom);
+  for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+    const style = getComputedStyle(parent);
+    if (style.display === 'none' || style.visibility === 'hidden') return null;
+    const clip = parent.getBoundingClientRect();
+    if (/(hidden|clip|auto|scroll)/.test(style.overflowX)) { left = Math.max(left, clip.left); right = Math.min(right, clip.right); }
+    if (/(hidden|clip|auto|scroll)/.test(style.overflowY)) { top = Math.max(top, clip.top); bottom = Math.min(bottom, clip.bottom); }
+  }
+  return right > left && bottom > top ? new DOMRect(left, top, right - left, bottom - top) : null;
+}
+
 function positionTooltip(): void {
-  if (!tooltip || !anchor?.isConnected) return;
+  if (!tooltip || !anchor) return;
+  const rect = visibleAnchorRect(anchor);
+  if (!rect) { hideTooltip(); return; }
   const margin = 12;
   const gap = 11;
-  const rect = anchor.getBoundingClientRect();
   const tooltipRect = tooltip.getBoundingClientRect();
   const viewportWidth = window.innerWidth || document.documentElement?.clientWidth || 0;
   const viewportHeight = window.innerHeight || document.documentElement?.clientHeight || 0;
@@ -66,6 +85,8 @@ function positionTooltip(): void {
   tooltip.dataset.placement = placement;
   tooltip.style.left = `${Math.round(left)}px`;
   tooltip.style.top = `${Math.round(top)}px`;
+  tooltip.style.setProperty('--nx-tooltip-arrow-x', `${Math.min(tooltipRect.width - 8, Math.max(8, anchorCenter - left + tooltipRect.width / 2))}px`);
+  frame = window.requestAnimationFrame(positionTooltip);
 }
 
 function showNow(context: TooltipContext): void {
@@ -89,6 +110,7 @@ function showNow(context: TooltipContext): void {
 }
 
 function schedule(context: TooltipContext): void {
+  if (tooltip && (target !== context.target || anchor !== context.anchor)) hideTooltip();
   clearTimer();
   const element = context?.target;
   if (!helpText(element)) return;
@@ -102,9 +124,9 @@ function schedule(context: TooltipContext): void {
 function isContextActive(context: TooltipContext): boolean {
   const element = context?.target;
   const contextAnchor = context?.anchor;
-  if (!element?.isConnected || !contextAnchor?.isConnected || !helpText(element)) return false;
+  if (!element?.isConnected || !contextAnchor?.isConnected || !helpText(element) || !visibleAnchorRect(contextAnchor)) return false;
   if (context.trigger === "focus") return document.activeElement === contextAnchor;
-  if (context.trigger === "pointer") return element.matches(":hover");
+  if (context.trigger === "pointer") return contextAnchor.matches(":hover");
   return true;
 }
 
@@ -120,10 +142,12 @@ function closestHelpCont(node: EventTarget | null): TooltipContext | null {
   const nonHelpControl = element?.closest("[data-path-trigger], [data-nxp-step]");
   if (nonHelpControl && helpTarget.contains(nonHelpControl)) return null;
   const directAnchor = element?.closest<HTMLElement>("input:not([type=hidden]), textarea, button, select, [contenteditable=\"true\"], [tabindex]:not([tabindex=\"-1\"])");
-  const fallbackAnchor = helpTarget.querySelector<HTMLElement>("input:not([type=hidden]), textarea, button, select, [contenteditable=\"true\"], [tabindex]:not([tabindex=\"-1\"])");
+  const fallbackAnchor = element instanceof HTMLElement ? element : element?.parentElement;
+  const contextAnchor = directAnchor && helpTarget.contains(directAnchor) ? directAnchor : fallbackAnchor || helpTarget;
+  if (!visibleAnchorRect(contextAnchor)) return null;
   return {
     target: helpTarget,
-    anchor: directAnchor && helpTarget.contains(directAnchor) ? directAnchor : fallbackAnchor || helpTarget,
+    anchor: contextAnchor,
   };
 }
 

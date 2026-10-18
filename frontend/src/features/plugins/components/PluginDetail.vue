@@ -64,6 +64,7 @@ function hasPendingAction() {
       />
       <NxpEmptyState
         v-else-if="!plugin"
+        class="browser-empty-message"
         :title="t('plugins.select_a_plugin')"
         :description="t('plugins.selection.help')"
       />

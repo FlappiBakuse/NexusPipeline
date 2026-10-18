@@ -18,6 +18,6 @@
   text-align: center;
   transform: translateX(-50%);
 }
-.platform-tooltip::after { position: absolute; left: 50%; width: 0; height: 0; content: ""; transform: translateX(-50%); }
+.platform-tooltip::after { position: absolute; left: var(--nx-tooltip-arrow-x, 50%); width: 0; height: 0; content: ""; transform: translateX(-50%); }
 .platform-tooltip[data-placement="top"]::after { bottom: -7px; border-top: 7px solid #3a3a3a; border-right: 7px solid transparent; border-left: 7px solid transparent; }
 .platform-tooltip[data-placement="bottom"]::after { top: -7px; border-right: 7px solid transparent; border-bottom: 7px solid #3a3a3a; border-left: 7px solid transparent; }

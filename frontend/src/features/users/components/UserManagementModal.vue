@@ -15,6 +15,7 @@ import NxpBadge from "../../../ui/primitives/NxpBadge.vue";
 import TaskPlanPreview from "./TaskPlanPreview.vue";
 import NxpEmptyState from "../../../ui/primitives/NxpEmptyState.vue";
 import NxpEntityIcon from "../../../ui/primitives/NxpEntityIcon.vue";
+import NxpOverflowText from "../../../ui/primitives/NxpOverflowText.vue";
 import NxpIcon from "../../../ui/primitives/NxpIcon.vue";
 import NxpModal from "../../../ui/primitives/NxpModal.vue";
 import NxpPathPicker from "../../../ui/primitives/NxpPathPicker.vue";
@@ -558,7 +559,7 @@ onBeforeUnmount(() => { providerDisposed = true; providerEvents?.close(); });
                 @click.stop="toggleBinding(binding)"
               >
                 <NxpEntityIcon class="um-binding-ico" :id="binding.scriptInstanceId" /><span class="um-binding-copy"
-                  ><strong class="um-binding-name">{{ bindingName(binding) }}</strong
+                  ><strong class="um-binding-name"><NxpOverflowText :label="bindingName(binding)" /></strong
                   ><span class="um-binding-badges"
                     ><NxpBadge v-if="props.scripts.find(script => script.id === binding.scriptInstanceId)?.requiresReconfiguration" tone="warn">{{ t("scripts.requires_reconfiguration") }}</NxpBadge
                     ><NxpBadge v-if="bindingPluginStatus(binding)?.missing" tone="bad">{{ t("common.plugin.unknown") }}</NxpBadge

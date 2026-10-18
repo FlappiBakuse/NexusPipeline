@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import NxpIcon from "./NxpIcon.vue";
+import NxpSelectionTransition from "../composites/NxpSelectionTransition.vue";
 import { nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { bindFloatingReposition, positionFloatingOverlay } from "../floating";
 
@@ -7,7 +8,7 @@ const props = withDefaults(defineProps<{ id?: string; modelValue?: string; disab
 const emit = defineEmits<{ "update:modelValue": [value: string]; change: [value: string] }>();
 const open = ref(false);
 const root = ref<HTMLElement | null>(null);
-const anchor = ref<HTMLElement | null>(null);
+const anchor = ref<HTMLButtonElement | null>(null);
 const popover = ref<HTMLElement | null>(null);
 const [initialHour, initialMinute] = String(props.modelValue || "").split(":");
 const hour = ref(Number.isFinite(Number(initialHour)) ? Number(initialHour) % 24 : 0);
@@ -42,7 +43,7 @@ async function setOpen(value: boolean, restoreFocus = true) {
     unbindReposition = null;
     if (restoreFocus) {
       await nextTick();
-      anchor.value?.querySelector<HTMLInputElement>(".nxp-time-value")?.focus();
+      anchor.value?.focus();
     }
     return;
   }
@@ -83,23 +84,25 @@ onBeforeUnmount(() => {
 
 <template>
   <div ref="root" class="nxp-time">
-    <div ref="anchor" class="nxp-time-input-wrap"><input :id="props.id || undefined" class="nxp-time-value" type="text" readonly :value="value()" :disabled="disabled" :aria-label="ariaLabel" aria-haspopup="dialog" :aria-expanded="open" :aria-controls="popoverId" @click="toggle"><button class="nxp-time-trigger" type="button" :disabled="disabled" :aria-label="`${ariaLabel}选择`" :aria-expanded="open" @click="toggle"><NxpIcon name="chevronDown" class-name="nxp-time-chevron" /></button></div>
+    <input :id="props.id || undefined" type="hidden" :value="value()" :disabled="disabled">
+    <button ref="anchor" class="nxp-time-trigger" type="button" :disabled="disabled" :aria-label="ariaLabel" aria-haspopup="dialog" :aria-expanded="open" :aria-controls="popoverId" @click="toggle"><span class="nxp-time-value">{{ value() }}</span><NxpIcon name="chevronDown" class-name="nxp-time-chevron" /></button>
     <Teleport to="body">
-      <div ref="popover" v-show="open" :id="popoverId" class="nxp-time-popover secondary-surface" role="dialog" :aria-label="ariaLabel">
+      <NxpSelectionTransition>
+      <div ref="popover" v-show="open" :inert="!open || undefined" :aria-hidden="!open || undefined" :id="popoverId" class="nxp-time-popover secondary-surface" role="dialog" :aria-label="ariaLabel">
         <div class="nxp-time-columns">
           <div class="nxp-time-wheel" role="group" aria-label="小时"><button class="nxp-time-step" type="button" aria-label="减少小时" @click="adjust('hour', -1)">⌃</button><div class="nxp-time-viewport" role="listbox" aria-label="小时"><button v-for="offset in [-1, 0, 1]" :key="`h-${offset}`" class="nxp-time-option" :aria-selected="offset === 0" type="button" @click="choose('hour', (hour + offset + 24) % 24)">{{ text((hour + offset + 24) % 24) }}</button></div><button class="nxp-time-step" type="button" aria-label="增加小时" @click="adjust('hour', 1)"><NxpIcon name="chevronDown" class-name="nxp-time-chevron" /></button></div>
           <div class="nxp-time-wheel" role="group" aria-label="分钟"><button class="nxp-time-step" type="button" aria-label="减少分钟" @click="adjust('minute', -1)">⌃</button><div class="nxp-time-viewport" role="listbox" aria-label="分钟"><button v-for="offset in [-1, 0, 1]" :key="`m-${offset}`" class="nxp-time-option" :aria-selected="offset === 0" type="button" @click="choose('minute', (minute + offset + 60) % 60)">{{ text((minute + offset + 60) % 60) }}</button></div><button class="nxp-time-step" type="button" aria-label="增加分钟" @click="adjust('minute', 1)"><NxpIcon name="chevronDown" class-name="nxp-time-chevron" /></button></div>
         </div>
       </div>
+      </NxpSelectionTransition>
     </Teleport>
   </div>
 </template>
 
 <style>
 .nxp-time { position: relative; min-width: 0; }
-.nxp-time-input-wrap { display: flex; min-width: 0; }
-.nxp-time-value { flex: 1 1 auto; min-width: 0; border-radius: 8px 0 0 8px !important; cursor: pointer; }
-.nxp-time-trigger { width: 42px; min-width: 42px; min-height: 40px; padding: 0; border-radius: 0 8px 8px 0; color: var(--muted, var(--nx-color-muted)); font: inherit; }
+.nxp-time-value { min-width: 0; font-variant-numeric: tabular-nums; }
+.nxp-time-trigger { display: flex; width: 100%; min-width: 0; min-height: 40px; align-items: center; justify-content: space-between; gap: 10px; padding: 0 12px; border: 1px solid var(--content-control-border, var(--nx-color-border)); border-radius: 8px; background: var(--content-control, transparent); color: var(--nx-color-text); font: inherit; font-size: 13px; text-align: left; }
 .nxp-time-trigger:hover, .nxp-time-trigger[aria-expanded="true"] { border-color: var(--accent, var(--nx-color-accent)); background: var(--content-control-hover, transparent); color: var(--nx-color-text); }
 .nxp-time-trigger:disabled { cursor: not-allowed; opacity: .45; }
 .nxp-time-popover { position: absolute; top: calc(100% + 6px); right: 0; z-index: 60; width: 100%; min-width: 0; padding: var(--space-3, var(--nx-space-3)); border: 1px solid var(--content-control-border, var(--nx-color-border)); border-radius: var(--radius-md, var(--nx-radius-md)); background: var(--content-card, var(--nx-color-surface)); box-shadow: var(--shadow); }
@@ -116,7 +119,6 @@ onBeforeUnmount(() => {
 </style>
 
 <style>
-.nxp-time-trigger { display: grid; place-items: center; }
-.nxp-time-chevron { width: 16px; height: 16px; transition: transform .15s ease; }
+.nxp-time-chevron { flex: 0 0 16px; width: 16px; height: 16px; color: var(--muted, var(--nx-color-muted)); transition: transform var(--nx-motion-duration-fast, 160ms) var(--nx-motion-ease, ease); }
 .nxp-time-trigger[aria-expanded="true"] .nxp-time-chevron { transform: rotate(180deg); }
 </style>

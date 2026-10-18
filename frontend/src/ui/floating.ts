@@ -42,6 +42,7 @@ export function positionFloatingOverlay(
     : Math.min(viewportHeight - margin, anchorRect.bottom + gap);
 
   overlay.style.top = `${Math.round(top)}px`;
+  overlay.style.setProperty("--nx-overlay-origin", opensAbove ? "bottom left" : "top left");
   overlay.style.bottom = "auto";
   overlay.style.maxHeight = `${Math.max(80, Math.round(availableHeight))}px`;
   return { top, left, width, maxHeight: Math.max(80, availableHeight) };

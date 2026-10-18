@@ -83,7 +83,7 @@ function description(plugin: PluginViewPlugin) {
           <NxpBadge tone="muted">{{ plugin.version ? `v${plugin.version}` : t("plugins.version_not_specified") }}</NxpBadge>
         </span>
       </NxpButton>
-      <NxpEmptyState v-if="!plugins.length" :title="t('plugins.no_matching_plugins')" :description="t('plugins.search.no_match_help')" />
+      <NxpEmptyState class="browser-empty-message" v-if="!plugins.length" :title="t('plugins.no_matching_plugins')" :description="t('plugins.search.no_match_help')" />
     </div>
   </NxpScrollArea>
 </template>

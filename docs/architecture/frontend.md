@@ -30,7 +30,7 @@ frontend/src/app/App.vue → router / stores / features / ui
 | `frontend/src/platform/shell.ts` / `platform/toast.ts` | 顶部标题、导航态、主题切换以及 Toast、通知与字段错误状态 |
 | `frontend/src/platform/appearance.ts` | 主题 token 校验、插件主题注册、通用背景表面与外观变更广播；背景地址由外观表面托管，替换或清除时回收上一个 Blob Object URL |
 | `frontend/src/platform/service-restart.ts` | 服务重启编排：提交或复用重启交接信息、按实例身份与候选端口确认新实例、跳转到实际监听端口 |
-| `frontend/src/platform/tooltip.ts` / `platform/auto-scroll.ts` | 延迟气泡提示与长文本滚动辅助 |
+| `frontend/src/platform/tooltip.ts` / `platform/auto-scroll.ts` | 延迟气泡锚定当前可见控件或悬停元素并跟随布局，滚动或离开时释放；长文本滚动辅助 |
 | `frontend/src/platform/auth.ts` | 访问令牌探测、令牌校验与重新认证入口 |
 | `frontend/src/platform/limits.ts` | shell 启动时的约束警告层与完成操作提示卡片 |
 | `frontend/src/platform/markdown.ts` / `platform/format.ts` / `platform/plugin-list.ts` | README 渲染、状态与结果码投影、插件浏览筛选排序 |
@@ -68,7 +68,11 @@ RouterView 以 route.fullPath 标识页面代际。shell 启动完成后安装�
 
 运行计划检查按 explain 的 scriptId 将账号资格和警告归属到计划任务，保持任务顺序；重复引用同一实例时去除重复账号投影。全局准入失败优先显示，账号 ready/skipped/blocked 保留不同含义；页面只解释快照，不改变执行资格或启动运行。
 
+用户管理的绑定标题复用 NxpOverflowText，窄屏固定把手、图标和箭头的位置，名称在剩余宽度内省略并提供全文；触控端自动滚动溢出名称，减少动态偏好保留省略和全文提示。历史与插件双栏容器中的空状态仅显示提示文字。插件筛选浮层使用可容纳单行选项的紧凑宽度，并在视口内收缩，保留至少 40px 的触控目标。所有排序把手保留 40px 点击区域，以 24px 布局列和紧凑间距减少横向占位，卡片左右内边距保持一致，绑定把手与箭头中心相对卡片边缘对称。鼠标悬停不改变把手背景或颜色，键盘焦点保留可访问提示。
+
 运行中心与历史详情共用 NxpLogText 按原始换行展示脚本日志，WARN/WARNING/WRN 行为警告色，ERROR/ERR/FATAL/FTL/CRITICAL/CRIT/CRT 行为错误色，不区分大小写；宿主日志级别作为补充。换行消息与异常堆栈延续上一行级别，新的显式级别重置颜色；独立 Python Traceback 以错误色显示。ANSI 颜色码仅在级别识别时忽略，原始文本不改写。插值渲染保留文本和空行，不执行日志中的 HTML，不改变日志内容、跟随滚动或完整日志读取。
+
+公共 Select（单选与多选）、TimePicker、日期范围、筛选与 Menu 浮层共用 NxpSelectionTransition，展开和收回使用动效 token；收回时立即禁止交互，减少动态效果时关闭装饰动画。浮层定位在展开时完成，向上打开时以底边为动画原点。队列执行时间使用单个按钮承载时间和箭头，整个按钮可以点击并由 Enter/Space 打开；隐藏输入保留 HH:mm 值与原 id，时分调整仍立即提交，关闭恢复同一按钮的焦点。
 
 历史运行详情的每次尝试使用一次性整行卡片按钮显示脚本日志；点击后按钮消失，原位显示标题与日志，当前详情内不再收起。关闭或切换记录后恢复未显示状态。完整日志读取与原始文本保持不变，标题与日志内容使用统一间距。截图预览以适合预览区域的大小作为 100%，支持鼠标滚轮、双指缩放及按钮调整至 50%–200%；鼠标或单指拖动按缩放后图片和视口边界限制，较小图片居中，窗口变化后重新约束位置。关闭预览恢复缩略图焦点，Escape 只关闭当前预览。
 
