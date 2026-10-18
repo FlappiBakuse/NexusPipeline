@@ -21,7 +21,6 @@ const props = defineProps<{
   detail: HistoryRecord | null;
 }>();
 const emit = defineEmits<{
-  retry: [];
   back: [];
   openDetail: [record: HistoryRecord];
   closeDetail: [];
@@ -35,7 +34,7 @@ const panelTitle = computed(() => props.selectedUserKey ? `${props.selectedUserN
       {{ t('history.back_to_user_list') }}
     </NxpButton>
     <NxpScrollArea class="browser-detail-pane history-records-pane" :aria-label="panelTitle">
-      <NxpEmptyState v-if="!selectedUserKey" :title="t('history.choose_run_users')" :description="t('history.filter.user_day_help')" />
+      <NxpEmptyState class="browser-empty-message" v-if="!selectedUserKey" :title="t('history.choose_run_users')" :description="t('history.filter.user_day_help')" />
       <template v-else>
         <div class="history-records-heading">
           <h3><NxpOverflowText>{{ selectedUserName || t('history.no_user_specified') }}</NxpOverflowText></h3>
@@ -44,9 +43,8 @@ const panelTitle = computed(() => props.selectedUserKey ? `${props.selectedUserN
         <NxpLoadingState v-if="loading" :title="t('common.loading')" />
         <template v-else-if="error">
           <NxpEmptyState :title="error" tone="danger" />
-          <NxpButton @click="emit('retry')">{{ t('common.retry') }}</NxpButton>
         </template>
-        <NxpEmptyState v-else-if="!records.length" :title="t('history.records.empty_day')" />
+        <NxpEmptyState class="browser-empty-message" v-else-if="!records.length" :title="t('history.records.empty_day')" />
         <div v-else class="history-record-cards">
           <NxpButton
             v-for="(record, index) in records"

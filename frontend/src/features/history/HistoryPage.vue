@@ -14,7 +14,7 @@ import type { NxpOption } from "../../ui/primitives/NxpSelect.vue";
 import RangePicker from "./components/RangePicker.vue";
 import HistoryList from "./components/HistoryList.vue";
 import HistoryDetail from "./components/HistoryDetail.vue";
-import { formatHistoryDate, statusLabel } from "./utils/historyFormat";
+import { formatHistoryDate, historyUserKey, statusLabel } from "./utils/historyFormat";
 import type { HistoryDate, HistoryRecord, HistoryStatus, HistoryUser } from "./utils/historyTypes";
 
 const initialRange = initialHistoryRange();
@@ -146,7 +146,7 @@ async function toggleDate(date: string) {
 }
 
 async function chooseUser(date: string, user: HistoryUser) {
-  const key = String(user.userKey || user.userId || "");
+  const key = historyUserKey(user);
   if (!key) return;
   selectedDate.value = date;
   selectedUserKey.value = key;
@@ -237,7 +237,7 @@ async function openLinkedRecord() {
     const record = data.record;
     const day = (record.startTime || '').slice(0, 10);
     from.value = day; to.value = day; statusFilter.value = '';
-    selectedDate.value = day; selectedUserKey.value = record.userId || record.userName || '';
+    selectedDate.value = day; selectedUserKey.value = historyUserKey(record);
     selectedUserName.value = record.userName || '';
     dates.value = [{ date: day, count: 1 }]; expanded.value = new Set([day]);
     usersByDate.value.set(day, [{ userKey: selectedUserKey.value, userName: selectedUserName.value, count: 1 }]);
@@ -254,7 +254,7 @@ if (initialData) {
   const first = initialData.dates[0]?.date;
   if (initialData.record) {
     const record = initialData.record;
-    selectedDate.value = first || ""; selectedUserKey.value = record.userId || record.userName || "";
+    selectedDate.value = first || ""; selectedUserKey.value = historyUserKey(record);
     selectedUserName.value = record.userName || "";
     expanded.value = new Set(first ? [first] : []);
     if (first) usersByDate.value.set(first, [{ userKey: selectedUserKey.value, userName: selectedUserName.value, count: 1 }]);
@@ -333,7 +333,6 @@ onBeforeUnmount(() => {
         :selected-user-key="selectedUserKey"
         :selected-user-name="selectedUserName"
         :detail="detail"
-        @retry="loadRecords"
         @back="goBack"
         @open-detail="openDetail"
         @close-detail="closeDetail"

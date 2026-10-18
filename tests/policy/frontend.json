@@ -5,6 +5,8 @@
     ],
     "files": [
       "src/features/dashboard/layout-editor.test.ts",
+      "src/features/history/HistoryPage.test.ts",
+      "src/features/history/components/HistoryDetailModal.test.ts",
       "src/features/history/components/TaskReportPanel.test.ts",
       "src/features/scripts/utils/scriptTypes.test.ts",
       "src/features/settings/SettingsPage.test.ts",
@@ -15,6 +17,7 @@
       "src/platform/client-capabilities.test.ts",
       "src/platform/client-sessions.test.ts",
       "src/platform/events.test.ts",
+      "src/platform/navigation-preparation.test.ts",
       "src/platform/navigation.test.ts",
       "src/platform/page-writes.test.ts",
       "src/platform/plugin-list.test.ts",
@@ -23,8 +26,7 @@
       "src/plugin-bridge/contract.test.ts",
       "src/plugin-bridge/dashboard.test.ts",
       "src/stores/shell.test.ts",
-      "src/ui/primitives/NxpTextInput.test.ts",
-      "src/platform/navigation-preparation.test.ts"
+      "src/ui/primitives/NxpTextInput.test.ts"
     ],
     "caseIds": [
       "Frontend API 1.7 contract aborts a route before cleaning it exactly once when its registration is disposed",
@@ -83,6 +85,12 @@
       "dashboard renderer lifecycle rejects duplicate and foreign local IDs",
       "external navigation opens a separate tab without opener or referrer",
       "external navigation rejects non HTTPS credentials and control characters before opening",
+      "history linked user selection preserves historical keys and never substitutes a display name for a missing identity",
+      "history linked user selection queries the stable historical identity after closing a mounted deep link",
+      "history linked user selection queries the stable historical identity after closing a prepared deep link",
+      "history screenshot lifecycle does not reuse or publish a pending image belonging to the previous record",
+      "history screenshot lifecycle ignores a pending image and preview after the detail is cleared by its owner",
+      "history screenshot lifecycle shares a pending thumbnail request with preview and revokes its single object URL",
       "host api client keeps management authentication when a client session expires",
       "host api client normalizes browser-specific cancellation messages",
       "host api client projects backend error codes through the host locale resources",

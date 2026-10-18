@@ -41,9 +41,9 @@
 | 日期投影 | `features/history/components/RangePicker.vue` 的 `history-from/history-to` | `type=hidden`，承载现役日期控件的值投影，不增加可见交互。 |
 | 控件与媒体尺寸 | 统一控制高度、图标、边框、触控尺寸及媒体 aspect-ratio | 不作为业务卡片固定宽高的豁免。 |
 | 模态最大宽高 | 公共 Modal 的面板 max-width/max-height | 窄屏收缩，短视口内容可滚动，footer 可访问。 |
-| 任务卡片表面 | `features/history/components/TaskPlanItem.vue` 的实际 card 节点 | 历史和绑定计划统一使用 `--content-card-soft`；保留公共层级计算，超过第三层仍为透明分组。 |
 | 只读次级详情 | RunPlanModal；GameActivities ActivityCarousel 的 detailsOpen Modal | 无编辑事务，使用公共 Modal 标题栏关闭。活动设置不在例外内。 |
-| 全屏图片查看 | HistoryDetailModal 的 history-image-lightbox | 只显示图片与关闭操作，不承载编辑或保存。 |
+| 任务卡片表面 | `features/history/components/TaskPlanItem.vue` 的实际 card 节点 | 从浅色任务卡片开始，按公共表面 tone 在浅、深底色间交替；超过第三层仍为透明分组。 |
+| 全屏图片查看 | HistoryImagePreview 的 history-image-lightbox | 只显示图片、缩放与关闭操作，不承载编辑或保存；移动限于图片边界，关闭恢复焦点。 |
 | 业务状态背景 | 输入、选中、危险、成功与警告提示 | 使用相应语义 token，不算普通卡片背景交替。 |
 
 ## 检查与验收

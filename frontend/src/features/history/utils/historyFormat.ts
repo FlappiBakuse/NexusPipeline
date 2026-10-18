@@ -1,5 +1,11 @@
 import { formatNumber, getLocale, t } from "../../../platform/i18n";
-import type { HistoryRecord } from "./historyTypes";
+import type { HistoryRecord, HistoryUser } from "./historyTypes";
+
+export function historyUserKey(user: HistoryUser) {
+  if (user.userKey?.startsWith("id:")) return user.userKey;
+  const id = user.userId?.trim();
+  return id ? `id:${id}` : "";
+}
 
 export function formatDateTime(value?: string) {
   if (!value) return "-";

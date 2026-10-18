@@ -26,9 +26,7 @@ const emit = defineEmits<{
   chooseUser: [date: string, user: HistoryUser];
   retryUsers: [date: string];
 }>();
-function userKeyOf(user: HistoryUser) {
-  return String(user.userKey || user.userId || "");
-}
+import { historyUserKey as userKeyOf } from "../utils/historyFormat";
 </script>
 
 <template>
@@ -57,7 +55,7 @@ function userKeyOf(user: HistoryUser) {
             <NxpButton @click="emit('retryUsers', item.date)">{{ t('common.retry') }}</NxpButton>
           </template>
           <NxpLoadingState v-else-if="!usersByDate.has(item.date)" :title="t('history.loading_run_users')" />
-          <NxpEmptyState v-else-if="!usersByDate.get(item.date)?.length" :title="t('history.filter.no_users_day')" />
+          <NxpEmptyState class="browser-empty-message" v-else-if="!usersByDate.get(item.date)?.length" :title="t('history.filter.no_users_day')" />
           <NxpButton
             v-for="user in usersByDate.get(item.date) || []"
             :key="userKeyOf(user)"
@@ -73,7 +71,7 @@ function userKeyOf(user: HistoryUser) {
           </NxpButton>
         </div>
       </NxpCollapsibleCard>
-      <NxpEmptyState v-if="!dates.length" :title="t('history.records.empty_range')" :description="t('history.filter.date_range_retry')" />
+      <NxpEmptyState class="browser-empty-message" v-if="!dates.length" :title="t('history.records.empty_range')" :description="t('history.filter.date_range_retry')" />
     </div>
   </NxpScrollArea>
 </template>
