@@ -10,6 +10,7 @@
 | `NexusPipeline.TaskProtocolTests/` | 显式插件检出、当前夹具 → Jint、账号隔离、编辑、运行身份及安装契约报告 | partner 门禁及显式诊断；Windows/.NET 10；受控运行目录和进程 | 插件核心组及 Host partner 门禁 |
 | `host_candidate_source.py` | 原 candidate run、writer run → 服务端核实的 SHA、attempt、artifact ID/digest | Release writer；GitHub Actions read 网络；仅追加指定 output | `test_host_candidate_source.py` |
 | `host_release.py` | 真实源码、前端、预装清单、staging 和版本 → 阶段清单、ZIP、候选及校验结果 | release workflow；生产构建在 Windows；明确输出目录、官方包下载 | `test_host_release.py` |
+| `bundled_plugins.py` | 预装选择策略、固定 Plugins 检出 → 稳定插件载荷与精确版本/文件清单 | 候选、PR 生产编译、本机验收；读取本地稳定 catalog/ZIP，写指定 staging；无网络 | `test_bundled_plugins.py` |
 | `host_release_publish.sh` | 经核验的生产候选、来源身份及 token → tag 对应 Release 资产 | release writer；Bash/gh/curl；需对话内发布授权，写 GitHub | 来源与包校验；远端发行后下载复核 |
 | `host_installer.py` | 同一 production staging、运行时锁、Inno 编译器 → Setup 与 metadata | release workflow；Windows；下载依赖、写指定输出，不安装软件 | `test_host_installer.py` |
 | `installer.iss.in`、`installer-launch.iss`、`installer-languages/` | 安装器模板、共享启动/OS 返回边界及语言资源 | Inno 编译；正式 Setup 可安装 runtime、登记当前代际并写用户选择目录 | 安装器工具测试、受控登记和人工生产验收 |

@@ -225,10 +225,14 @@ def build(host: Path, plugins: Path, output: Path, compiler: Path | None, cache:
             raise ValueError('Electron archive digest mismatch')
         inputs = application_build.prepare(source, output/'application-inputs', source_sha=host_input['baseSourceCommit'],
             source_tree_sha=host_input['sourceTreeSha'], partner_sha=plugin_input['baseSourceCommit'], workflow_sha=host_input['baseSourceCommit'], electron_archive=archive)
+        production = output/'production'
+        production.mkdir()
+        resolved = release.stage_bundled_plugins(production, partner, source/'src/Modules/Plugins/Repository/BundledPlugins.json')
+        resolved_path = output/'BundledPlugins.json'
+        resolved_path.write_text(json.dumps(resolved, sort_keys=True) + '\n', encoding='utf-8')
         publish = ['dotnet', 'publish', 'src/NexusPipeline.csproj', '-c', 'Release', '-r', 'win-x64', '--self-contained', 'false',
             '-p:PublishSingleFile=true', '-p:DebugType=none', '-p:DebugSymbols=false', '-p:UseSharedCompilation=false', '--disable-build-servers',
-            '-p:NexusTestHost=false', '-p:NexusFrontendProps='+inputs['frontendProps'], '-p:NexusBuildIdentityPath='+inputs['identity'], '-p:NexusUpdaterRecoveryPath='+inputs['updater']]
-        production = output/'production'
+            '-p:NexusTestHost=false', '-p:NexusFrontendProps='+inputs['frontendProps'], '-p:NexusBuildIdentityPath='+inputs['identity'], '-p:NexusUpdaterRecoveryPath='+inputs['updater'], '-p:NexusBundledPluginsManifest='+str(resolved_path)]
         command('Production Host', [*publish, '-o', production])
         pe.verify_embedded_manifest(production/'NexusPipeline.exe', 'requireAdministrator')
         helper = Path(inputs['metadataHelper']).parent
@@ -238,7 +242,6 @@ def build(host: Path, plugins: Path, output: Path, compiler: Path | None, cache:
         shutil.copy2(inputs['updater'], production/'NexusPipeline.update.exe')
         shutil.copytree(inputs['desktopBundle'], production/'resources/desktop')
         shutil.copy2(source/'README.md', production/'README.md')
-        release.stage_bundled_plugins(production, partner, source/'src/Modules/Plugins/Repository/BundledPlugins.json')
         identity = json.loads(Path(inputs['identity']).read_bytes())
         manifest = payload.create(production, identity, source)
         payload.validate(production, manifest, identity, source)
