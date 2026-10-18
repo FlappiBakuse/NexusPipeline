@@ -36,7 +36,6 @@ import NxpCollapsibleCard from "../../ui/composites/NxpCollapsibleCard.vue";
 import NxpSwitchSetting from "../../ui/composites/NxpSwitchSetting.vue";
 import DiagnosticsSection from "./components/DiagnosticsSection.vue";
 import ServiceRestartNotice from "./components/ServiceRestartNotice.vue";
-import SettingsNotificationsSection from "./components/SettingsNotificationsSection.vue";
 import SettingsNetworkSection from "./components/SettingsNetworkSection.vue";
 import SettingsServiceSection from "./components/SettingsServiceSection.vue";
 import SettingsRemoteAccessSection from "./components/SettingsRemoteAccessSection.vue";
@@ -64,11 +63,6 @@ let tokenRevision = 0;
 let tokenWriteEpoch = 0;
 let tokenReadController: AbortController | null = null;
 const secretDraft = reactive<Record<string, string>>({
-  webhookUrl: "",
-  webhookSecret: "",
-  feishuAppSecret: "",
-  slackBotToken: "",
-  smtpPassword: "",
   proxyPassword: "",
 });
 const saving = ref(false);
@@ -78,7 +72,7 @@ let categorySelection = 0;
 const pluginCategories = ref<{ id: string; label: string }[]>([]);
 const panelOrder = ref<string[]>([]);
 const builtInPanels = [
-  ["service", "settings.service_behavior"], ["notifications", "settings.notification_channels"],
+  ["service", "settings.service_behavior"],
   ["remote-mcp", "settings.remote_access.mcp"], ["network", "settings.network_proxy"],
   ["advanced", "settings.advanced"], ["updates", "settings.update_settings"],
   ["diagnostics", "settings.system_diagnostics"],
@@ -222,6 +216,7 @@ function servicePayload() {
     historyRetentionDays: Number(settings.historyRetentionDays) || 3,
     webPort: Number(settings.webPort) || 58731,
     mcpEnabled: settings.mcpEnabled === true,
+    mcpWriteEnabled: settings.mcpWriteEnabled === true,
     mcpPort: Number(settings.mcpPort) || 58732,
     logLevel: settings.logLevel || "info",
     hostLocale: settings.hostLocale || "zh-CN",
@@ -235,37 +230,6 @@ function saveService() {
 function saveServiceWithRestart() {
   markRestart();
   return saveService();
-}
-function saveNotifications() {
-  const payload = {
-    webhookEnabled: settings.webhookEnabled === true,
-    webhookScreenshotEnabled: settings.webhookScreenshotEnabled === true,
-    smtpEnabled: settings.smtpEnabled === true,
-    smtpScreenshotEnabled: settings.smtpScreenshotEnabled === true,
-    webhookType: settings.webhookType || "generic",
-    webhookTimeout: Number(settings.webhookTimeout) || 30,
-    webhookTemplate: settings.webhookTemplate || "",
-    feishuAppId: settings.feishuAppId || "",
-    slackChannelId: settings.slackChannelId || "",
-    smtpHost: settings.smtpHost || "",
-    smtpPort: Number(settings.smtpPort) || 465,
-    smtpSecure: settings.smtpSecure || "auto",
-    smtpUser: settings.smtpUser || "",
-    smtpTo: settings.smtpTo || "",
-    smtpFrom: settings.smtpFrom || "",
-    smtpSubjectPrefix: settings.smtpSubjectPrefix || "",
-    smtpTimeout: Number(settings.smtpTimeout) || 30,
-  };
-  const secrets = Object.entries(secretDraft).filter(
-    ([key, value]) => key !== "proxyPassword" && value.trim(),
-  );
-  return queueSave(async () => {
-    await persist(payload);
-    for (const [key, value] of secrets) {
-      await persist({}, key, value);
-      secretDraft[key] = "";
-    }
-  });
 }
 function saveNetwork() {
   const password = secretDraft.proxyPassword.trim();
@@ -447,20 +411,6 @@ async function clearToken() {
 watch(() => loaded.value && panelExpanded("remote-mcp"), expanded => {
   if (expanded && !tokenLoaded && !tokenReading.value && !token.value) void readToken();
 });
-async function testNotifications() {
-  await saveChain;
-  try {
-    const result = await api<any>("POST", "/api/settings/test");
-    toast(
-      result?.ok
-        ? t("settings.notification.test_success")
-        : t("settings.notification.send_failed"),
-      result?.ok ? "info" : "error",
-    );
-  } catch (reason) {
-    if (!isAbortError(reason)) toast(reason instanceof Error ? reason.message : String(reason), "error");
-  }
-}
 async function paintPluginSlots() {
   await nextTick();
   const slots =
@@ -610,14 +560,6 @@ onBeforeUnmount(() => {
           :save="saveService"
           :save-with-restart="saveServiceWithRestart"
           @toggle="togglePanel('service')"
-        />
-
-        <SettingsNotificationsSection
-          :settings="settings"
-          :secret-draft="secretDraft"
-          :expanded="panelExpanded('notifications')"
-          :save="saveNotifications"
-          @toggle="togglePanel('notifications')"
         />
         <SettingsRemoteAccessSection
           :token="token"

@@ -74,7 +74,7 @@ export function addBinding(userId: string, scriptInstanceId: string): Promise<un
     preRunOnceOnly: false,
     postRunScript: "",
     postRunOnFinalOnly: false,
-    smtpTo: "",
+    notificationTaskIds: [],
     runDays: -1,
     maxSuccessfulRunsPerDay: -1,
   });
@@ -94,7 +94,7 @@ export function saveBinding(userId: string, binding: Record<string, unknown>): P
       scriptInstanceId,
       enabled: binding.enabled !== false,
       notifyEnabled: binding.notifyEnabled !== false,
-      smtpTo: binding.smtpTo || "",
+      notificationTaskIds: binding.notificationTaskIds || [],
       preRunScript: binding.preRunScript || "",
       preRunOnceOnly: binding.preRunOnceOnly === true,
       postRunScript: binding.postRunScript || "",

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import NotificationTaskSelect from "../../notifications/NotificationTaskSelect.vue";
 import { useOperationAccess } from "../../../platform/operation-access";
 const { allowed: nativeBrowseAllowed, reason: nativeBrowseReason } = useOperationAccess("hostFilePicker");
 import { nextTick, ref, watch } from "vue";
@@ -323,15 +324,8 @@ watch(
           />
         </div>
         <div class="field" :data-help="t('users.global.notification.smtp_help')">
-          <label class="field-label" for="gm-notification-smtp">{{ t("users.smtp_recipients") }}</label>
-          <NxpTextInput
-            id="gm-notification-smtp"
-            :model-value="settings.notification.smtpTo"
-            type="text"
-            :placeholder="t('users.binding.smtp_inherit_help')"
-            :aria-label="t('users.smtp_recipients')"
-            @update:model-value="setGlobalInput('notification', 'smtpTo', $event)"
-          />
+          <label class="field-label" for="gm-notification-targets-trigger">{{ t("notifications.targets") }}</label>
+            <NotificationTaskSelect id="gm-notification-targets" v-model="settings.notification.notificationTaskIds" />
         </div>
       </section>
       <section class="global-management-card global-management-card-wide">

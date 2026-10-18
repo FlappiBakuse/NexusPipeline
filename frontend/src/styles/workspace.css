@@ -9,7 +9,8 @@ body { font-size: 14px; line-height: 1.55; }
 .sidebar { padding: 18px 12px 14px; gap: 0; }
 .brand { flex: 0 0 auto; }
 .brand-mark { border-radius: 10px; }
-.sidebar-navigation { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 2px 16px; scrollbar-width: thin; }
+.sidebar-navigation { flex: 1 1 auto; min-height: 0; }
+.sidebar-navigation-viewport { padding: 0 2px 16px; }
 .nav-caption { margin: 24px 10px 8px; letter-spacing: .08em; font-size: 11px; }
 .main-nav a { min-height: 42px; border-radius: 9px; font-weight: 500; }
 .main-nav a.active { color: var(--accent); background: var(--accent-soft); border-color: transparent; font-weight: 650; }

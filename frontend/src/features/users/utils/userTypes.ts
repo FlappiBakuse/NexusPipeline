@@ -1,7 +1,7 @@
 export interface BindingEffective {
   enabled?: boolean;
   notifyEnabled?: boolean;
-  smtpTo?: string;
+  notificationTaskIds?: string[];
   preRunScript?: string;
   postRunScript?: string;
   runDays?: number;
@@ -22,7 +22,7 @@ export interface Binding {
   scriptName?: string;
   enabled?: boolean;
   notifyEnabled?: boolean;
-  smtpTo?: string;
+  notificationTaskIds?: string[];
   preRunScript?: string;
   preRunOnceOnly?: boolean;
   postRunScript?: string;
