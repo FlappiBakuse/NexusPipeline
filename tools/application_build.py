@@ -57,13 +57,13 @@ def prepare_compilation(root: Path,output: Path,*,source_sha: str,source_tree_sh
     tools = prepare_tools(root, output/'maintenance', record, test_host=test_host)
     return {'updater':tools['updater'], 'uninstaller':tools['uninstaller'], 'metadataHelper':tools['installer-metadata'], 'identity':str(identity),'frontendProps':str(output/'frontend'/'embedded-frontend.props'),'buildId':record['buildId']}
 
-def prepare(root: Path,output: Path,*,source_sha: str,source_tree_sha: str,partner_sha: str,workflow_sha: str,electron_archive: Path|None=None,test_host: bool=False) -> dict:
+def prepare(root: Path,output: Path,*,source_sha: str,source_tree_sha: str,partner_sha: str,workflow_sha: str,electron_archive: Path|None=None,test_host: bool=False,component_cache=None,cache_inputs=None) -> dict:
     result=prepare_compilation(root,output,source_sha=source_sha,source_tree_sha=source_tree_sha,partner_sha=partner_sha,workflow_sha=workflow_sha,test_host=test_host)
     runtime=json.loads((root/'desktop'/'electron-runtime.json').read_text(encoding='utf-8'))
     if electron_archive is None:
         electron_archive=output/runtime['archive'];urllib.request.urlretrieve(runtime['url'],electron_archive)
     if sha(electron_archive)!=runtime['archiveSha256']:raise ValueError('Electron archive digest mismatch')
-    desktop=build_desktop(root,output/'desktop',Path(result['identity']),electron_archive)
+    desktop=build_desktop(root,output/'desktop',Path(result['identity']),electron_archive,component_cache=component_cache,cache_inputs=cache_inputs)
     return {**result,'desktopBundle':desktop['bundle']}
 
 def main():

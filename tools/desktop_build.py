@@ -24,7 +24,7 @@ def digest(file: Path) -> str:
         return hashlib.file_digest(stream,'sha256').hexdigest()
 
 
-def build(root: Path, output: Path, identity: Path, electron_archive: Path, *, install=True) -> dict:
+def build(root: Path, output: Path, identity: Path, electron_archive: Path, *, install=True, component_cache=None, cache_inputs=None) -> dict:
     root,output,identity,electron_archive=(value.resolve() for value in (root,output,identity,electron_archive))
     if output.exists(): raise ValueError('Desktop output already exists')
     record=read_identity(identity);validate_record(record)
@@ -36,36 +36,46 @@ def build(root: Path, output: Path, identity: Path, electron_archive: Path, *, i
         if digest(file)!=inputs[key]: raise ValueError('Frozen desktop input mismatch: '+key)
     if runtime['version']!=inputs['electronVersion'] or runtime['archiveSha256']!=inputs['electronArchiveSha256']: raise ValueError('Electron release lock mismatch')
     output.mkdir(parents=True)
-    source=output/'source';shutil.copytree(root/'desktop',source,ignore=shutil.ignore_patterns('node_modules','out'))
-    npm='npm.cmd' if os.name=='nt' else 'npm'
-    environment={**os.environ,'ELECTRON_SKIP_BINARY_DOWNLOAD':'1'}
-    if install: subprocess.run([npm,'ci','--no-audit','--no-fund'],cwd=source,env=environment,check=True)
-    else: raise ValueError('Dependency installation is mandatory')
-    subprocess.run([npm,'run','build'],cwd=source,env=environment,check=True)
-    bundle=output/'bundle';bundle.mkdir()
-    with zipfile.ZipFile(electron_archive) as archive:
-        names=set()
-        for item in archive.infolist():
-            name=item.filename
-            if name.startswith('/') or '\\' in name or ':' in name or any(part in ('','.','..') for part in name.rstrip('/').split('/')) or name.casefold() in names or item.external_attr>>16 & 0o170000 == 0o120000: raise ValueError('Unsafe Electron archive path')
-            names.add(name.casefold())
-            if item.is_dir(): continue
-            if item.file_size>256*1024*1024: raise ValueError('Electron archive file limit')
-            if name.startswith('locales/') and name not in {f'locales/{locale}.pak' for locale in profile['locales']}: continue
-            destination=bundle.joinpath(*name.split('/'));destination.parent.mkdir(parents=True,exist_ok=True)
-            with archive.open(item) as stream,destination.open('xb') as target: shutil.copyfileobj(stream,target)
-    (bundle/'electron.exe').rename(bundle/'NexusPipeline.Desktop.exe')
+    def compile_source(source):
+        shutil.copytree(root/'desktop',source,ignore=shutil.ignore_patterns('node_modules','out'))
+        npm='npm.cmd' if os.name=='nt' else 'npm'
+        environment={**os.environ,'ELECTRON_SKIP_BINARY_DOWNLOAD':'1'}
+        if install: subprocess.run([npm,'ci','--no-audit','--no-fund'],cwd=source,env=environment,check=True)
+        else: raise ValueError('Dependency installation is mandatory')
+        subprocess.run([npm,'run','build'],cwd=source,env=environment,check=True)
+    def extract_runtime(bundle):
+        bundle.mkdir()
+        with zipfile.ZipFile(electron_archive) as archive:
+            names=set()
+            for item in archive.infolist():
+                name=item.filename
+                if name.startswith('/') or '\\' in name or ':' in name or any(part in ('','.','..') for part in name.rstrip('/').split('/')) or name.casefold() in names or item.external_attr>>16 & 0o170000 == 0o120000: raise ValueError('Unsafe Electron archive path')
+                names.add(name.casefold())
+                if item.is_dir(): continue
+                if item.file_size>256*1024*1024: raise ValueError('Electron archive file limit')
+                if name.startswith('locales/') and name not in {f'locales/{locale}.pak' for locale in profile['locales']}: continue
+                destination=bundle.joinpath(*name.split('/'));destination.parent.mkdir(parents=True,exist_ok=True)
+                with archive.open(item) as stream,destination.open('xb') as target: shutil.copyfileobj(stream,target)
+        (bundle/'electron.exe').rename(bundle/'NexusPipeline.Desktop.exe')
+        icon=root/'src'/'NexusPipeline.ico'
+        replace_icon(bundle/'NexusPipeline.Desktop.exe',icon)
+        shutil.copy2(icon,bundle/'resources'/'NexusPipeline.ico')
+        default=bundle/'resources'/'default_app.asar'
+        if default.exists(): default.unlink()
+        runtime_inventory=read_json(root/'desktop'/'runtime-files.json')
+        expected={item['path']:item for item in runtime_inventory['files']}
+        actual={file.relative_to(bundle).as_posix():file for file in bundle.rglob('*') if file.is_file()}
+        if set(actual)!=set(expected): raise ValueError('Desktop runtime file set mismatch')
+        for name,file in actual.items():
+            if file.stat().st_size!=expected[name]['sizeBytes'] or digest(file)!=expected[name]['sha256']: raise ValueError('Desktop runtime byte mismatch: '+name)
+    if component_cache is None:
+        source=output/'source'; compile_source(source)
+        bundle=output/'bundle'; extract_runtime(bundle)
+    else:
+        source=component_cache.prepare('desktop-code', cache_inputs['code'], compile_source)
+        runtime_base=component_cache.prepare('electron-runtime', cache_inputs['runtime'], extract_runtime)
+        bundle=output/'bundle'; shutil.copytree(runtime_base,bundle)
     icon=root/'src'/'NexusPipeline.ico'
-    replace_icon(bundle/'NexusPipeline.Desktop.exe',icon)
-    shutil.copy2(icon,bundle/'resources'/'NexusPipeline.ico')
-    default=bundle/'resources'/'default_app.asar'
-    if default.exists(): default.unlink()
-    runtime_inventory=read_json(root/'desktop'/'runtime-files.json')
-    expected={item['path']:item for item in runtime_inventory['files']}
-    actual={file.relative_to(bundle).as_posix():file for file in bundle.rglob('*') if file.is_file()}
-    if set(actual)!=set(expected): raise ValueError('Desktop runtime file set mismatch')
-    for name,file in actual.items():
-        if file.stat().st_size!=expected[name]['sizeBytes'] or digest(file)!=expected[name]['sha256']: raise ValueError('Desktop runtime byte mismatch: '+name)
     app=output/'application';app.mkdir()
     for folder in ('main','preload','shared'): shutil.copytree(source/'out'/folder,app/folder)
     shutil.copytree(source/'src'/'bootstrap',app/'bootstrap')

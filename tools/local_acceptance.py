@@ -80,7 +80,8 @@ def freeze(root: Path, target: Path, manifest_path: Path, objects: Path) -> dict
         for name, _, raw in entries:
             path = target / name
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(raw)
+            if not path.exists() or path.read_bytes() != raw:
+                path.write_bytes(raw)
     else:
         snapshot(root, target, entries)
     for file in manifest:
@@ -330,11 +331,16 @@ def build(host: Path, plugins: Path, output: Path, compiler: Path | None, cache:
 def main():
     parser=argparse.ArgumentParser(allow_abbrev=False)
     parser.add_argument('command', choices=['build'])
+    parser.add_argument('--assembly-only', action='store_true', help='Incremental complete software without distribution packages')
     for name in ('host-root','plugins-root','output'):
         parser.add_argument('--'+name, type=Path, required=True)
     for name in ('compiler','cache','baseline-cache'):
         parser.add_argument('--'+name, type=Path)
     args=parser.parse_args()
+    if args.assembly_only:
+        from local_incremental import build as incremental_build
+        incremental_build(args.host_root.resolve(), args.plugins_root.resolve(), args.output.absolute(), (args.cache or args.output/'cache').absolute())
+        return
     build(args.host_root.resolve(), args.plugins_root.resolve(), args.output, args.compiler, (args.cache or args.output/'cache').resolve(),
           args.baseline_cache.resolve() if args.baseline_cache else None)
 
