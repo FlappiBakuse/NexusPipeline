@@ -18,7 +18,7 @@ internal static class UserBindingOverrideResolver
         if (overrides.Notification?.SyncEnabled == true)
         {
             effective.NotifyEnabled = overrides.Notification.NotifyEnabled;
-            effective.SmtpTo = overrides.Notification.SmtpTo;
+            effective.NotificationTaskIds = overrides.Notification.NotificationTaskIds.ToList();
         }
         if (overrides.Advanced?.SyncEnabled == true)
         {
@@ -36,7 +36,7 @@ internal static class UserBindingOverrideResolver
         source.General ??= new UserGeneralOverride();
         source.Notification ??= new UserNotificationOverride();
         source.Advanced ??= new UserAdvancedOverride();
-        source.Notification.SmtpTo = source.Notification.SmtpTo?.Trim() ?? "";
+        source.Notification.NotificationTaskIds = source.Notification.NotificationTaskIds?.Distinct(StringComparer.Ordinal).ToList() ?? [];
         source.Advanced.PreRunScript = source.Advanced.PreRunScript?.Trim() ?? "";
         source.Advanced.PostRunScript = source.Advanced.PostRunScript?.Trim() ?? "";
         return source;

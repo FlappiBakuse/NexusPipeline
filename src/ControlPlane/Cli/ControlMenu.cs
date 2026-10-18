@@ -330,10 +330,9 @@ internal static class ControlMenu
             Ui.ClearScreen();
             RunCommand("settings", "get");
             Console.WriteLine();
-            Console.WriteLine(CliText.Get("menu.settings_heading", "===== 设置与通知 ====="));
+            Console.WriteLine(CliText.Get("menu.settings_heading", "===== 设置 ====="));
             Console.WriteLine(CliText.Get("menu.settings_update", "1. 使用 JSON 文件更新设置"));
-            Console.WriteLine(CliText.Get("menu.settings_test", "2. 发送测试通知"));
-            Console.WriteLine(CliText.Get("menu.settings_restart", "3. 请求服务重启"));
+            Console.WriteLine(CliText.Get("menu.settings_restart", "2. 请求服务重启"));
             Console.WriteLine(CliText.Get("menu.back", "0. 返回"));
             string? choice = Ui.Prompt(CliText.Get("prompt.choice", "请选择："));
             if (choice is null || choice.Trim() == "0")
@@ -352,9 +351,6 @@ internal static class ControlMenu
                     break;
                 }
                 case "2":
-                    RunCommand("settings", "test");
-                    break;
-                case "3":
                     RunCommand("settings", "restart");
                     break;
                 default:

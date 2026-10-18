@@ -1,3 +1,4 @@
+using NexusPipeline.Modules.Notifications;
 using NexusPipeline.ControlPlane.Contracts;
 using NexusPipeline.Modules.Queues.UseCases;
 using NexusPipeline.Modules.Users.Contracts;
@@ -55,8 +56,10 @@ internal sealed class McpToolContext
         ITaskQueryProjection taskQueries,
         ConfigEditCommands configEdits,
         IProviderConfigurationOperations providerConfigurations,
-        DashboardService dashboard)
+        DashboardService dashboard, NotificationTasks? notifications = null, NotificationDelivery? notificationDelivery = null)
     {
+        Notifications = notifications!;
+        NotificationDelivery = notificationDelivery!;
         QueueCommands = queueCommands;
         TaskQueries = taskQueries;
         ConfigEdits = configEdits;
@@ -85,6 +88,8 @@ internal sealed class McpToolContext
             hostVersion);
     }
 
+    internal NotificationTasks Notifications { get; }
+    internal NotificationDelivery NotificationDelivery { get; }
     internal QueueCommands QueueCommands { get; }
     internal ITaskQueryProjection TaskQueries { get; }
     internal ConfigEditCommands ConfigEdits { get; }

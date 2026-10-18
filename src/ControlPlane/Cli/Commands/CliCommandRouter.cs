@@ -19,6 +19,7 @@ internal static partial class CliCommandRouter
             ["run"] = ExecuteRun,
             ["history"] = ExecuteHistory,
             ["settings"] = ExecuteSettings,
+            ["notification"] = ExecuteNotification,
             ["setting"] = ExecuteSettings,
             ["plugin"] = ExecutePlugin,
             ["plugins"] = ExecutePlugin,

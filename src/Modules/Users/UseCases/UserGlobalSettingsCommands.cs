@@ -15,6 +15,8 @@ internal sealed partial class UserCommands
         UserBindingOverrides? candidate,
         string source = Audit.Web)
     {
+        if (candidate?.Notification?.LegacySmtpTo is not null)
+            return Validation<UserBindingOverrides>("notification_recipient_override_retired", "请改用通知任务选择");
         UserBindingOverrides normalized = UserBindingOverrideResolver.Normalize(candidate);
         if (normalized.General.SyncEnabled
             && ValidateRunDays(normalized.General.RunDays) is string runDaysError)
@@ -32,10 +34,9 @@ internal sealed partial class UserCommands
                 maxSuccessfulRunsError,
                 new Dictionary<string, object?> { ["value"] = normalized.General.MaxSuccessfulRunsPerDay });
         }
-        if (normalized.Notification.SyncEnabled
-            && ValidateSmtp(normalized.Notification.SmtpTo) is string smtpError)
+        if (_notificationTargets?.Validate(normalized.Notification.NotificationTaskIds, _state.Find(userId)?.BindingOverrides.Notification.NotificationTaskIds) is string notificationError)
         {
-            return Validation<UserBindingOverrides>("global_smtp_invalid", smtpError);
+            return Validation<UserBindingOverrides>("notification_targets_invalid", notificationError);
         }
 
         NexusUser? target = _state.Find(userId);
@@ -65,6 +66,7 @@ internal sealed partial class UserCommands
                         return;
                     }
                     UserBindingOverrides previous = current.BindingOverrides?.Clone() ?? new UserBindingOverrides();
+                    normalized.Notification.LegacySmtpTo = previous.Notification.LegacySmtpTo;
                     current.BindingOverrides = normalized.Clone();
                     try
                     {

@@ -107,9 +107,10 @@ internal sealed partial class UserCommands
         {
             return Validation<UserScriptBinding>("必须指定脚本实例");
         }
-        if (ValidateSmtp(candidate.SmtpTo) is string smtpError)
+        if (candidate.LegacySmtpTo is not null) return Validation<UserScriptBinding>("notification_recipient_override_retired");
+        if (_notificationTargets?.Validate(candidate.NotificationTaskIds, _state.Find(userId)?.Bindings.FirstOrDefault(item => item.ScriptInstanceId == candidate.ScriptInstanceId)?.NotificationTaskIds) is string notificationError)
         {
-            return Validation<UserScriptBinding>(smtpError);
+            return Validation<UserScriptBinding>(notificationError);
         }
         if (ValidateRunDays(candidate.RunDays) is string runDaysError)
         {
@@ -250,9 +251,10 @@ internal sealed partial class UserCommands
         string source = Audit.Web)
     {
         UserScriptBinding candidate = request.Binding;
-        if (ValidateSmtp(candidate.SmtpTo) is string smtpError)
+        if (candidate.LegacySmtpTo is not null) return Validation<UserScriptBinding>("notification_recipient_override_retired");
+        if (_notificationTargets?.Validate(candidate.NotificationTaskIds, _state.Find(userId)?.Bindings.FirstOrDefault(item => item.ScriptInstanceId == scriptId)?.NotificationTaskIds) is string notificationError)
         {
-            return Validation<UserScriptBinding>(smtpError);
+            return Validation<UserScriptBinding>(notificationError);
         }
         if (ValidateRunDays(candidate.RunDays) is string runDaysError)
         {
@@ -301,6 +303,7 @@ internal sealed partial class UserCommands
                         scriptId,
                         request.ConfigInputsSpecified ? candidate.ConfigInputs : old.ConfigInputs);
                     replacement.ExecutionProviderConfigRevision = old.ExecutionProviderConfigRevision;
+                    replacement.LegacySmtpTo = old.LegacySmtpTo;
                     if (CheckLockedBindingUpdate(currentUser, old, replacement) is UserMutationBlock overrideBlock)
                     {
                         block = overrideBlock;
@@ -496,7 +499,7 @@ internal sealed partial class UserCommands
             PostRunScript = candidate.PostRunScript.Trim(),
             PostRunOnFinalOnly = candidate.PostRunOnFinalOnly,
             NotifyEnabled = candidate.NotifyEnabled,
-            SmtpTo = candidate.SmtpTo.Trim(),
+            NotificationTaskIds = candidate.NotificationTaskIds?.Distinct(StringComparer.Ordinal).ToList() ?? [],
             RunDays = candidate.RunDays,
             MaxSuccessfulRunsPerDay = candidate.MaxSuccessfulRunsPerDay,
         };

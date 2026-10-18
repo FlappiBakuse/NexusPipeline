@@ -1,3 +1,4 @@
+using NexusPipeline.Modules.Notifications;
 using NexusPipeline.Modules.Scripts.Contracts;
 using NexusPipeline.ControlPlane.Http.Services;
 using NexusPipeline.ControlPlane.Http;
@@ -68,8 +69,10 @@ internal sealed class HttpRouteBindings : IHttpRouteBindings
         NexusPipeline.Modules.Users.Contracts.ITaskQueryProjection taskQueries,
         NexusPipeline.ControlPlane.Http.Static.IFrontendAssetProvider frontendAssets,
         NexusPipeline.Modules.ClientSessions.ClientSessionService clientSessions,
-        IProviderConfigurationOperations? providerConfigurations = null)
+        IProviderConfigurationOperations? providerConfigurations = null, NotificationTasks? notifications = null, NotificationDelivery? notificationDelivery = null)
     {
+        Notifications = notifications!;
+        NotificationDelivery = notificationDelivery!;
         FrontendAssets = frontendAssets;
         ClientSessions = clientSessions;
         _providerConfigurations = providerConfigurations;
@@ -111,6 +114,8 @@ internal sealed class HttpRouteBindings : IHttpRouteBindings
 
     public IReadOnlyDictionary<string, ApiRouteCatalog.BoundRoute> Routes { get; }
 
+    public NotificationTasks Notifications { get; }
+    public NotificationDelivery NotificationDelivery { get; }
     public SettingsCommands SettingsCommands { get; }
 
     public ScriptCommands ScriptCommands { get; }

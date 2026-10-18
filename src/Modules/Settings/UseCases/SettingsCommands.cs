@@ -31,8 +31,7 @@ internal sealed class SettingsCommands
 
     private static readonly HashSet<string> SecretFields = new(StringComparer.OrdinalIgnoreCase)
     {
-        "webhookUrl", "webhookSecret", "smtpPassword", "proxyPassword", "accessToken",
-        "feishuAppSecret", "slackBotToken",
+        "proxyPassword", "accessToken",
     };
 
     private static readonly HashSet<string> RetiredDingTalkFields = new(StringComparer.OrdinalIgnoreCase)
@@ -40,8 +39,12 @@ internal sealed class SettingsCommands
         "dingTalkAppKey", "dingTalkAppSecret", "dingTalkRobotCode", "dingTalkOpenConversationId",
     };
 
+    private static bool IsNotificationField(string key) => new[] { "smtp", "webhook", "feishu", "slack" }.Any(prefix => key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+
     public OperationResult<AppSettings> Update(JsonObject patch, string source = Audit.Web)
     {
+        if (patch.Any(pair => IsNotificationField(pair.Key)) || IsNotificationField(patch["secretKey"]?.ToString() ?? ""))
+            return OperationResult<AppSettings>.Failure("notification_settings_retired", "请通过通知任务管理通知配置", OperationErrorKind.Validation);
         AppSettings candidate = _state.Current;
         AppSettings? previous = null;
         string? bindError = null;
@@ -70,12 +73,6 @@ internal sealed class SettingsCommands
                         if (RetiredDingTalkFields.Contains(field))
                         {
                             bindError = "钉钉通知配置已不再支持";
-                            break;
-                        }
-                        if (field.Equals("webhookType", StringComparison.OrdinalIgnoreCase)
-                            && (pair.Value is null || !AppSettings.WebhookTypes.Contains(pair.Value.Str().Trim().ToLowerInvariant())))
-                        {
-                            bindError = "Webhook 类型无效";
                             break;
                         }
                         if (field.Equals("pluginRepository", StringComparison.OrdinalIgnoreCase)
@@ -109,8 +106,7 @@ internal sealed class SettingsCommands
                     {
                         string key = secretKeyNode.Str();
                         string value = secretValueNode.Str();
-                        if (key is "webhookUrl" or "webhookSecret" or "smtpPassword" or "proxyPassword" or "accessToken"
-                            or "feishuAppSecret" or "slackBotToken")
+                        if (key is "proxyPassword" or "accessToken")
                         {
                             if (string.IsNullOrWhiteSpace(value))
                             {
@@ -203,27 +199,6 @@ internal sealed class SettingsCommands
                     settings.McpPort = mcpPort;
                 }
                 return null;
-            case "webhookTimeout":
-                int timeout = value.Int(settings.WebhookTimeout);
-                if (timeout >= 1)
-                {
-                    settings.WebhookTimeout = timeout;
-                }
-                return null;
-            case "smtpPort":
-                int smtpPort = value.Int(settings.SmtpPort);
-                if (smtpPort is >= 1 and <= 65535)
-                {
-                    settings.SmtpPort = smtpPort;
-                }
-                return null;
-            case "smtpTimeout":
-                int smtpTimeout = value.Int(settings.SmtpTimeout);
-                if (smtpTimeout >= 1)
-                {
-                    settings.SmtpTimeout = smtpTimeout;
-                }
-                return null;
             case "logLevel":
                 string level = value.Str().Trim().ToLowerInvariant();
                 if (LogLevelUtil.IsValid(level))
@@ -283,26 +258,11 @@ internal sealed class SettingsCommands
     {
         switch (key)
         {
-            case "webhookUrl":
-                settings.WebhookUrl = storedValue;
-                break;
-            case "webhookSecret":
-                settings.WebhookSecret = storedValue;
-                break;
-            case "smtpPassword":
-                settings.SmtpPassword = storedValue;
-                break;
             case "proxyPassword":
                 settings.ProxyPassword = storedValue;
                 break;
             case "accessToken":
                 settings.AccessToken = storedValue;
-                break;
-            case "feishuAppSecret":
-                settings.FeishuAppSecret = storedValue;
-                break;
-            case "slackBotToken":
-                settings.SlackBotToken = storedValue;
                 break;
         }
     }

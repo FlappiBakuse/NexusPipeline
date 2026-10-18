@@ -1,6 +1,6 @@
 # 客户端会话与网页登录
 
-Plugin API 2.2 的 `IPluginHostContext.BrowserLogin` 管固定 flow；Frontend API 1.7 提供 `host.clientSessions.get()` 和 `host.browserLogin.open(request, signal)`。Host 管身份、窗口与清理，插件管抽取、平台只读验证和凭据候选。
+Plugin API 2.3 的 `IPluginHostContext.BrowserLogin` 管固定 flow；Frontend API 1.7 提供 `host.clientSessions.get()` 和 `host.browserLogin.open(request, signal)`。Host 管身份、窗口与清理，插件管抽取、平台只读验证和凭据候选。
 
 ## 客户端身份
 

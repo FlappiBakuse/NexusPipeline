@@ -1,6 +1,6 @@
 # 专项任务协议
 
-宿主接受 data-specialized 的 `taskProtocol.version = "0.3.0"`（最低 Host `0.17.4`）和独立的 `0.2.0` 分支（最低 Host `0.16.15`）。完整作者契约、生产适配器源文件、生成器与源码派生夹具由 [官方插件作者指南](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/docs/author/task-protocol.md) 维护。Plugin API 仍为 2.2，Frontend API 仍为 1.7。
+宿主接受 data-specialized 的 `taskProtocol.version = "0.3.0"`（最低 Host `0.17.4`）和独立的 `0.2.0` 分支（最低 Host `0.16.15`）。完整作者契约、生产适配器源文件、生成器与源码派生夹具由 [官方插件作者指南](https://github.com/FlappiBakuse/NexusPipeline-Plugins/blob/main/docs/author/task-protocol.md) 维护。Plugin API 为 2.3，Frontend API 仍为 1.7。
 
 宿主责任按现役模块划分：Plugins 验证 manifest 和冻结脚本；Configuration 提供只读 JSON/YAML 视图、CAS 选择补丁与恢复 journal；Execution 按当前运行日志归并任务事实；History 保存不可变 TaskReport、最近结果索引及崩溃检查点；Notifications 统一格式化任务分类；Host 组合适配器协调用户查询。
 

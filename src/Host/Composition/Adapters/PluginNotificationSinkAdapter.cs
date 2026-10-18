@@ -14,6 +14,9 @@ internal sealed class PluginNotificationSinkAdapter : IPluginNotificationSink
         _dispatcher = dispatcher;
     }
 
+    public ValueTask<IReadOnlyList<PluginNotificationTask>> ListAsync(CancellationToken token = default) => _dispatcher.ListAsync(token);
+    public string? ValidateTargets(IReadOnlyList<string> ids, IReadOnlyList<string>? previous = null) => _dispatcher.ValidateTargets(ids, previous);
+
     public ValueTask SendAsync(PluginNotification notification, CancellationToken cancellationToken = default)
     {
         return _dispatcher.SendPluginAsync(notification, cancellationToken);

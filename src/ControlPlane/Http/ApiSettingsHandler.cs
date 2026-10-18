@@ -52,15 +52,7 @@ internal static class ApiSettingsHandler
                 settings = MaskedSettings(settings),
                 status = new
                 {
-                    webhook = WebhookSender.Status(settings),
-                    smtp = SmtpSender.Status(settings),
-                    channels = new
-                    {
-                        webhookEnabled = settings.WebhookEnabled,
-                        webhookScreenshotEnabled = settings.WebhookScreenshotEnabled,
-                        smtpEnabled = settings.SmtpEnabled,
-                        smtpScreenshotEnabled = settings.SmtpScreenshotEnabled,
-                    },
+
                     autoStart = WindowsScheduledTaskRegistration.IsRegistered(),
                     remote = new
                     {
@@ -97,30 +89,7 @@ internal static class ApiSettingsHandler
         }
         if (method == "POST" && seg.Length == 2 && seg[1].ToLowerInvariant() == "test")
         {
-            string time = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", LocaleCatalog.Culture(LocaleCatalog.HostLocale));
-            string text = string.Join(
-                "\r\n",
-                HostLocalization.TranslateNamed(
-                    "notification.test.title",
-                    "[NexusPipeline] 通知测试",
-                    locale: LocaleCatalog.HostLocale),
-                HostLocalization.TranslateNamed(
-                    "notification.test.body",
-                    $"时间：{time}\r\n如果你收到这条消息，说明通知渠道配置正确。",
-                    new Dictionary<string, object?> { ["time"] = time },
-                    LocaleCatalog.HostLocale));
-            bool ok = await NotifySender.SendAsync(
-                settings,
-                text,
-                outbound: outboundHttp).ConfigureAwait(false);
-            Audit.Log(Audit.Web, "发送测试通知", ok ? "成功" : "失败");
-            if (!ok)
-            {
-                const string code = "notification_test_failed";
-                await HttpHelper.ErrorAsync(context, code, 502).ConfigureAwait(false);
-                return;
-            }
-            await HttpHelper.WriteJsonAsync(context, new { ok = true }).ConfigureAwait(false);
+            await HttpHelper.ErrorAsync(context, "notification_settings_retired", 410).ConfigureAwait(false);
             return;
         }
         if (method == "POST" && seg.Length == 2 && seg[1].ToLowerInvariant() == "restart")
@@ -160,35 +129,12 @@ internal static class ApiSettingsHandler
             settings.HistoryRetentionDays,
             settings.WebPort,
             settings.McpEnabled,
+            settings.McpWriteEnabled,
             settings.McpPort,
             settings.ProxyMode,
             settings.ProxyUrl,
             settings.ProxyUsername,
             proxyPassword = string.IsNullOrWhiteSpace(settings.ProxyPassword) ? "" : "enc:***",
-            settings.WebhookEnabled,
-            settings.WebhookScreenshotEnabled,
-            settings.SmtpEnabled,
-            settings.SmtpScreenshotEnabled,
-            settings.WebhookType,
-            // 密钥一律不回显明文——空=未设置；非空（无论是否 DPAPI 加密，含旧版明文遗留
-            // 与手工编辑的明文）统一返回占位符，杜绝明文泄露；前端协议为「非空=已设置，留空不变」。
-            webhookUrl = string.IsNullOrWhiteSpace(settings.WebhookUrl) ? "" : "enc:***",
-            webhookSecret = string.IsNullOrWhiteSpace(settings.WebhookSecret) ? "" : "enc:***",
-            settings.WebhookTemplate,
-            settings.WebhookTimeout,
-            settings.FeishuAppId,
-            feishuAppSecret = string.IsNullOrWhiteSpace(settings.FeishuAppSecret) ? "" : "enc:***",
-            settings.SlackChannelId,
-            slackBotToken = string.IsNullOrWhiteSpace(settings.SlackBotToken) ? "" : "enc:***",
-            settings.SmtpHost,
-            settings.SmtpPort,
-            settings.SmtpSecure,
-            settings.SmtpUser,
-            smtpPassword = string.IsNullOrWhiteSpace(settings.SmtpPassword) ? "" : "enc:***",
-            settings.SmtpFrom,
-            settings.SmtpTo,
-            settings.SmtpSubjectPrefix,
-            settings.SmtpTimeout,
             settings.LogLevel,
             settings.HostLocale,
             settings.AllowRemoteAccess,

@@ -2,24 +2,19 @@
 
 Notifications 负责运行结果分发，Diagnostics 负责只读诊断；网络出口由 Platform 提供。各服务不得把通知或诊断失败改写为业务成功。
 
-## 通知分发
+## 通知任务与分发
 
-```mermaid
-flowchart LR
-    R[运行结束] --> N{队列汇总或脚本+绑定通知开关}
-    N -- 脚本+绑定级 --> S[NotifyScriptAsync]
-    N -- 队列级汇总 --> Q[NotifyQueueAsync]
-    S --> D[NotificationDispatcher]
-    Q --> D
-    D --> C1[宿主 Webhook]
-    D --> C2[宿主 SMTP]
-```
+通知页面独立管理可复用 SMTP/Webhook 任务，配置保存在 `config/notifications.json`（schema 1）。每项有稳定 ID、名称、备注、类型、启用状态和任务级配置；名称唯一且不超过 64 UTF-8 字节，备注不超过 512 字节。新任务默认禁用，启用前检查必要配置。`MaxNotificationTasks` 默认 10，范围 1—99；迁移超过当前限额时保留已有任务，禁止继续新建。
 
-- **用户脚本级**：有效绑定开启用户通知后，在最终运行阶段（一次成功/多次尝试后成功/部分完成/多次失败后/已跳过）发送该用户运行状态；SMTP 收件人按绑定级覆盖或继承全局设置。
-- **队列级**：队列开启通知后，在队列结束时汇总发送所有脚本状态（`· {ScriptName}：成功（...）/部分完成（...）/失败（...）/已跳过（...）`，按 `record.Status`）。
-- 判断脚本返回的 `notifyText` 替换脚本级通知正文（`CustomNotifyText`，不落盘）；`notifyScreenshotId` 选择最终 Attempt 的脚本级通知附图，单个 Attempt 的截图池最多 8 张且 FIFO 淘汰；队列级汇总不使用运行截图。
-- 多通道并存（内置 Webhook/SMTP 独立开关并行），单通道异常隔离不阻塞；密钥 DPAPI 加密（`enc:` 前缀）存 settings.json。
-- Webhook 截图由全局开关控制；Discord 支持 multipart 附件，企业微信支持图片消息，飞书和 Slack 使用各自的最小应用级上传凭据，Generic 通过模板图片占位符接入。SMTP 截图作为 JPEG MIME 附件发送。
+用户绑定、用户全局覆盖、队列与签到只保存 `notificationTaskIds`。空列表不发送；全局同步不覆盖绑定原始选择。删除任务不清空引用，界面标记失效，发送时跳过。队列通知开启时只发送队列汇总，抑制队列内用户通知；关闭时使用用户配置。失败、取消、跳过及空队列沿用同一规则，通知失败不能改写执行结果。
+
+`NotificationTasks` 负责克隆、校验、原子保存后发布内存状态；`NotificationDelivery` 在事件发送阶段冻结目标配置，按 ID 去重，以最多四路并发执行，每个目标有独立超时和取消。不同任务即使地址相同也分别发送，不自动重发。普通 DTO 只返回密钥配置状态，密钥通过 keep/replace/clear 写入，使用 DPAPI 加密。日志不记录请求 URL、认证响应及秘密。
+
+通知编辑器使用单一填写框，密钥以密码框输入；填写新值后显式保存会替换已存值，留空保留原值，取消不写入。已保存的秘密不回填明文，编辑其他字段或删除未保存的新值不会清除原凭据。
+
+脚本通知按每个目标的截图开关附图，队列汇总和签到使用文字。Discord 支持 multipart 附件，企业微信支持图片消息，飞书和 Slack 使用各自上传凭据，Generic 支持模板图片占位符；SMTP 使用 MIME 附件。
+
+`Host/Initialization/NotificationMigration` 协调旧设置、绑定原始值、全局覆盖、队列和插件 scoped data 的迁移；插件负责自身已知 schema 的纯转换。journal 保存来源指纹、原字节、准备后的稳定 ID 和提交状态，中断后核对来源并继续。超过 99、未知格式、损坏数据或缺少必要转换器时阻止通知发送并保留来源，不部分迁移或并行启用旧发送路径。
 
 ## 宿主代理设置与网络边界
 

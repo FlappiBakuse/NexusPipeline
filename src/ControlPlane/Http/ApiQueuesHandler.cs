@@ -123,6 +123,7 @@ internal static class ApiQueuesHandler
             queue.TimeSets,
             queue.Tasks,
             queue.NotifyEnabled,
+            queue.NotificationTaskIds,
             nextTrigger = model.NextTrigger,
         };
     }

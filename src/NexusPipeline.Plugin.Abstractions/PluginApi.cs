@@ -2,12 +2,12 @@ using System.Text.Json.Nodes;
 
 namespace NexusPipeline.Plugin.Abstractions;
 
-/// <summary>稳定的 NexusPipeline managed-code 插件生命周期契约（Plugin API v2.2）。</summary>
+/// <summary>稳定的 NexusPipeline managed-code 插件生命周期契约（Plugin API v2.3）。</summary>
 public static class PluginApiVersion
 {
     public const int Major = 2;
 
-    public const int Minor = 2;
+    public const int Minor = 3;
 }
 
 /// <summary>独立于 C# Plugin API 维护的前端扩展 ABI 版本；要求精确版本匹配。</summary>
@@ -698,12 +698,24 @@ public interface IPluginSecretStore
 public interface IPluginNotificationService
 {
     ValueTask SendAsync(PluginNotification notification, CancellationToken cancellationToken = default);
+
+    ValueTask<IReadOnlyList<PluginNotificationTask>> ListAsync(CancellationToken cancellationToken = default);
+
+    string? ValidateTargets(IReadOnlyList<string> ids, IReadOnlyList<string>? previous = null);
+}
+
+public sealed record PluginNotificationTask(string Id, string Name, string Type, bool Enabled, bool Configured);
+
+/// <summary>在插件生命周期启动前执行的纯数据转换；只能修改返回的副本，不启动任务或访问外部服务。</summary>
+public interface IPluginNotificationDataMigration
+{
+    IReadOnlyList<string> NotificationDataScopes { get; }
+    JsonObject MigrateNotificationData(string scope, JsonObject source, Func<string, IReadOnlyList<string>> resolveLegacyTargets);
 }
 
 public sealed record PluginNotification(string Title, string Body)
 {
-    /// <summary>可选的 SMTP 收件人覆盖；为空时使用宿主全局收件人。</summary>
-    public string? SmtpTo { get; init; }
+    public IReadOnlyList<string> NotificationTaskIds { get; init; } = Array.Empty<string>();
 }
 
 /// <summary>插件后台任务调度端口。任务由宿主隔离执行并在插件停止时取消。</summary>

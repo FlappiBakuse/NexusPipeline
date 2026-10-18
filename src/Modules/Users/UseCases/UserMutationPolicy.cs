@@ -32,7 +32,7 @@ internal sealed partial class UserCommands
         if (overrides.Notification?.SyncEnabled == true)
         {
             normalized.NotifyEnabled = true;
-            normalized.SmtpTo = "";
+            normalized.NotificationTaskIds = [];
         }
         if (overrides.Advanced?.SyncEnabled == true)
         {
@@ -59,7 +59,7 @@ internal sealed partial class UserCommands
         }
         if (overrides.Notification?.SyncEnabled == true
             && (previous.NotifyEnabled != candidate.NotifyEnabled
-                || !string.Equals(previous.SmtpTo, candidate.SmtpTo, StringComparison.Ordinal)))
+                || !previous.NotificationTaskIds.SequenceEqual(candidate.NotificationTaskIds, StringComparer.Ordinal)))
         {
             return GlobalOverride("全局管理正在同步通知设置，请先关闭全局同步或保持绑定原始值不变");
         }

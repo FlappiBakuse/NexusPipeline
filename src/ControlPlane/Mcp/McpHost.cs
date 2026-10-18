@@ -126,6 +126,23 @@ internal sealed class McpHost : IDisposable
         mcp.WithHttpTransport(options => options.Stateless = true);
         mcp.WithTools<McpReadOnlyTools>();
         mcp.WithTools<McpMutationTools>();
+        mcp.WithRequestFilters(filters =>
+        {
+            filters.AddCallToolFilter(next => async (request, cancellationToken) =>
+            {
+                bool readOnly = (request.MatchedPrimitive as McpServerTool)?.ProtocolTool.Annotations?.ReadOnlyHint == true;
+                if (!readOnly && !_toolContext.Settings.Current.McpWriteEnabled)
+                    return McpToolResult.Failure("mcp_write_disabled", "MCP 写权限未启用，请在宿主设置中开启。");
+                return await next(request, cancellationToken).ConfigureAwait(false);
+            });
+            filters.AddListToolsFilter(next => async (request, cancellationToken) =>
+            {
+                var result = await next(request, cancellationToken).ConfigureAwait(false);
+                if (!_toolContext.Settings.Current.McpWriteEnabled)
+                    result.Tools = result.Tools.Where(tool => tool.Annotations?.ReadOnlyHint == true).ToList();
+                return result;
+            });
+        });
 
         WebApplication app = builder.Build();
         app.Use(async (context, next) =>

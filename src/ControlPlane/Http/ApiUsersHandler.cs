@@ -26,6 +26,16 @@ internal static class ApiUsersHandler
         UserAssetService userAssets,
         ITaskQueryProjection taskQueries)
     {
+        if (method is "POST" or "PUT" && seg.Length >= 3 && seg[2] is "bindings" or "global-settings")
+        {
+            var input = HttpHelper.ParseBody(body) as JsonObject;
+            var notification = seg[2] == "global-settings" ? input?["notification"] as JsonObject : input;
+            if (notification?.Any(pair => pair.Key.Equals("smtpTo", StringComparison.OrdinalIgnoreCase)) == true)
+            {
+                await HttpHelper.ErrorAsync(context, "notification_recipient_override_retired", 400).ConfigureAwait(false);
+                return;
+            }
+        }
         if (method == "GET" && seg.Length == 2 && seg[1] == "task-summaries")
         {
             try { await HttpHelper.WriteJsonAsync(context, taskQueries.Summaries()).ConfigureAwait(false); }
@@ -551,7 +561,7 @@ internal static class ApiUsersHandler
 
         public bool NotifyEnabled { get; set; } = true;
 
-        public string SmtpTo { get; set; } = "";
+        public List<string> NotificationTaskIds { get; set; } = [];
 
         public int RunDays { get; set; } = -1;
 
@@ -572,7 +582,7 @@ internal static class ApiUsersHandler
                 PostRunScript = PostRunScript.Trim(),
                 PostRunOnFinalOnly = PostRunOnFinalOnly,
                 NotifyEnabled = NotifyEnabled,
-                SmtpTo = SmtpTo.Trim(),
+                NotificationTaskIds = NotificationTaskIds?.Distinct(StringComparer.Ordinal).ToList() ?? [],
                 RunDays = RunDays,
                 MaxSuccessfulRunsPerDay = MaxSuccessfulRunsPerDay,
             };

@@ -1,4 +1,3 @@
-using NexusPipeline.Modules.Notifications;
 using NexusPipeline.Modules.Settings.Persistence;
 using NexusPipeline.Shared.Logging;
 namespace NexusPipeline.Modules.Settings;
@@ -26,6 +25,8 @@ public class AppSettings
     /// <summary>是否启动内嵌 MCP Streamable HTTP 端点；默认关闭。</summary>
     public bool McpEnabled { get; set; }
 
+    public bool McpWriteEnabled { get; set; }
+
     /// <summary>MCP 仅绑定 loopback 的固定监听端口；端口冲突时不自动漂移。</summary>
     public int McpPort { get; set; } = 58732;
 
@@ -51,57 +52,6 @@ public class AppSettings
 
     /// <summary>自定义代理密码（DPAPI 加密存储）。</summary>
     public string ProxyPassword { get; set; } = "";
-
-    public bool WebhookEnabled { get; set; } = true;
-
-    /// <summary>脚本完成通知是否尝试附带判断脚本选择的截图；队列汇总通知不附图。</summary>
-    public bool WebhookScreenshotEnabled { get; set; }
-
-    public bool SmtpEnabled { get; set; }
-
-    /// <summary>脚本完成邮件是否附带判断脚本选择的截图；队列汇总通知不附图。</summary>
-    public bool SmtpScreenshotEnabled { get; set; }
-
-    public string WebhookType { get; set; } = "feishu";
-
-    /// <summary>Webhook 类型白名单（单源化）：AppSettingsStore.Normalize 校验与 WebhookSender 状态/映射共用，避免双份维护漂移。</summary>
-    public static readonly string[] WebhookTypes = { "feishu", "wecom", "slack", "discord", "generic" };
-
-    public string WebhookUrl { get; set; } = "";
-
-    public string WebhookSecret { get; set; } = "";
-
-    public string WebhookTemplate { get; set; } = "";
-
-    public int WebhookTimeout { get; set; } = 30;
-
-    /// <summary>飞书图片消息所需的自建应用凭据；AppSecret 使用 DPAPI 加密保存。</summary>
-    public string FeishuAppId { get; set; } = "";
-
-    public string FeishuAppSecret { get; set; } = "";
-
-    /// <summary>Slack 图片上传所需的 Bot Token 与目标频道；Token 使用 DPAPI 加密保存。</summary>
-    public string SlackBotToken { get; set; } = "";
-
-    public string SlackChannelId { get; set; } = "";
-
-    public string SmtpHost { get; set; } = "";
-
-    public int SmtpPort { get; set; } = 465;
-
-    public string SmtpSecure { get; set; } = "auto";
-
-    public string SmtpUser { get; set; } = "";
-
-    public string SmtpPassword { get; set; } = "";
-
-    public string SmtpFrom { get; set; } = "";
-
-    public string SmtpTo { get; set; } = "";
-
-    public string SmtpSubjectPrefix { get; set; } = "[NexusPipeline]";
-
-    public int SmtpTimeout { get; set; } = 30;
 
     /// <summary>是否启用定期自动检查更新；服务启动约 5 秒后首次检查，此后每 12 小时检查一次。</summary>
     public bool UpdateCheckEnabled { get; set; } = true;

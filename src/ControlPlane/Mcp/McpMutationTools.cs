@@ -16,7 +16,7 @@ using NexusPipeline.Shared.Results;
 
 namespace NexusPipeline.ControlPlane.Mcp;
 
-/// <summary>默认可用的执行、配置和安全设置 MCP 工具。</summary>
+/// <summary>受 MCP 写权限开关控制的执行、配置和安全设置工具。</summary>
 [McpServerToolType]
 internal sealed partial class McpMutationTools
 {

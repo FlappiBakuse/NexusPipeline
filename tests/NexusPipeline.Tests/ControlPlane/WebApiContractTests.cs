@@ -72,11 +72,6 @@ public sealed class WebApiContractTests
             ProxyUrl = "http://proxy.example.test:7890",
             ProxyUsername = "proxy-user",
             ProxyPassword = "proxy-password-plain",
-            WebhookUrl = "https://hook.example.test/plain",
-            WebhookSecret = "webhook-secret-plain",
-            FeishuAppSecret = "feishu-secret-plain",
-            SlackBotToken = "slack-token-plain",
-            SmtpPassword = "smtp-password-plain",
             AccessToken = "access-token-plain",
             WebPort = 58888,
         };
@@ -87,11 +82,11 @@ public sealed class WebApiContractTests
         Assert.Equal("proxy-user", projected["ProxyUsername"]!.GetValue<string>());
         Assert.Equal(58888, projected["WebPort"]!.GetValue<int>());
         Assert.Equal("enc:***", projected["proxyPassword"]!.GetValue<string>());
-        Assert.Equal("enc:***", projected["webhookUrl"]!.GetValue<string>());
-        Assert.Equal("enc:***", projected["webhookSecret"]!.GetValue<string>());
-        Assert.Equal("enc:***", projected["feishuAppSecret"]!.GetValue<string>());
-        Assert.Equal("enc:***", projected["slackBotToken"]!.GetValue<string>());
-        Assert.Equal("enc:***", projected["smtpPassword"]!.GetValue<string>());
+        Assert.False(projected.ContainsKey("webhookUrl"));
+        Assert.False(projected.ContainsKey("webhookSecret"));
+        Assert.False(projected.ContainsKey("feishuAppSecret"));
+        Assert.False(projected.ContainsKey("slackBotToken"));
+        Assert.False(projected.ContainsKey("smtpPassword"));
         Assert.Equal("enc:***", projected["accessToken"]!.GetValue<string>());
         Assert.DoesNotContain("proxy-password-plain", projected.ToJsonString(), StringComparison.Ordinal);
         Assert.DoesNotContain("webhook-secret-plain", projected.ToJsonString(), StringComparison.Ordinal);

@@ -25,6 +25,7 @@ internal static class HostedRuntimeInitializer
         try
         {
             PluginInstallRecovery.SeedBundledForNewInstall(RuntimeInitializer.BundledPluginSeedEligible);
+            runtime.MigrateNotifications();
             runtime.ReloadSettings(ConfigLoadMode.Repair);
             runtime.ReloadData();
             RuntimeDataReconciler.Reconcile(runtime);

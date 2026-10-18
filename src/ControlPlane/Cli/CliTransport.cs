@@ -21,7 +21,7 @@ internal static class CliTransport
 
     public static readonly TimeSpan DefaultControlTimeout = TimeSpan.FromSeconds(5);
 
-    public static readonly TimeSpan NotificationTestTimeout = TimeSpan.FromMinutes(2);
+    public static readonly TimeSpan NotificationTestTimeout = TimeSpan.FromMinutes(6);
 
     public static readonly TimeSpan UpdateCheckTimeout = TimeSpan.FromMinutes(10);
 
@@ -217,7 +217,7 @@ internal static class CliTransport
     internal static TimeSpan TimeoutFor(string method, string apiPath)
     {
         if (string.Equals(method, "POST", StringComparison.OrdinalIgnoreCase)
-            && string.Equals(apiPath, "/api/settings/test", StringComparison.OrdinalIgnoreCase))
+            && apiPath.StartsWith("/api/notifications/", StringComparison.OrdinalIgnoreCase) && apiPath.EndsWith("/test", StringComparison.OrdinalIgnoreCase))
         {
             return NotificationTestTimeout;
         }
