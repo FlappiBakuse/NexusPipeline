@@ -2,7 +2,7 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType><TargetFramework>net10.0-windows</TargetFramework>
     <UseWindowsForms>true</UseWindowsForms><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
-    <Version>0.17.5</Version><AssemblyName>NexusPipeline.uninstall</AssemblyName>
+    <Version>0.17.6</Version><AssemblyName>NexusPipeline.uninstall</AssemblyName>
     <ApplicationManifest>../app.installer-helper.manifest</ApplicationManifest><ApplicationIcon>../NexusPipeline.ico</ApplicationIcon>
   </PropertyGroup>
   <PropertyGroup Condition="'$(NexusTestHost)' == 'true'"><ApplicationManifest>../app.test.manifest</ApplicationManifest><DefineConstants>$(DefineConstants);NEXUS_TEST_HOST</DefineConstants></PropertyGroup>
