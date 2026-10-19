@@ -52,7 +52,7 @@ def plan(root: Path, base: str, head: str, checkout: str, partner_sha: str | Non
     selected = scope(paths)
     if selected['partnerRequired']:
         partner_sha = partner_sha or subprocess.check_output(
-            ['git', 'ls-remote', 'https://github.com/FlappiBakuse/NexusPipeline-Plugins.git', 'refs/heads/main'],
+            ['git', 'ls-remote', 'https://github.com/FlappiBakuse/NexusPipeline-Plugins.git', 'refs/heads/develop'],
             encoding='utf-8').split()[0]
     else:
         partner_sha = partner_sha or checkout
@@ -119,9 +119,21 @@ def run(root: Path, selected: dict, output: Path, partner: Path | None) -> None:
                                          workflow_sha=selected['checkoutSha'])
             if partner is None or git(partner, 'rev-parse', 'HEAD') != selected['partnerSha'] or git(partner, 'status', '--porcelain'):
                 raise ValueError('Bundled validation requires the fixed clean Plugins checkout')
-            from host_release import stage_bundled_plugins
+            from local_incremental import stage_local_bundled
             (output / 'bundled').mkdir()
-            resolved = stage_bundled_plugins(output / 'bundled', partner, source / 'src/Modules/Plugins/Repository/BundledPlugins.json')
+            partner_source = output / 'plugins-source'
+            snapshot(partner, partner_source, source_entries(partner))
+            builds = []
+            for artifact in ('EmulatorSupport', 'LiveScreenshot'):
+                package_output = output / 'packages' / artifact
+                package_report = output / f'{artifact}.json'
+                command('Bundled production package: ' + artifact,
+                        [sys.executable, partner_source / 'tools/repo.py', 'package', '--root', partner_source,
+                         '--host-root', source, '--artifact', artifact, '--output', package_output,
+                         '--report', package_report], partner_source)
+                built = json.loads(package_report.read_bytes())
+                builds.append({**built, 'package': str(package_output / built['fileName'])})
+            resolved = stage_local_bundled(output / 'bundled', source, builds)
             resolved_path = output / 'bundled' / 'BundledPlugins.json'
             resolved_path.write_text(json.dumps(resolved, sort_keys=True) + '\n', encoding='utf-8')
             properties = ['-p:NexusBundledPluginsManifest=' + str(resolved_path), '-p:NexusTestHost=false', '-p:UseSharedCompilation=false',

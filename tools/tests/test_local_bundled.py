@@ -15,6 +15,9 @@ class LocalBundledTests(unittest.TestCase):
         host = root/'host'
         policy = host/'src/Modules/Plugins/Repository/BundledPlugins.json'
         policy.parent.mkdir(parents=True)
+        api = host/'src/NexusPipeline.Plugin.Abstractions/PluginApi.cs'
+        api.parent.mkdir(parents=True)
+        api.write_text('public static class PluginApiVersion { public const int Major = 2; public const int Minor = 3; }')
         artifacts = ('EmulatorSupport', 'LiveScreenshot')
         policy.write_text(json.dumps({'schemaVersion': 1, 'repository': 'FlappiBakuse/NexusPipeline-Plugins',
                                      'plugins': [{'artifactName': name} for name in artifacts]}))
@@ -47,6 +50,14 @@ class LocalBundledTests(unittest.TestCase):
                 if mutation == 'bytes': Path(reports[0]['package']).write_bytes(b'changed')
                 else: reports.pop(0)
                 with self.assertRaises(ValueError): stage_local_bundled(root/'software', host, reports)
+
+    def test_incompatible_api_is_rejected_even_when_package_hash_matches(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary); host, reports = self.fixture(root)
+            api = host/'src/NexusPipeline.Plugin.Abstractions/PluginApi.cs'
+            api.write_text('public static class PluginApiVersion { public const int Major = 2; public const int Minor = 4; }')
+            with self.assertRaisesRegex(ValueError, 'manifest mismatch'):
+                stage_local_bundled(root/'software', host, reports)
 
 
 if __name__ == '__main__': unittest.main()

@@ -31,6 +31,7 @@ def stage_local_bundled(production: Path, host: Path, builds: list) -> dict:
     target = production/'plugins'
     if target.exists():
         raise ValueError('Bundled destination already exists')
+    api_version = bundled_plugins.host_api_version(host)
     resolved = []
     for selection in selections:
         artifact = selection['artifactName']
@@ -44,7 +45,8 @@ def stage_local_bundled(production: Path, host: Path, builds: list) -> dict:
         files = []
         with zipfile.ZipFile(package) as archive:
             plugin = json.loads(archive.read('plugin.json'))
-            if plugin['artifactName'] != artifact or plugin['version'] != report['version'] or plugin['kind'] != 'managed-code':
+            if (plugin['artifactName'] != artifact or plugin['version'] != report['version']
+                    or plugin['kind'] != 'managed-code' or plugin['apiVersion'] != api_version):
                 raise ValueError('Local bundled manifest mismatch: ' + artifact)
             for entry in archive.infolist():
                 name = host_release._safe_package_entry(entry.filename, inner_plugin=True)

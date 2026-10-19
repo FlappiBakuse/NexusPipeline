@@ -12,6 +12,17 @@ REPOSITORY = 'FlappiBakuse/NexusPipeline-Plugins'
 ARTIFACTS = {'EmulatorSupport', 'LiveScreenshot'}
 
 
+def host_api_version(host_root: Path) -> str:
+    api_source = (host_root / 'src/NexusPipeline.Plugin.Abstractions/PluginApi.cs').read_text(encoding='utf-8')
+    api_class = re.search(r'public static class PluginApiVersion\s*\{([^}]+)\}', api_source)
+    if api_class is None:
+        raise ValueError('无法读取 Host Plugin API 版本')
+    parts = [re.findall(r'public const int ' + part + r'\s*=\s*(\d+)\s*;', api_class[1]) for part in ('Major', 'Minor')]
+    if not all(len(part) == 1 for part in parts):
+        raise ValueError('Host Plugin API 版本无效')
+    return '.'.join(part[0] for part in parts)
+
+
 def stage(production: Path, partner: Path, policy_path: Path) -> dict:
     try:
         from .host_release import (_require, _safe_package_entry, parse_version, project_version,
@@ -40,12 +51,7 @@ def stage(production: Path, partner: Path, policy_path: Path) -> dict:
              '官方稳定 catalog 来源无效')
     host_root = policy_path.resolve().parents[4]
     host_version = parse_version(project_version(host_root))
-    api_source = (host_root / 'src/NexusPipeline.Plugin.Abstractions/PluginApi.cs').read_text(encoding='utf-8')
-    api_class = re.search(r'public static class PluginApiVersion\s*\{([^}]+)\}', api_source)
-    _require(api_class is not None, '无法读取 Host Plugin API 版本')
-    api_parts = [re.findall(r'public const int ' + part + r'\s*=\s*(\d+)\s*;', api_class[1]) for part in ('Major', 'Minor')]
-    _require(all(len(part) == 1 for part in api_parts), 'Host Plugin API 版本无效')
-    api_version = '.'.join(part[0] for part in api_parts)
+    api_version = host_api_version(host_root)
     resolved, payload = [], {}
     for selection in policy['plugins']:
         artifact = selection['artifactName']
