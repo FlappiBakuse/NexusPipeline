@@ -29,7 +29,8 @@ internal sealed partial class ExecutionRunner
         IReadOnlyList<ResolvedScriptUser> users,
         ResolvedScriptSpec? resolvedSpec = null,
         Func<int, string>? queueFollowingWork = null,
-        Func<int, (string Relation, string LaunchOwner)>? queueNextWork = null)
+        Func<int, (string Relation, string LaunchOwner)>? queueNextWork = null,
+        bool suppressNotifications = false)
     {
         var records = new List<RunRecord>();
         Dictionary<string, int>? successfulRunsByUser = null;
@@ -270,7 +271,7 @@ internal sealed partial class ExecutionRunner
                 {
                     exec.AppendLog(LogLevel.Info, $"[{displayName}] {publishedRecord.ResultDetail}");
                 }
-                await NotifyScriptIfEnabledAsync(
+                if (!suppressNotifications) await NotifyScriptIfEnabledAsync(
                     script,
                     publishedRecord,
                     runUser.Binding,

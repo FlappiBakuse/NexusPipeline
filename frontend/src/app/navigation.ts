@@ -18,6 +18,7 @@ async function loadPage(to: RouteLocationNormalized, signal: AbortSignal): Promi
     case 'users': data = await (await import('../features/users/first-screen')).loadUsersPage(signal); break;
     case 'queues': data = await (await import('../features/queues/first-screen')).loadQueuesPage(signal); break;
     case 'dispatch': data = await (await import('../features/dispatch/first-screen')).loadDispatchPage(signal); break;
+    case 'notifications': data = await (await import('../features/notifications/first-screen')).loadNotificationsPage(signal); break;
     case 'settings': data = await (await import('../features/settings/first-screen')).loadSettingsPage(signal); break;
     case 'plugins': data = await (await import('../features/plugins/first-screen')).loadPluginsPage(signal); break;
     case 'history': data = await (await import('../features/history/first-screen')).loadHistoryPage(signal, typeof to.query.recordId === 'string' ? to.query.recordId : undefined); break;

@@ -33,12 +33,11 @@ internal sealed partial class ExecutionRunner
         }
         try
         {
-            // 用户绑定通知开关与队列级汇总通知相互独立，按每个用户完成立即发送。
             await _notifications.NotifyScriptAsync(script, record, binding, image).ConfigureAwait(false);
         }
-        catch (Exception ex)
+        catch
         {
-            Logger.Warn($"[通知] 脚本「{displayName}」通知发送异常：{ex.Message}");
+            Logger.Warn("[通知] 用户运行通知发送失败，执行结果保持不变。");
         }
     }
 

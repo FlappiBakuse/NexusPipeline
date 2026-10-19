@@ -41,6 +41,7 @@ export interface TaskPlan {
 }
 export interface TaskResult {
   taskId: string; status: string; reasonCode: string; lastAttemptId: string;
+  ownStatus?: string;
   reasonText?: TaskTextRef;
   engineStatus?: string;
   structuredEvidenceRefs?: string[];
@@ -75,7 +76,8 @@ export interface TaskReport {
   summary?: { tone: string; outcome: string; counts: Record<string, number>; recovered: boolean };
   admissionBlocked?: { reasonCode: string; message: string; readiness?: TaskReadiness; configAssessment?: TaskConfigAssessment };
   attemptReports: Array<{ attemptId: string; number: number; selectedTaskIds: string[]; taskResults: TaskResult[];
-    retryDecision?: { decision: string; reasonCode: string; reasonText?: TaskTextRef; expandedUnitIds: string[] } }>;
+    retryDecision?: { decision: string; reasonCode: string; reasonText?: TaskTextRef; expandedUnitIds: string[];
+      includedTaskIds?: string[]; targetTaskIds?: string[]; launchScopeTaskIds?: string[] } }>;
 }
 export interface TaskUserSummary {
   userId: string; tone: string; recordId?: string; reason: string; activeCount?: number;

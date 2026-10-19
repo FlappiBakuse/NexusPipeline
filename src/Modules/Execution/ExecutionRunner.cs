@@ -109,10 +109,10 @@ internal sealed partial class ExecutionRunner
     public async Task RunQueueAsync(RunningExecution exec, QueueExecutionPlan plan)
     {
         DispatchQueue queue = plan.Queue;
+        var records = new List<RunRecord>();
         CompletionIntent? completionIntent = null;
         try
         {
-            var records = new List<RunRecord>();
             var taskOutcomes = new Dictionary<string, string>(StringComparer.Ordinal);
             List<PlannedQueueTask> tasks = plan.Tasks.ToList();
             for (int i = 0; i < tasks.Count; i++)
@@ -141,12 +141,22 @@ internal sealed partial class ExecutionRunner
                 {
                     bool quarantined = blockedDependencies.Any(id =>
                         taskOutcomes.GetValueOrDefault(id) == "quarantined");
-                    RunRecord dependent = CreateDependencySkippedRecord(script, task, exec.Mode,
-                        queue.Id, queue.Name, blockedDependencies, quarantined);
-                    RunRecord published = PersistRecord(exec, dependent, new List<string>(),
-                        Array.Empty<RunScreenshot>(), script?.Name ?? queue.Name, requireDurable: true);
-                    records.Add(published);
-                    exec.AddRecordAndIncrement(published);
+                    var dependentUsers = ResolvePlanUsers(planned.ResolvedUsers);
+                    IEnumerable<ResolvedScriptUser?> recipients = dependentUsers.Count == 0
+                        ? new ResolvedScriptUser?[] { null } : dependentUsers;
+                    foreach (ResolvedScriptUser? user in recipients)
+                    {
+                        RunRecord dependent = CreateDependencySkippedRecord(script, task, exec.Mode,
+                            queue.Id, queue.Name, blockedDependencies, quarantined);
+                        dependent.UserId = user?.UserId ?? "";
+                        dependent.UserName = user?.UserName ?? "";
+                        RunRecord published = PersistRecord(exec, dependent, new List<string>(),
+                            Array.Empty<RunScreenshot>(), script?.Name ?? queue.Name, requireDurable: true);
+                        records.Add(published);
+                        exec.AddRecordAndIncrement(published);
+                        if (!queue.NotifyEnabled && script is not null && user is not null)
+                            await NotifyScriptIfEnabledAsync(script, published, user.Binding, user.UserName).ConfigureAwait(false);
+                    }
                     taskOutcomes[task.Id] = quarantined ? "quarantined" : "blocked";
                     exec.CurrentStatus = "未执行（前置任务未确认成功）";
                     continue;
@@ -248,7 +258,7 @@ internal sealed partial class ExecutionRunner
                         string owner = !next.LaunchGame ? "already_running"
                             : ExecutionCoordinator.ShouldHostLaunchGame(next, nextSpec) ? "host" : "upstream";
                         return (relation, owner);
-                    }).ConfigureAwait(false);
+                    }, suppressNotifications: queue.NotifyEnabled).ConfigureAwait(false);
                 records.AddRange(itemRecords);
                 taskOutcomes[task.Id] = itemRecords.Any(record => record.ResultCode == "run.not_started_quarantined")
                     ? "quarantined"
@@ -263,11 +273,6 @@ internal sealed partial class ExecutionRunner
                 || exec.Cts.IsCancellationRequested
                 || records.Any(record => record.Status == "cancelled");
             exec.Status = anyCancelled ? "cancelled" : "done";
-            if (queue.NotifyEnabled)
-            {
-                await _notifications.NotifyQueueAsync(queue, records).ConfigureAwait(false);
-            }
-
             if (!anyCancelled && !records.Any(record => record.ResultCode is "run.not_started_quarantined" or "run.not_started_dependency"))
             {
                 Logger.Info($"调度队列「{queue.Name}」全部任务执行完毕，执行完成操作：{QueueRule.CompletionActionDesc(queue.CompletionAction)}。");
@@ -285,6 +290,11 @@ internal sealed partial class ExecutionRunner
         }
         finally
         {
+            if (queue.NotifyEnabled)
+            {
+                try { await _notifications.NotifyQueueAsync(queue, records).ConfigureAwait(false); }
+                catch { Logger.Warn("[通知] 队列汇总发送失败，执行结果保持不变。"); }
+            }
             exec.ClearPreviewTarget();
             exec.FinishedAt = DateTime.Now;
             _systemActions.CompleteExecution(exec, completionIntent);

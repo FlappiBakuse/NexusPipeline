@@ -54,7 +54,7 @@ export function globalContributionValuesForSave(
 
 export interface GlobalSettings {
   general: { syncEnabled: boolean; enabled: boolean; runDays: number; maxSuccessfulRunsPerDay: number };
-  notification: { syncEnabled: boolean; notifyEnabled: boolean; smtpTo: string };
+  notification: { syncEnabled: boolean; notifyEnabled: boolean; notificationTaskIds: string[] };
   advanced: { syncEnabled: boolean; preRunScript: string; preRunOnceOnly: boolean; postRunScript: string; postRunOnFinalOnly: boolean };
 }
 
@@ -88,7 +88,7 @@ export function normalizeGlobalSettings(value: any): GlobalSettings {
     notification: {
       syncEnabled: notification.syncEnabled === true,
       notifyEnabled: notification.notifyEnabled !== false,
-      smtpTo: String(notification.smtpTo || ""),
+      notificationTaskIds: Array.isArray(notification.notificationTaskIds) ? notification.notificationTaskIds.map(String) : [],
     },
     advanced: {
       syncEnabled: advanced.syncEnabled === true,

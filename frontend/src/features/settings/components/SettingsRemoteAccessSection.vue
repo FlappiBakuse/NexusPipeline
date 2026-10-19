@@ -95,6 +95,9 @@ const emit = defineEmits<{ toggle: []; "update:token": [value: string] }>();
             :aria-label="t('settings.enable_mcp_service')"
             @change="props.onMcpChange"
           />
+          <NxpSwitchSetting id="st-mcp-write-enabled" v-model="props.settings.mcpWriteEnabled"
+            :label="t('settings.mcp_write_enabled')" :description="t('settings.mcp_write_help')"
+            :aria-label="t('settings.mcp_write_enabled')" @change="props.saveWithRestart" />
         </div>
         <div
           class="form-grid settings-single-field"

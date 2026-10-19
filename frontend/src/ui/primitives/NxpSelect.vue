@@ -4,6 +4,7 @@ import { t } from "../../platform/i18n";
 import { bindFloatingReposition, positionFloatingOverlay } from "../floating";
 import NxpIcon from "./NxpIcon.vue";
 import NxpScrollArea from "./NxpScrollArea.vue";
+import NxpSelectionTransition from "../composites/NxpSelectionTransition.vue";
 
 export interface NxpOption { value: string; label: string; disabled?: boolean; title?: string }
 
@@ -151,13 +152,15 @@ onBeforeUnmount(() => {
       <span data-nxp-select-label>{{ summary() }}</span><span class="nxp-select-chevron" aria-hidden="true"><NxpIcon name="chevronDown" className="nxp-select-chevron-icon" /></span>
     </button>
     <Teleport to="body">
-      <div ref="menu" v-show="open" :id="menuId" class="nxp-select-menu secondary-surface" role="listbox" :aria-multiselectable="multiple || undefined">
+      <NxpSelectionTransition>
+      <div ref="menu" v-show="open" :inert="!open || undefined" :aria-hidden="!open || undefined" :id="menuId" class="nxp-select-menu secondary-surface" role="listbox" :aria-multiselectable="multiple || undefined">
         <NxpScrollArea class="nxp-select-menu-scroll" direction="vertical" :aria-label="ariaLabel || summary()">
           <button v-for="(option, index) in options" :key="option.value" class="nxp-select-option" :class="{ 'nxp-select-option-selected': selected().includes(String(option.value)) }" type="button" role="option" data-nxp-select-option :data-value="option.value" :data-option-index="index" :disabled="option.disabled" :aria-selected="selected().includes(String(option.value))" :title="option.title || undefined" @click="choose(option)" @keydown="onOptionKeydown($event, index)">
             <span>{{ option.label }}</span><span v-if="selected().includes(String(option.value))" class="nxp-select-check" aria-hidden="true">✓</span>
           </button>
         </NxpScrollArea>
       </div>
+      </NxpSelectionTransition>
     </Teleport>
   </div>
 </template>

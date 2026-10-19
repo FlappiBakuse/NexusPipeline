@@ -34,6 +34,7 @@ export interface Queue {
   autoRunMode?: string;
   completionAction?: string;
   notifyEnabled?: boolean;
+  notificationTaskIds?: string[];
   tasks?: QueueTask[];
   timeSets?: TimeSet[];
   nextTrigger?: string;
@@ -54,6 +55,7 @@ export interface QueueDraft {
   autoRunMode: string;
   completionAction: string;
   notifyEnabled: boolean;
+  notificationTaskIds: string[];
   timeSets: TimeSet[];
   tasks: QueueTask[];
 }

@@ -166,11 +166,6 @@ export function runningLogEntries(record: DispatchRunningRecord): DispatchLogEnt
   return (record.logTail || []).map((text, index) => ({ sequence: index + 1, level: "info", text }));
 }
 
-export function runningLogClass(level?: string) {
-  const normalized = String(level || "info").toLowerCase();
-  return ["debug", "info", "warn", "error", "fatal"].includes(normalized) ? `run-log-${normalized}` : "run-log-info";
-}
-
 /** 队列按完成任务数、脚本按尝试次数展示进度百分比。 */
 export function runningProgress(record: DispatchRunningRecord) {
   if (record.kind === "queue" && record.totalTasks) return Math.round((Number(record.doneTasks) || 0) / record.totalTasks * 100);

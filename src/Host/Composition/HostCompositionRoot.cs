@@ -196,6 +196,11 @@ internal class HostCompositionRoot
         collection.AddSingleton<QueueQueries>();
         collection.AddSingleton<UserQueries>();
         collection.AddSingleton<IUserRunStartingPublisher>(provider => provider.GetRequiredService<PluginManager>());
+        collection.AddSingleton(_ => new NotificationTasks(Path.Combine(AppPaths.ConfigDir, "notifications.json")));
+        collection.AddSingleton<NotificationDelivery>();
+        collection.AddSingleton<NotificationTargetValidator>();
+        collection.AddSingleton<IUserNotificationTargets>(provider => provider.GetRequiredService<NotificationTargetValidator>());
+        collection.AddSingleton<IQueueNotificationTargets>(provider => provider.GetRequiredService<NotificationTargetValidator>());
         collection.AddSingleton<NotificationDispatcher>();
         collection.AddSingleton<IPluginNotificationSink>(provider => new PluginNotificationSinkAdapter(
             provider.GetRequiredService<NotificationDispatcher>()));
@@ -267,7 +272,7 @@ internal class HostCompositionRoot
             provider.GetRequiredService<IScriptRepository>(),
             provider.GetRequiredService<IQueueUserParticipationReader>(),
             provider.GetRequiredService<IPluginAvailability>(),
-            provider.GetRequiredService<IQueueDataMaintenance>()));
+            provider.GetRequiredService<IQueueDataMaintenance>(), provider.GetRequiredService<IQueueNotificationTargets>()));
         collection.AddSingleton<IScriptDeletionTransaction>(provider => new AutomationDefinitionTransactions(
             _entityState,
             provider.GetRequiredService<IScriptMutationAdmission>(),
@@ -297,7 +302,7 @@ internal class HostCompositionRoot
             provider.GetRequiredService<IScriptConfigGate>(),
             provider.GetRequiredService<IUserConfigDataMaintenance>(),
             provider.GetRequiredService<UserAssetService>(),
-            provider.GetRequiredService<IUserDeletionTransaction>()));
+            provider.GetRequiredService<IUserDeletionTransaction>(), provider.GetRequiredService<IUserNotificationTargets>()));
         collection.AddSingleton<ConfigEditCommands>(provider => new ConfigEditCommands(
             provider.GetRequiredService<IConfigEditAdmission>(),
             provider.GetRequiredService<IScriptRepository>(),
@@ -384,7 +389,8 @@ internal class HostCompositionRoot
             provider.GetRequiredService<NexusPipeline.Modules.Users.Contracts.ITaskQueryProjection>(),
             provider.GetRequiredService<NexusPipeline.ControlPlane.Http.Static.IFrontendAssetProvider>(),
             provider.GetRequiredService<NexusPipeline.Modules.ClientSessions.ClientSessionService>(),
-            provider.GetRequiredService<ProviderConfigurationOperations>()));
+            provider.GetRequiredService<ProviderConfigurationOperations>(),
+            provider.GetRequiredService<NotificationTasks>(), provider.GetRequiredService<NotificationDelivery>()));
         collection.AddSingleton<ExecutionExplainService>();
         collection.AddSingleton<DiagnosticsService>();
         _services = collection.BuildServiceProvider(new ServiceProviderOptions
@@ -449,7 +455,8 @@ internal class HostCompositionRoot
             Resolve<ITaskQueryProjection>(),
             Resolve<ConfigEditCommands>(),
             Resolve<ProviderConfigurationOperations>(),
-            Resolve<NexusPipeline.Modules.Dashboard.DashboardService>());
+            Resolve<NexusPipeline.Modules.Dashboard.DashboardService>(),
+            Resolve<NotificationTasks>(), Resolve<NotificationDelivery>());
     }
 
     /// <summary>服务解析出口：按类型解析已注册服务；未注册类型抛出异常。</summary>
@@ -476,6 +483,15 @@ internal class HostCompositionRoot
     }
 
     /// <summary>只加载并发布实体内存状态；修复、规范化和落盘由 HostedRuntimeInitializer 编排。</summary>
+    internal void MigrateNotifications()
+    {
+        var tasks = Resolve<NotificationTasks>();
+        string? error = NotificationMigration.Run(AppPaths.ConfigDir, Path.Combine(AppPaths.StateDir, "notifications", "migration.json"),
+            resolve => Plugins.PrepareNotificationMigrationDocuments(resolve).Select(file => new NotificationMigrationFile(file.Path, file.Before, file.After)).ToArray());
+        if (error is null) tasks.Reload();
+        else { tasks.Block(error); Logger.Warn("[通知] 通知配置迁移未完成：" + error); }
+    }
+
     public void ReloadData()
     {
         List<ScriptInstance> scripts = ScriptDefinitionStore.LoadScripts(out bool scriptsAuthoritative);

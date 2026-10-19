@@ -6,6 +6,7 @@ import NxpBadge from "../../../ui/primitives/NxpBadge.vue";
 import NxpScrollArea from "../../../ui/primitives/NxpScrollArea.vue";
 import NxpDismissibleNotice from "../../../ui/composites/NxpDismissibleNotice.vue";
 import TaskPlanItem from "./TaskPlanItem.vue";
+import TaskEvidence from "./TaskEvidence.vue";
 import { resolveTaskText } from "../utils/taskText";
 import { taskDiagnosticLabel, currentTaskReport, providerTaskReport, taskStatusLabel } from "../utils/taskLabels";
 import type { TaskConfigCheck, TaskDefinition, TaskPlan, TaskReport } from "../utils/taskTypes";
@@ -66,9 +67,6 @@ watch(() => report.value, async report => {
   focus?.scrollIntoView?.({ block: "nearest" });
 }, { immediate: true });
 function status(id: string) { return report.value?.finalTaskResults.find(r => r.taskId === id)?.status || "pending"; }
-function incidentEvidence(attemptId: string, sourceId: string, epoch: number, sequence: number) {
-  return report.value?.evidenceLines?.find(line => line.attemptId === attemptId && line.sourceId === sourceId && line.epoch === epoch && line.sequence === sequence)?.text || t('tasks.evidence_unavailable');
-}
 function diagnosticOwnerName(id?: string | null) {
   const task = plan.value?.tasks.find(task => task.id === id);
   return task ? taskName(task) : '';
@@ -122,7 +120,7 @@ function configSettingHint(check: TaskConfigCheck) {
       </section>
       <p v-if="!tasks.length" class="muted">{{ t('tasks.empty') }}</p>
       <div v-if="layout !== 'steps'" class="task-list">
-        <TaskPlanItem v-for="task in roots" :key="task.id" :task="task" :tasks="plan.tasks" :report="report" :display-snapshot="report?.displaySnapshot || plan.displaySnapshot" :focus-task-id="focusTaskId" />
+        <TaskPlanItem v-for="task in roots" :key="task.id" :task="task" :tasks="plan.tasks" :report="report" :display-snapshot="report?.displaySnapshot || plan.displaySnapshot" :focus-task-id="focusTaskId" :config-checks="configChecks" />
       </div>
       <NxpScrollArea v-else-if="layout === 'steps'" direction="horizontal" :aria-label="t('tasks.title')">
         <ol class="task-steps">
@@ -139,10 +137,7 @@ function configSettingHint(check: TaskConfigCheck) {
         <div v-for="event in unattributed" :key="event.attemptId + ':' + event.incident.id">
           <p>{{ event.incident.reasonText
             ? resolveTaskText(event.incident.reasonText, report?.displaySnapshot, getLocale(), event.incident.reasonCode) : event.incident.reasonCode }}</p>
-          <figure v-for="proof in event.incident.evidence" :key="`${proof.sourceId}:${proof.epoch}:${proof.sequence}:${proof.ruleId}`">
-            <figcaption>{{ t('tasks.evidence') }} · {{ proof.sourceId }} / {{ proof.epoch }} / {{ proof.sequence }}</figcaption>
-            <pre>{{ incidentEvidence(event.attemptId, proof.sourceId, proof.epoch, proof.sequence) }}</pre>
-          </figure>
+          <TaskEvidence v-if="report" :proof="event.incident" :report="report" :attempt-id="event.attemptId" />
         </div>
       </div>
       <p v-if="providerTaskReport(report) && report?.summary?.recovered && layout !== 'steps'" class="task-notice">{{ t('tasks.recovered') }}</p>

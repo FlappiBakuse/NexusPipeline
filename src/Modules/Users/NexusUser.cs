@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using System.Text.Json;
 
 namespace NexusPipeline.Modules.Users;
@@ -58,8 +59,12 @@ public class UserScriptBinding
     /// <summary>用户级脚本运行通知开关。</summary>
     public bool NotifyEnabled { get; set; } = true;
 
-    /// <summary>SMTP 用户级收件人覆盖；为空时继承全局设置。</summary>
-    public string SmtpTo { get; set; } = "";
+    /// <summary>通知目标；空列表表示不发送。</summary>
+    public List<string> NotificationTaskIds { get; set; } = [];
+
+    // Retain unmigrated recipients through unrelated runtime saves while notification migration is blocked.
+    [JsonPropertyName("smtpTo"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? LegacySmtpTo { get; set; }
 
     /// <summary>
     /// 参与运行天数：-1 = 永久运行（默认，不递减）；
@@ -86,7 +91,8 @@ public class UserScriptBinding
             PostRunScript = PostRunScript,
             PostRunOnFinalOnly = PostRunOnFinalOnly,
             NotifyEnabled = NotifyEnabled,
-            SmtpTo = SmtpTo,
+            NotificationTaskIds = NotificationTaskIds?.ToList() ?? [],
+            LegacySmtpTo = LegacySmtpTo,
             RunDays = RunDays,
             MaxSuccessfulRunsPerDay = MaxSuccessfulRunsPerDay,
         };

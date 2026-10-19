@@ -315,7 +315,7 @@ onBeforeUnmount(() => {
           t("common.cancel")
         }}</NxpButton>
         <NxpButton
-          class="danger"
+          class="danger solid"
           type="button"
           data-action="confirm-delete-script"
           @click="removeScript"

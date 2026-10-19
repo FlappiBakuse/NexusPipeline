@@ -1,6 +1,6 @@
 # 请求来源与本机交互
 
-Plugin API 2.2 只定义 `General`、`HostFilePicker`、`NativeConfigEditor` 三类访问。每条 `PluginWebApiRoute` 必须显式设置 `Access`；声明式 UI 的读取、保存和每个动作分别显式设置访问类，缺失或未知值使注册失败。`PluginWebApiRequest.ConnectionKind` 由实际传输对端确定为 `Local`、`Remote` 或 `Unknown`，不采信 Host、Origin、Referer 或转发头。General 在三种来源均可用；后两类只允许 Local，在读取参数、请求体或执行回调前拒绝 Remote/Unknown。SDK 包及程序集继续为 2.0.0，与接口 2.2 独立治理。
+Plugin API 2.3 只定义 `General`、`HostFilePicker`、`NativeConfigEditor` 三类访问。每条 `PluginWebApiRoute` 必须显式设置 `Access`；声明式 UI 的读取、保存和每个动作分别显式设置访问类，缺失或未知值使注册失败。`PluginWebApiRequest.ConnectionKind` 由实际传输对端确定为 `Local`、`Remote` 或 `Unknown`，不采信 Host、Origin、Referer 或转发头。General 在三种来源均可用；后两类只允许 Local，在读取参数、请求体或执行回调前拒绝 Remote/Unknown。SDK 包及程序集继续为 2.0.0，与接口 2.3 独立治理。
 
 Frontend API 1.7 的 `host.getCapabilities(signal?)` 返回冻结只读的 schema 1 对象：`connectionKind` 为 local/remote/unknown，`operations` 精确包含 general、hostFilePicker、nativeConfigEditor，每项有 allowed 与 denyReason。拒绝原因分别为 host_file_picker_requires_local、native_config_editor_requires_local、client_origin_unverified。缓存绑定同源、认证和当前 Host 实例；重连或重启使旧读取失效。它用于呈现界面，后端每次操作仍重新判断来源。
 

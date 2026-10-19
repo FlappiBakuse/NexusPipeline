@@ -6,9 +6,10 @@ import NxpBadge from "../../../ui/primitives/NxpBadge.vue";
 import NxpButton from "../../../ui/primitives/NxpButton.vue";
 import NxpEmptyState from "../../../ui/primitives/NxpEmptyState.vue";
 import NxpScrollArea from "../../../ui/primitives/NxpScrollArea.vue";
+import NxpLogText from "../../../ui/composites/NxpLogText.vue";
 import SystemActionCard from "../../dashboard/SystemActionCard.vue";
 import LiveTaskReports from "./LiveTaskReports.vue";
-import { runningLogClass, runningLogEntries, runningProgress, type DispatchRunningRecord, type DispatchSystemAction } from "../utils/dispatchTypes";
+import { runningLogEntries, runningProgress, type DispatchRunningRecord, type DispatchSystemAction } from "../utils/dispatchTypes";
 
 /** 运行中区块：宿主系统操作倒计时、运行记录卡片与实时日志。取消动作由页面执行。 */
 
@@ -195,7 +196,7 @@ function recordMode(record: DispatchRunningRecord) {
         <LiveTaskReports :execution-id="record.id" :current-script-id="record.currentScriptId" />
         <div class="running-item-content" :class="{ 'has-execution-preview': executionPreviewLayoutEnabled }">
           <div class="run-log-resizable" :style="{ height: `${logHeight(record.id)}px` }" :data-log-height="logHeight(record.id)" :data-testid="`run-log-resizable-${record.id}`">
-            <NxpScrollArea class="run-log run-terminal" viewport-class="run-log-viewport" direction="vertical" :aria-label="t('dispatch.run_log')"><pre class="logbox"><span v-if="record.logTruncated" class="run-log-truncated">{{ t("dispatch.log_truncated", {}, "较早日志已折叠") }}</span><span v-if="!runningLogEntries(record).length" class="run-log-empty">({{ t("dispatch.no_log_output") }})</span><span v-for="entry in runningLogEntries(record)" :key="entry.sequence || `${entry.text}-${entry.level}`" class="run-log-line" :class="runningLogClass(entry.level)">{{ entry.text || entry.formattedText || entry.message || "" }}</span></pre></NxpScrollArea>
+            <NxpScrollArea class="run-log run-terminal" viewport-class="run-log-viewport" direction="vertical" :aria-label="t('dispatch.run_log')"><pre class="logbox"><span v-if="record.logTruncated" class="run-log-truncated">{{ t("dispatch.log_truncated", {}, "较早日志已折叠") }}</span><span v-if="!runningLogEntries(record).length" class="run-log-empty">({{ t("dispatch.no_log_output") }})</span><span v-for="entry in runningLogEntries(record)" :key="entry.sequence || `${entry.text}-${entry.level}`" class="run-log-line"><NxpLogText :text="entry.text || entry.formattedText || entry.message || ''" :level="entry.level" /></span></pre></NxpScrollArea>
             <div
               class="run-log-resize-handle"
               role="separator"

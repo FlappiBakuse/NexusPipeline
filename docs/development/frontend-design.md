@@ -41,9 +41,9 @@
 | 日期投影 | `features/history/components/RangePicker.vue` 的 `history-from/history-to` | `type=hidden`，承载现役日期控件的值投影，不增加可见交互。 |
 | 控件与媒体尺寸 | 统一控制高度、图标、边框、触控尺寸及媒体 aspect-ratio | 不作为业务卡片固定宽高的豁免。 |
 | 模态最大宽高 | 公共 Modal 的面板 max-width/max-height | 窄屏收缩，短视口内容可滚动，footer 可访问。 |
-| 任务卡片表面 | `features/history/components/TaskPlanItem.vue` 的实际 card 节点 | 历史和绑定计划统一使用 `--content-card-soft`；保留公共层级计算，超过第三层仍为透明分组。 |
 | 只读次级详情 | RunPlanModal；GameActivities ActivityCarousel 的 detailsOpen Modal | 无编辑事务，使用公共 Modal 标题栏关闭。活动设置不在例外内。 |
-| 全屏图片查看 | HistoryDetailModal 的 history-image-lightbox | 只显示图片与关闭操作，不承载编辑或保存。 |
+| 任务卡片表面 | `features/history/components/TaskPlanItem.vue` 的实际 card 节点 | 从浅色任务卡片开始，按公共表面 tone 在浅、深底色间交替；超过第三层仍为透明分组。 |
+| 全屏图片查看 | HistoryImagePreview 的 history-image-lightbox | 只显示图片、缩放与关闭操作，不承载编辑或保存；移动限于图片边界，关闭恢复焦点。 |
 | 业务状态背景 | 输入、选中、危险、成功与警告提示 | 使用相应语义 token，不算普通卡片背景交替。 |
 
 ## 检查与验收
@@ -63,3 +63,7 @@
 ## 系统诊断
 
 系统诊断与运行计划检查共用 assessment 分组和三列布局，先给总体状态，再按类别显示检查项、状态和说明。分类不在每行重复，正常项只保留摘要，异常项保留必要详情和处理建议；表头与内容共用列宽，检查详情表头和正文右对齐，窄屏说明换至下一行并保持右对齐。刷新、错误恢复和导出继续使用现役诊断接口。
+
+## 选择浮层与排序把手
+
+时间、日期、筛选、单选与多选浮层使用公共展开和收回动效，遵守 reduced motion；收回过程中不再接收指针或键盘操作。排序把手的鼠标悬停不高亮，键盘焦点仍可辨认。把手保留 40px 触控区域，通过 24px 布局列和紧凑间距节省文字空间，各卡片保持左右内边距一致。

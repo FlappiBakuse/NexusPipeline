@@ -119,10 +119,11 @@ internal sealed class McpQueueInput
     public List<QueueTimeSet> TimeSets { get; set; } = new();
     public List<QueueTask> Tasks { get; set; } = new();
     public bool NotifyEnabled { get; set; }
+    public List<string> NotificationTaskIds { get; set; } = [];
     [Description("必须为 none；MCP 不能配置系统完成操作。")]
     public string CompletionAction { get; set; } = "none";
     internal DispatchQueue ToModel() => new() { Name = Name, AutoRunMode = AutoRunMode, TimeSets = TimeSets,
-        Tasks = Tasks, NotifyEnabled = NotifyEnabled, CompletionAction = CompletionAction };
+        Tasks = Tasks, NotifyEnabled = NotifyEnabled, NotificationTaskIds = NotificationTaskIds, CompletionAction = CompletionAction };
 }
 
 internal sealed partial class McpMutationTools

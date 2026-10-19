@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import NotificationTaskSelect from "../../notifications/NotificationTaskSelect.vue";
 import { useOperationAccess } from "../../../platform/operation-access";
 const { allowed: nativeBrowseAllowed, reason: nativeBrowseReason } = useOperationAccess("hostFilePicker");
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
@@ -15,6 +16,7 @@ import NxpBadge from "../../../ui/primitives/NxpBadge.vue";
 import TaskPlanPreview from "./TaskPlanPreview.vue";
 import NxpEmptyState from "../../../ui/primitives/NxpEmptyState.vue";
 import NxpEntityIcon from "../../../ui/primitives/NxpEntityIcon.vue";
+import NxpOverflowText from "../../../ui/primitives/NxpOverflowText.vue";
 import NxpIcon from "../../../ui/primitives/NxpIcon.vue";
 import NxpModal from "../../../ui/primitives/NxpModal.vue";
 import NxpPathPicker from "../../../ui/primitives/NxpPathPicker.vue";
@@ -100,7 +102,7 @@ function bindingPluginStatus(binding: Binding) {
 function bindingValue(binding: Binding, field: keyof BindingEffective) {
   const category = ["enabled", "runDays", "maxSuccessfulRunsPerDay"].includes(field)
     ? "general"
-    : ["notifyEnabled", "smtpTo"].includes(field)
+    : ["notifyEnabled", "notificationTaskIds"].includes(field)
       ? "notification"
       : "advanced";
   if (binding.locks?.[category as keyof BindingLocks] && binding.effective && field in binding.effective)
@@ -110,7 +112,7 @@ function bindingValue(binding: Binding, field: keyof BindingEffective) {
 function setBindingValue(binding: Binding, field: keyof Binding, value: unknown) {
   const category = ["enabled", "runDays", "maxSuccessfulRunsPerDay"].includes(field)
     ? "general"
-    : ["notifyEnabled", "smtpTo"].includes(field)
+    : ["notifyEnabled", "notificationTaskIds"].includes(field)
       ? "notification"
       : "advanced";
   if (binding.locks?.[category as keyof BindingLocks]) return;
@@ -558,7 +560,7 @@ onBeforeUnmount(() => { providerDisposed = true; providerEvents?.close(); });
                 @click.stop="toggleBinding(binding)"
               >
                 <NxpEntityIcon class="um-binding-ico" :id="binding.scriptInstanceId" /><span class="um-binding-copy"
-                  ><strong class="um-binding-name">{{ bindingName(binding) }}</strong
+                  ><strong class="um-binding-name"><NxpOverflowText :label="bindingName(binding)" /></strong
                   ><span class="um-binding-badges"
                     ><NxpBadge v-if="props.scripts.find(script => script.id === binding.scriptInstanceId)?.requiresReconfiguration" tone="warn">{{ t("scripts.requires_reconfiguration") }}</NxpBadge
                     ><NxpBadge v-if="bindingPluginStatus(binding)?.missing" tone="bad">{{ t("common.plugin.unknown") }}</NxpBadge
@@ -648,16 +650,11 @@ onBeforeUnmount(() => { providerDisposed = true; providerEvents?.close(); });
                       @update:model-value="setBindingValue(binding, 'notifyEnabled', $event)"
                     />
                     <div class="field" :data-help="t('users.binding.smtp_help')">
-                      <label class="field-label" :for="`um-${binding.scriptInstanceId}-smtp`">{{ t("users.smtp_recipients") }}</label>
-                      <NxpTextInput
-                        :id="`um-${binding.scriptInstanceId}-smtp`"
-                        :model-value="String(bindingValue(binding, 'smtpTo') || '')"
-                        type="text"
-                        :disabled="binding.locks?.notification === true"
-                        :placeholder="t('users.binding.smtp_inherit_help')"
-                        :aria-label="t('users.smtp_recipients')"
-                        @update:model-value="setBindingValue(binding, 'smtpTo', $event)"
-                      />
+                      <label class="field-label" :for="`um-${binding.scriptInstanceId}-notifications-trigger`">{{ t("notifications.targets") }}</label>
+                        <NotificationTaskSelect :id="`um-${binding.scriptInstanceId}-notifications`"
+                          :model-value="(bindingValue(binding, 'notificationTaskIds') || []) as string[]"
+                          :disabled="binding.locks?.notification === true"
+                          @update:model-value="setBindingValue(binding, 'notificationTaskIds', $event)" />
                     </div>
                     <p v-if="bindingOverrideHelp(binding, 'notification')" class="muted helper-copy um-override-helper">{{ bindingOverrideHelp(binding, 'notification') }}</p>
                   </section>

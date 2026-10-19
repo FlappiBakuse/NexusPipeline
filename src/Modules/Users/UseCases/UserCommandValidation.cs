@@ -1,4 +1,3 @@
-using MimeKit;
 using NexusPipeline.Modules.Settings.Validation;
 using NexusPipeline.Modules.Settings;
 using NexusPipeline.Modules.Users;
@@ -35,31 +34,6 @@ internal sealed partial class UserCommands
 
     private static string? ValidateMaxSuccessfulRunsPerDay(int value) =>
         Limits.CheckMaxSuccessfulRunsPerDay(value);
-
-    private static string? ValidateSmtp(string? value) =>
-        string.IsNullOrWhiteSpace(value) ? null : ValidateRecipients(value.Trim());
-
-    private static string? ValidateRecipients(string value)
-    {
-        string[] recipients = value
-            .Split(new[] { ',', '，', ';', '；', ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        if (recipients.Length == 0)
-        {
-            return "SMTP 收件人不能为空";
-        }
-        try
-        {
-            foreach (string recipient in recipients)
-            {
-                _ = MailboxAddress.Parse(recipient);
-            }
-            return null;
-        }
-        catch (Exception ex)
-        {
-            return $"SMTP 收件人格式不正确：{ex.Message}";
-        }
-    }
 
     private static bool HasMatchingMagic(string mime, byte[] data)
     {

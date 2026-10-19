@@ -243,7 +243,10 @@
     "codePaths": [
       "src/Modules/Notifications",
       "src/Modules/Diagnostics",
-      "src/Platform"
+      "src/Platform",
+      "src/Modules/Notifications",
+      "src/Host/Initialization/NotificationMigration.cs",
+      "frontend/src/features/notifications"
     ],
     "authorityFor": [
       "observability-and-notification"
@@ -251,7 +254,8 @@
     "status": "current",
     "validationPaths": [
       "tools/check-doc-links.mjs",
-      "tests/policy.json"
+      "tests/policy.json",
+      "tests/NexusPipeline.Tests/Notifications"
     ]
   },
   {

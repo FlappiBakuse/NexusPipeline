@@ -19,7 +19,7 @@ internal sealed class DesktopSessionStore(string directory, string rootHash)
     private string RecordPath => Path.Combine(directory, "session.json");
     private string KeyPath => Path.Combine(directory, "session.key");
     internal bool HasFiles => File.Exists(RecordPath) || File.Exists(KeyPath) || Directory.Exists(RecordPath) || Directory.Exists(KeyPath);
-    internal (DesktopSessionRecord Record, byte[] Key)? Load()
+    internal (DesktopSessionRecord Record, byte[] Key)? Load(bool allowRelocated = false)
     {
         lock (_gate)
         {
@@ -43,7 +43,7 @@ internal sealed class DesktopSessionStore(string directory, string rootHash)
             foreach (JsonElement member in body.GetProperty("family").EnumerateArray())
                 DesktopSupervisorProtocol.Fields(member, "pid", "startFileTime", "executablePath");
             DesktopSessionRecord record = value.GetProperty("record").Deserialize<DesktopSessionRecord>(DesktopPipeTransport.Json)!;
-            if (record is null || record.SchemaVersion != 1 || record.RootHash != rootHash || record.Generation != "g0170"
+            if (record is null || record.SchemaVersion != 1 || (!allowRelocated && record.RootHash != rootHash) || record.Generation != "g0170"
                 || !Guid.TryParseExact(record.SessionId, "N", out _) || record.BuildId.Length != 64 || !record.BuildId.All(char.IsAsciiHexDigitLower)
                 || record.Main is null || !ValidProcess(record.Main) || !Guid.TryParseExact(record.HostInstanceId, "N", out _)
                 || record.WindowState is not ("hidden" or "visible" or "minimized") || record.Route.Length > 256
@@ -56,6 +56,46 @@ internal sealed class DesktopSessionStore(string directory, string rootHash)
         catch { return null; }
             }
     }
+    internal string RecoverRelocated()
+    {
+        lock (_gate)
+        {
+            if (!HasFiles) return "empty";
+            var saved = Load(allowRelocated: true);
+            if (saved is null) return "unverified";
+            var (record, key) = saved.Value;
+            try
+            {
+                if (record.RootHash == rootHash) return "current";
+                string? oldRoot = Path.GetDirectoryName(Path.GetDirectoryName(Path.GetDirectoryName(record.Main.ExecutablePath)));
+                if (oldRoot is null || DesktopSupervisorProtocol.RootHash(oldRoot) != record.RootHash
+                    || !string.Equals(Path.Combine(oldRoot, "resources", "desktop", "NexusPipeline.Desktop.exe"),
+                        record.Main.ExecutablePath, StringComparison.OrdinalIgnoreCase)
+                    || record.Family.Any(member => !string.Equals(member.ExecutablePath, record.Main.ExecutablePath, StringComparison.OrdinalIgnoreCase)))
+                    return "unverified";
+                if (!RelocatedProcessExited(record.Main) || record.Family.Any(member => !RelocatedProcessExited(member))) return "active";
+                GuardDirectory();
+                // Preserve both ticket files atomically; an interrupted retirement cannot leave a lone key.
+                Directory.Move(directory, directory.TrimEnd('\\', '/') + ".retired-" + Guid.NewGuid().ToString("N"));
+                return "retired";
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException) { return "blocked"; }
+            finally { CryptographicOperations.ZeroMemory(key); }
+        }
+    }
+
+    private static bool RelocatedProcessExited(DesktopProcessIdentity identity)
+    {
+        try
+        {
+            // Renaming an image does not prove its process exited; PID reuse does require a new start time.
+            return DesktopProcessIdentity.Read(identity.Pid).StartFileTime != identity.StartFileTime;
+        }
+        catch (ArgumentException) { return true; }
+        catch (InvalidOperationException) { return true; }
+        catch (Exception error) { throw new IOException("desktop_process_exit_unconfirmed", error); }
+    }
+
     internal byte[] CreateKey()
     {
         lock (_gate)

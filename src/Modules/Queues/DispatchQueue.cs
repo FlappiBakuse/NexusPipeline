@@ -42,6 +42,8 @@ public class DispatchQueue
 
     public bool NotifyEnabled { get; set; }
 
+    public List<string> NotificationTaskIds { get; set; } = [];
+
     private static readonly System.Text.Json.JsonSerializerOptions CloneOptions = new()
     {
         PropertyNameCaseInsensitive = true,

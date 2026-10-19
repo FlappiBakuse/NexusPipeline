@@ -109,6 +109,8 @@ python -m unittest discover -s tools/tests -p test_pe_manifest.py
 
 批次中的 execution、config、control 按实际选中集合共享 Test Host 构建和两个运行槽位，每组使用独立进程、端口、数据和运行身份。分钟调度单独分配；不需要浏览器的批次只准备 API Test Host。本机批次报告逐份核对 `finite-H-E01.json`、`finite-H-E02.json`、`finite-H-E03.json` 中对应选中场景的原生结果与清理证据。
 
+本机 `NEXUS_TEST_LOW_RESOURCE=1` 时，API/网页 Test Host 发布结果按实际源码与工具链指纹缓存，命中后校验完整文件集合与字节，再复制至本次独立运行目录；`test-host-cache.json` 记录命中、前端需求及源码身份。测试仍每次真实执行并生成新的原生报告。`daily --group config|control|schedule` 不构建网页前端或 Electron，`daily --group execution` 使用网页前端与浏览器，不构建 Electron。后端与专项 Jint 测试也不需要 Electron；桌面生命周期及完整应用测试继续使用真实桌面装配，不以 API 测试代替。
+
 完整应用批次共用一次前端与 Electron 准备。计划已包含独立 `host.frontend.typecheck` 提供者时，其他应用构建复用该义务，本机批次报告仍核验其真实原生收据；独立 gate 和 release 继续自行类型检查。后端和架构同批时，架构工具及桌面输入在独立输出图中提前准备，原生后端先完成自己的引用图，随后执行两种模式的 Roslyn 检查。桌面观察与新旧应用夹具各用独立目录，并行准备；全部子任务、原生报告和清理均纳入父命令计时，功能失败、取消或清理不完整均使批次失败。
 
 `node tests/run.mjs gate --id host.integration.installation-adoption` 验证手动覆盖后的安装归属登记与中断恢复。运行前设置绝对路径 `NEXUS_ADOPTION_BASELINE_PACKAGE`（官方 0.17.3 完整包）和 `NEXUS_ADOPTION_BASELINE_RELEASE`（独立取得的官方 Release API JSON，包含资产 digest）；入口只读核对旧包，使用当前源码构建 asInvoker Test Host。19 个固定场景覆盖辅助程序存在／缺失时的五个登记阶段、维护暂停的三个提交阶段、独立证明后补回缺失的共同入口与 README，以及未知辅助程序、离线和自行修改清单的拒绝路径，以及完整还原原载荷后维护恢复的中断路径；成功登记场景还验证卸载保留用户数据。HTTP、Setup 资产和注册表隔离范围为受控夹具；结果不代表官方在线发布、真实 Setup 安装或 UAC 验收。失败现场保留在本轮外部报告目录。

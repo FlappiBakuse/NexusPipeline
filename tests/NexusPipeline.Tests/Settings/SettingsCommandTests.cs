@@ -84,13 +84,8 @@ public sealed class SettingsCommandTests
             Assert.Equal("owned-remote-token", secondToken);
             (string Key, Func<AppSettings, string> Read)[] secrets =
             [
-                ("webhookUrl", settings => settings.WebhookUrl),
-                ("webhookSecret", settings => settings.WebhookSecret),
-                ("smtpPassword", settings => settings.SmtpPassword),
                 ("proxyPassword", settings => settings.ProxyPassword),
                 ("accessToken", settings => settings.AccessToken),
-                ("feishuAppSecret", settings => settings.FeishuAppSecret),
-                ("slackBotToken", settings => settings.SlackBotToken),
             ];
             foreach (var (key, read) in secrets)
             {

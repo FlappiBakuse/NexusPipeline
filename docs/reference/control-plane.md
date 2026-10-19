@@ -2,6 +2,10 @@
 
 本文件记录可管理能力在 Web、CLI 和 MCP 三个控制面的入口现状，供开发与排障参考。MCP 只保留面向 Agent 的核心子集；删除、密钥、插件安装/开关、商店、服务重启和更新应用等高风险或低频运维操作由本地 CLI 与管理页面承担。
 
+MCP 写权限由 `mcpWriteEnabled` 控制，默认关闭。关闭时工具列表只展示只读工具，缓存的写工具调用同样返回 `mcp_write_disabled`；测试通知属于写操作并标记外部发送副作用。设置变更对后续调用立即生效。
+
+通知渠道不再属于 Settings；旧通知字段和 `settings test` 返回 `notification_settings_retired`。通知任务普通读取不返回明文密钥，保存用 secrets 的 keep/replace/clear 操作；测试只使用已保存配置。
+
 ## 能力现状
 
 | Capability | Web | CLI | MCP |
@@ -32,7 +36,7 @@
 | 设置读取 | 设置 API | `settings get` | `get_settings`（密钥脱敏，包含配置修复开关和宿主语言） |
 | 设置写入 | 设置 API | `settings update` | 由 CLI/Web 承担（MCP 只读） |
 | 系统诊断 | `GET /api/diagnostics`；`POST /api/diagnostics/export`；受管 artifact 下载 | `doctor`、`doctor export --output <新文件>` | `get_diagnostics` |
-| 通知截图开关 | 设置 API（`webhookScreenshotEnabled` / `smtpScreenshotEnabled`） | `settings update` | `get_settings` 只读返回开关状态 |
+| 通知任务 | `/api/notifications` 列表、详情、CRUD；`PUT order`、`POST {id}/test` | `notification list/get/create/update/delete/order/test` | `list_notifications` / `get_notification` / `create_notification` / `update_notification` / `delete_notification` / `order_notifications` / `test_notification` |
 | 更新 | 更新 API | `update status/check/download/cancel/apply` | `get_update_status` |
 | 任务摘要与计划 | 用户页任务概览、绑定任务预览、运行报告 | `user task-summaries`、`user binding task-plan`、`run tasks` | `get_task_summaries` / `get_task_plan` / `get_run_tasks` |
 | 配置修复 | 预览后按 token 提交 | `user binding repair-preview/repair` | `preview_config_repair`（只读） |
@@ -54,7 +58,7 @@ HTTP 更新状态与 MCP `get_update_status` 提供可空的 `lastApplyFailure`�
 
 自动更新由设置中的 `UpdateCheckEnabled`、`UpdateAutoApplyEnabled` 与 `PluginAutoUpdateEnabled` 分别控制。前两项同时开启时，程序启动恢复收尾后、宿主服务启动前会检查并尝试下载、应用宿主更新；已验证的 `Ready` 包也会在该阶段应用。检查或下载超时/失败时继续启动当前版本，同一目标自动失败后冷却 12 小时；策略屏障不允许自动下载。`PluginAutoUpdateEnabled` 独立控制插件更新：启动阶段在插件事务恢复及加载前检查并暂存符合条件的已安装插件，运行期间每 12 小时检查更新，并在维护租约空闲时安排安全重启。手动宿主更新和插件商店批量更新入口保持可用。
 
-GameCheckIn 的独立签到页面由插件导航注册；状态读取位于 `GET /api/plugin-api/game-checkin/state`，任务新增、更新和删除使用 `/api/plugin-api/game-checkin/tasks`，排序使用 `PUT /api/plugin-api/game-checkin/tasks/order`，手动执行使用 `POST /api/plugin-api/game-checkin/tasks/run`。每个任务保存自己的计划和平台凭据；通知通过宿主全局渠道发送，任务可覆盖 SMTP 收件人。v2 任务存储不导入 v0.3.0 的任务数据。
+GameCheckIn 的独立签到页面由插件导航注册；状态读取位于 `GET /api/plugin-api/game-checkin/state`，任务新增、更新和删除使用 `/api/plugin-api/game-checkin/tasks`，排序使用 `PUT /api/plugin-api/game-checkin/tasks/order`，手动执行使用 `POST /api/plugin-api/game-checkin/tasks/run`。每个任务保存自己的计划和平台凭据；通知使用 `notificationTaskIds` 多选目标，不选即不发送。已知 v2 存储通过插件转换器升级至 schema 3，计划、历史和凭据键保持；不导入 v0.3.0 的任务数据。
 
 网页登录使用固定 flow、限定采集字段与独立临时 Electron 会话。外站页面不能调用 Nexus IPC；候选通过只读身份验证及窗口清理后才对当前编辑器生效。`X-Nxp-Client-Session` 由宿主验证并注入插件请求，JSON 中自报客户端身份无效。Web 会话保存在当前页面内存，不能获取 native 能力。详见[网页登录与客户端会话](plugin-api/browser-login.md)。
 
@@ -86,7 +90,7 @@ MCP 的队列创建/修改只接受 `completionAction=none`，修改已有危险
 - 带 Origin 的 HTTP 管理请求要求相同的 HTTP scheme、主机与实际端口。NAT/外部域名入口还要求真实非回环对端、当前 remote bound 和通过 Bearer 认证；伪转发头不改变连接来源。回环地址及本机 LAN 地址继续遵守本机来源校验，跨端口例外仅用于只读 status 探测。
 - `run_queue` 提交执行前经 `McpPolicy.ValidateQueueExecution` 复核队列快照的完成操作，任何非 `none` 动作返回 `dangerous_completion_action`。
 - `get_settings` 对 Webhook、SMTP 和访问令牌只返回空值或 `enc:***` 占位符。
-- 通知截图开关按渠道全局生效；脚本通知可携带所选运行截图，队列汇总通知不附图；Webhook 协议能力存在差异时由发送器记录兼容性警告。
+- 通知截图开关按通知任务生效；脚本通知可携带所选运行截图，队列汇总通知不附图；Webhook 协议能力存在差异时由发送器记录兼容性警告。
 - MCP 网络边界独立于 Web 远程访问设置：仅 loopback、Host/Origin 校验、请求体上限 2 MiB。
 - 用户绑定的通用设置包含 `RunDays` 与 `MaxSuccessfulRunsPerDay`；后者使用 `-1` 表示不限制，达到正数上限后生成 `skipped` 历史记录。
 - 历史页面按日期、用户、运行记录分层查询；`/api/history/users` 与带 `userKey` 的记录查询都在宿主侧完成过滤，避免把整日记录一次性返回前端。

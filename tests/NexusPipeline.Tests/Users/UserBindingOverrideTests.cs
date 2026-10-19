@@ -20,7 +20,7 @@ public sealed class UserBindingOverrideTests
             BindingOverrides = new UserBindingOverrides
             {
                 General = new UserGeneralOverride { SyncEnabled = true, Enabled = true, RunDays = 6, MaxSuccessfulRunsPerDay = 4 },
-                Notification = new UserNotificationOverride { SyncEnabled = true, NotifyEnabled = false, SmtpTo = "global@example.com" },
+                Notification = new UserNotificationOverride { SyncEnabled = true, NotifyEnabled = false, NotificationTaskIds = ["global-target"] },
                 Advanced = new UserAdvancedOverride { SyncEnabled = true, PreRunScript = "global-pre", PreRunOnceOnly = true, PostRunScript = "global-post", PostRunOnFinalOnly = true },
             },
         };
@@ -30,7 +30,7 @@ public sealed class UserBindingOverrideTests
             Enabled = false,
             RunDays = 2,
             NotifyEnabled = true,
-            SmtpTo = "raw@example.com",
+            NotificationTaskIds = ["raw-target"],
             PreRunScript = "raw-pre",
             PostRunScript = "raw-post",
         };
@@ -41,14 +41,20 @@ public sealed class UserBindingOverrideTests
         Assert.Equal(6, effective.RunDays);
         Assert.Equal(4, effective.MaxSuccessfulRunsPerDay);
         Assert.False(effective.NotifyEnabled);
-        Assert.Equal("global@example.com", effective.SmtpTo);
+        Assert.Equal(new[] { "global-target" }, effective.NotificationTaskIds);
         Assert.Equal("global-pre", effective.PreRunScript);
         Assert.True(effective.PreRunOnceOnly);
         Assert.Equal("global-post", effective.PostRunScript);
         Assert.True(effective.PostRunOnFinalOnly);
         Assert.False(raw.Enabled);
         Assert.Equal(2, raw.RunDays);
-        Assert.Equal("raw@example.com", raw.SmtpTo);
+        Assert.Equal(new[] { "raw-target" }, raw.NotificationTaskIds);
+        effective.NotificationTaskIds.Add("isolated");
+        Assert.Single(user.BindingOverrides.Notification.NotificationTaskIds);
+        user.BindingOverrides.Notification.SyncEnabled = false;
+        var restored = UserBindingOverrideResolver.Resolve(user, raw);
+        Assert.True(restored.NotifyEnabled);
+        Assert.Equal(new[] { "raw-target" }, restored.NotificationTaskIds);
     }
 
     [Fact]

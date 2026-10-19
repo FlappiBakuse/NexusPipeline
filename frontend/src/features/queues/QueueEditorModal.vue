@@ -1,10 +1,12 @@
 <script setup lang="ts">
+import NotificationTaskSelect from "../notifications/NotificationTaskSelect.vue";
 import { computed, ref, watch } from "vue";
 import NxpButton from "../../ui/primitives/NxpButton.vue";
 import NxpModal from "../../ui/primitives/NxpModal.vue";
 import NxpSelect from "../../ui/primitives/NxpSelect.vue";
 import NxpSwitch from "../../ui/primitives/NxpSwitch.vue";
 import NxpSwitchSetting from "../../ui/composites/NxpSwitchSetting.vue";
+import NxpField from "../../ui/primitives/NxpField.vue";
 import NxpTextInput from "../../ui/primitives/NxpTextInput.vue";
 import NxpTimePicker from "../../ui/primitives/NxpTimePicker.vue";
 import { clearFieldError } from "../../platform/toast";
@@ -127,13 +129,18 @@ function toggleDay(timeSet: QueueDraft["timeSets"][number], day: number) {
           />
         </div>
     </div>
-    <NxpSwitchSetting
+    <section class="queue-notification-settings">
+      <NxpSwitchSetting
           id="qm-notify"
           v-model="draft.notifyEnabled"
           :label="translate('queues.queue_notifications')"
           :description="translate('queues.notification.override_help')"
           :aria-label="translate('queues.queue_notifications')"
         />
+      <NxpField :label="translate('notifications.targets')">
+        <NotificationTaskSelect v-model="draft.notificationTaskIds" id="qm-notification-tasks" />
+      </NxpField>
+    </section>
     <div class="subsection">
         <div class="section-heading">
           <h3>{{ translate("queues.schedules") }}</h3>
@@ -268,3 +275,7 @@ function toggleDay(timeSet: QueueDraft["timeSets"][number], day: number) {
     </template>
   </NxpModal>
 </template>
+
+<style scoped>
+.queue-notification-settings { display: grid; gap: var(--space-3); margin-bottom: var(--space-5); }
+</style>

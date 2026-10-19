@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using NexusPipeline.Modules.Settings;
 using NexusPipeline.Platform.Storage;
 using NexusPipeline.Shared.Localization;
@@ -12,6 +13,9 @@ internal static class AppSettingsStore
     private static readonly HashSet<string> CurrentProperties = JsonSerializer
         .SerializeToElement(new AppSettings(), JsonOpts.Default).EnumerateObject()
         .Select(property => property.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    internal static readonly HashSet<string> LegacyNotificationProperties = new(StringComparer.OrdinalIgnoreCase)
+    { "webhookEnabled", "webhookScreenshotEnabled", "smtpEnabled", "smtpScreenshotEnabled", "webhookType", "webhookUrl", "webhookSecret", "webhookTemplate", "webhookTimeout", "feishuAppId", "feishuAppSecret", "slackBotToken", "slackChannelId", "smtpHost", "smtpPort", "smtpSecure", "smtpUser", "smtpPassword", "smtpFrom", "smtpTo", "smtpSubjectPrefix", "smtpTimeout" };
 
     public static AppSettings Load(ConfigLoadMode mode = ConfigLoadMode.Repair, string? configPath = null)
     {
@@ -72,14 +76,21 @@ internal static class AppSettingsStore
     public static void Save(AppSettings settings, string? configPath = null)
     {
         string file = configPath ?? AppPaths.ConfigPath;
+        JsonObject? original = null;
         if (File.Exists(file))
         {
+            original = JsonNode.Parse(File.ReadAllText(file)) as JsonObject;
             using JsonDocument document = JsonDocument.Parse(File.ReadAllText(file));
             ValidateCurrentFormat(document.RootElement);
         }
         Normalize(settings);
         Directory.CreateDirectory(Path.GetDirectoryName(file)!);
-        JsonUtil.WriteAtomic(file, JsonSerializer.Serialize(settings, JsonOpts.Indented));
+        var output = JsonSerializer.SerializeToNode(settings, JsonOpts.Default)!.AsObject();
+        // A blocked notification migration must retain its source fields when unrelated settings are saved.
+        if (original is not null)
+            foreach (var pair in original.Where(pair => LegacyNotificationProperties.Contains(pair.Key)))
+                output[pair.Key] = pair.Value?.DeepClone();
+        JsonUtil.WriteAtomic(file, output.ToJsonString(JsonOpts.Indented));
         LocaleCatalog.SetHostLocale(settings.HostLocale);
         // 原子保存成功后才更新日志阈值，失败时保留旧阈值。
         Logger.ConfigureLevel(settings.LogLevel);
@@ -92,11 +103,7 @@ internal static class AppSettingsStore
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (JsonProperty property in root.EnumerateObject())
         {
-            if (!names.Add(property.Name) || !CurrentProperties.Contains(property.Name))
-                throw new InvalidDataException("unsupported_settings_format");
-            if (property.Name.Equals("webhookType", StringComparison.OrdinalIgnoreCase)
-                && (property.Value.ValueKind != JsonValueKind.String
-                    || !AppSettings.WebhookTypes.Contains(property.Value.GetString())))
+            if (!names.Add(property.Name) || (!CurrentProperties.Contains(property.Name) && !LegacyNotificationProperties.Contains(property.Name)))
                 throw new InvalidDataException("unsupported_settings_format");
         }
     }
@@ -126,27 +133,6 @@ internal static class AppSettingsStore
         settings.HostLocale = LocaleCatalog.Normalize(settings.HostLocale);
         settings.PluginPreferences ??= new Dictionary<string, PluginPreference>(StringComparer.OrdinalIgnoreCase);
         PluginRepositorySettingsValidator.Normalize(settings.PluginRepository);
-        // Webhook 类型白名单引用 AppSettings.WebhookTypes（单源），不再双份维护。
-        if (!AppSettings.WebhookTypes.Contains(settings.WebhookType))
-        {
-            throw new InvalidDataException("unsupported_settings_format");
-        }
-        if (settings.WebhookTimeout < 1)
-        {
-            settings.WebhookTimeout = 30;
-        }
-        if (settings.SmtpPort < 1 || settings.SmtpPort > 65535)
-        {
-            settings.SmtpPort = 465;
-        }
-        if (settings.SmtpSecure is not ("auto" or "ssl" or "starttls" or "none"))
-        {
-            settings.SmtpSecure = "auto";
-        }
-        if (settings.SmtpTimeout < 1)
-        {
-            settings.SmtpTimeout = 30;
-        }
         settings.ProxyMode = (settings.ProxyMode ?? "none").Trim().ToLowerInvariant();
         if (settings.ProxyMode is not ("none" or "system" or "http"))
         {

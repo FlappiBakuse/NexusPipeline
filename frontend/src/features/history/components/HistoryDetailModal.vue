@@ -1,18 +1,20 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { api, apiBlob, isAbortError } from "../../../platform/api";
 import { t } from "../../../platform/i18n";
 import { renderPluginSlot } from "@bridge/index";
 import { disposePluginSlot } from "@bridge/index";
 import NxpBadge from "../../../ui/primitives/NxpBadge.vue";
-import { taskOutcomeLabel } from "../utils/taskLabels";
+import { currentTaskReport, taskOutcomeLabel } from "../utils/taskLabels";
 import TaskReportPanel from "./TaskReportPanel.vue";
+import TaskRetryDecision from "./TaskRetryDecision.vue";
 import NxpButton from "../../../ui/primitives/NxpButton.vue";
 import NxpEmptyState from "../../../ui/primitives/NxpEmptyState.vue";
-import NxpIcon from "../../../ui/primitives/NxpIcon.vue";
-import NxpIconButton from "../../../ui/primitives/NxpIconButton.vue";
+import HistoryImagePreview from "./HistoryImagePreview.vue";
+import HistoryLogDisclosure from "./HistoryLogDisclosure.vue";
 import NxpModal from "../../../ui/primitives/NxpModal.vue";
 import NxpScrollArea from "../../../ui/primitives/NxpScrollArea.vue";
+import NxpLogText from "../../../ui/composites/NxpLogText.vue";
 import { badgeTone, formatDateTime, formatDurationMs, statusLabel, statusTone } from "../utils/historyFormat";
 import type { HistoryAttempt, HistoryDetailPayload, HistoryLog, HistoryRecord, HistoryScreenshot } from "../utils/historyTypes";
 
@@ -25,7 +27,16 @@ const detailData = ref<HistoryDetailPayload | null>(null);
 const detailLoading = ref(false);
 const detailError = ref("");
 const detailSlot = ref<HTMLElement | null>(null);
+const taskReport = computed(() => currentTaskReport(detailData.value?.record?.taskReport) ? detailData.value?.record?.taskReport : undefined);
+const detailAttempts = computed(() => {
+  const attempts = [...(detailData.value?.record?.attemptDetails || [])];
+  for (const attempt of taskReport.value?.attemptReports || [])
+    if (!attempts.some(item => item.number === attempt.number)) attempts.push({ number: attempt.number });
+  return attempts.sort((a, b) => a.number - b.number);
+});
+function taskAttempt(number: number) { return taskReport.value?.attemptReports.find(item => item.number === number); }
 const imageUrls = ref<Record<string, string>>({});
+const pendingImages = new Map<string, Promise<string>>();
 const lightbox = ref<{ url: string; alt: string; caption: string } | null>(null);
 let detailRequestId = 0;
 
@@ -35,18 +46,24 @@ function detailImageKey(attempt: HistoryAttempt, screenshot: HistoryScreenshot, 
 function historyImagePath(record: HistoryRecord, attempt: HistoryAttempt, screenshot: HistoryScreenshot) {
   return screenshot.imageUrl || `/api/history/image?id=${encodeURIComponent(record.id || "")}&attempt=${encodeURIComponent(attempt.number)}&screenshot=${encodeURIComponent(screenshot.id || "")}`;
 }
-async function loadHistoryImage(key: string, path: string) {
-  if (imageUrls.value[key]) return imageUrls.value[key];
-  try {
-    const blob = await apiBlob(path);
-    if (!blob.type.startsWith("image/")) throw new Error(t("history.screenshot.invalid_format"));
-    const url = URL.createObjectURL(blob);
-    imageUrls.value[key] = url;
-    return url;
-  } catch (reason) {
-    if (!isAbortError(reason)) return "";
-    return "";
-  }
+function loadHistoryImage(key: string, path: string): Promise<string> {
+  if (imageUrls.value[key]) return Promise.resolve(imageUrls.value[key]);
+  const existing = pendingImages.get(key);
+  if (existing) return existing;
+  const requestId = detailRequestId;
+  const pending = (async () => {
+    try {
+      const blob = await apiBlob(path);
+      if (requestId !== detailRequestId) return "";
+      if (!blob.type.startsWith("image/")) throw new Error(t("history.screenshot.invalid_format"));
+      const url = URL.createObjectURL(blob);
+      imageUrls.value[key] = url;
+      return url;
+    } catch { return ""; }
+  })();
+  pendingImages.set(key, pending);
+  void pending.finally(() => { if (pendingImages.get(key) === pending) pendingImages.delete(key); });
+  return pending;
 }
 async function hydrateDetailImages() {
   const record = detailData.value?.record;
@@ -64,8 +81,9 @@ async function openImage(attempt: HistoryAttempt, screenshot: HistoryScreenshot,
   const record = detailData.value?.record;
   if (!record) return;
   const key = detailImageKey(attempt, screenshot, index);
+  const requestId = detailRequestId;
   const url = await loadHistoryImage(key, historyImagePath(record, attempt, screenshot));
-  if (!url) return;
+  if (!url || requestId !== detailRequestId) return;
   lightbox.value = {
     url,
     alt: t("history.screenshot.item", { attempt: attempt.number, index: index + 1 }),
@@ -103,12 +121,18 @@ function attemptLogText(attemptNumber: number) {
   const log = attemptLog(attemptNumber);
   return log?.logText || log?.logTail || t("history.no_script_log");
 }
+function attemptLogSummary(attemptNumber: number) {
+  return t(attemptLogIsTail(attemptNumber) ? "history.log.count.tail" : "history.log.count", {
+    count: attemptLog(attemptNumber)?.logTotalLines || 0, lines: t("history.lines"),
+  });
+}
 function attemptLogIsTail(attemptNumber: number) {
   const log = attemptLog(attemptNumber);
   return Boolean(log && log.logText == null && Number(log.logTotalLines || 0) > 200);
 }
 
 function revokeImages() {
+  pendingImages.clear();
   for (const url of Object.values(imageUrls.value)) URL.revokeObjectURL(url);
   imageUrls.value = {};
 }
@@ -150,6 +174,8 @@ function close() {
 watch(
   () => props.record,
   (record) => {
+    detailRequestId += 1;
+    lightbox.value = null;
     revokeImages();
     if (record) void load();
   },
@@ -184,7 +210,7 @@ onBeforeUnmount(() => {
           <div class="history-detail-meta-item"><span class="k">{{ t("history.start_time") }}</span><span>{{ formatDateTime(detailData.record.startTime) }}</span></div>
           <div class="history-detail-meta-item"><span class="k">{{ t("history.end_time") }}</span><span>{{ formatDateTime(detailData.record.endTime) }}</span></div>
           <div class="history-detail-meta-item"><span class="k">{{ t("history.duration.label") }}</span><span>{{ formatDurationMs(detailData.record.durationMs) }}</span></div>
-          <div class="history-detail-meta-item history-detail-meta-wide"><span class="k">{{ t("history.result_description") }}</span><span>{{ detailData.record.taskReport ? taskOutcomeLabel(detailData.record.resultDetail, detailData.record.taskReport.summary?.counts.unknown, detailData.record.taskReport, detailData.record.resultCode) : detailData.record.resultDetail || "-" }}</span></div>
+          <div class="history-detail-meta-item history-detail-meta-explanation"><span class="k">{{ t("history.result_description") }}</span><span>{{ detailData.record.taskReport ? taskOutcomeLabel(detailData.record.resultDetail, detailData.record.taskReport.summary?.counts.unknown, detailData.record.taskReport, detailData.record.resultCode) : detailData.record.resultDetail || "-" }}</span></div>
         </div>
         <TaskReportPanel :report="detailData.record.taskReport" />
         <section v-if="detailData.record.pluginHistory?.length" class="plugin-history-section">
@@ -197,13 +223,15 @@ onBeforeUnmount(() => {
         </section>
         <div ref="detailSlot" class="plugin-slot history-detail-plugin-slot" data-plugin-slot="history.detail.sections" data-plugin-anchor="history.detail.sections" data-plugin-mode="detail" :data-plugin-primary-id="detailData.record.id" hidden></div>
         <div class="history-attempt-list">
-          <section v-for="attempt in detailData.record.attemptDetails || []" :key="attempt.number" class="subsection history-attempt-detail">
-            <div class="section-heading"><h3>{{ t("common.run.attempt", { attempt: attempt.number }) }}</h3><NxpBadge :tone="statusTone(attempt.status)">{{ statusLabel(attempt.status) }}</NxpBadge></div>
+          <section v-for="attempt in detailAttempts" :key="attempt.number" class="subsection history-attempt-detail" :data-retry-attempt-id="taskAttempt(attempt.number)?.attemptId" tabindex="-1">
+            <div class="section-heading"><h3>{{ t("common.run.attempt", { attempt: attempt.number }) }}</h3><NxpBadge v-if="attempt.status" :tone="statusTone(attempt.status)">{{ statusLabel(attempt.status) }}</NxpBadge></div>
             <div class="history-attempt-meta"><div><span class="k">{{ t("common.time") }}</span><span>{{ formatDateTime(attempt.startTime) }} - {{ formatDateTime(attempt.endTime) }}</span></div><div><span class="k">{{ t("history.duration.label") }}</span><span>{{ formatDurationMs(attempt.durationMs) }}</span></div><div><span class="k">{{ t("common.reason") }}</span><span>{{ detailData.record.taskReport ? taskOutcomeLabel(attempt.reason, undefined, detailData.record.taskReport, attempt.reasonCode) : attempt.reason || "-" }}</span></div></div>
+            <TaskRetryDecision v-if="taskReport && taskAttempt(attempt.number)?.retryDecision" :report="taskReport" :attempt="taskAttempt(attempt.number)!" />
             <div v-if="attemptLog(attempt.number)" class="history-log" data-history-log>
-              <div class="qk-row">{{ attemptLogIsTail(attempt.number) ? t("history.log.lines_summary.tail", { label: t("history.log.attempt", { attempt: attempt.number }), count: attemptLog(attempt.number)?.logTotalLines || 0, lines: t("history.lines") }) : t("history.log.lines_summary", { label: t("history.log.attempt", { attempt: attempt.number }), count: attemptLog(attempt.number)?.logTotalLines || 0, lines: t("history.lines") }) }}</div>
+              <HistoryLogDisclosure :content-id="`history-log-${detailData.record.id}-${attempt.number}`" :title="t('history.log.attempt', { attempt: attempt.number })" :description="attemptLogSummary(attempt.number)" :reveal-label="t('history.log.reveal', { count: attemptLog(attempt.number)?.logTotalLines || 0 })">
               <div v-if="attemptLogIsTail(attempt.number)" class="history-log-actions"><span class="muted">{{ t("history.log.tail_only") }}</span><NxpButton class="ghost sm" type="button" @click.stop="loadFullLog(attempt.number)">{{ t("history.view_full_log") }}</NxpButton></div>
-              <NxpScrollArea class="history-log-scroll" viewport-class="history-log-viewport" direction="vertical" :aria-label="t('history.log.attempt', { attempt: attempt.number })"><pre class="logbox" data-history-log-body>{{ attemptLogText(attempt.number) }}</pre></NxpScrollArea>
+              <NxpScrollArea class="history-log-scroll" viewport-class="history-log-viewport" direction="vertical" :aria-label="t('history.log.attempt', { attempt: attempt.number })"><pre class="logbox" data-history-log-body><NxpLogText :text="attemptLogText(attempt.number)" /></pre></NxpScrollArea>
+              </HistoryLogDisclosure>
             </div>
             <div v-if="attemptScreenshots(attempt).length" class="history-attempt-screenshots" data-testid="history-attempt-screenshots">
               <div class="qk-row">{{ t("history.screenshots.summary", { count: attemptScreenshots(attempt).length }) }}</div>
@@ -215,7 +243,7 @@ onBeforeUnmount(() => {
               </NxpScrollArea>
             </div>
           </section>
-          <NxpEmptyState v-if="!(detailData.record.attemptDetails || []).length" :title="t('history.attempts')" :description="t('history.no_script_log')" />
+          <NxpEmptyState v-if="!detailAttempts.length" :title="t('history.attempts')" :description="t('history.no_script_log')" />
         </div>
       </template>
     </template>
@@ -223,11 +251,5 @@ onBeforeUnmount(() => {
       <NxpButton class="ghost" type="button" @click.stop="close">{{ t("common.close") }}</NxpButton>
     </template>
   </NxpModal>
-  <Teleport to="body">
-    <div v-if="lightbox" class="history-image-lightbox" role="dialog" aria-modal="true" :aria-label="t('history.view_run_screenshot')" @click.self="lightbox = null">
-      <div class="history-image-lightbox-backdrop" @click="lightbox = null"></div>
-      <figure class="history-image-lightbox-content"><img :src="lightbox.url" :alt="lightbox.alt"><figcaption>{{ lightbox.caption }}</figcaption></figure>
-      <NxpIconButton class="history-image-lightbox-close" :label="t('history.screenshot.close')" @click="lightbox = null"><NxpIcon name="close" /></NxpIconButton>
-    </div>
-  </Teleport>
+  <HistoryImagePreview v-if="lightbox" :key="lightbox.url" :image="lightbox" @close="lightbox = null" />
 </template>

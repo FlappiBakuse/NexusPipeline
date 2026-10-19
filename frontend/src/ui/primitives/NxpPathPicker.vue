@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import NxpIcon from "./NxpIcon.vue";
 import { useId } from "vue";
+import { useOperationAccess } from "../../platform/operation-access";
 const reasonId = useId();
+const { allowed: nativeBrowseAllowed } = useOperationAccess("hostFilePicker");
 
 const props = withDefaults(
   defineProps<{
@@ -44,13 +46,13 @@ function update(event: Event) {
 function browse(
   kind: "file" | "folder" = props.kind === "folder" ? "folder" : "file",
 ) {
-  if (props.disabled || props.browseDisabled) return;
+  if (!nativeBrowseAllowed.value || props.disabled || props.browseDisabled) return;
   emit("browse", kind);
 }
 </script>
 
 <template>
-  <div class="nxp-path" :data-help="props.help || undefined">
+  <div class="nxp-path" :class="{ 'nxp-path--input-only': !nativeBrowseAllowed }" :data-help="props.help || undefined">
     <input
       :id="props.id || undefined"
       class="nxp-path-input"
@@ -63,7 +65,7 @@ function browse(
       @change.stop="update"
     />
     <span
-      v-if="props.kind === 'file-or-folder'"
+      v-if="nativeBrowseAllowed && props.kind === 'file-or-folder'"
       class="nxp-path-actions"
       role="group"
       :aria-label="`${props.ariaLabel}选择`"
@@ -96,7 +98,7 @@ function browse(
       </button>
     </span>
     <button
-      v-else
+      v-else-if="nativeBrowseAllowed"
       class="nxp-path-trigger"
       type="button"
       data-path-trigger
@@ -109,7 +111,7 @@ function browse(
     >
       <NxpIcon :name="props.kind === 'folder' ? 'folder' : 'file'" class-name="nxp-path-trigger-icon" />
     </button>
-    <span v-if="props.browseDisabledReason" :id="reasonId" class="nxp-path-browse-reason">{{ props.browseDisabledReason }}</span>
+    <span v-if="nativeBrowseAllowed && props.browseDisabledReason" :id="reasonId" class="nxp-path-browse-reason">{{ props.browseDisabledReason }}</span>
   </div>
 </template>
 
@@ -151,6 +153,10 @@ function browse(
   border-radius: 0 8px 8px 0;
   color: var(--muted, var(--nx-color-muted));
   font: inherit;
+}
+.nxp-path--input-only .nxp-path-input {
+  width: 100%;
+  border-radius: 8px !important;
 }
 .nxp-path-trigger:hover:not(:disabled) {
   border-color: var(--accent, var(--nx-color-accent));

@@ -18,6 +18,7 @@ export const routes: RouteRecordRaw[] = [
   { path: "/dispatch", component: () => import("./features/dispatch/DispatchPage.vue") },
   { path: "/history", component: () => import("./features/history/HistoryPage.vue") },
   { path: "/plugins", component: () => import("./features/plugins/PluginsPage.vue") },
+  { path: "/notifications", component: () => import("./features/notifications/NotificationsPage.vue") },
   { path: "/settings", component: () => import("./features/settings/SettingsPage.vue") },
   ...developmentRoutes,
   { path: "/plugin/:pathMatch(.*)*", component: () => import("./app/PluginRouteHost.vue") },

@@ -9,5 +9,7 @@
       "id": "en-US",
       "nativeName": "English"
     }
-  ]
+  ],
+  "cli.menu.settings_heading": "===== Settings =====",
+  "cli.menu.settings_restart": "2. Request service restart"
 }

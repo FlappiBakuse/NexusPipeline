@@ -3,7 +3,7 @@
 <!-- contract:versions -->
 | Contract | Version |
 |---|---|
-| plugin-api | 2.2 |
+| plugin-api | 2.3 |
 | frontend-api | 1.7 |
 <!-- /contract:versions -->
 
@@ -11,7 +11,7 @@
 
 ## 适用版本与包示例
 
-当前 managed 插件精确声明 Plugin API `2.2`，最低 Host `0.17.2`，并以 .NET 10 编译。SDK 包和程序集版本为 `2.0.0`。宿主在激活前检查目标框架、SDK 引用与清单；旧 API、未来 minor、旧运行时程序集和包内复制的宿主 SDK 均拒绝加载。
+当前 managed 插件精确声明 Plugin API `2.3`，最低 Host `0.17.6`，并以 .NET 10 编译。SDK 包和程序集版本为 `2.0.0`。宿主在激活前检查目标框架、SDK 引用与清单；旧 API、未来 minor、旧运行时程序集和包内复制的宿主 SDK 均拒绝加载。
 
 `IPluginHostContext` 直接暴露全部现役端口。插件通过这些明确端口工作，不检查旧接口继承链。`ExecutionProviders` 的冻结计划、配置门禁、worker 与事件协议见[执行 provider](execution-provider.md)。Frontend API 独立维持 `1.7`。
 
@@ -33,8 +33,8 @@ plugins/Example/
   "description": "提供通用的用户级扩展设置",
   "version": "0.1.0",
   "kind": "managed-code",
-  "apiVersion": "2.2",
-  "minHostVersion": "0.17.2",
+  "apiVersion": "2.3",
+  "minHostVersion": "0.17.6",
   "entryAssembly": "ExamplePlugin.dll",
   "entryType": "ExamplePlugin.EntryPoint",
   "capabilities": ["background-jobs", "ui-contributions", "frontend-module"],
@@ -168,7 +168,9 @@ Generic ADB 与 MuMuManager 保留在宿主。雷电、夜神和 BlueStacks 的�
 
 ## 通知收件人覆盖
 
-`IPluginHostContext.Notifications` 提供通知收件人覆盖能力。插件调用 `IPluginNotificationService.SendAsync` 时，可以在 `PluginNotification.SmtpTo` 提供可选 SMTP 收件人；空值或空白值继承宿主全局 SMTP 收件人。SMTP 服务器、发件人、凭据与渠道开关仍由宿主管理，Webhook 继续使用宿主全局配置。
+`IPluginHostContext.Notifications.ListAsync` 返回脱敏通知任务选项，包含稳定 ID、名称、类型、启用和配置状态。保存选择前调用 `ValidateTargets(ids, previous)`；旧失效引用可以保留或移除，不接受新引入的未知 ID。`PluginNotification.NotificationTaskIds` 指定发送目标，空列表不发送；每次事件按 ID 去重，禁用、删除及配置不可用目标跳过。配置、截图开关和加密凭据由 Notifications 模块持有。
+
+`IPluginNotificationDataMigration` 提供加载生命周期前的纯数据转换。插件声明自身 scoped data 范围，接收原文档副本与旧 SMTP 收件人到通知任务 ID 的映射函数，返回转换后的副本。转换不得启动任务、写文件或发送请求。宿主负责统一准备、原字节 journal 和原子提交，必要转换器缺失或未知 schema 时阻止通知迁移。
 
 ## 请求来源与本机交互
 

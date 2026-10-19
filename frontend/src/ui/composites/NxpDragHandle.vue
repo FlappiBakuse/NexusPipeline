@@ -32,8 +32,11 @@ const props = withDefaults(defineProps<{
 <style>
 .nxp-drag-handle {
   display: inline-flex;
-  min-width: max(var(--nx-drag-handle-size, 32px), var(--nx-control-height, 40px));
-  min-height: var(--nx-control-height, 36px);
+  flex: 0 0 var(--nx-control-height, 40px);
+  width: var(--nx-control-height, 40px);
+  min-width: var(--nx-control-height, 40px);
+  min-height: var(--nx-control-height, 40px);
+  margin-inline: calc((var(--nx-drag-handle-size, 24px) - var(--nx-control-height, 40px)) / 2);
   align-items: center;
   justify-content: center;
   padding: 0;
@@ -46,8 +49,7 @@ const props = withDefaults(defineProps<{
   -webkit-user-select: none;
   touch-action: none;
 }
-.nxp-drag-handle:hover,
-.nxp-drag-handle:focus-visible { border-color: var(--nx-color-border, currentColor); color: var(--nx-color-text, currentColor); }
+.nxp-drag-handle:hover { border-color: transparent; background: transparent; color: var(--nx-color-muted, currentColor); }
 .nxp-drag-handle:focus-visible { outline: none; box-shadow: var(--nx-focus-ring, 0 0 0 2px currentColor); }
 .nxp-drag-handle:active { cursor: grabbing; }
 .nxp-drag-handle:disabled { cursor: default; opacity: .45; }

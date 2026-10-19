@@ -12,6 +12,8 @@ internal class AppLimits
 
     public int MaxQueues { get; set; } = 50;
 
+    public int MaxNotificationTasks { get; set; } = 10;
+
     public int MaxQueueTotalUsers { get; set; } = 50;
 
     public int MaxTimeSetsPerQueue { get; set; } = 10;

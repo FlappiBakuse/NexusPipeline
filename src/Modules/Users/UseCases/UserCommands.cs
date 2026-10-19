@@ -17,6 +17,7 @@ internal sealed partial class UserCommands : IUserProviderConfigurationStore
     private readonly IUserConfigDataMaintenance _configData;
     private readonly UserAssetService _assets;
     private readonly IUserDeletionTransaction _deletion;
+    private readonly IUserNotificationTargets? _notificationTargets;
 
     internal UserCommands(
         IUserMutationState state,
@@ -27,7 +28,7 @@ internal sealed partial class UserCommands : IUserProviderConfigurationStore
         IScriptConfigGate scriptConfigGate,
         IUserConfigDataMaintenance configData,
         UserAssetService assets,
-        IUserDeletionTransaction deletion)
+        IUserDeletionTransaction deletion, IUserNotificationTargets? notificationTargets = null)
     {
         _state = state;
         _admission = admission;
@@ -38,5 +39,6 @@ internal sealed partial class UserCommands : IUserProviderConfigurationStore
         _configData = configData;
         _assets = assets;
         _deletion = deletion;
+        _notificationTargets = notificationTargets;
     }
 }

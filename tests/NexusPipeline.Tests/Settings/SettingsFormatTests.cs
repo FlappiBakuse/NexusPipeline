@@ -15,10 +15,6 @@ public sealed class SettingsFormatTests
             string file = Path.Combine(root, "settings.json");
             foreach (string original in new[]
             {
-                "{\"webhookEnabled\":true,\"webhookType\":\"dingtalk\"}",
-                "{\"webhookEnabled\":true,\"webhookType\":\" DingTalk \"}",
-                "{\"webhookEnabled\":true,\"webhookType\":\"unknown\"}",
-                "{\"webhookType\":null}",
                 "{\"webhookType\":\"slack\",\"dingTalkAppKey\":\"retired\"}",
                 "{\"webhookType\":\"slack\",\"DINGTALKAPPSECRET\":\"retired\"}",
                 "{\"webhookType\":\"slack\",\"dingTalkRobotCode\":\"retired\"}",
@@ -39,6 +35,21 @@ public sealed class SettingsFormatTests
             }
         }
         finally { Directory.Delete(root, recursive: true); }
+        root = NewRoot();
+        try
+        {
+            string file = Path.Combine(root, "settings.json");
+            foreach (string channel in new[] { "dingtalk", "unknown", "" })
+            {
+                string original = System.Text.Json.JsonSerializer.Serialize(new { webhookType = channel, webPort = 58888 });
+                File.WriteAllText(file, original);
+                Assert.Equal(58888, AppSettingsStore.Load(ConfigLoadMode.Repair, file).WebPort);
+                Assert.NotNull(NexusPipeline.Host.Initialization.NotificationMigration.Run(root, Path.Combine(root, "journal.json"), _ => []));
+                Assert.Equal(original, File.ReadAllText(file));
+                Assert.False(File.Exists(Path.Combine(root, "notifications.json")));
+            }
+        }
+        finally { Directory.Delete(root, recursive: true); }
     }
 
     [Fact]
@@ -48,17 +59,15 @@ public sealed class SettingsFormatTests
         try
         {
             string file = Path.Combine(root, "settings.json");
-            foreach (string channel in AppSettings.WebhookTypes)
+            foreach (string channel in new[] { "feishu", "wecom", "slack", "discord", "generic" })
             {
                 string original = "{\"webhookEnabled\":true,\"webhookType\":\"" + channel + "\",\"webhookUrl\":\"https://example.test\",\"openDesktopOnStartup\":false}";
                 File.WriteAllText(file, original);
                 var settings = AppSettingsStore.Load(ConfigLoadMode.Repair, file);
-                Assert.Equal(channel, settings.WebhookType);
-                Assert.True(settings.WebhookEnabled);
                 Assert.False(settings.OpenDesktopOnStartup);
                 Assert.Equal(original, File.ReadAllText(file));
                 AppSettingsStore.Save(settings, file);
-                Assert.Equal(channel, AppSettingsStore.Load(ConfigLoadMode.ReadOnly, file).WebhookType);
+                Assert.Equal(channel, System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(file))!["webhookType"]!.GetValue<string>());
             }
         }
         finally { Directory.Delete(root, recursive: true); }

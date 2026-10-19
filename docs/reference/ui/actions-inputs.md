@@ -45,7 +45,7 @@ slot：`label`、`help`、默认字段内容、`description`、`error`。字段�
 | 元件 | 属性（类型；默认值） | 事件 detail | 使用约束 |
 |---|---|---|---|
 | `nxp-file-picker` | `accept` string；空；`multiple` boolean；`false`；`disabled` boolean；`false`；`label` string；`选择文件` | `change`: `[File[]]` | 选择取消时发出空数组；原生 file input 隐藏在组件内部，调用方只消费文件数组。 |
-| `nxp-path-picker` | `id`/`modelValue`/`placeholder`/`help` string；空；`disabled`/`browseDisabled` boolean；`false`；`browseDisabledReason` string；空；`ariaLabel` string；`路径`；`kind`: `file\|folder\|file-or-folder`；`file`；`filter` string；空 | `update:modelValue`、`change`: `[string]`；`browse`: `["file"\|"folder"]` | 文本编辑立即发出值。`browse` 只表达用户应打开的选择器类型；宿主负责实际原生选择和回填 `modelValue`。`file-or-folder` 会显示两个 browse 动作。`browseDisabled` 仅禁用选择按钮，不阻止手工输入；原因只用于按钮提示和辅助技术，不占用字段布局。 |
+| `nxp-path-picker` | `id`/`modelValue`/`placeholder`/`help` string；空；`disabled`/`browseDisabled` boolean；`false`；`browseDisabledReason` string；空；`ariaLabel` string；`路径`；`kind`: `file\|folder\|file-or-folder`；`file`；`filter` string；空 | `update:modelValue`、`change`: `[string]`；`browse`: `["file"\|"folder"]` | 文本编辑立即发出值。`browse` 只表达用户应打开的选择器类型；宿主负责实际原生选择和回填 `modelValue`。宿主确认本机连接后，`file-or-folder` 显示两个 browse 动作；远程或未确认连接时，组件统一隐藏所有 browse 按钮，文本框占满宽度并恢复完整圆角。`browseDisabled` 在本机连接时仅禁用选择按钮，不阻止手工输入；原因只用于可见按钮提示和辅助技术，不占用字段布局。 |
 
 ## 受控输入示例
 

@@ -101,13 +101,11 @@ function toggle() {
   display: flex;
   min-width: 0;
   align-items: flex-start;
-  gap: 10px;
-  padding: 13px 0;
+  gap: var(--nx-space-2, 8px);
+  padding: 13px var(--nx-space-2, 8px);
 }
 .nxp-schedule-head > .nxp-schedule-drag-handle {
-  flex: 0 0 auto;
-  align-self: flex-start;
-  margin: 2px 0 0;
+  align-self: center;
 }
 
 .nxp-schedule-summary {
@@ -143,7 +141,9 @@ function toggle() {
 .nxp-schedule-summary-main strong { font-size: 13px; }
 .nxp-schedule-summary-main > span { color: var(--nx-color-muted, var(--muted)); }
 .nxp-schedule-chevron {
-  flex: 0 0 auto;
+  display: inline-flex;
+  flex: 0 0 var(--nx-drag-handle-size, 24px);
+  justify-content: center;
   color: var(--nx-color-muted, var(--muted));
   font-size: 12px;
 }

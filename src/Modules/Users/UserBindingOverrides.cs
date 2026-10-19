@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 namespace NexusPipeline.Modules.Users;
 
 /// <summary>用户级全局绑定覆盖。每个类别只有一个同步开关，关闭后绑定中的原始值重新生效。</summary>
@@ -46,13 +47,18 @@ public sealed class UserNotificationOverride
 
     public bool NotifyEnabled { get; set; } = true;
 
-    public string SmtpTo { get; set; } = "";
+    public List<string> NotificationTaskIds { get; set; } = [];
+
+    // Retain unmigrated recipients through unrelated runtime saves while notification migration is blocked.
+    [JsonPropertyName("smtpTo"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? LegacySmtpTo { get; set; }
 
     public UserNotificationOverride Clone() => new()
     {
         SyncEnabled = SyncEnabled,
         NotifyEnabled = NotifyEnabled,
-        SmtpTo = SmtpTo,
+        NotificationTaskIds = NotificationTaskIds?.ToList() ?? [],
+            LegacySmtpTo = LegacySmtpTo,
     };
 }
 

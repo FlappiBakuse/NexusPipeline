@@ -41,6 +41,7 @@ internal sealed class TaskProtocolRun
     private TaskAdmissionBlockedException? _admissionBlocked;
     private RunAttemptResult? _lastCompletedAttemptResult;
     private string _terminationReason = "none";
+    private bool _stoppedAtBoundary;
     private TaskExecutionCompletion _processCompletion = TaskExecutionCompletion.Unconfirmed;
     private JsonObject? _cursorState;
     private long _revision;
@@ -55,7 +56,15 @@ internal sealed class TaskProtocolRun
     internal void SetProcessCompletion(TaskExecutionCompletion completion)
     {
         lock (_gate)
-            if (_processCompletion.Status != "failed") _processCompletion = completion;
+            if (!_stoppedAtBoundary && _processCompletion.Status != "failed") _processCompletion = completion;
+    }
+    internal void ConfirmBoundaryStop(TaskExecutionCompletion beforeStop)
+    {
+        lock (_gate)
+        {
+            if (beforeStop.Status == "failed") _processCompletion = beforeStop;
+            _stoppedAtBoundary = true;
+        }
     }
     internal void SetFinalLifecycleFailure(bool cancelled)
     {
@@ -149,7 +158,7 @@ internal sealed class TaskProtocolRun
         _attemptNumber = number;
         lock (_gate)
         {
-            _logs = new(); _cursorState = null; _terminationReason = "none"; _processCompletion = TaskExecutionCompletion.Unconfirmed;
+            _logs = new(); _cursorState = null; _terminationReason = "none"; _stoppedAtBoundary = false; _processCompletion = TaskExecutionCompletion.Unconfirmed;
             _lifecycle = "running"; _reducer.BeginAttempt(_attemptId, number, _selected, _nativeResume);
             if (number > 1 && _protocol.Version == "0.3.0"
                 && (plan.Tasks.Any(task => task.Enabled && task.Recognition == "opaque")
@@ -264,6 +273,19 @@ internal sealed class TaskProtocolRun
         VerifyRuntimeIdentity();
         lock (_gate)
         {
+            if (_protocol.Version == "0.3.0" && _reducer is not null && _attemptNumber == number
+                && !_protocolFailed && !_runtimeIdentityChanged && !processResult.IsFatal
+                && processResult.Status is "success" or "partial"
+                && _terminationReason is "process_exited" or "marker_timeout")
+            {
+                var plan = _reducer.OriginalPlan;
+                bool verified = _reducer.RunBoundary == "ended"
+                    && plan.Tasks.Any(task => task.Enabled)
+                    && plan.Tasks.Where(task => task.Enabled).All(task => task.Recognition == "known")
+                    && !plan.Verification!.OpaqueScopes.Any(scope => scope.Enabled)
+                    && _reducer.Results.All(result => result.Status is "succeeded" or "skipped");
+                _processCompletion = _processCompletion.ConfirmBoundary(verified, _stoppedAtBoundary);
+            }
             _engineStatus = processResult.Status switch
             {
                 "success" => "succeeded",

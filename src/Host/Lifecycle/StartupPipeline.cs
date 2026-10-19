@@ -26,6 +26,7 @@ internal static class StartupPipeline
             if (launch?.Intent == "show") DesktopActivationClient.ShowAsync().GetAwaiter().GetResult();
             return;
         }
+        using var directoryLease = NexusPipeline.Platform.Windows.RunningDirectoryLease.Acquire(AppPaths.AppRoot);
         DesktopCoordinator desktop = runtime.Get<DesktopCoordinator>();
         desktop.Start();
         bool showDesktop = (launch ?? new DesktopLaunchOptions("from-settings")).ShouldShow(

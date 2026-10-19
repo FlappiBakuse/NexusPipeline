@@ -46,6 +46,7 @@ const draft = reactive<QueueDraft>({
   autoRunMode: "none",
   completionAction: "none",
   notifyEnabled: false,
+  notificationTaskIds: [],
   timeSets: [],
   tasks: [],
 });
@@ -102,6 +103,7 @@ function resetDraft(queue: Queue | null = null) {
   draft.autoRunMode = queue?.autoRunMode || "none";
   draft.completionAction = queue?.completionAction || "none";
   draft.notifyEnabled = Boolean(queue?.notifyEnabled);
+  draft.notificationTaskIds = [...(queue?.notificationTaskIds || [])];
   draft.timeSets = (queue?.timeSets || []).map((item) => ({
     id: item.id,
     enabled: item.enabled !== false,

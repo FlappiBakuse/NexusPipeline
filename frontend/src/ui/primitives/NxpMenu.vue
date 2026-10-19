@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { bindFloatingReposition, positionFloatingOverlay } from "../floating";
+import NxpSelectionTransition from "../composites/NxpSelectionTransition.vue";
 
 const props = withDefaults(defineProps<{ open?: boolean; label?: string; disabled?: boolean }>(), { open: false, label: "菜单", disabled: false });
 const emit = defineEmits<{ "update:open": [value: boolean]; close: [] }>();
@@ -62,7 +63,7 @@ onBeforeUnmount(() => {
   <div ref="root" class="nxp-menu">
     <button ref="trigger" class="nxp-menu-trigger" type="button" :aria-label="props.label" :aria-expanded="expanded" :aria-controls="popupId" :disabled="props.disabled" @click="toggle"><slot name="trigger">{{ props.label }}</slot></button>
     <Teleport to="body">
-      <div v-if="expanded" ref="popup" :id="popupId" class="nxp-menu-popup" role="menu" @click="close"><slot /></div>
+      <NxpSelectionTransition><div v-if="expanded" ref="popup" :id="popupId" class="nxp-menu-popup" role="menu" @click="close"><slot /></div></NxpSelectionTransition>
     </Teleport>
   </div>
 </template>

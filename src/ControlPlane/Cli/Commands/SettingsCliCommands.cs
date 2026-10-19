@@ -22,7 +22,7 @@ internal static partial class CliCommandRouter
         return sub switch
         {
             "get" => ExecuteSettingsRead(args, client),
-            "test" => ExecuteSettingsTest(args, client),
+            "test" => CliOutput.WriteFailure("notification_settings_retired", "Use notification test <id>."),
             "restart" => ExecuteSettingsRestart(args, client),
             "update" or "set" => ExecuteSettingsUpdate(args, client),
             _ => CliOutput.WriteFailure(
@@ -37,13 +37,6 @@ internal static partial class CliCommandRouter
     {
         return EnsureOptions(args)
             ? ReturnApi(client.Get("/api/settings"))
-            : CliExitCodes.For("invalid_arguments");
-    }
-
-    private static int ExecuteSettingsTest(CliArguments args, CliApiClient client)
-    {
-        return EnsureOptions(args)
-            ? ReturnApi(client.Post("/api/settings/test"))
             : CliExitCodes.For("invalid_arguments");
     }
 

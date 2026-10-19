@@ -74,6 +74,7 @@ internal static partial class RunRecordFormat
         string? status = completion["status"]?.GetValue<string>(), basis = completion["basis"]?.GetValue<string>();
         int? code = completion["exitCode"]?.GetValue<int>();
         Require(status == "normal" && basis == "owned_worker_exit" && code == 0
+            || status == "normal" && basis == "verified_task_boundary" && code is null
             || status == "failed" && basis == "owned_process_nonzero" && code is not null and not 0
             || status == "unconfirmed" && basis == "unconfirmed_worker" && code is null);
     }

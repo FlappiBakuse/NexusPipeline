@@ -47,6 +47,7 @@ internal static class Limits
         CheckCount(limits.MaxUsersPerScript, 50, 999, "MaxUsersPerScript（每脚本用户上限）", warnings, fatals);
         CheckCount(limits.MaxUsers, 50, 999, "MaxUsers（全局用户上限）", warnings, fatals);
         CheckCount(limits.MaxQueues, 50, 999, "MaxQueues（调度队列上限）", warnings, fatals);
+        CheckCount(limits.MaxNotificationTasks, 10, 99, "MaxNotificationTasks（通知任务上限）", warnings, fatals);
         CheckCount(limits.MaxQueueTotalUsers, 50, 999, "MaxQueueTotalUsers（队列任务总用户上限）", warnings, fatals);
         CheckCount(limits.MaxTimeSetsPerQueue, 10, 999, "MaxTimeSetsPerQueue（每队列定时上限）", warnings, fatals);
         CheckSentinelUpper(limits.MaxRunDays, -1, 365, 3650, "MaxRunDays（运行天数上限）", warnings, fatals);

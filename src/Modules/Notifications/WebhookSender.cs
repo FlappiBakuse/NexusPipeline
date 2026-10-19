@@ -4,8 +4,6 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using NexusPipeline.ControlPlane.Http;
-using NexusPipeline.Modules.Settings;
 using NexusPipeline.Platform.Networking;
 using NexusPipeline.Platform.Security;
 using NexusPipeline.Shared.Logging;
@@ -19,8 +17,8 @@ internal static class WebhookSender
     private const string FeishuApiRoot = "https://open.feishu.cn/open-apis";
     private const string SlackApiRoot = "https://slack.com/api";
 
-    /// <summary>Webhook 类型白名单（单源化）：引用 AppSettings.WebhookTypes，不再独立维护副本。</summary>
-    private static readonly string[] Types = AppSettings.WebhookTypes;
+    /// <summary>Webhook 类型白名单（单源化）：引用 NotificationChannelSettings.WebhookTypes，不再独立维护副本。</summary>
+    private static readonly string[] Types = NotificationChannelSettings.WebhookTypes;
 
     public static string TypeDisplay(string type)
     {
@@ -35,34 +33,12 @@ internal static class WebhookSender
         };
     }
 
-    public static (bool Ok, string Reason) Status(AppSettings settings)
-    {
-        string url = settings.WebhookUrl;
-        if (string.IsNullOrWhiteSpace(url))
-        {
-            return (false, "未配置（未设置 Webhook 地址）");
-        }
-        string type = settings.WebhookType;
-        if (!Types.Contains(type))
-        {
-            return (false, $"未配置（未知的 webhook_type：{type}）");
-        }
-        if (type == "generic" && string.IsNullOrWhiteSpace(settings.WebhookTemplate))
-        {
-            return (false, "未配置（generic 类型缺少 webhook_template）");
-        }
-        if (SecretStore.IsEncrypted(url) && !SecretStore.TryDecrypt(url, out _))
-        {
-            return (false, "未配置（密钥无法解密，可能已复制到其他电脑）");
-        }
-        return (true, $"已配置（{TypeDisplay(type)}）");
-    }
-
     public static async Task<bool> SendAsync(
-        AppSettings settings,
+        NotificationChannelSettings settings,
         string text,
         OutboundHttpClientProvider? outbound = null,
-        NotificationImage? image = null)
+        NotificationImage? image = null,
+        CancellationToken cancellationToken = default)
     {
         string? webhookUrl = TryDecrypt(settings.WebhookUrl);
         string? webhookSecret = TryDecrypt(settings.WebhookSecret);
@@ -91,15 +67,15 @@ internal static class WebhookSender
             switch (type)
             {
                 case "discord":
-                    return await SendDiscordWithImageAsync(settings, targetUrl, signatureHeaders, BuildBody(type, text, template), image, outbound).ConfigureAwait(false);
+                    return await SendDiscordWithImageAsync(settings, targetUrl, signatureHeaders, BuildBody(type, text, template), image, outbound, cancellationToken).ConfigureAwait(false);
                 case "wecom":
-                    return await SendWeComWithImageAsync(settings, targetUrl, signatureHeaders, BuildBody(type, text, template), image, outbound).ConfigureAwait(false);
+                    return await SendWeComWithImageAsync(settings, targetUrl, signatureHeaders, BuildBody(type, text, template), image, outbound, cancellationToken).ConfigureAwait(false);
                 case "feishu":
-                    return await SendFeishuWithImageAsync(settings, targetUrl, signatureHeaders, text, image, webhookSecret, outbound).ConfigureAwait(false);
+                    return await SendFeishuWithImageAsync(settings, targetUrl, signatureHeaders, text, image, webhookSecret, outbound, cancellationToken).ConfigureAwait(false);
                 case "slack":
-                    return await SendSlackWithImageAsync(settings, targetUrl, signatureHeaders, text, image, outbound).ConfigureAwait(false);
+                    return await SendSlackWithImageAsync(settings, targetUrl, signatureHeaders, text, image, outbound, cancellationToken).ConfigureAwait(false);
                 case "generic":
-                    return await SendJsonAsync(settings, type, targetUrl, signatureHeaders, BuildGenericBody(text, template, image), outbound).ConfigureAwait(false);
+                    return await SendJsonAsync(settings, type, targetUrl, signatureHeaders, BuildGenericBody(text, template, image), outbound, cancellationToken).ConfigureAwait(false);
             }
         }
         string body = type == "generic"
@@ -109,34 +85,34 @@ internal static class WebhookSender
         {
             body = BuildSignedFeishuBody(body, webhookSecret);
         }
-        return await SendJsonAsync(settings, type, targetUrl, signatureHeaders, body, outbound).ConfigureAwait(false);
+        return await SendJsonAsync(settings, type, targetUrl, signatureHeaders, body, outbound, cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task<bool> SendDiscordWithImageAsync(
-        AppSettings settings,
+        NotificationChannelSettings settings,
         string targetUrl,
         Dictionary<string, string> signatureHeaders,
         string body,
         NotificationImage image,
-        OutboundHttpClientProvider? outbound)
+        OutboundHttpClientProvider? outbound, CancellationToken cancellationToken)
     {
         using var multipart = new MultipartFormDataContent();
         multipart.Add(new StringContent(body, Encoding.UTF8, "application/json"), "payload_json");
         var file = new ByteArrayContent(image.Data);
         file.Headers.ContentType = new MediaTypeHeaderValue(image.ContentType);
         multipart.Add(file, "files[0]", image.FileName);
-        return await SendRequestAsync(settings, "discord", targetUrl, signatureHeaders, multipart, outbound).ConfigureAwait(false);
+        return await SendRequestAsync(settings, "discord", targetUrl, signatureHeaders, multipart, outbound, cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task<bool> SendWeComWithImageAsync(
-        AppSettings settings,
+        NotificationChannelSettings settings,
         string targetUrl,
         Dictionary<string, string> signatureHeaders,
         string textBody,
         NotificationImage image,
-        OutboundHttpClientProvider? outbound)
+        OutboundHttpClientProvider? outbound, CancellationToken cancellationToken)
     {
-        bool textOk = await SendJsonAsync(settings, "wecom", targetUrl, signatureHeaders, textBody, outbound).ConfigureAwait(false);
+        bool textOk = await SendJsonAsync(settings, "wecom", targetUrl, signatureHeaders, textBody, outbound, cancellationToken).ConfigureAwait(false);
         if (!textOk)
         {
             return false;
@@ -145,7 +121,7 @@ internal static class WebhookSender
         string base64 = Convert.ToBase64String(image.Data);
         string md5 = Convert.ToHexString(MD5.HashData(image.Data)).ToLowerInvariant();
         string imageBody = $"{{\"msgtype\":\"image\",\"image\":{{\"base64\":{JsonLiteral(base64)},\"md5\":{JsonLiteral(md5)}}}}}";
-        bool imageOk = await SendJsonAsync(settings, "wecom", targetUrl, signatureHeaders, imageBody, outbound).ConfigureAwait(false);
+        bool imageOk = await SendJsonAsync(settings, "wecom", targetUrl, signatureHeaders, imageBody, outbound, cancellationToken).ConfigureAwait(false);
         if (!imageOk)
         {
             Logger.Warn("[通知] 企业微信文字通知已发送，但图片附件发送失败。");
@@ -154,16 +130,16 @@ internal static class WebhookSender
     }
 
     private static async Task<bool> SendFeishuWithImageAsync(
-        AppSettings settings,
+        NotificationChannelSettings settings,
         string targetUrl,
         Dictionary<string, string> signatureHeaders,
         string text,
         NotificationImage image,
         string? webhookSecret,
-        OutboundHttpClientProvider? outbound)
+        OutboundHttpClientProvider? outbound, CancellationToken cancellationToken)
     {
         string textBody = BuildSignedFeishuBody(BuildBody("feishu", text, ""), webhookSecret);
-        bool textOk = await SendJsonAsync(settings, "feishu", targetUrl, signatureHeaders, textBody, outbound).ConfigureAwait(false);
+        bool textOk = await SendJsonAsync(settings, "feishu", targetUrl, signatureHeaders, textBody, outbound, cancellationToken).ConfigureAwait(false);
         if (!textOk)
         {
             return false;
@@ -176,13 +152,13 @@ internal static class WebhookSender
             Logger.Warn("[通知] 飞书图片凭据未完整配置，已发送文字通知。");
             return true;
         }
-        string? token = await GetFeishuTenantTokenAsync(settings, appId, appSecret, outbound).ConfigureAwait(false);
+        string? token = await GetFeishuTenantTokenAsync(settings, appId, appSecret, outbound, cancellationToken).ConfigureAwait(false);
         if (string.IsNullOrWhiteSpace(token))
         {
             Logger.Warn("[通知] 飞书 tenant_access_token 获取失败，图片附件发送失败。");
             return false;
         }
-        string? imageKey = await UploadFeishuImageAsync(settings, token, image, outbound).ConfigureAwait(false);
+        string? imageKey = await UploadFeishuImageAsync(settings, token, image, outbound, cancellationToken).ConfigureAwait(false);
         if (string.IsNullOrWhiteSpace(imageKey))
         {
             Logger.Warn("[通知] 飞书图片上传失败。");
@@ -191,7 +167,7 @@ internal static class WebhookSender
         string imageBody = BuildSignedFeishuBody(
             $"{{\"msg_type\":\"image\",\"content\":{{\"image_key\":{JsonLiteral(imageKey)}}}}}",
             webhookSecret);
-        bool imageOk = await SendJsonAsync(settings, "feishu", targetUrl, signatureHeaders, imageBody, outbound).ConfigureAwait(false);
+        bool imageOk = await SendJsonAsync(settings, "feishu", targetUrl, signatureHeaders, imageBody, outbound, cancellationToken).ConfigureAwait(false);
         if (!imageOk)
         {
             Logger.Warn("[通知] 飞书文字通知已发送，但图片附件发送失败。");
@@ -200,14 +176,14 @@ internal static class WebhookSender
     }
 
     private static async Task<bool> SendSlackWithImageAsync(
-        AppSettings settings,
+        NotificationChannelSettings settings,
         string targetUrl,
         Dictionary<string, string> signatureHeaders,
         string text,
         NotificationImage image,
-        OutboundHttpClientProvider? outbound)
+        OutboundHttpClientProvider? outbound, CancellationToken cancellationToken)
     {
-        bool textOk = await SendJsonAsync(settings, "slack", targetUrl, signatureHeaders, BuildBody("slack", text, ""), outbound).ConfigureAwait(false);
+        bool textOk = await SendJsonAsync(settings, "slack", targetUrl, signatureHeaders, BuildBody("slack", text, ""), outbound, cancellationToken).ConfigureAwait(false);
         if (!textOk)
         {
             return false;
@@ -233,7 +209,7 @@ internal static class WebhookSender
             $"{SlackApiRoot}/files.getUploadURLExternal",
             BearerHeaders(botToken),
             form,
-            outbound).ConfigureAwait(false);
+            outbound, cancellationToken).ConfigureAwait(false);
         if (!ticketOk || !TryReadSlackUploadTicket(ticketText, out string uploadUrl, out string fileId))
         {
             Logger.Warn("[通知] Slack 图片上传凭据获取失败。");
@@ -242,7 +218,7 @@ internal static class WebhookSender
 
         using var upload = new ByteArrayContent(image.Data);
         upload.Headers.ContentType = new MediaTypeHeaderValue(image.ContentType);
-        (bool uploadOk, _) = await SendApiRequestAsync(settings, "slack", uploadUrl, new Dictionary<string, string>(), upload, outbound).ConfigureAwait(false);
+        (bool uploadOk, _) = await SendApiRequestAsync(settings, "slack", uploadUrl, new Dictionary<string, string>(), upload, outbound, cancellationToken).ConfigureAwait(false);
         if (!uploadOk)
         {
             Logger.Warn("[通知] Slack 图片二进制上传失败。");
@@ -260,7 +236,7 @@ internal static class WebhookSender
             $"{SlackApiRoot}/files.completeUploadExternal",
             BearerHeaders(botToken),
             new StringContent(completeBody, Encoding.UTF8, "application/json"),
-            outbound).ConfigureAwait(false);
+            outbound, cancellationToken).ConfigureAwait(false);
         if (!completeOk || !IsSlackSuccess(completeText))
         {
             Logger.Warn("[通知] Slack 图片发布失败。");
@@ -271,10 +247,10 @@ internal static class WebhookSender
     }
 
     private static async Task<string?> GetFeishuTenantTokenAsync(
-        AppSettings settings,
+        NotificationChannelSettings settings,
         string appId,
         string appSecret,
-        OutboundHttpClientProvider? outbound)
+        OutboundHttpClientProvider? outbound, CancellationToken cancellationToken)
     {
         string body = JsonSerializer.Serialize(new { app_id = appId, app_secret = appSecret }, JsonOpts.Default);
         (bool ok, string responseText) = await SendApiRequestAsync(
@@ -283,7 +259,7 @@ internal static class WebhookSender
             $"{FeishuApiRoot}/auth/v3/tenant_access_token/internal",
             new Dictionary<string, string>(),
             new StringContent(body, Encoding.UTF8, "application/json"),
-            outbound).ConfigureAwait(false);
+            outbound, cancellationToken).ConfigureAwait(false);
         if (!ok)
         {
             return null;
@@ -300,10 +276,10 @@ internal static class WebhookSender
     }
 
     private static async Task<string?> UploadFeishuImageAsync(
-        AppSettings settings,
+        NotificationChannelSettings settings,
         string token,
         NotificationImage image,
-        OutboundHttpClientProvider? outbound)
+        OutboundHttpClientProvider? outbound, CancellationToken cancellationToken)
     {
         using var multipart = new MultipartFormDataContent();
         multipart.Add(new StringContent("message", Encoding.UTF8), "image_type");
@@ -316,7 +292,7 @@ internal static class WebhookSender
             $"{FeishuApiRoot}/im/v1/images",
             BearerHeaders(token),
             multipart,
-            outbound).ConfigureAwait(false);
+            outbound, cancellationToken).ConfigureAwait(false);
         if (!ok)
         {
             return null;
@@ -333,12 +309,12 @@ internal static class WebhookSender
     }
 
     private static Task<bool> SendJsonAsync(
-        AppSettings settings,
+        NotificationChannelSettings settings,
         string type,
         string targetUrl,
         Dictionary<string, string> signatureHeaders,
         string body,
-        OutboundHttpClientProvider? outbound)
+        OutboundHttpClientProvider? outbound, CancellationToken cancellationToken)
     {
         return SendRequestAsync(
             settings,
@@ -346,18 +322,18 @@ internal static class WebhookSender
             targetUrl,
             signatureHeaders,
             new StringContent(body, Encoding.UTF8, "application/json"),
-            outbound);
+            outbound, cancellationToken);
     }
 
     private static async Task<bool> SendRequestAsync(
-        AppSettings settings,
+        NotificationChannelSettings settings,
         string type,
         string targetUrl,
         IReadOnlyDictionary<string, string> headers,
         HttpContent content,
-        OutboundHttpClientProvider? outbound)
+        OutboundHttpClientProvider? outbound, CancellationToken cancellationToken)
     {
-        (bool httpOk, string responseText) = await SendApiRequestAsync(settings, type, targetUrl, headers, content, outbound).ConfigureAwait(false);
+        (bool httpOk, string responseText) = await SendApiRequestAsync(settings, type, targetUrl, headers, content, outbound, cancellationToken).ConfigureAwait(false);
         bool ok = httpOk && IsResponseBodySuccessful(type, responseText);
         if (ok)
         {
@@ -365,20 +341,20 @@ internal static class WebhookSender
         }
         else if (httpOk)
         {
-            Logger.Warn($"[警告] Webhook 返回异常：{responseText}");
+            Logger.Warn("[警告] Webhook 返回失败状态。");
         }
         return ok;
     }
 
     private static async Task<(bool Ok, string ResponseText)> SendApiRequestAsync(
-        AppSettings settings,
+        NotificationChannelSettings settings,
         string type,
         string targetUrl,
         IReadOnlyDictionary<string, string> headers,
         HttpContent content,
-        OutboundHttpClientProvider? outbound)
+        OutboundHttpClientProvider? outbound, CancellationToken cancellationToken)
     {
-        int timeout = settings.WebhookTimeout < 1 ? 30 : settings.WebhookTimeout;
+        int timeout = settings.Timeout < 1 ? 30 : settings.Timeout;
         try
         {
             Uri target = new(targetUrl);
@@ -392,14 +368,16 @@ internal static class WebhookSender
             {
                 request.Headers.TryAddWithoutValidation(header.Key, header.Value);
             }
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(timeout));
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            cts.CancelAfter(TimeSpan.FromSeconds(timeout));
             using HttpResponseMessage response = await client.SendAsync(request, cts.Token).ConfigureAwait(false);
-            string responseText = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+            string responseText = await response.Content.ReadAsStringAsync(cts.Token).ConfigureAwait(false);
             return (response.IsSuccessStatusCode, responseText);
         }
-        catch (Exception ex)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception)
         {
-            Logger.Error($"[错误] {TypeDisplay(type)} 请求失败：{ex.Message}");
+            Logger.Error($"[错误] {TypeDisplay(type)} 请求失败。");
             return (false, "");
         }
     }

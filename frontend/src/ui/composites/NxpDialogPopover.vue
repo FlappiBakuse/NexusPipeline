@@ -2,6 +2,7 @@
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { t } from "../../platform/i18n";
 import NxpIcon from "../primitives/NxpIcon.vue";
+import NxpSelectionTransition from "./NxpSelectionTransition.vue";
 
 /** 二级页面语义的自定义浮层：`role="dialog"` + 可选的右上角关闭入口。
  *  普通控件 popover（Select、TimePicker 等）不使用本组件。定位由调用方 class 提供。 */
@@ -70,8 +71,10 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
+  <NxpSelectionTransition>
   <div
     v-if="props.open"
+    :inert="!props.open || undefined"
     :id="props.id"
     ref="root"
     class="nxp-dialog-popover secondary-surface"
@@ -92,6 +95,7 @@ onBeforeUnmount(() => {
     </button>
     <slot />
   </div>
+  </NxpSelectionTransition>
 </template>
 
 <style>

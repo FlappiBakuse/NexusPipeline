@@ -250,18 +250,29 @@ async function publishTestHost({ withFrontend = true, withApplication = false } 
     if(embedded) return embedded;
     embeddedInputs.push(`-p:NexusFrontendProps=${path.join(embedding,"embedded-frontend.props")}`);
   }
+  const build = async directory => {
+    const code = await run("dotnet", [
+      "publish", "src\\NexusPipeline.csproj", "-c", "Release", "-r", "win-x64", "--self-contained", "false",
+      "-p:PublishSingleFile=true", "-p:DebugType=none", "-p:DebugSymbols=false", "-p:NexusTestHost=true",
+      "-p:UseSharedCompilation=false", "--disable-build-servers", ...embeddedInputs,
+      "-o", directory, "--nologo",
+    ], { timeoutMs: 20 * 60 * 1000 });
+    if (code) return code;
+    return verifyManifest(path.join(directory, "NexusPipeline.exe"), "asInvoker");
+  };
   fs.rmSync(testHostDir, { recursive: true, force: true, maxRetries: 120, retryDelay: 250 });
-  fs.mkdirSync(testHostDir, { recursive: true });
-  const code = await run("dotnet", [
-    "publish", "src\\NexusPipeline.csproj", "-c", "Release", "-r", "win-x64", "--self-contained", "false",
-    "-p:PublishSingleFile=true", "-p:DebugType=none", "-p:DebugSymbols=false", "-p:NexusTestHost=true",
-    "-p:UseSharedCompilation=false", "--disable-build-servers",
-    ...embeddedInputs,
-    "-o", testHostDir, "--nologo",
-  ], { timeoutMs: 20 * 60 * 1000 });
-  if (code !== 0) return code;
-  const manifestCode = await verifyManifest(path.join(testHostDir, "NexusPipeline.exe"), "asInvoker");
-  if (manifestCode !== 0) return manifestCode;
+  if (!withApplication && process.env.NEXUS_TEST_LOW_RESOURCE === "1") {
+    const cached = await preparedArtifact(path.join(process.env.NEXUS_TEST_ARTIFACT_ROOT, "cache/prepared-test-hosts"),
+      [workspace.fingerprint, withFrontend, "Release/win-x64/asInvoker/single-file",
+        execFileSync("dotnet", ["--list-runtimes"], { encoding: "utf8" }).trim()], build);
+    if (cached.code) return cached.code;
+    fs.cpSync(cached.output, testHostDir, { recursive: true });
+    fs.writeFileSync(path.join(runRoot, "test-host-cache.json"), JSON.stringify({ key: cached.key, cacheHit: cached.cacheHit,
+      frontend: withFrontend, electron: false, source: workspace.source }));
+  } else {
+    fs.mkdirSync(testHostDir, { recursive: true });
+    const code = await build(testHostDir); if (code) return code;
+  }
   fs.mkdirSync(path.join(testHostDir, "plugins"), { recursive: true });
   if(withApplication) { const assembled=await assembleApplication(testHostDir);if(assembled) return assembled; }
   publishedTestHost=true;publishedFrontend=withFrontend;publishedApplication=withApplication;

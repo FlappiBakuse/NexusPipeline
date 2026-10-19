@@ -119,7 +119,7 @@ internal sealed class McpBindingInput
 
     public bool NotifyEnabled { get; set; } = true;
 
-    public string SmtpTo { get; set; } = "";
+    public List<string> NotificationTaskIds { get; set; } = [];
 
     public int RunDays { get; set; } = -1;
 
@@ -139,7 +139,7 @@ internal sealed class McpBindingInput
             PostRunScript = PostRunScript.Trim(),
             PostRunOnFinalOnly = PostRunOnFinalOnly,
             NotifyEnabled = NotifyEnabled,
-            SmtpTo = SmtpTo.Trim(),
+            NotificationTaskIds = NotificationTaskIds?.Distinct(StringComparer.Ordinal).ToList() ?? [],
             RunDays = RunDays,
             MaxSuccessfulRunsPerDay = MaxSuccessfulRunsPerDay,
             ConfigInputs = new Dictionary<string, string>(ConfigInputs ?? new(), StringComparer.OrdinalIgnoreCase),
@@ -291,7 +291,7 @@ internal static class McpViews
             binding.PostRunScript,
             binding.PostRunOnFinalOnly,
             binding.NotifyEnabled,
-            binding.SmtpTo,
+            binding.NotificationTaskIds,
             binding.RunDays,
             binding.MaxSuccessfulRunsPerDay,
             configInputs = binding.ConfigInputs,
@@ -304,7 +304,7 @@ internal static class McpViews
                 effective.PostRunScript,
                 effective.PostRunOnFinalOnly,
                 effective.NotifyEnabled,
-                effective.SmtpTo,
+                effective.NotificationTaskIds,
                 effective.RunDays,
                 effective.MaxSuccessfulRunsPerDay,
                 effective.Participates,
@@ -351,6 +351,7 @@ internal static class McpViews
             queue.TimeSets,
             queue.Tasks,
             queue.NotifyEnabled,
+            queue.NotificationTaskIds,
             nextTrigger = scheduler.NextTriggerFor(queue),
         };
     }
@@ -367,33 +368,12 @@ internal static class McpViews
             settings.HistoryRetentionDays,
             settings.WebPort,
             settings.McpEnabled,
+            settings.McpWriteEnabled,
             settings.McpPort,
             settings.ProxyMode,
             settings.ProxyUrl,
             settings.ProxyUsername,
             proxyPassword = Mask(settings.ProxyPassword),
-            settings.WebhookEnabled,
-            settings.WebhookScreenshotEnabled,
-            settings.SmtpEnabled,
-            settings.SmtpScreenshotEnabled,
-            settings.WebhookType,
-            webhookUrl = Mask(settings.WebhookUrl),
-            webhookSecret = Mask(settings.WebhookSecret),
-            settings.WebhookTemplate,
-            settings.WebhookTimeout,
-            settings.FeishuAppId,
-            feishuAppSecret = Mask(settings.FeishuAppSecret),
-            settings.SlackChannelId,
-            slackBotToken = Mask(settings.SlackBotToken),
-            settings.SmtpHost,
-            settings.SmtpPort,
-            settings.SmtpSecure,
-            settings.SmtpUser,
-            smtpPassword = Mask(settings.SmtpPassword),
-            settings.SmtpFrom,
-            settings.SmtpTo,
-            settings.SmtpSubjectPrefix,
-            settings.SmtpTimeout,
             settings.LogLevel,
             settings.HostLocale,
             // MCP 始终 loopback；远程 Web 开关和令牌设置不作为 MCP 写入项，但读取时保留脱敏状态。

@@ -1,10 +1,10 @@
-# 执行 provider（Plugin API 2.2）
+# 执行 provider（Plugin API 2.3）
 
-这是独立 managed 插件接入现有执行生命周期的公共扩展。接口位于 `src/NexusPipeline.Plugin.Abstractions/ExecutionProviderApi.cs`。当前 provider 使用 API 2.2 和独立 worker IPC；报告为 schema 1 / provider-execution-v1，[taskProtocol](task-protocol.md) 日常报告为 schema 2 / daily-flow-v1。provider 使用现有用户、队列、历史和恢复引擎。
+这是独立 managed 插件接入现有执行生命周期的公共扩展。接口位于 `src/NexusPipeline.Plugin.Abstractions/ExecutionProviderApi.cs`。当前 provider 使用 API 2.3 和独立 worker IPC；报告为 schema 1 / provider-execution-v1，[taskProtocol](task-protocol.md) 日常报告为 schema 2 / daily-flow-v1。provider 使用现有用户、队列、历史和恢复引擎。
 
 ## 注册和计划
 
-插件声明 `apiVersion: "2.2"`、`minHostVersion: "0.17.3"`，初始化时检查 `IPluginHostContext`，通过 `ExecutionProviders.Register` 注册唯一 provider ID，停止时释放注册。只有当前启用插件可以注册；停用后配置与历史保留，新的执行报告 provider 不可用。
+插件声明 `apiVersion: "2.3"`、`minHostVersion: "0.17.6"`，初始化时检查 `IPluginHostContext`，通过 `ExecutionProviders.Register` 注册唯一 provider ID，停止时释放注册。只有当前启用插件可以注册；停用后配置与历史保留，新的执行报告 provider 不可用。
 
 `InspectAsync` 返回只读项目能力和公共 schema。`PrepareAsync` 返回冻结的 `PluginProviderPlan`：稳定 plan ID、配置 revision、授权指纹、资源、任务身份与顺序、私有执行数据。任务 ID 不等于翻译后的显示名称。Host 校验任务与资源预算、资源根和整份计划的 1 MiB 上限，随后使用原有准入和资源租约。
 

@@ -70,6 +70,8 @@ internal sealed class HostRuntime : IAsyncDisposable
     internal void ReplaceSettings(AppSettings settings)
         => _composition.ReplaceSettings(settings);
 
+    internal void MigrateNotifications() => _composition.MigrateNotifications();
+
     internal void ReloadData()
         => _composition.ReloadData();
 

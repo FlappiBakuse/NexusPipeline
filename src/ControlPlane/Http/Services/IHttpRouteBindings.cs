@@ -1,3 +1,4 @@
+using NexusPipeline.Modules.Notifications;
 using NexusPipeline.Modules.Scripts.Contracts;
 using NexusPipeline.Modules.Settings.UseCases;
 using NexusPipeline.Modules.Scripts.UseCases;
@@ -35,6 +36,8 @@ internal interface IHttpRouteBindings
     NexusPipeline.ControlPlane.Http.Static.IFrontendAssetProvider FrontendAssets { get; }
     IReadOnlyDictionary<string, ApiRouteCatalog.BoundRoute> Routes { get; }
 
+    NotificationTasks Notifications => throw new NotSupportedException();
+    NotificationDelivery NotificationDelivery => throw new NotSupportedException();
     SettingsCommands SettingsCommands { get; }
 
     ScriptCommands ScriptCommands { get; }

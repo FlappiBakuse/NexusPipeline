@@ -17,6 +17,7 @@ namespace NexusPipeline.Modules.Queues.UseCases;
 /// <summary>调度队列应用命令；租约协调、校验、落盘和调度重校验集中在服务进程内。</summary>
 internal sealed class QueueCommands
 {
+    private readonly IQueueNotificationTargets? _notificationTargets;
     private readonly IQueueRepository _queues;
     private readonly IQueueMutationState _state;
     private readonly IQueuePlansChanged _plansChanged;
@@ -34,9 +35,10 @@ internal sealed class QueueCommands
         IScriptRepository scripts,
         IQueueUserParticipationReader users,
         IPluginAvailability pluginAvailability,
-        IQueueDataMaintenance dataMaintenance)
+        IQueueDataMaintenance dataMaintenance, IQueueNotificationTargets? notificationTargets = null)
     {
         _queues = queues;
+        _notificationTargets = notificationTargets;
         _state = state;
         _plansChanged = plansChanged;
         _admission = admission;
@@ -70,7 +72,8 @@ internal sealed class QueueCommands
                         duplicateName = true;
                         error = "队列名称重复：调度队列已存在同名队列";
                     }
-                    error ??= Limits.CheckTimeSets(candidate.TimeSets.Count)
+                    error ??= _notificationTargets?.Validate(candidate.NotificationTaskIds)
+                        ?? Limits.CheckTimeSets(candidate.TimeSets.Count)
                         ?? CheckTimeFormat(candidate)
                         ?? QueueCompositionPolicy.CheckDependencies(candidate)
                         ?? Limits.CheckQueueTotalUsers(QueueCompositionPolicy.QueueTotalUsers(scripts, _users, candidate))
@@ -154,7 +157,8 @@ internal sealed class QueueCommands
                                 duplicateName = true;
                                 error = "队列名称重复：调度队列已存在同名队列";
                             }
-                            error ??= Limits.CheckTimeSets(candidate.TimeSets.Count)
+                            error ??= _notificationTargets?.Validate(candidate.NotificationTaskIds, existing.NotificationTaskIds)
+                        ?? Limits.CheckTimeSets(candidate.TimeSets.Count)
                                 ?? CheckTimeFormat(candidate)
                                 ?? QueueCompositionPolicy.CheckDependencies(candidate)
                                 ?? Limits.CheckQueueTotalUsers(QueueCompositionPolicy.QueueTotalUsers(scripts, _users, candidate))

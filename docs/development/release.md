@@ -47,7 +47,7 @@ gh workflow run release.yml --ref main -f operation=publish-only -f tag=<已有 
 
 源码 `src/Modules/Plugins/Repository/BundledPlugins.json` 只选择 EmulatorSupport 和 LiveScreenshot，不固定版本。候选在一次 source plan 固定的 Plugins SHA 中读取稳定 catalog 与对应 ZIP，检查 catalog 投影、包摘要与大小、最低宿主版本、manifest 身份及安全条目，再生成含精确版本和逐文件摘要的 `BundledPlugins.json`。生成清单与插件载荷一起进入 bundled 阶段；生产编译通过 `NexusBundledPluginsManifest` 嵌入同一份清单，首次安装仍按精确字节确权。
 
-本机验收及 PR 生产编译使用相同解析器。消费阶段核对固定两仓 SHA、完整阶段指纹和清单与载荷对应关系；writer 只复用已验证候选，不重新获取最新 catalog 或包。稳定 catalog 发布新插件版本后，下次 Host 候选自动选择该快照中的版本；不改变已构建候选或已公开发行物。
+正式候选使用上述稳定解析器。PR 生产编译固定官方 Plugins develop 的完整 SHA，从隔离源码实际打包两个预装插件，复用本机验收的包摘要与清单装配器，避免 API 升级依赖尚未发布的稳定包。该路径不写稳定 catalog，也不产生发布资格。消费阶段核对固定两仓 SHA、完整阶段指纹和清单与载荷对应关系；writer 只复用已验证候选，不重新获取最新 catalog 或包。稳定 catalog 发布新插件版本后，下次 Host 候选自动选择该快照中的版本；不改变已构建候选或已公开发行物。
 
 ### 资产与 SHA 规则
 

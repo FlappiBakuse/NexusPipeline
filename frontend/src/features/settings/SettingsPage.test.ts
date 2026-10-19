@@ -40,7 +40,7 @@ afterEach(() => { wrapper?.unmount(); document.body.innerHTML = ""; vi.unstubAll
 
 async function setup() {
   wrapper = mount(SettingsPage, { attachTo: document.body, global: {
-    plugins: [createPinia()], stubs: { SettingsNotificationsSection: true, SettingsNetworkSection: true, SettingsUpdatesSection: true, DiagnosticsSection: true },
+    plugins: [createPinia()], stubs: { SettingsNetworkSection: true, SettingsUpdatesSection: true, DiagnosticsSection: true },
   } });
   await flushPromises();
   wrapper.getComponent(SettingsRemoteAccessSection).vm.$emit("toggle");

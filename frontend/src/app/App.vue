@@ -63,6 +63,7 @@ const navigation = [
   ["users", "users", "shell.users"],
   ["history", "history", "shell.history"],
   ["plugins", "plugins", "shell.plugins"],
+  ["notifications", "bell", "notifications.title"],
   ["settings", "settings", "shell.settings"],
 ] as const;
 const preferencesUnavailable = document.documentElement.dataset.desktopPreferences === 'unavailable';
@@ -180,7 +181,7 @@ function onSidebarClick(event: MouseEvent) {
   <div class="app-shell" :class="{ 'nav-open': shell.navOpen, 'desktop-shell': !!desktop }" :inert="shell.recoveryPhase === 'navigating' || shutdownNotice">
     <aside id="sidebar" class="sidebar" :aria-label="t('shell.nav.main')" data-i18n-aria-label="shell.nav.main" :inert="isMobile && !shell.navOpen" :aria-hidden="isMobile ? (shell.navOpen ? 'false' : 'true') : undefined" @click="onSidebarClick">
       <div class="brand"><div class="brand-mark" aria-hidden="true">N</div><div class="brand-copy"><strong>NexusPipeline</strong><span data-i18n="shell.brand_suffix"></span></div></div>
-      <div class="sidebar-navigation">
+      <NxpScrollArea class="sidebar-navigation" viewport-class="sidebar-navigation-viewport" :aria-label="t('shell.nav.main')">
       <div class="nav-caption" data-i18n="shell.workbench"></div>
         <nav class="main-nav" :aria-label="t('shell.workbench')" data-i18n-aria-label="shell.workbench">
         <RouterLink v-for="[path, icon, label] in navigation.slice(0, 3)" :key="path" :to="`/${path}`" :data-page="path" :data-testid="`nav-${path}`" :class="{ active: segments[0] === path }" :aria-current="segments[0] === path ? 'page' : undefined" @click="closeNav"><span class="nav-icon"><NxpIcon :name="icon" /></span><span :data-i18n="label"></span></RouterLink>
@@ -194,7 +195,7 @@ function onSidebarClick(event: MouseEvent) {
       <nav class="main-nav" :aria-label="t('shell.system')" data-i18n-aria-label="shell.system">
         <RouterLink v-for="[path, icon, label] in navigation.slice(6)" :key="path" :to="`/${path}`" :data-page="path" :data-testid="`nav-${path}`" :class="{ active: segments[0] === path }" :aria-current="segments[0] === path ? 'page' : undefined" @click="closeNav"><span class="nav-icon"><NxpIcon :name="icon" /></span><span :data-i18n="label"></span></RouterLink>
       </nav>
-      </div>
+      </NxpScrollArea>
       <div class="sidebar-foot"><div class="sidebar-foot-copy"><span id="local-addr" data-testid="local-addr">{{ localAddress }}</span><span id="app-version" :title="shell.identityConnection === 'online' ? '' : t('shell.recovery.disconnected')">{{ t('common.current_version') }} · {{ shell.hostVersion || t('shell.version_unknown') }}</span></div><NxpIconButton :label="t('shell.theme_toggle')" data-i18n-aria-label="shell.theme_toggle" @click="cycleTheme"><span data-theme-icon aria-hidden="true"><NxpIcon name="theme" /></span></NxpIconButton></div>
     </aside>
     <div class="nav-backdrop" @click.capture="closeNav"><NxpButton type="button" :aria-label="t('shell.close_navigation')" data-i18n-aria-label="shell.close_navigation" @pointerdown="closeNav" @click.stop="closeNav" /></div>

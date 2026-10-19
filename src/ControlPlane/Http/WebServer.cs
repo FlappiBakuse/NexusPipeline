@@ -1,3 +1,4 @@
+using NexusPipeline.Modules.Notifications;
 using NexusPipeline.Modules.Scripts.Contracts;
 using System.Net;
 using System.Net.Sockets;
@@ -104,6 +105,8 @@ internal sealed class WebServer : IDisposable
                 var type when type == typeof(string[]) => seg,
                 var type when type == typeof(CancellationToken) => cancellationToken,
                 var type when type == typeof(SettingsCommands) => routeBindings.SettingsCommands,
+                var type when type == typeof(NotificationTasks) => routeBindings.Notifications,
+                var type when type == typeof(NotificationDelivery) => routeBindings.NotificationDelivery,
                 var type when type == typeof(ScriptCommands) => routeBindings.ScriptCommands,
                 var type when type == typeof(IProviderConfigurationOperations) => routeBindings.ProviderConfigurations,
                 var type when type == typeof(QueueCommands) => routeBindings.QueueCommands,
