@@ -1,0 +1,217 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/update-recipe.schema.json",
+  "$defs": {
+    "file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "sizeBytes",
+        "sha256"
+      ],
+      "properties": {
+        "path": {
+          "$ref": "common.schema.json#/$defs/relativePath"
+        },
+        "sizeBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 268435456
+        },
+        "sha256": {
+          "$ref": "common.schema.json#/$defs/sha256"
+        }
+      }
+    }
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "packageKind",
+    "product",
+    "rid",
+    "installationGeneration",
+    "target",
+    "base",
+    "requirements",
+    "includedFiles",
+    "reusedFiles",
+    "removedFiles",
+    "bundledFiles",
+    "manualCover"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "packageKind": {
+      "enum": [
+        "portable",
+        "update"
+      ]
+    },
+    "product": {
+      "const": "NexusPipeline"
+    },
+    "rid": {
+      "const": "win-x64"
+    },
+    "installationGeneration": {
+      "const": "g0180"
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "buildId",
+        "frontendHash",
+        "payloadManifestSha256"
+      ],
+      "properties": {
+        "version": {
+          "$ref": "common.schema.json#/$defs/releaseVersion"
+        },
+        "buildId": {
+          "$ref": "common.schema.json#/$defs/sha256"
+        },
+        "frontendHash": {
+          "$ref": "common.schema.json#/$defs/sha256"
+        },
+        "payloadManifestSha256": {
+          "$ref": "common.schema.json#/$defs/sha256"
+        }
+      }
+    },
+    "base": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "releaseTag",
+            "releaseId",
+            "assetId",
+            "assetSha256",
+            "payloadManifestSha256"
+          ],
+          "properties": {
+            "releaseTag": {
+              "type": "string",
+              "minLength": 2,
+              "maxLength": 100
+            },
+            "releaseId": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "assetId": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "assetSha256": {
+              "$ref": "common.schema.json#/$defs/sha256"
+            },
+            "payloadManifestSha256": {
+              "$ref": "common.schema.json#/$defs/sha256"
+            }
+          }
+        }
+      ]
+    },
+    "requirements": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "readerProtocol",
+        "requiredCapabilities",
+        "routeId"
+      ],
+      "properties": {
+        "readerProtocol": {
+          "const": 2
+        },
+        "requiredCapabilities": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": {
+            "enum": [
+              "payload-manifest-v2",
+              "single-delta-v1",
+              "transaction-recovery-v1"
+            ]
+          }
+        },
+        "routeId": {
+          "const": "g0180-no-store-change-v1"
+        }
+      }
+    },
+    "includedFiles": {
+      "type": "array",
+      "maxItems": 4096,
+      "items": {
+        "$ref": "#/$defs/file"
+      }
+    },
+    "reusedFiles": {
+      "type": "array",
+      "maxItems": 4096,
+      "items": {
+        "$ref": "#/$defs/file"
+      }
+    },
+    "removedFiles": {
+      "type": "array",
+      "maxItems": 4096,
+      "items": {
+        "$ref": "#/$defs/file"
+      }
+    },
+    "bundledFiles": {
+      "type": "array",
+      "maxItems": 4096,
+      "items": {
+        "$ref": "#/$defs/file"
+      }
+    },
+    "manualCover": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "allowed",
+        "minimumSourceVersion",
+        "exactBaseRequired",
+        "requiresPostStartReconciliation",
+        "reason"
+      ],
+      "properties": {
+        "allowed": {
+          "type": "boolean"
+        },
+        "minimumSourceVersion": {
+          "const": "0.18.0"
+        },
+        "exactBaseRequired": {
+          "type": "boolean"
+        },
+        "requiresPostStartReconciliation": {
+          "type": "boolean"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      }
+    }
+  }
+}

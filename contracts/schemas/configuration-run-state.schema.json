@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/configuration-run-state.schema.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["format", "version", "instanceId", "ownerOperationId", "configurationOperationId", "autoSyncEnabled", "syncInitially", "syncAtFinish", "initialPublicationRevision", "source", "tasks"],
+  "$defs": {
+    "ids": {"type": "array", "maxItems": 256, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 256}},
+    "taskSource": {
+      "oneOf": [
+        {
+          "type": "object", "additionalProperties": false, "required": ["kind", "items", "idProperty", "enabledProperty"],
+          "properties": {
+            "kind": {"const": "objects"}, "items": {"$ref": "configuration-selector.schema.json"},
+            "idProperty": {"type": "string", "minLength": 1, "maxLength": 256},
+            "enabledProperty": {"type": "string", "minLength": 1, "maxLength": 256},
+            "idPrefix": {"type": "string", "maxLength": 120}
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false, "required": ["kind", "items"],
+          "properties": {"kind": {"const": "map"}, "items": {"$ref": "configuration-selector.schema.json"},
+            "idPrefix": {"type": "string", "maxLength": 120}}
+        },
+        {
+          "type": "object", "additionalProperties": false, "required": ["kind", "ids", "states"],
+          "properties": {
+            "kind": {"const": "parallel"}, "ids": {"$ref": "configuration-selector.schema.json"},
+            "states": {"$ref": "configuration-selector.schema.json"},
+            "idPrefix": {"type": "string", "maxLength": 120}
+          }
+        },
+        {
+          "type": "object", "additionalProperties": false, "required": ["kind", "targets"],
+          "properties": {
+            "kind": {"const": "selectors"}, "idPrefix": {"type": "string", "maxLength": 120},
+            "targets": {
+              "type": "array", "minItems": 1, "maxItems": 256,
+              "items": {
+                "type": "object", "additionalProperties": false, "required": ["taskId", "selector"],
+                "properties": {"taskId": {"type": "string", "minLength": 1, "maxLength": 256},
+                  "selector": {"$ref": "configuration-selector.schema.json", "minItems": 1}}
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "properties": {
+    "format": {"const": "nexus.configuration.run-state"}, "version": {"const": 1},
+    "instanceId": {"$ref": "common.schema.json#/$defs/uuid"},
+    "ownerOperationId": {"$ref": "common.schema.json#/$defs/uuid"},
+    "configurationOperationId": {"$ref": "common.schema.json#/$defs/uuid"},
+    "autoSyncEnabled": {"type": "boolean"},
+    "syncInitially": {"type": "boolean"}, "syncAtFinish": {"type": "boolean"},
+    "initialPublicationRevision": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+    "inputSnapshot": {"$ref": "execution-plan.schema.json#/$defs/planReference"},
+    "source": {
+      "type": "object", "additionalProperties": false,
+      "required": ["bindingId", "resourceId", "revision", "bindingRevision", "userId", "scriptId", "contract", "snapshot"],
+      "properties": {
+        "bindingId": {"$ref": "common.schema.json#/$defs/uuid"},
+        "resourceId": {"type": "string", "minLength": 1, "maxLength": 120},
+        "revision": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "bindingRevision": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "userId": {"$ref": "common.schema.json#/$defs/uuid"}, "scriptId": {"$ref": "common.schema.json#/$defs/uuid"},
+        "snapshot": {"$ref": "execution-plan.schema.json#/$defs/planReference"},
+        "contract": {
+          "type": "object", "additionalProperties": false, "required": ["revision", "definitionSha256", "requiresInstance"],
+          "properties": {
+            "revision": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+            "definitionSha256": {"$ref": "common.schema.json#/$defs/sha256"},
+            "instanceKey": {"type": "string", "minLength": 1, "maxLength": 256}, "requiresInstance": {"type": "boolean"}
+          },
+          "allOf": [{"if": {"properties": {"requiresInstance": {"const": true}}}, "then": {"required": ["instanceKey"]}}]
+        }
+      }
+    },
+    "tasks": {
+      "type": "array", "maxItems": 32,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["relativePath", "syntax", "access", "declaration", "selectedIds", "initialValues"],
+        "properties": {
+          "relativePath": {"type": "string", "maxLength": 1024}, "syntax": {"enum": ["json", "jsonWithComments", "yaml"]},
+          "access": {"$ref": "configuration-selector.schema.json#/$defs/access"},
+          "declaration": {
+            "type": "object", "additionalProperties": false, "required": ["source", "authorizedIds"],
+            "properties": {"source": {"$ref": "#/$defs/taskSource"}, "authorizedIds": {"$ref": "#/$defs/ids", "minItems": 1}}
+          },
+          "selectedIds": {"$ref": "#/$defs/ids"},
+          "initialValues": {
+            "type": "array", "minItems": 1, "maxItems": 256,
+            "items": {
+              "type": "object", "additionalProperties": false, "required": ["taskId", "enabled"],
+              "properties": {"taskId": {"type": "string", "minLength": 1, "maxLength": 256}, "enabled": {"type": "boolean"}}
+            }
+          }
+        }
+      }
+    }
+  }
+}

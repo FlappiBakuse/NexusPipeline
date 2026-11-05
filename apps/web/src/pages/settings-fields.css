@@ -1,0 +1,55 @@
+.settings-fields {
+  display: grid;
+  gap: 24px;
+  min-width: 0;
+}
+.columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.proxy-credentials {
+  display: grid;
+  gap: 16px;
+}
+.three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+input {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 40px;
+  font: inherit;
+  font-weight: 400;
+}
+.switches {
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  overflow: hidden;
+}
+nexus-switch-setting {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+nexus-switch-setting + nexus-switch-setting {
+  border-top: 1px solid var(--border);
+}
+.divider {
+  height: 1px;
+  background: var(--border);
+}
+@media (max-width: 700px) {
+  .columns,
+  .three {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

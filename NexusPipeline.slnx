@@ -1,0 +1,18 @@
+<Solution>
+  <Project Path="src/core/NexusPipeline.Core.csproj" />
+  <Project Path="src/platform/NexusPipeline.Platform.csproj" />
+  <Project Path="sdk/dotnet/NexusPipeline.Extensibility.csproj" />
+  <Project Path="apps/host/NexusPipeline.Host.csproj" />
+  <Project Path="apps/maintenance/NexusPipeline.Maintenance.csproj" />
+  <Project Path="apps/installer/NexusPipeline.Installer.csproj" />
+  <Project Path="tooling/boundaries/NexusPipeline.Boundaries.csproj" />
+  <Project Path="tests/contracts/NexusPipeline.ContractTests.csproj" />
+  <Project Path="tests/unit/NexusPipeline.CoreTests.csproj" />
+  <Project Path="tests/windows/NexusPipeline.WindowsTests.csproj" />
+  <Project Path="tests/fixtures/OwnedWriter/OwnedWriter.csproj" />
+  <Project Path="tests/fixtures/TargetGame/TargetGame.csproj" />
+  <Project Path="tests/fixtures/AndroidTool/AndroidTool.csproj" />
+  <Project Path="tests/fixtures/ManagedExtension/ManagedExtension.csproj" />
+  <Project Path="tests/integration/storage/NexusPipeline.StorageTests.csproj" />
+  <Project Path="tests/integration/storage-data/NexusPipeline.StorageDataTests.csproj" />
+</Solution>

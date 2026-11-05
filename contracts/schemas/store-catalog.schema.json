@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/store-catalog.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "version",
+    "generationId",
+    "sequence",
+    "channel",
+    "publishedAt",
+    "entries"
+  ],
+  "properties": {
+    "format": {
+      "const": "nexus.store.catalog"
+    },
+    "version": {
+      "const": 1
+    },
+    "generationId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "sequence": {
+      "$ref": "common.schema.json#/$defs/sequence"
+    },
+    "channel": {
+      "enum": [
+        "stable",
+        "develop"
+      ]
+    },
+    "publishedAt": {
+      "$ref": "common.schema.json#/$defs/utcTime"
+    },
+    "entries": {
+      "type": "array",
+      "maxItems": 1000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "extensionId",
+          "artifactName",
+          "packageVersion",
+          "kind",
+          "minHostVersion",
+          "sdkVersion",
+          "artifact",
+          "manifestSha256"
+        ],
+        "properties": {
+          "extensionId": {
+            "$ref": "common.schema.json#/$defs/extensionId"
+          },
+          "artifactName": {
+            "$ref": "common.schema.json#/$defs/artifactName"
+          },
+          "packageVersion": {
+            "$ref": "common.schema.json#/$defs/releaseVersion"
+          },
+          "kind": {
+            "enum": [
+              "managed-code",
+              "data-specialized"
+            ]
+          },
+          "minHostVersion": {
+            "$ref": "common.schema.json#/$defs/releaseVersion"
+          },
+          "sdkVersion": {
+            "const": "0.1.0"
+          },
+          "artifact": {
+            "$ref": "common.schema.json#/$defs/artifact"
+          },
+          "manifestSha256": {
+            "$ref": "common.schema.json#/$defs/sha256"
+          },
+          "metadata": {
+            "$ref": "extension-metadata.schema.json"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "parameters": [{"name": "runId", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}],
+  "get": {"operationId": "readCompletedRun", "description": "records.read; stable run ID lookup. Returns the same CompletedRunRecord shape as a records page item, including finalAttempt.runId. No query. Retired or unknown runs are not returned.",
+    "responses": {"200": {"description": "CompletedRunRecord"}, "404": {"description": "record_not_found"}, "403": {"description": "Capability unavailable"}}}
+}

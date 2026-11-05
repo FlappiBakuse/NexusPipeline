@@ -1,0 +1,98 @@
+.notifications-page {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+h2,
+p {
+  margin: 0;
+}
+.task-list {
+  display: block;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  overflow: hidden;
+  background: var(--panel);
+}
+.task {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 104px;
+  padding: 18px 12px;
+}
+.task + .task {
+  border-top: 1px solid var(--border);
+}
+.avatar {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.copy {
+  display: grid;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  padding-left: 4px;
+}
+.copy h2 {
+  font-size: 16px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.badges {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.actions button {
+  min-width: 96px;
+}
+.empty {
+  display: grid;
+  align-content: center;
+  gap: 8px;
+  min-height: 147px;
+  padding: 24px;
+  text-align: center;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--panel);
+}
+.empty h2 {
+  font-size: 17px;
+}
+.empty p {
+  color: var(--muted);
+}
+.error {
+  color: var(--nx-color-danger);
+}
+@media (max-width: 700px) {
+  .task {
+    flex-wrap: wrap;
+  }
+  .task .actions {
+    width: 100%;
+    padding-left: 44px;
+  }
+  .task .actions button:first-child {
+    flex: 1;
+  }
+  .task .actions button:last-child {
+    min-width: 64px;
+  }
+}

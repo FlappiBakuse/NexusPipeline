@@ -1,0 +1,21 @@
+{
+  "name": "nexus-file-picker",
+  "properties": {
+    "accept": "string",
+    "multiple": "boolean",
+    "disabled": "boolean"
+  },
+  "defaults": {
+    "multiple": false,
+    "accept": "",
+    "disabled": false
+  },
+  "slots": [
+    "label"
+  ],
+  "events": {
+    "nexus-change": "Change<File[]>"
+  },
+  "focus": "picker trigger",
+  "accessibility": "实际File仅property/事件；取消不伪造选择；不能把浏览器文件名当宿主路径"
+}

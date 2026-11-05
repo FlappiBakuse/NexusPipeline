@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/execution-project.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "fingerprint",
+    "pipeName"
+  ],
+  "properties": {
+    "fingerprint": {
+      "$ref": "common.schema.json#/$defs/sha256"
+    },
+    "pipeName": {
+      "type": "string",
+      "pattern": "^NexusExecutionProject-[0-9a-f]{64}$"
+    }
+  }
+}

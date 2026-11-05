@@ -1,0 +1,27 @@
+{
+  "parameters": [{"name": "operationId", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}],
+  "get": {
+    "operationId": "readHostMaintenanceOperation",
+    "description": "Requires control.maintenance.read and the original operation subject. No query parameters. CLI: maintenance-operation --id <uuid>. Not exposed through MCP.",
+    "responses": {
+      "200": {
+        "description": "Current maintenance operation metadata",
+        "content": {"application/json": {"schema": {
+          "type": "object", "additionalProperties": false,
+          "required": ["operationId", "hostVersion", "timing", "state", "journalId", "outcome"],
+          "properties": {
+            "operationId": {"type": "string", "format": "uuid"},
+            "hostVersion": {"type": "string"},
+            "timing": {"enum": ["now", "whenIdle", "nextStartup"]},
+            "state": {"enum": ["pending", "starting", "completed", "cancelled", "quarantined"]},
+            "journalId": {"type": ["string", "null"], "format": "uuid"},
+            "outcome": {"enum": ["updated", "originalRestored", "notExecuted", null], "description": "Only completed operations carry an outcome. Completed alone does not mean the candidate was adopted."}
+          }
+        }}}
+      },
+      "400": {"description": "Invalid identifier or query"},
+      "403": {"description": "Origin or capability rejected"},
+      "404": {"description": "No operation owned by this subject"}
+    }
+  }
+}

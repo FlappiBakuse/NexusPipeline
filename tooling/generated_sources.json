@@ -1,0 +1,101 @@
+{
+  "files": [
+    {
+      "path": "contracts/sdk-public/schemas/task-adapter.schema.json",
+      "generator": "tooling/contract_codegen.py",
+      "verifyCommand": [
+        "python",
+        "-B",
+        "tooling/contract_codegen.py",
+        "--check"
+      ],
+      "reason": "The public task adapter schema includes the complete referenced retry and finite repetition contract."
+    },
+    {
+      "path": "contracts/fingerprint.json",
+      "generator": "tooling/contract_codegen.py",
+      "verifyCommand": [
+        "python",
+        "-B",
+        "tooling/contract_codegen.py",
+        "--check"
+      ],
+      "reason": "Public compatibility identity contains only reviewed public schema semantics and actual compiled SDK API descriptions."
+    },
+    {
+      "path": "sdk/frontend/src/protocol.generated.ts",
+      "generator": "tooling/contract_codegen.py",
+      "verifyCommand": [
+        "python",
+        "-B",
+        "tooling/contract_codegen.py",
+        "--check"
+      ],
+      "reason": "The finite plugin export and necessary reference closure generate the frontend SDK wire projection."
+    },
+    {
+      "path": "sdk/frontend/src/ui-elements.generated.ts",
+      "generator": "tooling/contract_codegen.py",
+      "verifyCommand": [
+        "python",
+        "-B",
+        "tooling/contract_codegen.py",
+        "--check"
+      ],
+      "reason": "The single public UI ABI registry generates all forty element property types and shared readonly event payloads."
+    },
+    {
+      "path": "contracts/source-fingerprint.json",
+      "generator": "tooling/contract_codegen.py",
+      "verifyCommand": [
+        "python",
+        "-B",
+        "tooling/contract_codegen.py",
+        "--check"
+      ],
+      "reason": "Complete contract, SDK source and generator input provenance is recorded separately from runtime compatibility."
+    },
+    {
+      "path": "apps/web/src/control/wire.generated.ts",
+      "generator": "tooling/contract_codegen.py",
+      "verifyCommand": [
+        "python",
+        "-B",
+        "tooling/contract_codegen.py",
+        "--check"
+      ]
+    },
+    {
+      "path": "apps/web/src/control/schemas.generated.ts",
+      "generator": "tooling/contract_codegen.py",
+      "verifyCommand": [
+        "python",
+        "-B",
+        "tooling/contract_codegen.py",
+        "--check"
+      ]
+    },
+    {
+      "path": "apps/web/package-lock.json",
+      "generator": "npm",
+      "verifyCommand": [
+        "python",
+        "-B",
+        "tooling/web_build.py",
+        "--check-lock"
+      ],
+      "reason": "Native npm dependency resolution lock; npm ci verifies the exact external package graph and integrity."
+    },
+    {
+      "path": "contracts/sdk-public/schemas/extension-manifest.schema.json",
+      "generator": "tooling/contract_codegen.py",
+      "verifyCommand": [
+        "python",
+        "-B",
+        "tooling/contract_codegen.py",
+        "--check"
+      ],
+      "reason": "The public extension manifest projects the complete permission and source discovery declarations from its authoritative schema."
+    }
+  ]
+}

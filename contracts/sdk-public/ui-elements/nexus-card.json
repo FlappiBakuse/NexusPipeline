@@ -1,0 +1,17 @@
+{
+  "name": "nexus-card",
+  "properties": {
+    "surface": "primary|secondary|nested",
+    "accessibleName": "string"
+  },
+  "defaults": {
+    "surface": "primary",
+    "accessibleName": ""
+  },
+  "slots": [
+    "default"
+  ],
+  "events": {},
+  "focus": "none",
+  "accessibility": "语义表面最多三层；深数据完整；不自动生成按钮角色"
+}

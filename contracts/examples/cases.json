@@ -1,0 +1,190 @@
+{
+  "purpose": "synthetic-schema-validation-only",
+  "cases": [
+    {
+      "file": "writer-job-closure-run.json",
+      "schema": "../schemas/writer-job-closure.schema.json",
+      "expected": "accept"
+    },
+    {
+      "file": "negative-writer-job-closure-run-elapsed.json",
+      "schema": "../schemas/writer-job-closure.schema.json",
+      "expected": "reject"
+    },
+    {
+      "file": "negative-writer-job-closure-run-null.json",
+      "schema": "../schemas/writer-job-closure.schema.json",
+      "expected": "reject"
+    },
+    {
+      "file": "writer-job-closure.json",
+      "schema": "../schemas/writer-job-closure.schema.json",
+      "expected": "accept"
+    },
+    {
+      "file": "negative-writer-job-closure.json",
+      "schema": "../schemas/writer-job-closure.schema.json",
+      "expected": "reject"
+    },
+    {
+      "file": "configuration-edit-output.json",
+      "schema": "../schemas/configuration-edit-output.schema.json",
+      "expected": "accept"
+    },
+    {
+      "file": "negative-configuration-edit-output.json",
+      "schema": "../schemas/configuration-edit-output.schema.json",
+      "expected": "reject"
+    },
+    {
+      "file": "configuration-edit-output-reference.json",
+      "schema": "../schemas/configuration-edit-output-reference.schema.json",
+      "expected": "accept"
+    },
+    {
+      "file": "negative-configuration-edit-output-reference.json",
+      "schema": "../schemas/configuration-edit-output-reference.schema.json",
+      "expected": "reject"
+    },
+    {
+      "file": "payload-install-plan.json",
+      "schema": "../schemas/payload-apply-plan.schema.json",
+      "expected": "accept"
+    },
+    {
+      "file": "negative-payload-install-source.json",
+      "schema": "../schemas/payload-apply-plan.schema.json",
+      "expected": "reject"
+    },
+    {
+      "file": "negative-payload-host-removal.json",
+      "schema": "../schemas/payload-apply-plan.schema.json",
+      "expected": "reject"
+    },
+    {
+      "file": "control-error.json",
+      "schema": "../schemas/control-error.schema.json",
+      "expected": "accept"
+    },
+    {
+      "file": "event-state.json",
+      "schema": "../schemas/event.schema.json",
+      "expected": "accept"
+    },
+    {
+      "file": "managed-manifest.json",
+      "schema": "../schemas/extension-manifest.schema.json",
+      "expected": "accept"
+    },
+    {
+      "file": "specialized-manifest.json",
+      "schema": "../schemas/extension-manifest.schema.json",
+      "expected": "accept"
+    },
+    {
+      "file": "store-catalog.json",
+      "schema": "../schemas/store-catalog.schema.json",
+      "expected": "accept"
+    },
+    {
+      "file": "store-pointer.json",
+      "schema": "../schemas/store-pointer.schema.json",
+      "expected": "accept"
+    },
+    {
+      "file": "detached-signature.json",
+      "schema": "../schemas/detached-signature.schema.json",
+      "expected": "accept"
+    },
+    {
+      "file": "execution-journal.json",
+      "schema": "../schemas/execution-journal.schema.json",
+      "expected": "accept"
+    },
+    {
+      "file": "negative-legacy-manifest.json",
+      "schema": "../schemas/extension-manifest.schema.json",
+      "expected": "reject"
+    },
+    {
+      "file": "negative-unknown-journal.json",
+      "schema": "../schemas/execution-journal.schema.json",
+      "expected": "reject"
+    },
+    {
+      "file": "negative-specialized-frontend.json",
+      "schema": "../schemas/extension-manifest.schema.json",
+      "expected": "reject"
+    },
+    {
+      "file": "negative-sdk-version.json",
+      "schema": "../schemas/extension-manifest.schema.json",
+      "expected": "reject"
+    },
+    {
+      "file": "negative-event-sequence.json",
+      "schema": "../schemas/event.schema.json",
+      "expected": "reject"
+    },
+    {
+      "file": "configuration-editor-plan.json",
+      "schema": "../schemas/configuration-exchange-plan.schema.json",
+      "expected": "accept"
+    },
+    {
+      "file": "negative-editor-command.json",
+      "schema": "../schemas/configuration-exchange-plan.schema.json",
+      "expected": "reject"
+    },
+    {
+      "file": "negative-editor-claims.json",
+      "schema": "../schemas/configuration-exchange-plan.schema.json",
+      "expected": "reject"
+    },
+    {
+      "file": "negative-editor-document.json",
+      "schema": "../schemas/configuration-exchange-plan.schema.json",
+      "expected": "reject"
+    },
+    {
+      "file": "configuration-run-state.json",
+      "schema": "../schemas/configuration-run-state.schema.json",
+      "expected": "accept"
+    },
+    {
+      "file": "negative-run-state-legacy-path.json",
+      "schema": "../schemas/configuration-run-state.schema.json",
+      "expected": "reject"
+    },
+    {
+      "file": "negative-run-state-unknown-version.json",
+      "schema": "../schemas/configuration-run-state.schema.json",
+      "expected": "reject"
+    },
+    {
+      "file": "negative-run-state-unknown-fact.json",
+      "schema": "../schemas/configuration-run-state.schema.json",
+      "expected": "reject"
+    },
+    {
+      "file": "file-cleanup-work.json",
+      "schema": "../schemas/file-cleanup-plan.schema.json",
+      "expected": "accept"
+    },
+    {
+      "file": "file-cleanup-blob.json",
+      "schema": "../schemas/file-cleanup-plan.schema.json",
+      "expected": "accept"
+    },
+    {
+      "file": "negative-file-cleanup-empty.json",
+      "schema": "../schemas/file-cleanup-plan.schema.json",
+      "expected": "reject"
+    },
+    {
+      "file": "negative-file-cleanup-mixed.json",
+      "schema": "../schemas/file-cleanup-plan.schema.json",
+      "expected": "reject"
+    }
+  ]
+}

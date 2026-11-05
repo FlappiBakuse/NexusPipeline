@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/control-media-grant.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "version",
+    "runId",
+    "attemptId",
+    "extensionId",
+    "providerId"
+  ],
+  "properties": {
+    "format": {
+      "const": "nexus.control.media-grant"
+    },
+    "version": {
+      "const": 1
+    },
+    "runId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "attemptId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "extensionId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,79}$"
+    },
+    "providerId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    }
+  }
+}

@@ -11,6 +11,11 @@
       "version": "0.17.0",
       "code": "desktop-shell-embedded-ui",
       "migrationUrl": "https://github.com/FlappiBakuse/NexusPipeline/blob/main/docs/user/README.md"
+    },
+    {
+      "version": "0.18.0",
+      "code": "new-instance-sdk-0.1",
+      "migrationUrl": "https://github.com/FlappiBakuse/NexusPipeline/blob/main/docs/users/install-018.md"
     }
   ]
 }

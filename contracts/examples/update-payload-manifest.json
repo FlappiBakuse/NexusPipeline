@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 2,
+  "product": "NexusPipeline",
+  "productVersion": "0.18.0",
+  "installationGeneration": "g0180",
+  "rid": "win-x64",
+  "sourceSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "sourceTreeSha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "buildId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "frontendHash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "desktop": {
+    "entryPoint": "resources/desktop/NexusPipeline.Desktop.exe",
+    "appArchive": "resources/desktop/resources/app.asar",
+    "electronVersion": "44.9.0",
+    "electronArchiveSha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "packageLockSha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "bootstrapProtocolVersion": 1,
+    "runtimeProfileId": "win-x64-en-zh-v1",
+    "runtimeProfileSha256": "1111111111111111111111111111111111111111111111111111111111111111",
+    "runtimeInventorySha256": "beb0bd5e66cbf20a1d6b3bbef1cacd02aa13c07bf63e5fcfd0cfe13c4d6dc40c"
+  },
+  "files": [
+    {
+      "path": "NexusPipeline.exe",
+      "sizeBytes": 1,
+      "sha256": "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+      "kind": "host"
+    },
+    {
+      "path": "NexusPipeline.update.exe",
+      "sizeBytes": 1,
+      "sha256": "4bf5122f344554c53bde2ebb8cd2b7e3d1600ad631c385a5d7cce23c7785459a",
+      "kind": "update-entry"
+    },
+    {
+      "path": "README.md",
+      "sizeBytes": 1,
+      "sha256": "dbc1b4c900ffe48d575b5da5c638040125f65db0fe3e24494b76ea986457d986",
+      "kind": "readme"
+    },
+    {
+      "path": "resources/desktop/NexusPipeline.Desktop.exe",
+      "sizeBytes": 1,
+      "sha256": "084fed08b978af4d7d196a7446a86b58009e636b611db16211b65a9aadff29c5",
+      "kind": "desktop-entry"
+    },
+    {
+      "path": "resources/desktop/locales/en-US.pak",
+      "sizeBytes": 1,
+      "sha256": "e52d9c508c502347344d8c07ad91cbd6068afc75ff6292f062a09ca381c89e71",
+      "kind": "desktop-runtime"
+    },
+    {
+      "path": "resources/desktop/locales/zh-CN.pak",
+      "sizeBytes": 1,
+      "sha256": "e77b9a9ae9e30b0dbdb6f510a264ef9de781501d7b6b92ae89eb059c5ab743db",
+      "kind": "desktop-runtime"
+    },
+    {
+      "path": "resources/desktop/resources/app.asar",
+      "sizeBytes": 1,
+      "sha256": "67586e98fad27da0b9968bc039a1ef34c939b9b8e523a8bef89d478608c5ecf6",
+      "kind": "desktop-app"
+    }
+  ]
+}

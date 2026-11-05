@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/event.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "version",
+    "streamId",
+    "sequence",
+    "occurredAt",
+    "kind",
+    "topic",
+    "subject",
+    "data"
+  ],
+  "properties": {
+    "format": {
+      "const": "nexus.event"
+    },
+    "version": {
+      "const": 1
+    },
+    "streamId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "sequence": {
+      "$ref": "common.schema.json#/$defs/sequence"
+    },
+    "occurredAt": {
+      "$ref": "common.schema.json#/$defs/utcTime"
+    },
+    "kind": {
+      "enum": [
+        "state",
+        "log",
+        "control",
+        "resync"
+      ]
+    },
+    "topic": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$",
+      "maxLength": 120
+    },
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "id"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "id": {
+          "type": "string",
+          "maxLength": 120
+        }
+      }
+    },
+    "data": {
+      "type": "object",
+      "maxProperties": 64
+    },
+    "instanceId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "runId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "attemptId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "operationId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "correlationId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    }
+  }
+}

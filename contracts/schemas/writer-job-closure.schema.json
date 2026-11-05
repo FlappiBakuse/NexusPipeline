@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/writer-job-closure.schema.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["format", "version", "instanceId", "operationId", "writerId", "jobName", "sessionId", "journalIds", "creator", "family", "totalProcesses", "activeProcesses", "disposition", "closedAt"],
+  "$defs": {
+    "process": {
+      "type": "object", "additionalProperties": false,
+      "required": ["processId", "createdAtUtc", "imagePath", "imageSha256", "userSid", "elevated"],
+      "properties": {
+        "processId": {"type": "integer", "minimum": 1, "maximum": 2147483647},
+        "createdAtUtc": {"$ref": "common.schema.json#/$defs/utcTime"},
+        "imagePath": {"type": "string", "minLength": 4, "maxLength": 32767},
+        "imageSha256": {"$ref": "common.schema.json#/$defs/sha256"},
+        "userSid": {"type": "string", "minLength": 3, "maxLength": 256},
+        "elevated": {"type": "boolean"}
+      }
+    }
+  },
+  "properties": {
+    "format": {"const": "nexus.writer.job-closure"}, "version": {"const": 1},
+    "instanceId": {"$ref": "common.schema.json#/$defs/uuid"},
+    "operationId": {"$ref": "common.schema.json#/$defs/uuid"},
+    "writerId": {"$ref": "common.schema.json#/$defs/uuid"},
+    "jobName": {"type": "string", "pattern": "^Local\\\\NexusWorker-[0-9a-f]{32}$"},
+    "sessionId": {"type": "integer", "minimum": 0, "maximum": 2147483647},
+    "journalIds": {"type": "array", "minItems": 1, "maxItems": 32, "uniqueItems": true, "items": {"$ref": "common.schema.json#/$defs/uuid"}},
+    "creator": {"$ref": "#/$defs/process"}, "root": {"$ref": "#/$defs/process"},
+    "family": {"type": "array", "maxItems": 4096, "items": {"$ref": "#/$defs/process"}},
+    "totalProcesses": {"type": "integer", "minimum": 0, "maximum": 4096},
+    "activeProcesses": {"const": 0}, "disposition": {"enum": ["notExecuted", "stopped"]},
+    "runElapsedMilliseconds": {"type": "integer", "minimum": 0, "maximum": 922337203685477},
+    "closedAt": {"$ref": "common.schema.json#/$defs/utcTime"}
+  }
+}

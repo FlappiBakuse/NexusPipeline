@@ -1,0 +1,23 @@
+.entity-list-page,
+.entity-list {
+  display: grid;
+  gap: 14px;
+}
+.automation-empty {
+  display: grid;
+  place-content: center;
+  text-align: center;
+  min-height: 147px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--panel);
+  gap: 8px;
+}
+.automation-empty p {
+  color: var(--muted);
+  margin: 0;
+  font-size: 13px;
+}
+.error-text {
+  color: var(--bad);
+}

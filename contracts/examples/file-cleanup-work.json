@@ -1,0 +1,14 @@
+{
+  "format": "nexus.file.cleanup-plan",
+  "version": 1,
+  "instanceId": "c0560436-badc-4dfd-bd53-68acda58a855",
+  "operationId": "df69a859-b6db-4dc6-b3eb-d74ae0e7d1a2",
+  "journalId": "af8868dd-c9c8-4ba5-88ed-099f079fa5ec",
+  "operationKind": "fileCleanup",
+  "items": [],
+  "extensionWork": {
+    "relativePath": "blobs/plans/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.json",
+    "sizeBytes": 1,
+    "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  }
+}

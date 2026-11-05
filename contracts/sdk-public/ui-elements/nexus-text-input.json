@@ -1,0 +1,25 @@
+{
+  "name": "nexus-text-input",
+  "properties": {
+    "value": "string",
+    "disabled": "boolean",
+    "type": "text|password|email|url|search|tel",
+    "placeholder": "string",
+    "readOnly": "boolean",
+    "maxLength": "number|null"
+  },
+  "defaults": {
+    "type": "text",
+    "disabled": false,
+    "maxLength": null,
+    "value": "",
+    "placeholder": "",
+    "readOnly": false
+  },
+  "slots": [],
+  "events": {
+    "nexus-change": "Change<string>"
+  },
+  "focus": "input",
+  "accessibility": "label/description/error关联；密码value不反射；IME组合结束规则明确"
+}

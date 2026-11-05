@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/frontend-handshake.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "version",
+    "extensionId",
+    "sdkVersion",
+    "contractFingerprint"
+  ],
+  "properties": {
+    "format": {
+      "const": "nexus.extension.frontend"
+    },
+    "version": {
+      "const": 1
+    },
+    "extensionId": {
+      "$ref": "common.schema.json#/$defs/extensionId"
+    },
+    "sdkVersion": {
+      "const": "0.1.0"
+    },
+    "contractFingerprint": {
+      "$ref": "common.schema.json#/$defs/sha256"
+    }
+  }
+}

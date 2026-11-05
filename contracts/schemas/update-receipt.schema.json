@@ -1,0 +1,259 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/update-receipt.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "version",
+    "instanceId",
+    "operationId",
+    "journalId",
+    "correlationId",
+    "stage",
+    "payloadManifestSha256",
+    "planSha256",
+    "oldPayloadSha256",
+    "candidatePayloadSha256",
+    "storeBinding",
+    "recordedAt",
+    "detailCode"
+  ],
+  "properties": {
+    "format": {
+      "const": "nexus.update.receipt"
+    },
+    "version": {
+      "const": 1
+    },
+    "instanceId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "operationId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "journalId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "correlationId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "stage": {
+      "enum": [
+        "helper-ready",
+        "old-family-stopped",
+        "candidate-started",
+        "candidate-prepared",
+        "candidate-ready",
+        "old-restored",
+        "old-ready",
+        "committed",
+        "not-executed",
+        "quarantined"
+      ]
+    },
+    "payloadManifestSha256": {
+      "$ref": "common.schema.json#/$defs/sha256"
+    },
+    "planSha256": {
+      "$ref": "common.schema.json#/$defs/sha256"
+    },
+    "oldPayloadSha256": {
+      "$ref": "common.schema.json#/$defs/sha256"
+    },
+    "candidatePayloadSha256": {
+      "$ref": "common.schema.json#/$defs/sha256"
+    },
+    "storeBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "channel",
+        "generationId",
+        "sequence",
+        "catalogUrl",
+        "catalogSha256",
+        "signatureUrl"
+      ],
+      "properties": {
+        "channel": {
+          "enum": [
+            "stable",
+            "develop"
+          ]
+        },
+        "generationId": {
+          "$ref": "common.schema.json#/$defs/uuid"
+        },
+        "sequence": {
+          "$ref": "common.schema.json#/$defs/sequence"
+        },
+        "catalogUrl": {
+          "$ref": "common.schema.json#/$defs/httpsUrl"
+        },
+        "catalogSha256": {
+          "$ref": "common.schema.json#/$defs/sha256"
+        },
+        "signatureUrl": {
+          "$ref": "common.schema.json#/$defs/httpsUrl"
+        }
+      }
+    },
+    "process": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "processId",
+        "createdFileTime",
+        "imagePath",
+        "imageSha256",
+        "userSid",
+        "isElevated"
+      ],
+      "properties": {
+        "processId": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "createdFileTime": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "imagePath": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32767
+        },
+        "imageSha256": {
+          "$ref": "common.schema.json#/$defs/sha256"
+        },
+        "userSid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "isElevated": {
+          "type": "boolean"
+        }
+      }
+    },
+    "recordedAt": {
+      "$ref": "common.schema.json#/$defs/utcTime"
+    },
+    "detailCode": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,119}$"
+    },
+    "startup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "handoffId",
+        "generationId",
+        "jobName",
+        "nonce",
+        "installedRoot"
+      ],
+      "properties": {
+        "handoffId": {
+          "$ref": "common.schema.json#/$defs/uuid"
+        },
+        "generationId": {
+          "$ref": "common.schema.json#/$defs/uuid"
+        },
+        "jobName": {
+          "type": "string",
+          "pattern": "^Local\\\\NexusWorker-[a-f0-9]{32}$"
+        },
+        "nonce": {
+          "$ref": "common.schema.json#/$defs/sha256"
+        },
+        "installedRoot": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "volumeSerial",
+            "fileId"
+          ],
+          "properties": {
+            "volumeSerial": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{16}$"
+            },
+            "fileId": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{32}$"
+            }
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "stage": {
+            "enum": [
+              "helper-ready",
+              "old-family-stopped",
+              "candidate-started",
+              "candidate-prepared",
+              "candidate-ready",
+              "old-restored",
+              "old-ready",
+              "committed"
+            ]
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "process"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "stage": {
+            "enum": [
+              "candidate-prepared",
+              "old-ready"
+            ]
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "startup"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "stage": {
+            "enum": [
+              "helper-ready",
+              "old-family-stopped",
+              "candidate-started",
+              "candidate-ready",
+              "old-restored",
+              "committed",
+              "not-executed",
+              "quarantined"
+            ]
+          }
+        }
+      },
+      "then": {
+        "not": {
+          "required": [
+            "startup"
+          ]
+        }
+      }
+    }
+  ]
+}

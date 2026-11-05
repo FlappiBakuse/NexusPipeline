@@ -1,0 +1,23 @@
+<Project>
+  <ItemGroup Condition="'$(PublishReadyToRun)' == 'true'">
+    <PublishReadyToRunExclude Include="NexusPipeline.Extensibility.dll" />
+  </ItemGroup>
+  <Target Name="BindPublishedSdk" AfterTargets="PrepareForBundle"
+          Condition="'$(PublishSingleFile)' == 'true' and '$(NexusSdkRuntime)' != ''">
+    <Error Condition="!Exists('$(NexusSdkRuntime)')" Text="The verified SDK producer artifact is required." />
+    <ItemGroup>
+      <FilesToBundle Remove="@(FilesToBundle)" Condition="'%(FilesToBundle.RelativePath)' == 'NexusPipeline.Extensibility.dll'" />
+      <FilesToBundle Include="$(NexusSdkRuntime)">
+        <RelativePath>NexusPipeline.Extensibility.dll</RelativePath>
+      </FilesToBundle>
+    </ItemGroup>
+  </Target>
+  <Target Name="ValidateExternalOutputs" BeforeTargets="Restore;PrepareForBuild">
+    <Error Condition="'$(NexusArtifactsRoot)' == ''" Text="Use tooling/nexus.py: NexusArtifactsRoot must be an external directory." />
+    <Error Condition="'$(NexusPackagesRoot)' == ''" Text="Use tooling/nexus.py: NexusPackagesRoot must be an external dependency cache." />
+    <Error Condition="!$([System.IO.Path]::IsPathFullyQualified('$(NexusArtifactsRoot)'))" Text="NexusArtifactsRoot must be an absolute path." />
+    <Error Condition="!$([System.IO.Path]::IsPathFullyQualified('$(NexusPackagesRoot)'))" Text="NexusPackagesRoot must be an absolute path." />
+    <Error Condition="$([System.String]::Copy('$(NexusArtifactsRoot)').StartsWith('$(MSBuildThisFileDirectory)', System.StringComparison.OrdinalIgnoreCase))" Text="Build outputs must be outside the source tree." />
+    <Error Condition="$([System.String]::Copy('$(NexusPackagesRoot)').StartsWith('$(MSBuildThisFileDirectory)', System.StringComparison.OrdinalIgnoreCase))" Text="Dependency caches must be outside the source tree." />
+  </Target>
+</Project>

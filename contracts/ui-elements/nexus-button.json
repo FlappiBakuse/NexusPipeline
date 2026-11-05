@@ -1,0 +1,26 @@
+{
+  "name": "nexus-button",
+  "properties": {
+    "label": "string",
+    "type": "button|submit|reset",
+    "tone": "neutral|info|success|warning|danger",
+    "disabled": "boolean",
+    "busy": "boolean"
+  },
+  "defaults": {
+    "type": "button",
+    "tone": "neutral",
+    "label": "",
+    "disabled": false,
+    "busy": false
+  },
+  "slots": [
+    "icon",
+    "default"
+  ],
+  "events": {
+    "click": "native MouseEvent"
+  },
+  "focus": "button",
+  "accessibility": "名称与忙态；禁用阻止重复动作；原生click一次"
+}

@@ -1,0 +1,307 @@
+{
+  "documentVersion": 1,
+  "status": "current-unreleased-contracts",
+  "hostVersion": "0.18.0",
+  "officialPluginVersion": "0.5.0",
+  "sdkPackages": {
+    "dotnet": {
+      "name": "NexusPipeline.Extensibility",
+      "version": "0.1.0"
+    },
+    "frontend": {
+      "name": "@nexuspipeline/extension-sdk",
+      "version": "0.1.0"
+    }
+  },
+  "httpBasePath": "/control/v1",
+  "protocols": [
+    {
+      "format": "nexus.control.project-command",
+      "version": 1,
+      "scope": "已鉴权绑定的来源发现、幂等选择保存及同主体有界冻结索引/分页预览",
+      "schemaPath": "schemas/control-project-command.schema.json",
+      "stage": "implementation-contract",
+      "task": "P3-04"
+    },
+    {
+      "format": "nexus.desktop.login",
+      "version": 1,
+      "scope": "实际原生进程拥有的隔离登录采集与清理确认，秘密仅经专用内存入口传递",
+      "schemaPath": "schemas/desktop-login.schema.json",
+      "stage": "implementation-contract",
+      "task": "P3-03"
+    },
+    {
+      "format": "nexus.browser.login-policy",
+      "version": 1,
+      "scope": "显式来源与有限被动采集选择器及完成谓词",
+      "schemaPath": "schemas/browser-login-policy.schema.json",
+      "stage": "implementation-contract",
+      "task": "P3-03"
+    },
+    {
+      "format": "nexus.execution.plan",
+      "version": 1,
+      "scope": "定义修订、任务依赖、进程与扩展身份、资源、时间预算、完成动作和重试策略的冻结输入",
+      "schemaPath": "schemas/execution-plan.schema.json",
+      "stage": "prototype-contract",
+      "task": "P0-06"
+    },
+    {
+      "format": "nexus.execution.run-attempt-plan",
+      "version": 1,
+      "scope": "单次尝试的总计划引用、独立配置计划、日志前态与输出范围",
+      "schemaPath": "schemas/run-attempt-plan.schema.json",
+      "stage": "prototype-contract",
+      "task": "P0-06"
+    },
+    {
+      "format": "nexus.payload.apply-plan",
+      "version": 1,
+      "scope": "宿主更新与插件安装、升级、移除的冻结文件意图；执行与信任准入由各业务 owner 验证",
+      "schemaPath": "schemas/payload-apply-plan.schema.json",
+      "stage": "prototype-contract",
+      "task": "P0-06"
+    },
+    {
+      "format": "nexus.schedule.invocation",
+      "version": 1,
+      "scope": "宿主冻结的 occurrence、run、attempt、秘密主体及通知选择",
+      "schemaPath": "schemas/scheduled-invocation.schema.json",
+      "stage": "prototype-contract",
+      "task": "P0-07"
+    },
+    {
+      "format": "nexus.schedule.work-result",
+      "version": 1,
+      "scope": "绑定单次宿主调度调用的业务事实",
+      "schemaPath": "schemas/scheduled-work-result.schema.json",
+      "stage": "prototype-contract",
+      "task": "P0-07"
+    },
+    {
+      "format": "nexus.notification.submission",
+      "version": 1,
+      "scope": "宿主已选择通知目标及持久幂等操作的队列提交",
+      "schemaPath": "schemas/notification-submission.schema.json",
+      "stage": "prototype-contract",
+      "task": "P0-07"
+    },
+    {
+      "format": "nexus.configuration.exchange-plan",
+      "version": 1,
+      "scope": "配置前态、候选态、内容及物理身份的不可变意图",
+      "schemaPath": "schemas/configuration-exchange-plan.schema.json",
+      "stage": "prototype-contract",
+      "task": "P0-06"
+    },
+    {
+      "format": "nexus.configuration.workspace",
+      "version": 1,
+      "scope": "配置恢复工作区的已确权对象清单",
+      "schemaPath": "schemas/configuration-workspace.schema.json",
+      "stage": "prototype-contract",
+      "task": "P0-06"
+    },
+    {
+      "format": "nexus.file.cleanup-plan",
+      "version": 1,
+      "scope": "本实例内容对象的精确清理意图及物理身份",
+      "schemaPath": "schemas/file-cleanup-plan.schema.json",
+      "stage": "prototype-contract",
+      "task": "P0-06"
+    },
+    {
+      "format": "nexus.media.capture",
+      "version": 1,
+      "scope": "单次运行预览请求与实例、run、attempt、预览代际绑定",
+      "schemaPath": "schemas/media-capture.schema.json",
+      "stage": "prototype-contract",
+      "task": "P0-07"
+    },
+    {
+      "format": "nexus.media.frame",
+      "version": 1,
+      "scope": "有预算的PNG媒体描述与请求身份绑定",
+      "schemaPath": "schemas/media-frame.schema.json",
+      "stage": "prototype-contract",
+      "task": "P0-07"
+    },
+    {
+      "format": "nexus.instance",
+      "version": 1,
+      "scope": "实例身份与新runtime格式",
+      "schemaPath": "schemas/instance.schema.json",
+      "stage": "prototype-contract",
+      "task": "P0-04"
+    },
+    {
+      "format": "nexus.state.database",
+      "version": 1,
+      "scope": "SQLite主状态schema身份",
+      "schemaPath": null,
+      "stage": "to-complete-during-implementation",
+      "task": "P1-02"
+    },
+    {
+      "format": "nexus.automation.bundle",
+      "version": 1,
+      "scope": "新JSON定义与通用脚本模板交换",
+      "schemaPath": "schemas/automation-bundle.schema.json",
+      "stage": "prototype-contract",
+      "task": "P1-03"
+    },
+    {
+      "format": "nexus.execution.journal",
+      "version": 1,
+      "scope": "恢复现场和外部副作用",
+      "schemaPath": "schemas/execution-journal.schema.json",
+      "stage": "seed-provided",
+      "task": "P1-05"
+    },
+    {
+      "format": "nexus.control.error",
+      "version": 1,
+      "scope": "公共错误",
+      "schemaPath": "schemas/control-error.schema.json",
+      "stage": "seed-provided",
+      "task": "P1-11"
+    },
+    {
+      "format": "nexus.event",
+      "version": 1,
+      "scope": "SSE状态与日志通知",
+      "schemaPath": "schemas/event.schema.json",
+      "stage": "implementation-contract",
+      "task": "P2-03"
+    },
+    {
+      "format": "nexus.extension.manifest",
+      "version": 1,
+      "scope": "扩展包身份和能力",
+      "schemaPath": "schemas/extension-manifest.schema.json",
+      "stage": "seed-provided",
+      "task": "P3-01"
+    },
+    {
+      "format": "nexus.task.adapter",
+      "version": 1,
+      "scope": "专项任务discover/observe/retry/configuration",
+      "schemaPath": "schemas/task-adapter.schema.json",
+      "stage": "prototype-contract",
+      "task": "P3-02"
+    },
+    {
+      "format": "nexus.config.patch",
+      "version": 1,
+      "scope": "配置预览与受控修复计划",
+      "schemaPath": "schemas/config-patch.schema.json",
+      "stage": "prototype-contract",
+      "task": "P1-05"
+    },
+    {
+      "format": "nexus.store.catalog",
+      "version": 1,
+      "scope": "新商店不可变generation",
+      "schemaPath": "schemas/store-catalog.schema.json",
+      "stage": "seed-provided",
+      "task": "P3-09"
+    },
+    {
+      "format": "nexus.store.pointer",
+      "version": 1,
+      "scope": "新商店发现指针",
+      "schemaPath": "schemas/store-pointer.schema.json",
+      "stage": "seed-provided",
+      "task": "P3-09"
+    },
+    {
+      "format": "nexus.detached.signature",
+      "version": 1,
+      "scope": "catalog与feed分离签名",
+      "schemaPath": "schemas/detached-signature.schema.json",
+      "stage": "seed-provided",
+      "task": "P3-09"
+    },
+    {
+      "format": "nexus.update.feed",
+      "version": 1,
+      "scope": "新宿主更新发现",
+      "schemaPath": "schemas/update-feed.schema.json",
+      "stage": "implementation-contract",
+      "task": "P1-12"
+    },
+    {
+      "format": "nexus.update.receipt",
+      "version": 1,
+      "scope": "新宿主更新/回滚结果",
+      "schemaPath": "schemas/update-receipt.schema.json",
+      "stage": "implementation-contract",
+      "task": "P1-12"
+    },
+    {
+      "format": "nexus.desktop.channel",
+      "version": 1,
+      "scope": "本实例桌面拥有权/重连消息",
+      "schemaPath": "schemas/desktop-channel.schema.json",
+      "stage": "implementation-contract",
+      "task": "P2-04"
+    },
+    {
+      "format": "nexus.release.lock",
+      "version": 1,
+      "scope": "本地与正式候选身份绑定",
+      "schemaPath": null,
+      "stage": "to-complete-during-implementation",
+      "task": "P4-04"
+    },
+    {
+      "format": "nexus.extension.frontend",
+      "version": 1,
+      "scope": "插件浏览器模块与当前SDK产物身份握手",
+      "schemaPath": "schemas/frontend-handshake.schema.json",
+      "stage": "implementation-contract",
+      "task": "P0-04"
+    },
+    {
+      "format": "nexus.desktop.frontend",
+      "version": 1,
+      "scope": "原已鉴权前端会话与实际本机桌面会话的有主绑定",
+      "schemaPath": "schemas/desktop-frontend.schema.json",
+      "stage": "implementation-contract",
+      "task": "P3-03"
+    },
+    {
+      "format": "nexus.desktop.session",
+      "version": 1,
+      "scope": "本机壳主进程的 Host 代际和动作权限",
+      "schemaPath": "schemas/desktop-session.schema.json",
+      "stage": "implementation-contract",
+      "task": "P0-05"
+    },
+    {
+      "format": "nexus.desktop.proof",
+      "version": 1,
+      "scope": "绑定受信任 Host 启动公钥的桌面响应签名",
+      "schemaPath": "schemas/desktop-proof.schema.json",
+      "stage": "implementation-contract",
+      "task": "P0-05"
+    },
+    {
+      "format": "nexus.update.payload-manifest",
+      "version": 2,
+      "scope": "公开应用文件清单、桌面运行时与源码身份",
+      "schemaPath": "schemas/update-payload-manifest.schema.json",
+      "stage": "implementation-contract",
+      "task": "P1-12"
+    },
+    {
+      "format": "nexus.application.recipe",
+      "version": 1,
+      "scope": "公开便携及更新包的包含、复用、删除文件与精确基线",
+      "schemaPath": "schemas/update-recipe.schema.json",
+      "stage": "implementation-contract",
+      "task": "REL-02A"
+    }
+  ]
+}

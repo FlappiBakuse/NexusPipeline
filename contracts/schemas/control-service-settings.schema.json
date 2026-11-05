@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/control-service-settings.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "version",
+    "operationId",
+    "expectedRevision",
+    "service"
+  ],
+  "properties": {
+    "format": {
+      "const": "nexus.control.service-settings"
+    },
+    "version": {
+      "const": 1
+    },
+    "operationId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "expectedRevision": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "service": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "webPort",
+        "allowRemoteAccess",
+        "mcpEnabled",
+        "mcpWriteEnabled",
+        "mcpPort"
+      ],
+      "properties": {
+        "webPort": {
+          "type": "integer",
+          "anyOf": [
+            {
+              "const": 0
+            },
+            {
+              "minimum": 1024,
+              "maximum": 65535
+            }
+          ]
+        },
+        "allowRemoteAccess": {
+          "type": "boolean"
+        },
+        "mcpEnabled": {
+          "type": "boolean"
+        },
+        "mcpWriteEnabled": {
+          "type": "boolean"
+        },
+        "mcpPort": {
+          "type": "integer",
+          "minimum": 1024,
+          "maximum": 65535
+        }
+      }
+    }
+  }
+}

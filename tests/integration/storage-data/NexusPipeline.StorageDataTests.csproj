@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsTestProject>true</IsTestProject>
+    <IsPackable>false</IsPackable>
+    <TargetFramework>net10.0-windows10.0.22621.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../fixtures/RecordStoreFixture.cs" Link="RecordStoreFixture.cs" />
+    <Using Include="NexusPipeline.Platform.Serialization.Protocol" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+    <ProjectReference Include="../../../src/platform/NexusPipeline.Platform.csproj" />
+  </ItemGroup>
+</Project>

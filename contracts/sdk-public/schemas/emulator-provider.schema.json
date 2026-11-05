@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/emulator-provider.schema.json",
+  "not": {},
+  "$defs": {
+    "manifest": {
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "managed"
+            ],
+            "properties": {
+              "managed": {
+                "required": [
+                  "emulators"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "kind": {
+                "const": "managed-code"
+              },
+              "capabilities": {
+                "contains": {
+                  "const": "emulator.provide"
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "capabilities"
+            ],
+            "properties": {
+              "capabilities": {
+                "contains": {
+                  "const": "emulator.provide"
+                }
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "managed"
+            ],
+            "properties": {
+              "kind": {
+                "const": "managed-code"
+              },
+              "managed": {
+                "required": [
+                  "emulators"
+                ]
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

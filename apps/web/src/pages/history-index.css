@@ -1,0 +1,67 @@
+.history-index-pane {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--panel);
+}
+.history-index-pane > p {
+  text-align: center;
+  color: var(--muted);
+}
+.history-index-pane > nexus-empty-state {
+  border: 0;
+  background: transparent;
+}
+.date-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 48px;
+  padding: 12px 14px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+.date-heading strong {
+  font-size: 15px;
+}
+nexus-icon {
+  color: var(--accent);
+  width: 16px;
+  height: 16px;
+}
+.history-user {
+  display: flex;
+  width: 100%;
+  min-height: 40px;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+.history-user strong {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.history-user[aria-pressed='true'],
+.history-user:hover {
+  background: var(--content-card-soft);
+  color: var(--accent);
+}
+.date-users {
+  padding-bottom: 8px;
+}
+.user-pages {
+  display: flex;
+  justify-content: end;
+  gap: 8px;
+}

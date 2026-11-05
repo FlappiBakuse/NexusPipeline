@@ -1,0 +1,26 @@
+{
+  "post": {
+    "operationId": "restartHost",
+    "description": "Requires local control.maintenance.write. No body or query. Restarts the same Host from saved settings without an update package or release trust. Requires an idle completion drain and existing desktop family proof. An authenticated successor waits for actual parent exit before acquiring the same instance. CLI: host-restart --id <uuid>. Not exposed through MCP. A 202 response proves prepared handoff, not successful service startup; reconnect to the returned saved port to observe readiness.",
+    "parameters": [{"name": "operationId", "in": "path", "required": true, "schema": {"$ref": "../schemas/common.schema.json#/$defs/uuid"}}],
+    "responses": {
+      "202": {
+        "description": "Prepared successor and committed handoff",
+        "content": {"application/json": {"schema": {
+          "type": "object", "additionalProperties": false,
+          "required": ["operationId", "instanceId", "processId", "port", "state"],
+          "properties": {
+            "operationId": {"$ref": "../schemas/common.schema.json#/$defs/uuid"},
+            "instanceId": {"$ref": "../schemas/common.schema.json#/$defs/uuid"},
+            "processId": {"type": "integer", "minimum": 1},
+            "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+            "state": {"const": "handoff"}
+          }
+        }}}
+      },
+      "400": {"description": "Invalid request"},
+      "403": {"description": "Local authority required"},
+      "409": {"description": "Busy, unknown process origin or failed handoff; no successful restart claimed"}
+    }
+  }
+}

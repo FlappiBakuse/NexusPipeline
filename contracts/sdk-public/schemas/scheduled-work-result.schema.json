@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/scheduled-work-result.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "version",
+    "invocation",
+    "businessOutcome",
+    "reasonCode"
+  ],
+  "properties": {
+    "format": {
+      "const": "nexus.schedule.work-result"
+    },
+    "version": {
+      "const": 1
+    },
+    "invocation": {
+      "$ref": "scheduled-invocation.schema.json"
+    },
+    "businessOutcome": {
+      "$ref": "execution-outcomes.schema.json#/properties/businessOutcome"
+    },
+    "reasonCode": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_-]{0,79}$"
+    }
+  }
+}

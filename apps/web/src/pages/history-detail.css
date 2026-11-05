@@ -1,0 +1,98 @@
+.history-detail-content {
+  border-top: 1px solid var(--border);
+}
+.history-detail-metadata {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 18px;
+  margin: 0 0 20px;
+}
+.history-detail-metadata > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 44px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.history-detail-metadata dt {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.history-detail-metadata dd {
+  min-width: 0;
+  margin: 0;
+  text-align: right;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  font-weight: 400;
+}
+.history-detail-content > .history-detail-metadata > div:nth-child(-n + 2) {
+  min-height: 48px;
+}
+.history-attempt-card {
+  margin-top: 20px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--content-card-soft);
+}
+.history-attempt-card > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 0 12px;
+  border-bottom: 1px solid var(--border);
+}
+.history-attempt-card h3 {
+  margin: 0;
+  font-size: 14px;
+}
+.history-attempt-card .history-detail-metadata {
+  margin-bottom: 20px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.history-attempt-card .history-detail-metadata > .history-attempt-reason {
+  grid-column: 1 / -1;
+}
+.history-attempt-card .history-detail-metadata > div {
+  min-height: 40px;
+}
+.history-tasks {
+  margin: 20px 0 34px;
+}
+.history-tasks h3 {
+  margin: 0 0 20px;
+  font-size: 14px;
+}
+.history-tasks > p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.history-tasks ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.history-tasks li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+}
+@media (max-width: 600px) {
+  .history-detail-metadata,
+  .history-attempt-card .history-detail-metadata {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .history-attempt-card {
+    padding: 14px;
+  }
+}

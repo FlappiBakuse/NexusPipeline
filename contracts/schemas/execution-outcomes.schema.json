@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/execution-outcomes.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "engineOutcome",
+    "businessOutcome",
+    "lifecycleOutcome",
+    "recoveryOutcome"
+  ],
+  "properties": {
+    "engineOutcome": {
+      "enum": [
+        "notStarted",
+        "running",
+        "succeeded",
+        "failed",
+        "cancelled",
+        "unknown"
+      ]
+    },
+    "businessOutcome": {
+      "enum": [
+        "unverified",
+        "succeeded",
+        "partial",
+        "failed",
+        "notApplicable",
+        "cancelled"
+      ]
+    },
+    "lifecycleOutcome": {
+      "enum": [
+        "notStarted",
+        "running",
+        "completed",
+        "cancelled",
+        "interrupted",
+        "blocked",
+        "skipped"
+      ]
+    },
+    "recoveryOutcome": {
+      "enum": [
+        "notRequired",
+        "pending",
+        "restored",
+        "quarantined"
+      ]
+    }
+  }
+}

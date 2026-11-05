@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/execution-workspace.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "path",
+    "identity",
+    "inputIdentity",
+    "outputIdentity"
+  ],
+  "properties": {
+    "path": {
+      "type": "string",
+      "minLength": 4,
+      "maxLength": 32767
+    },
+    "identity": {
+      "$ref": "file-tree.schema.json#/$defs/physicalIdentity"
+    },
+    "inputIdentity": {
+      "$ref": "file-tree.schema.json#/$defs/physicalIdentity"
+    },
+    "outputIdentity": {
+      "$ref": "file-tree.schema.json#/$defs/physicalIdentity"
+    }
+  }
+}

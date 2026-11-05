@@ -1,0 +1,21 @@
+{
+  "name": "nexus-select",
+  "properties": {
+    "value": "string|readonly string[]",
+    "options": "readonly Option[]",
+    "multiple": "boolean",
+    "searchable": "boolean"
+  },
+  "defaults": {
+    "value": "",
+    "multiple": false,
+    "options": [],
+    "searchable": false
+  },
+  "slots": [],
+  "events": {
+    "nexus-change": "Change<string|string[]>"
+  },
+  "focus": "combobox",
+  "accessibility": "稳定选项ID；单/多选类型校验；键盘搜索和关闭焦点"
+}

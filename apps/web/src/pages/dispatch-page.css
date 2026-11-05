@@ -1,0 +1,65 @@
+.dispatch-targets,
+.dispatch-running {
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--panel);
+}
+.target-controls > label {
+  color: var(--muted);
+  font-size: 12px;
+}
+.running-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.running-heading small {
+  color: var(--muted);
+  font-size: 12px;
+}
+.running-heading strong {
+  font-size: 15px;
+  line-height: 1.35;
+}
+.target-controls {
+  align-items: end;
+  margin: 0;
+}
+.target-controls > label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.target-controls > label:first-child {
+  width: 184px;
+}
+.target-controls > label:nth-child(2) {
+  flex: 1;
+}
+.running-empty {
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  min-height: 146px;
+}
+.target-controls nexus-button {
+  min-width: 128px;
+}
+.dispatch-hint {
+  position: fixed;
+  z-index: 200;
+  top: calc(var(--nx-desktop-offset, 0px) + 64px);
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: calc(100vw - 32px);
+  font-size: 13px;
+  line-height: 1.6;
+}
+@media (max-width: 700px) {
+  .target-controls > label:first-child,
+  .target-controls > label:nth-child(2) {
+    width: 100%;
+    flex: auto;
+  }
+}

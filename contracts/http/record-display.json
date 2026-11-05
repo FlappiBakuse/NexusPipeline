@@ -1,0 +1,5 @@
+{
+  "parameters": [{"name": "runId", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}],
+  "get": {"operationId": "readRecordDisplay", "description": "records.read; bounded read-only projection of verified frozen definition names, retry ceiling and durable run-budget observations. No query. runId, targetName, nullable userName/mode/startedAt, maximumAttempts and at most 99 attempt timing entries. Missing timing remains null; current catalog names and endedAt minus duration are not used as frozen facts.",
+    "responses": {"200": {"description": "RecordDisplay"}, "404": {"description": "record_display_unavailable"}, "403": {"description": "Capability unavailable"}}}
+}

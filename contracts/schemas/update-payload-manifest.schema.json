@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/update-payload-manifest.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "product",
+    "productVersion",
+    "installationGeneration",
+    "rid",
+    "sourceSha",
+    "sourceTreeSha",
+    "buildId",
+    "frontendHash",
+    "desktop",
+    "files"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 2
+    },
+    "product": {
+      "const": "NexusPipeline"
+    },
+    "productVersion": {
+      "$ref": "common.schema.json#/$defs/releaseVersion"
+    },
+    "installationGeneration": {
+      "const": "g0180"
+    },
+    "rid": {
+      "const": "win-x64"
+    },
+    "sourceSha": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "sourceTreeSha": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "buildId": {
+      "$ref": "common.schema.json#/$defs/sha256"
+    },
+    "frontendHash": {
+      "$ref": "common.schema.json#/$defs/sha256"
+    },
+    "desktop": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entryPoint",
+        "appArchive",
+        "electronVersion",
+        "electronArchiveSha256",
+        "packageLockSha256",
+        "bootstrapProtocolVersion",
+        "runtimeProfileId",
+        "runtimeProfileSha256",
+        "runtimeInventorySha256"
+      ],
+      "properties": {
+        "entryPoint": {
+          "const": "resources/desktop/NexusPipeline.Desktop.exe"
+        },
+        "appArchive": {
+          "const": "resources/desktop/resources/app.asar"
+        },
+        "electronVersion": {
+          "$ref": "common.schema.json#/$defs/releaseVersion"
+        },
+        "electronArchiveSha256": {
+          "$ref": "common.schema.json#/$defs/sha256"
+        },
+        "packageLockSha256": {
+          "$ref": "common.schema.json#/$defs/sha256"
+        },
+        "bootstrapProtocolVersion": {
+          "const": 1
+        },
+        "runtimeProfileId": {
+          "const": "win-x64-en-zh-v1"
+        },
+        "runtimeProfileSha256": {
+          "$ref": "common.schema.json#/$defs/sha256"
+        },
+        "runtimeInventorySha256": {
+          "$ref": "common.schema.json#/$defs/sha256"
+        }
+      }
+    },
+    "files": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 4095,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "sizeBytes",
+          "sha256",
+          "kind"
+        ],
+        "properties": {
+          "path": {
+            "$ref": "common.schema.json#/$defs/relativePath"
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 268435456
+          },
+          "sha256": {
+            "$ref": "common.schema.json#/$defs/sha256"
+          },
+          "kind": {
+            "enum": [
+              "host",
+              "update-entry",
+              "readme",
+              "desktop-entry",
+              "desktop-app",
+              "license",
+              "runtime-manifest",
+              "desktop-runtime"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

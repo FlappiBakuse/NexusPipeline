@@ -1,0 +1,12 @@
+{
+  "parameters": [{"name": "channel", "in": "path", "required": true, "schema": {"enum": ["stable", "prerelease"]}}],
+  "get": {
+    "operationId": "readTrustedHostUpdateFeed",
+    "description": "Requires control.maintenance.read. Reads only the last accepted signed feed for this channel; null means none accepted. No query. CLI: maintenance-feed --channel <channel>. Not exposed through MCP.",
+    "responses": {
+      "200": {"description": "Last accepted feed or null"},
+      "400": {"description": "Invalid channel or query"},
+      "409": {"description": "Release trust, runtime or trusted cache unavailable"}
+    }
+  }
+}

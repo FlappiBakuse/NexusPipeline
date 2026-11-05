@@ -1,0 +1,272 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "NexusPipeline Control",
+    "version": "0.18.0",
+    "description": "Implemented Host Control contracts. Capability policy and the current route handlers define authentication and effect ownership."
+  },
+  "paths": {
+    "/control/v1/settings/interface": {
+      "$ref": "http/interface-read.json"
+    },
+    "/control/v1/settings/interface/change": {
+      "$ref": "http/interface-change.json"
+    },
+    "/control/v1/records/summary": {
+      "$ref": "http/record-summary.json"
+    },
+    "/control/v1/records/{runId}": {
+      "$ref": "http/record-detail.json"
+    },
+    "/control/v1/records/{runId}/attempts/{attemptId}/report": {
+      "$ref": "http/execution-report.json"
+    },
+    "/control/v1/execution/active": {
+      "$ref": "http/execution-active.json"
+    },
+    "/control/v1/execution/runs/{runId}/attempts/{attemptId}/logs/{stepId}/{role}/events": {
+      "$ref": "http/live-log.json"
+    },
+    "/control/v1/configuration/bindings/{bindingId}/resources": {
+      "$ref": "http/configuration-overview.json"
+    },
+    "/control/v1/configuration/generic/{bindingId}/{resourceId}/document": {
+      "$ref": "http/configuration-document.json"
+    },
+    "/control/v1/extensions/{extensionId}/details": {
+      "$ref": "http/extension-details.json"
+    },
+    "/control/v1/extensions/catalog/{channel}": {
+      "$ref": "http/extension-catalog.json"
+    },
+    "/control/v1/extensions/catalog/{channel}/entries/{extensionId}/details": {
+      "$ref": "http/extension-catalog-details.json"
+    },
+    "/control/v1/extensions/operations": {
+      "$ref": "http/extension-operation-history.json"
+    },
+    "/control/v1/automation/bindings/{bindingId}/effective": {
+      "$ref": "http/automation-binding-effective.json"
+    },
+    "/control/v1/automation/users/summary": {
+      "$ref": "http/automation-user-summary.json"
+    },
+    "/control/v1/completion/pending": {
+      "$ref": "http/completion-pending.json"
+    },
+    "/control/v1/local/completion/{operationId}/cancel": {
+      "$ref": "http/completion-cancel.json"
+    },
+    "/control/v1/local/secrets/{field}": {
+      "$ref": "http/host-secret.json"
+    },
+    "/control/v1/local/secrets/{field}/read": {
+      "$ref": "http/host-secret-read.json"
+    },
+    "/control/v1/local/secrets/{field}/change": {
+      "$ref": "http/host-secret-change.json"
+    },
+    "/control/v1/local/secrets/{field}/operations/{operationId}": {
+      "$ref": "http/host-secret-operation.json"
+    },
+    "/control/v1/maintenance/feed/{channel}": {
+      "$ref": "http/maintenance-feed.json"
+    },
+    "/control/v1/maintenance/feed/{channel}/refresh": {
+      "$ref": "http/maintenance-refresh.json"
+    },
+    "/control/v1/maintenance/prepare": {
+      "$ref": "http/maintenance-prepare.json"
+    },
+    "/control/v1/maintenance/restart/{operationId}": {
+      "$ref": "http/host-restart.json"
+    },
+    "/control/v1/maintenance/operations/{operationId}": {
+      "$ref": "http/maintenance-operation.json"
+    },
+    "/control/v1/maintenance/operations/{operationId}/{action}": {
+      "$ref": "http/maintenance-action.json"
+    },
+    "/control/v1/support": {
+      "$ref": "http/diagnostic-support.json"
+    },
+    "/control/v1/capabilities": {
+      "get": {
+        "operationId": "readCapabilities",
+        "responses": {
+          "200": {
+            "description": "Currently implemented capabilities",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "instanceId",
+                    "hostVersion",
+                    "sdkVersion",
+                    "capabilities"
+                  ],
+                  "properties": {
+                    "instanceId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "hostVersion": {
+                      "const": "0.18.0"
+                    },
+                    "sdkVersion": {
+                      "const": "0.1.0"
+                    },
+                    "capabilities": {
+                      "type": "array",
+                      "uniqueItems": true,
+                      "items": {
+                        "enum": [
+                          "control.capabilities.read",
+                          "control.status.read",
+                          "control.doctor.read",
+                          "operations.read",
+                          "automation.read",
+                          "automation.write",
+                          "automation.delete",
+                          "automation.exchange",
+                          "configuration.read",
+                          "configuration.edit",
+                          "configuration.repair",
+                          "configuration.native.open",
+                          "execution.preview",
+                          "execution.start",
+                          "execution.cancel",
+                          "scheduling.read",
+                          "records.read",
+                          "records.logs.read",
+                          "records.images.read",
+                          "records.retire",
+                          "settings.read",
+                          "settings.write",
+                          "secrets.status",
+                          "secrets.read",
+                          "secrets.write",
+                          "notifications.read",
+                          "notifications.write",
+                          "notifications.delete",
+                          "notifications.test",
+                          "extensions.read",
+                          "extensions.write",
+                          "desktop.local",
+                          "completion.local",
+                          "maintenance.read",
+                          "maintenance.write",
+                          "media.preview.grant"
+                        ]
+                      }
+                    },
+                    "desktopVerificationKey": {
+                      "type": "string",
+                      "description": "Public SPKI P-256 verification key, present only when a native owner is registered. Trust this key only through the authenticated launcher bootstrap."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Untrusted Origin"
+          }
+        }
+      }
+    },
+    "/control/v1/secrets/{extensionId}/{subjectId}/{field}": {
+      "$ref": "http/secret-field.json"
+    },
+    "/control/v1/secrets/{extensionId}/{subjectId}/{field}/read": {
+      "$ref": "http/secret-read.json"
+    },
+    "/control/v1/secrets/{extensionId}/{subjectId}/{field}/change": {
+      "$ref": "http/secret-change.json"
+    },
+    "/control/v1/desktop/session": {
+      "get": {
+        "operationId": "readNativeDesktopSession",
+        "description": "Only available when the trusted launcher supplied a native owner PID. Kernel transport ownership and frozen process identity are required.",
+        "responses": {
+          "200": {
+            "description": "Current Host generation; native main process only",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "schemas/desktop-proof.schema.json"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Transport owner is not the registered native shell"
+          },
+          "400": {
+            "description": "Missing, invalid or additional handshake query parameters"
+          }
+        },
+        "parameters": [
+          {
+            "name": "correlationId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "Fresh challenge from the native main process, echoed inside the signed session payload."
+          }
+        ]
+      }
+    },
+    "/control/v1/desktop/authorize": {
+      "post": {
+        "operationId": "authorizeNativeDesktopAction",
+        "description": "Consumes a correlation ID once and signs the fixed action authorization or a session-bound, short-lived close permit after lifecycle draining. Native effects execute in the registered client.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "schemas/desktop-channel.schema.json"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Bound one-time native action approval",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "schemas/desktop-proof.schema.json"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid current contract"
+          },
+          "409": {
+            "description": "Stale session, duplicate, invalid arguments or exhausted session"
+          },
+          "413": {
+            "description": "Request exceeds 8192 bytes"
+          },
+          "415": {
+            "description": "JSON media type required"
+          },
+          "403": {
+            "description": "Transport owner is not the registered native shell"
+          }
+        }
+      }
+    },
+    "/control/v1/records/{runId}/display": {
+      "$ref": "http/record-display.json"
+    }
+  }
+}

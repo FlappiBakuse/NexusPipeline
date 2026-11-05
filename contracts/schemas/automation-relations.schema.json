@@ -1,0 +1,278 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/automation-relations.schema.json",
+  "$defs": {
+    "user": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "order"
+      ],
+      "properties": {
+        "bindingOverrides": {
+          "$ref": "automation-binding-policy.schema.json#/$defs/overrides"
+        },
+        "order": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4095
+        },
+        "id": {
+          "$ref": "common.schema.json#/$defs/uuid"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 4000
+        },
+        "avatar": {
+          "type": "string",
+          "maxLength": 65536
+        }
+      }
+    },
+    "hook": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "executable",
+        "arguments"
+      ],
+      "properties": {
+        "executable": {
+          "$ref": "automation-paths.schema.json#/$defs/portablePath"
+        },
+        "arguments": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "type": "string",
+            "maxLength": 4096
+          }
+        }
+      }
+    },
+    "binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "userId",
+        "scriptId",
+        "enabled",
+        "priority",
+        "notifyEnabled",
+        "notificationTaskIds"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "common.schema.json#/$defs/uuid"
+        },
+        "userId": {
+          "$ref": "common.schema.json#/$defs/uuid"
+        },
+        "scriptId": {
+          "$ref": "common.schema.json#/$defs/uuid"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "runDays": {
+          "$ref": "automation-binding-policy.schema.json#/$defs/runDays"
+        },
+        "maximumSuccessfulRunsPerDay": {
+          "$ref": "automation-binding-policy.schema.json#/$defs/dailyLimit"
+        },
+        "priority": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9999
+        },
+        "preHook": {
+          "$ref": "#/$defs/hook"
+        },
+        "postHook": {
+          "$ref": "#/$defs/hook"
+        },
+        "preOnceAfterSuccess": {
+          "type": "boolean"
+        },
+        "postFinalOnly": {
+          "type": "boolean"
+        },
+        "notifyEnabled": {
+          "type": "boolean"
+        },
+        "notificationTaskIds": {
+          "type": "array",
+          "maxItems": 99,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "common.schema.json#/$defs/uuid"
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "preOnceAfterSuccess"
+            ],
+            "properties": {
+              "preOnceAfterSuccess": {
+                "const": true
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "preHook"
+            ]
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "postFinalOnly"
+            ],
+            "properties": {
+              "postFinalOnly": {
+                "const": true
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "postHook"
+            ]
+          }
+        }
+      ]
+    },
+    "queue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "scriptIds",
+        "completionAction",
+        "notifyEnabled",
+        "notificationTaskIds",
+        "order"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "common.schema.json#/$defs/uuid"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "successDependencies": {
+          "$ref": "automation-binding-policy.schema.json#/$defs/dependencies"
+        },
+        "completionAction": {
+          "enum": [
+            "none",
+            "shutdown",
+            "hibernate",
+            "restart",
+            "exit"
+          ]
+        },
+        "runOnStartup": {
+          "type": "boolean",
+          "default": false
+        },
+        "notifyEnabled": {
+          "type": "boolean"
+        },
+        "notificationTaskIds": {
+          "type": "array",
+          "maxItems": 99,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "common.schema.json#/$defs/uuid"
+          }
+        },
+        "scriptIds": {
+          "type": "array",
+          "items": {
+            "$ref": "common.schema.json#/$defs/uuid"
+          },
+          "maxItems": 4096
+        },
+        "order": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4095
+        },
+        "scheduleEnabled": {
+          "type": "boolean",
+          "default": true
+        }
+      }
+    },
+    "schedule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "queueId",
+        "enabled",
+        "timeZoneId",
+        "weekdays",
+        "localMinute",
+        "missedPolicy"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "common.schema.json#/$defs/uuid"
+        },
+        "queueId": {
+          "$ref": "common.schema.json#/$defs/uuid"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "timeZoneId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "weekdays": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 7,
+          "uniqueItems": true,
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 6
+          }
+        },
+        "localMinute": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1439
+        },
+        "missedPolicy": {
+          "const": "skip"
+        },
+        "order": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4095
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "format": "nexus.update.feed",
+  "version": 1,
+  "channel": "stable",
+  "sequence": 1,
+  "releases": [
+    {
+      "hostVersion": "0.18.0",
+      "minReaderVersion": "0.18.0",
+      "artifact": {
+        "url": "https://assets.example.test/host/Host.zip",
+        "sizeBytes": 1024,
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "payloadManifestSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "publishedAt": "2026-10-22T00:00:00.0000000Z",
+      "storeBinding": {
+        "channel": "stable",
+        "generationId": "12345678-1234-4234-8234-123456789abc",
+        "sequence": 1,
+        "catalogUrl": "https://store.example.test/metadata/store/1/stable/generations/12345678-1234-4234-8234-123456789abc/catalog.json",
+        "catalogSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "signatureUrl": "https://store.example.test/metadata/store/1/stable/generations/12345678-1234-4234-8234-123456789abc/catalog.sig.json"
+      },
+      "releaseId": 1,
+      "assetId": 2
+    }
+  ]
+}

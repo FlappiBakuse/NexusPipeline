@@ -1,0 +1,19 @@
+{
+  "name": "nexus-tabs",
+  "properties": {
+    "selectedId": "string",
+    "items": "readonly TabItem[]"
+  },
+  "defaults": {
+    "selectedId": "",
+    "items": []
+  },
+  "slots": [
+    "panels"
+  ],
+  "events": {
+    "nexus-change": "Change<string>"
+  },
+  "focus": "active tab",
+  "accessibility": "tablist/tabpanel关联；方向键与选中策略一致；隐藏panel不收焦点"
+}

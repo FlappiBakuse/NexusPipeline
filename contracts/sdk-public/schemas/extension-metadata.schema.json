@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/extension-metadata.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "defaultLocale",
+    "displayName",
+    "gameName",
+    "summary",
+    "locales",
+    "tags"
+  ],
+  "properties": {
+    "defaultLocale": {
+      "type": "string",
+      "pattern": "^[a-z]{2,3}(?:-[A-Z][a-z]{3})?(?:-[A-Z]{2}|-[0-9]{3})?$",
+      "maxLength": 35
+    },
+    "displayName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "gameName": {
+      "type": "string",
+      "minLength": 0,
+      "maxLength": 120
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 0,
+      "maxLength": 1024
+    },
+    "author": {
+      "type": "string",
+      "minLength": 0,
+      "maxLength": 120
+    },
+    "tags": {
+      "type": "array",
+      "maxItems": 32,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 80
+      }
+    },
+    "locales": {
+      "type": "object",
+      "maxProperties": 16,
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[a-z]{2,3}(?:-[A-Z][a-z]{3})?(?:-[A-Z]{2}|-[0-9]{3})?$",
+        "maxLength": 35
+      },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "displayName",
+          "gameName",
+          "summary"
+        ],
+        "properties": {
+          "displayName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "gameName": {
+            "type": "string",
+            "minLength": 0,
+            "maxLength": 120
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 0,
+            "maxLength": 1024
+          }
+        }
+      }
+    },
+    "createdAt": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "updatedAt": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    }
+  }
+}

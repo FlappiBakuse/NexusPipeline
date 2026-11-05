@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/compiled-input.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "fingerprint",
+    "canExecute",
+    "view"
+  ],
+  "properties": {
+    "fingerprint": {
+      "$ref": "common.schema.json#/$defs/sha256"
+    },
+    "canExecute": {
+      "type": "boolean"
+    },
+    "view": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  }
+}

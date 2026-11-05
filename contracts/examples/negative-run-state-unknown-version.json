@@ -1,0 +1,71 @@
+{
+  "format": "nexus.configuration.run-state",
+  "version": 2,
+  "instanceId": "11111111-1111-4111-8111-111111111111",
+  "ownerOperationId": "22222222-2222-4222-8222-222222222222",
+  "configurationOperationId": "33333333-3333-4333-8333-333333333333",
+  "autoSyncEnabled": true,
+  "syncInitially": true,
+  "syncAtFinish": true,
+  "source": {
+    "bindingId": "44444444-4444-4444-8444-444444444444",
+    "resourceId": "main",
+    "revision": 1,
+    "bindingRevision": 1,
+    "userId": "55555555-5555-4555-8555-555555555555",
+    "scriptId": "66666666-6666-4666-8666-666666666666",
+    "snapshot": {
+      "relativePath": "blobs/plans/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.json",
+      "sizeBytes": 100,
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "contract": {
+      "revision": 1,
+      "definitionSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "requiresInstance": false
+    }
+  },
+  "tasks": [
+    {
+      "relativePath": "",
+      "syntax": "json",
+      "access": {
+        "read": [
+          {
+            "selector": [
+              "tasks"
+            ],
+            "descendants": true
+          }
+        ],
+        "write": [
+          {
+            "selector": [
+              "tasks"
+            ],
+            "descendants": true
+          }
+        ],
+        "protected": []
+      },
+      "declaration": {
+        "source": {
+          "kind": "map",
+          "items": [
+            "tasks"
+          ]
+        },
+        "authorizedIds": [
+          "daily"
+        ]
+      },
+      "selectedIds": [],
+      "initialValues": [
+        {
+          "taskId": "daily",
+          "enabled": true
+        }
+      ]
+    }
+  ]
+}

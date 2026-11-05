@@ -1,0 +1,198 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/execution-journal.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "version",
+    "instanceId",
+    "journalId",
+    "operationId",
+    "operationKind",
+    "phase",
+    "revision",
+    "updatedAt",
+    "planDigest",
+    "planPath",
+    "resourceKeys",
+    "participants",
+    "receipts"
+  ],
+  "properties": {
+    "format": {
+      "const": "nexus.execution.journal"
+    },
+    "version": {
+      "const": 1
+    },
+    "instanceId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "journalId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "operationId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "runId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "attemptId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "operationKind": {
+      "enum": [
+        "configExchange",
+        "configEdit",
+        "fileCleanup",
+        "runAttempt",
+        "updateApply",
+        "extensionApply",
+        "assetPrepare",
+        "secretPrepare"
+      ]
+    },
+    "phase": {
+      "enum": [
+        "prepared",
+        "applying",
+        "applied",
+        "reverting",
+        "reverted",
+        "committed",
+        "quarantined"
+      ]
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "updatedAt": {
+      "$ref": "common.schema.json#/$defs/utcTime"
+    },
+    "planDigest": {
+      "$ref": "common.schema.json#/$defs/sha256"
+    },
+    "planPath": {
+      "$ref": "common.schema.json#/$defs/relativePath"
+    },
+    "resourceKeys": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 4096,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 512
+      }
+    },
+    "participants": {
+      "type": "array",
+      "maxItems": 4096,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "participantId",
+          "kind",
+          "resourceKey",
+          "identity"
+        ],
+        "properties": {
+          "participantId": {
+            "$ref": "common.schema.json#/$defs/uuid"
+          },
+          "kind": {
+            "enum": [
+              "process",
+              "file",
+              "directory",
+              "database"
+            ]
+          },
+          "resourceKey": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "identity": {
+            "type": "object",
+            "minProperties": 1,
+            "maxProperties": 32
+          }
+        }
+      }
+    },
+    "receipts": {
+      "type": "array",
+      "maxItems": 4096,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "receiptId",
+          "recordedAt",
+          "stepId",
+          "effect",
+          "detailCode"
+        ],
+        "properties": {
+          "receiptId": {
+            "$ref": "common.schema.json#/$defs/uuid"
+          },
+          "recordedAt": {
+            "$ref": "common.schema.json#/$defs/utcTime"
+          },
+          "stepId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "effect": {
+            "enum": [
+              "started",
+              "completed",
+              "reverted",
+              "unknown",
+              "notExecuted"
+            ]
+          },
+          "detailCode": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "outcomes": {
+            "$ref": "execution-outcomes.schema.json"
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "operationKind": {
+            "const": "runAttempt"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "runId",
+          "attemptId"
+        ]
+      }
+    }
+  ],
+  "dependentRequired": {
+    "attemptId": [
+      "runId"
+    ],
+    "runId": [
+      "attemptId"
+    ]
+  }
+}

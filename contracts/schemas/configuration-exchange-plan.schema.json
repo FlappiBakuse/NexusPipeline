@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/configuration-exchange-plan.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "version", "instanceId", "operationId", "journalId", "operationKind", "targetPath", "parentIdentity", "before", "candidate", "originalObjects"],
+  "properties": {
+    "format": {"const": "nexus.configuration.exchange-plan"},
+    "version": {"const": 1},
+    "instanceId": {"$ref": "common.schema.json#/$defs/uuid"},
+    "operationId": {"$ref": "common.schema.json#/$defs/uuid"},
+    "journalId": {"$ref": "common.schema.json#/$defs/uuid"},
+    "operationKind": {"enum": ["configExchange", "configEdit"]},
+    "targetPath": {"type": "string", "minLength": 4, "maxLength": 32767},
+    "parentIdentity": {"$ref": "file-tree.schema.json#/$defs/physicalIdentity"},
+    "before": {"$ref": "file-tree.schema.json"},
+    "candidate": {"$ref": "file-tree.schema.json"},
+    "runState": {"$ref": "execution-plan.schema.json#/$defs/planReference"},
+    "editor": {
+      "type": "object", "additionalProperties": false, "required": ["executablePath", "executableSha256", "arguments", "workingDirectory"],
+      "properties": {
+        "exclusiveProgram": {"type": "boolean"},
+        "executablePath": {"type": "string", "minLength": 4, "maxLength": 32767},
+        "executableSha256": {"$ref": "common.schema.json#/$defs/sha256"},
+        "arguments": {"type": "array", "maxItems": 256, "items": {"type": "string", "maxLength": 32767}},
+        "workingDirectory": {"type": "string", "minLength": 4, "maxLength": 32767}
+      }
+    },
+    "physicalClaims": {
+      "type": "array", "minItems": 1, "maxItems": 4096,
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["resourceKey", "mode"],
+        "properties": {
+          "resourceKey": {"type": "string", "minLength": 1, "maxLength": 512},
+          "mode": {"enum": ["reference", "mutation"]}
+        }
+      }
+    },
+    "editPolicy": {
+      "type": "object", "additionalProperties": false, "required": ["writableRoots", "resultShapes"],
+      "properties": {
+        "adapter": {
+          "type": "object", "additionalProperties": false,
+          "required": ["extensionId", "manifestSha256", "scriptSha256", "resourceId", "relativePath", "field", "prepareValue", "commitValue"],
+          "properties": {
+            "extensionId": {"$ref": "common.schema.json#/$defs/extensionId"},
+            "manifestSha256": {"$ref": "common.schema.json#/$defs/sha256"},
+            "scriptSha256": {"$ref": "common.schema.json#/$defs/sha256"},
+            "resourceId": {"type": "string", "minLength": 1, "maxLength": 120},
+            "relativePath": {"type": "string", "maxLength": 1024},
+            "field": {"type": "string", "minLength": 1, "maxLength": 120},
+            "prepareValue": {"type": "string", "maxLength": 256},
+            "commitValue": {"type": "string", "maxLength": 256}
+          }
+        },
+        "writableRoots": {"type": "array", "minItems": 1, "maxItems": 256, "uniqueItems": true, "items": {"type": "string", "maxLength": 1024}},
+        "documents": {
+          "type": "array", "maxItems": 256,
+          "items": {
+            "type": "object", "additionalProperties": false, "required": ["relativePath", "syntax", "required"],
+            "properties": {
+              "relativePath": {"type": "string", "maxLength": 1024},
+              "syntax": {"enum": ["opaque", "json", "jsonWithComments", "yaml"]},
+              "required": {"type": "boolean"}
+            }
+          }
+        },
+        "resultShapes": {"type": "array", "minItems": 1, "maxItems": 3, "uniqueItems": true, "items": {"enum": ["missing", "file", "directory"]}}
+      }
+    },
+    "originalObjects": {
+      "type": "array",
+      "maxItems": 4096,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["relativePath", "identity"],
+        "properties": {
+          "relativePath": {"type": "string", "maxLength": 1024},
+          "identity": {"$ref": "file-tree.schema.json#/$defs/physicalIdentity"}
+        }
+      }
+    }
+  }
+}

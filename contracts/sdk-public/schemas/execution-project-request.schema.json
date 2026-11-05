@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/execution-project-request.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "fingerprint",
+    "sequence",
+    "kind"
+  ],
+  "properties": {
+    "fingerprint": {
+      "$ref": "common.schema.json#/$defs/sha256"
+    },
+    "sequence": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100000
+    },
+    "kind": {
+      "enum": [
+        "manifest",
+        "assets",
+        "tree",
+        "asset",
+        "file",
+        "secret"
+      ]
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "path": {
+      "type": "string",
+      "maxLength": 32767
+    },
+    "index": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 32768
+    },
+    "offset": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1073741824
+    },
+    "maximumBytes": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 131072
+    }
+  }
+}

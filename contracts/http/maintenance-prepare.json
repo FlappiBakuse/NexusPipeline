@@ -1,0 +1,13 @@
+{
+  "post": {
+    "operationId": "prepareTrustedHostUpdate",
+    "description": "Requires local control.maintenance.write. Selects an exact accepted feed identity and version, downloads bounded bytes, checks trusted redirect targets, size/hash, actual build profile and frozen manifest/store binding, then accepts a pending operation. Does not replace the running Host or execute the candidate. Exact accepted replay returns the original operation; changed input with the same identity conflicts. CLI: maintenance-prepare --input <json>. Not exposed through MCP.",
+    "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "../schemas/control-maintenance-prepare.schema.json"}}}},
+    "responses": {
+      "202": {"description": "Prepared pending operation; not an update success receipt"},
+      "400": {"description": "Invalid current-format request"},
+      "403": {"description": "Origin or remote operation rejected"},
+      "409": {"description": "Identity, resource, release trust, candidate or runtime conflict"}
+    }
+  }
+}

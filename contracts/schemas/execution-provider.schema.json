@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/execution-provider.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "extensionId",
+    "entryId",
+    "activationId",
+    "verification",
+    "protocol",
+    "manifest",
+    "packageArchive",
+    "worker",
+    "upstream",
+    "upstreamArguments",
+    "packageRoot",
+    "packageRootIdentity"
+  ],
+  "properties": {
+    "gracefulStop": { "type": "boolean", "enum": [true] },
+    "targetControl": { "type": "boolean", "enum": [true] },
+    "extensionId": {"$ref": "common.schema.json#/$defs/extensionId"},
+    "entryId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120,
+      "pattern": "^[a-z][a-z0-9.-]*$"
+    },
+    "activationId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "verification": {
+      "const": "controlled-local-package"
+    },
+    "protocol": {
+      "const": "nexus.execution.provider/1"
+    },
+    "manifest": {
+      "$ref": "execution-plan.schema.json#/$defs/planReference"
+    },
+    "packageArchive": {
+      "$ref": "execution-plan.schema.json#/$defs/interpreterImage"
+    },
+    "worker": {
+      "$ref": "execution-plan.schema.json#/$defs/interpreterImage"
+    },
+    "upstream": {
+      "$ref": "execution-plan.schema.json#/$defs/interpreterImage"
+    },
+    "upstreamArguments": {
+      "type": "array",
+      "maxItems": 128,
+      "items": {
+        "type": "string",
+        "maxLength": 4096
+      }
+    },
+    "launcher": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "image",
+        "arguments",
+        "writesManagedConfiguration",
+        "terminalProtocol"
+      ],
+      "properties": {
+        "image": {
+          "$ref": "execution-plan.schema.json#/$defs/interpreterImage"
+        },
+        "arguments": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "type": "string",
+            "maxLength": 4096
+          }
+        },
+        "writesManagedConfiguration": {
+          "type": "boolean",
+          "enum": [
+            false
+          ]
+        },
+        "terminalProtocol": {
+          "const": "worker-terminal/1"
+        }
+      }
+    },
+    "packageRoot": {
+      "type": "string",
+      "minLength": 4,
+      "maxLength": 32767
+    },
+    "packageRootIdentity": {
+      "$ref": "file-tree.schema.json#/$defs/physicalIdentity"
+    },
+    "retry": {
+      "$ref": "execution-provider-retry.schema.json"
+    }
+  }
+}

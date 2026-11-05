@@ -1,0 +1,21 @@
+{
+  "name": "nexus-switch-setting",
+  "properties": {
+    "value": "boolean",
+    "title": "string",
+    "description": "string",
+    "disabled": "boolean"
+  },
+  "defaults": {
+    "value": false,
+    "title": "",
+    "description": "",
+    "disabled": false
+  },
+  "slots": [],
+  "events": {
+    "nexus-change": "Change<boolean>"
+  },
+  "focus": "switch",
+  "accessibility": "开关行名称/说明与checked关联；一次操作一次change"
+}

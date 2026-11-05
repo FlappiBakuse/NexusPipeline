@@ -1,0 +1,147 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/source-compiler.schema.json",
+  "not": {},
+  "$defs": {
+    "manifest": {
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "managed"
+            ],
+            "properties": {
+              "managed": {
+                "required": [
+                  "compilers"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "kind": {
+                "const": "managed-code"
+              },
+              "capabilities": {
+                "contains": {
+                  "const": "source.compile"
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "capabilities"
+            ],
+            "properties": {
+              "capabilities": {
+                "contains": {
+                  "const": "source.compile"
+                }
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "managed",
+              "permissions"
+            ],
+            "properties": {
+              "kind": {
+                "const": "managed-code"
+              },
+              "managed": {
+                "required": [
+                  "compilers"
+                ]
+              },
+              "permissions": {
+                "required": [
+                  "fileAccess"
+                ],
+                "properties": {
+                  "fileAccess": {
+                    "contains": {
+                      "const": "selected-script-root"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": [
+              "specialized"
+            ],
+            "properties": {
+              "specialized": {
+                "required": [
+                  "compiler"
+                ]
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "permissions"
+            ],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "data-specialized",
+                  "managed-code"
+                ]
+              },
+              "permissions": {
+                "required": [
+                  "fileAccess"
+                ],
+                "properties": {
+                  "fileAccess": {
+                    "contains": {
+                      "const": "selected-script-root"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "use": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "extensionId",
+        "compilerId"
+      ],
+      "properties": {
+        "extensionId": {
+          "$ref": "common.schema.json#/$defs/extensionId"
+        },
+        "compilerId": {
+          "$ref": "#/$defs/id"
+        }
+      }
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9.-]{0,63}$"
+    },
+    "ids": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 4,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/id"
+      }
+    }
+  }
+}

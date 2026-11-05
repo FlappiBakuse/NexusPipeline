@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/execution-provider-use.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "extensionId",
+    "entryId"
+  ],
+  "properties": {
+    "extensionId": {
+      "$ref": "common.schema.json#/$defs/extensionId"
+    },
+    "entryId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120,
+      "pattern": "^[a-z][a-z0-9.-]*$"
+    }
+  }
+}

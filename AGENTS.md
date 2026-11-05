@@ -1,94 +1,84 @@
-# AGENTS.md — NexusPipeline
+# AGENTS.md
 
-本文件是本仓库的项目级工程约束。所有路径相对本仓库根目录，另有标注除外。维护者及自动化代理从本文件开始；实施计划、Issue、任务卡可以细化工作，不能自行扩大操作授权、降低测试要求或放宽用户数据保护。
+## 开工
 
-## 1. 项目与开工入口
+- 先读 README、docs/developer/README.md 与 docs/developer/architecture.md。
+- 检查 branch、HEAD、status、暂存区和远端同步状态。
+- 未提交修改来源不明时停止依赖它的操作。
+- 日常开发只在本地 develop，Git commit 与远端操作分别授权。
+- 版本变更必须有用户明确目标。
+- 不执行 reset、clean、自动 stash 或 force push。
+- 不修改未知用户数据、实例、凭据和运行目录。
 
-NexusPipeline（枢链）是 Windows 本地自动化脚本管家：.NET 10/C# WinForms 托盘、HttpListener 服务、CLI/MCP 控制面，以及构建为静态文件的 Vue 3/TypeScript 前端。最终用户不需要 Node/npm。官方插件仓库为 `FlappiBakuse/NexusPipeline-Plugins`；两个仓库版本独立。单仓库开发不要求特定父目录名称。
+## 架构
 
-开始修改前，在本仓库运行 `git status --short --branch`、`git rev-parse HEAD`，确认用户未提交内容。读取下面与任务有关的最小文档集合；根据 `docs/architecture/README.md` 与 `docs/map.json` 定位专题和责任，再读对应代码和测试。
+- 一个业务概念只有一个 owner。
+- Core 不引用 Host、Platform、SDK DTO、数据库与 UI。
+- Platform 实现 Core ports，并在 SDK 边界转换 DTO。
+- Host 只组合服务、处理入口与生命周期。
+- 业务代码不解析 DI 容器，不建立泛型服务定位器。
+- Web、CLI、MCP 共享同一用例与权限。
+- 生产与 Test Host 使用同一业务和 HTTP 源码。
+- 旧 Nexus 协议、别名、reader 与 fallback 不进入新运行时。
+- 外部上游协议按其自己的版本管理。
 
-| 事项 | 仓库内权威入口 |
-|---|---|
-| 用户行为、安装、管理员运行原因 | `README.md` |
-| 模块、约束与代码定位 | `docs/architecture/README.md`、`docs/map.json` |
-| 环境、构建、发布 | `docs/development/README.md` |
-| 测试政策与完整命令 | `docs/testing/README.md` → `docs/testing/commands.md` |
-| Web/CLI/MCP 的能力与状态 | `docs/reference/control-plane.md` |
-| Plugin SDK、manifest、Frontend API | `docs/reference/plugin-api/README.md` |
-| 当前未完成问题 | `docs/status.md` |
-| 已发布历史 | `CHANGELOG.md` |
+## 数据安全
 
-涉及 Plugin API、manifest、专项能力、前端桥接或官方插件装配时，同时检查官方插件仓库相应文件。联调检出路径通过测试入口参数/环境变量显式提供；缺少联调依赖时记录具体缺失，继续不依赖它的工作，不伪造契约通过。
+- 未知格式只读拒绝，保留原字节。
+- 恢复前必须证明旧 writer 已停止。
+- 无法证明拥有权时隔离资源，不猜测恢复。
+- 未知外部副作用不自动重放。
+- 安全重试必须同时满足冻结声明与宿主策略。
+- JSON 导入导出仅接受当前新格式。
+- 秘密草稿单独驻留内存，不写日志或普通 DTO。
+- keep、set、clear 有明确语义，不以空字符串猜测。
 
-## 2. 操作授权、版本和数据
+## 文件与工具
 
-- 代码实施授权与 commit、push、tag、PR、合并、规则修改、实际发布授权分别判断。用户未授权的远端或版本操作不得执行。可以完成不依赖远端写入的实现和本地验证。
-- 日常开发目标为 `develop`；`main` 源码必须经 PR、`Host / 构建检查` 成功和 squash 合并。Host 没有生成物直推 `main` 例外。禁止普通直推/force push `main`。
-- 正式版本号仅按用户指示修改；未指定版本不阻止普通修复、架构或工具工作。指定版本后同步相关元数据。`major=0` 或含 `-beta.N`/`-rc.N` 的发行标记为 Pre-release。预览插件通道与 Host 产品 Pre-release 是不同概念。
-- 修改前保存当前 HEAD、diff 和将修改文件的外部备份。备份必须包含未提交字节；只记录 tag 不足以保全工作树。未经针对性授权不使用 `reset --hard`、`clean -fd`、自动 stash 或覆盖恢复。已授权的版本化本地备份 tag 不推送远端。
-- `config/`、`data/`、`history/`、`logs/`、`.nxp/`、插件用户数据、更新/配置恢复现场属于用户或运行态。测试使用新建隔离目录；不得对用户现有实例、进程、端口或文件做“测试清理”。读日志先脱敏。
-- 不提交凭据、Cookie、Token、密钥、账号、个人日志、运行目录、依赖缓存或本地验证包。只清理本次创建且身份已核验的明确路径；失败证据保留到诊断结束。不得仅凭 PID 文件杀进程，须核验本次运行身份。
-- 获授权提交后按可独立审查/验证/恢复的功能边界提交，Conventional Commits 类型英文、说明中文。不要混入无关修改；不得以固定文件数预算替代合理变更边界。
+- 手写文本使用 UTF-8、LF。
+- 标识符清楚表达领域、单位与所有权。
+- 注释解释代码不易说明的原因，不记中间尝试。
+- C# 文件最多 450 行；TS/JS 最多 350 行。
+- Vue SFC 最多 300 行；CSS 最多 350 行。
+- Python/Node 工具最多 400 行；测试最多 500 行。
+- 手写 JSON/YAML 最多 350 行；长期文档最多 400 行。
+- 函数目标 60 行，超过 100 行先审查职责。
+- 不通过压行、partial 或无主公共容器规避边界。
+- 生成例外必须登记具体文件、生成来源与验证命令。
+- 不把依赖、构建、运行数据、报告或候选放进源码。
+- 外部输出根必须由命令显式传入。
+- 工具入口保持薄层，职责模块各自验证。
+- 不依赖父目录文档、聊天或仓外隐藏脚本构建产品。
 
-## 3. 后端结构与依赖
+## 验证
 
-顶层为 `src/Host`、`src/ControlPlane`、`src/Modules`、`src/Platform`、`src/Shared`；独立 `src/NexusPipeline.Plugin.Abstractions` 保持 SDK 边界。模块包含 Settings、Plugins、Scripts、Users、Queues、Configuration、History、Notifications、Execution、Scheduling、Updates、Diagnostics。
+- 先最低有效层证明可观察结果。
+- 不用源码字符串匹配证明普通业务行为。
+- 架构使用编译或 AST 证据。
+- 零用例、意外 skip、缺报告、取消、超时均失败。
+- 不用无条件重试掩盖失败。
+- 保存原始命令、退出码、计时与源码摘要。
+- 未提交源码记 local-uncommitted，commit/tree 保持 null。
+- 不用旧参考 commit 冒充新实现身份。
+- UI 核心 Smoke 最多 12 个。
+- 不把装饰性断言作为核心功能门禁。
+- 视觉证据保留在仓外，不提交像素基线。
+- 桌面资源按完整进程族计量。
+- fixture、contract-only 与 integrated 证据分列。
+- 未运行记 NOT_RUN，不填假 PASS。
+- 生产与 Test Host 清单及输出必须分开。
 
-`Settings` 管宿主自身设置；`Configuration` 管被自动化目标的配置、快照、编辑会话、交换与恢复。一个业务概念一个 owner。目录和 namespace 对齐，测试按模块镜像组织。新增模块/入口同步 `docs/map.json` 与 `docs/architecture/README.md`。
+## 交付
 
-只有 `Host/Composition` 创建/解析/释放 DI 容器；创建完毕向生命周期和控制面传递具体依赖。业务代码禁止 `IServiceProvider`、全局组合根、泛型服务定位器和捕获容器的延迟 delegate。不要通过把 RuntimeContext 改名成其他 Singleton 绕过边界。
-
-Modules 不依赖 Host/ControlPlane；ControlPlane 不直接读写具体业务存储；Platform 不依赖业务模块或硬编码产品仓库/发行策略；Shared 不承载 feature 规则。跨模块依赖必须显式、无环；Contracts 目录不免除循环检查。Host 组合适配器负责需要跨 owner 协调的事务接线。
-
-`AutomationDefinitionState` 保持 scripts/queues/users 的唯一内存与同步边界；typed ports 暴露所需操作，禁止创建第二份实体集合或互不协调的三把锁。Settings 保持 clone → 校验 → 原子保存成功 → 发布新引用。保存失败不得先改变内存或副作用。
-
-HTTP 只处理路由、认证、参数、用例调用和响应映射；图标、avatar、文件浏览和历史读取进入对应服务。MCP 注入明确用例；CLI 经常驻服务 Control API，不另写一套数据修改路径。反射路由可保留，但绑定必须可验证、重复路由报错。
-
-保留配置交换、journal、崩溃恢复、取消、超时、租约与清理的可靠性语义。机械搬迁与行为修改分开验证。内部类型改名不得改变 JSON 字段、用户磁盘路径、资源名、程序集名和公开协议。Plugin API/Frontend API 版本与程序集包版本分别解释，不自动相互改成一样。
-
-## 4. 测试与 Windows 运行
-
-正式发行程序保持 `app.manifest` 的 `requireAdministrator`；自动化功能测试统一使用 `NexusTestHost=true`、`asInvoker` 的隔离测试构建。测试继承启动终端的权限：普通终端直接运行，GitHub 托管 Windows runner 使用其默认管理员环境。测试入口不要求提权，不触发 UAC，不降权，不按权限跳过用例；实际权限写入日志。
-
-核心验证入口为 `node tests/run.mjs ci --group backend`、`ci --group frontend`；`smoke` 并行运行这两组，记录从命令开始的实际耗时，不设执行时间预算。测试只在原字节隔离副本中构建，输出及依赖缓存使用外部测试目录。本机低负载模式可使用独占增量槽位及精确身份准备缓存，实际源码指纹、原生用例和清理标准保持；入口见 docs/testing/commands.md。`tests/policy.json` 固定选择与预期用例；原生 TRX／Vitest JSON、场景和用例集合、计数、源码指纹、计时字段和清理都必须匹配，零用例、意外 skip、缺报告、取消和超时不得成功。普通测试不自动运行全仓语法扫描、文档链接或全部工具自测；这些按改动显式运行。
-
-`daily` 在两个独立 Host 槽位中运行执行、配置恢复、控制面和真实分钟调度四组 E2E，记录完整父命令实际耗时，不设执行时间预算；预期场景不得缺失。`integration` 保留 UI/System Smoke 诊断，其中受控 API 响应不得冒称真实业务。`release` 单独执行生产 requireAdministrator 构建与清单校验。GitHub PR 只运行固定 `Host / 构建检查`，单 job `timeout-minutes: 10`，按完整变更闭包执行真实生产编译及适用 A01–A05 静态约束，不运行项目测试。纯文档和纯本机测试输入产生明确无需构建的成功结果；未知生产共享输入扩大闭包。本机验证与手动完整发行不受该十分钟时限约束。完整候选和实际发布分别手动触发，main push 不自动构建候选或发布。准确命令见 `docs/testing/commands.md`。
-
-生产/Test Host 构建的输出和中间目录分离；两者共享同一业务源实现，禁止将测试 EXE 发布给用户。功能测试统一使用 `NexusTestHost=true`、asInvoker 的隔离 Test Host，每次运行使用独立端口与独立 runtime 目录，运行数据、PID 与退出标记只写入已登记外部测试根的 `runs/<runId>/`，不读写用户实例的进程、端口或数据。托管层使用受控进程/模拟器 fixture，操作系统授权边界通过平台适配器契约验证，不冒称普通权限已执行了系统级操作。
-
-先搜索现役测试，在最低有效层增加覆盖。普通业务测试验证 API、结果、状态、文件效果和生命周期，不读取源码函数体匹配实现。UI Smoke 只保留必须跨浏览器证明的核心流程，总量不超过 12；不新增持久视觉截图/像素/布局基线，不断言私有 class、DOM 层级或装饰文案。临时人工浏览器验证材料放系统临时目录并按本次所有权清理。
-
-正式核心门禁中的新增测试必须直接验证项目核心功能的运行结果、状态、持久化或恢复。只检查卡片排列、分隔线、标题文案、CSS 类等展示细节，不能充当核心功能测试纳入现役门禁；此类改动使用类型检查、生产构建和人工验收核查。违反本条属于严重违规。
-
-测试失败保留原始报告并修根因。禁止自动重试掩盖不稳定、跳过失败、catch 后成功或降低通过条件。命令非交互、UTF-8、实时显示阶段/用例/退出码，不加无条件 pause。Python 用于适合的文件/数据与辅助脚本；既有 dotnet/node/npm/.cmd 入口按当前文档执行。
-
-## 5. 插件与前端
-
-宿主默认 stable 商店；`pluginRepository.channel` 只接受 stable/develop，通过配置文件及重启生效，普通设置 API 不开放此字段。develop 指向官方 `plugins-develop` Release 资产。通道缓存、ETag、pending、安装归属和冻结包身份一致；禁止跨通道缓存回退、候选按名称重新取包或无可信归属接管目录。
-
-Preview 同版本 hash 变化可更新；hash 相同不因 sourceCommit 变化重装；可信 preview 可被同版本 stable 替换；高版本安装不自动降级。稳定包版本对应字节不可变。新增 journal 字段同步白名单、克隆、读写、恢复和 ownership 提交，保持当前格式数据安全。
-
-专项插件只声明宿主支持的能力，前端代码写在 Host；专项不包含 frontend 对象、frontend-module、web/frontend 浏览器代码或 .NET 程序集。后端 judge/configEditor 脚本保持有效；configValidator 已退役，声明旧字段的包显式拒绝，配置诊断通过 taskProtocol discover.configAssessment，不改用户快照。managed 插件可通过 Frontend API 1.7、公开 slot/route 和 `nxp-*` Native Custom Elements 扩展。未声明能力不得静默当作支持。
-
-`frontend/` 是唯一宿主前端源码；Vite 最终输出以只读资源内嵌 Host；发行载荷为根 `NexusPipeline.exe`、独立更新程序 `NexusPipeline.update.exe`、`README.md`、`resources/desktop/` 和 `resources/payload-manifest.json`。`frontend/src/platform` 管平台服务，`app/bootstrap.ts` 管启动，`features/<domain>` 管业务。桥接仅通过 `plugin-bridge/host-adapter.ts` 使用宿主平台；app/features/ui 经 `@bridge/index` facade，不依赖 bridge 私有实现。插件不引用 Vue 私有组件/class。
-
-复用 `ui/primitives` 与既有 CSS 变量、紧凑列表。页面适配 360/768/1280 视口，触控目标至少 40px，公共数字输入的紧凑增减按钮按设计规范登记为例外；保持主题、焦点、ARIA 与可访问性。轮询/订阅经生命周期管理，离开页面释放。运行目标 Args 的路径与参数使用现役解析协议，不私自把命令行引号规则搬进持久化字段。
-
-## 6. 交付与长期维护
-
-README 描述当前产品，架构文档描述现役结构，TESTING 描述实际入口和测试政策，DEVELOPMENT 描述构建发布，CONTROL_PLANE 列公开能力，STATUS 只保留未完成问题，CHANGELOG 记录已发布历史。完成的迁移教程、版本专项清单、外部会话依赖、旧路径和零调用兼容层不进入长期维护入口。
-
-宿主更新日志只维护最近两个已发布的 `major.minor` 系列：`CHANGELOG.md` 保存当前系列，`docs/history/changelog-earlier.md` 保存上一系列。新增下一系列的首个发布记录时滚动两份文档，删除更旧系列的文档记录并更新历史导航；保留版本的发布事实不改写。发布前人工核对版本范围、完整性与链接。该规则不删除 Git 历史、GitHub Releases、更新屏障或插件发行记录。
-
-保留低层工具和测试，不长期保留迁移债务豁免。修改公开能力同步控制面表、相应测试与官方插件作者文档。
-
-交付时逐项列明改动、已运行命令/退出码、未运行范围及原因；本地测试通过不等于远端发布已启用，上传候选包不等于发布成功。正式完成前，在无父目录文档、无实施资料包的新 checkout 中验证导航、构建、测试和文档。
-
-正式支持与验收范围为 Windows 11 x64，现役 Plugin API 精确为 2.3，Frontend API 为 1.7，自有 .NET 工程使用 .NET 10。持续清理无调用的旧 Nexus 协议、别名和工具入口；受支持的自动迁移必须具有明确路线、身份校验和应用／数据恢复，稳定发现入口及必要桥接保持可达；外部上游最新稳定及前两版适配独立维护。旧配置、外观、历史及未知恢复现场原字节保留；已实现并验证恢复的迁移路线可以自动升级，未知 schema、缺失路线和未知恢复 journal 必须阻断。未支持的破坏性来源使用新目录人工迁移，独立升级屏障须先于资产公开生效。
-
-本机未提交树验收使用 `tools/local_acceptance.py build`，要求外部独占目录并保全原 Git index/ref。详细输入、产物和发布边界见 `docs/development/local-acceptance.md`。专用秘密读取仍须正常鉴权、脱敏普通 DTO 与 no-store；明文不进入日志、诊断和公共状态。
-
-前端设计专项仅在仓外本地执行，覆盖全部宿主页与官方插件页面；语义卡片最多三层，第四层违规，深数据不截断。真实浏览器专项为本机验收必要条件，不加入 PR CI 或核心功能门禁，不提交专项脚本、截图或报告。公共规范与必要功能回归按产品代码维护。
-
-文档名称、职责、格式、权威来源与验证遵循[文档维护规范](docs/development/documentation.md)。
+- README 描述当前真实能力。
+- status 只记录尚未完成的问题。
+- 契约、作者文档与消费者同步。
+- PR 描述最终行为，不记放弃的实现。
+- 获授权提交时按可独立审查的功能边界拆分。
+- 先完成本轮提交与验证，再按授权统一推送 develop。
+- 正式发布需独立授权，不从本地候选推断。
+- 交付注明实现、实际验证、未运行与远端状态。
+- 功能变更交付实际构建软件，不能用命令替代。
+- 新 SDK 版本 0.1.0、Host 0.18.0、官方插件 0.5.0。
+- 自有格式初代 version=1，各版本语义互相独立。
+- 未发布目标版本不因修复或重建重复 bump。

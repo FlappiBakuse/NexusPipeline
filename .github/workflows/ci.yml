@@ -34,7 +34,7 @@ jobs:
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          python tools/ci_check.py plan --base $env:PR_BASE_SHA --head $env:PR_HEAD_SHA --checkout $env:GITHUB_SHA --report "$env:RUNNER_TEMP/production-plan.json"
+          python tooling/ci_check.py plan --base $env:PR_BASE_SHA --head $env:PR_HEAD_SHA --checkout $env:GITHUB_SHA --report "$env:RUNNER_TEMP/production-plan.json"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: 检出固定对端生产输入
         if: steps.plan.outputs.partnerRequired == 'true'
@@ -58,8 +58,8 @@ jobs:
         working-directory: Source
         shell: pwsh
         run: |
-          $arguments = @('tools/ci_check.py', 'run', '--plan', "$env:RUNNER_TEMP/production-plan.json", '--output', "$env:RUNNER_TEMP/production-check")
-          if ('${{ steps.plan.outputs.partnerRequired }}' -eq 'true') { $arguments += @('--plugins-root', "$env:GITHUB_WORKSPACE/Partner") }
+          $arguments = @('tooling/ci_check.py', 'run', '--plan', "$env:RUNNER_TEMP/production-plan.json", '--output', "$env:RUNNER_TEMP/production-check")
+          if ('${{ steps.plan.outputs.partnerRequired }}' -eq 'true') { $arguments += @('--partner-root', "$env:GITHUB_WORKSPACE/Partner") }
           python @arguments
           exit $LASTEXITCODE
       - name: 保存范围和生产检查证据
@@ -72,5 +72,8 @@ jobs:
             ${{ runner.temp }}/production-check/report.json
             ${{ runner.temp }}/production-check/*.json
             ${{ runner.temp }}/production-check/*.log
+            ${{ runner.temp }}/production-check/**/*.log
+            ${{ runner.temp }}/production-check/**/*receipt.json
+            ${{ runner.temp }}/production-check/**/source-manifests/*.json
           if-no-files-found: error
           retention-days: 7

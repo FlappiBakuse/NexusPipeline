@@ -1,0 +1,8 @@
+{
+  "format": "nexus.detached.signature",
+  "version": 1,
+  "keyId": "fixture-never-production",
+  "algorithm": "ecdsa-p256-sha256",
+  "encoding": "base64-p1363",
+  "signature": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+}

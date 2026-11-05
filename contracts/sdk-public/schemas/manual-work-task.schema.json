@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/manual-work-task.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "version",
+    "taskId",
+    "revision",
+    "isEnabled",
+    "timeZoneId",
+    "timeoutSeconds",
+    "notificationTaskIds",
+    "scheduledTaskIds"
+  ],
+  "properties": {
+    "format": {
+      "const": "nexus.manual.work-task"
+    },
+    "version": {
+      "const": 1
+    },
+    "taskId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "isEnabled": {
+      "type": "boolean"
+    },
+    "timeZoneId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "timeoutSeconds": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 604800
+    },
+    "notificationTaskIds": {
+      "type": "array",
+      "maxItems": 99,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "common.schema.json#/$defs/uuid"
+      }
+    },
+    "scheduledTaskIds": {
+      "type": "array",
+      "maxItems": 4096,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "common.schema.json#/$defs/uuid"
+      }
+    }
+  }
+}

@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/extension-kind.schema.json",
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "managed-code"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "managed"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "data-specialized"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "specialized"
+        ],
+        "properties": {
+          "managed": false,
+          "frontend": false
+        },
+        "not": {
+          "properties": {
+            "capabilities": {
+              "contains": {
+                "const": "ui.contribute"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "frontend"
+        ]
+      },
+      "then": {
+        "properties": {
+          "kind": {
+            "const": "managed-code"
+          },
+          "capabilities": {
+            "contains": {
+              "const": "ui.contribute"
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "capabilities": {
+            "contains": {
+              "const": "ui.contribute"
+            }
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "frontend"
+        ]
+      }
+    }
+  ]
+}

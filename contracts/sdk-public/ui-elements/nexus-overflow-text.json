@@ -1,0 +1,15 @@
+{
+  "name": "nexus-overflow-text",
+  "properties": {
+    "text": "string"
+  },
+  "defaults": {
+    "text": ""
+  },
+  "slots": [
+    "default"
+  ],
+  "events": {},
+  "focus": "none",
+  "accessibility": "溢出全文提示/触控读取；reduced-motion不取消全文通路"
+}

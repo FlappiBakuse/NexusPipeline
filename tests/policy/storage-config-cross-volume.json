@@ -1,0 +1,6 @@
+{
+  "group": "storage-config-cross-volume",
+  "expectedMethods": {
+    "NexusPipeline.StorageTests.CrossVolumeTests.RestoresCrossVolume": 6
+  }
+}

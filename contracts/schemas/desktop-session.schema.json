@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/desktop-session.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "version", "instanceId", "clientId", "sessionId", "correlationId", "capabilities"],
+  "properties": {
+    "format": {"const": "nexus.desktop.session"},
+    "version": {"const": 1},
+    "instanceId": {"$ref": "common.schema.json#/$defs/uuid"},
+    "clientId": {"$ref": "common.schema.json#/$defs/uuid"},
+    "sessionId": {"$ref": "common.schema.json#/$defs/uuid"},
+    "correlationId": {"$ref": "common.schema.json#/$defs/uuid"},
+    "capabilities": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"enum": ["file.select", "folder.select", "external.open", "close.request"]}
+    }
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "name": "nexus-text-area",
+  "properties": {
+    "value": "string",
+    "rows": "number",
+    "readOnly": "boolean",
+    "maxLength": "number|null"
+  },
+  "defaults": {
+    "rows": 3,
+    "maxLength": null,
+    "value": "",
+    "readOnly": false
+  },
+  "slots": [],
+  "events": {
+    "nexus-change": "Change<string>"
+  },
+  "focus": "textarea",
+  "accessibility": "保留选区、换行、输入法与公开滚动/尺寸调整；完整值不因窗口化截断"
+}

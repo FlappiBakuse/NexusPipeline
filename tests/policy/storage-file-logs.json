@@ -1,0 +1,20 @@
+{
+  "group": "storage-file-logs",
+  "expectedMethods": {
+    "NexusPipeline.StorageTests.FileLogTests.HonorsFileSelectors": 6,
+    "NexusPipeline.StorageTests.FileLogTests.SeparatesReplacementEpochs": 2,
+    "NexusPipeline.StorageTests.FileLogTests.DrainsRetiredHandles": 1,
+    "NexusPipeline.StorageTests.FileLogTests.RejectsPipeFallback": 1,
+    "NexusPipeline.StorageTests.FileLogTests.BoundsFileJudgement": 2,
+    "NexusPipeline.StorageTests.LongLogTests.StreamsCompleteOriginal": 2,
+    "NexusPipeline.StorageTests.FileLogTests.CollectsUnreadableFiles": 1,
+    "NexusPipeline.StorageTests.FileLogTests.ObservesPartialActivity": 1,
+    "NexusPipeline.StorageTests.LogHistoryTests.StopsBusyWorkers": 1,
+    "NexusPipeline.StorageTests.LogHistoryTests.SelectsSavedFiles": 2,
+    "NexusPipeline.StorageTests.LogHistoryTests.RejectsRehashedEpochs": 4,
+    "NexusPipeline.StorageTests.LogHistoryTests.ProtectsRegisteredBaselines": 1,
+    "NexusPipeline.StorageTests.LogSelectorTests.FreezesSelectorScope": 5,
+    "NexusPipeline.StorageTests.LogSelectorTests.RejectsInvalidSelectors": 4,
+    "NexusPipeline.StorageTests.LogCatalogTests.ReadsCurrentLogs": 1
+  }
+}

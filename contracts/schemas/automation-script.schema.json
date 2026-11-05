@@ -1,0 +1,234 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/automation-script.schema.json",
+  "$defs": {
+    "script": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "kind",
+        "rootId",
+        "executable",
+        "arguments",
+        "configurationPaths",
+        "logPaths",
+        "limits",
+        "judgement",
+        "updateConfigurationAtFinish",
+        "adapterResources"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "common.schema.json#/$defs/uuid"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "kind": {
+          "enum": [
+            "generic",
+            "specialized"
+          ]
+        },
+        "extensionId": {
+          "$ref": "common.schema.json#/$defs/extensionId"
+        },
+        "rootId": {
+          "$ref": "common.schema.json#/$defs/uuid"
+        },
+        "executable": {
+          "$ref": "automation-paths.schema.json#/$defs/portablePath"
+        },
+        "arguments": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 4096
+          },
+          "maxItems": 128
+        },
+        "configurationPaths": {
+          "type": "array",
+          "items": {
+            "$ref": "automation-paths.schema.json#/$defs/portablePath"
+          },
+          "maxItems": 64
+        },
+        "logPaths": {
+          "type": "array",
+          "items": {
+            "$ref": "automation-paths.schema.json#/$defs/portablePath"
+          },
+          "maxItems": 16
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "maximumAttempts",
+            "stallTimeoutSeconds",
+            "totalTimeoutSeconds"
+          ],
+          "properties": {
+            "maximumAttempts": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 99
+            },
+            "stallTimeoutSeconds": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 86400
+            },
+            "totalTimeoutSeconds": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 604800
+            }
+          }
+        },
+        "judgement": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "successKeywords",
+            "failureKeywords",
+            "language"
+          ],
+          "properties": {
+            "successKeywords": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096
+              },
+              "maxItems": 64
+            },
+            "failureKeywords": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096
+              },
+              "maxItems": 64
+            },
+            "language": {
+              "enum": [
+                "keywords",
+                "javascript",
+                "python"
+              ]
+            },
+            "script": {
+              "type": "string",
+              "maxLength": 65536
+            }
+          }
+        },
+        "updateConfigurationAtFinish": {
+          "type": "boolean"
+        },
+        "target": {
+          "$ref": "automation-target.schema.json"
+        },
+        "adapterResources": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "$ref": "#/$defs/adapterResource"
+          }
+        },
+        "order": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4095
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "specialized"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "extensionId"
+            ],
+            "properties": {
+              "updateConfigurationAtFinish": {
+                "const": true
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "generic"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "extensionId": false
+            }
+          }
+        }
+      ]
+    },
+    "adapterResource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "resourceId",
+        "declarationIndex",
+        "relativePath",
+        "definitionRevision",
+        "syntax",
+        "access"
+      ],
+      "properties": {
+        "resourceId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "declarationIndex": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 31
+        },
+        "relativePath": {
+          "type": "string",
+          "maxLength": 1024
+        },
+        "definitionRevision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "syntax": {
+          "enum": [
+            "opaque",
+            "json",
+            "jsonWithComments",
+            "yaml"
+          ]
+        },
+        "access": {
+          "$ref": "configuration-selector.schema.json#/$defs/access"
+        }
+      }
+    }
+  }
+}

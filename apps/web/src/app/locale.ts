@@ -1,0 +1,88 @@
+import { ref } from 'vue';
+import { fieldMessages } from './field-messages';
+import { runtimeMessages } from './runtime-messages';
+
+export const locale = ref<'zh-CN' | 'en-US'>('zh-CN');
+const english: Record<string, string> = {
+  ...fieldMessages,
+  ...runtimeMessages,
+  今日概览: 'Overview',
+  运行中心: 'Run center',
+  计划与队列: 'Schedules & queues',
+  脚本库: 'Scripts',
+  账号与配置: 'Accounts & configuration',
+  运行历史: 'Run history',
+  插件中心: 'Plugins',
+  通知: 'Notifications',
+  通知任务: 'Notifications',
+  设置: 'Settings',
+  新增: 'Add',
+  编辑: 'Edit',
+  保存: 'Save',
+  '保存中…': 'Saving…',
+  取消: 'Cancel',
+  关闭: 'Close',
+  删除: 'Delete',
+  刷新: 'Refresh',
+  重试: 'Retry',
+  上移: 'Move up',
+  下移: 'Move down',
+  名称: 'Name',
+  备注: 'Notes',
+  启用: 'Enabled',
+  停用: 'Disable',
+  类型: 'Type',
+  全部: 'All',
+  全部账号: 'All accounts',
+  全部状态: 'All outcomes',
+  账号: 'Account',
+  脚本: 'Script',
+  队列: 'Queue',
+  日程: 'Schedule',
+  脚本目录: 'Script root',
+  脚本绑定: 'Binding',
+  配置: 'Configuration',
+  开始运行: 'Start run',
+  系统操作: 'System actions',
+  操作未完成: 'Operation incomplete',
+  重新连接: 'Reconnect',
+  远程访问令牌: 'Remote access token',
+  连接: 'Connect',
+  准备页面: 'Preparing page',
+  打开导航: 'Open navigation',
+  隐藏: 'Hide',
+  退出: 'Quit',
+  关闭提示: 'Dismiss notice',
+  浅色主题: 'Light theme',
+  深色主题: 'Dark theme',
+  服务已连接: 'Connected',
+  等待连接: 'Connecting',
+  '存在未保存的草稿，仍要退出窗口？': 'There are unsaved drafts. Quit the window?',
+  枢链: '枢链',
+  'NexusPipeline 枢链': 'NexusPipeline',
+  主导航: 'Main navigation',
+  扩展页面不可用: 'Extension page unavailable',
+  服务: 'Service',
+  当前版本: 'Current version',
+  关闭导航: 'Close navigation',
+  切换主题: 'Toggle theme',
+  '主题：': 'Theme: ',
+  跟随系统: 'Follow system',
+  浅色: 'Light',
+  深色: 'Dark',
+  '事件连接中断，正在重连': 'Event connection lost; reconnecting',
+  '写入结果待确认，请先核实操作结果。': 'The write outcome is unknown. Check the operation result first.',
+  实时日志已连接: 'Live logs connected',
+  等待实时日志: 'Waiting for live logs',
+  自动跟随: 'Follow automatically',
+  高度: 'Height',
+  '当前窗口仅保留日志尾部；完整原文可在运行证据中按段读取。':
+    'Only the log tail is shown here; read the full log in segments from run evidence.'
+};
+
+export function registerMessages(messages: Readonly<Record<string, string>>): void {
+  for (const [key, value] of Object.entries(messages)) english[key] = value;
+}
+export function t(text: string): string {
+  return locale.value === 'en-US' ? english[text] || text : text;
+}

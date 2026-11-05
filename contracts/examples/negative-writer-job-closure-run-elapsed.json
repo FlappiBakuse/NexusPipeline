@@ -1,0 +1,22 @@
+{
+  "format": "nexus.writer.job-closure", "version": 1,
+  "instanceId": "11111111-1111-4111-8111-111111111111",
+  "operationId": "22222222-2222-4222-8222-222222222222",
+  "writerId": "33333333-3333-4333-8333-333333333333",
+  "jobName": "Local\\NexusWorker-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "sessionId": 1,
+  "journalIds": ["44444444-4444-4444-8444-444444444444"],
+  "creator": {
+    "processId": 321, "createdAtUtc": "2026-10-20T00:00:00.0000000Z", "imagePath": "C:\\fixture\\host.exe",
+    "imageSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "userSid": "S-1-5-21-1-2-3-1001", "elevated": false
+  },
+  "root": {
+    "processId": 322, "createdAtUtc": "2026-10-20T00:00:01.0000000Z", "imagePath": "C:\\fixture\\writer.exe",
+    "imageSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "userSid": "S-1-5-21-1-2-3-1001", "elevated": false
+  },
+  "family": [{
+    "processId": 322, "createdAtUtc": "2026-10-20T00:00:01.0000000Z", "imagePath": "C:\\fixture\\writer.exe",
+    "imageSha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "userSid": "S-1-5-21-1-2-3-1001", "elevated": false
+  }],
+  "totalProcesses": 1, "activeProcesses": 0, "disposition": "stopped", "runElapsedMilliseconds": -1,
+  "closedAt": "2026-10-20T00:00:16.0000000Z"
+}

@@ -1,0 +1,15 @@
+{
+  "name": "nexus-loading-state",
+  "properties": {
+    "label": "string",
+    "progress": "number|null"
+  },
+  "defaults": {
+    "progress": null,
+    "label": ""
+  },
+  "slots": [],
+  "events": {},
+  "focus": "none",
+  "accessibility": "不确定进度不编造百分比；已确认完成才结束状态"
+}

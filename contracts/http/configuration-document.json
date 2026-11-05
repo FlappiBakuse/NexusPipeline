@@ -1,0 +1,23 @@
+{
+  "parameters": [
+    {"name": "bindingId", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}},
+    {"name": "resourceId", "in": "path", "required": true, "schema": {"type": "string"}},
+    {"name": "revision", "in": "query", "required": true, "schema": {"type": "integer", "minimum": 1, "maximum": 9007199254740991}},
+    {"name": "sourceSha256", "in": "query", "required": true, "schema": {"type": "string", "pattern": "^[a-f0-9]{64}$"}},
+    {"name": "relativePath", "in": "query", "schema": {"type": "string", "maxLength": 1024}},
+    {"name": "syntax", "in": "query", "required": true, "schema": {"enum": ["json", "jsonWithComments", "yaml"]}}
+  ],
+  "get": {
+    "operationId": "readGenericDocument",
+    "description": "configuration.read; parse the verified immutable saved document using the same bounded parser as value patches. The declaration, current resource revision and source digest must match. No writes, live filesystem fallback or guessed selector types.",
+    "responses": {
+      "200": {"description": "Parsed saved document", "content": {"application/json": {"schema": {
+        "type": "object", "additionalProperties": false, "required": ["revision", "sourceSha256", "value"],
+        "properties": {"revision": {"type": "integer", "minimum": 1}, "sourceSha256": {"type": "string"}, "value": {}}
+      }}}},
+      "400": {"description": "Invalid syntax or query"},
+      "403": {"description": "Capability unavailable"},
+      "409": {"description": "Saved declaration, revision, digest or structured content unavailable"}
+    }
+  }
+}

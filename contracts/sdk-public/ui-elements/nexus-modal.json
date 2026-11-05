@@ -1,0 +1,26 @@
+{
+  "name": "nexus-modal",
+  "properties": {
+    "open": "boolean",
+    "title": "string",
+    "size": "normal|wide",
+    "locked": "boolean",
+    "surface": "primary|secondary"
+  },
+  "defaults": {
+    "open": false,
+    "size": "normal",
+    "surface": "primary",
+    "title": "",
+    "locked": false
+  },
+  "slots": [
+    "default",
+    "footer"
+  ],
+  "events": {
+    "nexus-close": "CloseDetail"
+  },
+  "focus": "documented initial control",
+  "accessibility": "dialog语义、焦点约束、Escape层级、焦点返回；locked不误当写入已确认"
+}

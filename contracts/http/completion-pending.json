@@ -1,0 +1,4 @@
+{
+  "get": {"operationId": "readPendingCompletion", "description": "control.status.read; current completion owner facts. serverTimeUtc supports display-only countdown; the backend remains the effect authority. No query/body.",
+    "responses": {"200": {"description": "operationId/action/phase/notBeforeUtc/serverTimeUtc/canCancel/failureCode; no pending operation has null identity/action/phase/deadline."}, "403": {"description": "Capability unavailable"}}}
+}

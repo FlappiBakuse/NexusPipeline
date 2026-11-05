@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/manual-work-invocation.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "version",
+    "invocation",
+    "taskRevision"
+  ],
+  "properties": {
+    "format": {
+      "const": "nexus.manual.work-invocation"
+    },
+    "version": {
+      "const": 1
+    },
+    "invocation": {
+      "$ref": "scheduled-invocation.schema.json"
+    },
+    "taskRevision": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    }
+  }
+}

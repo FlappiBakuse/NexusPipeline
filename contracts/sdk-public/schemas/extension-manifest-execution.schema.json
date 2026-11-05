@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/extension-manifest-execution.schema.json",
+  "$defs": {
+    "manifest": {
+      "if": {
+        "required": [
+          "execution"
+        ]
+      },
+      "then": {
+        "properties": {
+          "capabilities": {
+            "contains": {
+              "const": "execution.drive"
+            }
+          },
+          "permissions": {
+            "required": [
+              "processAccess"
+            ],
+            "properties": {
+              "processAccess": {
+                "allOf": [
+                  {
+                    "contains": {
+                      "const": "owned-worker"
+                    }
+                  },
+                  {
+                    "contains": {
+                      "const": "selected-upstream"
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "entryId",
+    "workerEntry",
+    "arguments",
+    "protocol"
+  ],
+  "properties": {
+    "gracefulStop": {
+      "type": "boolean",
+      "enum": [
+        true
+      ]
+    },
+    "targetControl": {
+      "type": "boolean",
+      "enum": [
+        true
+      ]
+    },
+    "entryId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120,
+      "pattern": "^[a-z][a-z0-9.-]*$"
+    },
+    "workerEntry": {
+      "$ref": "common.schema.json#/$defs/relativePath",
+      "pattern": "\\.[eE][xX][eE]$"
+    },
+    "arguments": {
+      "type": "array",
+      "maxItems": 128,
+      "items": {
+        "type": "string",
+        "maxLength": 4096
+      }
+    },
+    "protocol": {
+      "const": "nexus.execution.provider/1"
+    },
+    "configurationResources": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "$ref": "execution-provider-resource.schema.json"
+      }
+    },
+    "launcher": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entry",
+        "arguments",
+        "writesManagedConfiguration",
+        "terminalProtocol"
+      ],
+      "properties": {
+        "entry": {
+          "$ref": "common.schema.json#/$defs/relativePath",
+          "pattern": "\\.[eE][xX][eE]$"
+        },
+        "arguments": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "type": "string",
+            "maxLength": 4096
+          }
+        },
+        "writesManagedConfiguration": {
+          "type": "boolean",
+          "enum": [
+            false
+          ]
+        },
+        "terminalProtocol": {
+          "const": "worker-terminal/1"
+        }
+      }
+    },
+    "retry": {
+      "$ref": "execution-provider-retry.schema.json"
+    }
+  }
+}

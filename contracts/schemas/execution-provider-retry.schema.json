@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/execution-provider-retry.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "safety",
+    "scope",
+    "idempotencyProtocol",
+    "outcomes"
+  ],
+  "properties": {
+    "safety": {
+      "const": "safe"
+    },
+    "scope": {
+      "const": "workerAndUpstream"
+    },
+    "idempotencyProtocol": {
+      "const": "stable-run-binding/1"
+    },
+    "outcomes": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "failed",
+          "interrupted"
+        ]
+      }
+    }
+  }
+}

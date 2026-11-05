@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "dependencies": [
+    {
+      "framework": "Microsoft.NETCore.App",
+      "minimumVersion": "10.0.0",
+      "version": "10.0.14",
+      "rid": "win-x64",
+      "url": "https://builds.dotnet.microsoft.com/dotnet/Runtime/10.0.14/dotnet-runtime-10.0.14-win-x64.exe",
+      "sizeBytes": 30653360,
+      "sha512": "6277b0feac2ec312276ec62ccaaec7fb49a22baa0c4157d0418eb4bfc7c443fa90aa06318725c113da1ea19343b5a315749825299a71e34010f4554496cf36e8",
+      "sha256": "53a67d2d68a74a892010191d70080a5b359f41ed7d0bb2f92f120c9f0e4e199d",
+      "metadataUrl": "https://dotnetcli.blob.core.windows.net/dotnet/release-metadata/10.0/releases.json"
+    },
+    {
+      "framework": "Microsoft.AspNetCore.App",
+      "minimumVersion": "10.0.0",
+      "version": "10.0.14",
+      "rid": "win-x64",
+      "url": "https://builds.dotnet.microsoft.com/dotnet/aspnetcore/Runtime/10.0.14/aspnetcore-runtime-10.0.14-win-x64.exe",
+      "sizeBytes": 11271088,
+      "sha512": "90045a7969d70453ac973ec3858105118e974f415c7cbd1a3cd7800b7442b291ea9f5b388a4ab79ab0d118e9fd330c9548a7e028d6d0e84daddec670a16bbb53",
+      "sha256": "b7ff2dc29209ac243eaea0b7614e26d33136e3d8a1aba97ba211e0e39e209849",
+      "metadataUrl": "https://dotnetcli.blob.core.windows.net/dotnet/release-metadata/10.0/releases.json"
+    }
+  ]
+}

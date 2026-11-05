@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/store-pointer.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "version",
+    "generationId",
+    "sequence",
+    "channel",
+    "catalogUrl",
+    "catalogSha256",
+    "signatureUrl"
+  ],
+  "properties": {
+    "format": {
+      "const": "nexus.store.pointer"
+    },
+    "version": {
+      "const": 1
+    },
+    "generationId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "sequence": {
+      "$ref": "common.schema.json#/$defs/sequence"
+    },
+    "channel": {
+      "enum": [
+        "stable",
+        "develop"
+      ]
+    },
+    "catalogUrl": {
+      "$ref": "common.schema.json#/$defs/httpsUrl"
+    },
+    "catalogSha256": {
+      "$ref": "common.schema.json#/$defs/sha256"
+    },
+    "signatureUrl": {
+      "$ref": "common.schema.json#/$defs/httpsUrl"
+    }
+  }
+}

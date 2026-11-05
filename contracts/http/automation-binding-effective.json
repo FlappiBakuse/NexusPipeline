@@ -1,0 +1,13 @@
+{
+  "get": {
+    "operationId": "readAutomationBindingEffective",
+    "description": "Requires automation.read. Resolves one saved binding through AutomationBindingPolicy using the same catalog snapshot. Response contains catalogRevision, bindingId, userId, raw, effective and sources. Each sources property is binding or user for isEnabled, runDays, maximumSuccessfulRunsPerDay, notifyEnabled, notificationTaskIds, preHook, postHook, preOnceAfterSuccess and postFinalOnly.",
+    "parameters": [{"name": "bindingId", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}],
+    "responses": {
+      "200": {"description": "Raw and effective binding and authoritative per-field sources."},
+      "400": {"description": "Invalid binding identity or query."},
+      "403": {"description": "Capability or origin denied."},
+      "404": {"description": "Binding does not exist."}
+    }
+  }
+}

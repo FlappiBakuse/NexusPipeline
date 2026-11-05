@@ -1,0 +1,159 @@
+# 扩展包、安装与实际运行时
+
+`Core.Extensions` 拥有插件安装策略；Platform 实现目录信任、物理载荷、运行时与持久安装事实。
+Host 只组合服务。SDK 为 0.1.0，Host 为 0.18.0，官方插件目标版本为 0.5.0。
+仅接受当前 managed-code/data-specialized manifest；managed 代码不具备沙箱隔离保证。
+尚未完成的产品入口和恢复范围见[当前范围](../status.md)。
+
+## 信任与缓存
+
+目录权威来自固定 HTTPS 来源和内置 P-256 SPKI/keyId，
+签名针对下载的 catalog 原字节，使用 SHA-256/P1363。
+指针、目录、签名均执行有界读取、严格 schema 和重复成员检查。
+条目身份、manifest、包长度与摘要、Host/SDK 兼容性必须一致。
+
+stable/develop 分别持久化最高序号、同序号摘要与已接受代际。
+新目录和新安装必须满足当前发行下限及最高水位；同序号不能替换原内容。
+缓存读取重新验证原始字节和当前信任根，不能把 SQL 行或显示字段当作验证结果。
+实际商店 HTTP client 禁用自动重定向、Cookie 和解压转换，保留系统证书验证与配置的代理策略。
+元数据不接受重定向；包的每一跳及最终请求都须满足固定来源策略，最多三次跳转。
+artifact 以有界缓冲流式核对长度和摘要，编码响应、范围响应、截断和超限均拒绝。
+
+已安装版本的重新激活仍验证原目录签名、当前信任根及原包/manifest。
+新目录缺少旧条目不构成撤销，提高新准入序号下限也不自动撤销既有安装。
+当前密钥撤销会阻止重新激活。
+生产商店与 Host 更新共用内嵌的 `src/platform/Security/release-trust.json`。该文件随源码冻结，
+运行目录、HTTP 响应或用户设置不能替换它。`unconfigured` 明确表示没有发布信任；
+配置正式公钥后须重建软件。配置包含 `keys`（keyId 到 Base64 SPKI）、`storeRoot`、`feedRoot`、
+`artifactRoots` 和四个通道下限 `storeStableFloor`、`storeDevelopFloor`、`updateStableFloor`、
+`updatePrereleaseFloor`，并将 `state` 设为 `configured`；格式为 `nexus.release.trust`，版本为1。
+仅接受 P-256 公钥及既有 HTTPS 来源约束，拒绝重复/未知字段、测试 keyId、已知 fixture 公钥、
+保留测试域名和无效下限。该文件不保存私钥；正式签名和线上发布由独立授权的发行流程完成。
+历史验证只回答原记录是否仍满足信任要求，不产生新的目录或安装候选权威。
+
+## 独占下载与包验证
+
+下载独占创建 `runtime/staging/extension-<operationId>` 与其中的 `payload.zip`。
+已有同名目录不被接管；原生相对目录句柄、物理身份和实际资源租约约束本次拥有权。
+成功下载保持原文件只读句柄，供 `VerifiedExtensionPackage` 重新验证实际包。
+失败清理核对本次真实文件的身份、大小、摘要与父目录身份，逐对象删除。
+额外未知子项会保留并使目录清理失败，不递归删除。
+
+ZIP 共用有界 reader，拒绝逃逸路径、大小写别名、重复节点、链接、异常元数据和 CRC/实际内容不一致。
+解包候选复用不可变 blobs 与文件树机制；目录和包上的 caller DTO 不授予安装权。
+prepared authority 绑定同一实例、真实资源 root、已接受目录、原 archive 和 manifest，消费时重新检查。
+
+可信安装工作流先查询持久受理，再下载冻结选择的原条目；目录变化不能替换用户已选请求。
+同一原主体和完整请求共享一个宿主持有的任务，内存最多保留 32 个未完成请求。
+客户端取消只分离等待，宿主退出才取消原任务；任务完成后移出内存，重复请求读取持久事实。
+移除使用原安装证据、实际资源租约和同一 inventory，不依赖新包发行信任或网络。
+目录获取与新包安装、升级仍须具备发行信任。
+下载和验证可先完成，实际安装等待原资源租约释放；持久准备完整受理前不报告受理成功。
+
+## 安装与最终提交
+
+install/upgrade/remove 使用 `extensionApply`，宿主更新独立使用 `updateApply`。
+冻结源包含原安装修订、目录/包身份、原偏好和精确资源声明。
+持久受理查询先核对原主体和原请求身份，重复 operationId 不能换成另一份请求。
+普通载荷计划不能替代私有 prepared package authority。
+
+实际 scope 排空后，物理 journal 才能创建工作区、保存旧树和移动已验证候选。
+移动使用原对象句柄及固定目标目录句柄，不覆盖或合并已有目标。
+Applied 只描述物理载荷，不表示插件已经启用。
+
+激活回调必须实际返回；同一 inventory 发布原 scope 后，
+安装修订、首次偏好 CAS 和 Committed 才在最终 SQL 事务提交。
+原 journal 的准备、物理、发布和提交证据均须完整且与 SQL 投影一致。
+元数据读取不产生新的可执行 prepared authority。
+
+## 冷启动还原
+
+恢复先取得原 `JournalRecoveryOwnership` 的真实旧 writer 完整停止证明。
+移除已完成全部冻结物理步骤时，核验目标缺失、原树保全及原安装/设置修订后，补写原移除完成记录和投影；不重复移动或执行激活回调。
+尚未完成前向 Applied 的冻结物理前缀可以进入冷还原。
+实际激活回调已观察到失败且注册资源清理成功时，同一安装 owner 可持有原 Mutation 恢复原安装。
+该失败事实随原还原记录持久化；进程中断后仍须证明原完整 writer 停止，才能继续原反向步骤。
+超时、取消、晚到回调或清理失败不签发这一证明；未知激活回调保持隔离。
+反向步骤由原计划、原物理记录与实际候选/备份位置闭集推导，不接管同名对象。
+原生移动保留对象身份；未知子项、链接、替换或缺失原树均拒绝并保全。
+
+实际恢复的原树由文件句柄保持，原停止证明在 SQL 事务内重新核对。
+未完成的前向 effect 只有在真实恢复后才记为 Reverted，既有 Completed 事实保持。
+最终 Committed 收据表明原安装已还原，不表示新安装成功；不产生新安装修订或改写启用偏好。
+物理记录先于 SQL 时只按原证据补投影，SQL 失败后的精确重试不重复移动。
+
+## 同一运行时与实际消费
+
+每个 InstanceLease 只绑定一个正式 ExtensionActivator 与 ResourceLeaseManager。
+安装时激活、启动后的激活及明确重新启用共用同一 loader、scope inventory 和清理流程。
+重新激活冻结当前安装与设置修订，持有真实 Mutation/Reference，验证恢复索引和旧 writer 停止证据。
+原持久索引尚未发布时，先通过既有完整 journal 校验与发布 owner，不能直接设置 ready。
+重新激活不改写原安装 journal 中的历史激活事实。
+
+宿主通过 Core 生命周期 port 组合唯一正式 inventory，并在开始服务前处理已保存的启用偏好。
+缺少生产发行信任资料时保留安装记录并明确标为不可用，不使用测试信任根加载。
+退出先停止原执行服务和保留进程监视，再撤销 scope、等待真实回调及登记资源清理。
+停止超时保持未确认状态；重复停止等待同一任务，停止开始后拒绝新激活。
+
+managed loader 从已验证包解析入口与声明依赖，SDK 身份共享实际宿主 SDK。
+SDK 保留程序集名按大小写无关识别，实际完整程序集身份仍须严格匹配；包内副本不能成为第二份 SDK。
+正式入口只接受 `Entry(ExtensionActivationContext)` 构造。固定 context 提供调度、秘密、通知、媒体、包资产/运行输出、普通 JSON 与受限网络的独立端口。
+缺少实际后端的端口明确不可用，不解析服务容器，也不回退到无参数入口。
+公开 SDK 类型与内部格式的边界见 [SDK 导出与身份](sdk.md)。
+模块加载、operation 权限与数据边界见 [插件浏览器入口](extension-frontend.md)。
+scope 寿命拥有回调登记的资源，准备对象释放不等于 scope 已停止。
+回调失败时清理已登记资源；尚未闭合的回调不能被当作无活动 scope。
+真实回调和返回流持有使用期间的 scope 与 Reference，取消后等待实际任务和流释放。
+资源清理失败会阻止最终运行时释放原生引用、ALC 和完整包保护句柄，保留隔离而不冒充卸载成功。
+
+`managed.nativeLibraries` 只允许当前签名 manifest 声明的至多 32 个本包原生 DLL。
+加载核对原包输入、AMD64 PE、普通与延迟依赖；只接受准确绝对路径和固定系统依赖，不按 basename 搜索外部目录。
+声明目录内额外 DLL、跨包同名已加载模块和未声明请求均拒绝；模块引用按 scope 反序释放。
+
+provider 在每次取得和实际消费前检查原完整 Committed 证据、当前安装行、当前启用偏好与实际 published registration。
+发布到最终事务之间的临时 registration 不允许消费；原安装 Mutation 也继续阻止独立 Reference。
+准备对象和安装 root 释放后，已提交 scope 可继续驱动原受控执行 owner。
+禁用偏好立即阻止旧 prepared provider 和新准入，保留历史安装事实。
+执行证据保留真实 terminal、原 writer 和完整进程族停止记录。
+
+## 废弃工作目录清理
+
+已终结安装操作的工作目录由原 fileCleanup 日志与 outbox 分页清理，当前每页选取至多 64 个节点，格式上限为 256。
+私有 proof 固定原 producer、完整终结证据、workspace 与每个节点的原物理身份和内容。
+下一页只接受原已完成页链；blob 清理项和工作目录 proof 在同一个计划中互斥。
+读取计划、完整 journal 绑定、启动和最终准入发布均迭代核对同一前页链，不递归重建校验器。
+
+清理持有同一实例的扩展 Mutation 和精确文件系统声明，先以原 inventory 确认扩展不活动。
+活动或未知 scope、独立引用、额外文件、内容或身份变化均阻止清理，不能为了回收隐式关闭扩展。
+文件和目录逐对象核对并非递归删除；当前安装载荷与原安装历史继续保留。
+未取得完成收据的删除保持原清理恢复语义并隔离，不凭路径缺失补写成功。
+
+一个新受理分页可在显式作用域内保护原 producer、前页证明和剩余文件字节，复用已完整验证的绑定。
+不可变元数据持有禁止写入/替换的文件句柄与祖先目录句柄；待删内容句柄允许本次删除但不允许写入。
+每次仍核对当前名称集合、物理身份、单硬链、SQL、claims、writer 停止和当前安装引用，不以大小或时间戳授权。
+超出保护预算或不能取得保护时使用原完整 reader；恢复和已有推进页不复用这一作用域。
+终态 SQL 提交后、通知 observer 前释放保护，最终准入发布使用新的完整证据 reader。
+
+## 操作结果查询
+
+Core 的扩展操作查询按已验证主体读取原 operation 与 journal，不签发安装或执行 authority。
+SQL 已接受但初始物理日志尚未创建时，只核对原计划、source、claims 和 Pending outbox；
+读取与重试不创建日志、不采用同名目录，也不重复安装。
+
+Pending、NotExecuted、Installed、Removed 与 OriginalRestored 分别保留实际含义。
+原件已还原的终结不会返回新安装成功；未知激活回调保持 Pending。
+返回的安装修订与激活 ID 属于该操作的历史结果，当前活动状态由运行时 port 提供。
+后续升级、移除或关闭 scope 不改写原操作结果；其他主体或不存在的操作均不暴露事实。
+
+## 验证入口
+
+扩展原生用例登记在 `tests/policy/storage-extensions.json`，Core 策略登记在 `core-extensions.json`。
+托管用例的受控程序集由仓库 `tests/fixtures/ManagedExtension` 实际构建，
+runner 注入真实 DLL 路径，并在原生调用前后核对其构建产物指纹。
+组件用例、受控执行与完整 Host/产品验收分别记录，不互相替代。
+
+### 通用框架直驱
+
+managed-code 驱动可声明自己的受限 adapter、compiler 和 execution provider，须逐项绑定本扩展实际注册入口。
+MaaFramework 使用此合同创建脚本、选择项目来源并冻结编译结果，交给原 managed worker 执行。
+data-specialized 仍禁止引用自身 compiler/provider；MaaEnd/MaaStellaSora 继续调用用户已安装客户端，保持纯数据包和无通用插件前置。

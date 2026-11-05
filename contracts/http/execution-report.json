@@ -1,0 +1,16 @@
+{
+  "get": {
+    "operationId": "readExecutionReport",
+    "description": "Requires records.read. Reads a committed attempt bound to its run, journal, accepted plan and validated evidence. Returns frozen step/task identities, dependencies and original collected task observations. Unknown observations remain unknown; engine and business facts do not replace the Host effective run result.",
+    "parameters": [
+      {"name": "runId", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}},
+      {"name": "attemptId", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}
+    ],
+    "responses": {
+      "200": {"description": "Committed run/attempt report with frozen steps and validated collected task observations."},
+      "400": {"description": "Invalid query or identity."},
+      "403": {"description": "Capability or origin denied."},
+      "409": {"description": "Attempt is unavailable, uncommitted or not bound to the requested run."}
+    }
+  }
+}

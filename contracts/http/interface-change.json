@@ -1,0 +1,9 @@
+{
+  "post": {
+    "operationId": "changeInterfacePreferences",
+    "description": "settings.write; saves fixed UI preferences using expectedRevision. Only an exact replay of the latest operation, subject and request returns that snapshot. A conflict preserves the current bytes. No automatic replay after an unknown outcome.",
+    "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "../schemas/control-interface-change.schema.json"}}}},
+    "responses": {"200": {"description": "Saved revision, values and exact operationId"}, "409": {"description": "interface_revision_conflict"},
+      "403": {"description": "Capability unavailable"}, "413": {"description": "Request exceeds 8192 bytes"}}
+  }
+}

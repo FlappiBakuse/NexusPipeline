@@ -1,0 +1,131 @@
+.settings-page {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+.categories {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-bottom: 8px;
+}
+.categories button[aria-expanded='true'] {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--content-control);
+}
+.panel {
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--nx-color-surface);
+  overflow: hidden;
+}
+.panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 76px;
+  padding: 16px 24px;
+  text-align: left;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.panel-heading > span {
+  display: grid;
+  gap: 4px;
+}
+.panel-heading strong {
+  font-size: 15px;
+}
+.panel-heading small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+.panel-heading nexus-icon {
+  color: var(--accent);
+}
+.panel-body {
+  border-top: 1px solid var(--border);
+  padding: 24px;
+}
+.token {
+  display: grid;
+  gap: 16px;
+}
+label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+.token-input {
+  display: flex;
+  gap: 8px;
+}
+.token-input input {
+  min-width: 0;
+  flex: 1;
+}
+.token-input button {
+  flex-shrink: 0;
+}
+input {
+  min-height: 40px;
+  box-sizing: border-box;
+  font-weight: 400;
+}
+dl,
+dd,
+p {
+  margin: 0;
+}
+.addresses > div {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  min-height: 34px;
+  border-bottom: 1px solid var(--border);
+}
+dt {
+  width: 94px;
+  color: var(--muted);
+}
+.warning,
+.notice {
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--content-card-soft);
+}
+.warning {
+  border-left: 2px solid var(--nx-color-warning);
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+.notice button {
+  margin-left: 12px;
+}
+.error {
+  color: var(--nx-color-danger);
+}
+@media (max-width: 600px) {
+  .panel-heading,
+  .panel-body {
+    padding: 16px;
+  }
+  .token-input {
+    flex-wrap: wrap;
+  }
+  .token-input input {
+    flex-basis: 100%;
+  }
+  .addresses > div {
+    align-items: flex-start;
+    padding: 8px 0;
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "parameters": [
+    {"name": "runId", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}},
+    {"name": "attemptId", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}},
+    {"name": "stepId", "in": "path", "required": true, "schema": {"type": "string", "maxLength": 120}},
+    {"name": "role", "in": "path", "required": true, "schema": {"enum": ["main", "preHook", "postHook"]}}
+  ],
+  "get": {"operationId": "streamRunLog", "description": "logs.read; initial retained tail then ordered live frames, each bound to the same key. Slow consumers receive resync. Reauthenticates at least every heartbeat and before each data write; connection lifetime is at most five minutes. Disconnect does not cancel execution. Full persistent originals remain separate.",
+    "responses": {"200": {"description": "SSE envelopes {kind,key,data}, kind tail/frame/resync", "content": {"text/event-stream": {"schema": {"type": "string"}}}}, "403": {"description": "Capability unavailable"}}}
+}

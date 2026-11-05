@@ -1,0 +1,23 @@
+{
+  "name": "nexus-icon-button",
+  "properties": {
+    "label": "string",
+    "icon": "string",
+    "disabled": "boolean",
+    "expanded": "boolean|null"
+  },
+  "defaults": {
+    "expanded": null,
+    "label": "",
+    "icon": "",
+    "disabled": false
+  },
+  "slots": [
+    "icon"
+  ],
+  "events": {
+    "click": "native MouseEvent"
+  },
+  "focus": "button",
+  "accessibility": "必填名称；aria-expanded与受控值一致"
+}

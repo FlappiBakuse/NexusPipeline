@@ -1,0 +1,19 @@
+{
+  "name": "nexus-sortable-list",
+  "properties": {
+    "ids": "readonly string[]",
+    "disabled": "boolean"
+  },
+  "defaults": {
+    "ids": [],
+    "disabled": false
+  },
+  "slots": [
+    "default"
+  ],
+  "events": {
+    "nexus-reorder": "ReorderDetail"
+  },
+  "focus": "active handle",
+  "accessibility": "输出完整唯一ID顺序；取消排序保持原顺序；稳定焦点"
+}

@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/media-frame.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "version",
+    "capture",
+    "mimeType",
+    "width",
+    "height",
+    "sizeBytes",
+    "sha256",
+    "capturedAt"
+  ],
+  "properties": {
+    "format": {
+      "const": "nexus.media.frame"
+    },
+    "version": {
+      "const": 1
+    },
+    "capture": {
+      "$ref": "media-capture.schema.json"
+    },
+    "mimeType": {
+      "const": "image/png"
+    },
+    "width": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 8192
+    },
+    "height": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 8192
+    },
+    "sizeBytes": {
+      "type": "integer",
+      "minimum": 33,
+      "maximum": 8388608
+    },
+    "sha256": {
+      "$ref": "common.schema.json#/$defs/sha256"
+    },
+    "capturedAt": {
+      "$ref": "common.schema.json#/$defs/utcTime"
+    }
+  }
+}

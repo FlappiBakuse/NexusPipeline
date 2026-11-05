@@ -1,0 +1,22 @@
+{
+  "name": "nexus-date-range-picker",
+  "properties": {
+    "value": "{from:date|null,to:date|null}",
+    "min": "date|null",
+    "max": "date|null"
+  },
+  "defaults": {
+    "value": {
+      "from": null,
+      "to": null
+    },
+    "min": null,
+    "max": null
+  },
+  "slots": [],
+  "events": {
+    "nexus-change": "Change<DateRange>"
+  },
+  "focus": "trigger",
+  "accessibility": "本地日期，不暗转时区；日历键盘与范围说明"
+}

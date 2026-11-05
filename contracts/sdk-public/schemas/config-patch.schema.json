@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/config-patch.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "version",
+    "operationId",
+    "resourceId",
+    "sourceSha256",
+    "expectedRevision",
+    "edits"
+  ],
+  "properties": {
+    "format": {
+      "const": "nexus.config.patch"
+    },
+    "version": {
+      "const": 1
+    },
+    "operationId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "resourceId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "sourceSha256": {
+      "$ref": "common.schema.json#/$defs/sha256"
+    },
+    "expectedRevision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "edits": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "selector",
+          "expected",
+          "value"
+        ],
+        "properties": {
+          "selector": {
+            "type": "array",
+            "items": {
+              "$ref": "configuration-selector.schema.json#/$defs/step"
+            },
+            "maxItems": 64,
+            "minItems": 1
+          },
+          "expected": {},
+          "expectedExists": {
+            "type": "boolean"
+          },
+          "value": {}
+        },
+        "allOf": [
+          {
+            "if": {
+              "required": [
+                "expectedExists"
+              ],
+              "properties": {
+                "expectedExists": {
+                  "const": false
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "expected": {
+                  "type": "null"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "maxItems": 256,
+      "minItems": 1
+    }
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "parameters": [{"name": "extensionId", "in": "path", "required": true, "schema": {"type": "string", "maxLength": 96}}],
+  "get": {"operationId": "readExtensionDetails", "description": "extensions.read; installed manifest and finite README/CHANGELOG locale variants, bound to current installation evidence and verified file fingerprints. Documents are UTF-8 text, at most 512KiB each. No arbitrary path and no implicit download/install for a store entry.",
+    "responses": {"200": {"description": "extensionId/installedRevision/packageVersion/manifest/documents"}, "404": {"description": "extension_not_installed"}, "403": {"description": "Capability unavailable"}}}
+}

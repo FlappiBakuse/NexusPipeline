@@ -1,0 +1,9 @@
+[
+  "tooling/naming-reviewed-runtime-1.json",
+  "tooling/naming-native-runtime-1.json",
+  "tooling/naming-native-runtime-2.json",
+  "tooling/naming-reviewed-storage-1.json",
+  "tooling/naming-reviewed-storage-2.json",
+  "tooling/naming-contracts-1.json",
+  "tooling/naming-native-tests-1.json"
+]

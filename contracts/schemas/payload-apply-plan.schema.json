@@ -1,0 +1,263 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/payload-apply-plan.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "version",
+    "instanceId",
+    "operationId",
+    "journalId",
+    "operationKind",
+    "action",
+    "targetPath",
+    "parentIdentity",
+    "before",
+    "candidate",
+    "originalObjects",
+    "resourceKeys"
+  ],
+  "properties": {
+    "format": {
+      "const": "nexus.payload.apply-plan"
+    },
+    "version": {
+      "const": 1
+    },
+    "instanceId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "operationId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "journalId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "operationKind": {
+      "enum": [
+        "updateApply",
+        "extensionApply"
+      ]
+    },
+    "action": {
+      "enum": [
+        "install",
+        "upgrade",
+        "remove"
+      ]
+    },
+    "extensionId": {
+      "$ref": "common.schema.json#/$defs/extensionId"
+    },
+    "extensionSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "relativePath",
+        "sizeBytes",
+        "sha256"
+      ],
+      "properties": {
+        "relativePath": {
+          "type": "string",
+          "pattern": "^blobs/plans/[0-9a-f]{64}\\.json$"
+        },
+        "sizeBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2097152
+        },
+        "sha256": {
+          "$ref": "common.schema.json#/$defs/sha256"
+        }
+      }
+    },
+    "targetPath": {
+      "type": "string",
+      "minLength": 4,
+      "maxLength": 32767
+    },
+    "parentIdentity": {
+      "$ref": "file-tree.schema.json#/$defs/physicalIdentity"
+    },
+    "before": {
+      "$ref": "file-tree.schema.json"
+    },
+    "candidate": {
+      "$ref": "file-tree.schema.json"
+    },
+    "resourceKeys": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 4096,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 512
+      }
+    },
+    "originalObjects": {
+      "type": "array",
+      "maxItems": 4096,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "relativePath",
+          "identity"
+        ],
+        "properties": {
+          "relativePath": {
+            "type": "string",
+            "maxLength": 1024
+          },
+          "identity": {
+            "$ref": "file-tree.schema.json#/$defs/physicalIdentity"
+          }
+        }
+      }
+    },
+    "maintenanceSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "relativePath",
+        "sizeBytes",
+        "sha256"
+      ],
+      "properties": {
+        "relativePath": {
+          "type": "string",
+          "pattern": "^blobs/plans/[0-9a-f]{64}\\.json$"
+        },
+        "sizeBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2097152
+        },
+        "sha256": {
+          "$ref": "common.schema.json#/$defs/sha256"
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "operationKind": {
+            "const": "updateApply"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "action": {
+            "const": "upgrade"
+          },
+          "extensionSource": false
+        },
+        "not": {
+          "required": [
+            "extensionId"
+          ]
+        },
+        "required": [
+          "maintenanceSource"
+        ]
+      },
+      "else": {
+        "required": [
+          "extensionId",
+          "extensionSource"
+        ],
+        "properties": {
+          "maintenanceSource": false
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "const": "install"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "before": {
+            "properties": {
+              "shape": {
+                "const": "missing"
+              }
+            }
+          },
+          "candidate": {
+            "properties": {
+              "shape": {
+                "const": "directory"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "const": "upgrade"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "before": {
+            "properties": {
+              "shape": {
+                "const": "directory"
+              }
+            }
+          },
+          "candidate": {
+            "properties": {
+              "shape": {
+                "const": "directory"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "const": "remove"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "before": {
+            "properties": {
+              "shape": {
+                "const": "directory"
+              }
+            }
+          },
+          "candidate": {
+            "properties": {
+              "shape": {
+                "const": "missing"
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

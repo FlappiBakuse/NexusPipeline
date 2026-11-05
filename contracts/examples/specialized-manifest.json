@@ -1,0 +1,27 @@
+{
+  "format": "nexus.extension.manifest",
+  "version": 1,
+  "extensionId": "bettergi",
+  "artifactName": "BetterGI",
+  "displayName": "更好的原神",
+  "packageVersion": "0.5.0",
+  "kind": "data-specialized",
+  "minHostVersion": "0.18.0",
+  "sdkVersion": "0.1.0",
+  "capabilities": [
+    "task.adapt",
+    "configuration.edit"
+  ],
+  "permissions": {
+    "fileAccess": [
+      "selected-script-root"
+    ],
+    "processAccess": [
+      "selected-upstream"
+    ]
+  },
+  "specialized": {
+    "adapterEntry": "adapter/entry.json"
+  },
+  "contractFingerprint": "f4c1eecbb0022b49af0fec5ff170dec83c13bb4e7a4fafff1efa07408ce418c8"
+}

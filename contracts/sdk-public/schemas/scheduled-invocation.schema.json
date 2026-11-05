@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/scheduled-invocation.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "version",
+    "instanceId",
+    "occurrenceId",
+    "runId",
+    "attemptId",
+    "subjectId",
+    "notificationOperationId",
+    "deadlineUtc",
+    "notificationTaskIds"
+  ],
+  "properties": {
+    "format": {
+      "const": "nexus.schedule.invocation"
+    },
+    "version": {
+      "const": 1
+    },
+    "instanceId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "occurrenceId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "runId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "attemptId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "subjectId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "notificationOperationId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "deadlineUtc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "notificationTaskIds": {
+      "type": "array",
+      "maxItems": 99,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "common.schema.json#/$defs/uuid"
+      }
+    }
+  }
+}

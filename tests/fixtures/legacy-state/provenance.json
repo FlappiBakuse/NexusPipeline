@@ -1,0 +1,31 @@
+{
+  "sourceManifestSha256": "ff6637471a8db97ad0f471db785147f52d57b4dc48697af27416c25c98d0ce0a",
+  "inputs": {
+    "src/platform/Storage/Sqlite/DatabaseSchema.cs": "24a3073b216c19d3d2721d21a5a570ea75e984786890e46504d22a91ce69da88",
+    "src/platform/Storage/Sqlite/StateSchema.sql": "8c7f8b5a067849ee4f352bcd7cc1a236b24d891d3aec09d53b5b561a19fca25e",
+    "src/platform/Storage/Sqlite/ExtensionDataSchema.cs": "9b2a09e42d33d613e690b637c18518cfd053f5f6448393f69a8fae709786a9de",
+    "src/platform/Storage/Sqlite/ExtensionImageSchema.cs": "17211c033fbd7dc402f8757866cfb1e4a756e498ba20084720e1475bc173999a",
+    "src/platform/Storage/Sqlite/SecretDocumentSchema.cs": "4d32268c004326ee75f0bd770ede32ab978d9b7373506faf3f8555e32eeca829",
+    "src/platform/Storage/Sqlite/ManualWorkSchema.cs": "2ae8c508d8bd9b8cf02e9a6d9888a09822597b0afd1fe3bad4cc7eb754a249e9",
+    "src/platform/Storage/Sqlite/WorkEffectSchema.cs": "1b98b0ff7df95fb6d6fbd7dfb4b41b19e8e8afee4947a6830bcc62058067ee34",
+    "src/platform/Storage/Sqlite/EffectRotationSchema.cs": "914148d855e625d4a97eded0d9b86d73fb06ae9c2ab37039c647fcc6b0b412c5",
+    "src/platform/Storage/Sqlite/NotificationManualSchema.cs": "06600a57bd7ad6575de82cb81e88fb5a4bb45ab1db008ce6bdb398069ff968f0",
+    "src/platform/Storage/Sqlite/EffectEpochSchema.cs": "c42f5425225b0433a8ec3bd0eb9c1ce83f01ba208016be60d75af456c4b6a4a0",
+    "src/platform/Storage/Sqlite/AutomationSchema.cs": "ec364fcba5b5f64f50e07f5370f62e835add95365550a591e5df0fa980f2e35f"
+  },
+  "schemas": {
+    "Prior": "3daf2ab3f782c5e7d3155bc6417cbaf5ac102df08168bb79b72d19838f0f4aa9",
+    "Previous": "1c6e5a7070282b3f69d1ca7daf69dea4a18852a8c93f04f37de4e8c1a63a4378",
+    "Data": "8c7f8b5a067849ee4f352bcd7cc1a236b24d891d3aec09d53b5b561a19fca25e",
+    "Document": "bda5d5ce2f37fa3a45bf545bec7788d6033b1d9f0af6b4167f8798d42c891797",
+    "Image": "b61015aebc62536e95f8ed898d93bc76c57191dbc7b7c1ac7468b630d0953668",
+    "Secret": "d66cd70d4f939eb81e9f1a1ccf20f9fc148f36b3db868bb8a0ba6ed4a7c13ab8",
+    "Manual": "fe0677be1e700ae03cd69dd8ad7a01635c4c3fc0850c828f0edfa86a2e8c8ca5",
+    "Effect": "a0f4c9dbaaacfa9e6e5045b5065c01b49364616f279f275e125224851bdde2e3",
+    "Rotation": "35363411140e460a298605038f63d3bbbb7679d6d80ac807c3109ebcac69e240",
+    "Notification": "d11f545eece4478963fbe7fc3a4dcb45ac846a0708e3d5566fcdb17b82859c76",
+    "Epoch": "c414f85a10dfb9dd9e4ab9930d25a7d38a549a77268dab7c1afa517fc0537cd8",
+    "Automation": "6bdbb72b6a873d25cbe2d4172b6b187c2337f44f25112ac708cbd7e77b39c85d",
+    "Settings": "032e18a0fa31b7ccf3a2e628814f160c0262b72e0bbbd8a462095577bba5fc88"
+  }
+}

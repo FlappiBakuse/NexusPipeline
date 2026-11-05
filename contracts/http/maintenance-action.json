@@ -1,0 +1,18 @@
+{
+  "parameters": [
+    {"name": "operationId", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}},
+    {"name": "action", "in": "path", "required": true, "schema": {"enum": ["start", "cancel"]}}
+  ],
+  "post": {
+    "operationId": "changeHostMaintenanceOperation",
+    "description": "Requires local control.maintenance.write and the original subject. No query or body. start reserves actual completion drain and authenticates an independent helper before Host exit; admission fails when update trust or required desktop family proof is unavailable. cancel is idempotent only before handoff and creates no file-effect journal. CLI: maintenance-start or maintenance-cancel --id <uuid>. Not exposed through MCP.",
+    "responses": {
+      "200": {"description": "Cancelled pending operation; response shape matches maintenance-operation.json"},
+      "202": {"description": "Starting operation; query by original operation identity. This is not a successful candidate receipt."},
+      "400": {"description": "Invalid identifier, query or body"},
+      "403": {"description": "Origin, remote source or capability rejected"},
+      "404": {"description": "Unknown action or operation"},
+      "409": {"description": "Current lifecycle, operation state, ownership or trusted inputs prevent handoff"}
+    }
+  }
+}

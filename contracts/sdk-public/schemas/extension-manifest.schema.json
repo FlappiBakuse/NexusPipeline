@@ -1,0 +1,310 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/extension-manifest.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "version",
+    "extensionId",
+    "artifactName",
+    "displayName",
+    "packageVersion",
+    "kind",
+    "minHostVersion",
+    "sdkVersion",
+    "contractFingerprint",
+    "capabilities",
+    "permissions"
+  ],
+  "properties": {
+    "format": {
+      "const": "nexus.extension.manifest"
+    },
+    "version": {
+      "const": 1
+    },
+    "extensionId": {
+      "$ref": "common.schema.json#/$defs/extensionId"
+    },
+    "artifactName": {
+      "$ref": "common.schema.json#/$defs/artifactName"
+    },
+    "displayName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "packageVersion": {
+      "$ref": "common.schema.json#/$defs/releaseVersion"
+    },
+    "kind": {
+      "enum": [
+        "managed-code",
+        "data-specialized"
+      ]
+    },
+    "minHostVersion": {
+      "$ref": "common.schema.json#/$defs/releaseVersion"
+    },
+    "sdkVersion": {
+      "const": "0.1.0"
+    },
+    "contractFingerprint": {
+      "$ref": "common.schema.json#/$defs/sha256"
+    },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "ui.contribute",
+          "execution.drive",
+          "emulator.provide",
+          "target.android",
+          "task.adapt",
+          "configuration.edit",
+          "schedule.register",
+          "notification.submit",
+          "media.capture",
+          "source.compile"
+        ]
+      },
+      "uniqueItems": true,
+      "maxItems": 10
+    },
+    "permissions": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "desktopAccess": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 2,
+          "items": {
+            "enum": [
+              "interactive-login",
+              "window-inventory"
+            ]
+          }
+        },
+        "loginOrigins": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 16,
+          "items": {
+            "type": "string",
+            "format": "uri",
+            "pattern": "^https?://",
+            "maxLength": 512
+          }
+        },
+        "networkOrigins": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "string",
+            "format": "uri",
+            "pattern": "^https?://",
+            "maxLength": 512
+          }
+        },
+        "fileAccess": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "instance-data",
+              "selected-script-root",
+              "selected-media-root"
+            ]
+          },
+          "maxItems": 3
+        },
+        "processAccess": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "owned-worker",
+              "selected-upstream"
+            ]
+          },
+          "maxItems": 2
+        },
+        "secretAccess": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "own-extension",
+              "selected-binding"
+            ]
+          },
+          "maxItems": 2
+        }
+      }
+    },
+    "managed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entryAssembly",
+        "entryType"
+      ],
+      "properties": {
+        "entryAssembly": {
+          "$ref": "common.schema.json#/$defs/relativePath"
+        },
+        "entryType": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "compilers": {
+          "$ref": "source-compiler.schema.json#/$defs/ids"
+        },
+        "emulators": {
+          "$ref": "source-compiler.schema.json#/$defs/ids"
+        },
+        "nativeLibraries": {
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "common.schema.json#/$defs/relativePath",
+            "pattern": "\\.dll$"
+          }
+        }
+      }
+    },
+    "specialized": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "adapterEntry"
+      ],
+      "properties": {
+        "adapterEntry": {
+          "$ref": "common.schema.json#/$defs/relativePath"
+        },
+        "exclusiveProgram": {
+          "type": "boolean"
+        },
+        "editorForbiddenArguments": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          }
+        },
+        "editorLifecycle": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "resourceId",
+            "field",
+            "prepareValue",
+            "commitValue"
+          ],
+          "properties": {
+            "resourceId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            },
+            "field": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            },
+            "prepareValue": {
+              "type": "string",
+              "maxLength": 256
+            },
+            "commitValue": {
+              "type": "string",
+              "maxLength": 256
+            }
+          }
+        },
+        "readOnlySources": {
+          "$ref": "adapter-source-policy.schema.json"
+        },
+        "sourceDiscovery": {
+          "type": "boolean"
+        },
+        "compiler": {
+          "$ref": "source-compiler.schema.json#/$defs/use"
+        },
+        "executionProvider": {
+          "$ref": "execution-provider-use.schema.json"
+        },
+        "instancePolicy": {
+          "$ref": "adapter-instance-policy.schema.json"
+        }
+      }
+    },
+    "execution": {
+      "$ref": "extension-manifest-execution.schema.json"
+    },
+    "frontend": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entry",
+        "styles",
+        "sdkVersion"
+      ],
+      "properties": {
+        "entry": {
+          "$ref": "common.schema.json#/$defs/relativePath"
+        },
+        "styles": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "$ref": "common.schema.json#/$defs/relativePath"
+          }
+        },
+        "sdkVersion": {
+          "const": "0.1.0"
+        }
+      }
+    },
+    "gameName": {
+      "$ref": "extension-metadata.schema.json#/properties/gameName"
+    },
+    "summary": {
+      "$ref": "extension-metadata.schema.json#/properties/summary"
+    },
+    "author": {
+      "$ref": "extension-metadata.schema.json#/properties/author"
+    },
+    "tags": {
+      "$ref": "extension-metadata.schema.json#/properties/tags"
+    },
+    "metadata": {
+      "$ref": "extension-metadata.schema.json"
+    },
+    "localization": {
+      "$ref": "extension-localization.schema.json"
+    }
+  },
+  "allOf": [
+    {
+      "$ref": "emulator-provider.schema.json#/$defs/manifest"
+    },
+    {
+      "$ref": "source-compiler.schema.json#/$defs/manifest"
+    },
+    {
+      "$ref": "extension-manifest-execution.schema.json#/$defs/manifest"
+    },
+    {
+      "$ref": "extension-kind.schema.json"
+    }
+  ]
+}

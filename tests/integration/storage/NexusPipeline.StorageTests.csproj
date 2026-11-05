@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsTestProject>true</IsTestProject>
+    <IsPackable>false</IsPackable>
+    <TargetFramework>net10.0-windows10.0.22621.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="../../fixtures/legacy-state/*.sql" LogicalName="LegacyState.%(Filename)%(Extension)" />
+    <Compile Include="../../fixtures/RecordStoreFixture.cs" Link="RecordStoreFixture.cs" />
+    <Compile Include="../../fixtures/UpdateFeedFixture.cs" Link="UpdateFeedFixture.cs" />
+    <Compile Include="../../fixtures/SerialNativeTests.cs" Link="SerialNativeTests.cs" />
+    <Compile Include="../../fixtures/NativeHttpFixture.cs" Link="NativeHttpFixture.cs" />
+    <Compile Include="../../fixtures/ControlledStartupRegistration.cs" Link="ControlledStartupRegistration.cs" />
+    <Compile Include="../../fixtures/FixtureInstanceSnapshot.cs" Link="FixtureInstanceSnapshot.cs" />
+    <Compile Include="../../fixtures/StorageSeed/*.cs" Link="StorageSeed/%(Filename)%(Extension)" />
+    <None Include="../../fixtures/notification_smtp_sink.py" Link="fixtures/notification_smtp_sink.py" CopyToOutputDirectory="PreserveNewest" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+    <ProjectReference Include="../../../src/platform/NexusPipeline.Platform.csproj" />
+    <ProjectReference Include="../../../apps/host/NexusPipeline.Host.csproj" />
+    <ProjectReference Include="../../fixtures/ManagedExtension/ManagedExtension.csproj" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+</Project>

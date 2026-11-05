@@ -1,0 +1,17 @@
+{
+  "name": "nexus-color-picker",
+  "properties": {
+    "value": "string",
+    "disabled": "boolean"
+  },
+  "defaults": {
+    "value": "#000000",
+    "disabled": false
+  },
+  "slots": [],
+  "events": {
+    "nexus-change": "Change<string>"
+  },
+  "focus": "color control",
+  "accessibility": "颜色语法和文本输入可读；不只依赖颜色传达状态"
+}

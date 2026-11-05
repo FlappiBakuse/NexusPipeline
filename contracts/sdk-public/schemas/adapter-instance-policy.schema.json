@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/adapter-instance-policy.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "selfManagedPcLaunch",
+    "supportsAndroid",
+    "requiresConfigurationSync"
+  ],
+  "properties": {
+    "selfManagedPcLaunch": {
+      "type": "boolean"
+    },
+    "supportsAndroid": {
+      "type": "boolean"
+    },
+    "requiresConfigurationSync": {
+      "type": "boolean"
+    },
+    "gamePathResource": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "gamePathSelector": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 120
+      }
+    }
+  },
+  "dependentRequired": {
+    "gamePathResource": [
+      "gamePathSelector"
+    ],
+    "gamePathSelector": [
+      "gamePathResource"
+    ]
+  }
+}

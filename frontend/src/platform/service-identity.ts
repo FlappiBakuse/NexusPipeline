@@ -1,1 +1,0 @@
-export const CONTROL_SERVICE_NAME = `NexusPipeline.${__NEXUS_INSTALLATION_GENERATION__}`;

@@ -1,0 +1,17 @@
+{
+  "name": "nexus-time-picker",
+  "properties": {
+    "value": "HH:mm|string-empty",
+    "disabled": "boolean"
+  },
+  "defaults": {
+    "value": "",
+    "disabled": false
+  },
+  "slots": [],
+  "events": {
+    "nexus-change": "Change<string>"
+  },
+  "focus": "single trigger",
+  "accessibility": "Enter/Space打开；方向键调整；Escape关闭返回同一触发器"
+}

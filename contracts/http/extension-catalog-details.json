@@ -1,0 +1,20 @@
+{
+  "get": {
+    "operationId": "readExtensionCatalogDetails",
+    "description": "Requires extensions.read and an exact verified cached catalog identity. Downloads only the selected signed catalog entry through the trusted artifact transport, verifies artifact bytes, archive, manifest and bounded UTF-8 README/CHANGELOG files, then checks the cache identity again. No arbitrary URL is accepted.",
+    "parameters": [
+      {"name": "channel", "in": "path", "required": true, "schema": {"enum": ["stable", "develop"]}},
+      {"name": "extensionId", "in": "path", "required": true, "schema": {"type": "string"}},
+      {"name": "generationId", "in": "query", "required": true, "schema": {"type": "string", "format": "uuid"}},
+      {"name": "sequence", "in": "query", "required": true, "schema": {"type": "integer", "minimum": 1}},
+      {"name": "sha256", "in": "query", "required": true, "schema": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}
+    ],
+    "responses": {
+      "200": {"description": "{identity,extensionId,packageVersion,manifest,documents}; documents contains only present bounded package README and CHANGELOG variants."},
+      "400": {"description": "Invalid identity, extension ID or query."},
+      "403": {"description": "Capability or origin denied."},
+      "404": {"description": "The exact cached catalog or its entry is unavailable."},
+      "409": {"description": "Release trust or verified package changed or is unavailable."}
+    }
+  }
+}

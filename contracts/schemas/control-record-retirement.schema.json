@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/control-record-retirement.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "version",
+    "operationId",
+    "afterSha256",
+    "limit"
+  ],
+  "properties": {
+    "format": {
+      "const": "nexus.control.record-retirement"
+    },
+    "version": {
+      "const": 1
+    },
+    "operationId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "afterSha256": {
+      "type": "string",
+      "pattern": "^(?:|[0-9a-f]{64})$"
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 128
+    }
+  }
+}

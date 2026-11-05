@@ -1,0 +1,23 @@
+{
+  "name": "nexus-schedule-card",
+  "properties": {
+    "itemId": "string",
+    "expanded": "boolean",
+    "summary": "string"
+  },
+  "defaults": {
+    "expanded": false,
+    "itemId": "",
+    "summary": ""
+  },
+  "slots": [
+    "days",
+    "time",
+    "actions"
+  ],
+  "events": {
+    "nexus-toggle": "ToggleDetail"
+  },
+  "focus": "summary trigger",
+  "accessibility": "键盘展开、排序、时间输入顺序与现有布局"
+}

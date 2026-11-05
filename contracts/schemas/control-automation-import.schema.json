@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/control-automation-import.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "version",
+    "action",
+    "operationId",
+    "expectedRevision",
+    "previewDigest",
+    "bundle",
+    "roots",
+    "attachments"
+  ],
+  "properties": {
+    "format": {
+      "const": "nexus.control.automation-import"
+    },
+    "version": {
+      "const": 1
+    },
+    "action": {
+      "enum": [
+        "preview",
+        "apply"
+      ]
+    },
+    "operationId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "expectedRevision": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "previewDigest": {
+      "$ref": "common.schema.json#/$defs/sha256"
+    },
+    "bundle": {
+      "$ref": "automation-bundle.schema.json"
+    },
+    "roots": {
+      "type": "array",
+      "maxItems": 4096,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "path"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "common.schema.json#/$defs/uuid"
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32700
+          }
+        }
+      }
+    },
+    "attachments": {
+      "type": "array",
+      "maxItems": 4096,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "path"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "common.schema.json#/$defs/uuid"
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32700
+          }
+        }
+      }
+    }
+  }
+}

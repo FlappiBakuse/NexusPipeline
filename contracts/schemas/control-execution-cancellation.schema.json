@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/control-execution-cancellation.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "version",
+    "runId",
+    "attemptId"
+  ],
+  "properties": {
+    "format": {
+      "const": "nexus.control.execution-cancellation"
+    },
+    "version": {
+      "const": 1
+    },
+    "runId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "attemptId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    }
+  }
+}

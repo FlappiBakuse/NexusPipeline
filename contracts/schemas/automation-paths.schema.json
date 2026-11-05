@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/automation-paths.schema.json",
+  "$defs": {
+    "portablePath": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rootId",
+        "relative"
+      ],
+      "properties": {
+        "rootId": {
+          "$ref": "common.schema.json#/$defs/uuid"
+        },
+        "relative": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024,
+          "pattern": "^(?!/)(?!.*(?:^|/)(?:\\.|\\.\\.)(?:/|$))(?!.*[:\\\\\\u0000-\\u001f])[^/]+(?:/[^/]+)*$"
+        }
+      }
+    },
+    "root": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "kind"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "common.schema.json#/$defs/uuid"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "kind": {
+          "enum": [
+            "script",
+            "external"
+          ]
+        }
+      }
+    },
+    "attachment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "path",
+        "sha256",
+        "sizeBytes"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "common.schema.json#/$defs/uuid"
+        },
+        "path": {
+          "$ref": "common.schema.json#/$defs/relativePath"
+        },
+        "sha256": {
+          "$ref": "common.schema.json#/$defs/sha256"
+        },
+        "sizeBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8388608
+        }
+      }
+    }
+  }
+}

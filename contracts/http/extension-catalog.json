@@ -1,0 +1,14 @@
+{
+  "get": {
+    "operationId": "readExtensionCatalog",
+    "description": "Requires extensions.read. Reads the verified cached channel catalog without performing a network refresh.",
+    "parameters": [{"name": "channel", "in": "path", "required": true, "schema": {"enum": ["stable", "develop"]}}],
+    "responses": {
+      "200": {"description": "Verified cached catalog identity and entries."},
+      "204": {"description": "This channel has no verified cached catalog."},
+      "400": {"description": "Invalid channel or query."},
+      "403": {"description": "Capability or origin denied."},
+      "409": {"description": "Release trust or catalog state is unavailable."}
+    }
+  }
+}

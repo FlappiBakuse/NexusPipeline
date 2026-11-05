@@ -1,0 +1,143 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/automation-binding-policy.schema.json",
+  "$defs": {
+    "runDays": {
+      "type": "integer",
+      "minimum": -1,
+      "maximum": 36500
+    },
+    "dailyLimit": {
+      "type": "integer",
+      "minimum": -1,
+      "maximum": 9999,
+      "not": {
+        "const": 0
+      }
+    },
+    "general": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "syncEnabled",
+        "enabled",
+        "runDays",
+        "maximumSuccessfulRunsPerDay"
+      ],
+      "properties": {
+        "syncEnabled": {
+          "type": "boolean"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "runDays": {
+          "$ref": "#/$defs/runDays"
+        },
+        "maximumSuccessfulRunsPerDay": {
+          "$ref": "#/$defs/dailyLimit"
+        }
+      }
+    },
+    "notification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "syncEnabled",
+        "notifyEnabled",
+        "notificationTaskIds"
+      ],
+      "properties": {
+        "syncEnabled": {
+          "type": "boolean"
+        },
+        "notifyEnabled": {
+          "type": "boolean"
+        },
+        "notificationTaskIds": {
+          "type": "array",
+          "maxItems": 99,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "common.schema.json#/$defs/uuid"
+          }
+        }
+      }
+    },
+    "advanced": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "syncEnabled",
+        "preOnceAfterSuccess",
+        "postFinalOnly"
+      ],
+      "properties": {
+        "syncEnabled": {
+          "type": "boolean"
+        },
+        "preOnceAfterSuccess": {
+          "type": "boolean"
+        },
+        "postFinalOnly": {
+          "type": "boolean"
+        },
+        "preHook": {
+          "$ref": "automation-relations.schema.json#/$defs/hook"
+        },
+        "postHook": {
+          "$ref": "automation-relations.schema.json#/$defs/hook"
+        }
+      }
+    },
+    "overrides": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "general",
+        "notification",
+        "advanced"
+      ],
+      "properties": {
+        "general": {
+          "$ref": "#/$defs/general"
+        },
+        "notification": {
+          "$ref": "#/$defs/notification"
+        },
+        "advanced": {
+          "$ref": "#/$defs/advanced"
+        }
+      }
+    },
+    "dependency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scriptId",
+        "requiredScriptIds"
+      ],
+      "properties": {
+        "scriptId": {
+          "$ref": "common.schema.json#/$defs/uuid"
+        },
+        "requiredScriptIds": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4095,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "common.schema.json#/$defs/uuid"
+          }
+        }
+      }
+    },
+    "dependencies": {
+      "type": "array",
+      "maxItems": 4096,
+      "items": {
+        "$ref": "#/$defs/dependency"
+      }
+    }
+  }
+}

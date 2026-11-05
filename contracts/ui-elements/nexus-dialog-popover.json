@@ -1,0 +1,21 @@
+{
+  "name": "nexus-dialog-popover",
+  "properties": {
+    "open": "boolean",
+    "anchor": "HTMLElement|null",
+    "label": "string"
+  },
+  "defaults": {
+    "open": false,
+    "anchor": null,
+    "label": ""
+  },
+  "slots": [
+    "default"
+  ],
+  "events": {
+    "nexus-close": "CloseDetail"
+  },
+  "focus": "initial interactive content",
+  "accessibility": "视口内定位、Escape层级、收回即禁交互、焦点归还"
+}

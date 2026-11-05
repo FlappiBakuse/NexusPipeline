@@ -1,0 +1,19 @@
+{
+  "name": "nexus-empty-state",
+  "properties": {
+    "title": "string",
+    "description": "string",
+    "tone": "neutral|warning|danger"
+  },
+  "defaults": {
+    "tone": "neutral",
+    "title": "",
+    "description": ""
+  },
+  "slots": [
+    "actions"
+  ],
+  "events": {},
+  "focus": "none",
+  "accessibility": "空数据/错误/拒绝访问由调用方真实区分"
+}

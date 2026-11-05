@@ -1,0 +1,17 @@
+{
+  "name": "nexus-switch",
+  "properties": {
+    "value": "boolean",
+    "disabled": "boolean"
+  },
+  "defaults": {
+    "value": false,
+    "disabled": false
+  },
+  "slots": [],
+  "events": {
+    "nexus-change": "Change<boolean>"
+  },
+  "focus": "switch control",
+  "accessibility": "可访问名称、checked状态、Space切换；不重复change"
+}

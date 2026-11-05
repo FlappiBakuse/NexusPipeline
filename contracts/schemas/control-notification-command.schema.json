@@ -1,0 +1,284 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/control-notification-command.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [ "format", "version", "action", "operationId", "expectedCatalogRevision" ],
+  "properties": {
+    "format": { "const": "nexus.control.notification-command" },
+    "version": { "const": 1 },
+    "action": {
+      "enum": [
+        "save",
+        "delete",
+        "reorder",
+        "limit",
+        "test"
+      ]
+    },
+    "operationId": { "$ref": "common.schema.json#/$defs/uuid" },
+    "expectedCatalogRevision": { "$ref": "#/$defs/revision" },
+    "taskId": { "$ref": "common.schema.json#/$defs/uuid" },
+    "expectedTaskRevision": { "$ref": "#/$defs/revision" },
+    "input": { "$ref": "#/$defs/input" },
+    "secrets": {
+      "type": "array",
+      "maxItems": 5,
+      "items": { "$ref": "#/$defs/secret" }
+    },
+    "order": {
+      "type": "array",
+      "maxItems": 99,
+      "uniqueItems": true,
+      "items": { "$ref": "common.schema.json#/$defs/uuid" }
+    },
+    "maximum": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 99
+    }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "action": { "const": "save" }
+      },
+      "required": [ "taskId", "expectedTaskRevision", "input" ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [ "order" ]
+          },
+          {
+            "required": [ "maximum" ]
+          }
+        ]
+      }
+    },
+    {
+      "properties": {
+        "action": {
+          "enum": [
+            "delete",
+            "test"
+          ]
+        }
+      },
+      "required": [ "taskId", "expectedTaskRevision" ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [ "input" ]
+          },
+          {
+            "required": [ "secrets" ]
+          },
+          {
+            "required": [ "order" ]
+          },
+          {
+            "required": [ "maximum" ]
+          }
+        ]
+      }
+    },
+    {
+      "properties": {
+        "action": { "const": "reorder" }
+      },
+      "required": [ "order" ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [ "taskId" ]
+          },
+          {
+            "required": [ "expectedTaskRevision" ]
+          },
+          {
+            "required": [ "input" ]
+          },
+          {
+            "required": [ "secrets" ]
+          },
+          {
+            "required": [ "maximum" ]
+          }
+        ]
+      }
+    },
+    {
+      "properties": {
+        "action": { "const": "limit" }
+      },
+      "required": [ "maximum" ],
+      "not": {
+        "anyOf": [
+          {
+            "required": [ "taskId" ]
+          },
+          {
+            "required": [ "expectedTaskRevision" ]
+          },
+          {
+            "required": [ "input" ]
+          },
+          {
+            "required": [ "secrets" ]
+          },
+          {
+            "required": [ "order" ]
+          }
+        ]
+      }
+    }
+  ],
+  "$defs": {
+    "revision": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [ "name", "remark", "kind", "isEnabled", "configuration" ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "remark": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "kind": {
+          "enum": [
+            "smtp",
+            "webhook"
+          ]
+        },
+        "isEnabled": { "type": "boolean" },
+        "configuration": { "$ref": "#/$defs/configuration" }
+      }
+    },
+    "configuration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [ "screenshotEnabled", "timeoutSeconds", "webhookKind", "webhookTemplate", "feishuAppId", "slackChannelId", "smtpHost", "smtpPort", "smtpSecurity", "smtpUser", "smtpFrom", "smtpTo", "smtpSubjectPrefix" ],
+      "properties": {
+        "screenshotEnabled": { "type": "boolean" },
+        "timeoutSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 300
+        },
+        "webhookKind": {
+          "enum": [
+            "feishu",
+            "wecom",
+            "slack",
+            "discord",
+            "generic"
+          ]
+        },
+        "webhookTemplate": {
+          "type": "string",
+          "maxLength": 65536
+        },
+        "feishuAppId": {
+          "type": "string",
+          "maxLength": 1024
+        },
+        "slackChannelId": {
+          "type": "string",
+          "maxLength": 1024
+        },
+        "smtpHost": {
+          "type": "string",
+          "maxLength": 1024
+        },
+        "smtpPort": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "smtpSecurity": {
+          "enum": [
+            "auto",
+            "ssl",
+            "startTls",
+            "none"
+          ]
+        },
+        "smtpUser": {
+          "type": "string",
+          "maxLength": 1024
+        },
+        "smtpFrom": {
+          "type": "string",
+          "maxLength": 1024
+        },
+        "smtpTo": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "smtpSubjectPrefix": {
+          "type": "string",
+          "maxLength": 1024
+        }
+      }
+    },
+    "secret": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [ "field", "expectedRevision", "disposition" ],
+      "properties": {
+        "field": {
+          "enum": [
+            "webhook-url",
+            "webhook-secret",
+            "feishu-app-secret",
+            "slack-bot-token",
+            "smtp-password"
+          ]
+        },
+        "expectedRevision": { "$ref": "#/$defs/revision" },
+        "disposition": {
+          "enum": [
+            "keep",
+            "set",
+            "clear"
+          ]
+        },
+        "value": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 65536
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "disposition": { "const": "set" }
+          },
+          "required": [ "value" ]
+        },
+        {
+          "properties": {
+            "disposition": {
+              "enum": [
+                "keep",
+                "clear"
+              ]
+            }
+          },
+          "not": {
+            "required": [ "value" ]
+          }
+        }
+      ]
+    }
+  }
+}

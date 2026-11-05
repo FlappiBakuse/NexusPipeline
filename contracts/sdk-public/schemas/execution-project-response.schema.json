@@ -1,0 +1,208 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/execution-project-response.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "fingerprint",
+    "sequence",
+    "kind"
+  ],
+  "properties": {
+    "fingerprint": {
+      "$ref": "common.schema.json#/$defs/sha256"
+    },
+    "sequence": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100000
+    },
+    "kind": {
+      "enum": [
+        "manifest",
+        "assets",
+        "tree",
+        "asset",
+        "file"
+      ]
+    },
+    "selection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "consumerExtensionId",
+        "bindingId",
+        "selectedTaskIds"
+      ],
+      "properties": {
+        "consumerExtensionId": {
+          "$ref": "common.schema.json#/$defs/extensionId"
+        },
+        "bindingId": {
+          "$ref": "common.schema.json#/$defs/uuid"
+        },
+        "repetitionOffsets": {
+          "type": "array",
+          "maxItems": 4096,
+          "items": {
+            "$ref": "task-definitions.schema.json#/$defs/repetitionOffset"
+          }
+        },
+        "executionTaskIds": {
+          "type": "array",
+          "maxItems": 4096,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          }
+        },
+        "selectedTaskIds": {
+          "type": "array",
+          "maxItems": 4096,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          }
+        }
+      }
+    },
+    "rootIndex": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120
+    },
+    "view": {
+      "type": "object"
+    },
+    "assetCount": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4112
+    },
+    "trees": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "path",
+          "entryCount"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "path": {
+            "type": "string",
+            "maxLength": 32767
+          },
+          "entryCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4096
+          }
+        }
+      }
+    },
+    "assets": {
+      "type": "array",
+      "maxItems": 16,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "kind",
+          "sizeBytes",
+          "sha256"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "kind": {
+            "enum": [
+              "index",
+              "page",
+              "artifact"
+            ]
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1073741824
+          },
+          "sha256": {
+            "$ref": "common.schema.json#/$defs/sha256"
+          }
+        }
+      }
+    },
+    "entries": {
+      "type": "array",
+      "maxItems": 16,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "kind",
+          "sizeBytes"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "maxLength": 32767
+          },
+          "kind": {
+            "enum": [
+              "file",
+              "directory"
+            ]
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1073741824
+          },
+          "sha256": {
+            "$ref": "common.schema.json#/$defs/sha256"
+          }
+        }
+      }
+    },
+    "index": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 32768
+    },
+    "offset": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1073741824
+    },
+    "sizeBytes": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1073741824
+    },
+    "sha256": {
+      "$ref": "common.schema.json#/$defs/sha256"
+    },
+    "contentBase64": {
+      "type": "string",
+      "maxLength": 174764,
+      "pattern": "^[A-Za-z0-9+/]*={0,2}$"
+    }
+  }
+}

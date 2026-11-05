@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/desktop-channel.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "version",
+    "instanceId",
+    "clientId",
+    "correlationId",
+    "sessionId",
+    "type"
+  ],
+  "properties": {
+    "format": {
+      "const": "nexus.desktop.channel"
+    },
+    "version": {
+      "const": 1
+    },
+    "instanceId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "clientId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "correlationId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "sessionId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "type": {
+      "enum": [
+        "show",
+        "hide",
+        "close.request",
+        "close.permit",
+        "file.select",
+        "folder.select",
+        "external.open",
+        "visibility",
+        "reply"
+      ]
+    },
+    "isVisible": {
+      "type": "boolean"
+    },
+    "url": {
+      "$ref": "common.schema.json#/$defs/httpsUrl"
+    },
+    "isApproved": {
+      "type": "boolean"
+    },
+    "permitId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "expiresAt": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"type": {"const": "close.permit"}}},
+      "then": {"required": ["isApproved", "permitId", "expiresAt"], "properties": {"isApproved": {"const": true}}}
+    }
+  ]
+}

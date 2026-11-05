@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/media-capture.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "version",
+    "instanceId",
+    "runId",
+    "attemptId",
+    "previewId",
+    "requestId",
+    "sequence"
+  ],
+  "properties": {
+    "format": {
+      "const": "nexus.media.capture"
+    },
+    "version": {
+      "const": 1
+    },
+    "instanceId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "runId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "attemptId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "previewId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "requestId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "sequence": {
+      "$ref": "common.schema.json#/$defs/sequence"
+    }
+  }
+}

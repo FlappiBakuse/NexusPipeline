@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "id": "win-x64-en-zh-v1",
+  "locales": ["en-US", "zh-CN"],
+  "fallbackLocale": "en-US",
+  "dependencyFiles": []
+}

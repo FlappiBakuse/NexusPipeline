@@ -1,0 +1,21 @@
+{
+  "name": "nexus-pager",
+  "properties": {
+    "page": "number",
+    "pageSize": "number",
+    "total": "number|null",
+    "hasNext": "boolean"
+  },
+  "defaults": {
+    "page": 1,
+    "pageSize": 50,
+    "total": null,
+    "hasNext": false
+  },
+  "slots": [],
+  "events": {
+    "nexus-change": "Change<number>"
+  },
+  "focus": "page control",
+  "accessibility": "未知total不编造总页；当前页可读；页变更由调用方执行"
+}

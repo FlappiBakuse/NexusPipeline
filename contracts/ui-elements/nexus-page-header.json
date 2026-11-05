@@ -1,0 +1,17 @@
+{
+  "name": "nexus-page-header",
+  "properties": {
+    "title": "string",
+    "description": "string"
+  },
+  "defaults": {
+    "title": "",
+    "description": ""
+  },
+  "slots": [
+    "actions"
+  ],
+  "events": {},
+  "focus": "none",
+  "accessibility": "页面标题层级；窄屏动作不越界"
+}

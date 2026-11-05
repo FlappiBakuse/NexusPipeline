@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/file-tree.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["shape", "entries"],
+  "$defs": {
+    "physicalObject": {
+      "type": "object", "additionalProperties": false, "required": ["relativePath", "identity"],
+      "properties": {
+        "relativePath": {"type": "string", "maxLength": 1024},
+        "identity": {"$ref": "#/$defs/physicalIdentity"}
+      }
+    },
+    "physicalIdentity": {
+      "type": "object", "additionalProperties": false, "required": ["volumeSerial", "fileId"],
+      "properties": {
+        "volumeSerial": {"type": "string", "pattern": "^[0-9a-f]{16}$"},
+        "fileId": {"type": "string", "pattern": "^[0-9a-f]{32}$"}
+      }
+    }
+  },
+  "properties": {
+    "shape": {"enum": ["missing", "file", "directory"]},
+    "entries": {
+      "type": "array",
+      "maxItems": 4096,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["relativePath", "kind", "sizeBytes"],
+        "properties": {
+          "relativePath": {"type": "string", "maxLength": 1024},
+          "kind": {"enum": ["file", "directory"]},
+          "sizeBytes": {"type": "integer", "minimum": 0, "maximum": 1073741824},
+          "sha256": {"$ref": "common.schema.json#/$defs/sha256"}
+        },
+        "allOf": [
+          {
+            "if": {"properties": {"kind": {"const": "file"}}},
+            "then": {"required": ["sha256"]},
+            "else": {"properties": {"sizeBytes": {"const": 0}}, "not": {"required": ["sha256"]}}
+          }
+        ]
+      }
+    }
+  }
+}

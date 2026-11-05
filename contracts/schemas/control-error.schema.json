@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/control-error.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "version",
+    "code",
+    "message",
+    "correlationId"
+  ],
+  "properties": {
+    "format": {
+      "const": "nexus.control.error"
+    },
+    "version": {
+      "const": 1
+    },
+    "code": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]+$",
+      "maxLength": 80
+    },
+    "message": {
+      "type": "string",
+      "maxLength": 1024
+    },
+    "correlationId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "operationId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "retryable": {
+      "type": "boolean"
+    },
+    "details": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "path",
+          "code",
+          "message"
+        ],
+        "properties": {
+          "path": {
+            "type": "string",
+            "maxLength": 256
+          },
+          "code": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "message": {
+            "type": "string",
+            "maxLength": 512
+          }
+        }
+      }
+    }
+  }
+}

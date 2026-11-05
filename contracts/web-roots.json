@@ -1,0 +1,26 @@
+{
+  "format": "nexus.web.schema-roots",
+  "version": 1,
+  "types": [
+    "automation-bundle.schema.json",
+    "control-automation-change.schema.json",
+    "control-automation-import.schema.json",
+    "control-emulator-discover.schema.json",
+    "control-extension-apply.schema.json",
+    "control-extension-reconcile.schema.json",
+    "control-host-settings.schema.json",
+    "control-notification-command.schema.json",
+    "extension-manifest.schema.json",
+    "control-script-source.schema.json",
+    "script-source.schema.json",
+    "control-project-command.schema.json"
+  ],
+  "runtime": [
+    "automation-binding-policy.schema.json#/$defs/overrides",
+    "automation-bundle.schema.json",
+    "automation-relations.schema.json#/$defs/queue",
+    "automation-relations.schema.json#/$defs/user",
+    "automation-script.schema.json#/$defs/script",
+    "control-emulator-discover.schema.json"
+  ]
+}

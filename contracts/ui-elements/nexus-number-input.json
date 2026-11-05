@@ -1,0 +1,23 @@
+{
+  "name": "nexus-number-input",
+  "properties": {
+    "value": "number|null",
+    "min": "number|null",
+    "max": "number|null",
+    "step": "number",
+    "readOnly": "boolean"
+  },
+  "defaults": {
+    "value": null,
+    "min": null,
+    "max": null,
+    "step": 1,
+    "readOnly": false
+  },
+  "slots": [],
+  "events": {
+    "nexus-change": "Change<number|null>"
+  },
+  "focus": "number input",
+  "accessibility": "空值与0区分；越界拒绝/提示；增减触控例外登记"
+}

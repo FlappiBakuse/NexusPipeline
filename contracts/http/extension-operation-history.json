@@ -1,0 +1,15 @@
+{
+  "get": {
+    "operationId": "readExtensionOperationHistory",
+    "description": "Requires operations.read. Lists only persisted extension.apply operations owned by the authenticated subject, newest first. Offset is 0..10000 and limit is 1..50. Each item contains operationId, createdAt, extensionId, action, status and outcome; nextOffset is null after the final page.",
+    "parameters": [
+      {"name": "offset", "in": "query", "required": false, "schema": {"type": "integer", "minimum": 0, "maximum": 10000, "default": 0}},
+      {"name": "limit", "in": "query", "required": false, "schema": {"type": "integer", "minimum": 1, "maximum": 50, "default": 20}}
+    ],
+    "responses": {
+      "200": {"description": "{items,nextOffset} for the current subject only."},
+      "400": {"description": "Invalid page query."},
+      "403": {"description": "Capability or origin denied."}
+    }
+  }
+}

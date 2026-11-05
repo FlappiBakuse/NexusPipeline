@@ -1,0 +1,21 @@
+{
+  "name": "nexus-entity-row",
+  "properties": {
+    "itemId": "string",
+    "title": "string",
+    "subtitle": "string"
+  },
+  "defaults": {
+    "itemId": "",
+    "title": "",
+    "subtitle": ""
+  },
+  "slots": [
+    "icon",
+    "meta",
+    "actions"
+  ],
+  "events": {},
+  "focus": "none",
+  "accessibility": "稳定实体身份；长标题全文可读；不以装饰DOM作为契约"
+}

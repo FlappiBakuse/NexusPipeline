@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/control-interface-change.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "version",
+    "operationId",
+    "expectedRevision",
+    "values"
+  ],
+  "properties": {
+    "format": {
+      "const": "nexus.control.interface-change"
+    },
+    "version": {
+      "const": 1
+    },
+    "operationId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "expectedRevision": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "values": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "theme",
+        "dashboardCards",
+        "pinnedSettings",
+        "collapsedSettings",
+        "locale"
+      ],
+      "properties": {
+        "theme": {
+          "enum": [
+            "dark",
+            "light",
+            "system"
+          ]
+        },
+        "dashboardCards": {
+          "type": "array",
+          "maxItems": 4,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "game-activities",
+              "status",
+              "running",
+              "history-duration",
+              "history-counts"
+            ]
+          }
+        },
+        "pinnedSettings": {
+          "$ref": "#/$defs/settings"
+        },
+        "collapsedSettings": {
+          "$ref": "#/$defs/settings"
+        },
+        "locale": {
+          "enum": [
+            "zh-CN",
+            "en-US"
+          ]
+        }
+      }
+    }
+  },
+  "$defs": {
+    "settings": {
+      "type": "array",
+      "maxItems": 6,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "service",
+          "remote",
+          "proxy",
+          "advanced",
+          "updates",
+          "diagnostics"
+        ]
+      }
+    }
+  }
+}

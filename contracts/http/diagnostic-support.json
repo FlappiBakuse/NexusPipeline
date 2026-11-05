@@ -1,0 +1,15 @@
+{
+  "get": {
+    "operationId": "exportDiagnosticSupport",
+    "description": "Requires control.doctor.read. No query parameters. A bounded ZIP containing manifest.json, doctor.json, environment.json, plugins.json, runtime-state.json and safe-log.json. Contains allowlisted environment facts, typed checks and plugin activation state, recovery and queue counts plus at most 64 typed completion events. Excludes raw worker logs, private reason codes, paths, configuration, database contents and secrets. The read does not persist an export in the runtime; the installation access check creates and deletes one owned probe. CLI: control support --address <origin> --binary-stdout true. Not exposed through MCP.",
+    "responses": {
+      "200": {
+        "description": "At most 65536 bytes, no-store; filename nexus-support.zip",
+        "content": {"application/zip": {"schema": {"type": "string", "format": "binary"}}}
+      },
+      "400": {"description": "Query parameters are not accepted"},
+      "401": {"description": "A remote request requires a valid bearer"},
+      "403": {"description": "Untrusted Origin or unavailable capability"}
+    }
+  }
+}

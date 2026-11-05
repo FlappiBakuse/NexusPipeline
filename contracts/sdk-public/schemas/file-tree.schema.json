@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/file-tree.schema.json",
+  "not": {},
+  "$defs": {
+    "physicalIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "volumeSerial",
+        "fileId"
+      ],
+      "properties": {
+        "volumeSerial": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{16}$"
+        },
+        "fileId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}$"
+        }
+      }
+    }
+  }
+}

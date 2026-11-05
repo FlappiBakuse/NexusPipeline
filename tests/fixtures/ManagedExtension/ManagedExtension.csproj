@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>NexusPipeline.ControlledExtension</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../../sdk/dotnet/NexusPipeline.Extensibility.csproj" Private="false" />
+  </ItemGroup>
+</Project>

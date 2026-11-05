@@ -1,0 +1,25 @@
+{
+  "name": "nexus-path-picker",
+  "properties": {
+    "value": "string",
+    "kinds": "readonly(file|folder)[]",
+    "browseAllowed": "boolean",
+    "readOnly": "boolean"
+  },
+  "defaults": {
+    "kinds": [
+      "file",
+      "folder"
+    ],
+    "browseAllowed": false,
+    "value": "",
+    "readOnly": false
+  },
+  "slots": [],
+  "events": {
+    "nexus-change": "Change<string>",
+    "nexus-browse": "BrowseDetail"
+  },
+  "focus": "text input",
+  "accessibility": "未获Host本机能力时不显示浏览按钮；后端再验证，不因前端属性授予权限"
+}

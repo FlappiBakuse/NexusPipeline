@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/extension-localization.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "defaultLocale",
+    "locales"
+  ],
+  "properties": {
+    "defaultLocale": {
+      "type": "string",
+      "pattern": "^[a-z]{2,3}(?:-[A-Z][a-z]{3})?(?:-[A-Z]{2}|-[0-9]{3})?$",
+      "maxLength": 35
+    },
+    "locales": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 16,
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[a-z]{2,3}(?:-[A-Z][a-z]{3})?(?:-[A-Z]{2}|-[0-9]{3})?$",
+        "maxLength": 35
+      },
+      "additionalProperties": {
+        "$ref": "common.schema.json#/$defs/relativePath"
+      }
+    }
+  }
+}

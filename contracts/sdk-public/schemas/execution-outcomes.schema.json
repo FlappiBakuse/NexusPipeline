@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/execution-outcomes.schema.json",
+  "not": {},
+  "properties": {
+    "businessOutcome": {
+      "enum": [
+        "unverified",
+        "succeeded",
+        "partial",
+        "failed",
+        "notApplicable",
+        "cancelled"
+      ]
+    }
+  }
+}

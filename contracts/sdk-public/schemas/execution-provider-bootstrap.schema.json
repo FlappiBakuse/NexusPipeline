@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/execution-provider-bootstrap.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "version",
+    "identity",
+    "pipeName",
+    "upstream",
+    "upstreamArguments",
+    "workingDirectory",
+    "configurationTargets",
+    "maximumEvents",
+    "attemptOrdinal",
+    "idempotencyKey"
+  ],
+  "properties": {
+    "purpose": {
+      "enum": [
+        "initialization"
+      ]
+    },
+    "workspace": {
+      "$ref": "execution-workspace.schema.json"
+    },
+    "device": {
+      "$ref": "execution-device-grant.schema.json"
+    },
+    "project": {
+      "$ref": "execution-project.schema.json"
+    },
+    "format": {
+      "const": "nexus.execution.provider-bootstrap"
+    },
+    "version": {
+      "const": 1
+    },
+    "identity": {
+      "$ref": "execution-provider-event.schema.json#/$defs/identity"
+    },
+    "pipeName": {
+      "type": "string",
+      "pattern": "^NexusExecutionProvider-[0-9a-f]{64}$"
+    },
+    "upstream": {
+      "$ref": "execution-plan.schema.json#/$defs/interpreterImage"
+    },
+    "upstreamArguments": {
+      "type": "array",
+      "maxItems": 128,
+      "items": {
+        "type": "string",
+        "maxLength": 4096
+      }
+    },
+    "workingDirectory": {
+      "type": "string",
+      "minLength": 4,
+      "maxLength": 32767
+    },
+    "configurationTargets": {
+      "type": "array",
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 4,
+        "maxLength": 32767
+      }
+    },
+    "maximumEvents": {
+      "type": "integer",
+      "minimum": 2,
+      "maximum": 10002
+    },
+    "attemptOrdinal": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 99
+    },
+    "idempotencyKey": {
+      "$ref": "common.schema.json#/$defs/sha256"
+    }
+  }
+}

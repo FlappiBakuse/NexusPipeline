@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/control-configuration-value.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "version",
+    "expectedBindingRevision",
+    "relativePath",
+    "syntax",
+    "patch"
+  ],
+  "properties": {
+    "format": {
+      "const": "nexus.control.configuration-value"
+    },
+    "version": {
+      "const": 1
+    },
+    "expectedBindingRevision": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "relativePath": {
+      "type": "string",
+      "maxLength": 1024
+    },
+    "syntax": {
+      "enum": [
+        "json",
+        "jsonWithComments",
+        "yaml"
+      ]
+    },
+    "patch": {
+      "$ref": "config-patch.schema.json"
+    }
+  }
+}

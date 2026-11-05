@@ -1,0 +1,23 @@
+{
+  "name": "nexus-confirm-dialog",
+  "properties": {
+    "open": "boolean",
+    "title": "string",
+    "message": "string",
+    "tone": "neutral|warning|danger"
+  },
+  "defaults": {
+    "open": false,
+    "tone": "neutral",
+    "title": "",
+    "message": ""
+  },
+  "slots": [],
+  "events": {
+    "nexus-confirm": "ActionDetail",
+    "nexus-cancel": "ActionDetail",
+    "nexus-close": "CloseDetail"
+  },
+  "focus": "safe initial action",
+  "accessibility": "确认/取消/关闭区分；背景不可操作；关闭焦点恢复"
+}

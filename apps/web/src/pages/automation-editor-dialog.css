@@ -1,0 +1,24 @@
+.editor-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.editor-actions button {
+  min-width: 80px;
+}
+.editor-actions button:not(.primary) {
+  color: var(--muted);
+}
+.account-actions .primary {
+  order: -1;
+}
+.error-text {
+  color: var(--bad);
+}
+.editor-fields {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}

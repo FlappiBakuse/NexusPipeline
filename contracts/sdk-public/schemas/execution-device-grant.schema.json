@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/execution-device-grant.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "pipeName",
+    "kind"
+  ],
+  "properties": {
+    "pipeName": {
+      "type": "string",
+      "pattern": "^NexusExecutionDevice-[0-9a-f]{64}$"
+    },
+    "kind": {
+      "enum": [
+        "pc",
+        "android"
+      ]
+    }
+  }
+}

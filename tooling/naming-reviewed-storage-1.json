@@ -1,0 +1,247 @@
+[
+  {
+    "path": "src/platform/Storage/Automation/PreparedAutomationExport.cs",
+    "kind": "method",
+    "name": "CopyAttachmentToAsync",
+    "count": 1,
+    "reason": "Four words retain the To relation at the ownership or transaction boundary"
+  },
+  {
+    "path": "src/platform/Storage/Configuration/ConfigurationRunController.cs",
+    "kind": "method",
+    "name": "ReleaseUnregisteredAfterCompletion",
+    "count": 1,
+    "reason": "Four words retain the After relation at the ownership or transaction boundary"
+  },
+  {
+    "path": "src/platform/Storage/Configuration/ConfigurationRunController.cs",
+    "kind": "method",
+    "name": "WaitForWorkAsync",
+    "count": 1,
+    "reason": "Four words retain the For relation at the ownership or transaction boundary"
+  },
+  {
+    "path": "src/platform/Storage/Configuration/ConfigurationRunController.cs",
+    "kind": "method",
+    "name": "PrepareInstalledForTarget",
+    "count": 1,
+    "reason": "Four words retain the For relation at the ownership or transaction boundary"
+  },
+  {
+    "path": "src/platform/Storage/Configuration/ConfigurationWriterProcess.cs",
+    "kind": "method",
+    "name": "WaitForWorkAsync",
+    "count": 1,
+    "reason": "Four words retain the For relation at the ownership or transaction boundary"
+  },
+  {
+    "path": "src/platform/Storage/Configuration/RunWriterProcess.cs",
+    "kind": "method",
+    "name": "WaitForWorkAsync",
+    "count": 1,
+    "reason": "Four words retain the For relation at the ownership or transaction boundary"
+  },
+  {
+    "path": "src/platform/Storage/Execution/AndroidControlProjection.cs",
+    "kind": "method",
+    "name": "RequireMainStartInside",
+    "count": 1,
+    "reason": "Four words retain the Inside relation at the ownership or transaction boundary"
+  },
+  {
+    "path": "src/platform/Storage/Execution/AttemptTerminalEvidence.cs",
+    "kind": "method",
+    "name": "RequireHookResultsInside",
+    "count": 1,
+    "reason": "Four words retain the Inside relation at the ownership or transaction boundary"
+  },
+  {
+    "path": "src/platform/Storage/Execution/AttemptValidatedRead.cs",
+    "kind": "method",
+    "name": "WithCoherentFreshHistory",
+    "count": 1,
+    "reason": "Four words retain the With relation at the ownership or transaction boundary"
+  },
+  {
+    "path": "src/platform/Storage/Execution/BindingOutputBudget.cs",
+    "kind": "method",
+    "name": "UsedFromValidatedRead",
+    "count": 1,
+    "reason": "Four words retain the From relation at the ownership or transaction boundary"
+  },
+  {
+    "path": "src/platform/Storage/Execution/CaptureEvidenceReader.cs",
+    "kind": "method",
+    "name": "HoldCollectedForPublication",
+    "count": 1,
+    "reason": "Four words retain the For relation at the ownership or transaction boundary"
+  },
+  {
+    "path": "src/platform/Storage/Execution/CaptureEvidenceReader.cs",
+    "kind": "method",
+    "name": "RequireResolvedForRecovery",
+    "count": 1,
+    "reason": "Four words retain the For relation at the ownership or transaction boundary"
+  },
+  {
+    "path": "src/platform/Storage/Execution/CompletionActionStore.cs",
+    "kind": "method",
+    "name": "IsReadyToPrepare",
+    "count": 1,
+    "reason": "Four words retain the To relation at the ownership or transaction boundary"
+  },
+  {
+    "path": "src/platform/Storage/Execution/ExecutionAttemptProjection.cs",
+    "kind": "method",
+    "name": "SynchronizeFromValidatedRead",
+    "count": 1,
+    "reason": "Four words retain the From relation at the ownership or transaction boundary"
+  },
+  {
+    "path": "src/platform/Storage/Execution/ExecutionCaptureProjection.cs",
+    "kind": "method",
+    "name": "RequireNewEffectInside",
+    "count": 1,
+    "reason": "Four words retain the Inside relation at the ownership or transaction boundary"
+  },
+  {
+    "path": "src/platform/Storage/Execution/ExecutionCaptureProjection.cs",
+    "kind": "method",
+    "name": "RequireCapturedPublicationInside",
+    "count": 1,
+    "reason": "Four words retain the Inside relation at the ownership or transaction boundary"
+  },
+  {
+    "path": "src/platform/Storage/Execution/ExecutionHookEvidence.cs",
+    "kind": "method",
+    "name": "ReadFromValidatedContext",
+    "count": 1,
+    "reason": "Four words retain the From relation at the ownership or transaction boundary"
+  },
+  {
+    "path": "src/platform/Storage/Execution/ExecutionRuntimeStep.cs",
+    "kind": "method",
+    "name": "WaitForHookAsync",
+    "count": 1,
+    "reason": "Four words retain the For relation at the ownership or transaction boundary"
+  },
+  {
+    "path": "src/platform/Storage/Execution/ExecutionRuntimeStep.cs",
+    "kind": "method",
+    "name": "CaptureBeforeStopAsync",
+    "count": 1,
+    "reason": "Four words retain the Before relation at the ownership or transaction boundary"
+  },
+  {
+    "path": "src/platform/Storage/Execution/PcStageProjection.cs",
+    "kind": "method",
+    "name": "RequireMainStartInside",
+    "count": 1,
+    "reason": "Four words retain the Inside relation at the ownership or transaction boundary"
+  },
+  {
+    "path": "src/platform/Storage/Execution/PcStageProjection.cs",
+    "kind": "method",
+    "name": "RequireConfigurationInstalledInside",
+    "count": 1,
+    "reason": "Four words retain the Inside relation at the ownership or transaction boundary"
+  },
+  {
+    "path": "src/platform/Storage/Execution/ProviderLauncherProjection.cs",
+    "kind": "method",
+    "name": "RequireNewEffectInside",
+    "count": 1,
+    "reason": "Four words retain the Inside relation at the ownership or transaction boundary"
+  },
+  {
+    "path": "src/platform/Storage/Execution/StepEvidenceFactory.cs",
+    "kind": "method",
+    "name": "NormalizeUnpublishedAfterClose",
+    "count": 1,
+    "reason": "Four words retain the After relation at the ownership or transaction boundary"
+  },
+  {
+    "path": "src/platform/Storage/Execution/StepEvidenceReader.cs",
+    "kind": "method",
+    "name": "ReadFromValidatedContext",
+    "count": 1,
+    "reason": "Four words retain the From relation at the ownership or transaction boundary"
+  },
+  {
+    "path": "src/platform/Storage/Execution/StepEvidenceReader.cs",
+    "kind": "method",
+    "name": "ContextFromValidatedRead",
+    "count": 1,
+    "reason": "Four words retain the From relation at the ownership or transaction boundary"
+  },
+  {
+    "path": "src/platform/Storage/Execution/TargetCleanupFacts.cs",
+    "kind": "method",
+    "name": "ReadAtAndroidCollection",
+    "count": 1,
+    "reason": "Four words retain the At relation at the ownership or transaction boundary"
+  },
+  {
+    "path": "src/platform/Storage/Extensions/PayloadEffectCursor.cs",
+    "kind": "method",
+    "name": "RequireFrozenEffectsInside",
+    "count": 1,
+    "reason": "Four words retain the Inside relation at the ownership or transaction boundary"
+  },
+  {
+    "path": "src/platform/Storage/Extensions/PreparedExtensionActivation.cs",
+    "kind": "method",
+    "name": "RequireForInstalledPublication",
+    "count": 1,
+    "reason": "Four words retain the For relation at the ownership or transaction boundary"
+  },
+  {
+    "path": "src/platform/Storage/Extensions/PreparedExtensionActivation.cs",
+    "kind": "method",
+    "name": "ReadAppliedInsidePublication",
+    "count": 1,
+    "reason": "Four words retain the Inside relation at the ownership or transaction boundary"
+  },
+  {
+    "path": "src/platform/Storage/Journals/JournalRecoveryOwnership.cs",
+    "kind": "method",
+    "name": "ReadExtensionWritersInside",
+    "count": 1,
+    "reason": "Four words retain the Inside relation at the ownership or transaction boundary"
+  },
+  {
+    "path": "src/platform/Storage/Maintenance/MaintenanceOperationOutcome.cs",
+    "kind": "method",
+    "name": "ProjectNoEffectInside",
+    "count": 1,
+    "reason": "Four words retain the Inside relation at the ownership or transaction boundary"
+  },
+  {
+    "path": "src/platform/Storage/Notifications/NotificationDeliveryService.cs",
+    "kind": "method",
+    "name": "ReadPendingForRun",
+    "count": 1,
+    "reason": "Four words retain the For relation at the ownership or transaction boundary"
+  },
+  {
+    "path": "src/platform/Storage/Notifications/NotificationDeliveryService.cs",
+    "kind": "method",
+    "name": "IsSettledForRun",
+    "count": 1,
+    "reason": "Four words retain the For relation at the ownership or transaction boundary"
+  },
+  {
+    "path": "src/platform/Storage/Notifications/NotificationSender.cs",
+    "kind": "method",
+    "name": "ReadQueuedForSource",
+    "count": 1,
+    "reason": "Four words retain the For relation at the ownership or transaction boundary"
+  },
+  {
+    "path": "src/platform/Storage/Notifications/NotificationSender.cs",
+    "kind": "method",
+    "name": "ReadSendingForSource",
+    "count": 1,
+    "reason": "Four words retain the For relation at the ownership or transaction boundary"
+  }
+]

@@ -1,0 +1,52 @@
+{
+  "aliases": {
+    "UiChangeSource": "pointer|keyboard|input|assistive",
+    "UiActivationSource": "pointer|keyboard|assistive"
+  },
+  "interfaces": {
+    "Option": {
+      "id": "string",
+      "label": "string",
+      "disabled?": "boolean"
+    },
+    "MenuItem": {
+      "id": "string",
+      "label": "string",
+      "disabled?": "boolean",
+      "tone?": "neutral|danger",
+      "separatorBefore?": "boolean"
+    },
+    "TabItem": {
+      "id": "string",
+      "label": "string",
+      "disabled?": "boolean",
+      "badge?": "string"
+    },
+    "DateRange": {
+      "from": "date|null",
+      "to": "date|null"
+    },
+    "Change<T>": {
+      "value": "T",
+      "source": "UiChangeSource"
+    },
+    "ToggleDetail": {
+      "expanded": "boolean",
+      "source": "UiActivationSource"
+    },
+    "ReorderDetail": {
+      "ids": "readonly string[]",
+      "source": "UiActivationSource"
+    },
+    "ActionDetail": {
+      "actionId": "string",
+      "source": "UiActivationSource"
+    },
+    "CloseDetail": {
+      "reason": "button|escape|backdrop|owner"
+    },
+    "BrowseDetail": {
+      "kind": "file|folder"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "name": "nexus-toast",
+  "properties": {
+    "message": "string",
+    "tone": "neutral|info|success|warning|danger"
+  },
+  "defaults": {
+    "tone": "info",
+    "message": ""
+  },
+  "slots": [
+    "actions"
+  ],
+  "events": {
+    "nexus-close": "CloseDetail"
+  },
+  "focus": "only on explicit interaction",
+  "accessibility": "状态播报不抢焦点；自动消失计时受owner管理"
+}

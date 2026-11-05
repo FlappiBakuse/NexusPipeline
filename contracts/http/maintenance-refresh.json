@@ -1,0 +1,13 @@
+{
+  "parameters": [{"name": "channel", "in": "path", "required": true, "schema": {"enum": ["stable", "prerelease"]}}],
+  "post": {
+    "operationId": "refreshTrustedHostUpdateFeed",
+    "description": "Requires local control.maintenance.write. Fetches only release-policy feed and signature URLs, verifies original signed bytes and persistent sequence/equivocation rules before acceptance. Uses frozen saved proxy settings. No query or body. CLI: maintenance-refresh --channel <channel>. Not exposed through MCP.",
+    "responses": {
+      "200": {"description": "Accepted signed feed"},
+      "400": {"description": "Invalid channel, query or body"},
+      "403": {"description": "Origin or remote operation rejected"},
+      "409": {"description": "Untrusted response, network, ownership or release policy unavailable"}
+    }
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/control-project-surface.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["context", "input"],
+  "properties": {
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["surfaceId", "instanceId", "entityId"],
+      "properties": {
+        "surfaceId": {"enum": ["automation.binding.editor", "automation.script.editor"]},
+        "instanceId": {"$ref": "common.schema.json#/$defs/uuid"},
+        "entityId": {"$ref": "common.schema.json#/$defs/uuid"}
+      }
+    },
+    "input": {"type": "object", "additionalProperties": true},
+    "operationId": {"$ref": "common.schema.json#/$defs/uuid"}
+  }
+}

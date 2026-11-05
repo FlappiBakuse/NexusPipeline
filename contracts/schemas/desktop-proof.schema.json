@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/desktop-proof.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "version", "algorithm", "payloadBase64", "signatureBase64"],
+  "properties": {
+    "format": {"const": "nexus.desktop.proof"},
+    "version": {"const": 1},
+    "algorithm": {"const": "ES256"},
+    "payloadBase64": {"type": "string", "minLength": 4, "maxLength": 16384, "pattern": "^[A-Za-z0-9+/]+={0,2}$"},
+    "signatureBase64": {"type": "string", "minLength": 88, "maxLength": 88, "pattern": "^[A-Za-z0-9+/]{86}==$"}
+  }
+}

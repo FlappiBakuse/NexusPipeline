@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/automation-bundle.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "version",
+    "bundleId",
+    "createdAt",
+    "exportKind",
+    "roots",
+    "scripts",
+    "users",
+    "bindings",
+    "queues",
+    "schedules",
+    "attachments"
+  ],
+  "properties": {
+    "format": {
+      "const": "nexus.automation.bundle"
+    },
+    "version": {
+      "const": 1
+    },
+    "bundleId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "createdAt": {
+      "$ref": "common.schema.json#/$defs/utcTime"
+    },
+    "exportKind": {
+      "enum": [
+        "definitions",
+        "scriptTemplate"
+      ]
+    },
+    "roots": {
+      "type": "array",
+      "items": {
+        "$ref": "automation-paths.schema.json#/$defs/root"
+      },
+      "maxItems": 128
+    },
+    "scripts": {
+      "type": "array",
+      "items": {
+        "$ref": "automation-script.schema.json#/$defs/script"
+      },
+      "maxItems": 4096
+    },
+    "users": {
+      "type": "array",
+      "items": {
+        "$ref": "automation-relations.schema.json#/$defs/user"
+      },
+      "maxItems": 4096
+    },
+    "bindings": {
+      "type": "array",
+      "items": {
+        "$ref": "automation-relations.schema.json#/$defs/binding"
+      },
+      "maxItems": 4096
+    },
+    "queues": {
+      "type": "array",
+      "items": {
+        "$ref": "automation-relations.schema.json#/$defs/queue"
+      },
+      "maxItems": 4096
+    },
+    "schedules": {
+      "type": "array",
+      "items": {
+        "$ref": "automation-relations.schema.json#/$defs/schedule"
+      },
+      "maxItems": 4096
+    },
+    "attachments": {
+      "type": "array",
+      "items": {
+        "$ref": "automation-paths.schema.json#/$defs/attachment"
+      },
+      "maxItems": 256
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "exportKind": {
+            "const": "scriptTemplate"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "scripts": {
+            "minItems": 1,
+            "maxItems": 1
+          },
+          "users": {
+            "maxItems": 0
+          },
+          "bindings": {
+            "maxItems": 0
+          },
+          "queues": {
+            "maxItems": 0
+          },
+          "schedules": {
+            "maxItems": 0
+          }
+        }
+      }
+    }
+  ]
+}

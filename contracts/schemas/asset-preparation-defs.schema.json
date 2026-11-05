@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/asset-preparation-defs.schema.json",
+  "$defs": {
+    "blob": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["relativePath", "sizeBytes", "sha256"],
+      "properties": {
+        "relativePath": {"$ref": "common.schema.json#/$defs/relativePath"},
+        "sizeBytes": {"type": "integer", "minimum": 0, "maximum": 8388608},
+        "sha256": {"$ref": "common.schema.json#/$defs/sha256"}
+      }
+    },
+    "root": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sourceRootId", "targetRootId", "path", "identity"],
+      "properties": {
+        "sourceRootId": {"$ref": "common.schema.json#/$defs/uuid"},
+        "targetRootId": {"$ref": "common.schema.json#/$defs/uuid"},
+        "path": {"type": "string", "minLength": 1, "maxLength": 32767},
+        "identity": {"$ref": "file-tree.schema.json#/$defs/physicalIdentity"}
+      }
+    },
+    "asset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["assetId", "packagePath", "content", "wasPresent", "parentIdentity"],
+      "properties": {
+        "assetId": {"$ref": "common.schema.json#/$defs/uuid"},
+        "packagePath": {"$ref": "common.schema.json#/$defs/relativePath"},
+        "content": {"$ref": "#/$defs/blob"},
+        "wasPresent": {"type": "boolean"},
+        "parentIdentity": {"$ref": "file-tree.schema.json#/$defs/physicalIdentity"},
+        "existingIdentity": {"$ref": "file-tree.schema.json#/$defs/physicalIdentity"}
+      },
+      "allOf": [
+        {"if": {"properties": {"wasPresent": {"const": true}}},
+          "then": {"required": ["existingIdentity"]},
+          "else": {"properties": {"existingIdentity": false}}}
+      ]
+    }
+  }
+}

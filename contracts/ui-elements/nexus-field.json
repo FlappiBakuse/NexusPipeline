@@ -1,0 +1,24 @@
+{
+  "name": "nexus-field",
+  "properties": {
+    "label": "string",
+    "controlId": "string",
+    "help": "string",
+    "error": "string",
+    "required": "boolean"
+  },
+  "defaults": {
+    "label": "",
+    "controlId": "",
+    "help": "",
+    "error": "",
+    "required": false
+  },
+  "slots": [
+    "control",
+    "help"
+  ],
+  "events": {},
+  "focus": "delegates to associated control",
+  "accessibility": "label/description/error与实际control相关联；必填可读"
+}

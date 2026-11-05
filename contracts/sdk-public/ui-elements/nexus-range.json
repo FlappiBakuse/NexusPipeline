@@ -1,0 +1,22 @@
+{
+  "name": "nexus-range",
+  "properties": {
+    "value": "number",
+    "min": "number",
+    "max": "number",
+    "step": "number"
+  },
+  "defaults": {
+    "value": 0,
+    "min": 0,
+    "max": 100,
+    "step": 1
+  },
+  "slots": [],
+  "events": {
+    "nexus-change": "Change<number>",
+    "nexus-commit": "Change<number>"
+  },
+  "focus": "slider",
+  "accessibility": "连续预览与最终提交不同事件；键盘step与读屏值一致"
+}

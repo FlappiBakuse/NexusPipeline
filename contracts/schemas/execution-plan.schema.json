@@ -1,0 +1,293 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/execution-plan.schema.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["format", "version", "instanceId", "runId", "createdAt", "definitionBundle", "sourceRevisions", "rootBindings", "settingsRevision", "selection", "configurationSlots", "steps", "physicalClaims", "resourceKeys", "budget", "retryPolicy", "completionAction", "extensionLocks"],
+  "properties": {
+    "format": {"const": "nexus.execution.plan"},
+    "version": {"const": 1},
+    "instanceId": {"$ref": "common.schema.json#/$defs/uuid"},
+    "runId": {"$ref": "common.schema.json#/$defs/uuid"},
+    "queueId": {"$ref": "common.schema.json#/$defs/uuid"},
+    "createdAt": {"$ref": "common.schema.json#/$defs/utcTime"},
+    "definitionBundle": {"$ref": "#/$defs/contentReference"},
+    "settingsRevision": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+    "judgementNetwork": {"$ref": "#/$defs/judgementNetwork"},
+    "captureRuntime": {"$ref": "#/$defs/captureRuntime"},
+    "selection": {
+      "type": "array", "minItems": 1, "maxItems": 4096,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["stepId", "bindingId", "scriptId", "userId", "disposition", "reasonCode"],
+        "properties": {
+          "stepId": {"type": "string", "minLength": 1, "maxLength": 120},
+          "bindingId": {"$ref": "common.schema.json#/$defs/uuid"},
+          "scriptId": {"$ref": "common.schema.json#/$defs/uuid"},
+          "userId": {"$ref": "common.schema.json#/$defs/uuid"},
+          "disposition": {"enum": ["runnable", "skipped", "blocked"]},
+          "reasonCode": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-z][a-z0-9_]*$"}
+        }
+      }
+    },
+    "configurationSlots": {
+      "type": "array", "maxItems": 4096,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["stepId", "bindingId", "resourceId", "targetPath", "expectedRevision"],
+        "properties": {
+          "stepId": {"type": "string", "minLength": 1, "maxLength": 120},
+          "bindingId": {"$ref": "common.schema.json#/$defs/uuid"},
+          "resourceId": {"type": "string", "minLength": 1, "maxLength": 120},
+          "targetPath": {"type": "string", "minLength": 4, "maxLength": 32767},
+          "expectedRevision": {"type": "integer", "minimum": 1, "maximum": 9007199254740991}
+        }
+      }
+    },
+    "sourceRevisions": {
+      "type": "array", "minItems": 1, "maxItems": 4096,
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["entityKind", "entityId", "revision"],
+        "properties": {
+          "entityKind": {"enum": ["script", "user", "queue", "binding", "root"]},
+          "entityId": {"$ref": "common.schema.json#/$defs/uuid"},
+          "revision": {"type": "integer", "minimum": 1, "maximum": 9007199254740991}
+        }
+      }
+    },
+    "rootBindings": {
+      "type": "array", "minItems": 1, "maxItems": 128,
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["rootId", "path", "identity"],
+        "properties": {
+          "rootId": {"$ref": "common.schema.json#/$defs/uuid"},
+          "path": {"type": "string", "minLength": 4, "maxLength": 32767},
+          "identity": {"$ref": "file-tree.schema.json#/$defs/physicalIdentity"}
+        }
+      }
+    },
+    "steps": {"type": "array", "minItems": 1, "maxItems": 4096, "items": {"$ref": "#/$defs/step"}},
+    "physicalClaims": {
+      "type": "array", "minItems": 1, "maxItems": 4096,
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["resourceKey", "mode"],
+        "properties": {
+          "resourceKey": {"type": "string", "minLength": 1, "maxLength": 512, "pattern": "^filesystem:(entry|object):"},
+          "mode": {"enum": ["reference", "mutation"]}
+        }
+      }
+    },
+    "resourceKeys": {"type": "array", "minItems": 1, "maxItems": 4096, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 512}},
+    "completionAction": {"enum": ["none", "shutdown", "hibernate", "restart", "exitHost"]},
+    "budget": {
+      "type": "object", "additionalProperties": false,
+      "required": ["totalTimeoutSeconds", "stopTimeoutSeconds", "drainTimeoutSeconds", "judgementTimeoutSeconds"],
+      "properties": {
+        "totalTimeoutSeconds": {"type": "integer", "minimum": 0, "maximum": 604800},
+        "stopTimeoutSeconds": {"type": "integer", "minimum": 1, "maximum": 300},
+        "drainTimeoutSeconds": {"type": "integer", "minimum": 1, "maximum": 300},
+        "judgementTimeoutSeconds": {"type": "integer", "minimum": 1, "maximum": 300}
+      }
+    },
+    "retryPolicy": {
+      "type": "object", "additionalProperties": false,
+      "required": ["safety", "hostApproved", "maximumAttempts", "deadlineUtc", "backoffSeconds", "idempotencyKey"],
+      "properties": {
+        "safety": {"enum": ["safe", "unknown"]},
+        "hostApproved": {"type": "boolean"},
+        "maximumAttempts": {"type": "integer", "minimum": 1, "maximum": 99},
+        "deadlineUtc": {"$ref": "common.schema.json#/$defs/utcTime"},
+        "backoffSeconds": {"type": "integer", "minimum": 0, "maximum": 86400},
+        "idempotencyKey": {"type": "string", "minLength": 1, "maxLength": 256}
+      }
+    },
+    "extensionLocks": {
+      "type": "array", "maxItems": 256,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["extensionId", "packageVersion", "sdkVersion", "contractFingerprint", "manifestSha256", "packageSha256"],
+        "properties": {
+          "extensionId": {"$ref": "common.schema.json#/$defs/extensionId"},
+          "packageVersion": {"$ref": "common.schema.json#/$defs/releaseVersion"},
+          "sdkVersion": {"const": "0.1.0"},
+          "contractFingerprint": {"$ref": "common.schema.json#/$defs/sha256"},
+          "manifestSha256": {"$ref": "common.schema.json#/$defs/sha256"},
+          "packageSha256": {"$ref": "common.schema.json#/$defs/sha256"}
+        }
+      }
+    }
+  },
+  "allOf": [{
+    "if": {"properties": {"steps": {"contains": {"required": ["judgementWorker"]}}}},
+    "then": {"required": ["judgementNetwork"]},
+    "else": {"not": {"required": ["judgementNetwork"]}}
+  }],
+  "$defs": {
+    "captureRuntime": {
+      "type": "object", "additionalProperties": false,
+      "required": ["broker", "timeoutMilliseconds", "maximumPngBytes", "maximumFramesPerStep"],
+      "properties": {
+        "broker": {"$ref": "#/$defs/interpreterImage"},
+        "timeoutMilliseconds": {"type": "integer", "minimum": 5000, "maximum": 30000},
+        "maximumPngBytes": {"const": 8388608},
+        "maximumFramesPerStep": {"type": "integer", "minimum": 1, "maximum": 200}
+      },
+      "if": {"properties": {"maximumFramesPerStep": {"const": 1}}},
+      "then": {"properties": {"timeoutMilliseconds": {"const": 5000}}},
+      "else": {"properties": {"timeoutMilliseconds": {"const": 30000}}}
+    },
+    "judgementNetwork": {
+      "type": "object", "additionalProperties": false,
+      "required": ["proxyMode", "proxyUserName", "passwordRevision"],
+      "properties": {
+        "proxyMode": {"enum": ["none", "system", "http"]},
+        "proxyUrl": {"type": "string", "minLength": 1, "maxLength": 2048},
+        "proxyUserName": {"type": "string", "maxLength": 256},
+        "passwordRevision": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+        "passwordSecretId": {"$ref": "common.schema.json#/$defs/uuid"}
+      },
+      "allOf": [{"if": {"properties": {"proxyMode": {"const": "http"}}}, "then": {"required": ["proxyUrl"]}}]
+    },
+    "logTarget": {
+      "type": "object", "additionalProperties": false,
+      "required": ["declarationIndex", "scopePath", "selector"],
+      "properties": {
+        "declarationIndex": {"type": "integer", "minimum": 0, "maximum": 15},
+        "scopePath": {"type": "string", "minLength": 4, "maxLength": 32767},
+        "selector": {"enum": ["file", "latestFile", "latestMatchingFile"]},
+        "timeZoneId": {"type": "string", "minLength": 1, "maxLength": 256}
+      }
+    },
+    "runtimeFile": {
+      "type": "object", "additionalProperties": false,
+      "required": ["relativePath", "sizeBytes", "sha256", "identity", "parentIdentity"],
+      "properties": {
+        "relativePath": {"type": "string", "minLength": 1, "maxLength": 1024},
+        "sizeBytes": {"type": "integer", "minimum": 1, "maximum": 1073741824},
+        "sha256": {"$ref": "common.schema.json#/$defs/sha256"},
+        "identity": {"$ref": "file-tree.schema.json#/$defs/physicalIdentity"},
+        "parentIdentity": {"$ref": "file-tree.schema.json#/$defs/physicalIdentity"}
+      }
+    },
+    "interpreterImage": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path", "sizeBytes", "sha256", "identity", "parentIdentity", "runtimeFiles"],
+      "properties": {
+        "path": {"type": "string", "minLength": 4, "maxLength": 32767},
+        "sizeBytes": {"type": "integer", "minimum": 1, "maximum": 1073741824},
+        "sha256": {"$ref": "common.schema.json#/$defs/sha256"},
+        "identity": {"$ref": "file-tree.schema.json#/$defs/physicalIdentity"},
+        "parentIdentity": {"$ref": "file-tree.schema.json#/$defs/physicalIdentity"},
+        "runtimeFiles": {"type": "array", "maxItems": 512, "items": {"$ref": "#/$defs/runtimeFile"}}
+      }
+    },
+    "hook": {
+      "type": "object", "additionalProperties": false,
+      "required": ["role", "launchKind", "source", "command", "sourceArguments", "arguments", "workingDirectory", "workingDirectoryIdentity", "onceAfterSuccess", "finalOnly"],
+      "properties": {
+        "role": {"enum": ["preHook", "postHook"]},
+        "launchKind": {"enum": ["native", "command", "powershell"]},
+        "source": {"$ref": "#/$defs/interpreterImage"},
+        "command": {"$ref": "#/$defs/interpreterImage"},
+        "sourceArguments": {"type": "array", "maxItems": 128, "items": {"type": "string", "maxLength": 4096}},
+        "arguments": {"type": "array", "maxItems": 133, "items": {"type": "string", "maxLength": 32767}},
+        "workingDirectory": {"type": "string", "minLength": 4, "maxLength": 32767},
+        "workingDirectoryIdentity": {"$ref": "file-tree.schema.json#/$defs/physicalIdentity"},
+        "onceAfterSuccess": {"type": "boolean"},
+        "finalOnly": {"type": "boolean"}
+      }
+    },
+    "judgementWorker": {
+      "type": "object", "additionalProperties": false,
+      "required": ["broker", "scriptSha256", "maximumInvocations", "maximumEvidenceBytes"],
+      "properties": {
+        "broker": {"$ref": "#/$defs/interpreterImage"},
+        "python": {"$ref": "#/$defs/interpreterImage"},
+        "scriptSha256": {"$ref": "common.schema.json#/$defs/sha256"},
+        "maximumInvocations": {"type": "integer", "minimum": 1, "maximum": 4095},
+        "maximumEvidenceBytes": {"type": "integer", "minimum": 33554432, "maximum": 67108864}
+      }
+    },
+    "contentReference": {
+      "type": "object", "additionalProperties": false, "required": ["relativePath", "sizeBytes", "sha256"],
+      "properties": {
+        "relativePath": {"type": "string", "pattern": "^blobs/content/[0-9a-f]{64}\\.bin$"},
+        "sizeBytes": {"type": "integer", "minimum": 1, "maximum": 2097152},
+        "sha256": {"$ref": "common.schema.json#/$defs/sha256"}
+      }
+    },
+    "planReference": {
+      "type": "object", "additionalProperties": false, "required": ["relativePath", "sizeBytes", "sha256"],
+      "properties": {
+        "relativePath": {"type": "string", "pattern": "^blobs/plans/[0-9a-f]{64}\\.json$"},
+        "sizeBytes": {"type": "integer", "minimum": 1, "maximum": 2097152},
+        "sha256": {"$ref": "common.schema.json#/$defs/sha256"}
+      }
+    },
+    "step": {
+      "type": "object", "additionalProperties": false,
+      "required": ["stepId", "scriptId", "engineKind", "dependsOn", "executablePath", "imageSizeBytes", "imageSha256", "imageIdentity", "parentIdentity", "arguments", "workingDirectory", "workingDirectoryIdentity", "tasks", "selectedTaskIds", "configurationTargets", "logTargets", "updateConfigurationAtFinish"],
+      "properties": {
+        "stepId": {"type": "string", "minLength": 1, "maxLength": 120},
+        "scriptId": {"$ref": "common.schema.json#/$defs/uuid"},
+        "userId": {"$ref": "common.schema.json#/$defs/uuid"},
+        "bindingId": {"$ref": "common.schema.json#/$defs/uuid"},
+        "engineKind": {"enum": ["process", "extensionWorker"]},
+        "purpose": {"enum": ["initialization"]},
+        "exclusiveProgram": {"type": "boolean"},
+        "judgementWorker": {"$ref": "#/$defs/judgementWorker"},
+        "provider": {"$ref": "execution-provider.schema.json"},
+        "adapter": {
+          "$ref": "execution-adapter.schema.json"
+        },
+        "target": {"$ref": "execution-target.schema.json"},
+        "hooks": {"type": "array", "minItems": 1, "maxItems": 2, "items": {"$ref": "#/$defs/hook"}},
+        "extensionId": {"$ref": "common.schema.json#/$defs/extensionId"},
+        "entryId": {"type": "string", "minLength": 1, "maxLength": 120},
+        "maximumSuccessfulRunsPerDay": {"$ref": "automation-binding-policy.schema.json#/$defs/dailyLimit"},
+        "maximumAttempts": {"type": "integer", "minimum": 1, "maximum": 99},
+        "totalTimeoutSeconds": {"type": "integer", "minimum": 0, "maximum": 604800},
+        "dependsOn": {"type": "array", "maxItems": 256, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 120}},
+        "executablePath": {"type": "string", "minLength": 4, "maxLength": 32767},
+        "imageSizeBytes": {"type": "integer", "minimum": 1, "maximum": 1073741824},
+        "imageSha256": {"$ref": "common.schema.json#/$defs/sha256"},
+        "imageIdentity": {"$ref": "file-tree.schema.json#/$defs/physicalIdentity"},
+        "parentIdentity": {"$ref": "file-tree.schema.json#/$defs/physicalIdentity"},
+        "arguments": {"type": "array", "maxItems": 128, "items": {"type": "string", "maxLength": 4096}},
+        "workingDirectory": {"type": "string", "minLength": 4, "maxLength": 32767},
+        "workingDirectoryIdentity": {"$ref": "file-tree.schema.json#/$defs/physicalIdentity"},
+        "tasks": {"type": "array", "maxItems": 4096, "items": {"$ref": "task-definitions.schema.json#/$defs/task"}},
+        "selectedTaskIds": {"type": "array", "maxItems": 4096, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 120}},
+        "updateConfigurationAtFinish": {"type": "boolean"},
+        "configurationTargets": {"type": "array", "maxItems": 64, "uniqueItems": true, "items": {"type": "string", "minLength": 4, "maxLength": 32767}},
+        "logTargets": {"type": "array", "maxItems": 16, "uniqueItems": true, "items": {"$ref": "#/$defs/logTarget"}}
+      },
+      "dependentRequired": {"userId": ["bindingId"], "bindingId": ["userId"]},
+      "allOf": [{
+        "if": {"properties": {"engineKind": {"const": "extensionWorker"}}},
+        "then": {"required": ["extensionId", "entryId", "provider"]},
+        "else": {"not": {"anyOf": [{"required": ["entryId"]}, {"required": ["provider"]}]}}
+      },
+      {
+        "if": {
+          "required": ["adapter"]
+        },
+        "then": {
+          "required": ["extensionId", "bindingId", "userId"]
+        }
+      },
+      {
+        "if": {
+          "properties": {
+            "engineKind": {
+              "const": "process"
+            }
+          },
+          "required": ["extensionId"]
+        },
+        "then": {
+          "required": ["adapter"]
+        }
+      }]
+    }
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/configuration-workspace.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "version", "instanceId", "journalId", "planDigest", "workPath", "workIdentity", "candidateObjects"],
+  "properties": {
+    "format": {"const": "nexus.configuration.workspace"},
+    "version": {"const": 1},
+    "instanceId": {"$ref": "common.schema.json#/$defs/uuid"},
+    "journalId": {"$ref": "common.schema.json#/$defs/uuid"},
+    "planDigest": {"$ref": "common.schema.json#/$defs/sha256"},
+    "workPath": {"type": "string", "minLength": 4, "maxLength": 32767},
+    "workIdentity": {"$ref": "file-tree.schema.json#/$defs/physicalIdentity"},
+    "candidateObjects": {
+      "type": "array",
+      "maxItems": 4096,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["relativePath", "identity"],
+        "properties": {
+          "relativePath": {"type": "string", "maxLength": 1024},
+          "identity": {"$ref": "file-tree.schema.json#/$defs/physicalIdentity"}
+        }
+      }
+    }
+  }
+}

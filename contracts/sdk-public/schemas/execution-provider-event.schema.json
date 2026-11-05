@@ -1,0 +1,157 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/execution-provider-event.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "version",
+    "identity",
+    "sequence",
+    "kind"
+  ],
+  "properties": {
+    "format": {
+      "const": "nexus.execution.provider-event"
+    },
+    "version": {
+      "const": 1
+    },
+    "identity": {
+      "$ref": "#/$defs/identity"
+    },
+    "sequence": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 10002
+    },
+    "kind": {
+      "enum": [
+        "started",
+        "progress",
+        "terminal"
+      ]
+    },
+    "outcome": {
+      "enum": [
+        "succeeded",
+        "failed",
+        "cancelled"
+      ]
+    },
+    "message": {
+      "type": "string",
+      "maxLength": 256
+    },
+    "reasonCode": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80,
+      "pattern": "^[a-z][a-z0-9_]*$"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "terminal"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "outcome",
+          "reasonCode"
+        ],
+        "properties": {
+          "message": false
+        }
+      },
+      "else": {
+        "properties": {
+          "outcome": false,
+          "reasonCode": false
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "progress"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "message"
+        ]
+      },
+      "else": {
+        "properties": {
+          "message": false
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "instanceId",
+        "parentOperationId",
+        "parentJournalId",
+        "runId",
+        "attemptId",
+        "stepId",
+        "extensionId",
+        "entryId",
+        "activationId",
+        "planDigest",
+        "nonce"
+      ],
+      "properties": {
+        "instanceId": {
+          "$ref": "common.schema.json#/$defs/uuid"
+        },
+        "parentOperationId": {
+          "$ref": "common.schema.json#/$defs/uuid"
+        },
+        "parentJournalId": {
+          "$ref": "common.schema.json#/$defs/uuid"
+        },
+        "runId": {
+          "$ref": "common.schema.json#/$defs/uuid"
+        },
+        "attemptId": {
+          "$ref": "common.schema.json#/$defs/uuid"
+        },
+        "activationId": {
+          "$ref": "common.schema.json#/$defs/uuid"
+        },
+        "stepId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "extensionId": {
+          "$ref": "common.schema.json#/$defs/extensionId"
+        },
+        "entryId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "pattern": "^[a-z][a-z0-9.-]*$"
+        },
+        "planDigest": {
+          "$ref": "common.schema.json#/$defs/sha256"
+        },
+        "nonce": {
+          "$ref": "common.schema.json#/$defs/sha256"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,4 @@
+{
+  "get": {"operationId": "readActiveExecutions", "description": "control.status.read; immutable views of accepted plans and actual executor phases. Returns revision and items with operationId/runId/attemptId/ordinal/phase/canCancel/steps. canCancel reflects the authenticated operation owner; a displayed phase is not a final business outcome.",
+    "responses": {"200": {"description": "ExecutionRunView array and progress revision"}, "403": {"description": "Capability unavailable"}}}
+}

@@ -1,0 +1,16 @@
+{
+  "get": {
+    "operationId": "readRecordSummary",
+    "description": "records.read; one SQLite snapshot of non-retired completed records. Range must be positive and at most 366 days. Fixed-offset date buckets and at most 200 user groups per page. Totals keep measured duration, lower bounds and unknown duration separate.",
+    "parameters": [
+      {"name": "endedFromInclusive", "in": "query", "required": true, "schema": {"type": "string", "format": "date-time"}},
+      {"name": "endedUntilExclusive", "in": "query", "required": true, "schema": {"type": "string", "format": "date-time"}},
+      {"name": "offsetMinutes", "in": "query", "schema": {"type": "integer", "minimum": -840, "maximum": 840, "default": 0}},
+      {"name": "userId", "in": "query", "schema": {"type": "string", "format": "uuid"}},
+      {"name": "business", "in": "query", "schema": {"enum": ["unverified", "succeeded", "partial", "failed", "notApplicable", "cancelled"]}},
+      {"name": "afterUserId", "in": "query", "schema": {"type": "string", "format": "uuid"}}
+    ],
+    "responses": {"200": {"description": "RecordSummary: totals; days[{date,totals}]; users[{userId,totals}]; nextUserId. Totals contain runs/succeeded/failed/cancelled/unverified/measuredCount/measuredMilliseconds/lowerBoundCount/unknownDurationCount. Null user identifies script-group runs."},
+      "400": {"description": "Invalid range/filter/cursor"}, "403": {"description": "Capability unavailable"}}
+  }
+}

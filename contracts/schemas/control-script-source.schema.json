@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/control-script-source.schema.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["format", "version", "operationId", "extensionId", "expectedInstalledRevision", "rootPath"],
+  "properties": {
+    "format": {"const": "nexus.control.script-source"}, "version": {"const": 1},
+    "operationId": {"$ref": "common.schema.json#/$defs/uuid"},
+    "extensionId": {"$ref": "common.schema.json#/$defs/extensionId"},
+    "expectedInstalledRevision": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+    "rootPath": {"type": "string", "minLength": 1, "maxLength": 32767}
+  }
+}

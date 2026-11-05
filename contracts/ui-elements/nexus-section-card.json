@@ -1,0 +1,21 @@
+{
+  "name": "nexus-section-card",
+  "properties": {
+    "title": "string",
+    "description": "string",
+    "surface": "primary|secondary"
+  },
+  "defaults": {
+    "surface": "primary",
+    "title": "",
+    "description": ""
+  },
+  "slots": [
+    "header",
+    "actions",
+    "default"
+  ],
+  "events": {},
+  "focus": "none",
+  "accessibility": "标题/描述/动作语义；表面继承与响应式栅格"
+}

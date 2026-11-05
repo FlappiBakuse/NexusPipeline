@@ -1,0 +1,22 @@
+{
+  "name": "nexus-collapsible-card",
+  "properties": {
+    "expanded": "boolean",
+    "panelId": "string",
+    "title": "string"
+  },
+  "defaults": {
+    "expanded": false,
+    "panelId": "",
+    "title": ""
+  },
+  "slots": [
+    "actions",
+    "default"
+  ],
+  "events": {
+    "nexus-toggle": "ToggleDetail"
+  },
+  "focus": "header trigger",
+  "accessibility": "aria-controls/expanded一致；动画中关闭交互；展开不丢草稿"
+}

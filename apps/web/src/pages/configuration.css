@@ -1,0 +1,65 @@
+.config-panel {
+  display: grid;
+  gap: 1rem;
+  min-width: 0;
+}
+.config-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  border-bottom: 1px solid var(--nexus-border, #454b59);
+  padding-bottom: 0.75rem;
+}
+.config-tabs button[aria-current='page'] {
+  color: var(--nexus-accent, #62a8ff);
+  border-color: currentColor;
+}
+.config-fields {
+  display: grid;
+  gap: 0.9rem;
+  min-width: 0;
+}
+.config-fields .form-field {
+  display: grid;
+  gap: 0.4rem;
+  min-width: 0;
+}
+.config-fields select,
+.config-fields input,
+.config-fields textarea {
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.config-fields fieldset {
+  min-width: 0;
+  display: grid;
+  gap: 0.35rem;
+  border: 1px solid var(--nexus-border, #454b59);
+  border-radius: 0.65rem;
+}
+.config-fields .choice-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.config-fields .choice-row small {
+  opacity: 0.75;
+}
+.config-fields .row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.config-fields section {
+  min-width: 0;
+}
+.config-fields li {
+  overflow-wrap: anywhere;
+}
+@media (max-width: 420px) {
+  .config-fields .row > button {
+    flex: 1 1 100%;
+  }
+}

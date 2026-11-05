@@ -1,0 +1,24 @@
+{
+  "format": "nexus.store.catalog",
+  "version": 1,
+  "generationId": "11111111-1111-4111-8111-111111111111",
+  "sequence": 1,
+  "channel": "develop",
+  "publishedAt": "2026-10-19T00:00:00Z",
+  "entries": [
+    {
+      "extensionId": "live-screenshot",
+      "artifactName": "LiveScreenshot",
+      "packageVersion": "0.5.0-beta.1",
+      "kind": "managed-code",
+      "minHostVersion": "0.18.0",
+      "sdkVersion": "0.1.0",
+      "artifact": {
+        "url": "https://example.invalid/LiveScreenshot.zip",
+        "sizeBytes": 1024,
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "manifestSha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  ]
+}

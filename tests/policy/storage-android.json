@@ -1,0 +1,30 @@
+{
+  "group": "storage-android",
+  "expectedMethods": {
+    "NexusPipeline.StorageTests.AndroidRuntimeTests.OrdersDeviceCommands": 2,
+    "NexusPipeline.StorageTests.AndroidRuntimeTests.StopsServerChildren": 1,
+    "NexusPipeline.StorageTests.AndroidRuntimeTests.RejectsIncompleteOffline": 1,
+    "NexusPipeline.StorageTests.AndroidRuntimeTests.RejectsContradictoryDevices": 1,
+    "NexusPipeline.StorageTests.OfflineRuleTests.RejectsOfflineErrors": 4,
+    "NexusPipeline.StorageTests.AndroidRuntimeTests.PreservesShutdownFailures": 1,
+    "NexusPipeline.StorageTests.AndroidRuntimeTests.CleansReadinessTimeout": 1,
+    "NexusPipeline.StorageTests.AndroidRuntimeTests.SkipsDisabledLaunches": 1,
+    "NexusPipeline.StorageTests.AndroidRuntimeTests.BoundsToolOutput": 1,
+    "NexusPipeline.StorageTests.AndroidRuntimeTests.PreservesToolFailures": 1,
+    "NexusPipeline.StorageTests.AndroidMuMuTests.BindsCurrentDiscovery": 1,
+    "NexusPipeline.StorageTests.AndroidMuMuTests.RejectsChangedPorts": 1,
+    "NexusPipeline.StorageTests.AndroidMuMuTests.ReplaysSavedResponses": 1,
+    "NexusPipeline.StorageTests.AndroidMuMuTests.RefreshesCleanupMapping": 1,
+    "NexusPipeline.StorageTests.AndroidMuMuTests.RejectsStaleMapping": 1,
+    "NexusPipeline.StorageTests.AndroidCancellationTests.CancelsBeforeDispatch": 1,
+    "NexusPipeline.StorageTests.AndroidCancellationTests.FreezesCleanupDecision": 1,
+    "NexusPipeline.StorageTests.AndroidCancellationTests.StopsFailedPublication": 1,
+    "NexusPipeline.StorageTests.AndroidOutputTests.SharesBindingAllowance": 1,
+    "NexusPipeline.StorageTests.AndroidRecoveryTests.KeepsUnknownEffects": 1,
+    "NexusPipeline.StorageTests.AndroidRecoveryTests.RestoresCollectedAttempts": 1,
+    "NexusPipeline.StorageTests.AndroidAuthorityTests.RejectsDisposedPreparation": 1,
+    "NexusPipeline.StorageTests.AndroidAuthorityTests.RejectsCopiedAuthority": 1,
+    "NexusPipeline.StorageTests.AndroidMediaTests.CapturesFreshPreviews": 2,
+    "NexusPipeline.StorageTests.AndroidCancellationTests.CancelsRunningTarget": 1
+  }
+}

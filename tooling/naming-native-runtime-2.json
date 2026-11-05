@@ -1,0 +1,9 @@
+[
+  {
+    "path": "src/platform/Windows/WindowsCompletionCalls.cs",
+    "kind": "method",
+    "name": "LookupPrivilegeValueW",
+    "count": 1,
+    "reason": "Native entrypoint: advapi32.dll!LookupPrivilegeValueW"
+  }
+]

@@ -1,0 +1,303 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/control-project-command.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "version", "action"],
+  "properties": {
+    "format": {
+      "const": "nexus.control.project-command"
+    },
+    "version": {
+      "const": 1
+    },
+    "action": {
+      "enum": ["context", "discover", "select", "result", "preview", "page", "release"]
+    },
+    "bindingId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "expectedBindingRevision": {
+      "$ref": "common.schema.json#/$defs/sequence"
+    },
+    "extensionId": {
+      "$ref": "common.schema.json#/$defs/extensionId"
+    },
+    "operationId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "expectedSelectionRevision": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740990
+    },
+    "selection": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "previewId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "asset": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9._-]{0,127}$"
+    },
+    "protectedInputs": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["key", "expectedRevision", "intent"],
+        "properties": {
+          "key": {
+            "type": "string",
+            "pattern": "^[a-z0-9-]{1,80}$"
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740990
+          },
+          "intent": {
+            "enum": ["keep", "set", "clear"]
+          },
+          "value": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096
+          }
+        }
+      }
+    },
+    "providerId": {
+      "$ref": "common.schema.json#/$defs/extensionId"
+    },
+    "finish": {
+      "type": "boolean"
+    },
+    "scriptId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "expectedScriptRevision": {
+      "$ref": "common.schema.json#/$defs/sequence"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "enum": ["discover", "select", "result", "preview"]
+          }
+        }
+      },
+      "then": {
+        "required": ["extensionId"],
+        "properties": {
+          "previewId": false,
+          "asset": false
+        },
+        "oneOf": [
+          {
+            "required": ["bindingId", "expectedBindingRevision"],
+            "properties": {
+              "scriptId": false,
+              "expectedScriptRevision": false
+            }
+          },
+          {
+            "required": ["scriptId", "expectedScriptRevision"],
+            "properties": {
+              "bindingId": false,
+              "expectedBindingRevision": false
+            }
+          }
+        ]
+      },
+      "else": {
+        "properties": {
+          "expectedBindingRevision": false,
+          "extensionId": false,
+          "expectedScriptRevision": false
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "enum": ["context", "discover", "select", "result", "preview"]
+          }
+        }
+      },
+      "then": {
+        "oneOf": [
+          {
+            "required": ["bindingId"],
+            "properties": {
+              "scriptId": false
+            }
+          },
+          {
+            "required": ["scriptId"],
+            "properties": {
+              "bindingId": false
+            }
+          }
+        ]
+      },
+      "else": {
+        "properties": {
+          "bindingId": false,
+          "scriptId": false
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "const": "context"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "previewId": false,
+          "asset": false
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "enum": ["discover", "select", "result"]
+          }
+        }
+      },
+      "then": {
+        "required": ["selection"]
+      },
+      "else": {
+        "if": {
+          "properties": {
+            "action": {
+              "const": "preview"
+            }
+          }
+        },
+        "then": {},
+        "else": {
+          "properties": {
+            "selection": false
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "enum": ["select", "result"]
+          }
+        }
+      },
+      "then": {
+        "required": ["operationId", "expectedSelectionRevision"]
+      },
+      "else": {
+        "properties": {
+          "operationId": false,
+          "expectedSelectionRevision": false
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "enum": ["page", "release"]
+          }
+        }
+      },
+      "then": {
+        "required": ["previewId"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "const": "page"
+          }
+        }
+      },
+      "then": {
+        "required": ["asset"]
+      },
+      "else": {
+        "properties": {
+          "asset": false
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "enum": ["select", "result"]
+          }
+        }
+      },
+      "then": {},
+      "else": {
+        "properties": {
+          "protectedInputs": false
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "const": "result"
+          }
+        }
+      },
+      "then": {},
+      "else": {
+        "properties": {
+          "finish": false
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "action": {
+            "enum": ["select", "result"]
+          }
+        }
+      },
+      "then": {},
+      "else": {
+        "properties": {
+          "providerId": false
+        }
+      }
+    },
+    {
+      "if": {
+        "required": ["scriptId"]
+      },
+      "then": {
+        "properties": {
+          "protectedInputs": false,
+          "finish": false
+        }
+      }
+    }
+  ]
+}

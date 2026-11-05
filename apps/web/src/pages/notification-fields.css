@@ -1,0 +1,63 @@
+.notification-fields {
+  display: grid;
+  gap: 24px;
+  min-width: 0;
+}
+label {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+.required {
+  display: inline;
+  color: var(--nx-color-danger);
+}
+label:has(> .required) {
+  display: block;
+}
+label:has(> .required) > input {
+  display: block;
+  margin-top: 8px;
+}
+input,
+textarea {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 40px;
+  font: inherit;
+  font-weight: 400;
+}
+textarea {
+  min-height: 100px;
+  resize: none;
+}
+.columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.switches {
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  overflow: hidden;
+}
+nexus-switch-setting {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+nexus-switch-setting + nexus-switch-setting {
+  border-top: 1px solid var(--border);
+}
+@media (max-width: 650px) {
+  .columns,
+  .three {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

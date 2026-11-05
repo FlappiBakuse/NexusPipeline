@@ -1,0 +1,13 @@
+{
+  "get": {
+    "operationId": "readInterfacePreferences",
+    "description": "settings.read; fixed non-secret UI preferences for the current instance. No query or body. Unknown saved format is rejected without overwriting it.",
+    "responses": {
+      "200": {"description": "Current CAS snapshot", "content": {"application/json": {"schema": {
+        "type": "object", "required": ["revision", "values", "operationId"], "additionalProperties": false,
+        "properties": {"revision": {"type": "integer", "minimum": 0}, "operationId": {"type": "string", "format": "uuid"}, "values": {"$ref": "../schemas/control-interface-change.schema.json#/properties/values"}}
+      }}}},
+      "403": {"description": "Capability unavailable"}, "409": {"description": "Saved preferences unavailable"}
+    }
+  }
+}

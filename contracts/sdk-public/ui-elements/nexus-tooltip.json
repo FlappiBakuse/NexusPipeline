@@ -1,0 +1,21 @@
+{
+  "name": "nexus-tooltip",
+  "properties": {
+    "content": "string",
+    "open": "boolean",
+    "anchor": "HTMLElement|null",
+    "delay": "number"
+  },
+  "defaults": {
+    "open": false,
+    "anchor": null,
+    "delay": 400,
+    "content": ""
+  },
+  "slots": [],
+  "events": {
+    "nexus-close": "CloseDetail"
+  },
+  "focus": "never steals focus",
+  "accessibility": "hover/focus一致；锚点移除即清理；文本可读取"
+}

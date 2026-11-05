@@ -1,0 +1,17 @@
+{
+  "name": "nexus-icon",
+  "properties": {
+    "name": "string",
+    "title": "string",
+    "decorative": "boolean"
+  },
+  "defaults": {
+    "decorative": true,
+    "name": "",
+    "title": ""
+  },
+  "slots": [],
+  "events": {},
+  "focus": "none",
+  "accessibility": "装饰aria-hidden；语义图标提供title；不暴露私有SVG结构"
+}

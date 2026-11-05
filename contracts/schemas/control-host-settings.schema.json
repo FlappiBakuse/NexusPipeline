@@ -1,0 +1,246 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/control-host-settings.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "version",
+    "operationId",
+    "expectedRevision",
+    "values"
+  ],
+  "properties": {
+    "format": {
+      "const": "nexus.control.host-settings"
+    },
+    "version": {
+      "const": 1
+    },
+    "operationId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "expectedRevision": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "values": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "autoStart",
+        "desktop",
+        "service",
+        "allowConfigRepair",
+        "historyRetentionDays",
+        "logLevel",
+        "locale",
+        "proxy",
+        "updates",
+        "extensions",
+        "automaticRetry"
+      ],
+      "properties": {
+        "autoStart": {
+          "type": "boolean"
+        },
+        "desktop": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mode",
+            "minimizeToTray",
+            "openOnStartup"
+          ],
+          "properties": {
+            "mode": {
+              "enum": [
+                "desktop",
+                "browser"
+              ]
+            },
+            "minimizeToTray": {
+              "type": "boolean"
+            },
+            "openOnStartup": {
+              "type": "boolean"
+            }
+          }
+        },
+        "service": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "webPort",
+            "allowRemoteAccess",
+            "mcpEnabled",
+            "mcpWriteEnabled",
+            "mcpPort"
+          ],
+          "properties": {
+            "webPort": {
+              "type": "integer",
+              "anyOf": [
+                {
+                  "const": 0
+                },
+                {
+                  "minimum": 1024,
+                  "maximum": 65535
+                }
+              ]
+            },
+            "allowRemoteAccess": {
+              "type": "boolean"
+            },
+            "mcpEnabled": {
+              "type": "boolean"
+            },
+            "mcpWriteEnabled": {
+              "type": "boolean"
+            },
+            "mcpPort": {
+              "type": "integer",
+              "minimum": 1024,
+              "maximum": 65535
+            }
+          }
+        },
+        "allowConfigRepair": {
+          "type": "boolean"
+        },
+        "historyRetentionDays": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 180
+        },
+        "logLevel": {
+          "enum": [
+            "debug",
+            "info",
+            "warning",
+            "error",
+            "fatal"
+          ]
+        },
+        "locale": {
+          "enum": [
+            "zhCn",
+            "enUs"
+          ]
+        },
+        "proxy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mode",
+            "url",
+            "userName"
+          ],
+          "properties": {
+            "mode": {
+              "enum": [
+                "none",
+                "system",
+                "http"
+              ]
+            },
+            "url": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 2048
+            },
+            "userName": {
+              "type": "string",
+              "maxLength": 256
+            }
+          }
+        },
+        "updates": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "checkEnabled",
+            "autoApplyEnabled",
+            "pluginAutoUpdateEnabled",
+            "channel",
+            "sourceUrl",
+            "pluginSource"
+          ],
+          "properties": {
+            "checkEnabled": {
+              "type": "boolean"
+            },
+            "autoApplyEnabled": {
+              "type": "boolean"
+            },
+            "pluginAutoUpdateEnabled": {
+              "type": "boolean"
+            },
+            "channel": {
+              "enum": [
+                "stable",
+                "prerelease"
+              ]
+            },
+            "sourceUrl": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "maxLength": 2048
+            },
+            "pluginSource": {
+              "enum": [
+                "stable",
+                "develop"
+              ]
+            }
+          }
+        },
+        "extensions": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "extensionId",
+              "enabled"
+            ],
+            "properties": {
+              "extensionId": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]{0,79}$"
+              },
+              "enabled": {
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        "automaticRetry": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "backoffSeconds"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "backoffSeconds": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 86400
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,93 @@
+[
+  {
+    "path": "tests/windows/StartupInspectorTests.cs",
+    "kind": "method",
+    "name": "CommandLineToArgv",
+    "count": 1,
+    "reason": "Native entrypoint: shell32.dll!CommandLineToArgvW"
+  },
+  {
+    "path": "tests/windows/WorkerJobTests.cs",
+    "kind": "method",
+    "name": "WaitForSingleObject",
+    "count": 1,
+    "reason": "Native entrypoint: kernel32.dll!WaitForSingleObject"
+  },
+  {
+    "path": "tests/fixtures/OwnedWriter/WindowCaptureFixture.cs",
+    "kind": "method",
+    "name": "GetModuleHandleW",
+    "count": 1,
+    "reason": "Native entrypoint: kernel32.dll!GetModuleHandleW"
+  },
+  {
+    "path": "tests/fixtures/OwnedWriter/WindowCaptureFixture.cs",
+    "kind": "method",
+    "name": "RegisterClassExW",
+    "count": 1,
+    "reason": "Native entrypoint: user32.dll!RegisterClassExW"
+  },
+  {
+    "path": "tests/fixtures/OwnedWriter/WindowCaptureFixture.cs",
+    "kind": "method",
+    "name": "CreateWindowExW",
+    "count": 1,
+    "reason": "Native entrypoint: user32.dll!CreateWindowExW"
+  },
+  {
+    "path": "tests/fixtures/OwnedWriter/WindowCaptureFixture.cs",
+    "kind": "method",
+    "name": "DefWindowProcW",
+    "count": 1,
+    "reason": "Native entrypoint: user32.dll!DefWindowProcW"
+  },
+  {
+    "path": "tests/integration/storage/ConfirmationWindowTests.cs",
+    "kind": "method",
+    "name": "GetWindowThreadProcessId",
+    "count": 1,
+    "reason": "Native entrypoint: user32.dll!GetWindowThreadProcessId"
+  },
+  {
+    "path": "tests/integration/storage/ConfirmationWindowTests.cs",
+    "kind": "method",
+    "name": "GetWindowTextW",
+    "count": 1,
+    "reason": "Native entrypoint: user32.dll!GetWindowTextW"
+  },
+  {
+    "path": "tests/integration/storage/MaintenanceDesktopObservation.cs",
+    "kind": "method",
+    "name": "NtQueryInformationProcess",
+    "count": 1,
+    "reason": "Native entrypoint: ntdll.dll!NtQueryInformationProcess"
+  },
+  {
+    "path": "tests/integration/storage/ProbeWindowFixture.cs",
+    "kind": "method",
+    "name": "CreateWindowExW",
+    "count": 1,
+    "reason": "Native entrypoint: user32.dll!CreateWindowExW"
+  },
+  {
+    "path": "tests/integration/storage/ProbeWindowFixture.cs",
+    "kind": "method",
+    "name": "PostThreadMessageW",
+    "count": 1,
+    "reason": "Native entrypoint: user32.dll!PostThreadMessageW"
+  },
+  {
+    "path": "tests/integration/storage/ProbeWindowFixture.cs",
+    "kind": "method",
+    "name": "GetCurrentThreadId",
+    "count": 1,
+    "reason": "Native entrypoint: kernel32.dll!GetCurrentThreadId"
+  },
+  {
+    "path": "tests/integration/storage/RecoveryOwnershipTests.cs",
+    "kind": "method",
+    "name": "OpenJobObjectW",
+    "count": 1,
+    "reason": "Native entrypoint: kernel32.dll!OpenJobObjectW"
+  }
+]

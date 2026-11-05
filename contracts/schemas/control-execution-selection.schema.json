@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/control-execution-selection.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "version",
+    "target",
+    "expectedCatalogRevision",
+    "expectedSettingsRevision"
+  ],
+  "properties": {
+    "format": {
+      "const": "nexus.control.execution-selection"
+    },
+    "version": {
+      "const": 1
+    },
+    "expectedCatalogRevision": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "expectedSettingsRevision": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "target": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "bindingId"
+          ],
+          "properties": {
+            "kind": {
+              "enum": ["binding", "projectInitialization"]
+            },
+            "bindingId": {
+              "$ref": "common.schema.json#/$defs/uuid"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "scriptId"
+          ],
+          "properties": {
+            "kind": {
+              "const": "script"
+            },
+            "scriptId": {
+              "$ref": "common.schema.json#/$defs/uuid"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "scriptId",
+            "userId"
+          ],
+          "properties": {
+            "kind": {
+              "const": "scriptUser"
+            },
+            "scriptId": {
+              "$ref": "common.schema.json#/$defs/uuid"
+            },
+            "userId": {
+              "$ref": "common.schema.json#/$defs/uuid"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "queueId"
+          ],
+          "properties": {
+            "kind": {
+              "const": "queue"
+            },
+            "queueId": {
+              "$ref": "common.schema.json#/$defs/uuid"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "parameters": [{"name": "bindingId", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}],
+  "get": {"operationId": "readBindingResources", "description": "configuration.read; current binding/script identity and declared generic or specialized resource metadata, verified against saved owner and contract. No configuration values or arbitrary filesystem reads. No query.",
+    "responses": {"200": {"description": "ConfigurationOverview with bindingId/bindingRevision/scriptId/scriptRevision/kind/extensionId/resources. Each resource has resourceId/declarationIndex/label/revision/isSaved/shape/fileCount/relativePath/syntax."}, "403": {"description": "Capability unavailable"}, "409": {"description": "Resource or definition contract unavailable"}}}
+}

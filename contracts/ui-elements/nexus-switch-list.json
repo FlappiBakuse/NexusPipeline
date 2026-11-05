@@ -1,0 +1,15 @@
+{
+  "name": "nexus-switch-list",
+  "properties": {
+    "label": "string"
+  },
+  "defaults": {
+    "label": ""
+  },
+  "slots": [
+    "default"
+  ],
+  "events": {},
+  "focus": "none",
+  "accessibility": "分组可访问名称；紧凑分隔与子项原有顺序"
+}

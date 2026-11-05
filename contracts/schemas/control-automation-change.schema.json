@@ -1,0 +1,219 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/control-automation-change.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "version",
+    "operationId",
+    "expectedCatalogRevision",
+    "roots",
+    "scripts",
+    "users",
+    "bindings",
+    "queues",
+    "schedules",
+    "removed"
+  ],
+  "properties": {
+    "format": {
+      "const": "nexus.control.automation-change"
+    },
+    "version": {
+      "const": 1
+    },
+    "operationId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "expectedCatalogRevision": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "roots": {
+      "type": "array",
+      "maxItems": 4096,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "expectedRevision",
+          "name",
+          "kind",
+          "path"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "common.schema.json#/$defs/uuid"
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "kind": {
+            "enum": [
+              "script",
+              "external"
+            ]
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32767
+          }
+        }
+      }
+    },
+    "scripts": {
+      "type": "array",
+      "maxItems": 4096,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expectedRevision",
+          "value"
+        ],
+        "properties": {
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "value": {
+            "$ref": "automation-script.schema.json#/$defs/script"
+          }
+        }
+      }
+    },
+    "users": {
+      "type": "array",
+      "maxItems": 4096,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expectedRevision",
+          "value"
+        ],
+        "properties": {
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "value": {
+            "$ref": "automation-relations.schema.json#/$defs/user"
+          }
+        }
+      }
+    },
+    "bindings": {
+      "type": "array",
+      "maxItems": 4096,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expectedRevision",
+          "value"
+        ],
+        "properties": {
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "value": {
+            "$ref": "automation-relations.schema.json#/$defs/binding"
+          }
+        }
+      }
+    },
+    "queues": {
+      "type": "array",
+      "maxItems": 4096,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expectedRevision",
+          "value"
+        ],
+        "properties": {
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "value": {
+            "$ref": "automation-relations.schema.json#/$defs/queue"
+          }
+        }
+      }
+    },
+    "schedules": {
+      "type": "array",
+      "maxItems": 4096,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "expectedRevision",
+          "value"
+        ],
+        "properties": {
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "value": {
+            "$ref": "automation-relations.schema.json#/$defs/schedule"
+          }
+        }
+      }
+    },
+    "removed": {
+      "type": "array",
+      "maxItems": 4096,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "id",
+          "expectedRevision"
+        ],
+        "properties": {
+          "kind": {
+            "enum": [
+              "root",
+              "script",
+              "user",
+              "binding",
+              "queue",
+              "schedule"
+            ]
+          },
+          "id": {
+            "$ref": "common.schema.json#/$defs/uuid"
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          }
+        }
+      }
+    }
+  }
+}

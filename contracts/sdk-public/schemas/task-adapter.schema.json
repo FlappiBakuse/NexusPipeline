@@ -1,0 +1,377 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/task-adapter.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "version",
+    "direction",
+    "phase",
+    "extensionId",
+    "operationId"
+  ],
+  "properties": {
+    "purpose": {
+      "enum": [
+        "run",
+        "editPrepare",
+        "editCommit"
+      ]
+    },
+    "format": {
+      "const": "nexus.task.adapter"
+    },
+    "version": {
+      "const": 1
+    },
+    "direction": {
+      "enum": [
+        "request",
+        "response"
+      ]
+    },
+    "phase": {
+      "enum": [
+        "discover",
+        "observe",
+        "retry",
+        "configuration"
+      ]
+    },
+    "extensionId": {
+      "$ref": "common.schema.json#/$defs/extensionId"
+    },
+    "operationId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "runId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "attemptId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "planDigest": {
+      "$ref": "common.schema.json#/$defs/sha256"
+    },
+    "compiled": {
+      "$ref": "compiled-input.schema.json"
+    },
+    "repetitionOffsets": {
+      "type": "array",
+      "maxItems": 4096,
+      "items": {
+        "$ref": "task-definitions.schema.json#/$defs/repetitionOffset"
+      }
+    },
+    "resources": {
+      "type": "array",
+      "items": {
+        "$ref": "task-definitions.schema.json#/$defs/resource"
+      },
+      "maxItems": 256,
+      "minItems": 0
+    },
+    "tasks": {
+      "type": "array",
+      "items": {
+        "$ref": "task-definitions.schema.json#/$defs/task"
+      },
+      "maxItems": 4096,
+      "minItems": 0
+    },
+    "observations": {
+      "type": "array",
+      "items": {
+        "$ref": "task-definitions.schema.json#/$defs/observation"
+      },
+      "maxItems": 4096,
+      "minItems": 0
+    },
+    "logLines": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 65536
+      },
+      "maxItems": 256,
+      "minItems": 0
+    },
+    "selectedTaskIds": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 120
+      },
+      "maxItems": 4096,
+      "minItems": 0,
+      "uniqueItems": true
+    },
+    "logEvents": {
+      "type": "array",
+      "items": {
+        "$ref": "task-log-event.schema.json"
+      },
+      "maxItems": 256
+    },
+    "logComplete": {
+      "type": "boolean"
+    },
+    "observationCheckpoint": {
+      "type": "string",
+      "maxLength": 65536
+    },
+    "upstreamProcessId": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4294967295
+    },
+    "configurationIntents": {
+      "type": "array",
+      "items": {
+        "$ref": "config-patch.schema.json"
+      },
+      "maxItems": 256
+    },
+    "idempotencyKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "configPatches": {
+      "type": "array",
+      "items": {
+        "$ref": "config-patch.schema.json"
+      },
+      "maxItems": 256
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code",
+          "resourceId",
+          "severity"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "resourceId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "severity": {
+            "enum": [
+              "info",
+              "warning",
+              "blocking"
+            ]
+          }
+        }
+      },
+      "maxItems": 256,
+      "minItems": 0
+    }
+  },
+  "dependentSchemas": {
+    "purpose": {
+      "properties": {
+        "phase": {
+          "const": "configuration"
+        },
+        "direction": {
+          "const": "request"
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "repetitionOffsets"
+        ]
+      },
+      "then": {
+        "required": [
+          "selectedTaskIds"
+        ],
+        "properties": {
+          "direction": {
+            "const": "request"
+          },
+          "phase": {
+            "const": "observe"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "compiled"
+        ],
+        "properties": {
+          "direction": {
+            "const": "request"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "resources": {
+            "items": {
+              "required": [
+                "relativePath",
+                "revision"
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "direction": {
+            "const": "response"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "compiled": false
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "direction": {
+            "const": "request"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "resources"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "direction": {
+            "const": "response"
+          },
+          "phase": {
+            "const": "discover"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "tasks"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "direction": {
+            "const": "response"
+          },
+          "phase": {
+            "const": "observe"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "observations"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "direction": {
+            "const": "response"
+          },
+          "phase": {
+            "const": "retry"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "selectedTaskIds",
+          "idempotencyKey",
+          "planDigest"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "direction": {
+            "const": "response"
+          },
+          "phase": {
+            "const": "configuration"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "diagnostics"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "phase": {
+            "enum": [
+              "discover",
+              "configuration"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "runId": false,
+          "attemptId": false,
+          "planDigest": false
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "phase": {
+            "enum": [
+              "observe",
+              "retry"
+            ]
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "runId",
+          "attemptId",
+          "planDigest"
+        ]
+      }
+    }
+  ]
+}

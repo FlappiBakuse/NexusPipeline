@@ -1,0 +1,1241 @@
+{
+  "algorithm": "nexus-sdk-source-manifest-sha256-v1",
+  "sourceFingerprint": "e42f4b211533379da4a2432f6d866dc6007def3e9dead6d06e391424e4fed820",
+  "inputs": [
+    {
+      "path": "Directory.Build.props",
+      "sizeBytes": 2219,
+      "sha256": "109285338f2fdfedd3b708f64d757e9284e6a4a06e811ace8568189daae6d82f"
+    },
+    {
+      "path": "contracts/http/automation-binding-effective.json",
+      "sizeBytes": 912,
+      "sha256": "764a91a8640063efd93504a5b690c903d5965188d59a824ed169bff305376699"
+    },
+    {
+      "path": "contracts/http/automation-user-summary.json",
+      "sizeBytes": 895,
+      "sha256": "bb23a9224b1f6d8139d44baf93026ac3dee196c52e3d316b97e841c1a7f13168"
+    },
+    {
+      "path": "contracts/http/completion-cancel.json",
+      "sizeBytes": 609,
+      "sha256": "b856df2dc65034128e1af9d458cfefcf0a505e8ff9b0f033f7757da14338a6cc"
+    },
+    {
+      "path": "contracts/http/completion-pending.json",
+      "sizeBytes": 462,
+      "sha256": "43d83a91c990adeb7f3ffb991346b1962e03767598df206af8b5e983247e26b2"
+    },
+    {
+      "path": "contracts/http/configuration-document.json",
+      "sizeBytes": 1592,
+      "sha256": "79468bd9ad70f050ecc11a8f05937bb690f78c95bb4da96288b3941cd4d8819a"
+    },
+    {
+      "path": "contracts/http/configuration-overview.json",
+      "sizeBytes": 785,
+      "sha256": "c964b1c03e323edc391f971b838fd277fb307f05d600701281301468babd0932"
+    },
+    {
+      "path": "contracts/http/diagnostic-support.json",
+      "sizeBytes": 1157,
+      "sha256": "f463440bf3dd7d3660b8f169a3e8918fefeb04ab942ae8e731e11c4454c75c12"
+    },
+    {
+      "path": "contracts/http/execution-active.json",
+      "sizeBytes": 491,
+      "sha256": "3955bb8ff1974d5752d7febb1e65db7ac02526cbfda46519ab6edd0343c11622"
+    },
+    {
+      "path": "contracts/http/execution-report.json",
+      "sizeBytes": 1011,
+      "sha256": "9e54d249bbd05e402acf5451c0aad6fedf3074c391a858bcdef2427531d58a6c"
+    },
+    {
+      "path": "contracts/http/extension-catalog-details.json",
+      "sizeBytes": 1474,
+      "sha256": "6756fb02a26032a42bac50a286dc743bd394c4f183d3228da3391d5f5d1168a7"
+    },
+    {
+      "path": "contracts/http/extension-catalog.json",
+      "sizeBytes": 688,
+      "sha256": "4b98c2e92c549e954702c3b5117e8aee3bff4e5d6f2f6acc64b6cc1f0ef8d18f"
+    },
+    {
+      "path": "contracts/http/extension-details.json",
+      "sizeBytes": 673,
+      "sha256": "6328689c4c39a9885d3316f277d81fbfca1d166ea1d0b5617038b54ed2342475"
+    },
+    {
+      "path": "contracts/http/extension-operation-history.json",
+      "sizeBytes": 899,
+      "sha256": "2c03fd0178f1661ce4e6c63795334f8575314d3775e7c078224726d3375269e1"
+    },
+    {
+      "path": "contracts/http/host-restart.json",
+      "sizeBytes": 1629,
+      "sha256": "598f4916e6ff6090af5382caa8c9522d020566b8973efffc277beb1c44229ccc"
+    },
+    {
+      "path": "contracts/http/host-secret-change.json",
+      "sizeBytes": 1090,
+      "sha256": "43696d41f90306f09bdc5e3ffba78e62922cf84834eca3213e9d1dea2ef4efd3"
+    },
+    {
+      "path": "contracts/http/host-secret-operation.json",
+      "sizeBytes": 788,
+      "sha256": "3d395ed8b19f8f7c8c9201ac672c999718c234c8f4cd35523951b1ea3273b311"
+    },
+    {
+      "path": "contracts/http/host-secret-read.json",
+      "sizeBytes": 737,
+      "sha256": "e44e3035107c945564633dfdc610dcbd97c6a722de45ed2ab0baa723aa1050c1"
+    },
+    {
+      "path": "contracts/http/host-secret.json",
+      "sizeBytes": 472,
+      "sha256": "bfcc308c75c7fd7cb730e508445118bbedb6098970ada5ef6451dcd9f0ef59c6"
+    },
+    {
+      "path": "contracts/http/interface-change.json",
+      "sizeBytes": 733,
+      "sha256": "f2157c4818129496f070a3606772dbcffc0fe5d4aa79cdd3e10f02d0bb0812e9"
+    },
+    {
+      "path": "contracts/http/interface-read.json",
+      "sizeBytes": 804,
+      "sha256": "4060c47082e94d0dc87384c9c3468cf76d1c51ad7fcdb7e16787dfd9ae14d3dc"
+    },
+    {
+      "path": "contracts/http/live-log.json",
+      "sizeBytes": 1035,
+      "sha256": "88f5dc32364eef8289ea75e48828e823b79e0932de5345eb8f87170dc45a9ac3"
+    },
+    {
+      "path": "contracts/http/maintenance-action.json",
+      "sizeBytes": 1338,
+      "sha256": "4d50c6a2aed66844c7f611b9729a4dd642cb2c4fc191bf0af50f0945c1414fbe"
+    },
+    {
+      "path": "contracts/http/maintenance-feed.json",
+      "sizeBytes": 631,
+      "sha256": "5046af1b9b8d524113150097e4a43432331a88f91004829ba0cfa87e2602be7c"
+    },
+    {
+      "path": "contracts/http/maintenance-operation.json",
+      "sizeBytes": 1490,
+      "sha256": "a572dd57590065f9799386d691ff62cce1b44a68fc29682d0dec552a99f16549"
+    },
+    {
+      "path": "contracts/http/maintenance-prepare.json",
+      "sizeBytes": 1065,
+      "sha256": "dbc6de6fdc52290a04b8601f64faf401b6c72c375fa32f9be48b5071f48a2d4c"
+    },
+    {
+      "path": "contracts/http/maintenance-refresh.json",
+      "sizeBytes": 834,
+      "sha256": "8edc15c07663dc2758caae1f4cdc6fe97ba2cc4b2cc2163dbe127ac0248be56f"
+    },
+    {
+      "path": "contracts/http/record-detail.json",
+      "sizeBytes": 527,
+      "sha256": "a2c9b7b815eb014c230f96b6f254a6d36c30e8aaca238226cccdf300924af4c4"
+    },
+    {
+      "path": "contracts/http/record-display.json",
+      "sizeBytes": 706,
+      "sha256": "43f655ccdb739e6619c56c8c4bbfaeace806297108b6a25062334cd4098f7638"
+    },
+    {
+      "path": "contracts/http/record-summary.json",
+      "sizeBytes": 1467,
+      "sha256": "53bb9d32cb408d3176c5d0e5a1cf18b6caed7d5be8411824b569f5c570b0f563"
+    },
+    {
+      "path": "contracts/http/secret-change.json",
+      "sizeBytes": 1505,
+      "sha256": "ad4f0245fb7a513efa31efc15409a84b64262795214154115b471cd48d4f4470"
+    },
+    {
+      "path": "contracts/http/secret-field.json",
+      "sizeBytes": 560,
+      "sha256": "af3a777b04bc6f68d974d93cbe4f332a641733b4e463f36c323c17e80566937d"
+    },
+    {
+      "path": "contracts/http/secret-parameters.json",
+      "sizeBytes": 1114,
+      "sha256": "81ca7e571b89891b4670fb8a297d8955edc0efeec9fa436403de326f4aa002f7"
+    },
+    {
+      "path": "contracts/http/secret-read.json",
+      "sizeBytes": 1194,
+      "sha256": "0e1b62aa61389cbde766f33073f144eb21a5b5681d982657ca0bddb28904cd90"
+    },
+    {
+      "path": "contracts/http/secret-responses.json",
+      "sizeBytes": 621,
+      "sha256": "bb8e1b3ebf914092a69cb8970a6e07149273ce2e0779ddc680cc79f9273a6131"
+    },
+    {
+      "path": "contracts/openapi.json",
+      "sizeBytes": 9667,
+      "sha256": "43de3667d31335fa3b739f307d8dcd2e9963a8a944af4fa7f5326e772ca3cfa5"
+    },
+    {
+      "path": "contracts/protocol-catalog.json",
+      "sizeBytes": 9915,
+      "sha256": "edbd4576ca9adbad5aff8e2ecad6d6980f82ffc9cc4e246baf68858eea106b43"
+    },
+    {
+      "path": "contracts/schemas/adapter-instance-policy.schema.json",
+      "sizeBytes": 958,
+      "sha256": "01b9333a5364973307463b9cdd9d456e5a7d4053c29f37bf14b0286ed682d141"
+    },
+    {
+      "path": "contracts/schemas/adapter-source-policy.schema.json",
+      "sizeBytes": 661,
+      "sha256": "76b7d5573ddd3e740220f3ad13e3f8a55380b6ad34b5b5aff5ba6adb7bb3427c"
+    },
+    {
+      "path": "contracts/schemas/asset-preparation-defs.schema.json",
+      "sizeBytes": 1830,
+      "sha256": "fccceef4bbda0cecd3167e1ab22b166fdd13e8288bf8cca7f325b6e0242d37f7"
+    },
+    {
+      "path": "contracts/schemas/asset-preparation-plan.schema.json",
+      "sizeBytes": 1508,
+      "sha256": "97d5155aae1c4cd5295e20b561a8f5856ac7b29f9687610af29cc5fd8c9093bf"
+    },
+    {
+      "path": "contracts/schemas/asset-preparation-receipt.schema.json",
+      "sizeBytes": 1303,
+      "sha256": "0b1c7b4ec90a4cf2684f838aac118f903f95696d8cf51d1784016a8fd5308dc0"
+    },
+    {
+      "path": "contracts/schemas/asset-preparation-workspace.schema.json",
+      "sizeBytes": 933,
+      "sha256": "d073713d0bdf559e8adacdac6e79d0d1ef5e75530027fca79818bf92c74be0a1"
+    },
+    {
+      "path": "contracts/schemas/automation-binding-policy.schema.json",
+      "sizeBytes": 3194,
+      "sha256": "6a83a7b5a1b7eae988d74ae492f51d5d5f296feeae8f2cefc1cb78a782d1c634"
+    },
+    {
+      "path": "contracts/schemas/automation-bundle.schema.json",
+      "sizeBytes": 2455,
+      "sha256": "e2dbd33fb2204989979dd1156a803116f063232669b0ede25771e02e7ce545fd"
+    },
+    {
+      "path": "contracts/schemas/automation-paths.schema.json",
+      "sizeBytes": 1713,
+      "sha256": "7b298ed88220a3c8332f3e24aca6be2d3a0d865ccdfef34ce113146afed26378"
+    },
+    {
+      "path": "contracts/schemas/automation-relations.schema.json",
+      "sizeBytes": 6313,
+      "sha256": "c82d600ced6e16ca1b05df79208ed9e6dd1f9585ff5c24911ced9a2dd71da8b0"
+    },
+    {
+      "path": "contracts/schemas/automation-script.schema.json",
+      "sizeBytes": 5608,
+      "sha256": "ef31b5c0cd754918fa9fdb5dd03d783ac2faef9c37383747020dcda5fd8a4a0c"
+    },
+    {
+      "path": "contracts/schemas/automation-target.schema.json",
+      "sizeBytes": 2179,
+      "sha256": "387b95dd99d925cd56f7de0ece7e3bfa3e5733346431450f6855298c3b744ebb"
+    },
+    {
+      "path": "contracts/schemas/browser-login-policy.schema.json",
+      "sizeBytes": 3331,
+      "sha256": "d3a6e4bbf2827c7622ca44169b662eefd6f63544213acec6891bd852c792a7d2"
+    },
+    {
+      "path": "contracts/schemas/common.schema.json",
+      "sizeBytes": 1666,
+      "sha256": "3e12d81ea9d34705c23132d574a11a1e02ebcece6fbda94c7e6282b5f645bb15"
+    },
+    {
+      "path": "contracts/schemas/compiled-input.schema.json",
+      "sizeBytes": 437,
+      "sha256": "dc80c923d96c1282a413f653fc0b288a78e1deba9046367189cd24a3c2ee3c46"
+    },
+    {
+      "path": "contracts/schemas/config-patch.schema.json",
+      "sizeBytes": 1710,
+      "sha256": "48639b504085cb472cad9e5d039a7a4bbb0f20251b072fd414cf4c59c019346c"
+    },
+    {
+      "path": "contracts/schemas/configuration-edit-output-reference.schema.json",
+      "sizeBytes": 610,
+      "sha256": "a430c4aa524af27a7c237a99f31d45f2d68e97a02d053109eebfaeffe0bddbc3"
+    },
+    {
+      "path": "contracts/schemas/configuration-edit-output.schema.json",
+      "sizeBytes": 1344,
+      "sha256": "b23fcea278ec3a34285a119d7328aed244064cafc9e8e91683623e84c51247ce"
+    },
+    {
+      "path": "contracts/schemas/configuration-exchange-plan.schema.json",
+      "sizeBytes": 4199,
+      "sha256": "d39dfcb2f664e6ec795d6572d77f02c5b6c92c037dc4a51c398ed8e581064900"
+    },
+    {
+      "path": "contracts/schemas/configuration-run-state.schema.json",
+      "sizeBytes": 5586,
+      "sha256": "6f1495552e3f46fca96e31ca5af971ec85257ccb626421149012779e1d5fe2a5"
+    },
+    {
+      "path": "contracts/schemas/configuration-selector.schema.json",
+      "sizeBytes": 1557,
+      "sha256": "216cf53b34ac4d3db4a283254540cd7bd5f1984a67eeb3f79e70f59c2cc5b720"
+    },
+    {
+      "path": "contracts/schemas/configuration-workspace.schema.json",
+      "sizeBytes": 1177,
+      "sha256": "d5607549fd7a13350202d577acfcc74912035e12f0044225796f61e28b2eb606"
+    },
+    {
+      "path": "contracts/schemas/control-adapter-command.schema.json",
+      "sizeBytes": 2981,
+      "sha256": "36f0e961e529891ee543b8ed6112b417f957dd4b6d19943f85e194c4c923b6ab"
+    },
+    {
+      "path": "contracts/schemas/control-automation-change.schema.json",
+      "sizeBytes": 4971,
+      "sha256": "0a7f40a6394531e7c13023777306a7970736df873c3ae041f06395af2be9e030"
+    },
+    {
+      "path": "contracts/schemas/control-automation-import.schema.json",
+      "sizeBytes": 1866,
+      "sha256": "e4d09b85dec7bea120e2bded0f9cf87d227c5d8695f1d3e1e9f84c6918a5b39d"
+    },
+    {
+      "path": "contracts/schemas/control-cli-response.schema.json",
+      "sizeBytes": 1393,
+      "sha256": "dff9f18d2c292d59db9ac7d0703d615496a34a897e9ed3961b59560a713dcbfe"
+    },
+    {
+      "path": "contracts/schemas/control-configuration-import.schema.json",
+      "sizeBytes": 1207,
+      "sha256": "b38ac1e0c26cb73d4f0b08212150cbb882ec18afc9883d3ca6346e1ec038377d"
+    },
+    {
+      "path": "contracts/schemas/control-configuration-value.schema.json",
+      "sizeBytes": 838,
+      "sha256": "83f865bca07311065c2461836b50858ebf42e5c4edc3c625ef5e90a66eb64c4b"
+    },
+    {
+      "path": "contracts/schemas/control-emulator-discover.schema.json",
+      "sizeBytes": 682,
+      "sha256": "348b82f27ab8c5cdc197721aa03e126cba0e4b4c1dedf841d2af392ed93c194d"
+    },
+    {
+      "path": "contracts/schemas/control-error.schema.json",
+      "sizeBytes": 1353,
+      "sha256": "8cde67508bcd7cf8bd9100a8f9a987f9280fb62c518558e24d159c8c297be529"
+    },
+    {
+      "path": "contracts/schemas/control-execution-cancellation.schema.json",
+      "sizeBytes": 573,
+      "sha256": "29154ba614f441e0a127e726a1b5866761a79cc7e5e73bc5afe2a385d6c92b12"
+    },
+    {
+      "path": "contracts/schemas/control-execution-selection.schema.json",
+      "sizeBytes": 2322,
+      "sha256": "b9ed789330ea27db0c007ed8b5041b0a4728de5fff25fe768c3a7ad968c9fd01"
+    },
+    {
+      "path": "contracts/schemas/control-extension-apply.schema.json",
+      "sizeBytes": 4490,
+      "sha256": "3827f3970de11abdefe5e73997062d846fd87838fb701a6dd51873588c9dfeae"
+    },
+    {
+      "path": "contracts/schemas/control-extension-reconcile.schema.json",
+      "sizeBytes": 670,
+      "sha256": "d0539ef5c10a247f73b133461e086183b1137c665c82cdd8b9990a76ba947f65"
+    },
+    {
+      "path": "contracts/schemas/control-host-settings.schema.json",
+      "sizeBytes": 5710,
+      "sha256": "201934acb480070173b76cf9ecffe68b23f10336d2931579ff02c22c6000eaa6"
+    },
+    {
+      "path": "contracts/schemas/control-interface-change.schema.json",
+      "sizeBytes": 1869,
+      "sha256": "7352802e713e31ab0ac62880eefaf00cff91b46a39f6270873320121599c6e68"
+    },
+    {
+      "path": "contracts/schemas/control-maintenance-prepare.schema.json",
+      "sizeBytes": 1318,
+      "sha256": "c38153b3e2f84a366b26867e4596560d578e74ad70d1eab9437f0e28b2b4c3ae"
+    },
+    {
+      "path": "contracts/schemas/control-media-grant.schema.json",
+      "sizeBytes": 778,
+      "sha256": "89cac8eef1689641db011037e714301b46398539ad99a8b84cdd09ab35e3f7ae"
+    },
+    {
+      "path": "contracts/schemas/control-native-editor-finish.schema.json",
+      "sizeBytes": 641,
+      "sha256": "ae6eef239077497546f2903928dce111213ef9a912293f12e8f51a57550a3469"
+    },
+    {
+      "path": "contracts/schemas/control-native-editor.schema.json",
+      "sizeBytes": 1982,
+      "sha256": "e5869c2a2982bcc03a1908bd96428ea62889c672e3855bd1de5b80057d6f28c6"
+    },
+    {
+      "path": "contracts/schemas/control-notification-command.schema.json",
+      "sizeBytes": 6536,
+      "sha256": "f24973f4b226a03ad02fd3148d5122bb85c4a27cac66d6796a710d62efdec58d"
+    },
+    {
+      "path": "contracts/schemas/control-project-command.schema.json",
+      "sizeBytes": 6289,
+      "sha256": "c87f62e1763a151c4440d5059b589e9818410a3170747c82caff90668cca5956"
+    },
+    {
+      "path": "contracts/schemas/control-project-surface.schema.json",
+      "sizeBytes": 782,
+      "sha256": "1bbf3ff83dc3ad0b2389dd70f5e7af22728f3b6bc18d7454725c89d4f04a2180"
+    },
+    {
+      "path": "contracts/schemas/control-record-retirement.schema.json",
+      "sizeBytes": 696,
+      "sha256": "39fd161eee181719ed65c002eea82ad44c6d005cf2494ccec32d8565dbb162ab"
+    },
+    {
+      "path": "contracts/schemas/control-script-source.schema.json",
+      "sizeBytes": 714,
+      "sha256": "65cf08eab26630e8c104afbadd25c9877c35231d579166fa7126be7208a65fc1"
+    },
+    {
+      "path": "contracts/schemas/control-service-settings.schema.json",
+      "sizeBytes": 1446,
+      "sha256": "b92bb81a3fb992f87ac0db57e4d14ef03493bd953eb61305ed60572cb0498161"
+    },
+    {
+      "path": "contracts/schemas/desktop-channel.schema.json",
+      "sizeBytes": 1520,
+      "sha256": "af2fc5ad6860f328d0b7c76f24f44d616233471ab0682a86bffe9b694b5fcb42"
+    },
+    {
+      "path": "contracts/schemas/desktop-frontend.schema.json",
+      "sizeBytes": 741,
+      "sha256": "0b0b7bd0552b830810aee08fb0c4d0df030fd36a9b2d4968c474a07182df123a"
+    },
+    {
+      "path": "contracts/schemas/desktop-login.schema.json",
+      "sizeBytes": 2388,
+      "sha256": "47e1c0286216303321c4ee9283415884b2de655ebc6db3f769d1076ce496fce1"
+    },
+    {
+      "path": "contracts/schemas/desktop-proof.schema.json",
+      "sizeBytes": 644,
+      "sha256": "161c3f0f5280324299c2697bc195ff4fa2e56e26c93cd9686ae3a77f59c33be0"
+    },
+    {
+      "path": "contracts/schemas/desktop-session.schema.json",
+      "sizeBytes": 826,
+      "sha256": "b30427ade925b7c1c605edd03753a1f68f640b798cae7d0fe123eebbc922b730"
+    },
+    {
+      "path": "contracts/schemas/detached-signature.schema.json",
+      "sizeBytes": 753,
+      "sha256": "cd12aaf7845297acaa3edcd0a3320110e23f707b6c12ca875c2e7b006ac639da"
+    },
+    {
+      "path": "contracts/schemas/emulator-provider.schema.json",
+      "sizeBytes": 901,
+      "sha256": "a2ead2f3df73a36160d823b53203b504029c0684eb1b9520f908f7ce8e9330fa"
+    },
+    {
+      "path": "contracts/schemas/emulator-target.schema.json",
+      "sizeBytes": 2155,
+      "sha256": "9c34696aaf75efd12818427fc6b43b61a25bcc4b77020e37ddfe5067621fe0c4"
+    },
+    {
+      "path": "contracts/schemas/event.schema.json",
+      "sizeBytes": 1691,
+      "sha256": "d992b2d3ab2efecf60ff107d0ae51b6ac4498e8a8d1dad56c360935550528cb3"
+    },
+    {
+      "path": "contracts/schemas/execution-adapter.schema.json",
+      "sizeBytes": 3223,
+      "sha256": "afac91aa42658c7bbe897cd534ccf297612db4c2574e682c0ffdd5abeaed5742"
+    },
+    {
+      "path": "contracts/schemas/execution-device-grant.schema.json",
+      "sizeBytes": 391,
+      "sha256": "bf8572ae297b33ec5c336a0e05b17f58f2909e997ab6f944f52e0842eeabdc4c"
+    },
+    {
+      "path": "contracts/schemas/execution-device-request.schema.json",
+      "sizeBytes": 2002,
+      "sha256": "ce19f176fc346d381cb3a3bcc2d6db7be5343cfd5cfb4a1b014c2431ac7cbf11"
+    },
+    {
+      "path": "contracts/schemas/execution-device-response.schema.json",
+      "sizeBytes": 1228,
+      "sha256": "83c484096f5260724e6dc87d339cf1a2089586c0e56eec57d24df683384c754a"
+    },
+    {
+      "path": "contracts/schemas/execution-journal.schema.json",
+      "sizeBytes": 4155,
+      "sha256": "232c30711df43c75355461e7098273aff283bd1a925fbd7020c88e2c3714948c"
+    },
+    {
+      "path": "contracts/schemas/execution-outcomes.schema.json",
+      "sizeBytes": 1027,
+      "sha256": "8e8f3b3a0465d978153aeeba8ad80c95989d90d3a2ed1e38a3a2b3ed9899547a"
+    },
+    {
+      "path": "contracts/schemas/execution-plan.schema.json",
+      "sizeBytes": 15699,
+      "sha256": "b20b4ad6b3559b09d3f1247bb6c3f36e333a0806e72f91d2dee152ccb784fe86"
+    },
+    {
+      "path": "contracts/schemas/execution-project-request.schema.json",
+      "sizeBytes": 1060,
+      "sha256": "ad2d87513d031a436adb5964517aaf477920080f6e19805c917cc6dd2a746512"
+    },
+    {
+      "path": "contracts/schemas/execution-project-response.schema.json",
+      "sizeBytes": 3380,
+      "sha256": "f4e8091871a8cabf8c2028169e8e2664d8da1172f0fd8e3402954f536c5a159a"
+    },
+    {
+      "path": "contracts/schemas/execution-project.schema.json",
+      "sizeBytes": 420,
+      "sha256": "1804d3b8b959662d07f0049d43c5061de17383804f24967bf11cc975079812c3"
+    },
+    {
+      "path": "contracts/schemas/execution-provider-bootstrap.schema.json",
+      "sizeBytes": 1868,
+      "sha256": "a616a7b59730561d0de0cc5137e6500b0e17677e6d881ac8a848739fb0ef91ef"
+    },
+    {
+      "path": "contracts/schemas/execution-provider-event.schema.json",
+      "sizeBytes": 2282,
+      "sha256": "f15f0895afea4bd2583cfb52a790029e4c05e302b3901c53668c04ececa68ee5"
+    },
+    {
+      "path": "contracts/schemas/execution-provider-resource.schema.json",
+      "sizeBytes": 666,
+      "sha256": "1015624a59263039e8b1e74cd25496ebbea32f6ca50f6d712b2c7e9ad72bad5f"
+    },
+    {
+      "path": "contracts/schemas/execution-provider-retry.schema.json",
+      "sizeBytes": 708,
+      "sha256": "892256b88deeb8c1b371b3114ce126811e2c9ff8857b4b88add708e5b76b7904"
+    },
+    {
+      "path": "contracts/schemas/execution-provider-use.schema.json",
+      "sizeBytes": 470,
+      "sha256": "4739e6506d14dcbf8b9b153b37f03ecb42409b1e3075c47363060e915a1de724"
+    },
+    {
+      "path": "contracts/schemas/execution-provider.schema.json",
+      "sizeBytes": 2545,
+      "sha256": "d05802ec2f70bb3e24b18ace9802039e638e73b358107b020612e7ecb7708cb8"
+    },
+    {
+      "path": "contracts/schemas/execution-target.schema.json",
+      "sizeBytes": 3511,
+      "sha256": "3f7da95c94795f2c82f96a1dbc3be57807a49ebf194fe8bc35ed777c08436f18"
+    },
+    {
+      "path": "contracts/schemas/execution-workspace.schema.json",
+      "sizeBytes": 598,
+      "sha256": "c4a0e705f8c4880b09697e27e7f8bb7975baa6a1845dad9281982b5e83abdb14"
+    },
+    {
+      "path": "contracts/schemas/extension-kind.schema.json",
+      "sizeBytes": 1483,
+      "sha256": "aef90da18dccbeb09eef8c4883b3b725b677dca565e0fb0bcc5994b2d87b1bc5"
+    },
+    {
+      "path": "contracts/schemas/extension-localization.schema.json",
+      "sizeBytes": 794,
+      "sha256": "cf8a48c091942cdf985ff1d3d3b253149507b5a61fd881c7c479d118422ad5c5"
+    },
+    {
+      "path": "contracts/schemas/extension-manifest-execution.schema.json",
+      "sizeBytes": 2817,
+      "sha256": "b1affebdfbca826bc682d29c9439040989526ecef369cd6ae2ab2d147a1d60ab"
+    },
+    {
+      "path": "contracts/schemas/extension-manifest.schema.json",
+      "sizeBytes": 7458,
+      "sha256": "f62a34d8a4938abc2cc4059717a361e10b7d5360f07d95ff3d75ccc0743f2dfb"
+    },
+    {
+      "path": "contracts/schemas/extension-metadata.schema.json",
+      "sizeBytes": 2135,
+      "sha256": "069060a4a8ba4d3355880993e4f0fca3c49efb0c6628a881287098628ad9ef33"
+    },
+    {
+      "path": "contracts/schemas/file-cleanup-plan.schema.json",
+      "sizeBytes": 2108,
+      "sha256": "86d4ce1db527bbe3cea0ad21e85926e3463bd62f4418d92dc9c450b5da06e887"
+    },
+    {
+      "path": "contracts/schemas/file-tree.schema.json",
+      "sizeBytes": 1674,
+      "sha256": "847e21fc9159d8f494ab16253230f170b971d7d23cf66b49734b5f036ff00334"
+    },
+    {
+      "path": "contracts/schemas/frontend-handshake.schema.json",
+      "sizeBytes": 584,
+      "sha256": "ffe4251860675c350384b39ac618999a68e060528014011a599a96d41f538a2f"
+    },
+    {
+      "path": "contracts/schemas/instance.schema.json",
+      "sizeBytes": 659,
+      "sha256": "7b352f7c07fa98e6cd03536ba8fa66959a81ea6758cc145bad93c8fee0459121"
+    },
+    {
+      "path": "contracts/schemas/manual-work-invocation.schema.json",
+      "sizeBytes": 535,
+      "sha256": "572ff4f55ae7833feb2c78a60271a2000f86eb99ed9a4c0f575f156730f76f92"
+    },
+    {
+      "path": "contracts/schemas/manual-work-task.schema.json",
+      "sizeBytes": 1096,
+      "sha256": "40421347bb5d3410a49ac9e8c64d43303ee0e9b0925611c72c7df185bbffcf01"
+    },
+    {
+      "path": "contracts/schemas/media-capture.schema.json",
+      "sizeBytes": 771,
+      "sha256": "8aba3ba02642281151fc5e7126c3c1ea7b99568f75e6f753d9eb716caefda640"
+    },
+    {
+      "path": "contracts/schemas/media-frame.schema.json",
+      "sizeBytes": 1013,
+      "sha256": "f3c684a70b7e5f2f629259c5bbd6655a6978b13a3b3322b75d4fa30c9efae443"
+    },
+    {
+      "path": "contracts/schemas/notification-submission.schema.json",
+      "sizeBytes": 830,
+      "sha256": "00e5f69016aa719a928dc133d57c82a5c5973096d714526e3b1169a40768c3c9"
+    },
+    {
+      "path": "contracts/schemas/payload-apply-plan.schema.json",
+      "sizeBytes": 5355,
+      "sha256": "d1f7c1de1bd50cd36701fcd460bcb6301fc0295ae20b5a8bf032d0c27f6c47eb"
+    },
+    {
+      "path": "contracts/schemas/run-attempt-plan.schema.json",
+      "sizeBytes": 3002,
+      "sha256": "da70f600f0fb12da0ec938ae71efd7d06966aaa1e2fe779f1477f2ee5999d93b"
+    },
+    {
+      "path": "contracts/schemas/scheduled-invocation.schema.json",
+      "sizeBytes": 1050,
+      "sha256": "83cd73891f7bae6a92061abcf49c52a303fa530b5660ac751309b7520a574e03"
+    },
+    {
+      "path": "contracts/schemas/scheduled-planned-invocation.schema.json",
+      "sizeBytes": 823,
+      "sha256": "30184caa0d72638a50ab0114482e5237d9f58fa44ac40135ef1a292eef145e14"
+    },
+    {
+      "path": "contracts/schemas/scheduled-work-plans.schema.json",
+      "sizeBytes": 2184,
+      "sha256": "15add999019fb938af045aa9cf0fc9c86bc5db14fdf4d83835ab59c28e82a291"
+    },
+    {
+      "path": "contracts/schemas/scheduled-work-result.schema.json",
+      "sizeBytes": 626,
+      "sha256": "d0f5e07009add920d46d59c9071483fd4484b10ed440265435b4b453f6369a8a"
+    },
+    {
+      "path": "contracts/schemas/script-source.schema.json",
+      "sizeBytes": 3370,
+      "sha256": "4939e679b08345799454de060ff4555e8077241eec75a6f3840e468b43632213"
+    },
+    {
+      "path": "contracts/schemas/secret-preparation-defs.schema.json",
+      "sizeBytes": 2598,
+      "sha256": "a1ef3c5c0801de5a723d18be617655bd67260b3eeecf9bbd68bf5c00fb10fb13"
+    },
+    {
+      "path": "contracts/schemas/secret-preparation-plan.schema.json",
+      "sizeBytes": 3552,
+      "sha256": "2a8a51255b7170efb54bc2efec87da2f14b73595de6dd177d5835482f3ef2f43"
+    },
+    {
+      "path": "contracts/schemas/secret-preparation-receipt.schema.json",
+      "sizeBytes": 1228,
+      "sha256": "8ad8dacdb8f12726d8e740948740f5f12344e780d19b755bfa4f61f112b6cd9d"
+    },
+    {
+      "path": "contracts/schemas/secret-status.schema.json",
+      "sizeBytes": 826,
+      "sha256": "35cc2232c4a195f5453d622252b039a29959175e6d8723daa6e8a8123bf10746"
+    },
+    {
+      "path": "contracts/schemas/source-compiler.schema.json",
+      "sizeBytes": 3336,
+      "sha256": "f3b47d3723d837d57a23d6771bc29a509a1b6332102ed8311df7ed285c682fdd"
+    },
+    {
+      "path": "contracts/schemas/store-catalog.schema.json",
+      "sizeBytes": 2087,
+      "sha256": "a767ffb4159a915b2c99b9bab9f95b2ac953fc181dbfb55496d7d55c3195f0d3"
+    },
+    {
+      "path": "contracts/schemas/store-pointer.schema.json",
+      "sizeBytes": 950,
+      "sha256": "169db4a599e284fb13482f8327a65fa001c8b4ace03b53393984de8727b0e4a3"
+    },
+    {
+      "path": "contracts/schemas/task-adapter.schema.json",
+      "sizeBytes": 6382,
+      "sha256": "ea9423dcf86f821db3a70627b652ab1519ae51ae1ac309119c466719da88188c"
+    },
+    {
+      "path": "contracts/schemas/task-definitions.schema.json",
+      "sizeBytes": 5869,
+      "sha256": "1290e03805499aca594875b1e76753bdfba90b472545b2cc8aee1ebed5acf76c"
+    },
+    {
+      "path": "contracts/schemas/task-log-event.schema.json",
+      "sizeBytes": 562,
+      "sha256": "0aeefba831355e3f355461588a3a319ea99c4eb818007dfdf44dc2f57f9bd813"
+    },
+    {
+      "path": "contracts/schemas/update-feed.schema.json",
+      "sizeBytes": 3370,
+      "sha256": "5731ce6daa82e816d492e25533fa38703f7281f7652117ac2245a2183d562f37"
+    },
+    {
+      "path": "contracts/schemas/update-payload-manifest.schema.json",
+      "sizeBytes": 3307,
+      "sha256": "c6af0afaae328b489f9214917d5f4648fec02381f0f330bf9a52c73b1ab2f869"
+    },
+    {
+      "path": "contracts/schemas/update-receipt.schema.json",
+      "sizeBytes": 5732,
+      "sha256": "b49618740a55f91e14ed65c522ac821785d7b3b883bca2a410adb828ace2735f"
+    },
+    {
+      "path": "contracts/schemas/update-recipe.schema.json",
+      "sizeBytes": 4785,
+      "sha256": "fc277c65f326fb0ab57412cee944f685182eaf802affc2854bf6972f0902f152"
+    },
+    {
+      "path": "contracts/schemas/writer-job-closure.schema.json",
+      "sizeBytes": 2111,
+      "sha256": "3e286fee54897bb5dcaff70d8821f501f6fbb16f96ded8e9f242e675d1a51d95"
+    },
+    {
+      "path": "contracts/sdk-exports.json",
+      "sizeBytes": 6104,
+      "sha256": "16c3a8f8ddc263184e885e85b345ccbae71bbf9186d32a8f4fa024bd001b4eda"
+    },
+    {
+      "path": "contracts/sdk-frontend-api.json",
+      "sizeBytes": 56002,
+      "sha256": "69bfc8a77ede53cbd4570cbb5f10ec0cd5a0a645e8d13c5639a8006019bc6380"
+    },
+    {
+      "path": "contracts/sdk-public-api.json",
+      "sizeBytes": 1835924,
+      "sha256": "12390a348d45364a2bebf414b30bd94e3924305aebdebc3571a852cf91534c68"
+    },
+    {
+      "path": "contracts/ui-elements.json",
+      "sizeBytes": 3118,
+      "sha256": "79d161a6fdf29424655d046c2d8c50458a11d3e342db480d28f20023295e8f55"
+    },
+    {
+      "path": "contracts/ui-elements/nexus-action-group.json",
+      "sizeBytes": 270,
+      "sha256": "7d684e725d914d62db168f6ac7684cc4c986a89c9a7cd27ee3cb19df6c321a86"
+    },
+    {
+      "path": "contracts/ui-elements/nexus-badge.json",
+      "sizeBytes": 310,
+      "sha256": "909f1a714c4de070c1392d73488064b871869c0bf497de885716bdfd9319bb68"
+    },
+    {
+      "path": "contracts/ui-elements/nexus-button.json",
+      "sizeBytes": 536,
+      "sha256": "cd930ad62f06641d92f87fa78726bb3d32a49cc72c89d0ef41614cd0ccc9405e"
+    },
+    {
+      "path": "contracts/ui-elements/nexus-card.json",
+      "sizeBytes": 358,
+      "sha256": "0485aa8cb5e4a5248596b164c71443d1d14f1c33fe70fc180d760ada2c1edde0"
+    },
+    {
+      "path": "contracts/ui-elements/nexus-collapsible-card.json",
+      "sizeBytes": 441,
+      "sha256": "4be134422b23a87cfa6e3b6b49b14ca8882e22b723486700a0c7ae1901bd9ec7"
+    },
+    {
+      "path": "contracts/ui-elements/nexus-color-picker.json",
+      "sizeBytes": 362,
+      "sha256": "915845d499a892852321a4654b9270fc275131d86a794f2f37fa483a9671a23d"
+    },
+    {
+      "path": "contracts/ui-elements/nexus-confirm-dialog.json",
+      "sizeBytes": 531,
+      "sha256": "756822c5d4aec9664da14cd24381c15308d8627d95e724e971dbc09404142c3f"
+    },
+    {
+      "path": "contracts/ui-elements/nexus-date-range-picker.json",
+      "sizeBytes": 448,
+      "sha256": "582ff9fab576b16bddf85a0f33cd620f1a30541aa72ac454163a978be0e90afe"
+    },
+    {
+      "path": "contracts/ui-elements/nexus-dialog-popover.json",
+      "sizeBytes": 430,
+      "sha256": "2a1288a93dda784ff789f33849df0ca73ff95d133c25a3715b63e92e3c79e6e9"
+    },
+    {
+      "path": "contracts/ui-elements/nexus-drag-handle.json",
+      "sizeBytes": 399,
+      "sha256": "00f2d9e6713a51e4de26154741eed290f6203a12ee29158e604ac549296e483a"
+    },
+    {
+      "path": "contracts/ui-elements/nexus-empty-state.json",
+      "sizeBytes": 372,
+      "sha256": "1d4bef6c4da94737fc774612c3085a5d90d151a25fe44bb0f49ccd83b0863fd2"
+    },
+    {
+      "path": "contracts/ui-elements/nexus-entity-row.json",
+      "sizeBytes": 389,
+      "sha256": "68e0f880e54b1591ec5a10a0198ffda1e6d43872509da4baee92bbfee6c0c751"
+    },
+    {
+      "path": "contracts/ui-elements/nexus-field.json",
+      "sizeBytes": 478,
+      "sha256": "c466369a53733a5a3ab5f4068ac14ccf7a6b77dce2f074a8073be69c3faaa6b8"
+    },
+    {
+      "path": "contracts/ui-elements/nexus-file-picker.json",
+      "sizeBytes": 453,
+      "sha256": "f0f5174729221c98d3a7c3aa17a0591f468b5ee3e0c84504cbc59aa79f3161dc"
+    },
+    {
+      "path": "contracts/ui-elements/nexus-icon-button.json",
+      "sizeBytes": 429,
+      "sha256": "23336ef49fb1f0d7613f419bfd5484dfe7680294049ac8393fca1909abd5a639"
+    },
+    {
+      "path": "contracts/ui-elements/nexus-icon.json",
+      "sizeBytes": 343,
+      "sha256": "587d45db4eb79b1038a960858acc1d8a7ee09a00d58bda009868d25ba83d788a"
+    },
+    {
+      "path": "contracts/ui-elements/nexus-loading-state.json",
+      "sizeBytes": 310,
+      "sha256": "b9464e8018512a302c95d61121964a105ae1961a4be2fa939cf2d4de570a62f5"
+    },
+    {
+      "path": "contracts/ui-elements/nexus-menu.json",
+      "sizeBytes": 476,
+      "sha256": "45c41af54dcff0706f7e476cd4554d0fa184a41b5226c9daf19103f84011e3ac"
+    },
+    {
+      "path": "contracts/ui-elements/nexus-modal.json",
+      "sizeBytes": 561,
+      "sha256": "715dbe7669996a9249f42fd6fcc88a52a8c5734f162999f159046b3238828fc0"
+    },
+    {
+      "path": "contracts/ui-elements/nexus-number-input.json",
+      "sizeBytes": 488,
+      "sha256": "2404fb73d9b43fc3e90f915a79e27b12afaef11af22a676f555527baa70ae7ad"
+    },
+    {
+      "path": "contracts/ui-elements/nexus-overflow-text.json",
+      "sizeBytes": 275,
+      "sha256": "76309aaa377538d9b613f8e70b9883ae983eb3c653b8a10dfb5ee04f030876a1"
+    },
+    {
+      "path": "contracts/ui-elements/nexus-page-header.json",
+      "sizeBytes": 300,
+      "sha256": "bfe0cad69268d9622c7f3422d1f788cc585d767caf3811bc2fe67872d09e46ac"
+    },
+    {
+      "path": "contracts/ui-elements/nexus-pager.json",
+      "sizeBytes": 443,
+      "sha256": "85c4350eb527e9bd8462ce4fe287815dbb9345992fae95ce94d73a7fcd4dcec1"
+    },
+    {
+      "path": "contracts/ui-elements/nexus-path-picker.json",
+      "sizeBytes": 569,
+      "sha256": "98bf8ece9b43bfd3e9e0b56ff8ecdcb39353843649fafbfe01bc9f176095fc4b"
+    },
+    {
+      "path": "contracts/ui-elements/nexus-range.json",
+      "sizeBytes": 441,
+      "sha256": "8a49043caf5835efa320e3e332acccff893a34de10c98d971ed08f66ccbc5c62"
+    },
+    {
+      "path": "contracts/ui-elements/nexus-schedule-card.json",
+      "sizeBytes": 434,
+      "sha256": "9a41877bb186643435dc7bfd06be6bece0c6e6a09a2c2073977a691fd0d6c106"
+    },
+    {
+      "path": "contracts/ui-elements/nexus-scroll-area.json",
+      "sizeBytes": 374,
+      "sha256": "59ce8848b5e7ccd1547c0d5ae69a70c95e6b3a67b58df2c83b4884f2eb6ec30e"
+    },
+    {
+      "path": "contracts/ui-elements/nexus-section-card.json",
+      "sizeBytes": 409,
+      "sha256": "f8048ecac6693aa5b63fd7e94c6dda71514c5a2e9fc2e55934d86b080880ff2f"
+    },
+    {
+      "path": "contracts/ui-elements/nexus-select.json",
+      "sizeBytes": 483,
+      "sha256": "f9d3566c357ebcfc86162a189e2c0b9d6ddcdc46cefa55c63fd3fc9c6b65d17e"
+    },
+    {
+      "path": "contracts/ui-elements/nexus-sortable-list.json",
+      "sizeBytes": 385,
+      "sha256": "011da3ee1fa6022bec521455fdbea2e4c753d86918e81acf8255f075fa0323ba"
+    },
+    {
+      "path": "contracts/ui-elements/nexus-spinner.json",
+      "sizeBytes": 283,
+      "sha256": "5c90ecc4d578c1a3df2938b2835534722f00e28c24448ff13577e756ca2f67f1"
+    },
+    {
+      "path": "contracts/ui-elements/nexus-switch-list.json",
+      "sizeBytes": 263,
+      "sha256": "bdef70021366639cd6dd42bb3c7eedf7a37d093a56902c56a531c05eeafe6f23"
+    },
+    {
+      "path": "contracts/ui-elements/nexus-switch-setting.json",
+      "sizeBytes": 446,
+      "sha256": "39b6f8d5e13b94a59d132ae2d2197facf8ca63459be6826b623e1abf0cc20c75"
+    },
+    {
+      "path": "contracts/ui-elements/nexus-switch.json",
+      "sizeBytes": 352,
+      "sha256": "3025086191eb275211fc4ed26a17fdb95bd125686f9224e1f1eadf645730bd18"
+    },
+    {
+      "path": "contracts/ui-elements/nexus-tabs.json",
+      "sizeBytes": 387,
+      "sha256": "5746295851e4fa77624b3560c9993e4b4d5d368edb6fc03c99afd40f8860b145"
+    },
+    {
+      "path": "contracts/ui-elements/nexus-text-area.json",
+      "sizeBytes": 467,
+      "sha256": "cb1f8047747519c8dad1418e4287f9c7917349c23c3dbf531adaeccc49353773"
+    },
+    {
+      "path": "contracts/ui-elements/nexus-text-input.json",
+      "sizeBytes": 588,
+      "sha256": "96fe1069d2a6ca89bd06b26a867a47a0324b0b86eeb70fc94376fb12f7e292db"
+    },
+    {
+      "path": "contracts/ui-elements/nexus-time-picker.json",
+      "sizeBytes": 372,
+      "sha256": "491b4e1bbe8f04b9540f73e7ed6b14a3942f1fc8bfed01580be25275928b6223"
+    },
+    {
+      "path": "contracts/ui-elements/nexus-toast.json",
+      "sizeBytes": 394,
+      "sha256": "84b9c8eb921cb8f96eadb849a685d2299712b797e56c9ecb311442f177d61cdf"
+    },
+    {
+      "path": "contracts/ui-elements/nexus-tooltip.json",
+      "sizeBytes": 435,
+      "sha256": "8e477e6812a430190ed87cab4153a61e521bc7faa0becaecc6cf5d539eb41ba4"
+    },
+    {
+      "path": "contracts/ui-types.json",
+      "sizeBytes": 928,
+      "sha256": "dd1017d42928e9c3074f7100118d9b8061f9d6c8ebc27b107da6fafd432b9a15"
+    },
+    {
+      "path": "contracts/web-roots.json",
+      "sizeBytes": 899,
+      "sha256": "8cc61285dd700c1c8c34e74b0fe38accdfbf84842759d1b6953f982a2fd18bff"
+    },
+    {
+      "path": "sdk/dotnet/Assets/IExtensionPackageAssets.cs",
+      "sizeBytes": 1418,
+      "sha256": "5533b9eb4c91d5d960f0c8374f0fb729724de7d5aa163876e439dd3307b71704"
+    },
+    {
+      "path": "sdk/dotnet/Assets/IExtensionRuntimeOutputs.cs",
+      "sizeBytes": 749,
+      "sha256": "46c304067a611d28e769a503f64ad71bebb441029889ebd153c92d05ed7c7d25"
+    },
+    {
+      "path": "sdk/dotnet/Compilation/ICompilerRegistration.cs",
+      "sizeBytes": 430,
+      "sha256": "279245a0e24eafc3a0863e4d9210fc7da31cfcdaa7666b67e077504c8e365752"
+    },
+    {
+      "path": "sdk/dotnet/Compilation/IProjectCompiler.cs",
+      "sizeBytes": 3350,
+      "sha256": "a9802f17a1b56b1c826fddc1f0b9f8b771f92a6b4ebe6a512df6c1ea90fbae1c"
+    },
+    {
+      "path": "sdk/dotnet/Compilation/ISelectedSource.cs",
+      "sizeBytes": 2132,
+      "sha256": "dda55b3fa92a809ed34f62ab6b95ce14cdb8bdf09f7a974072612b297a554ec9"
+    },
+    {
+      "path": "sdk/dotnet/Emulation/EmulatorException.cs",
+      "sizeBytes": 770,
+      "sha256": "9b34389ff10a011b6462226ecb4d9e41cf7854a05d70d3bd191b71b28b9a3387"
+    },
+    {
+      "path": "sdk/dotnet/Emulation/EmulatorModels.cs",
+      "sizeBytes": 3885,
+      "sha256": "4fb57fae7353e33829645ef54de322725ef2bea1261941f070fff92758d905ed"
+    },
+    {
+      "path": "sdk/dotnet/Emulation/IEmulatorHost.cs",
+      "sizeBytes": 3878,
+      "sha256": "2e840fa90ec860268f9694a70fc3a6c4cb2a47136273d0c0d5d183b3a6697f34"
+    },
+    {
+      "path": "sdk/dotnet/Emulation/IEmulatorProvider.cs",
+      "sizeBytes": 2014,
+      "sha256": "28f5b326fc3f39d2bebf5fae67d609889af4adfe67316e126f39c470335d90ca"
+    },
+    {
+      "path": "sdk/dotnet/Execution/ExecutionDeviceClient.cs",
+      "sizeBytes": 5344,
+      "sha256": "99ccb8f1426ae0bb91d5ea2fd90b5cdf735972f3689ed13f5e73c66997679fde"
+    },
+    {
+      "path": "sdk/dotnet/Execution/ExecutionProjectReader.cs",
+      "sizeBytes": 8187,
+      "sha256": "6ba61c38bb12628a17aa74213f49e7144c8be12df03a2da7f413160c21054d9b"
+    },
+    {
+      "path": "sdk/dotnet/Execution/ExecutionProviderChannel.cs",
+      "sizeBytes": 7864,
+      "sha256": "26e8c77bda52c188327a555600ab59182b4f09a4848c239feb1676b37c0bd920"
+    },
+    {
+      "path": "sdk/dotnet/Execution/ExecutionProviderFrames.cs",
+      "sizeBytes": 3749,
+      "sha256": "430c9c6aaa33444d8b297f04eae664c6a76fc57abe3ccb14ff603df44329a311"
+    },
+    {
+      "path": "sdk/dotnet/Execution/ExecutionWorkDirectory.cs",
+      "sizeBytes": 4908,
+      "sha256": "959fede88bef4d9df78d3976274c5815bbf2d4ef647f6eafafe0e9185ab9b687"
+    },
+    {
+      "path": "sdk/dotnet/Execution/IExecutionRegistrationPort.cs",
+      "sizeBytes": 393,
+      "sha256": "b3ed622d3fed6bd61fa041112c302829befc551631b8b1ace9a14e10a171606f"
+    },
+    {
+      "path": "sdk/dotnet/Frontend/IExtensionFrontend.cs",
+      "sizeBytes": 2411,
+      "sha256": "fcab197247d53af46fc83a6b4ccb6d6a92d49b62dea47d1d095d6c21d76c51a3"
+    },
+    {
+      "path": "sdk/dotnet/Lifecycle/BrowserLoginCapture.cs",
+      "sizeBytes": 2768,
+      "sha256": "fde6ab72282cc9cd68c2520f9a9a87abea655e8e38e6ebee9a5e1f32ab9363b8"
+    },
+    {
+      "path": "sdk/dotnet/Lifecycle/BrowserLoginPolicy.cs",
+      "sizeBytes": 1396,
+      "sha256": "bb81b76edd1ecc002edfae2736e37882de705286bbeed61f853f1fa1a731f891"
+    },
+    {
+      "path": "sdk/dotnet/Lifecycle/ExtensionActivationContext.cs",
+      "sizeBytes": 5369,
+      "sha256": "8b8ea9df060b06f0d8bf2048cc7c70334c9da5da186c6b4d6d8f89f5ea576cf0"
+    },
+    {
+      "path": "sdk/dotnet/Lifecycle/IExtension.cs",
+      "sizeBytes": 877,
+      "sha256": "2489c9457c3e27c81bffc7a3680794de142f6ae6b36e725a0752e4519257c9ab"
+    },
+    {
+      "path": "sdk/dotnet/Lifecycle/IExtensionActivation.cs",
+      "sizeBytes": 409,
+      "sha256": "155efa8516ffe6bec83d34a62f6d173b4776c79e967d471978855b95161d24da"
+    },
+    {
+      "path": "sdk/dotnet/Lifecycle/IExtensionDesktop.cs",
+      "sizeBytes": 2123,
+      "sha256": "61710fafd85d89bdfd7a86cbfeb7d3cccf780c33e1ef7dbe99be2e19deb8614c"
+    },
+    {
+      "path": "sdk/dotnet/Media/IMediaPreviewRegistrationPort.cs",
+      "sizeBytes": 1581,
+      "sha256": "0536a43baed24f5adccdce6b38c9529df07c58cd0ab0acf77a442e5be049ab5d"
+    },
+    {
+      "path": "sdk/dotnet/Media/IRunScreenshotPort.cs",
+      "sizeBytes": 461,
+      "sha256": "f7dfed6836b47aa5e9c3609d5a2473681c5af106884ebcfd1ceb04c7cd219623"
+    },
+    {
+      "path": "sdk/dotnet/Networking/IExtensionHttp.cs",
+      "sizeBytes": 997,
+      "sha256": "05347a8b425e4d5771b6b83ee27b75e5f80028a3687ce291ede029270d68a741"
+    },
+    {
+      "path": "sdk/dotnet/NexusPipeline.Extensibility.csproj",
+      "sizeBytes": 1196,
+      "sha256": "7ceda3a667cb5238dd396377fc05f5af61691bafeb5e7e9ed83a3b1fe8a2247e"
+    },
+    {
+      "path": "sdk/dotnet/Notifications/INotificationSubmissionPort.cs",
+      "sizeBytes": 695,
+      "sha256": "34cffc18f1369edcde83ba2fc2491825c0092f7d14b42c83e4dd7644396906a6"
+    },
+    {
+      "path": "sdk/dotnet/Notifications/INotificationTargets.cs",
+      "sizeBytes": 840,
+      "sha256": "65eec62ba49c5b4e977dec9975ebd00d3dfd74cb34316691a4f15ade26312d2b"
+    },
+    {
+      "path": "sdk/dotnet/Scheduling/IManualWorkHandler.cs",
+      "sizeBytes": 1460,
+      "sha256": "d131d46e8ec944398523934298e12587f54d09978e23dd16be4e1a7b601ec1b8"
+    },
+    {
+      "path": "sdk/dotnet/Scheduling/IScheduleRegistrationPort.cs",
+      "sizeBytes": 915,
+      "sha256": "8e6c18c72042ee54bc5da46806502b0398090b5c82393111e4e4f4e2f78818c4"
+    },
+    {
+      "path": "sdk/dotnet/Scheduling/IScheduledWorkPlanningHandler.cs",
+      "sizeBytes": 813,
+      "sha256": "4c18db5bec612bbdd9388f09e8c308993d7d5bd3ac47f31730e8b0d6a38f8d29"
+    },
+    {
+      "path": "sdk/dotnet/Scheduling/IWorkEffects.cs",
+      "sizeBytes": 1987,
+      "sha256": "5940ebd71f3a69d29984637a1dbd1ddb361d254b17f89b26ca15a44d2986709c"
+    },
+    {
+      "path": "sdk/dotnet/Scheduling/IWorkTasks.cs",
+      "sizeBytes": 3095,
+      "sha256": "4fd0e8d0446302ad4003b62b31f7140143e25b14d83eeeb4087c8476e5970421"
+    },
+    {
+      "path": "sdk/dotnet/Secrets/IExtensionSecretPort.cs",
+      "sizeBytes": 1185,
+      "sha256": "03da6755c97eeae6ffcc8944fcca037cfc8fe2418c80ca8d9f9a8121d415e936"
+    },
+    {
+      "path": "sdk/dotnet/Secrets/SecretChange.cs",
+      "sizeBytes": 2833,
+      "sha256": "010b38c34838f41f493b121d10dff87ebf8fb0b4c8e4d1b6b55cf4132770388e"
+    },
+    {
+      "path": "sdk/dotnet/Secrets/SecretDraft.cs",
+      "sizeBytes": 2243,
+      "sha256": "187e2141f8a8ad7e1154b93584493b6f260396dad741601b8069db81735e7c6e"
+    },
+    {
+      "path": "sdk/dotnet/State/IExtensionDocuments.cs",
+      "sizeBytes": 1316,
+      "sha256": "55a746bfecc74b2bfc3379442c8ee778eaa97fd0e445a3fbf0b705994e552f61"
+    },
+    {
+      "path": "sdk/dotnet/State/IExtensionImages.cs",
+      "sizeBytes": 1571,
+      "sha256": "227b7164282ac1c557c5e27570a8b5e8d7c97910eeb552c8c41fbc7c9ae21f40"
+    },
+    {
+      "path": "sdk/dotnet/State/ISecretDocuments.cs",
+      "sizeBytes": 1048,
+      "sha256": "4a5c45222cf65a12064c1dde667613d77d9e54d24e66afc1b25d1ff65dbf97b7"
+    },
+    {
+      "path": "sdk/frontend/build.mjs",
+      "sizeBytes": 2258,
+      "sha256": "0ca228d4da3351df0400aa697dbc3da1226afbc40d9d2e020149e81a7b441724"
+    },
+    {
+      "path": "sdk/frontend/package.json",
+      "sizeBytes": 414,
+      "sha256": "fbab024f7caedc7e5de516810ff770a84cb47a41d292385f73505312ebd346af"
+    },
+    {
+      "path": "sdk/frontend/src/extension-scope.ts",
+      "sizeBytes": 1589,
+      "sha256": "bcfe55643bdd17dadc5f39bacc6178a069f376bcf2e5d57af94eac75ae629789"
+    },
+    {
+      "path": "sdk/frontend/src/frontend-extension.ts",
+      "sizeBytes": 2465,
+      "sha256": "0c6aee5bb4935c77f4163073f8c2cebe1a0c2d2c522b7dbdfa16fc4b47433e06"
+    },
+    {
+      "path": "sdk/frontend/src/frontend-transport.ts",
+      "sizeBytes": 1301,
+      "sha256": "2c65843674a0ee9346e6a760e7d8349e2422e6933cd903bf12791c114e424919"
+    },
+    {
+      "path": "sdk/frontend/src/index.ts",
+      "sizeBytes": 509,
+      "sha256": "b6e349dafb3d2663406a32ef0eea0e54858715d7a2dd5b202411783eb398f032"
+    },
+    {
+      "path": "sdk/frontend/tsconfig.json",
+      "sizeBytes": 343,
+      "sha256": "55e43c72d84e66e6a1fbdb4206f11f1b2118ef581883596d6d736c54f24aac68"
+    },
+    {
+      "path": "tooling/boundaries/Program.cs",
+      "sizeBytes": 5117,
+      "sha256": "151a06bf10b99c49eb3dfef75836791f313445a77f37243bde27a76a62ef72d8"
+    },
+    {
+      "path": "tooling/boundaries/PublicSdkSignatures.cs",
+      "sizeBytes": 3679,
+      "sha256": "cb0b9c5bf621c061f0583617bf37a75ddeb78d732e67516bd367039cdd1fb01a"
+    },
+    {
+      "path": "tooling/boundaries/PublicSdkSurface.cs",
+      "sizeBytes": 11772,
+      "sha256": "17ce84a68dc01afee993eb9d9ddafd0e9361584f7157f5ba33d0d9cffee6dc4f"
+    },
+    {
+      "path": "tooling/contract_codegen.py",
+      "sizeBytes": 10898,
+      "sha256": "de787a35d8b1e237a42429e83375e722e3b2fff05f4edb0f3483c56068ca5dc8"
+    },
+    {
+      "path": "tooling/contract_exports.py",
+      "sizeBytes": 4977,
+      "sha256": "81f1f7aa565735ed40a5b1920b27123d5e2d41e71cd9a5f0c178b2490e7de656"
+    },
+    {
+      "path": "tooling/contract_identity.py",
+      "sizeBytes": 2611,
+      "sha256": "d1d41c089c13ad76076dac5905942c28d4d75d3d25feb511ebe7aa23d80927a5"
+    },
+    {
+      "path": "tooling/sdk_frontend_surface.mjs",
+      "sizeBytes": 4424,
+      "sha256": "05bc29abe69f0352ac81fc93c8dba55ab03ff04a0e107d22f9a02fa8075da81b"
+    },
+    {
+      "path": "tooling/ui_codegen.py",
+      "sizeBytes": 4068,
+      "sha256": "5a309ff73e83097a2e523d78b79c3cffcc1fbd2d44f472d47bf732652d2bc8b9"
+    },
+    {
+      "path": "tooling/web_schema.py",
+      "sizeBytes": 3135,
+      "sha256": "825a5da1503b0e203f65aad02ee1236606a0a2c060e41d0b157012dbd258efea"
+    }
+  ]
+}

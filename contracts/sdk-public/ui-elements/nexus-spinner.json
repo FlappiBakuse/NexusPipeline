@@ -1,0 +1,15 @@
+{
+  "name": "nexus-spinner",
+  "properties": {
+    "label": "string",
+    "size": "small|medium"
+  },
+  "defaults": {
+    "size": "medium",
+    "label": ""
+  },
+  "slots": [],
+  "events": {},
+  "focus": "none",
+  "accessibility": "忙态名称；可见动画保持，隐藏暂停"
+}

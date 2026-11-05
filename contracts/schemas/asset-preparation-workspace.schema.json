@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/asset-preparation-workspace.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "version", "instanceId", "operationId", "journalId", "writerId", "relativePath", "identity", "parentIdentity"],
+  "properties": {
+    "format": {"const": "nexus.asset.preparation.workspace"},
+    "version": {"const": 1},
+    "instanceId": {"$ref": "common.schema.json#/$defs/uuid"},
+    "operationId": {"$ref": "common.schema.json#/$defs/uuid"},
+    "journalId": {"$ref": "common.schema.json#/$defs/uuid"},
+    "writerId": {"$ref": "common.schema.json#/$defs/uuid"},
+    "relativePath": {"$ref": "common.schema.json#/$defs/relativePath"},
+    "identity": {"$ref": "file-tree.schema.json#/$defs/physicalIdentity"},
+    "parentIdentity": {"$ref": "file-tree.schema.json#/$defs/physicalIdentity"}
+  }
+}

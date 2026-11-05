@@ -1,0 +1,19 @@
+{
+  "name": "nexus-drag-handle",
+  "properties": {
+    "itemId": "string",
+    "label": "string",
+    "disabled": "boolean"
+  },
+  "defaults": {
+    "itemId": "",
+    "label": "",
+    "disabled": false
+  },
+  "slots": [],
+  "events": {
+    "nexus-action": "ActionDetail"
+  },
+  "focus": "handle",
+  "accessibility": "40px目标；指针/触控/键盘；宣告移动意图，不单独保存业务"
+}

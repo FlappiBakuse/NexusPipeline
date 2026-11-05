@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/control-maintenance-prepare.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "version", "operationId", "feed", "hostVersion", "timing", "window"],
+  "properties": {
+    "format": {"const": "nexus.control.maintenance-prepare"},
+    "version": {"const": 1},
+    "operationId": {"$ref": "common.schema.json#/$defs/uuid"},
+    "feed": {
+      "type": "object", "additionalProperties": false,
+      "required": ["channel", "sequence", "sha256"],
+      "properties": {
+        "channel": {"enum": ["stable", "prerelease"]},
+        "sequence": {"type": "integer", "minimum": 1, "maximum": 9007199254740991},
+        "sha256": {"$ref": "common.schema.json#/$defs/sha256"}
+      }
+    },
+    "hostVersion": {"type": "string", "minLength": 1, "maxLength": 80},
+    "timing": {"enum": ["now", "nextStartup", "whenIdle"]},
+    "window": {
+      "type": "object", "additionalProperties": false,
+      "required": ["mode", "visible", "route"],
+      "properties": {
+        "mode": {"enum": ["desktop", "browser", "headless"]},
+        "visible": {"type": "boolean"},
+        "route": {"type": "string", "minLength": 1, "maxLength": 256, "pattern": "^/"}
+      }
+    }
+  }
+}

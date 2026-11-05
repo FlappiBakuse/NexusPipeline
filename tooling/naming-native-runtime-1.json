@@ -1,0 +1,247 @@
+[
+  {
+    "path": "src/platform/Media/WindowCaptureWorker.cs",
+    "kind": "method",
+    "name": "GetWindowThreadProcessId",
+    "count": 1,
+    "reason": "Native entrypoint: user32.dll!GetWindowThreadProcessId"
+  },
+  {
+    "path": "src/platform/Networking/LoopbackTcpPeer.cs",
+    "kind": "method",
+    "name": "GetExtendedTcpTable",
+    "count": 1,
+    "reason": "Native entrypoint: iphlpapi.dll!GetExtendedTcpTable"
+  },
+  {
+    "path": "src/platform/Processes/JobNative.cs",
+    "kind": "method",
+    "name": "CreateJobObjectW",
+    "count": 1,
+    "reason": "Native entrypoint: kernel32.dll!CreateJobObjectW"
+  },
+  {
+    "path": "src/platform/Processes/JobNative.cs",
+    "kind": "method",
+    "name": "OpenJobObjectW",
+    "count": 1,
+    "reason": "Native entrypoint: kernel32.dll!OpenJobObjectW"
+  },
+  {
+    "path": "src/platform/Processes/JobNative.cs",
+    "kind": "method",
+    "name": "SetInformationJobObject",
+    "count": 1,
+    "reason": "Native entrypoint: kernel32.dll!SetInformationJobObject"
+  },
+  {
+    "path": "src/platform/Processes/JobNative.cs",
+    "kind": "method",
+    "name": "QueryInformationJobObject",
+    "count": 1,
+    "reason": "Native entrypoint: kernel32.dll!QueryInformationJobObject"
+  },
+  {
+    "path": "src/platform/Processes/JobNative.cs",
+    "kind": "method",
+    "name": "InitializeProcThreadAttributeList",
+    "count": 1,
+    "reason": "Native entrypoint: kernel32.dll!InitializeProcThreadAttributeList"
+  },
+  {
+    "path": "src/platform/Processes/JobNative.cs",
+    "kind": "method",
+    "name": "UpdateProcThreadAttribute",
+    "count": 1,
+    "reason": "Native entrypoint: kernel32.dll!UpdateProcThreadAttribute"
+  },
+  {
+    "path": "src/platform/Processes/JobNative.cs",
+    "kind": "method",
+    "name": "DeleteProcThreadAttributeList",
+    "count": 1,
+    "reason": "Native entrypoint: kernel32.dll!DeleteProcThreadAttributeList"
+  },
+  {
+    "path": "src/platform/Processes/JobNative.cs",
+    "kind": "method",
+    "name": "GetExitCodeProcess",
+    "count": 1,
+    "reason": "Native entrypoint: kernel32.dll!GetExitCodeProcess"
+  },
+  {
+    "path": "src/platform/Processes/JobNative.cs",
+    "kind": "method",
+    "name": "AssignProcessToJobObject",
+    "count": 1,
+    "reason": "Native entrypoint: kernel32.dll!AssignProcessToJobObject"
+  },
+  {
+    "path": "src/platform/Processes/JobNative.cs",
+    "kind": "method",
+    "name": "WaitForSingleObject",
+    "count": 1,
+    "reason": "Native entrypoint: kernel32.dll!WaitForSingleObject"
+  },
+  {
+    "path": "src/platform/Processes/JobNative.cs",
+    "kind": "method",
+    "name": "IsProcessInJob",
+    "count": 2,
+    "reason": "Native entrypoint: kernel32.dll!IsProcessInJob"
+  },
+  {
+    "path": "src/platform/Processes/JobNative.cs",
+    "kind": "method",
+    "name": "QueryFullProcessImageNameW",
+    "count": 1,
+    "reason": "Native entrypoint: kernel32.dll!QueryFullProcessImageNameW"
+  },
+  {
+    "path": "src/platform/Processes/MaintenanceStartupOrigin.cs",
+    "kind": "method",
+    "name": "IsProcessInAnyJob",
+    "count": 1,
+    "reason": "Native entrypoint: kernel32.dll!IsProcessInJob"
+  },
+  {
+    "path": "src/platform/Processes/MaintenanceStartupOrigin.cs",
+    "kind": "method",
+    "name": "GetNamedPipeServerProcessId",
+    "count": 1,
+    "reason": "Native entrypoint: kernel32.dll!GetNamedPipeServerProcessId"
+  },
+  {
+    "path": "src/platform/Processes/MaintenanceStartupOrigin.cs",
+    "kind": "method",
+    "name": "GetNamedPipeClientProcessId",
+    "count": 1,
+    "reason": "Native entrypoint: kernel32.dll!GetNamedPipeClientProcessId"
+  },
+  {
+    "path": "src/platform/Processes/ProcessStartObserver.cs",
+    "kind": "method",
+    "name": "CreateIoCompletionPort",
+    "count": 1,
+    "reason": "Native entrypoint: kernel32.dll!CreateIoCompletionPort"
+  },
+  {
+    "path": "src/platform/Processes/ProcessStartObserver.cs",
+    "kind": "method",
+    "name": "SetInformationJobObject",
+    "count": 1,
+    "reason": "Native entrypoint: kernel32.dll!SetInformationJobObject"
+  },
+  {
+    "path": "src/platform/Processes/ProcessStartObserver.cs",
+    "kind": "method",
+    "name": "GetQueuedCompletionStatus",
+    "count": 1,
+    "reason": "Native entrypoint: kernel32.dll!GetQueuedCompletionStatus"
+  },
+  {
+    "path": "src/platform/Processes/ProcessStartObserver.cs",
+    "kind": "method",
+    "name": "PostQueuedCompletionStatus",
+    "count": 1,
+    "reason": "Native entrypoint: kernel32.dll!PostQueuedCompletionStatus"
+  },
+  {
+    "path": "src/platform/Processes/WindowSnapshotProbe.cs",
+    "kind": "method",
+    "name": "GetWindowTextW",
+    "count": 1,
+    "reason": "Native entrypoint: user32.dll!GetWindowTextW"
+  },
+  {
+    "path": "src/platform/Processes/WindowSnapshotProbe.cs",
+    "kind": "method",
+    "name": "GetWindowTextLengthW",
+    "count": 1,
+    "reason": "Native entrypoint: user32.dll!GetWindowTextLengthW"
+  },
+  {
+    "path": "src/platform/Processes/WindowSnapshotProbe.cs",
+    "kind": "method",
+    "name": "SendMessageTimeoutW",
+    "count": 2,
+    "reason": "Native entrypoint: user32.dll!SendMessageTimeoutW"
+  },
+  {
+    "path": "src/platform/Processes/WindowSnapshotProbe.cs",
+    "kind": "method",
+    "name": "GetWindowThreadProcessId",
+    "count": 1,
+    "reason": "Native entrypoint: user32.dll!GetWindowThreadProcessId"
+  },
+  {
+    "path": "src/platform/Storage/Execution/ProviderControlSession.cs",
+    "kind": "method",
+    "name": "GetNamedPipeClientProcessId",
+    "count": 1,
+    "reason": "Native entrypoint: kernel32.dll!GetNamedPipeClientProcessId"
+  },
+  {
+    "path": "src/platform/Storage/Maintenance/HelperBootstrapConnection.cs",
+    "kind": "method",
+    "name": "GetNamedPipeServerProcessId",
+    "count": 1,
+    "reason": "Native entrypoint: kernel32.dll!GetNamedPipeServerProcessId"
+  },
+  {
+    "path": "src/platform/Storage/Maintenance/HelperReadyServer.cs",
+    "kind": "method",
+    "name": "GetNamedPipeClientProcessId",
+    "count": 1,
+    "reason": "Native entrypoint: kernel32.dll!GetNamedPipeClientProcessId"
+  },
+  {
+    "path": "src/platform/Storage/Maintenance/MaintenanceStartupClient.cs",
+    "kind": "method",
+    "name": "GetNamedPipeServerProcessId",
+    "count": 1,
+    "reason": "Native entrypoint: kernel32.dll!GetNamedPipeServerProcessId"
+  },
+  {
+    "path": "src/platform/Storage/Maintenance/MaintenanceStartupServer.cs",
+    "kind": "method",
+    "name": "GetNamedPipeClientProcessId",
+    "count": 1,
+    "reason": "Native entrypoint: kernel32.dll!GetNamedPipeClientProcessId"
+  },
+  {
+    "path": "src/platform/Storage/PhysicalDirectoryHandle.cs",
+    "kind": "method",
+    "name": "RtlNtStatusToDosError",
+    "count": 1,
+    "reason": "Native entrypoint: ntdll.dll!RtlNtStatusToDosError"
+  },
+  {
+    "path": "src/platform/Storage/PhysicalObjectIdentity.cs",
+    "kind": "method",
+    "name": "GetFinalPathName",
+    "count": 1,
+    "reason": "Native entrypoint: kernel32.dll!GetFinalPathNameByHandleW"
+  },
+  {
+    "path": "src/platform/Storage/PhysicalObjectMove.cs",
+    "kind": "method",
+    "name": "RtlNtStatusToDosError",
+    "count": 1,
+    "reason": "Native entrypoint: ntdll.dll!RtlNtStatusToDosError"
+  },
+  {
+    "path": "src/platform/Windows/LocalConfirmationDialog.cs",
+    "kind": "method",
+    "name": "DialogBoxIndirectParamW",
+    "count": 1,
+    "reason": "Native entrypoint: user32.dll!DialogBoxIndirectParamW"
+  },
+  {
+    "path": "src/platform/Windows/LocalConfirmationDialog.cs",
+    "kind": "method",
+    "name": "SetWindowTextW",
+    "count": 1,
+    "reason": "Native entrypoint: user32.dll!SetWindowTextW"
+  }
+]

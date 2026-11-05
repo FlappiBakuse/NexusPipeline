@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/control-cli-response.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "version",
+    "status",
+    "operationId"
+  ],
+  "properties": {
+    "format": {
+      "const": "nexus.control.cli-response"
+    },
+    "version": {
+      "const": 1
+    },
+    "status": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 100,
+      "maximum": 599
+    },
+    "operationId": {
+      "anyOf": [
+        {
+          "$ref": "common.schema.json#/$defs/uuid"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "body": true,
+    "code": {
+      "enum": [
+        "control_cli_input_invalid",
+        "control_cli_transport_or_input_unavailable",
+        "control_cli_response_invalid",
+        "control_cli_artifact_rejected"
+      ]
+    }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "status": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "body"
+      ],
+      "not": {
+        "required": [
+          "code"
+        ]
+      }
+    },
+    {
+      "properties": {
+        "status": {
+          "type": "null"
+        }
+      },
+      "required": [
+        "code"
+      ],
+      "not": {
+        "required": [
+          "body"
+        ]
+      }
+    }
+  ]
+}

@@ -1,39 +1,28 @@
 <Project>
   <PropertyGroup>
-    <NexusInstallationGeneration>g0170</NexusInstallationGeneration>
-    <RuntimeFrameworkVersion>10.0.13</RuntimeFrameworkVersion>
-    <RollForward>LatestPatch</RollForward>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <Deterministic>true</Deterministic>
+    <Version>0.18.0</Version>
+    <LangVersion>14.0</LangVersion>
+    <DefineConstants Condition="'$(NexusTestHost)' == 'true'">$(DefineConstants);NEXUS_TEST_HOST</DefineConstants>
+    <UseArtifactsOutput>true</UseArtifactsOutput>
+    <ArtifactsPath>$(NexusArtifactsRoot)</ArtifactsPath>
+    <RestorePackagesPath>$(NexusPackagesRoot)</RestorePackagesPath>
+    <EnableDefaultCompileItems>true</EnableDefaultCompileItems>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <NuGetLockFilePath>$(NexusArtifactsRoot)/locks/$(MSBuildProjectName).packages.lock.json</NuGetLockFilePath>
+    <NuGetLockFilePath Condition="Exists('$(MSBuildProjectDirectory)/packages.lock.json')">$(MSBuildProjectDirectory)/packages.lock.json</NuGetLockFilePath>
+    <RestoreLockedMode Condition="Exists('$(MSBuildProjectDirectory)/packages.lock.json')">true</RestoreLockedMode>
+    <NuGetLockFilePath Condition="'$(NexusLockOutputRoot)' != ''">$(NexusLockOutputRoot)/$(MSBuildProjectName).packages.lock.json</NuGetLockFilePath>
   </PropertyGroup>
-  <Target Name="GenerateInstallationGeneration" BeforeTargets="CoreCompile" Condition="'$(NexusGenerateInstallationGeneration)' == 'true'">
-    <PropertyGroup>
-      <_GenerationSource>$(IntermediateOutputPath)InstallationGeneration.g.cs</_GenerationSource>
-    </PropertyGroup>
-    <WriteLinesToFile File="$(_GenerationSource)" Overwrite="true" WriteOnlyWhenDifferent="true"
-      Lines="namespace NexusPipeline.Platform.Storage { internal static class InstallationGeneration { internal const string Id = &quot;$(NexusInstallationGeneration)&quot;%3B } }" />
-    <ItemGroup>
-      <Compile Include="$(_GenerationSource)" />
-    </ItemGroup>
-  </Target>
-  <ItemGroup>
-    <FrameworkReference Update="Microsoft.NETCore.App;Microsoft.WindowsDesktop.App;Microsoft.AspNetCore.App" RuntimeFrameworkVersion="10.0.13" />
+  <ItemGroup Condition="'$(MSBuildProjectName)' == 'NexusPipeline.Platform' Or '$(MSBuildProjectName)' == 'NexusPipeline.Host' Or '$(MSBuildProjectName)' == 'NexusPipeline.Maintenance' Or '$(MSBuildProjectName)' == 'NexusPipeline.ContractTests' Or '$(MSBuildProjectName)' == 'NexusPipeline.StorageTests' Or '$(MSBuildProjectName)' == 'NexusPipeline.WindowsTests' Or '$(MSBuildProjectName)' == 'OwnedWriter'">
+    <Using Include="NexusPipeline.Platform.Serialization.Protocol" />
   </ItemGroup>
-  <PropertyGroup>
-    <!-- Keep every project from re-including another project's generated obj/bin files. -->
-    <DefaultItemExcludes>$(DefaultItemExcludes);**/obj/**;**/bin/**</DefaultItemExcludes>
-  </PropertyGroup>
-
-  <!-- Keep the Test Host restore/intermediate graph separate from production for every SDK project. -->
-  <PropertyGroup Condition="'$(NexusTestHost)' == 'true'">
-    <BaseIntermediateOutputPath>$(MSBuildThisFileDirectory)obj\test-host\$(MSBuildProjectName)\</BaseIntermediateOutputPath>
-    <MSBuildProjectExtensionsPath>$(BaseIntermediateOutputPath)</MSBuildProjectExtensionsPath>
-    <BaseOutputPath>$(MSBuildThisFileDirectory)bin\test-host\$(MSBuildProjectName)\</BaseOutputPath>
-  </PropertyGroup>
-
-  <!-- Keep Roslyn's production architecture graph independent per project; a global
-       extensions path would make the Host and SDK overwrite each other's assets. -->
-  <PropertyGroup Condition="'$(NexusArchitectureMode)' == 'production' and '$(NexusTestHost)' != 'true'">
-    <BaseIntermediateOutputPath>$(MSBuildThisFileDirectory)obj\architecture\production\$(MSBuildProjectName)\</BaseIntermediateOutputPath>
-    <MSBuildProjectExtensionsPath>$(BaseIntermediateOutputPath)</MSBuildProjectExtensionsPath>
-    <BaseOutputPath>$(MSBuildThisFileDirectory)bin\architecture\production\$(MSBuildProjectName)\</BaseOutputPath>
-  </PropertyGroup>
+  <ItemGroup Condition="'$(MSBuildProjectName)' == 'NexusPipeline.Host' Or '$(MSBuildProjectName)' == 'NexusPipeline.Maintenance' Or '$(MSBuildProjectName)' == 'NexusPipeline.Installer'">
+    <AssemblyMetadata Include="Nexus.BuildProfile" Value="production" Condition="'$(NexusTestHost)' != 'true'" />
+    <AssemblyMetadata Include="Nexus.BuildProfile" Value="test" Condition="'$(NexusTestHost)' == 'true'" />
+  </ItemGroup>
 </Project>

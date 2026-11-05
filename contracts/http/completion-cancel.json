@@ -1,0 +1,5 @@
+{
+  "parameters": [{"name": "operationId", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}],
+  "post": {"operationId": "cancelPendingCompletion", "description": "completion.local and verified local origin only. Empty body and no query. Cancels only the identified cancellable countdown through the existing completion owner; does not revoke unrelated authorization or infer an OS effect result.",
+    "responses": {"200": {"description": "cancelled true"}, "409": {"description": "completion_not_cancellable"}, "403": {"description": "Local origin/capability unavailable"}}}
+}

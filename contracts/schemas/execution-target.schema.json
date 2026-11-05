@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/execution-target.schema.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["kind", "launchByHost", "waitSeconds", "forceCloseAtEnd"],
+  "properties": {
+    "kind": {"enum": ["pc", "android"]},
+    "launchByHost": {"type": "boolean"},
+    "waitSeconds": {"type": "integer", "minimum": 0, "maximum": 604800},
+    "forceCloseAtEnd": {"type": "boolean"},
+    "pc": {
+      "type": "object", "additionalProperties": false,
+      "required": ["launch", "readyImage", "readinessMode"],
+      "properties": {
+        "launch": {"$ref": "#/$defs/launch"},
+        "readyImage": {"$ref": "execution-plan.schema.json#/$defs/interpreterImage"},
+        "readinessMode": {"enum": ["process", "visibleWindow"]}
+      }
+    },
+    "android": {
+      "type": "object", "additionalProperties": false,
+      "required": ["driver", "tool", "endpoint", "package", "startArguments"],
+      "properties": {
+        "driver": {"enum": ["genericAdb", "mumu"]},
+        "emulator": {"$ref": "emulator-target.schema.json#/$defs/frozen"},
+        "tool": {"$ref": "execution-plan.schema.json#/$defs/interpreterImage"},
+        "screenshotTool": {"$ref": "execution-plan.schema.json#/$defs/interpreterImage"},
+        "endpoint": {"type": "string", "minLength": 3, "maxLength": 512},
+        "package": {"type": "string", "minLength": 1, "maxLength": 256},
+        "startArguments": {"type": "array", "maxItems": 128, "items": {"type": "string", "maxLength": 4096}},
+        "mapping": {
+          "type": "object", "additionalProperties": false,
+          "required": ["index", "endpointPort", "infoEvidence", "managerImageSha256"],
+          "properties": {
+            "index": {"type": "integer", "minimum": 0, "maximum": 2147483647},
+            "endpointPort": {"type": "integer", "minimum": 1, "maximum": 65535},
+            "infoEvidence": {"$ref": "execution-plan.schema.json#/$defs/planReference"},
+            "managerImageSha256": {"$ref": "common.schema.json#/$defs/sha256"}
+          }
+        }
+      },
+      "allOf": [{"if": {"properties": {"driver": {"const": "mumu"}}},
+        "then": {"required": ["mapping"], "not": {"required": ["emulator"]}}, "else": {"allOf": [
+          {"not": {"required": ["mapping"]}}, {"not": {"required": ["screenshotTool"]}}]}}]
+    }
+  },
+  "oneOf": [
+    {"properties": {"kind": {"const": "pc"}}, "required": ["pc"], "not": {"required": ["android"]}},
+    {"properties": {"kind": {"const": "android"}}, "required": ["android"], "not": {"required": ["pc"]}}
+  ],
+  "$defs": {
+    "launch": {
+      "type": "object", "additionalProperties": false,
+      "required": ["launchKind", "source", "command", "sourceArguments", "arguments", "workingDirectory", "workingDirectoryIdentity"],
+      "properties": {
+        "launchKind": {"enum": ["native", "command", "powershell"]},
+        "source": {"$ref": "execution-plan.schema.json#/$defs/interpreterImage"},
+        "command": {"$ref": "execution-plan.schema.json#/$defs/interpreterImage"},
+        "sourceArguments": {"type": "array", "maxItems": 128, "items": {"type": "string", "maxLength": 4096}},
+        "arguments": {"type": "array", "maxItems": 132, "items": {"type": "string", "maxLength": 32767}},
+        "workingDirectory": {"type": "string", "minLength": 4, "maxLength": 32767},
+        "workingDirectoryIdentity": {"$ref": "file-tree.schema.json#/$defs/physicalIdentity"}
+      }
+    }
+  }
+}

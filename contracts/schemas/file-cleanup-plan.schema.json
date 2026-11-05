@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/file-cleanup-plan.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "version", "instanceId", "operationId", "journalId", "operationKind", "items"],
+  "properties": {
+    "format": {"const": "nexus.file.cleanup-plan"},
+    "version": {"const": 1},
+    "instanceId": {"$ref": "common.schema.json#/$defs/uuid"},
+    "operationId": {"$ref": "common.schema.json#/$defs/uuid"},
+    "journalId": {"$ref": "common.schema.json#/$defs/uuid"},
+    "operationKind": {"const": "fileCleanup"},
+    "items": {
+      "type": "array", "minItems": 0, "maxItems": 256,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["stepId", "relativePath", "sizeBytes", "sha256", "parentIdentity", "identity"],
+        "properties": {
+          "stepId": {"type": "string", "pattern": "^remove-[0-9]{3}$"},
+          "relativePath": {"type": "string", "pattern": "^(blobs/content/[0-9a-f]{64}|secrets/payloads/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-[0-9a-f]{64})\\.bin$"},
+          "sizeBytes": {"type": "integer", "minimum": 0, "maximum": 1073741824},
+          "sha256": {"$ref": "common.schema.json#/$defs/sha256"},
+          "parentIdentity": {"$ref": "file-tree.schema.json#/$defs/physicalIdentity"},
+          "identity": {"$ref": "file-tree.schema.json#/$defs/physicalIdentity"}
+        }
+      }
+    },
+    "extensionWork": {
+      "type": "object", "additionalProperties": false, "required": ["relativePath", "sizeBytes", "sha256"],
+      "properties": {
+        "relativePath": {"type": "string", "pattern": "^blobs/plans/[0-9a-f]{64}\\.json$"},
+        "sizeBytes": {"type": "integer", "minimum": 1, "maximum": 2097152},
+        "sha256": {"$ref": "common.schema.json#/$defs/sha256"}
+      }
+    }
+  },
+  "oneOf": [
+    {"not": {"required": ["extensionWork"]}, "properties": {"items": {"minItems": 1, "maxItems": 256}}},
+    {"required": ["extensionWork"], "properties": {"items": {"maxItems": 0}}}
+  ]
+}

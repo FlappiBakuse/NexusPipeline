@@ -1,0 +1,22 @@
+{
+  "name": "nexus-menu",
+  "properties": {
+    "items": "readonly MenuItem[]",
+    "open": "boolean",
+    "anchor": "HTMLElement|null"
+  },
+  "defaults": {
+    "open": false,
+    "anchor": null,
+    "items": []
+  },
+  "slots": [
+    "trigger"
+  ],
+  "events": {
+    "nexus-action": "ActionDetail",
+    "nexus-close": "CloseDetail"
+  },
+  "focus": "trigger or active item",
+  "accessibility": "方向键/Home/End/Escape；disabled选项不可执行；关闭返回触发器"
+}

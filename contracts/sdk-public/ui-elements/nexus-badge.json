@@ -1,0 +1,17 @@
+{
+  "name": "nexus-badge",
+  "properties": {
+    "label": "string",
+    "tone": "neutral|info|success|warning|danger"
+  },
+  "defaults": {
+    "tone": "neutral",
+    "label": ""
+  },
+  "slots": [
+    "default"
+  ],
+  "events": {},
+  "focus": "none",
+  "accessibility": "文字表达状态；颜色仅补充"
+}

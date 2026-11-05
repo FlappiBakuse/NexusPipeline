@@ -1,0 +1,17 @@
+{
+  "name": "nexus-scroll-area",
+  "properties": {
+    "direction": "vertical|horizontal|both",
+    "label": "string"
+  },
+  "defaults": {
+    "direction": "vertical",
+    "label": ""
+  },
+  "slots": [
+    "default"
+  ],
+  "events": {},
+  "focus": "viewport when explicitly requested",
+  "accessibility": "公开viewport/scroll方法；键盘/触控和滚动位置保留"
+}

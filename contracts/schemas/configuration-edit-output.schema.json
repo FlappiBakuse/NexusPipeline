@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/configuration-edit-output.schema.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["format", "version", "instanceId", "operationId", "journalId", "sourcePlanDigest", "workIdentity", "output", "objects", "writerStop"],
+  "properties": {
+    "format": {"const": "nexus.configuration.edit-output"}, "version": {"const": 1},
+    "instanceId": {"$ref": "common.schema.json#/$defs/uuid"},
+    "operationId": {"$ref": "common.schema.json#/$defs/uuid"},
+    "journalId": {"$ref": "common.schema.json#/$defs/uuid"},
+    "sourcePlanDigest": {"$ref": "common.schema.json#/$defs/sha256"},
+    "workIdentity": {"$ref": "file-tree.schema.json#/$defs/physicalIdentity"},
+    "output": {"$ref": "file-tree.schema.json"},
+    "objects": {"type": "array", "maxItems": 4096, "items": {"$ref": "file-tree.schema.json#/$defs/physicalObject"}},
+    "writerStop": {
+      "type": "object", "additionalProperties": false, "required": ["path", "sizeBytes", "sha256"],
+      "properties": {
+        "path": {"type": "string", "pattern": "^blobs/plans/[0-9a-f]{64}\\.json$"},
+        "sizeBytes": {"type": "integer", "minimum": 1, "maximum": 2097152},
+        "sha256": {"$ref": "common.schema.json#/$defs/sha256"}
+      }
+    }
+  }
+}

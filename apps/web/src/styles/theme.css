@@ -1,0 +1,182 @@
+:root {
+  color-scheme: dark;
+  --bg: #0b1120;
+  --bg-raised: #101a2d;
+  --panel-opaque: #131f33;
+  --panel-soft-opaque: #1a2940;
+  --panel-hover-opaque: #213656;
+  --panel: var(--panel-opaque);
+  --panel-soft: var(--panel-soft-opaque);
+  --panel-hover: var(--panel-hover-opaque);
+  --text: #edf5ff;
+  --muted: #92a8c4;
+  --faint: #647c9c;
+  --accent: #62a0ff;
+  --accent-strong: #3181f7;
+  --border: rgba(139, 170, 211, 0.18);
+  --border-strong: rgba(139, 170, 211, 0.34);
+  --accent-soft: rgba(98, 160, 255, 0.15);
+  --bad: #ff727b;
+  --ok: #4ed39a;
+  --shadow: 0 10px 24px #00000024;
+  --log-bg: #0a1220;
+  --log-text: #b9d5f4;
+  --warn: #f6bf61;
+  --hover-bg: #ffffff0d;
+  --mask: rgba(3, 8, 16, 0.68);
+  --particle-dot-alpha: 0.12;
+  --particle-line-alpha: 0.05;
+  --status-tint: 14%;
+  --muted-tint: 12%;
+  --radius-sm: 7px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+}
+body[data-theme='light'] {
+  color-scheme: light;
+  --bg: #f7f6f3;
+  --bg-raised: #efedea;
+  --panel-opaque: #fff;
+  --panel-soft-opaque: #f7f7f5;
+  --panel-hover-opaque: #efedea;
+  --panel: var(--panel-opaque);
+  --panel-soft: var(--panel-soft-opaque);
+  --panel-hover: var(--panel-hover-opaque);
+  --text: #37352f;
+  --muted: #787774;
+  --faint: #a09d98;
+  --accent: #2eaadc;
+  --accent-strong: #2387b8;
+  --border: rgba(55, 53, 47, 0.09);
+  --border-strong: rgba(55, 53, 47, 0.2);
+  --accent-soft: rgba(46, 170, 220, 0.12);
+  --bad: #d9544f;
+  --ok: #0f7b6c;
+  --log-bg: #f1f1ef;
+  --log-text: #3f3d39;
+  --warn: #a66a0b;
+  --hover-bg: #37352f0d;
+  --mask: rgba(15, 15, 15, 0.4);
+  --particle-dot-alpha: 0.28;
+  --particle-line-alpha: 0.14;
+  --status-tint: 12%;
+  --muted-tint: 10%;
+}
+body[data-theme='system'] {
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: light) {
+  body[data-theme='system'] {
+    color-scheme: light;
+    --bg: #f7f6f3;
+    --bg-raised: #efedea;
+    --panel-opaque: #fff;
+    --panel-soft-opaque: #f7f7f5;
+    --panel-hover-opaque: #efedea;
+    --text: #37352f;
+    --muted: #787774;
+    --faint: #a09d98;
+    --accent: #2eaadc;
+    --accent-strong: #2387b8;
+    --border: rgba(55, 53, 47, 0.09);
+    --border-strong: rgba(55, 53, 47, 0.2);
+    --accent-soft: rgba(46, 170, 220, 0.12);
+    --bad: #d9544f;
+    --ok: #0f7b6c;
+    --warn: #a66a0b;
+    --hover-bg: #37352f0d;
+    --mask: rgba(15, 15, 15, 0.4);
+    --particle-dot-alpha: 0.28;
+    --particle-line-alpha: 0.14;
+    --status-tint: 12%;
+    --muted-tint: 10%;
+    --log-bg: #f1f1ef;
+    --log-text: #3f3d39;
+  }
+}
+body {
+  --panel: var(--panel-opaque);
+  --panel-soft: var(--panel-soft-opaque);
+  --panel-hover: var(--panel-hover-opaque);
+  --content-card: var(--panel);
+  --content-card-soft: var(--panel-soft);
+  --content-control: var(--panel-soft);
+  --content-card-secondary: var(--content-card-soft);
+  --content-control-hover: var(--panel-hover);
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--nx-color-text, var(--text));
+  font:
+    14px/1.55 -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    'Microsoft YaHei',
+    sans-serif;
+}
+* {
+  box-sizing: border-box;
+}
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+button {
+  cursor: pointer;
+}
+button,
+input,
+select,
+textarea {
+  min-height: 40px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--content-control);
+  padding: 8px 12px;
+}
+button:hover {
+  background: var(--panel-hover);
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+input,
+select,
+textarea {
+  max-width: 100%;
+  min-width: 0;
+}
+input[type='checkbox'] {
+  min-height: 20px;
+  accent-color: var(--accent);
+}
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+a {
+  color: var(--accent);
+}
+h1,
+h2,
+h3,
+p {
+  margin-top: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}

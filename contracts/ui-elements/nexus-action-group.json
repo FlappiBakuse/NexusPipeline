@@ -1,0 +1,15 @@
+{
+  "name": "nexus-action-group",
+  "properties": {
+    "align": "start|end|between"
+  },
+  "defaults": {
+    "align": "end"
+  },
+  "slots": [
+    "default"
+  ],
+  "events": {},
+  "focus": "none",
+  "accessibility": "动作间距/顺序、窄屏换行与触控目标"
+}

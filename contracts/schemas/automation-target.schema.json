@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/automation-target.schema.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["kind", "launchByHost", "waitSeconds", "forceCloseAtEnd"],
+  "properties": {
+    "kind": {"enum": ["pc", "android"]},
+    "launchByHost": {"type": "boolean"},
+    "waitSeconds": {"type": "integer", "minimum": 0, "maximum": 604800},
+    "forceCloseAtEnd": {"type": "boolean"},
+    "pc": {
+      "type": "object", "additionalProperties": false,
+      "required": ["launchExecutable", "arguments", "readyExecutable", "readinessMode"],
+      "properties": {
+        "launchExecutable": {"$ref": "automation-paths.schema.json#/$defs/portablePath"},
+        "arguments": {"type": "array", "maxItems": 128, "items": {"type": "string", "maxLength": 4096}},
+        "readyExecutable": {"$ref": "automation-paths.schema.json#/$defs/portablePath"},
+        "readinessMode": {"enum": ["process", "visibleWindow"]}
+      }
+    },
+    "android": {
+      "type": "object", "additionalProperties": false,
+      "required": ["driver", "tool", "endpoint", "package", "startArguments"],
+      "properties": {
+        "driver": {"enum": ["genericAdb", "mumu"]},
+        "emulator": {"$ref": "emulator-target.schema.json#/$defs/selection"},
+        "tool": {"$ref": "automation-paths.schema.json#/$defs/portablePath"},
+        "screenshotTool": {"$ref": "automation-paths.schema.json#/$defs/portablePath"},
+        "endpoint": {"type": "string", "minLength": 3, "maxLength": 512},
+        "package": {"type": "string", "minLength": 1, "maxLength": 256},
+        "startArguments": {"type": "array", "maxItems": 128, "items": {"type": "string", "maxLength": 4096}}
+      },
+      "allOf": [{"if": {"properties": {"driver": {"const": "genericAdb"}}},
+        "then": {"not": {"required": ["screenshotTool"]}}, "else": {"not": {"required": ["emulator"]}}}]
+    }
+  },
+  "oneOf": [
+    {"properties": {"kind": {"const": "pc"}}, "required": ["pc"], "not": {"required": ["android"]}},
+    {"properties": {"kind": {"const": "android"}}, "required": ["android"], "not": {"required": ["pc"]}}
+  ]
+}

@@ -1,0 +1,72 @@
+{
+  "abiVersion": 1,
+  "elements": [
+    "ui-elements/nexus-text-input.json",
+    "ui-elements/nexus-text-area.json",
+    "ui-elements/nexus-switch.json",
+    "ui-elements/nexus-number-input.json",
+    "ui-elements/nexus-range.json",
+    "ui-elements/nexus-file-picker.json",
+    "ui-elements/nexus-color-picker.json",
+    "ui-elements/nexus-time-picker.json",
+    "ui-elements/nexus-date-range-picker.json",
+    "ui-elements/nexus-path-picker.json",
+    "ui-elements/nexus-button.json",
+    "ui-elements/nexus-icon-button.json",
+    "ui-elements/nexus-menu.json",
+    "ui-elements/nexus-select.json",
+    "ui-elements/nexus-pager.json",
+    "ui-elements/nexus-tabs.json",
+    "ui-elements/nexus-drag-handle.json",
+    "ui-elements/nexus-sortable-list.json",
+    "ui-elements/nexus-confirm-dialog.json",
+    "ui-elements/nexus-dialog-popover.json",
+    "ui-elements/nexus-card.json",
+    "ui-elements/nexus-field.json",
+    "ui-elements/nexus-section-card.json",
+    "ui-elements/nexus-collapsible-card.json",
+    "ui-elements/nexus-action-group.json",
+    "ui-elements/nexus-entity-row.json",
+    "ui-elements/nexus-schedule-card.json",
+    "ui-elements/nexus-page-header.json",
+    "ui-elements/nexus-switch-setting.json",
+    "ui-elements/nexus-switch-list.json",
+    "ui-elements/nexus-badge.json",
+    "ui-elements/nexus-overflow-text.json",
+    "ui-elements/nexus-spinner.json",
+    "ui-elements/nexus-empty-state.json",
+    "ui-elements/nexus-tooltip.json",
+    "ui-elements/nexus-modal.json",
+    "ui-elements/nexus-toast.json",
+    "ui-elements/nexus-icon.json",
+    "ui-elements/nexus-scroll-area.json",
+    "ui-elements/nexus-loading-state.json"
+  ],
+  "commonProperties": {
+    "interactive": "disabled:boolean=false；readOnly仅在适用输入声明；label/ariaLabel提供可访问名称",
+    "scalarAttributes": "公开scalar可用kebab-case attribute；property优先且类型校验",
+    "structuredProperties": "对象、数组、File与秘密仅property；不反射为attribute",
+    "unknownInput": "未知枚举/非法结构明确拒绝，不回退旧协议"
+  },
+  "eventTypes": {
+    "Change<T>": "{value:T,source:pointer|keyboard|input|assistive}；只对用户改动发出",
+    "ToggleDetail": "{expanded:boolean,source:pointer|keyboard|assistive}",
+    "ReorderDetail": "{ids:readonly string[],source:pointer|keyboard|assistive}；完整唯一ID集合",
+    "ActionDetail": "{actionId:string,source:pointer|keyboard|assistive}",
+    "CloseDetail": "{reason:button|escape|backdrop|owner}",
+    "BrowseDetail": "{kind:file|folder}；只请求Host已授权能力"
+  },
+  "eventPolicy": {
+    "customEventsBubble": true,
+    "customEventsComposed": true,
+    "detailReadonly": true,
+    "nativeClickEmittedOnce": true,
+    "eventTelemetryMayContainSecretValues": false
+  },
+  "lifecycle": {
+    "connect": "创建单一owner、监听/观察器按需登记",
+    "disconnect": "先abort后幂等清理；晚到cleanup立即释放",
+    "hidden": "暂停展示资源但不丢编辑值；不等于disconnect",
+    "focus": "交互元素focus()聚焦实际控件；结构元素不偷焦点"
+  }
+}

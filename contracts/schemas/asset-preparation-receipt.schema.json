@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/asset-preparation-receipt.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "version", "instanceId", "operationId", "journalId", "writerId", "planDigest", "stepId", "stage", "content", "parentIdentity"],
+  "properties": {
+    "format": {"const": "nexus.asset.preparation.receipt"},
+    "version": {"const": 1},
+    "instanceId": {"$ref": "common.schema.json#/$defs/uuid"},
+    "operationId": {"$ref": "common.schema.json#/$defs/uuid"},
+    "journalId": {"$ref": "common.schema.json#/$defs/uuid"},
+    "writerId": {"$ref": "common.schema.json#/$defs/uuid"},
+    "planDigest": {"$ref": "common.schema.json#/$defs/sha256"},
+    "stepId": {"type": "string", "pattern": "^asset-[0-9a-f]{64}$"},
+    "stage": {"enum": ["started", "completed"]},
+    "content": {"$ref": "asset-preparation-defs.schema.json#/$defs/blob"},
+    "identity": {"$ref": "file-tree.schema.json#/$defs/physicalIdentity"},
+    "parentIdentity": {"$ref": "file-tree.schema.json#/$defs/physicalIdentity"}
+  },
+  "allOf": [
+    {"if": {"properties": {"stage": {"const": "completed"}}},
+      "then": {"required": ["identity"]},
+      "else": {"properties": {"identity": false}}}
+  ]
+}

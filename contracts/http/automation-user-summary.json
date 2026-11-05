@@ -1,0 +1,13 @@
+{
+  "get": {
+    "operationId": "readAccountSummaries",
+    "description": "automation.read + status.read + records.read + scheduling.read. Batch current user identities, latest effective specialized binding summaries, actual active binding count and next enabled queue schedule. No query, configuration compilation or full DryRun.",
+    "responses": {
+      "200": {
+        "description": "catalogRevision, progressRevision, observedAt and items. Each item contains userId, summaryReason (no_bindings/not_run/record_deleted/no_task_report/latest), summaryTone (bad/warn/muted/ok), nullable runId, activeCount, nullable nextRunAt/queueId, and the contributing binding summaries. Missing permission is not a not_run result."
+      },
+      "403": { "description": "A required capability is unavailable" },
+      "409": { "description": "Current authoritative state is unavailable" }
+    }
+  }
+}

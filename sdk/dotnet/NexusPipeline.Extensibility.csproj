@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Version>0.1.0</Version>
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NexusSdkApiTool>$(NexusArtifactsRoot)/bin/NexusPipeline.Boundaries/$([System.String]::Copy('$(Configuration)').ToLowerInvariant())/NexusPipeline.Boundaries.dll</NexusSdkApiTool>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="../../contracts/sdk-public/**/*.json" Pack="true" PackagePath="contracts/%(RecursiveDir)%(Filename)%(Extension)" />
+    <None Include="../../LICENSE" Pack="true" PackagePath="LICENSE" />
+  </ItemGroup>
+  <Target Name="VerifyPublicSdkPackage" BeforeTargets="GenerateNuspec">
+    <Error Condition="!Exists('$(NexusSdkApiTool)')" Text="Build the existing NexusPipeline.Boundaries tool before packing the SDK." />
+    <Exec WorkingDirectory="$(MSBuildProjectDirectory)/../.." Command="python -B tooling/nexus.py check --scope contracts" />
+    <Exec WorkingDirectory="$(MSBuildProjectDirectory)/../.." Command="dotnet &quot;$(NexusSdkApiTool)&quot; --sdk-surface &quot;$(TargetPath)&quot; --verify &quot;contracts/sdk-public-api.json&quot;" />
+  </Target>
+</Project>

@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nexuspipeline.invalid/1/execution-adapter.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "installedRevision",
+    "installedJournalId",
+    "installedFootprint",
+    "manifest",
+    "script",
+    "resources"
+  ],
+  "properties": {
+    "installedRevision": {
+      "$ref": "common.schema.json#/$defs/sequence"
+    },
+    "installedJournalId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "installedFootprint": {
+      "$ref": "execution-plan.schema.json#/$defs/planReference"
+    },
+    "manifest": {
+      "$ref": "execution-plan.schema.json#/$defs/contentReference"
+    },
+    "script": {
+      "$ref": "execution-plan.schema.json#/$defs/contentReference"
+    },
+    "compiled": { "$ref": "execution-plan.schema.json#/$defs/planReference" },
+    "compiledProvider": { "$ref": "common.schema.json#/$defs/extensionId" },
+    "compiledResources": {
+      "type": "array", "minItems": 1, "maxItems": 33, "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1, "maxLength": 120}
+    },
+    "sourceFiles": {
+      "type": "array", "minItems": 1, "maxItems": 128,
+      "items": {"$ref": "#/$defs/sourceFile"}
+    },
+    "resources": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
+      "items": {
+        "$ref": "#/$defs/resource"
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {"required": ["compiled"]},
+      "then": {"required": ["compiledProvider", "compiledResources"]},
+      "else": {"properties": {"compiledProvider": false, "compiledResources": false}}
+    }
+  ],
+  "$defs": {
+    "sourceFile": {
+      "type": "object", "additionalProperties": false,
+      "required": ["relativePath", "path", "content", "identity", "parentIdentity"],
+      "properties": {
+        "relativePath": {"$ref": "common.schema.json#/$defs/relativePath"},
+        "path": {"type": "string", "minLength": 4, "maxLength": 32767},
+        "content": {
+          "type": "object", "additionalProperties": false,
+          "required": ["relativePath", "sizeBytes", "sha256"],
+          "properties": {
+            "relativePath": {"type": "string", "pattern": "^blobs/content/[0-9a-f]{64}\\.bin$"},
+            "sizeBytes": {"type": "integer", "minimum": 1, "maximum": 8388608},
+            "sha256": {"$ref": "common.schema.json#/$defs/sha256"}
+          }
+        },
+        "identity": {"$ref": "file-tree.schema.json#/$defs/physicalIdentity"},
+        "parentIdentity": {"$ref": "file-tree.schema.json#/$defs/physicalIdentity"}
+      }
+    },
+    "resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "resourceId",
+        "relativePath",
+        "revision",
+        "sha256"
+      ],
+      "properties": {
+        "resourceId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "relativePath": {
+          "type": "string",
+          "maxLength": 1024
+        },
+        "revision": {
+          "$ref": "common.schema.json#/$defs/sequence"
+        },
+        "sha256": {
+          "$ref": "common.schema.json#/$defs/sha256"
+        }
+      }
+    }
+  }
+}

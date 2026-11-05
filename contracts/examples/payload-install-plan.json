@@ -1,0 +1,27 @@
+{
+  "format": "nexus.payload.apply-plan",
+  "version": 1,
+  "instanceId": "c0560436-badc-4dfd-bd53-68acda58a855",
+  "operationId": "df69a859-b6db-4dc6-b3eb-d74ae0e7d1a2",
+  "journalId": "af8868dd-c9c8-4ba5-88ed-099f079fa5ec",
+  "operationKind": "extensionApply",
+  "action": "install",
+  "extensionId": "fixture-extension",
+  "extensionSource": {
+    "relativePath": "blobs/plans/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.json",
+    "sizeBytes": 1,
+    "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "targetPath": "D:\\Fixture\\extensions\\fixture-extension",
+  "parentIdentity": {"volumeSerial": "0000000000000001", "fileId": "00000000000000000000000000000001"},
+  "before": {"shape": "missing", "entries": []},
+  "candidate": {
+    "shape": "directory",
+    "entries": [
+      {"relativePath": "", "kind": "directory", "sizeBytes": 0},
+      {"relativePath": "worker.bin", "kind": "file", "sizeBytes": 1, "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+    ]
+  },
+  "originalObjects": [],
+  "resourceKeys": ["extension:fixture-extension"]
+}

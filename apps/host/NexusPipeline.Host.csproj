@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows10.0.22621.0</TargetFramework>
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>false</SelfContained>
+    <StaticWebAssetsEnabled>false</StaticWebAssetsEnabled>
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ApplicationManifest Condition="'$(NexusTestHost)' != 'true'">app.manifest</ApplicationManifest>
+    <ApplicationManifest Condition="'$(NexusTestHost)' == 'true'">test.manifest</ApplicationManifest>
+  </PropertyGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="$(NexusWebRoot)/**/*" Condition="'$(NexusWebRoot)' != ''">
+      <LogicalName>nexus.web/%(RecursiveDir)%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+    <InternalsVisibleTo Include="NexusPipeline.StorageTests" />
+    <ProjectReference Include="../../src/core/NexusPipeline.Core.csproj" />
+    <ProjectReference Include="../../src/platform/NexusPipeline.Platform.csproj" />
+  </ItemGroup>
+</Project>
