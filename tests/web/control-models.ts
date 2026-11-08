@@ -19,7 +19,7 @@ export async function run(): Promise<string[]> {
     'discover', selection, undefined, '');
   assert.equal(discovery.tasks[0]?.title, '任务');
   cases.push('adapter discovery accepts an empty optional locale map and preserves the task title');
-  const preview = { hasRunnable: true, hasBlockedItems: false, reasonCode: null, completionAction: 'hibernate',
+  const preview = { hasRunnable: true, canPrepareInitialConfiguration: false, hasBlockedItems: false, reasonCode: null, completionAction: 'hibernate',
     groups: [{ scriptId: 'script' }], items: [{ scriptId: 'script', userId: 'user', disposition: 'runnable', reasonCode: 'execution_inputs_verified' }] };
   assert.equal(executionPreview(preview).completionAction, 'hibernate');
   for (const [field, value] of [['hasRunnable', 'true'], ['hasBlockedItems', 0], ['completionAction', 'sleep'], ['groups', {}], ['items', null]]) {

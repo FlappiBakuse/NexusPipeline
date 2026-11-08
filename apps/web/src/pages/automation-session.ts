@@ -1,4 +1,4 @@
-import type { AppStore } from '../app/store';
+import type { AutomationStore } from '../app/store-ports';
 import type { ControlAutomationChange, ControlAutomationImport, ControlProjectCommand } from '../control/wire.generated';
 
 export type AutomationAction = {
@@ -21,7 +21,7 @@ export type AutomationSession = {
   notice: string;
 };
 
-export function automationSession(store: AppStore, page: string): AutomationSession {
+export function automationSession(store: AutomationStore, page: string): AutomationSession {
   const key = 'automation/page/' + store.state.capabilities?.instanceId + '/' + page;
   if (!store.drafts.has(key))
     store.drafts.set(key, {

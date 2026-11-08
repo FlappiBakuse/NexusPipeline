@@ -9,7 +9,7 @@ const modules = path.resolve(option('--modules'));
 const require = createRequire(path.join(modules, 'package.json'));
 const ts = require('typescript');
 const vue = require('@vue/compiler-sfc');
-const words = name => (name.replace(/^I(?=[A-Z][a-z])/, '').replaceAll('BetterGi', 'Bettergi').replaceAll('MuMu', 'Mumu')
+const words = name => (name.replace(/^I(?=[A-Z][a-z])/, '').replaceAll('MuMu', 'Mumu')
   .match(/[A-Z]+(?=[A-Z][a-z]|[0-9]|$)|[A-Z]?[a-z]+[0-9]*|[0-9]+/g) || []).length;
 
 function declarations(source, filename) {

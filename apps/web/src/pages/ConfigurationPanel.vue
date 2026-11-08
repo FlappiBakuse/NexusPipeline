@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
-import type { AppStore } from '../app/store';
+import type { ConfigurationStore } from '../app/store-ports';
 import { t } from '../app/locale';
 import { configurationOverview, type ConfigurationOverview } from './configuration-types';
 import ValueEditorPanel from './ValueEditorPanel.vue';
@@ -10,7 +10,7 @@ import ConfigurationImport from './ConfigurationImport.vue';
 import './configuration-messages';
 import './configuration.css';
 
-const props = defineProps<{ store: AppStore; bindingId: string; visible: boolean }>();
+const props = defineProps<{ store: ConfigurationStore; bindingId: string; visible: boolean }>();
 const emit = defineEmits<{ close: [] }>();
 const overview = ref<ConfigurationOverview | null>(null);
 const mode = ref<'value' | 'native' | 'adapter'>('value');
@@ -38,10 +38,9 @@ async function load(preserveMode = false): Promise<void> {
       (mode.value === 'value' && value.kind !== 'generic') ||
       (mode.value === 'adapter' && value.kind !== 'specialized')
     )
-      mode.value = value.kind === 'generic' ? 'value' : 'adapter';
+      mode.value = nativeAllowed.value ? 'native' : value.kind === 'generic' ? 'value' : 'adapter';
   } catch (reason) {
     if (!next.signal.aborted) {
-      props.store.report(reason);
       error.value = reason instanceof Error ? reason.message : '配置不可用';
     }
   } finally {
@@ -64,26 +63,27 @@ onBeforeUnmount(() => owner?.abort());
       <p v-if="busy" role="status">{{ t('正在读取配置资源…') }}</p>
       <p v-if="error" role="alert">
         {{ t(error) }}
-        <button @click="load(true)">{{ t('刷新资源') }}</button>
+        <button type="button" @click="load(true)">{{ t('刷新资源') }}</button>
       </p>
       <template v-if="overview">
         <ConfigurationImport :store="store" :overview="overview" @changed="load(true)" />
+        <template v-if="overview.resources.length && overview.resources.every(item => item.isSaved)">
         <nav class="config-tabs" :aria-label="t('账号配置')">
-          <button
+          <button type="button"
             v-if="overview.kind === 'generic'"
             :aria-current="mode === 'value' ? 'page' : undefined"
             @click="mode = 'value'"
           >
             {{ t('配置值') }}
           </button>
-          <button
+          <button type="button"
             v-if="nativeAllowed"
             :aria-current="mode === 'native' ? 'page' : undefined"
             @click="mode = 'native'"
           >
             {{ t('原生编辑器') }}
           </button>
-          <button
+          <button type="button"
             v-if="overview.kind === 'specialized'"
             :aria-current="mode === 'adapter' ? 'page' : undefined"
             @click="mode = 'adapter'"
@@ -113,10 +113,11 @@ onBeforeUnmount(() => owner?.abort());
           :visible="visible"
           @changed="load(true)"
         />
+        </template>
       </template>
     </div>
     <div slot="footer" class="row">
-      <button @click="emit('close')">{{ t('暂时关闭') }}</button>
+      <button type="button" @click="emit('close')">{{ t('暂时关闭') }}</button>
     </div>
   </nexus-modal>
 </template>

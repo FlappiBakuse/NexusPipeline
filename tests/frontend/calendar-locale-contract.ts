@@ -12,8 +12,8 @@ export function calendarLocaleContract(fixture: HTMLElement, check: (condition: 
       for (let opening = 0; opening < 2; opening++) {
         const root = picker.shadowRoot!;
         root.querySelector<HTMLButtonElement>('.trigger')!.click();
-        check(root.querySelectorAll('.months section').length === 2,
-          `date range opening ${opening + 1} draws both months for locale ${locale || 'default'}`);
+        check(picker.value.from === '2024-02-28' && picker.value.to === '2024-02-29',
+          `opening and closing preserves the selected leap-day range for locale ${locale || 'default'}`);
         root.querySelector<HTMLElement>('[role=dialog]')!.dispatchEvent(
           new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
       }

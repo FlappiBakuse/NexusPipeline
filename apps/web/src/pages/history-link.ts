@@ -1,5 +1,5 @@
 import { ref } from 'vue';
-import type { AppStore } from '../app/store';
+import type { NavigationStore } from '../app/store-ports';
 import type { RecordRow } from '../control/models';
 import { recordRow } from '../control/records';
 
@@ -13,7 +13,7 @@ export class HistoryLink {
   private readonly instance: string | undefined;
 
   constructor(
-    private readonly store: AppStore,
+    private readonly store: NavigationStore,
     private readonly visible: () => boolean,
     private readonly selectRows: (record: RecordRow) => Promise<void>,
     private readonly abortSummary: () => void
@@ -78,7 +78,10 @@ export class HistoryLink {
       candidate = query.get('attempt') || '',
       user = query.get('user') || '';
     const attempt = this.validId(candidate) ? candidate : '';
-    if (!this.validId(runId) || query.has('user') && !this.validId(user)) {
+    if (!this.validId(runId) || query.has('user') && !this.validId(user) || candidate && !this.validId(candidate)) {
+      this.selected.value = undefined;
+      this.detailOpen.value = false;
+      this.deepLinkError.value = '记录链接无效或已不可用。';
       this.applied = '';
       return;
     }

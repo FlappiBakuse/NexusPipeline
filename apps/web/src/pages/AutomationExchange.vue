@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { createIdentity } from '../control/identity';
 import { computed, ref, watch } from 'vue';
-import type { AppStore } from '../app/store';
+import type { AutomationStore } from '../app/store-ports';
 import { arrayValue, ControlFailure, integerValue, objectValue, stringValue } from '../control/client';
 import type { AutomationBundle, ControlAutomationImport } from '../control/wire.generated';
 import { t } from '../app/locale';
@@ -16,7 +16,7 @@ type Preview = {
   paths: Record<string, unknown>[];
   problems: Record<string, unknown>[];
 };
-const props = defineProps<{ store: AppStore; file?: File }>();
+const props = defineProps<{ store: AutomationStore; file?: File }>();
 const emit = defineEmits<{ applied: [] }>();
 const bundle = ref<AutomationBundle | null>(null);
 const fileName = ref('');

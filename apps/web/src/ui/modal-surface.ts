@@ -17,7 +17,7 @@ dialog::backdrop{background:transparent}
 header{display:flex;flex:none;align-items:center;justify-content:space-between;gap:12px;padding:clamp(18px,3vw,30px);padding-bottom:16px}
 h2{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--nx-modal-title-size,19px);line-height:var(--nx-modal-title-line-height,1.35);letter-spacing:-.025em;margin:0}header>.close{width:40px;min-width:40px;height:40px;padding:0;border:1px solid var(--border-strong,var(--nx-color-border));border-radius:10px;background:transparent;font-size:22px;font-weight:400;color:var(--nx-color-muted)}
 header>.close{display:grid;place-items:center}header>.close svg{width:20px;height:20px;pointer-events:none}
-.content{flex:1 1 auto;min-height:0;overflow:hidden;padding:0 clamp(18px,3vw,30px) 24px}
+.content{flex:1 1 auto;min-height:0;overflow:hidden;--nx-scroll-padding:0 clamp(18px,3vw,30px) 24px}
 footer{display:flex;flex:none;flex-wrap:wrap;justify-content:flex-end;gap:12px;padding:16px clamp(18px,3vw,30px) clamp(18px,3vw,30px);border-top:1px solid var(--nx-color-border)}
 footer[hidden]{display:none}footer button,footer ::slotted(button){min-width:80px}p{margin:0;white-space:pre-wrap;line-height:1.6}
 @keyframes modal-fade{from{opacity:0}to{opacity:1}}
@@ -53,6 +53,8 @@ export class ModalSurface {
   }
 
   connect(signal: AbortSignal): void {
+    // A descendant toast or nested dialog closes only its own surface.
+    this.dialog.addEventListener('nexus-close', event => event.stopPropagation(), { signal });
     this.dialog.addEventListener('keydown', (event) => {
       if (event.key !== 'Tab' || ModalSurface.layers.at(-1) !== this.dialog) return;
       const targets: HTMLElement[] = [];

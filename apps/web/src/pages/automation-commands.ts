@@ -1,4 +1,4 @@
-import type { AppStore } from '../app/store';
+import type { AutomationStore } from '../app/store-ports';
 import { ControlFailure, objectValue } from '../control/client';
 import { copyDraft } from '../app/draft-copy';
 import type { AutomationAction, AutomationSession } from './automation-session';
@@ -11,7 +11,7 @@ export class AutomationCommands {
   private readonly instanceId: string | undefined;
 
   constructor(
-    private readonly store: AppStore,
+    private readonly store: AutomationStore,
     private readonly session: AutomationSession,
     private readonly completedView: (action: AutomationAction) => void
   ) {

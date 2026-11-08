@@ -1,5 +1,5 @@
 import { createIdentity } from '../control/identity';
-import type { AppStore } from '../app/store';
+import type { AutomationStore } from '../app/store-ports';
 import type {
   AutomationBundle,
   ControlAutomationChange,
@@ -15,7 +15,7 @@ type Script = AutomationBundle['scripts'][number];
 export const templateKey = (id: string): string => 'script-template/' + id;
 
 export async function loadTemplate(
-  store: AppStore,
+  store: AutomationStore,
   file: File,
   id: string
 ): Promise<{
@@ -74,7 +74,7 @@ export async function loadTemplate(
 }
 
 export async function previewTemplate(
-  store: AppStore,
+  store: AutomationStore,
   script: Script,
   preparedRoots: ControlAutomationChange['roots'],
   template: AutomationBundle,

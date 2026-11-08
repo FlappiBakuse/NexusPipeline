@@ -62,6 +62,8 @@ function rule(source, target, typeOnly) {
     if (destination === 'extensions/ExtensionOutlet.vue') return undefined;
     if (source === base + 'app/App.vue' && ['frontend-registry.ts', 'frontend-loader.ts', 'registry-context.ts', 'SurfaceOutlet.vue']
       .some(name => destination === 'extensions/' + name)) return undefined;
+    if (source === base + 'app/interface-preparation.ts' && typeOnly &&
+        ['frontend-loader.ts', 'frontend-registry.ts'].some(name => destination === 'extensions/' + name)) return undefined;
     if (source === base + 'app/AppNavigation.vue' && destination === 'extensions/frontend-registry.ts' && typeOnly) return undefined;
     return 'APP_COMPOSITION_ONLY';
   }
@@ -82,6 +84,14 @@ for (const file of files) {
     const tree = ts.createSourceFile(file, section.content, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
     if (tree.parseDiagnostics.length) throw new Error(source + ': invalid TypeScript source');
     function visit(node) {
+      if (!source.includes('.generated.') && source.startsWith('apps/web/src/') && ts.isBinaryExpression(node) &&
+          [ts.SyntaxKind.EqualsEqualsEqualsToken, ts.SyntaxKind.ExclamationEqualsEqualsToken].includes(node.operatorToken.kind)) {
+        const operands = [node.left, node.right];
+        if (operands.some(value => ts.isStringLiteralLike(value) && value.text.length > 0) &&
+            operands.some(value => ts.isPropertyAccessExpression(value) && ['extensionId', 'providerId', 'vendor'].includes(value.name.text) ||
+              ts.isIdentifier(value) && ['extensionId', 'providerId'].includes(value.text)))
+          errors.push({ rule: 'PLUGIN_ID_BRANCH', source, line: section.line + tree.getLineAndCharacterOfPosition(node.getStart(tree)).line + 1 });
+      }
       let literal, typeOnly = false;
       if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
         literal = node.moduleSpecifier;

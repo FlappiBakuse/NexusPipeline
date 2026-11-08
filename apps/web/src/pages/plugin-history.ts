@@ -1,8 +1,8 @@
 import { onBeforeUnmount, ref, watch } from 'vue';
-import type { AppStore } from '../app/store';
+import type { RecordsStore } from '../app/store-ports';
 import { arrayValue, objectValue } from '../control/client';
 
-export function usePluginHistory(store: AppStore, visible: () => boolean, pending: () => unknown) {
+export function usePluginHistory(store: RecordsStore, visible: () => boolean, pending: () => unknown) {
   const history = ref<Record<string, unknown>[]>([]),
     historyNext = ref<number | null>(null),
     historyBusy = ref(false);
@@ -44,5 +44,8 @@ export function usePluginHistory(store: AppStore, visible: () => boolean, pendin
     if (!next && before && visible()) void loadHistory();
   });
   onBeforeUnmount(() => historyOwner?.abort());
+  watch(() => store.state.preparationRevision, () => {
+    if (visible() && !pending()) void loadHistory();
+  });
   return { history, historyNext, historyBusy, loadHistory };
 }

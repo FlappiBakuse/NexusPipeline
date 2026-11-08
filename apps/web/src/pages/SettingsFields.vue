@@ -115,8 +115,6 @@ function updates(value: Partial<Values['updates']>): void {
       </div>
     </template>
     <template v-else-if="category === 'remote'">
-      <h3>{{ t('Web 管理') }}</h3>
-      <p class="service-hint">{{ t('开启远程访问后，请在 Windows 防火墙中允许 Web 端口入站连接。') }}</p>
       <div class="switches">
         <nexus-switch-setting
           :title="t('远程访问')"
@@ -128,8 +126,6 @@ function updates(value: Partial<Values['updates']>): void {
       </div>
       <slot name="token" />
       <div class="divider" />
-      <h3>{{ t('MCP 服务') }}</h3>
-      <p class="service-hint">{{ t('MCP 仅监听本机回环地址；写入与执行需要单独启用。') }}</p>
       <div class="switches">
         <nexus-switch-setting
           :title="t('启用 MCP 服务')"

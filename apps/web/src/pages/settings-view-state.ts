@@ -8,6 +8,7 @@ import { copyDraft } from '../app/draft-copy';
 interface ViewDraft {
   values: InterfaceValues;
   revision: number;
+  expanded: InterfaceCategory | null;
   edited: boolean;
   busy: boolean;
   pending: { id: string; revision: number; values: InterfaceValues } | null;
@@ -24,6 +25,7 @@ export function useSettingsView(store: AppStore, categories: readonly InterfaceC
     stored = reactive({
       values: copyDraft(initial.values),
       revision: initial.revision,
+      expanded: readExpanded(initial.values),
       edited: false,
       busy: false,
       pending: null,
@@ -36,13 +38,14 @@ export function useSettingsView(store: AppStore, categories: readonly InterfaceC
   const conflict = computed(
     () => state.edited && !!store.state.interface && state.revision !== store.state.interface.revision
   );
-  const pinned = computed(() => state.values.pinnedSettings);
+  const pinned = computed(() => state.values.pinnedSettings.filter(id => id === state.expanded));
   watch(
     () => store.state.interface,
     (snapshot) => {
       if (snapshot && isCurrent() && !state.edited && !state.pending && !state.busy) {
         state.values = copyDraft(snapshot.values);
         state.revision = snapshot.revision;
+        state.expanded = readExpanded(snapshot.values);
       }
     }
   );
@@ -56,25 +59,32 @@ export function useSettingsView(store: AppStore, categories: readonly InterfaceC
   }
   function choose(id: InterfaceCategory): void {
     if (!isCurrent() || state.pending || state.busy) return;
-    state.values.pinnedSettings = [id];
-    state.values.collapsedSettings = categories.filter((item) => item !== id);
-    schedule();
-  }
-  function toggle(id: InterfaceCategory): void {
-    if (!isCurrent() || state.pending || state.busy) return;
-    const current = state.values.collapsedSettings;
-    state.values.collapsedSettings = current.includes(id)
-      ? current.filter((item) => item !== id)
-      : [...current, id];
+    const closing = isExpanded(id) && state.values.pinnedSettings[0] === id;
+    state.values.pinnedSettings = closing ? [] : [id];
+    state.expanded = closing ? null : id;
+    state.values.collapsedSettings = categories.filter((item) => closing || item !== id);
     schedule();
   }
   function setLocale(value: InterfaceValues['locale']): void {
     if (!isCurrent() || state.pending || state.busy) return;
+    if (value === state.values.locale) return;
     state.values.locale = value;
     schedule();
   }
+  function toggleCard(id: InterfaceCategory): void {
+    if (!isCurrent() || state.pending || state.busy) return;
+    state.expanded = isExpanded(id) ? null : id;
+    state.values.pinnedSettings = [];
+    state.values.collapsedSettings = categories.filter(item => item !== state.expanded);
+    schedule();
+  }
   function isExpanded(id: InterfaceCategory): boolean {
-    return !state.values.collapsedSettings.includes(id);
+    return state.expanded === id;
+  }
+  function readExpanded(values: InterfaceValues): InterfaceCategory | null {
+    const preferred = values.pinnedSettings[0] || 'service';
+    if (!values.collapsedSettings.includes(preferred)) return preferred;
+    return categories.find(id => !values.collapsedSettings.includes(id)) || null;
   }
   async function save(): Promise<void> {
     if (
@@ -111,6 +121,7 @@ export function useSettingsView(store: AppStore, categories: readonly InterfaceC
     }
     state.values = copyDraft(snapshot.values);
     state.revision = snapshot.revision;
+    state.expanded = readExpanded(snapshot.values);
     state.edited = false;
     state.pending = null;
     state.error = '';
@@ -152,5 +163,5 @@ export function useSettingsView(store: AppStore, categories: readonly InterfaceC
   function loadLatest(): void {
     if (isCurrent() && store.state.interface && !state.pending && !state.busy) accept(store.state.interface);
   }
-  return { state, pinned, conflict, choose, toggle, setLocale, isExpanded, save, checkPending, loadLatest };
+  return { state, pinned, conflict, choose, toggleCard, setLocale, isExpanded, save, checkPending, loadLatest };
 }

@@ -1,5 +1,6 @@
 import { ref } from 'vue';
 import { fieldMessages } from './field-messages';
+import { errorMessages } from './error-messages';
 import { runtimeMessages } from './runtime-messages';
 
 export const locale = ref<'zh-CN' | 'en-US'>('zh-CN');
@@ -84,5 +85,9 @@ export function registerMessages(messages: Readonly<Record<string, string>>): vo
   for (const [key, value] of Object.entries(messages)) english[key] = value;
 }
 export function t(text: string): string {
+  const error = errorMessages[text];
+  if (error) return error[locale.value === 'en-US' ? 1 : 0];
+  for (const prefix of ['Invalid pre-upgrade element property: ', 'Public element already has another owner: ', 'Invalid '])
+    if (text.startsWith(prefix)) return errorMessages[prefix]![locale.value === 'en-US' ? 1 : 0] + text.slice(prefix.length);
   return locale.value === 'en-US' ? english[text] || text : text;
 }

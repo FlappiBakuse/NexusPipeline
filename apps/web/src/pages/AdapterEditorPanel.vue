@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { createIdentity } from '../control/identity';
 import { computed, onBeforeUnmount, reactive, toRefs, watch } from 'vue';
-import type { AppStore } from '../app/store';
+import type { ConfigurationStore } from '../app/store-ports';
 import { ControlFailure, objectValue } from '../control/client';
 import { t, locale } from '../app/locale';
 import AdapterCoverage from './AdapterCoverage.vue';
@@ -14,7 +14,7 @@ import {
   resetAdapterProposal,
   type AdapterDraft as Draft
 } from './adapter-results';
-const props = defineProps<{ store: AppStore; overview: ConfigurationOverview; visible: boolean }>();
+const props = defineProps<{ store: ConfigurationStore; overview: ConfigurationOverview; visible: boolean }>();
 const emit = defineEmits<{ changed: [] }>();
 const instance = props.store.state.capabilities?.instanceId;
 const currentInstance = () => instance === props.store.state.capabilities?.instanceId;
@@ -158,7 +158,7 @@ async function execute(action: 'discover' | 'propose' | 'previewRepair' | 'apply
       state.pending = '';
       state.pendingAction = '';
     }
-    props.store.report(error);
+    note.value = error instanceof Error ? error.message : '操作失败，请重试。';
   } finally {
     busy.value = false;
   }
@@ -190,8 +190,7 @@ async function checkPending(): Promise<void> {
       if (alive) emit('changed');
     } else note.value = '操作仍在处理中。';
   } catch (error) {
-    note.value = '无法证明保存结果；草稿已保留。';
-    props.store.report(error);
+    note.value = error instanceof Error ? error.message : '操作失败，请重试。';
   }
 }
 onBeforeUnmount(() => {
@@ -217,13 +216,13 @@ onBeforeUnmount(() => {
       </label>
     </fieldset>
     <div class="row">
-      <button
+      <button type="button"
         :disabled="busy || !!state.pending || !available || !selected.length"
         @click="execute('discover')"
       >
         {{ t('探测配置') }}
       </button>
-      <button
+      <button type="button"
         :disabled="busy || !!state.pending || !available || !selected.length"
         @click="execute('propose')"
       >
@@ -261,10 +260,10 @@ onBeforeUnmount(() => {
       </FormSelect>
     </label>
     <div v-if="candidate" class="row">
-      <button :disabled="busy || !!state.pending || !available" @click="execute('previewRepair')">
+      <button type="button" :disabled="busy || !!state.pending || !available" @click="execute('previewRepair')">
         {{ t('预览修复') }}
       </button>
-      <button
+      <button type="button"
         :disabled="busy || !!state.pending || !state.previewed || !store.can('configuration.repair')"
         @click="execute('applyRepair')"
       >
@@ -279,7 +278,7 @@ onBeforeUnmount(() => {
             : '读取结果未知，请重新读取资源。'
         )
       }}
-      <button @click="checkPending">
+      <button type="button" @click="checkPending">
         {{ t(state.pendingAction === 'applyRepair' ? '查询操作状态' : '读取资源重新开始') }}
       </button>
     </p>

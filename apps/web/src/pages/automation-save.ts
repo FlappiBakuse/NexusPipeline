@@ -1,4 +1,5 @@
-import type { AppStore } from '../app/store';
+import type { AutomationStore } from '../app/store-ports';
+import type { AutomationDraft } from '../app/automation-draft';
 import type { AutomationBundle, ControlAutomationChange } from '../control/wire.generated';
 import { copyDraft } from '../app/draft-copy';
 import { validateForm } from '../components/form-validation';
@@ -13,7 +14,7 @@ import { scriptSourceKey } from './script-source';
 
 export class AutomationSave {
   constructor(
-    private readonly store: AppStore,
+    private readonly store: AutomationStore,
     private readonly editor: AutomationEditor,
     private readonly session: AutomationSession,
     private readonly commands: AutomationCommands
@@ -23,10 +24,7 @@ export class AutomationSave {
     const editor = this.editor,
       session = this.session;
     if (session.saving || session.pending || !editor.current() || !this.store.can('automation.write')) return;
-    if (!validateForm(form)) {
-      session.error = '请修正无效字段后再保存。';
-      return;
-    }
+    if (!validateForm(form)) return;
     if (editor.unavailable) {
       session.error = '专项适配尚未就绪，暂时无法保存此脚本实例。';
       return;
@@ -42,7 +40,7 @@ export class AutomationSave {
       kind === 'users' &&
       !validAccountLimits(
         this.store,
-        editor.draft.value as unknown as AutomationBundle['users'][number],
+        editor.draft.value as AutomationBundle['users'][number],
         form
       )
     )
@@ -53,9 +51,9 @@ export class AutomationSave {
           !this.store.can('configuration.edit')) throw new Error('需要配置编辑权限才能保存所选实例。');
       const prepared =
         kind === 'scripts'
-          ? prepareScript(this.store, value as unknown as AutomationBundle['scripts'][number])
+          ? prepareScript(this.store, value as AutomationBundle['scripts'][number])
           : null;
-      if (prepared) value = prepared.value as unknown as Record<string, unknown>;
+      if (prepared) value = prepared.value as AutomationDraft;
       const roots = prepared?.roots || [];
       if (kind === 'scripts' && !value.rootId) throw new Error('请选择脚本目录。');
       const revision = session.catalogs[key] ?? editor.catalog.value!.catalogRevision;
@@ -64,7 +62,7 @@ export class AutomationSave {
       if (kind === 'scripts' && template) {
         const body = await previewTemplate(
           this.store,
-          value as unknown as AutomationBundle['scripts'][number],
+          value as AutomationBundle['scripts'][number],
           roots,
           template,
           revision
@@ -83,7 +81,7 @@ export class AutomationSave {
       let body = { ...this.store.command(), roots, expectedCatalogRevision: revision };
       if (kind === 'users') {
         body = accountChanges(this.store, id, body);
-        const user = value as unknown as AutomationBundle['users'][number];
+        const user = value as AutomationBundle['users'][number];
         if (user.bindingOverrides)
           value = {
             ...value,
@@ -98,10 +96,10 @@ export class AutomationSave {
             }
           };
       }
-      (body[kind] as unknown[]).push({
-        expectedRevision: session.revisions[key] ?? editor.revision(id),
-        value
-      });
+      const expectedRevision = session.revisions[key] ?? editor.revision(id);
+      if (kind === 'scripts') body = { ...body, scripts: [...body.scripts, { expectedRevision, value: value as AutomationBundle['scripts'][number] }] };
+      else if (kind === 'users') body = { ...body, users: [...body.users, { expectedRevision, value: value as AutomationBundle['users'][number] }] };
+      else body = { ...body, queues: [...body.queues, { expectedRevision, value: value as AutomationBundle['queues'][number] }] };
       if (kind === 'queues' && editor.queueState.value) body = this.schedules(body);
       await this.commands.commit({
         id: body.operationId,

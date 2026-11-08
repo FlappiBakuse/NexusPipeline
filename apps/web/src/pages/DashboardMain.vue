@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { AppStore } from '../app/store';
 import { arrayValue, objectValue } from '../control/client';
+import type { SurfaceContribution } from '@nexuspipeline/extension-sdk';
 import type { DashboardCard } from '../control/interface';
 import ModalTransition from '../components/ModalTransition.vue';
 import { useDashboardLayout } from './dashboard-layout';
@@ -16,9 +17,9 @@ import type { ActiveRun, RecordSummary } from './dashboard-types';
 import { executionRun } from '../control/execution';
 import { sevenDays, dashboardSummary } from './dashboard-summary';
 
-const props = defineProps<{ store: AppStore; visible: boolean; overviewAvailable?: boolean }>();
+const props = defineProps<{ store: AppStore; visible: boolean; overviewCards?: readonly { extensionId: string; id: string; dashboard?: SurfaceContribution['dashboard'] }[] }>();
 const catalog = computed<{ id: DashboardCard; title: string; description: string }[]>(() => [
-  ...(props.overviewAvailable ? [{ id: 'game-activities' as const, title: '游戏活动', description: '查看订阅游戏的版本与活动。' }] : []),
+  ...(props.overviewCards ?? []).flatMap(item => item.dashboard ? [{ id: item.dashboard.key, title: item.dashboard.title, description: item.dashboard.description }] : []),
   {
     id: 'status',
     title: locale.value === 'en-US' ? 'System status' : '一切准备就绪',
@@ -54,7 +55,7 @@ const {
   checkLayout,
   changeLayout,
   resetLayout
-} = useDashboardLayout(props.store);
+} = useDashboardLayout(props.store, () => (props.overviewCards ?? []).flatMap(item => item.dashboard && item.dashboard.defaultVisible ? [item.dashboard] : []).sort((a, b) => a.order - b.order).map(item => item.key));
 const statisticsVisible = computed(() => cards.value.includes('history-duration'));
 
 const active = ref<ActiveRun[]>([]);
@@ -110,7 +111,7 @@ async function readSummary(): Promise<void> {
   dates.value = range.dates;
   try {
     const row = await props.store.client.read(
-      '/control/v1/records/summary?' + range.query,
+      '/control/v1/records/summary/days?' + range.query,
       objectValue,
       owner.signal
     );
@@ -147,8 +148,8 @@ function armDayBoundary(): void {
   );
 }
 watch(
-  () => props.visible,
-  (visible) => {
+  [() => props.visible, () => props.store.state.preparationRevision],
+  ([visible]) => {
     if (visible) {
       void readActive();
       if (!layout.value) void readLayout();
@@ -204,16 +205,14 @@ onBeforeUnmount(() => {
       >
         {{ t('编辑页面布局') }}
       </button>
+      <button v-if="layoutError && !draft" @click="readLayout">{{ t('重新读取') }}</button>
     </PageActions>
-    <p v-if="layoutError" role="alert">
-      {{ t(layoutError) }}
-      <button v-if="!draft" @click="readLayout">{{ t('重新读取') }}</button>
-    </p>
-    <p v-if="layoutNotice" role="status">{{ t(layoutNotice) }}</p>
+    <nexus-toast v-if="layoutError" tone="danger" :message.prop="t(layoutError)" />
+    <nexus-toast v-if="layoutNotice" :message.prop="t(layoutNotice)" @nexus-close="layoutNotice = ''" />
     <CompletionNotice :store="store" :visible="visible" />
     <p v-if="!layout && layoutBusy" role="status">{{ t('正在读取卡片布局…') }}</p>
     <div v-if="layout" class="dashboard-grid">
-      <template v-for="card in cards.filter(item => item !== 'game-activities' || overviewAvailable)" :key="card">
+      <template v-for="card in cards.filter(item => catalog.some(card => card.id === item))" :key="card">
         <section
           v-if="card === 'status'"
           class="overview full-card"
@@ -240,8 +239,8 @@ onBeforeUnmount(() => {
           />
           <ExtensionOutlet target="overview.after-running" :store="store" :visible="visible" />
         </section>
-        <ExtensionOutlet v-else-if="card === 'game-activities'" class="full-card"
-          target="overview.cards" :extension-ids="['game-activities']" :store="store" :visible="visible" />
+        <ExtensionOutlet v-else-if="overviewCards?.some(item => item.dashboard?.key === card)" class="full-card"
+          target="overview.cards" :entry="overviewCards!.find(item => item.dashboard?.key === card)!" :store="store" :visible="visible" />
         <DashboardHistoryChart
           v-else
           class="full-card"

@@ -64,6 +64,7 @@ export class HostSnapshots {
     const newStream = this.stream !== snapshot.streamId;
     if (!newStream && snapshot.sequence < this.state.revision) return { accepted: false, newStream: false };
     if (!newStream && snapshot.sequence === this.state.revision) return { accepted: true, newStream: false };
+    this.client.invalidatePrepared();
     this.stream = snapshot.streamId;
     this.state.revision = snapshot.sequence;
     this.state.events = snapshot.state;

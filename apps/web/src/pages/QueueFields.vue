@@ -2,7 +2,7 @@
 import { createIdentity } from '../control/identity';
 import { computed, ref, onBeforeUnmount, onMounted } from 'vue';
 import type { AutomationBundle } from '../control/wire.generated';
-import type { AppStore } from '../app/store';
+import type { AutomationStore } from '../app/store-ports';
 import { t } from '../app/locale';
 import { notificationCatalog, type NotificationTask } from './notification-types';
 import QueueTasks from './QueueTasks.vue';
@@ -13,7 +13,7 @@ const props = defineProps<{
   modelValue: Queue;
   schedules: readonly Schedule[];
   bundle: AutomationBundle;
-  store: AppStore;
+  store: AutomationStore;
 }>();
 const emit = defineEmits<{
   'update:modelValue': [value: Queue];
@@ -187,8 +187,8 @@ function setTime(id: string, value: string): void {
           </div>
           <div v-if="expanded.has(item.id)" class="schedule-content">
             <div class="schedule-controls">
-              <label>
-                {{ t('执行周期（可多选）') }}
+              <div class="weekday-field" role="group" :aria-label="t('执行周期（可多选）')">
+                <span>{{ t('执行周期（可多选）') }}</span>
                 <span class="weekdays">
                   <button
                     v-for="(name, number) in ['日', '一', '二', '三', '四', '五', '六']"
@@ -200,7 +200,7 @@ function setTime(id: string, value: string): void {
                     {{ t(name) }}
                   </button>
                 </span>
-              </label>
+              </div>
               <label>
                 {{ t('执行时间') }}
                 <nexus-time-picker

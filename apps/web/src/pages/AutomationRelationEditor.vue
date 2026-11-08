@@ -1,33 +1,34 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import type { AppStore } from '../app/store';
+import type { AutomationStore } from '../app/store-ports';
 import { initialValue, schemaAt } from '../control/schema';
+import type { AutomationDraft } from '../app/automation-draft';
 import type { AutomationBundle } from '../control/wire.generated';
 import BindingPolicyFields from './BindingPolicyFields.vue';
 
 type User = AutomationBundle['users'][number];
 type Binding = AutomationBundle['bindings'][number];
 const props = defineProps<{
-  store: AppStore;
+  store: AutomationStore;
   kind: 'users' | 'bindings' | 'schedules';
-  modelValue: Record<string, unknown>;
+  modelValue: AutomationDraft;
   bundle: AutomationBundle;
 }>();
-const emit = defineEmits<{ 'update:modelValue': [value: Record<string, unknown>] }>();
+const emit = defineEmits<{ 'update:modelValue': [value: AutomationDraft] }>();
 const defaults = initialValue(
   schemaAt('automation-binding-policy.schema.json#/$defs/overrides')
 ) as NonNullable<User['bindingOverrides']>;
 const value = computed(() =>
   props.kind === 'users'
     ? (props.modelValue.bindingOverrides as User['bindingOverrides']) || defaults
-    : (props.modelValue as unknown as Binding)
+    : (props.modelValue as Binding)
 );
 function update(next: Binding | NonNullable<User['bindingOverrides']>): void {
   emit(
     'update:modelValue',
     props.kind === 'users'
-      ? { ...props.modelValue, bindingOverrides: next }
-      : (next as unknown as Record<string, unknown>)
+      ? { ...props.modelValue, bindingOverrides: next as NonNullable<User['bindingOverrides']> }
+      : (next as AutomationDraft)
   );
 }
 </script>

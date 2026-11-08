@@ -26,7 +26,7 @@ class DashboardLayoutOwner {
   readonly session: LayoutSession;
   private readonly instance: string;
   private readonly key: string;
-  constructor(private readonly store: AppStore) {
+  constructor(private readonly store: AppStore, private readonly defaults: () => DashboardCard[]) {
     this.instance = store.state.capabilities!.instanceId;
     this.key = 'dashboard-layout/' + this.instance;
     if (!store.drafts.has(this.key))
@@ -54,7 +54,7 @@ class DashboardLayoutOwner {
       state.pendingId ||
       (state.draft &&
         JSON.stringify(state.draft) !==
-          JSON.stringify(dashboardCards(state.baseline?.values.dashboardCards || [])));
+          JSON.stringify(state.baseline?.revision === 0 ? this.defaults() : dashboardCards(state.baseline?.values.dashboardCards || [])));
     if (dirty) this.store.dirty.add(this.key);
     else this.store.dirty.delete(this.key);
   }
@@ -83,7 +83,7 @@ class DashboardLayoutOwner {
     const snapshot = this.store.state.interface;
     if (!this.current() || !snapshot || this.store.interfaceChange.pending) return;
     this.session.baseline = copyDraft(snapshot);
-    this.session.draft = dashboardCards(snapshot.values.dashboardCards);
+    this.session.draft = snapshot.revision === 0 ? this.defaults() : dashboardCards(snapshot.values.dashboardCards);
     this.session.editing = true;
     this.session.error = '';
     this.session.notice = '';
@@ -106,7 +106,7 @@ class DashboardLayoutOwner {
     const snapshot = this.store.state.interface;
     if (!this.current() || !snapshot || this.session.pendingId || this.session.busy) return;
     this.session.baseline = copyDraft(snapshot);
-    if (!keep) this.session.draft = dashboardCards(snapshot.values.dashboardCards);
+    if (!keep) this.session.draft = snapshot.revision === 0 ? this.defaults() : dashboardCards(snapshot.values.dashboardCards);
     this.session.error = '';
     this.mark();
   }
@@ -186,8 +186,9 @@ class DashboardLayoutOwner {
   }
 }
 
-export function useDashboardLayout(store: AppStore) {
-  const owner = new DashboardLayoutOwner(store),
+export function useDashboardLayout(store: AppStore, contributions: () => DashboardCard[] = () => []) {
+  const defaults = () => [...contributions(), ...dashboardDefaults];
+  const owner = new DashboardLayoutOwner(store, defaults),
     state = owner.session;
   const { draft, editing, busy, error, notice, pendingId } = toRefs(state);
   const layout = computed(() => store.state.interface);
@@ -199,7 +200,7 @@ export function useDashboardLayout(store: AppStore) {
     layoutError: error,
     layoutNotice: notice,
     pendingLayoutId: pendingId,
-    cards: computed(() => dashboardCards(layout.value?.values.dashboardCards || [])),
+    cards: computed(() => layout.value?.revision === 0 ? defaults() : dashboardCards(layout.value?.values.dashboardCards || [])),
     layoutChanged: computed(() => !!state.draft && layout.value?.revision !== state.baseline?.revision),
     beginLayout: () => owner.begin(),
     cancelLayout: () => owner.cancel(),
@@ -209,6 +210,6 @@ export function useDashboardLayout(store: AppStore) {
     rebase: () => owner.rebase(true),
     loadLatest: () => owner.rebase(false),
     changeLayout: (cards: DashboardCard[]) => owner.change(cards),
-    resetLayout: () => owner.change([...dashboardDefaults])
+    resetLayout: () => owner.change(defaults())
   };
 }

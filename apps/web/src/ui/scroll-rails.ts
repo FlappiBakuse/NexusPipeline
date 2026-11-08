@@ -13,12 +13,12 @@ export const scrollRailStyles = `.rail {
 .rail[hidden] { display: none; }
 .rail[data-axis=y] { top: 4px; right: 2px; bottom: 4px; width: 8px; }
 .rail[data-axis=x] { left: 4px; right: 4px; bottom: 2px; height: 8px; }
-:host(:hover) .rail, :host(:focus-within) .rail, :host([data-scroll-active]) .rail { opacity: 1; }
+:host([data-scroll-active]) .rail { opacity: 1; }
 .thumb {
   position: absolute;
   border-radius: 999px;
   background: color-mix(in srgb,var(--nx-color-text,#7d8798) 48%,transparent);
-  pointer-events: auto;
+  pointer-events: none;
   cursor: grab;
   touch-action: none;
 }
@@ -27,6 +27,7 @@ export const scrollRailStyles = `.rail {
   outline: none;
 }
 .thumb:active { cursor: grabbing; }
+:host([data-scroll-active]) .thumb { pointer-events: auto; }
 [data-axis=y] > .thumb { top: 0; right: 0; width: 100%; }
 [data-axis=x] > .thumb { bottom: 0; left: 0; height: 100%; }
 @media(prefers-reduced-motion:reduce) { .rail { transition: none; } }
@@ -140,7 +141,7 @@ export class ScrollRails {
   private reveal(): void {
     this.host.setAttribute('data-scroll-active', '');
     clearTimeout(this.hideTimer);
-    this.hideTimer = window.setTimeout(() => this.host.removeAttribute('data-scroll-active'), 900);
+    this.hideTimer = window.setTimeout(() => this.host.removeAttribute('data-scroll-active'), 2000);
   }
 
   private beginDrag(event: PointerEvent, axis: Axis, thumb: HTMLElement): void {

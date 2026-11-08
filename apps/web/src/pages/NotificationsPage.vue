@@ -61,6 +61,9 @@ watch(
   { immediate: true }
 );
 onBeforeUnmount(() => readOwner?.abort());
+watch(() => props.store.state.preparationRevision, () => {
+  if (props.visible && !editor.value && !session.pending) void load();
+});
 watch(editor, (open, previous) => {
   if (!open && previous && props.visible && !session.pending) void load();
 });
@@ -204,21 +207,17 @@ async function reorder(ids: string[]): Promise<void> {
       >
         {{ t('添加通知任务') }}
       </button>
-    </PageActions>
+        <button v-if="session.pending" :disabled="session.busy || !store.can('operations.read')" @click="checkPending">{{ t('查询操作状态') }}</button>
+  </PageActions>
     <NotificationChannelChooser
       v-if="choosing"
       :visible="visible"
       @select="openNew"
       @close="choosing = false"
     />
-    <p v-if="session.error" class="error" role="alert">{{ t(session.error) }}</p>
-    <p v-if="session.notice" role="status">{{ t(session.notice) }}</p>
-    <p v-if="session.pending" role="alert">
-      {{ t('写入结果待确认，请先核实原操作。') }} {{ session.pending.operationId }}
-      <button :disabled="session.busy || !store.can('operations.read')" @click="checkPending">
-        {{ t('查询操作状态') }}
-      </button>
-    </p>
+    <nexus-toast v-if="session.error" tone="danger" :message.prop="t(session.error)" />
+    <nexus-toast v-if="session.notice" :message.prop="t(session.notice)" @nexus-close="session.notice = ''" />
+    <nexus-toast v-if="session.pending" tone="warning" :message.prop="t('写入结果待确认，请先核实原操作。')" />
     <p v-if="loading && !catalog" role="status">{{ t('通知任务加载中…') }}</p>
     <nexus-sortable-list
       v-else-if="catalog && catalog.tasks.length"

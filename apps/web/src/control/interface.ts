@@ -1,7 +1,7 @@
 import { arrayValue, integerValue, objectValue, stringValue } from './client';
 
-export type DashboardCard = 'game-activities' | 'status' | 'running' | 'history-duration' | 'history-counts';
-export type InterfaceCategory = 'service' | 'remote' | 'proxy' | 'advanced' | 'updates' | 'diagnostics';
+export type DashboardCard = string;
+export type InterfaceCategory = 'service' | 'remote' | 'proxy' | 'advanced' | 'updates' | 'diagnostics' | `extension:${string}:${string}`;
 export interface InterfaceValues {
   theme: 'dark' | 'light' | 'system';
   locale: 'zh-CN' | 'en-US';
@@ -14,8 +14,13 @@ export interface InterfaceSnapshot {
   values: InterfaceValues;
   operationId: string;
 }
-export const dashboardDefaults: DashboardCard[] = ['game-activities', 'status', 'running', 'history-duration'];
-const cards: DashboardCard[] = ['game-activities', 'status', 'running', 'history-duration', 'history-counts'];
+export const dashboardDefaults: DashboardCard[] = ['status', 'running', 'history-duration'];
+function cardKeys(value: unknown): DashboardCard[] {
+  const values = arrayValue(value, stringValue);
+  if (values.length > 64 || new Set(values).size !== values.length ||
+    values.some(key => !/^[a-z][a-z0-9.-]{0,95}$/.test(key))) throw new TypeError('interface_cards_invalid');
+  return values;
+}
 const categories: InterfaceCategory[] = ['service', 'remote', 'proxy', 'advanced', 'updates', 'diagnostics'];
 export function dashboardCards(values: readonly DashboardCard[]): DashboardCard[] {
   // Both stored chart identifiers share one visible unit; proof checks still need the original wire values.
@@ -28,9 +33,14 @@ function selected<T extends string>(value: unknown, available: T[]): T {
   if (!available.includes(candidate as T)) throw new TypeError('interface_value_invalid');
   return candidate as T;
 }
-function selectedList<T extends string>(value: unknown, available: T[]): T[] {
-  const values = arrayValue(value, (item) => selected(item, available));
-  if (new Set(values).size !== values.length) throw new TypeError('interface_value_duplicated');
+function settingsCategories(value: unknown): InterfaceCategory[] {
+  const values = arrayValue(value, item => {
+    const id = stringValue(item);
+    if (!categories.includes(id as InterfaceCategory) && !/^extension:[a-z0-9-]{1,80}:[a-z0-9-]{1,40}$/.test(id))
+      throw new TypeError('interface_value_invalid');
+    return id as InterfaceCategory;
+  });
+  if (values.length > 64 || new Set(values).size !== values.length) throw new TypeError('interface_value_duplicated');
   return values;
 }
 export function interfaceSnapshot(value: unknown): InterfaceSnapshot {
@@ -42,9 +52,9 @@ export function interfaceSnapshot(value: unknown): InterfaceSnapshot {
     values: {
       theme: selected(values.theme, ['dark', 'light', 'system']),
       locale: selected(values.locale, ['zh-CN', 'en-US']),
-      dashboardCards: selectedList(values.dashboardCards, cards),
-      pinnedSettings: selectedList(values.pinnedSettings, categories),
-      collapsedSettings: selectedList(values.collapsedSettings, categories)
+      dashboardCards: cardKeys(values.dashboardCards),
+      pinnedSettings: settingsCategories(values.pinnedSettings),
+      collapsedSettings: settingsCategories(values.collapsedSettings)
     }
   };
 }

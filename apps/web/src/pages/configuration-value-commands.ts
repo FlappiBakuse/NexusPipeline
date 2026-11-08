@@ -1,5 +1,5 @@
 import { createIdentity } from '../control/identity';
-import type { AppStore } from '../app/store';
+import type { ConfigurationStore } from '../app/store-ports';
 import { ControlFailure, objectValue } from '../control/client';
 import { configurationOverview } from './configuration-types';
 import { ConfigurationDocument, type ConfigurationValueDraft } from './configuration-document';
@@ -7,7 +7,7 @@ import { ConfigurationDocument, type ConfigurationValueDraft } from './configura
 export class ConfigurationValueCommands {
   private readonly instance: string | undefined;
   constructor(
-    private readonly store: AppStore,
+    private readonly store: ConfigurationStore,
     private readonly state: ConfigurationValueDraft,
     private readonly document: ConfigurationDocument,
     private readonly binding: string,

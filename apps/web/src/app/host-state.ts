@@ -15,6 +15,7 @@ export function createHostState() {
     settings: null as SettingsSnapshot | null,
     status: null as HostStatus | null,
     revision: 0,
+    preparationRevision: 0,
     uncertainOperation: '',
     feedError: '',
     interface: null as InterfaceSnapshot | null,

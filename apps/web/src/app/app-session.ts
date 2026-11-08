@@ -31,6 +31,7 @@ export class AppSession {
     this.feed = new EventFeed(
       client,
       (error) => {
+        this.client.invalidatePrepared();
         state.feedError = error instanceof Error ? error.message : 'connection_lost';
       },
       () => state.capabilities?.instanceId
@@ -38,14 +39,18 @@ export class AppSession {
     document.addEventListener('visibilitychange', this.visibility);
   }
 
-  async navigate(page: AppRoute, preserveLocation = false): Promise<void> {
+  async navigate(page: AppRoute, preserveLocation = false, initialAccess?: Capabilities, signal?: AbortSignal,
+    initialSnapshot?: EventSnapshot): Promise<void> {
     this.navigationOwner?.abort();
     const owner = new AbortController();
     this.navigationOwner = owner;
+    const cancel = () => owner.abort(signal?.reason);
+    signal?.addEventListener('abort', cancel, { once: true });
+    if (signal?.aborted) cancel();
     this.pendingRoute = page;
     this.state.busy = true;
     try {
-      const { snapshot, access } = await this.readAccess(owner.signal);
+      const { snapshot, access } = await this.readAccess(owner.signal, initialAccess, initialSnapshot);
       const plan = this.prepare(snapshot, access);
       await this.synchronize(page, snapshot, plan, owner.signal);
       if (this.navigationOwner !== owner) return;
@@ -57,27 +62,44 @@ export class AppSession {
       if (!this.stopFeed && this.state.automation) this.subscribe();
     } catch (error) {
       if (!owner.signal.aborted) this.report(error);
+      if (initialAccess) throw error;
     } finally {
+      signal?.removeEventListener('abort', cancel);
       if (this.navigationOwner === owner) this.state.busy = false;
     }
   }
 
-  async start(): Promise<void> {
-    const access = await this.client.read('/control/v1/capabilities', capabilities);
-    if (this.state.capabilities && this.state.capabilities.instanceId !== access.instanceId) {
-      this.stopFeed?.();
-      this.stopFeed = undefined;
-      this.feed.stop();
-      this.navigationOwner?.abort();
-      this.updateOwner?.abort();
-      this.updateWork = undefined;
-      this.snapshots.reset();
+  async start(signal?: AbortSignal): Promise<void> {
+    const owner = new AbortController();
+    const cancel = () => owner.abort(signal?.reason);
+    signal?.addEventListener('abort', cancel, { once: true });
+    if (signal?.aborted) cancel();
+    try {
+      const { snapshot, access } = await this.readAccess(owner.signal);
+      owner.signal.throwIfAborted();
+      if (snapshot.instanceId !== access.instanceId) throw new ControlFailure(409, 'control_instance_changed');
+      if (this.state.capabilities && this.state.capabilities.instanceId !== access.instanceId) {
+        this.stopFeed?.();
+        this.stopFeed = undefined;
+        this.feed.stop();
+        this.navigationOwner?.abort();
+        this.updateOwner?.abort();
+        this.updateWork = undefined;
+        this.client.clearPrepared();
+        this.snapshots.reset();
+      }
+      if (!sameAccess(this.state.capabilities, access)) {
+        this.client.clearPrepared();
+        this.state.capabilities = access;
+        this.accessRequiresRefresh = true;
+      }
+      await this.navigate(this.pendingRoute ?? this.readRoute(), !this.pendingRoute, access, owner.signal, snapshot);
+    } catch (error) {
+      owner.abort();
+      throw error;
+    } finally {
+      signal?.removeEventListener('abort', cancel);
     }
-    if (!sameAccess(this.state.capabilities, access)) {
-      this.state.capabilities = access;
-      this.accessRequiresRefresh = true;
-    }
-    await this.navigate(this.pendingRoute ?? this.readRoute(), !this.pendingRoute);
   }
 
   dispose(): void {
@@ -88,12 +110,14 @@ export class AppSession {
     document.removeEventListener('visibilitychange', this.visibility);
   }
 
-  private async readAccess(signal: AbortSignal): Promise<{ snapshot: EventSnapshot; access: Capabilities }> {
+  private async readAccess(signal: AbortSignal, initialAccess?: Capabilities,
+    initialSnapshot?: EventSnapshot): Promise<{ snapshot: EventSnapshot; access: Capabilities }> {
     for (let attempt = 0; attempt < 2; attempt++) {
       const before = this.snapshots.streamId;
       const [snapshot, access] = await Promise.all([
-        this.client.read('/control/v1/events/snapshot', eventSnapshot, signal),
-        this.client.read('/control/v1/capabilities', capabilities, signal)
+        attempt === 0 && initialSnapshot ? Promise.resolve(initialSnapshot) :
+          this.client.read('/control/v1/events/snapshot', eventSnapshot, signal),
+        attempt === 0 && initialAccess ? Promise.resolve(initialAccess) : this.client.read('/control/v1/capabilities', capabilities, signal)
       ]);
       signal.throwIfAborted();
       if (
@@ -117,6 +141,7 @@ export class AppSession {
       throw new ControlFailure(409, 'control_instance_changed');
     const accessChanged = !sameAccess(this.state.capabilities, access);
     if (accessChanged) {
+      this.client.clearPrepared();
       this.state.capabilities = access;
       this.accessRequiresRefresh = true;
     }
@@ -208,6 +233,7 @@ export class AppSession {
   }
 
   private subscribe(): void {
+    let initial = true;
     this.stopFeed = this.feed.subscribe((snapshot, fresh) => {
       if (snapshot.instanceId !== this.state.capabilities?.instanceId) {
         this.report(new Error('event_instance_changed'));
@@ -221,7 +247,9 @@ export class AppSession {
       const owner = new AbortController();
       this.updateOwner = owner;
       const current = this.snapshots.revisions(snapshot);
-      const full = fresh || observed.newStream || !current;
+      // Navigation already aligned the first stream snapshot; reconnects still refresh live status.
+      const full = (fresh && !initial) || observed.newStream || !current;
+      initial = false;
       const work = this.snapshots
         .read(
           {
@@ -248,6 +276,6 @@ export class AppSession {
   private readonly visibility = (): void => {
     this.state.visible = !document.hidden;
     this.feed.visibility(this.state.visible);
-    if (!this.state.visible) this.updateOwner?.abort();
+    if (!this.state.visible) { this.client.invalidatePrepared(); this.updateOwner?.abort(); }
   };
 }

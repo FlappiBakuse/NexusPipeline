@@ -1,4 +1,4 @@
-import type { AppStore } from '../app/store';
+import type { AutomationStore } from '../app/store-ports';
 import type { AutomationBundle, ScriptSource, ScriptSourceCandidate, ControlProjectCommand } from '../control/wire.generated';
 import { objectValue } from '../control/client';
 import { schemaAt, matchesSchema } from '../control/schema';
@@ -19,7 +19,7 @@ export function readSource(value: unknown, operationId: string, extensionId: str
   return discovery as unknown as ScriptSource;
 }
 
-export function selectSource(store: AppStore, script: Script, row: ScriptSourceCandidate): Script {
+export function selectSource(store: AutomationStore, script: Script, row: ScriptSourceCandidate): Script {
   const paths = scriptPaths(store, script);
   paths.executable = row.executable;
   paths.arguments = argumentText(row.arguments);
@@ -36,7 +36,7 @@ export function selectSource(store: AppStore, script: Script, row: ScriptSourceC
   })) };
 }
 
-export async function saveSourceSelection(store: AppStore, action: AutomationAction, current: () => boolean): Promise<void> {
+export async function saveSourceSelection(store: AutomationStore, action: AutomationAction, current: () => boolean): Promise<void> {
   if (action.kind !== 'scripts' || action.action !== 'save') return;
   const draft = store.drafts.get(scriptSourceKey(action.target));
   if (!draft?.selection && !action.sourceSelection) return;

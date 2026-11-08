@@ -1,4 +1,5 @@
 import { FrontendSession } from './frontend-session';
+import { ControlReads } from './control-reads';
 
 export class ControlFailure extends Error {
   constructor(
@@ -15,6 +16,13 @@ export class ControlFailure extends Error {
 export type Decoder<T> = (value: unknown) => T;
 
 export class ControlClient {
+  private readonly reads = new ControlReads((path, signal) => this.request(path, undefined, signal));
+  settledReads(signal: AbortSignal): Promise<void> { return this.reads.settled(signal); }
+  clearPrepared(): void { this.reads.clear(); }
+  invalidatePrepared(): void { this.reads.invalidatePrepared(); }
+  prepareRead<T = unknown>(path: string, signal: AbortSignal, decode?: Decoder<T>): Promise<T> {
+    return this.reads.prepare(path, signal, decode);
+  }
   private token = '';
   private writes = 0;
   private restarting = false;
@@ -31,6 +39,7 @@ export class ControlClient {
     return this.writes === (this.restarting ? 1 : 0);
   }
   authenticate(token: string): void {
+    this.clearPrepared();
     this.frontendSession.reset();
     this.token = token;
   }
@@ -39,13 +48,14 @@ export class ControlClient {
     if (this.token) headers.set('Authorization', 'Bearer ' + this.token);
     return headers;
   }
-  async read<T>(path: string, decode: Decoder<T>, signal?: AbortSignal): Promise<T> {
-    return decode(await this.request(path, undefined, signal));
+  read<T>(path: string, decode: Decoder<T>, signal?: AbortSignal): Promise<T> {
+    return this.reads.read(path, decode, signal);
   }
   async query<T>(path: string, body: unknown, decode: Decoder<T>, signal?: AbortSignal): Promise<T> {
     return decode(await this.request(path, body, signal, undefined, false));
   }
   async write<T>(path: string, body: unknown, decode: Decoder<T>, operationId?: string, signal?: AbortSignal): Promise<T> {
+    this.clearPrepared();
     this.writes++;
     try {
       const response = await this.request(path, body, signal, operationId);
@@ -60,6 +70,7 @@ export class ControlClient {
   }
   // Local secret writes use a separate raw transport but must block maintenance exit while unsettled.
   async trackExternalWrite<T>(send: () => Promise<T>): Promise<T> {
+    this.clearPrepared();
     this.writes++;
     try {
       return await send();

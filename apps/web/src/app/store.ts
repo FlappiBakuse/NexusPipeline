@@ -63,7 +63,7 @@ export function createStore(client: ControlClient) {
     media: new MediaPool(client),
     logs: new LiveLogs(client),
     can: (capability: string) => state.capabilities?.capabilities.includes(capability) === true,
-    start: () => session.start(),
+    start: (signal?: AbortSignal) => session.start(signal),
     dispose: () => session.dispose()
   };
 }

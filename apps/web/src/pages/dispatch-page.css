@@ -47,12 +47,6 @@
   min-width: 128px;
 }
 .dispatch-hint {
-  position: fixed;
-  z-index: 200;
-  top: calc(var(--nx-desktop-offset, 0px) + 64px);
-  left: 50%;
-  transform: translateX(-50%);
-  max-width: calc(100vw - 32px);
   font-size: 13px;
   line-height: 1.6;
 }

@@ -1,8 +1,9 @@
 <script setup lang="ts">
+import { animateBindingLayout } from './binding-motion';
 import { scriptIcon } from './script-icons';
 import { createIdentity } from '../control/identity';
 import { computed, ref } from 'vue';
-import type { AppStore } from '../app/store';
+import type { AutomationStore } from '../app/store-ports';
 import type { AutomationBundle } from '../control/wire.generated';
 import BindingPolicyFields from './BindingPolicyFields.vue';
 import BindingTaskPlan from './BindingTaskPlan.vue';
@@ -16,7 +17,7 @@ const props = defineProps<{
   bindings: readonly Binding[];
   bundle: AutomationBundle;
   existing: boolean;
-  store: AppStore;
+  store: AutomationStore;
   visible: boolean;
 }>();
 const emit = defineEmits<{
@@ -24,10 +25,14 @@ const emit = defineEmits<{
   'update:bindings': [value: Binding[]];
   configure: [id: string];
 }>();
+const root = ref<HTMLElement>();
 const removing = ref(false);
 const choosing = ref(false);
 const expanded = ref('');
+const visited = ref(new Set<string>());
 const choices = ref<string[]>([]);
+const scripts = computed(() => new Map(props.bundle.scripts.map(script => [script.id, script])));
+const savedBindings = computed(() => new Set(props.bundle.bindings.map(binding => binding.id)));
 const available = computed(() =>
   props.bundle.scripts.filter((item) => !props.bindings.some((binding) => binding.scriptId === item.id))
 );
@@ -68,7 +73,7 @@ function update(value: Binding): void {
 </script>
 
 <template>
-  <div class="account-fields">
+  <div ref="root" class="account-fields">
     <label>
       {{ t('用户名') }}
       <em>*</em>
@@ -148,6 +153,7 @@ function update(value: Binding): void {
         <nexus-sortable-list
           class="binding-grid"
           :ids.prop="bindings.map((item) => item.id)"
+          :disabled.prop="removing || !!expanded"
           @nexus-reorder.stop="$event.target === $event.currentTarget && reorder($event.detail.ids)"
         >
           <article
@@ -167,11 +173,11 @@ function update(value: Binding): void {
                 class="binding-toggle"
                 :disabled="removing"
                 :aria-expanded="expanded === binding.id"
-                @click="expanded = expanded === binding.id ? '' : binding.id"
+                @click="animateBindingLayout(root, () => { expanded = expanded === binding.id ? '' : binding.id; choosing = false; visited.add(binding.id); })"
               >
-                <img class="binding-icon" :src="scriptIcon(bundle.scripts.find(item => item.id === binding.scriptId)?.extensionId)" alt="" />
+                <img class="binding-icon" :src="scriptIcon(scripts.get(binding.scriptId)?.extensionId)" alt="" />
                 <span>
-                  <strong>{{ bundle.scripts.find((item) => item.id === binding.scriptId)?.name }}</strong>
+                  <strong>{{ scripts.get(binding.scriptId)?.name }}</strong>
                   <span class="badges">
                     <nexus-badge :tone="binding.enabled ? 'success' : 'neutral'" :label="t(binding.enabled ? '已启用' : '已停用')" />
                     <nexus-badge
@@ -195,18 +201,20 @@ function update(value: Binding): void {
                 {{ t('移除绑定') }}
               </button>
             </div>
-            <div v-if="expanded === binding.id" class="binding-content">
-              <BindingTaskPlan v-if="bundle.scripts.find(item => item.id === binding.scriptId)?.kind === 'specialized' && bundle.bindings.some(item => item.id === binding.id)"
-                :store="store" :binding-id="binding.id" :visible="visible" />
+            <div class="binding-reveal" :class="{ open: expanded === binding.id }" :inert="expanded !== binding.id">
+            <div class="binding-clip"><div v-if="visited.has(binding.id)" class="binding-content">
               <button
                 class="edit-configuration"
                 type="button"
-                :disabled="!bundle.bindings.some((item) => item.id === binding.id)"
+                :disabled="!savedBindings.has(binding.id)"
                 @click="emit('configure', binding.id)"
               >
                 <strong>{{ t('编辑配置') }}</strong>
                 <small>{{ t('启动主程序打开该脚本实例的用户配置') }}</small>
               </button>
+              <BindingTaskPlan v-if="scripts.get(binding.scriptId)?.kind === 'specialized' && savedBindings.has(binding.id)"
+                :store="store" :binding-id="binding.id" :visible="visible && expanded === binding.id" />
+
               <BindingPolicyFields
                 :id="binding.id"
                 :user-id="modelValue.id"
@@ -218,11 +226,11 @@ function update(value: Binding): void {
               <ExtensionOutlet
                 target="automation.binding.editor"
                 :store="store"
-                :visible="visible"
+                :visible="visible && expanded === binding.id"
                 :entity-id="binding.id"
-                :extension-ids="bundle.scripts.find(script => script.id === binding.scriptId)?.extensionId ? [bundle.scripts.find(script => script.id === binding.scriptId)!.extensionId!] : []"
+                :extension-ids="scripts.get(binding.scriptId)?.extensionId ? [scripts.get(binding.scriptId)!.extensionId!] : []"
               />
-            </div>
+            </div></div></div>
           </article>
         </nexus-sortable-list>
       </section>

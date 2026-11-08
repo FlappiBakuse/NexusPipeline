@@ -2,7 +2,8 @@
   display: grid;
   gap: 20px;
 }
-label {
+label,
+.weekday-field {
   display: grid;
   gap: 6px;
   color: var(--muted);

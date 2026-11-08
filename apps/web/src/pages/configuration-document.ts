@@ -1,5 +1,5 @@
 import { shallowReactive } from 'vue';
-import type { AppStore } from '../app/store';
+import type { ConfigurationStore } from '../app/store-ports';
 import { arrayValue, integerValue, objectValue, stringValue } from '../control/client';
 import { copyDraft } from '../app/draft-copy';
 import type { ConfigurationOverview } from './configuration-types';
@@ -45,7 +45,7 @@ export class ConfigurationDocument {
   private value: unknown;
 
   constructor(
-    private readonly store: AppStore,
+    private readonly store: ConfigurationStore,
     readonly state: ConfigurationValueDraft,
     private readonly overview: () => ConfigurationOverview
   ) {}

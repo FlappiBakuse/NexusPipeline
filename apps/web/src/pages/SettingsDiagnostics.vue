@@ -114,7 +114,6 @@ async function support(): Promise<void> {
     <p v-if="error" role="alert">{{ t(error) }}</p>
     <p v-if="!report && busy" role="status">{{ t('诊断加载中…') }}</p>
     <template v-if="report">
-      <p>{{ report.framework }} · {{ report.architecture }}</p>
       <div class="overview">
         <div>
           <strong>{{ t('总体状态') }}</strong>

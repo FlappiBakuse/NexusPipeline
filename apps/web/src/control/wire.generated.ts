@@ -44,6 +44,15 @@ export interface AutomationBindingPolicyOverrides {
   readonly advanced: AutomationBindingPolicyAdvanced;
 }
 
+export interface AutomationBindingSource {
+  readonly candidateId: string;
+  readonly rootId: string;
+  readonly executable: AutomationPathsPortablePath;
+  readonly arguments: ReadonlyArray<string>;
+  readonly configurationPaths: ReadonlyArray<AutomationPathsPortablePath>;
+  readonly logPaths: ReadonlyArray<AutomationPathsPortablePath>;
+}
+
 export interface AutomationBundle {
   readonly format: "nexus.automation.bundle";
   readonly version: 1;
@@ -91,6 +100,7 @@ export interface AutomationRelationsBinding {
   readonly postFinalOnly?: boolean;
   readonly notifyEnabled: boolean;
   readonly notificationTaskIds: ReadonlyArray<string>;
+  readonly source?: AutomationBindingSource;
 }
 
 export interface AutomationRelationsHook {
@@ -455,10 +465,12 @@ export interface ControlScriptSource {
 }
 
 export interface EmulatorTargetSelection {
-  readonly vendor: "ldplayer" | "nox" | "bluestacks";
+  readonly vendor: string;
   readonly rootId: string;
   readonly targetId: string;
   readonly generation: string;
+  readonly extensionId?: string;
+  readonly providerId?: string;
 }
 
 export interface ExecutionProviderResource {
@@ -507,6 +519,7 @@ export interface ExtensionManifest {
   readonly tags?: ReadonlyArray<string>;
   readonly metadata?: ExtensionMetadata;
   readonly localization?: ExtensionLocalization;
+  readonly icon?: string;
 }
 
 export interface ExtensionManifestExecution {

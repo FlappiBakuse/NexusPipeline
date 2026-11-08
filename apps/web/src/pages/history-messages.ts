@@ -1,6 +1,9 @@
 import { registerMessages } from '../app/locale';
 
 registerMessages({
+  '脚本已退出，未检测到约定的完成标记': 'The process exited without the configured completion marker',
+  '配置同步采集失败，已保留旧快照': 'Configuration capture failed; the saved snapshot was retained',
+  '专项重试建议读取失败，已停止重试': 'The adapter retry suggestion could not be read; retries stopped',
   返回用户列表: 'Back to users',
   状态: 'Outcome',
   开始日期: 'Start date',

@@ -238,3 +238,5 @@ textarea:disabled,
 :where(nexus-card, nexus-modal, nexus-collapsible-card, nexus-scroll-area, nexus-dialog-popover) > p {
   margin-block: 1em;
 }
+
+input[aria-invalid="true"], textarea[aria-invalid="true"], select[aria-invalid="true"] { border-color: var(--bad); outline-color: var(--bad); }

@@ -19,7 +19,7 @@ export class IconButton extends NexusElement {
     super(
       'nexus-icon-button',
       controlStyles +
-        'button{min-width:40px;padding:0 8px;background:transparent;border-color:var(--nx-icon-border,var(--nx-color-border))}svg{width:18px;height:18px}::slotted([slot=icon]){pointer-events:none}',
+        'button{display:flex;align-items:center;justify-content:center;width:100%;height:100%;min-width:40px;padding:0;background:transparent;border-color:var(--nx-icon-border,var(--nx-color-border))}svg{width:18px;height:18px}::slotted([slot=icon]){pointer-events:none}',
       '<button type="button"><slot name="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"></svg></slot></button>'
     );
     this.button = this.root.querySelector('button')!;

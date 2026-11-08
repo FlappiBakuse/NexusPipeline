@@ -48,17 +48,20 @@ small {
 .choice-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
+  gap: 12px;
+  align-items: start;
   margin-top: 16px;
 }
 .binding {
   min-width: 0;
-  border: 1px solid var(--border);
+  border: 1px solid var(--content-card-border, var(--border));
   border-radius: 10px;
+  background: var(--content-card, var(--panel));
   overflow: hidden;
 }
 .binding.expanded {
   grid-column: 1 / -1;
+  order: -1;
 }
 .binding-heading {
   display: flex;
@@ -82,9 +85,11 @@ small {
   display: grid;
   gap: 4px;
   flex: 1;
+  min-width: 0;
 }
 .binding-toggle strong {
   font-size: 13px;
+  overflow-wrap: anywhere;
 }
 .binding-toggle nexus-icon,
 .choice-grid nexus-icon {
@@ -97,6 +102,7 @@ small {
 }
 .badges {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
 }
 .chevron {
@@ -108,7 +114,7 @@ small {
   display: grid;
   gap: 16px;
   padding: 16px;
-  background: var(--content-control);
+  background: var(--content-card-soft);
   border-top: 1px solid var(--border);
   min-width: 0;
   grid-template-columns: minmax(0, 1fr);
@@ -118,7 +124,7 @@ small {
   place-content: center;
   gap: 4px;
   min-height: 120px;
-  background: var(--panel);
+  background: var(--content-control);
   width: 100%;
   min-width: 0;
   box-sizing: border-box;
@@ -155,3 +161,9 @@ small {
 }
 
 .binding-icon { width: 28px; height: 28px; flex: none; object-fit: contain; }
+
+.binding-reveal { display: grid; grid-template-rows: 0fr; transition: grid-template-rows var(--nx-motion-duration-normal,180ms) ease; }
+.binding-reveal.open { grid-template-rows: 1fr; }
+.binding-clip { min-height: 0; overflow: hidden; }
+.binding.expanded { border-color: var(--content-control-border); }
+@media (prefers-reduced-motion: reduce) { .binding-reveal { transition: none; } }

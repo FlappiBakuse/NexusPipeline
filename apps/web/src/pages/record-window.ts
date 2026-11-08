@@ -15,34 +15,6 @@ function validateCursor(next: Cursor | undefined, previous: Cursor | undefined):
     throw new TypeError('history_cursor_invalid');
 }
 
-export async function groupPage(
-  cursor: Cursor | undefined,
-  read: (cursor: Cursor | undefined, limit: number) => Promise<RecordPage>,
-  signal: AbortSignal
-): Promise<RecordPage> {
-  const items: RecordPage['items'] = [];
-  let boundary: Cursor | undefined;
-  for (;;) {
-    signal.throwIfAborted();
-    const data = await read(cursor, items.length < 50 ? 50 - items.length : 50);
-    signal.throwIfAborted();
-    validateCursor(data.next, cursor);
-    const matching = data.items.filter((item) => item.userId == null);
-    if (items.length === 50 && matching.length) return { ...data, items, next: boundary! };
-    if (items.length < 50) {
-      items.push(...matching);
-      if (items.length === 50) boundary = data.next;
-    }
-    if (!data.next) {
-      const result = { ...data, items };
-      delete result.next;
-      return result;
-    }
-    // Look ahead without retaining rows so Next means another matching page exists.
-    cursor = data.next;
-  }
-}
-
 export class RecordWindow {
   private starts = new Map<number, Cursor | undefined>([[1, undefined]]);
 

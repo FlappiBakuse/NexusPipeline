@@ -13,7 +13,8 @@ button[data-tone=success]{border-color:var(--success,#6bcf9b);color:var(--succes
 button[data-tone=warning]{border-color:var(--warning,#e9b66b);color:var(--warning,#e9b66b)}
 button[data-tone=danger]{border-color:var(--nx-color-danger,#ef7070);color:var(--nx-color-danger,#ef7070)}
 button:disabled,input:disabled{opacity:.55;cursor:not-allowed}
-button:focus-visible,input:focus{outline:2px solid var(--nx-color-accent,#80a7ff);outline-offset:2px}
+button:focus-visible,input:focus,textarea:focus{outline:2px solid var(--nx-color-accent,#80a7ff);outline-offset:-2px}
+input[aria-invalid=true],textarea[aria-invalid=true]{border-color:var(--nx-color-danger,#ef7070);outline-color:var(--nx-color-danger,#ef7070)}
 @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 `;
 

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref, watch } from 'vue';
-import type { AppStore } from '../app/store';
+import type { AutomationStore } from '../app/store-ports';
 import { configurationOverview, type ConfigurationOverview } from './configuration-types';
 import AdapterEditorPanel from './AdapterEditorPanel.vue';
 import { t, registerMessages } from '../app/locale';
@@ -10,7 +10,7 @@ registerMessages({
   '当前权限无法读取任务计划。': 'The current permissions do not allow reading the task plan.',
   重新检查: 'Check again'
 });
-const props = defineProps<{ store: AppStore; bindingId: string; visible: boolean }>();
+const props = defineProps<{ store: AutomationStore; bindingId: string; visible: boolean }>();
 const overview = ref<ConfigurationOverview>();
 const error = ref('');
 let owner: AbortController | undefined;

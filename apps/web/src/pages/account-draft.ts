@@ -1,4 +1,4 @@
-import type { AppStore } from '../app/store';
+import type { AutomationStore } from '../app/store-ports';
 import type { AutomationBundle, ControlAutomationChange } from '../control/wire.generated';
 import { copyDraft } from '../app/draft-copy';
 import { prepareHooks, hookPathKey } from './hook-paths';
@@ -10,10 +10,10 @@ export type AccountDraft = {
   catalogRevision: number;
   revisions: Record<string, number>;
 };
-export const accountKey = (store: AppStore, id: string): string =>
+export const accountKey = (store: AutomationStore, id: string): string =>
   'account-bindings/' + store.state.capabilities?.instanceId + '/' + id;
 
-export function accountDraft(store: AppStore, id: string): AccountDraft {
+export function accountDraft(store: AutomationStore, id: string): AccountDraft {
   const key = accountKey(store, id);
   const retained = store.drafts.get(key);
   if (retained) return retained as AccountDraft;
@@ -36,7 +36,7 @@ export function accountDraft(store: AppStore, id: string): AccountDraft {
 }
 
 export function accountChanges(
-  store: AppStore,
+  store: AutomationStore,
   id: string,
   command: ControlAutomationChange
 ): ControlAutomationChange {
@@ -65,7 +65,7 @@ export function accountChanges(
   };
 }
 
-export function clearAccountDraft(store: AppStore, id: string): void {
+export function clearAccountDraft(store: AutomationStore, id: string): void {
   const state = store.drafts.get(accountKey(store, id)) as AccountDraft | undefined;
   for (const binding of [...(state?.items || []), ...(state?.baseline || [])])
     store.drafts.delete(hookPathKey(store, binding.id));
@@ -73,7 +73,7 @@ export function clearAccountDraft(store: AppStore, id: string): void {
 }
 
 export function validAccountLimits(
-  store: AppStore,
+  store: AutomationStore,
   user: AutomationBundle['users'][number],
   form?: HTMLElement
 ): boolean {

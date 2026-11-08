@@ -1,5 +1,7 @@
 export interface DesktopChannel {
   version: number;
+  presented?(): Promise<void>;
+  preparation?(value: { stage: string; done: number; total: number }): Promise<void>;
   connect(): Promise<{ instanceId: string; route: string }>;
   setLocale(locale: 'zh-CN' | 'en-US'): Promise<void>;
   bindFrontend(clientId: string, token: string): Promise<unknown>;

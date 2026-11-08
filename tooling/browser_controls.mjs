@@ -13,7 +13,7 @@ export async function runControls({ root, modules, browser, runtime, output, chr
     '@nexuspipeline/extension-sdk': '/sdk/frontend/src/index.ts' } }) + '</script></head><body>' +
     '<script type="module" src="/tests/frontend/element-contract.ts"></script></body></html>';
   fs.writeFileSync(path.join(directory, 'index.html'), html);
-  const server = await createServer({ configFile: false, root, plugins: [vue(), {
+  const server = await createServer({ configFile: false, root, plugins: [vue({ template: { compilerOptions: { isCustomElement: tag => tag.startsWith('nexus-') } } }), {
     name: 'fixture-inputs', transform(_code, id) {
       const file = path.resolve(id.split('?')[0]);
       if (path.isAbsolute(file) && file.startsWith(root + path.sep) && fs.existsSync(file) && fs.statSync(file).isFile())
@@ -31,6 +31,7 @@ export async function runControls({ root, modules, browser, runtime, output, chr
       });
     }
   }], resolve: { alias: { vue: path.join(modules, 'vue/dist/vue.runtime.esm-bundler.js'),
+    'pinyin-pro': path.join(modules, 'pinyin-pro/dist/esm/index.mjs'),
     '@nexuspipeline/extension-sdk': path.join(root, 'sdk/frontend/src/index.ts') } },
     server: { host: '127.0.0.1', port: 0, fs: { allow: [root, modules] } }, optimizeDeps: { noDiscovery: true, include: [] } });
   let launched;

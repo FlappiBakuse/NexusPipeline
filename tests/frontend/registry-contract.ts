@@ -82,6 +82,23 @@ export async function registryContracts(checks: string[]): Promise<void> {
   resolveActivation();
   assert(await rejects(activation) && lateCleanup === 1, 'canceled activation cleans late completion without publication');
 
+  let completeLate!: () => void;
+  const cancelledOwner = new AbortController();
+  const delayed = registry.activate(manifest('retry-fixture'), extension('retry-fixture', async context => {
+    await new Promise<void>(resolve => { completeLate = resolve; });
+    context.registerSurface({ id: 'late', target: 'overview.cards', mount() {} });
+  }), cancelledOwner.signal);
+  const observed = delayed.catch(() => {});
+  cancelledOwner.abort();
+  const replacement = await registry.activate(manifest('retry-fixture'), extension('retry-fixture', context => {
+    for (const key of ['first', 'second']) context.registerSurface({ id: key, target: 'overview.cards',
+      dashboard: { key, title: key, description: 'Prepared contribution', defaultVisible: true, order: 0 }, mount() {} });
+  }));
+  completeLate(); await observed;
+  assert(registry.listSurfaces('overview.cards').filter(item => item.extensionId === 'retry-fixture').length === 2,
+    'retry publishes multiple generic cards and late cancelled activation cannot replace them');
+  await replacement.dispose();
+
   const alreadyCancelled = new AbortController();
   alreadyCancelled.abort();
   let cancelledCalled = false;
@@ -181,6 +198,58 @@ export async function registryContracts(checks: string[]): Promise<void> {
   assert(localeChanges === 1, 'disposed surface cannot receive a later locale callback');
   await localeOwner.dispose(); localeHost.remove();
   await retainedOutlet(checks);
+  await retryOutlet(checks);
+}
+
+async function retryOutlet(checks: string[]): Promise<void> {
+  const registry = new FrontendRegistry({ locale: 'en', appearance: 'dark', translate: (_id, key) => key });
+  let release!: () => void, attempts = 0, failures = 0, disposed = 0;
+  const blocked = new Promise<void>(resolve => { release = resolve; });
+  const owner = await registry.activate(manifest('retry-fixture'), extension('retry-fixture', context => {
+    context.registerSurface({ id: 'healthy', target: 'settings.panels', mount: surface => {
+      const draft = document.createElement('input'); draft.value = 'unsaved'; surface.element.append(draft);
+    } });
+    context.registerSurface({ id: 'slow', target: 'settings.panels', async mount(surface) {
+      attempts++;
+      if (attempts === 1) await blocked;
+      const content = document.createElement('span'); content.textContent = 'prepared'; surface.element.append(content);
+      return () => { disposed++; };
+    } });
+  }));
+  const host = document.createElement('section'); document.body.append(host);
+  const controller = new AbortController(); registry.preparationSignal = controller.signal;
+  registry.preparationFailure = () => { failures++; };
+  const app = createApp({ render: () => h(SurfaceOutlet, { registry, target: 'settings.panels',
+    context: { surfaceId: 'settings.panels', instanceId: 'fixture' }, visible: true }) });
+  const flush = async () => { await nextTick(); await new Promise(resolve => setTimeout(resolve, 0)); };
+  try {
+    app.mount(host); await flush();
+    const draft = host.querySelector('input')!;
+    if (!draft || attempts !== 1) throw new Error('Expected healthy and pending contributions');
+    controller.abort(); await flush();
+    registry.preparationSignal = undefined;
+    await registry.settled(new AbortController().signal);
+    if (!failures || !host.querySelector('[role=alert] button')) throw new Error('Mount cancellation lacks retry');
+    registry.retryMounts(); await registry.settled(new AbortController().signal); await flush();
+    if (host.querySelector('[role=alert]') || host.querySelector('span')?.textContent !== 'prepared' || draft.value !== 'unsaved' || !draft.isConnected)
+      throw new Error('Retry failed or replaced the healthy ordinary draft');
+    release(); await flush();
+    if (host.querySelectorAll('span').length !== 1 || disposed !== 1) throw new Error('Late cancelled mount leaked content or cleanup');
+    checks.push('mount timeout reports failure, releases the readiness barrier and retries only failed contributions');
+    checks.push('late cancelled mount cleans up without replacing the recovered surface or healthy draft');
+    const other = await registry.activate(manifest('other-fixture'), extension('other-fixture', context => {
+      context.registerSurface({ id: 'other', target: 'settings.panels', mount(surface) {
+        surface.element.textContent = 'Independent contribution';
+      } });
+    }));
+    await registry.settled(new AbortController().signal); await flush();
+    if (host.querySelector('input')?.value !== 'unsaved' || !host.textContent?.includes('Independent contribution'))
+      throw new Error('Adding another plugin lost the existing draft');
+    await other.dispose(); await registry.settled(new AbortController().signal); await flush();
+    if (host.querySelector('input')?.value !== 'unsaved' || host.textContent?.includes('Independent contribution'))
+      throw new Error('Disabling another plugin lost the existing draft');
+    checks.push('unrelated contribution activation and removal preserve existing unsaved input');
+  } finally { release(); app.unmount(); await owner.dispose(); host.remove(); }
 }
 
 async function retainedOutlet(checks: string[]): Promise<void> {

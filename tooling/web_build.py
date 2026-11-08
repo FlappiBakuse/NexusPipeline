@@ -46,6 +46,16 @@ def build_web(root, output, update_lock=False, source=None, prepare_only=False):
     ownership = work / "owned-source.json"
     previous = json.loads(ownership.read_bytes()) if ownership.exists() else []
     names = []
+    for name in ('startup-content.css', 'nexuspipeline.ico'):
+        relative = 'apps/desktop/' + name
+        names.append(relative)
+        target = work / relative
+        if target.is_symlink() or target.is_junction():
+            raise ValueError("Linked Web build source")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        data = (frozen / relative).read_bytes()
+        if not target.exists() or target.read_bytes() != data:
+            target.write_bytes(data)
     for prefix in ("apps/web", "sdk/frontend/src"):
         for path in sorted((frozen / prefix).rglob("*")):
             if not path.is_file():
@@ -98,7 +108,8 @@ def build_web(root, output, update_lock=False, source=None, prepare_only=False):
                 print(line, end="", flush=True)
                 log.write(line)
             code = process.wait()
-        results.append({"command": command, "exitCode": code, "elapsedSeconds": time.monotonic() - started, "log": str(log_path)})
+        responsibility = "lint" if any("frontend_names" in part or "frontend_boundaries" in part for part in command) else "typecheck" if any("vue-tsc" in part for part in command) else "build" if command[-1] == "build" else "preparation"
+        results.append({"responsibility": responsibility, "command": command, "exitCode": code, "elapsedSeconds": time.monotonic() - started, "log": str(log_path)})
         if code:
             break
         if len(command) > 1 and command[1] == "ci":
@@ -108,6 +119,10 @@ def build_web(root, output, update_lock=False, source=None, prepare_only=False):
             raise ValueError("Web pins changed during lock resolution")
         (root / "apps/web/package-lock.json").write_bytes(lock.read_bytes().replace(b"\r\n", b"\n"))
     receipt = {"status": "PASS" if code == 0 else "FAIL", "source": source, "commands": results,
+               "responsibilities": {"preparation": prepare_only or update_lock,
+                   **{kind: "NOT_RUN" if not any(item["responsibility"] == kind for item in results) else
+                       "PASS" if all(item["exitCode"] == 0 for item in results if item["responsibility"] == kind) else "FAIL"
+                       for kind in ("lint", "typecheck", "build")}, "test": "NOT_RUN"},
                "componentInputs": component, "reused": False,
                "output": str(project if prepare_only else project / "dist"),
                "scope": "dependency-preparation-only" if prepare_only else "lock-resolution" if update_lock else "Web typecheck and production assets"}

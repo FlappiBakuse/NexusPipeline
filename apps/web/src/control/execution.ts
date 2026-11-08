@@ -127,6 +127,7 @@ export function executionStep(value: unknown): ActiveStep {
 
 export interface ExecutionPreview {
   hasRunnable: boolean;
+  canPrepareInitialConfiguration?: boolean;
   hasBlockedItems: boolean;
   reasonCode: string | null;
   completionAction: AutomationBundle['queues'][number]['completionAction'];
@@ -136,7 +137,7 @@ export interface ExecutionPreview {
 }
 export function executionPreview(value: unknown): ExecutionPreview {
   const row = objectValue(value);
-  return { hasRunnable: booleanValue(row.hasRunnable), hasBlockedItems: booleanValue(row.hasBlockedItems),
+  return { hasRunnable: booleanValue(row.hasRunnable), canPrepareInitialConfiguration: booleanValue(row.canPrepareInitialConfiguration), hasBlockedItems: booleanValue(row.hasBlockedItems),
     reasonCode: row.reasonCode === null ? null : stringValue(row.reasonCode),
     completionAction: row.completionAction === 'exitHost' ? 'exit' : enumValue(row.completionAction, ['none', 'shutdown', 'hibernate', 'restart', 'exit']),
     groups: arrayValue(row.groups, value => ({ scriptId: stringValue(objectValue(value).scriptId) })),

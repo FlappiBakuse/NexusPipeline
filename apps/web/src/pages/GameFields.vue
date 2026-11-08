@@ -2,7 +2,7 @@
 import { computed, watch } from 'vue';
 import { useAdapterAvailability } from './adapter-availability';
 import type { AutomationBundle } from '../control/wire.generated';
-import type { AppStore } from '../app/store';
+import type { AutomationStore } from '../app/store-ports';
 import { desktop } from '../app/desktop';
 import { scriptPaths, scriptPathKey, type ScriptPaths } from './script-paths';
 import { t, registerMessages } from '../app/locale';
@@ -10,7 +10,7 @@ registerMessages({ '客户端由脚本自身启动': 'The script launches its ow
 import EmulatorFields from './EmulatorFields.vue';
 type Script = AutomationBundle['scripts'][number];
 type Target = NonNullable<Script['target']>;
-const props = defineProps<{ modelValue: Script; store: AppStore }>();
+const props = defineProps<{ modelValue: Script; store: AutomationStore }>();
 const emit = defineEmits<{ 'update:modelValue': [value: Script] }>();
 const paths = computed(() => scriptPaths(props.store, props.modelValue));
 const available = useAdapterAvailability(props.store, () => props.modelValue.extensionId || null, () => true, () => {});
@@ -143,9 +143,10 @@ function android(key: string, value: string): void {
       <template v-if="target.kind === 'pc'">
         <label>
           {{ t('游戏路径') }}
-          <em>*</em>
+          <em v-if="target.launchByHost || target.forceCloseAtEnd">*</em>
           <nexus-path-picker
             :aria-label="t('游戏路径')"
+            :aria-required="target.launchByHost || target.forceCloseAtEnd"
             :value.prop="paths.gamePath"
             :placeholder="t('游戏可执行文件路径')"
             :kinds.prop="['file']"

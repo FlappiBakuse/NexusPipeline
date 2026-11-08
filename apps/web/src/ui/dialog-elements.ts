@@ -1,3 +1,4 @@
+import { attachSortablePointer } from './sortable-pointer.js';
 import { NexusElement, elementAttributes } from './element-base.js';
 import { FloatingElement } from './floating-element.js';
 import { controlStyles } from './control-styles.js';
@@ -103,8 +104,8 @@ export class DragHandle extends NexusElement {
     super(
       'nexus-drag-handle',
       controlStyles +
-        'button{min-width:var(--nx-drag-size,24px);width:var(--nx-drag-size,24px);min-height:var(--nx-drag-size,24px);height:var(--nx-drag-size,24px);padding:0;border:0;background:transparent;color:var(--nx-color-muted);cursor:grab}button:active{cursor:grabbing}',
-      '<button type="button" aria-keyshortcuts="ArrowUp ArrowDown" draggable="true"><svg width="10" height="14" viewBox="0 0 10 14" aria-hidden="true"><g fill="currentColor"><circle cx="3" cy="3" r="1.2"/><circle cx="7" cy="3" r="1.2"/><circle cx="3" cy="7" r="1.2"/><circle cx="7" cy="7" r="1.2"/><circle cx="3" cy="11" r="1.2"/><circle cx="7" cy="11" r="1.2"/></g></svg></button>'
+        'button{min-width:var(--nx-drag-size,24px);width:var(--nx-drag-size,24px);min-height:var(--nx-drag-size,24px);height:var(--nx-drag-size,24px);padding:0;border:0;background:transparent;color:var(--nx-color-muted);cursor:grab;touch-action:none}button:active{cursor:grabbing}',
+      '<button type="button" aria-keyshortcuts="ArrowUp ArrowDown" draggable="false"><svg width="10" height="14" viewBox="0 0 10 14" aria-hidden="true"><g fill="currentColor"><circle cx="3" cy="3" r="1.2"/><circle cx="7" cy="3" r="1.2"/><circle cx="3" cy="7" r="1.2"/><circle cx="7" cy="7" r="1.2"/><circle cx="3" cy="11" r="1.2"/><circle cx="7" cy="11" r="1.2"/></g></svg></button>'
     );
     this.button = this.root.querySelector('button')!;
   }
@@ -121,25 +122,13 @@ export class DragHandle extends NexusElement {
       },
       { signal }
     );
-    this.button.addEventListener(
-      'dragstart',
-      (event) => {
-        if (this.values.disabled) {
-          event.preventDefault();
-          return;
-        }
-        event.dataTransfer?.setData('text/plain', String(this.values.itemId));
-        if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
-      },
-      { signal }
-    );
   }
   override focus(options?: FocusOptions): void {
     this.button.focus(options);
   }
   protected render(): void {
     this.button.disabled = Boolean(this.values.disabled);
-    this.button.draggable = !this.values.disabled;
+    this.button.draggable = false;
     this.button.setAttribute('aria-label', String(this.values.label));
   }
 }
@@ -147,9 +136,8 @@ export class DragHandle extends NexusElement {
 export class SortableList extends NexusElement {
   static readonly observedAttributes = elementAttributes('nexus-sortable-list');
   private readonly itemSlot: HTMLSlotElement;
-  private selected: string | null = null;
   constructor() {
-    super('nexus-sortable-list', ':host{display:block}::slotted(*){display:block}', '<slot></slot>');
+    super('nexus-sortable-list', ':host{display:block}::slotted(*){display:block}::slotted([data-dragging]){box-shadow:0 12px 24px #0005;opacity:.92}::slotted([data-drop-target]){outline:2px solid var(--nx-color-accent);outline-offset:2px}', '<slot></slot>');
     this.itemSlot = this.root.querySelector('slot')!;
   }
   protected connect(signal: AbortSignal): void {
@@ -165,43 +153,14 @@ export class SortableList extends NexusElement {
       },
       { signal }
     );
-    this.addEventListener(
-      'dragstart',
-      (event) => {
-        const target = (event.target as HTMLElement).closest('[data-item-id]');
-        if (target && !this.values.disabled) this.selected = target.getAttribute('data-item-id');
-      },
-      { signal }
-    );
-    this.addEventListener(
-      'dragover',
-      (event) => {
-        if (this.selected && !this.values.disabled) event.preventDefault();
-      },
-      { signal }
-    );
-    this.addEventListener(
-      'drop',
-      (event) => {
-        event.preventDefault();
-        const target = (event.target as HTMLElement).closest('[data-item-id]')?.getAttribute('data-item-id');
-        if (target && this.selected) this.moveTo(this.selected, target);
-        this.selected = null;
-      },
-      { signal }
-    );
-    this.addEventListener(
-      'dragend',
-      () => {
-        this.selected = null;
-      },
-      { signal }
-    );
+    attachSortablePointer(this, signal, () => this.values.ids as string[], () => Boolean(this.values.disabled), ids => {
+      this.emit('nexus-reorder', { ids: Object.freeze(ids), source: 'pointer' });
+    });
   }
   protected render(): void {
     const ids = this.values.ids as readonly string[];
     this.setAttribute('role', 'list');
-    this.setAttribute('aria-disabled', String(this.values.disabled));
+    this.toggleAttribute('data-reorder-disabled', Boolean(this.values.disabled));
     this.itemSlot.assignedElements().forEach((element) => {
       const id = element.getAttribute('data-item-id');
       element.toggleAttribute('data-sortable', !this.values.disabled && Boolean(id && ids.includes(id)));
@@ -214,17 +173,6 @@ export class SortableList extends NexusElement {
       next = index + delta;
     if (index < 0 || next < 0 || next >= ids.length) return;
     [ids[index], ids[next]] = [ids[next]!, ids[index]!];
-    this.setProperty('ids', ids);
     this.emit('nexus-reorder', { ids: Object.freeze(ids), source });
-  }
-  private moveTo(id: string, target: string): void {
-    const ids = [...(this.values.ids as string[])];
-    const from = ids.indexOf(id),
-      to = ids.indexOf(target);
-    if (from < 0 || to < 0 || from === to) return;
-    ids.splice(from, 1);
-    ids.splice(to, 0, id);
-    this.setProperty('ids', ids);
-    this.emit('nexus-reorder', { ids: Object.freeze(ids), source: 'pointer' });
   }
 }

@@ -1,7 +1,8 @@
 import { createIdentity } from '../control/identity';
 import { computed, ref, type Ref } from 'vue';
-import type { AppStore } from '../app/store';
+import type { AutomationStore } from '../app/store-ports';
 import { initialValue, schemaAt } from '../control/schema';
+import type { AutomationDraft } from '../app/automation-draft';
 import type { AutomationBundle } from '../control/wire.generated';
 import { copyDraft } from '../app/draft-copy';
 import { accountDraft, clearAccountDraft } from './account-draft';
@@ -43,15 +44,15 @@ export class AutomationEditor {
       this.selected.value
   );
   readonly draft = computed({
-    get: () => this.store.drafts.get(this.draftKey.value) || {},
+    get: (): AutomationDraft => this.store.drafts.get(this.draftKey.value) as AutomationDraft || {},
     set: (value) => {
-      this.store.drafts.set(this.draftKey.value, value);
+      this.store.drafts.set(this.draftKey.value, { ...value });
       this.store.dirty.add(this.draftKey.value);
     }
   });
   private readonly queueKey = computed(() => this.draftKey.value + '/schedules');
   readonly queueState = computed(
-    () => this.store.drafts.get(this.queueKey.value) as unknown as QueueDraft | undefined
+    () => this.store.drafts.get(this.queueKey.value) as QueueDraft | undefined
   );
   readonly queueSchedules = computed({
     get: () => this.queueState.value?.items || [],
@@ -76,7 +77,7 @@ export class AutomationEditor {
   );
 
   constructor(
-    private readonly store: AppStore,
+    private readonly store: AutomationStore,
     private readonly kind: () => EntityKind,
     private readonly session: AutomationSession
   ) {
@@ -101,7 +102,7 @@ export class AutomationEditor {
       this.draft.value.kind === 'specialized' &&
       !scriptPaths(
         this.store,
-        this.draft.value as unknown as AutomationBundle['scripts'][number]
+        this.draft.value as AutomationBundle['scripts'][number]
       ).executable.trim()
     );
   }
@@ -113,7 +114,7 @@ export class AutomationEditor {
         ? 'automation-script.schema.json#/$defs/script'
         : 'automation-relations.schema.json#/$defs/' + this.activeKind.value.slice(0, -1)
     );
-    const value = (row ? copyDraft(row) : initialValue(schema)) as Record<string, unknown>;
+    const value = (row ? copyDraft(row) : initialValue(schema)) as AutomationDraft;
     if (!row) {
       value.id = createIdentity();
       value.order = this.rows.value.length;
@@ -131,7 +132,7 @@ export class AutomationEditor {
       this.store.drafts.delete(scriptPathKey(this.selected.value));
     }
     if (!this.store.drafts.has(this.draftKey.value)) {
-      this.store.drafts.set(this.draftKey.value, value);
+      this.store.drafts.set(this.draftKey.value, { ...value });
       this.session.revisions[this.draftKey.value] = row ? this.revision(String(value.id)) : 0;
       this.session.catalogs[this.draftKey.value] = this.catalog.value.catalogRevision;
       if (!row) this.store.dirty.add(this.draftKey.value);
@@ -140,6 +141,19 @@ export class AutomationEditor {
     this.editing.value = true;
     this.session.error = '';
     this.session.notice = '';
+  }
+
+  private readonly scriptDrafts = new Map<string, string>();
+
+  createScript(extensionId?: string): void {
+    if (!this.current() || this.session.saving || this.session.pending || !this.catalog.value) return;
+    if (this.selected.value && !this.rows.value.some(row => row.id === this.selected.value) &&
+        this.store.drafts.has(this.draftKey.value))
+      this.scriptDrafts.set(String(this.draft.value.extensionId || ''), this.selected.value);
+    this.selected.value = this.scriptDrafts.get(extensionId || '') || '';
+    if (this.resumeNew()) return;
+    this.edit();
+    if (extensionId) this.draft.value = { ...this.draft.value, kind: 'specialized', extensionId };
   }
 
   resumeNew(): boolean {

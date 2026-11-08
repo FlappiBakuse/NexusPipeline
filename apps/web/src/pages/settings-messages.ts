@@ -2,7 +2,6 @@ import { registerMessages } from '../app/locale';
 
 registerMessages({
   '开启远程访问后，请在 Windows 防火墙中允许 Web 端口入站连接。': 'After enabling remote access, allow inbound connections to the Web port in Windows Firewall.',
-  自定义壁纸: 'Custom wallpaper',
   '请以管理员身份启动软件后设置开机自启；当前设置未保存。':
     'Run the app as administrator to change login startup; these settings were not saved.',
   '请修正无效字段后再保存。': 'Correct the invalid fields before saving.',
@@ -106,6 +105,5 @@ registerMessages({
   "设置校验未通过，请检查必填字段和取值范围。": "Settings validation failed. Check required fields and allowed ranges.",
   "Web 管理": "Web management",
   "MCP 服务": "MCP service",
-  "MCP 仅监听本机回环地址；写入与执行需要单独启用。": "MCP listens on loopback only. Enable writes and execution separately.",
-  "壁纸设置": "Wallpaper settings"
+  "MCP 仅监听本机回环地址；写入与执行需要单独启用。": "MCP listens on loopback only. Enable writes and execution separately."
 });

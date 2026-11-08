@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
-import type { AppStore } from '../app/store';
+import type { AutomationStore } from '../app/store-ports';
 import type { AutomationBundle } from '../control/wire.generated';
 import { desktop } from '../app/desktop';
 import { notificationCatalog, type NotificationTask } from './notification-types';
@@ -10,7 +10,7 @@ import { t } from '../app/locale';
 type Binding = AutomationBundle['bindings'][number];
 type Overrides = NonNullable<AutomationBundle['users'][number]['bindingOverrides']>;
 const props = defineProps<{
-  store: AppStore;
+  store: AutomationStore;
   id: string;
   modelValue: Binding | Overrides;
   global?: boolean;
@@ -212,7 +212,7 @@ section {
   padding: 16px;
   border: 1px solid var(--border);
   border-radius: 10px;
-  background: var(--content-control);
+  background: var(--content-card);
 }
 h3 {
   margin: 0;
@@ -234,7 +234,7 @@ label {
   border: 1px solid var(--border);
   border-radius: 16px;
   overflow: hidden;
-  background: var(--panel);
+  background: var(--content-control);
   margin-bottom: 12px;
 }
 .switches > nexus-switch-setting + nexus-switch-setting {

@@ -71,6 +71,9 @@ export function historyReason(value: unknown): string {
   const code = String(value || '未知');
   const labels: Record<string, string> = {
     execution_not_started: '尚未启动脚本',
+    execution_completion_missing: '脚本已退出，未检测到约定的完成标记',
+    configuration_sync_capture_rejected: '配置同步采集失败，已保留旧快照',
+    adapter_retry_unavailable: '专项重试建议读取失败，已停止重试',
     judgement_keyword_succeeded: '日志已匹配成功关键字',
     judgement_keyword_failed: '日志已匹配失败关键字',
     execution_capture_frame_verified: '已采集运行截图',

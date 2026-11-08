@@ -5,6 +5,7 @@ const styles =
   scrollRailStyles +
   `
 :host {
+  --nx-scroll-padding: 0;
   position: relative;
   display: flex;
   flex-direction: column;
@@ -26,7 +27,7 @@ const styles =
   outline: none;
 }
 .viewport::-webkit-scrollbar { display: none; }
-.inside { min-width: 100%; min-height: 100%; }
+.inside { min-width: 100%; min-height: 100%; box-sizing: border-box; padding: var(--nx-scroll-padding,0); }
 
 `;
 

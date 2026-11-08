@@ -2,7 +2,8 @@
 import { computed, ref, toRefs, watch, onBeforeUnmount } from 'vue';
 import { extensionList } from '../control/extensions';
 import { metadataText, type ExtensionMetadata } from '../control/extension-metadata';
-import type { AppStore } from '../app/store';
+import type { AutomationStore } from '../app/store-ports';
+import type { AutomationDraft } from '../app/automation-draft';
 import type { AutomationBundle } from '../control/wire.generated';
 import { AutomationEditor, type EntityKind } from './automation-editor';
 import type { AutomationSession } from './automation-session';
@@ -14,7 +15,7 @@ import ScriptActions from './ScriptActions.vue';
 import ExtensionOutlet from '../extensions/ExtensionOutlet.vue';
 import { t, locale } from '../app/locale';
 const props = defineProps<{
-  store: AppStore;
+  store: AutomationStore;
   kind: EntityKind;
   visible: boolean;
   model: AutomationEditor;
@@ -86,7 +87,7 @@ const specializedTitle = computed(() => typeMetadata.value ?
         slot="header-actions"
         v-if="activeKind === 'scripts'"
         :store="store"
-        :script="draft as unknown as AutomationBundle['scripts'][number]"
+        :script="draft as AutomationBundle['scripts'][number]"
         :existing="rows.some((row) => row.id === selected)"
         :locked="saving || !!pending"
         @import="emit('import', $event)"
@@ -99,26 +100,26 @@ const specializedTitle = computed(() => typeMetadata.value ?
       <p v-if="notice" role="status">{{ t(notice) }}</p>
       <p v-if="pending" role="status">
         {{ t('待确认操作：') }}{{ pending.id }}
-        <button :disabled="saving || !store.can('operations.read')" @click="emit('inspect')">
+        <button type="button" :disabled="saving || !store.can('operations.read')" @click="emit('inspect')">
           {{ t('查询操作状态并刷新') }}
         </button>
       </p>
-      <form :id="'automation-editor-' + kind" @submit.prevent="emit('save', form)">
+      <form novalidate :id="'automation-editor-' + kind" @submit.prevent="emit('save', form)">
         <fieldset :disabled="saving || !!pending" :inert="saving || !!pending" class="editor-fields">
           <QueueFields
             v-if="bundle && activeKind === 'queues'"
-            :model-value="draft as unknown as AutomationBundle['queues'][number]"
+            :model-value="draft as AutomationBundle['queues'][number]"
             v-model:schedules="queueSchedules"
             :bundle="bundle"
             :store="store"
-            @update:model-value="draft = $event as unknown as Record<string, unknown>"
+            @update:model-value="draft = $event as AutomationDraft"
           />
           <AccountFields
             v-else-if="bundle && activeKind === 'users' && !userGlobal"
-            :model-value="draft as unknown as AutomationBundle['users'][number]"
+            :model-value="draft as AutomationBundle['users'][number]"
             :existing="rows.some((row) => row.id === selected)"
             :bundle="bundle"
-            @update:model-value="draft = $event as unknown as Record<string, unknown>"
+            @update:model-value="draft = $event as AutomationDraft"
             :bindings="accountBindings"
             :store="store"
             :visible="visible"
@@ -134,12 +135,12 @@ const specializedTitle = computed(() => typeMetadata.value ?
           />
           <ScriptFields
             v-else-if="activeKind === 'scripts'"
-            :model-value="draft as unknown as AutomationBundle['scripts'][number]"
+            :model-value="draft as AutomationBundle['scripts'][number]"
             :store="store"
-            @update:model-value="draft = $event as unknown as Record<string, unknown>"
+            @update:model-value="draft = $event as AutomationDraft"
           />
           <ExtensionOutlet
-            v-if="activeKind !== 'users' || userGlobal"
+            v-if="(activeKind !== 'users' || userGlobal) && (activeKind !== 'scripts' || rows.some(row => row.id === selected))"
             :target="
               activeKind === 'scripts'
                 ? 'automation.script.editor'

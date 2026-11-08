@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch, onBeforeUnmount } from 'vue';
-import type { AppStore } from '../app/store';
+import type { RecordsStore } from '../app/store-ports';
 import { recordPage } from '../control/models';
 import type { RecordPage, RecordRow } from '../control/models';
 import { objectValue, arrayValue } from '../control/client';
@@ -9,7 +9,7 @@ import ModalTransition from '../components/ModalTransition.vue';
 import { t } from '../app/locale';
 import './history-messages';
 import type { DateRange } from '@nexuspipeline/extension-sdk';
-import { RecordWindow, groupPage } from './record-window';
+import { RecordWindow } from './record-window';
 import HistoryDescription from './HistoryDescription.vue';
 import HistoryIndex from './HistoryIndex.vue';
 import { outcomeName } from './history-row';
@@ -17,7 +17,7 @@ import HistoryRecords from './HistoryRecords.vue';
 import { HistoryLink } from './history-link';
 import { usePanelHeight } from '../app/panel-height';
 import { localDate, timeRange } from './history-range';
-const props = defineProps<{ store: AppStore; visible: boolean }>();
+const props = defineProps<{ store: RecordsStore; visible: boolean }>();
 const workspace = ref<HTMLElement>();
 const { height: workspaceHeight } = usePanelHeight(workspace, () => props.visible);
 const page = ref<RecordPage>();
@@ -65,7 +65,7 @@ const selectedName = computed(() =>
       user.value ||
       '全部账号'
 );
-function summaryQuery(start: string, end: string, afterUserId?: string): string {
+function summaryQuery(start: string, end: string): string {
   const range = timeRange(start, end);
   const query = new URLSearchParams({
     endedFromInclusive: range.from,
@@ -75,8 +75,7 @@ function summaryQuery(start: string, end: string, afterUserId?: string): string 
   if (business.value) query.set('business', business.value);
   if (lifecycle.value) query.set('lifecycle', lifecycle.value);
   if (user.value) query.set('userId', user.value);
-  if (afterUserId) query.set('afterUserId', afterUserId);
-  return '/control/v1/records/summary?' + query;
+  return '/control/v1/records/summary/days?' + query;
 }
 async function loadSummary(): Promise<void> {
   summaryOwner?.abort();
@@ -120,6 +119,7 @@ async function load(target = 1, reset = true): Promise<void> {
   loading.value = true;
   recordError.value = '';
   const query = new URLSearchParams({ limit: '50' });
+  if (chosenUser.value === 'null') query.set('scope', 'groups');
   if (chosenUser.value && chosenUser.value !== 'null') query.set('userId', chosenUser.value);
   else if (user.value && chosenUser.value !== 'null') query.set('userId', user.value);
   if (business.value) query.set('business', business.value);
@@ -128,7 +128,6 @@ async function load(target = 1, reset = true): Promise<void> {
   query.set('endedFromInclusive', range.from);
   query.set('endedUntilExclusive', range.until);
   try {
-    const groupsOnly = chosenUser.value === 'null';
     const fetchPage = (cursor: RecordPage['next'], limit: number) => {
       const requested = new URLSearchParams(query);
       if (cursor) {
@@ -140,7 +139,7 @@ async function load(target = 1, reset = true): Promise<void> {
     };
     const result = await records.read(
       target,
-      (cursor) => (groupsOnly ? groupPage(cursor, fetchPage, controller.signal) : fetchPage(cursor, 50)),
+      (cursor) => fetchPage(cursor, 50),
       controller.signal,
       reset
     );
@@ -191,6 +190,9 @@ async function refreshPage(): Promise<void> {
   await loadSummary();
   await load();
 }
+watch(() => props.store.state.preparationRevision, () => {
+  if (props.visible) void refreshPage();
+});
 watch([user, business, lifecycle, from, until], () => {
   chosenDate.value = '';
   chosenUser.value = '';

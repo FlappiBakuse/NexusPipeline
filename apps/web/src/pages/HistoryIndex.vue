@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { computed, markRaw, onBeforeUnmount, reactive, ref, watch, type Raw } from 'vue';
-import type { AppStore } from '../app/store';
+import type { RecordsStore } from '../app/store-ports';
 import { arrayValue, objectValue } from '../control/client';
 import { t, locale } from '../app/locale';
 import { UserWindow } from './user-window';
 const props = defineProps<{
-  store: AppStore;
+  store: RecordsStore;
   days: Record<string, unknown>[];
   visible: boolean;
   selectedDate: string;
@@ -102,7 +102,7 @@ async function load(date: string, page = 1): Promise<void> {
         const requested = new URLSearchParams(query);
         if (cursor) requested.set('afterUserId', cursor);
         const value = await props.store.client.read(
-          '/control/v1/records/summary?' + requested,
+          '/control/v1/records/summary/users?' + requested,
           objectValue,
           owner.signal
         );

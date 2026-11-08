@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, ref, watch, toRefs } from 'vue';
-import type { AppStore } from '../app/store';
+import type { AutomationStore } from '../app/store-ports';
 import ModalTransition from '../components/ModalTransition.vue';
 import ConfigurationPanel from './ConfigurationPanel.vue';
 import AutomationRows from './AutomationRows.vue';
 import AutomationEditorDialog from './AutomationEditorDialog.vue';
 import ScriptTypes, { type ScriptChoice } from './ScriptTypes.vue';
 import { scriptPathKey } from './script-paths';
+import type { AutomationDraft } from '../app/automation-draft';
 import type { AutomationBundle } from '../control/wire.generated';
 import AutomationExchange from './AutomationExchange.vue';
 import { automationSession, type AutomationAction } from './automation-session';
@@ -18,7 +19,7 @@ import { loadTemplate, templateKey } from './script-template';
 import { AutomationEditor, type EntityKind } from './automation-editor';
 import { AutomationSave } from './automation-save';
 import { useAccountSummaries } from './account-summary';
-const props = defineProps<{ store: AppStore; kind: EntityKind; visible: boolean }>();
+const props = defineProps<{ store: AutomationStore; kind: EntityKind; visible: boolean }>();
 const summaries = useAccountSummaries(props.store, () => props.visible && props.kind === 'users');
 const session = automationSession(props.store, props.kind);
 const { saving, error, notice, pending } = toRefs(session);
@@ -53,14 +54,12 @@ const emptyText = computed(
 function beginCreate(): void {
   activeKind.value = props.kind;
   userGlobal.value = false;
-  if (editorModel.resumeNew()) return;
   if (activeKind.value === 'scripts') typesOpen.value = true;
-  else edit();
+  else if (!editorModel.resumeNew()) edit();
 }
 function chooseScript(choice?: ScriptChoice): void {
   typesOpen.value = false;
-  edit();
-  if (choice) draft.value = { ...draft.value, kind: 'specialized', extensionId: choice.extensionId };
+  editorModel.createScript(choice?.extensionId);
 }
 async function importScript(file: File): Promise<void> {
   if (saving.value || pending.value) return;
@@ -77,7 +76,7 @@ async function importScript(file: File): Promise<void> {
       exchangeOpen.value = true;
       return;
     }
-    draft.value = imported.value as unknown as Record<string, unknown>;
+    draft.value = imported.value as AutomationDraft;
     props.store.drafts.set(scriptPathKey(id), imported.paths);
     props.store.drafts.set(templateKey(id), { bundle: imported.bundle });
   } catch (reason) {
@@ -89,7 +88,7 @@ async function importScript(file: File): Promise<void> {
 const edit = (row?: unknown) => editorModel.edit(row);
 function askRemove(row: { id: string }): void {
   if (!pending.value && !saving.value)
-    deleting.value = { id: row.id, name: label(row as Record<string, unknown>) };
+    deleting.value = { id: row.id, name: label(row as AutomationDraft) };
 }
 async function remove(): Promise<void> {
   if (!deleting.value || saving.value || pending.value || !props.store.can('automation.delete')) return;
@@ -129,7 +128,7 @@ async function checkPending(): Promise<void> {
   if (completed?.key === draftKey.value && (completed.action === 'save' || completed.action === 'import'))
     editing.value = false;
 }
-function label(row: Record<string, unknown>): string {
+function label(row: AutomationDraft): string {
   return String(row.name || row.id);
 }
 async function reorder(ids: string[]): Promise<void> {
@@ -185,24 +184,23 @@ function openRow(row: unknown, global = false): void {
     >
       {{ t(createLabel) }}
     </button>
+      <button v-if="pending && !editing" :disabled="saving" @click="checkPending">{{ t('查询操作状态并刷新') }}</button>
   </PageActions>
   <ModalTransition>
     <ScriptTypes
-      v-if="typesOpen"
+      v-if="kind === 'scripts'"
       :store="store"
-      :visible="visible"
+      :active="visible"
+      :visible="visible && typesOpen"
       @choose="chooseScript"
       @close="typesOpen = false"
     />
   </ModalTransition>
   <div class="entity-list-page">
-    <p v-if="kind === 'users' && summaries.error" role="alert" class="error-text">{{ t(summaries.error) }}</p>
-    <p v-if="error && !editing" role="alert" class="error-text">{{ t(error) }}</p>
-    <p v-if="pending && !editing" role="status">
-      {{ t('操作结果待确认；请查询状态，勿重复提交。') }}
-      <button :disabled="saving" @click="checkPending">{{ t('查询操作状态并刷新') }}</button>
-    </p>
-    <p v-if="notice" role="status" class="notice-banner">{{ t(notice) }}</p>
+    <nexus-toast v-if="kind === 'users' && summaries.error" tone="danger" :message.prop="t(summaries.error)" />
+    <nexus-toast v-if="error && !editing" tone="danger" :message.prop="t(error)" />
+    <nexus-toast v-if="pending && !editing" tone="warning" :message.prop="t('操作结果待确认；请查询状态，勿重复提交。')" />
+    <nexus-toast v-if="notice" :message.prop="t(notice)" @nexus-close="notice = ''" />
     <section class="entity-list">
       <div v-if="!listedRows.length" class="automation-empty">
         <strong>{{ t(emptyText[0]!) }}</strong>
@@ -211,7 +209,7 @@ function openRow(row: unknown, global = false): void {
       <AutomationRows
         v-else-if="bundle"
         :kind="kind"
-        :rows="listedRows as unknown as { id: string; name?: string; [key: string]: unknown }[]"
+        :rows="listedRows"
         :bundle="bundle"
         :store="store"
         :visible="visible"

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { createIdentity } from '../control/identity';
 import { computed, onBeforeUnmount, reactive, toRefs, watch } from 'vue';
-import type { AppStore } from '../app/store';
+import type { ConfigurationStore } from '../app/store-ports';
 import { ControlFailure, integerValue, objectValue, stringValue } from '../control/client';
 import { t } from '../app/locale';
 import type { ConfigurationOverview } from './configuration-types';
@@ -19,16 +19,16 @@ type Draft = {
   busy: boolean;
   note: string;
 };
-const props = defineProps<{ store: AppStore; overview: ConfigurationOverview; visible: boolean }>();
+const props = defineProps<{ store: ConfigurationStore; overview: ConfigurationOverview; visible: boolean }>();
 const emit = defineEmits<{ changed: [] }>();
 const key = 'configuration/native/' + props.overview.bindingId;
 const saved = props.store.drafts.get(key);
 const state = reactive(
   saved || {
-    rootId: '',
-    relativePath: '',
+    rootId: props.store.state.automation?.bundle.scripts.find(script => script.id === props.overview.scriptId)?.executable.rootId || '',
+    relativePath: props.store.state.automation?.bundle.scripts.find(script => script.id === props.overview.scriptId)?.executable.relative || '',
     argumentsText: '',
-    resourceIds: [] as string[],
+    resourceIds: props.overview.resources.map(resource => resource.resourceId),
     session: null,
     pending: null,
     launchId: '',
@@ -98,7 +98,7 @@ async function readSession(): Promise<void> {
       note.value = '编辑会话仍在进行。';
     }
   } catch (error) {
-    props.store.report(error);
+    note.value = error instanceof Error ? error.message : '操作失败，请重试。';
   }
 }
 async function begin(): Promise<void> {
@@ -138,7 +138,7 @@ async function begin(): Promise<void> {
     note.value = '原生编辑器已启动。';
   } catch (error) {
     if (!(error instanceof ControlFailure && error.uncertain)) state.pending = null;
-    props.store.report(error);
+    note.value = error instanceof Error ? error.message : '操作失败，请重试。';
   } finally {
     busy.value = false;
   }
@@ -169,7 +169,7 @@ async function finish(action: 'save' | 'cancel'): Promise<void> {
     await readSession();
   } catch (error) {
     if (!(error instanceof ControlFailure && error.uncertain)) state.pending = null;
-    props.store.report(error);
+    note.value = error instanceof Error ? error.message : '操作失败，请重试。';
   } finally {
     busy.value = false;
   }
@@ -220,19 +220,19 @@ onBeforeUnmount(() => {
           {{ item.label }}
         </label>
       </fieldset>
-      <button :disabled="!canBegin" @click="begin">{{ t('打开编辑器') }}</button>
+      <button type="button" :disabled="!canBegin" @click="begin">{{ t('打开编辑器') }}</button>
     </template>
     <template v-else>
       <p v-if="state.session" role="status">{{ t('会话状态') }}: {{ state.session.phase }}</p>
       <p v-if="state.pending" role="alert">{{ t('会话结果待确认，请先读取会话状态。') }}</p>
       <div class="row">
-        <button v-if="state.session" :disabled="busy || !!state.pending" @click="finish('save')">
+        <button type="button" v-if="state.session" :disabled="busy || !!state.pending" @click="finish('save')">
           {{ t('保存编辑结果') }}
         </button>
-        <button v-if="state.session" :disabled="busy || !!state.pending" @click="finish('cancel')">
+        <button type="button" v-if="state.session" :disabled="busy || !!state.pending" @click="finish('cancel')">
           {{ t('取消并恢复') }}
         </button>
-        <button :disabled="busy" @click="readSession">{{ t('读取会话状态') }}</button>
+        <button type="button" :disabled="busy" @click="readSession">{{ t('读取会话状态') }}</button>
       </div>
     </template>
     <p v-if="note" role="status">{{ t(note) }}</p>

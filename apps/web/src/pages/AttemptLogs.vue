@@ -1,18 +1,20 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
-import type { AppStore } from '../app/store';
+import type { RecordsStore } from '../app/store-ports';
 import { arrayValue, objectValue, stringValue } from '../control/client';
 import { attemptTitle } from './history-detail';
 import HistoryLogViewer from './HistoryLogViewer.vue';
+import HistoryCatalogWindow from '../components/HistoryCatalogWindow.vue';
 import { t } from '../app/locale';
+import { historyLogId, type HistoryLog } from './attempt-resources';
 const props = withDefaults(
   defineProps<{
-    store: AppStore;
+    store: RecordsStore;
     runId: string;
     attemptId: string;
     visible: boolean;
     ordinal?: number;
-    logs: (Record<string, unknown> & { key: { stepId: string; role: string; invocationOrdinal?: number } })[];
+    logs: HistoryLog[];
   }>(),
   { ordinal: 1 }
 );
@@ -22,10 +24,13 @@ const text = ref('');
 const omitted = ref(false);
 const error = ref('');
 const busy = ref(false);
+const selectedId = ref('');
 const lines = computed(() => (text.value ? text.value.split('\n').length : 0));
 const preview = computed(() => text.value.split('\n').slice(-200).join('\n'));
 const title = computed(() => t('脚本日志') + '（' + attemptTitle(props.ordinal) + '）');
+const selected = computed(() => props.logs.find(log => historyLogId(log) === selectedId.value));
 let owner: AbortController | undefined;
+let loadedKey = '', requestKey = '';
 function decode(value: unknown): string {
   const encoded = stringValue(value);
   const bytes = Uint8Array.from(atob(encoded), (character) => character.charCodeAt(0));
@@ -33,70 +38,63 @@ function decode(value: unknown): string {
 }
 async function load(): Promise<void> {
   owner?.abort();
-  if (!props.visible || !props.logs.length) return;
+  const log = selected.value;
+  if (!props.visible || !expanded.value || !log) return;
   const controller = new AbortController();
   owner = controller;
+  const key = log.key;
+  const fingerprint = JSON.stringify([props.runId, props.attemptId, historyLogId(log), log.snapshotSha256]);
+  requestKey = fingerprint;
   busy.value = true;
   error.value = '';
+  loadedKey = '';
+  text.value = '';
+  omitted.value = false;
   try {
-    const texts: string[] = [];
-    let truncated = false;
-    for (const log of props.logs) {
-      const key = log.key;
-      const base =
-        '/control/v1/records/' +
-        props.runId +
-        '/attempts/' +
-        props.attemptId +
-        '/logs/' +
-        encodeURIComponent(key.stepId) +
-        '/' +
-        encodeURIComponent(key.role);
-      const tail = await props.store.client.read(
-        base + '/tail?maximumBytes=65536' + (key.invocationOrdinal ? '&invocationOrdinal=' + key.invocationOrdinal : ''),
-        objectValue,
-        controller.signal
-      );
-      controller.signal.throwIfAborted();
-      const identity = objectValue(objectValue(tail.description).key);
-      if (
-        identity.runId !== props.runId ||
-        identity.attemptId !== props.attemptId ||
-        identity.stepId !== key.stepId ||
-        identity.role !== key.role
-      )
-        throw Error('history_log_identity_invalid');
-      texts.push(arrayValue(tail.slices, (item) => decode(objectValue(item).bytes)).join(''));
-      truncated ||= tail.prefixOmitted === true;
-    }
-    text.value = texts.filter(Boolean).join('\n');
-    omitted.value = truncated;
+    const base = '/control/v1/records/' + props.runId + '/attempts/' + props.attemptId + '/logs/' +
+      encodeURIComponent(key.stepId) + '/' + encodeURIComponent(key.role);
+    const tail = await props.store.client.read(
+      base + '/tail?maximumBytes=65536' + (key.invocationOrdinal ? '&invocationOrdinal=' + key.invocationOrdinal : ''),
+      objectValue, controller.signal);
+    controller.signal.throwIfAborted();
+    const received = objectValue(objectValue(tail.description).key);
+    if (received.runId !== props.runId || received.attemptId !== props.attemptId ||
+        received.stepId !== key.stepId || received.role !== key.role ||
+        (received.invocationOrdinal ?? null) !== (key.invocationOrdinal ?? null))
+      throw Error('history_log_identity_invalid');
+    text.value = arrayValue(tail.slices, item => decode(objectValue(item).bytes)).join('');
+    omitted.value = tail.prefixOmitted === true;
+    loadedKey = fingerprint;
   } catch (reason) {
     if (!controller.signal.aborted) error.value = reason instanceof Error ? reason.message : String(reason);
   } finally {
-    if (owner === controller) busy.value = false;
+    if (owner === controller) { busy.value = false; requestKey = ''; }
   }
 }
 watch(
-  [() => props.logs, () => props.visible],
-  () => {
-    if (!props.visible) {
-      owner?.abort();
-      full.value = false;
-    } else void load();
-  },
-  { immediate: true }
-);
-watch(
-  () => [props.runId, props.attemptId],
+  () => [props.runId, props.attemptId] as const,
   () => {
     owner?.abort();
     text.value = '';
     omitted.value = false;
     expanded.value = false;
     full.value = false;
+    selectedId.value = '';
+    loadedKey = ''; requestKey = '';
   }
 );
+watch(() => [props.visible, expanded.value, selectedId.value,
+  JSON.stringify(props.logs.map(log => [historyLogId(log), log.snapshotSha256]))] as const, () => {
+  if (!props.visible || !expanded.value) {
+    owner?.abort(); owner = undefined; requestKey = ''; busy.value = false;
+    if (!props.visible) full.value = false;
+    return;
+  }
+  if (!selected.value && props.logs[0]) { selectedId.value = historyLogId(props.logs[0]); return; }
+  if (!selected.value) { text.value = ''; omitted.value = false; loadedKey = ''; return; }
+  const fingerprint = JSON.stringify([props.runId, props.attemptId, historyLogId(selected.value), selected.value.snapshotSha256]);
+  if (loadedKey !== fingerprint && requestKey !== fingerprint) void load();
+}, { immediate: true });
 onBeforeUnmount(() => owner?.abort());
 </script>
 
@@ -108,17 +106,27 @@ onBeforeUnmount(() => owner?.abort());
     </p>
     <button v-if="!expanded" class="history-log-toggle" :aria-expanded="false" @click="expanded = true">
       <strong>{{ title }}</strong>
-      <span>{{ t('点击展开') }} {{ omitted ? '' : lines }} {{ t('行脚本日志') }}</span>
+      <span>{{ t('点击展开') }}</span>
     </button>
     <template v-else>
       <p class="history-log-label">
         {{ title }}
-        <span v-if="!omitted">· {{ lines }} {{ t('行脚本日志') }}</span>
+        <span v-if="!busy && !error && selected && !omitted">· {{ lines }} {{ t('行脚本日志') }}</span>
       </p>
+      <nav v-if="logs.length > 1" :aria-label="t('脚本日志')">
+        <HistoryCatalogWindow :items="logs" :item-key="historyLogId" :label="t('脚本日志')" :visible="visible">
+          <template #default="{ item: log }">
+            <button :aria-pressed="selectedId === historyLogId(log)" @click="selectedId = historyLogId(log)">
+              {{ log.key.stepId }} · {{ t(log.key.role) }}<template v-if="log.key.invocationOrdinal">
+                · {{ attemptTitle(log.key.invocationOrdinal) }}</template>
+            </button>
+          </template>
+        </HistoryCatalogWindow>
+      </nav>
       <nexus-scroll-area class="history-log-preview" direction="both" :label="t('运行日志')">
-        <pre>{{ preview || t('没有可用的日志') }}</pre>
+        <pre>{{ busy ? '' : preview || t('没有可用的日志') }}</pre>
       </nexus-scroll-area>
-      <button v-if="omitted || lines > 200" class="history-log-full" @click="full = true">
+      <button v-if="selected" class="history-log-full" @click="full = true">
         {{ t('查看完整日志') }}
       </button>
     </template>
@@ -129,6 +137,7 @@ onBeforeUnmount(() => owner?.abort());
       :attempt-id="attemptId"
       :visible="visible"
       :logs="logs"
+      :initial-log="selected"
       @close="full = false"
     />
   </section>

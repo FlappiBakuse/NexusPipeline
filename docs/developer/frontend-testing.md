@@ -1,5 +1,7 @@
 # 按范围验证 Web 与桌面
 
+执行顺序与选定范围以[统一验证规范](validation.md)为准；下面给出参数参考。
+
 先在仓外构建槽运行 `python tooling/web_build.py --prepare-only --output <构建槽>`。
 该模式固定当前源码和原生 npm lock、准备依赖，保留 source/prepare 回执；不运行 Vite、vue-tsc 或 .NET。
 相同锁复用依赖；源码改变须重新准备。正常 Web build 继续执行类型、AST 边界及生产构建。

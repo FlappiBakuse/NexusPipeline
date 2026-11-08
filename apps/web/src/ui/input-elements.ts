@@ -142,7 +142,7 @@ export class NexusRangeElement extends NexusElement {
       .range-track{position:absolute;inset:16px 0 auto;height:8px;border:1px solid light-dark(#b2b2b2,#999);border-radius:999px;
       background-color:light-dark(#efefef,#3b3b3b);background-image:linear-gradient(to right,var(--nx-color-accent) 0 var(--range-progress),transparent var(--range-progress) 100%)}
       .range-thumb{position:absolute;top:12px;left:calc((100% - 16px) * var(--range-unit));width:16px;height:16px;border-radius:50%;background:var(--nx-color-accent)}
-      .range:focus-within{outline:2px solid var(--nx-color-accent);outline-offset:2px;border-radius:4px}
+      .range:focus-within{outline:2px solid var(--nx-color-accent);outline-offset:-2px;border-radius:4px}
       input{position:absolute;inset:0;appearance:none;opacity:0;width:100%;height:40px;min-height:40px;margin:0;padding:0;border:0;background:transparent;cursor:pointer}
       .range-track,.range-thumb{pointer-events:none}
     `,

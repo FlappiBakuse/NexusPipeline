@@ -92,10 +92,7 @@ export function useSettingsSession(store: AppStore, valid: () => boolean) {
       !store.can('settings.write')
     )
       return;
-    if (!valid()) {
-      session.error = '请修正无效字段后再保存。';
-      return;
-    }
+    if (!valid()) return;
     const body: ControlHostSettings = {
       format: 'nexus.control.host-settings',
       version: 1,

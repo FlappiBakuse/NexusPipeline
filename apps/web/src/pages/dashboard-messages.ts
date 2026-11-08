@@ -121,6 +121,5 @@ registerMessages({
   项前置步骤: 'prerequisite steps',
   查看运行详情: 'View run details',
   与取消: ' and cancel',
-  "游戏活动": "Game activities",
   "查看订阅游戏的版本与活动。": "View subscribed game versions and activities."
 });

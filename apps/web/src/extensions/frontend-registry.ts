@@ -11,6 +11,7 @@ import {
   type SurfaceContext,
   type SurfaceId
 } from '@nexuspipeline/extension-sdk';
+import { abortable } from '../control/abortable';
 import { SurfaceSession } from './surface-session.js';
 
 interface ActiveExtension {
@@ -28,7 +29,24 @@ export interface FrontendEnvironment {
 
 export class FrontendRegistry {
   private readonly active = new Map<string, ActiveExtension>();
-  private readonly pending = new Set<string>();
+  private readonly pending = new Map<string, ExtensionScope>();
+  preparationSignal: AbortSignal | undefined;
+  preparationFailure: ((error: unknown) => void) | undefined;
+  private readonly retries = new Set<() => Promise<void>>();
+  subscribeRetry(retry: () => Promise<void>): () => void {
+    this.retries.add(retry);
+    return () => { this.retries.delete(retry); };
+  }
+  retryMounts(): void { for (const retry of this.retries) this.trackMount(retry()); }
+  reportMountFailure(error: unknown): void { this.preparationFailure?.(error); this.report(error); }
+  private readonly mounting = new Set<Promise<void>>();
+  trackMount(work: Promise<void>): void {
+    this.mounting.add(work);
+    void work.finally(() => this.mounting.delete(work)).catch(error => this.report(error));
+  }
+  async settled(signal: AbortSignal): Promise<void> {
+    while (this.mounting.size) await abortable(Promise.allSettled([...this.mounting]).then(() => {}), signal);
+  }
   private readonly listeners = new Set<(extensionId: string) => void>();
 
   constructor(private readonly environment: FrontendEnvironment) {}
@@ -40,6 +58,7 @@ export class FrontendRegistry {
         catch (error) { this.report(error); }
       }
     }
+    this.changed('');
   }
 
   subscribe(listener: (extensionId: string) => void): () => void {
@@ -62,8 +81,8 @@ export class FrontendRegistry {
     const id = manifest.extensionId;
     if (this.active.has(id) || this.pending.has(id))
       throw new Error('Extension already owns frontend registrations');
-    this.pending.add(id);
     const scope = new ExtensionScope();
+    this.pending.set(id, scope);
     const surfaces: SurfaceContribution[] = [];
     const routes: RouteContribution[] = [];
     const styles: HTMLStyleElement[] = [];
@@ -74,6 +93,8 @@ export class FrontendRegistry {
       if (!accepting || scope.signal.aborted) throw new Error('Extension registration is closed');
     };
     const cancel = (): void => {
+      accepting = false;
+      if (this.pending.get(id) === scope) this.pending.delete(id);
       void scope.dispose().catch((error) => this.report(error));
     };
     signal?.addEventListener('abort', cancel, { once: true });
@@ -99,10 +120,18 @@ export class FrontendRegistry {
         if (!surfaceIds.includes(contribution.target) || typeof contribution.mount !== 'function') {
           throw new TypeError('Unknown surface or renderer');
         }
+        const card = contribution.dashboard;
+        if (card && (contribution.target !== 'overview.cards' ||
+          !/^[a-z][a-z0-9.-]{0,95}$/.test(card.key) ||
+          ['status', 'running', 'history-duration', 'history-counts'].includes(card.key) ||
+          !card.title.trim() || card.title.length > 120 || card.description.length > 1024 ||
+          typeof card.defaultVisible !== 'boolean' || !Number.isSafeInteger(card.order)))
+          throw new TypeError('Invalid dashboard contribution');
         surfaces.push(
           Object.freeze({
             id: contribution.id,
             target: contribution.target,
+            ...(card ? { dashboard: Object.freeze({ ...card, get title() { return card.title; }, get description() { return card.description; } }) } : {}),
             mount: contribution.mount.bind(contribution)
           })
         );
@@ -152,17 +181,17 @@ export class FrontendRegistry {
       }
       throw error;
     } finally {
-      this.pending.delete(id);
+      if (this.pending.get(id) === scope) this.pending.delete(id);
       signal?.removeEventListener('abort', cancel);
     }
   }
 
-  listSurfaces(target: SurfaceId): readonly { extensionId: string; id: string }[] {
+  listSurfaces(target: SurfaceId): readonly { extensionId: string; id: string; dashboard?: SurfaceContribution['dashboard'] }[] {
     return Object.freeze(
       [...this.active].flatMap(([extensionId, owner]) =>
         owner.surfaces
           .filter((item) => item.target === target)
-          .map((item) => Object.freeze({ extensionId, id: item.id }))
+          .map((item) => Object.freeze({ extensionId, id: item.id, dashboard: item.dashboard }))
       )
     );
   }
@@ -181,7 +210,8 @@ export class FrontendRegistry {
     extensionId: string,
     id: string,
     element: HTMLElement,
-    context: SurfaceContext
+    context: SurfaceContext,
+    signal?: AbortSignal
   ): Promise<SurfaceSession> {
     const owner = this.active.get(extensionId);
     const contribution =
@@ -192,9 +222,16 @@ export class FrontendRegistry {
     scope.signal.throwIfAborted();
     const candidate = document.createElement('div');
     const session = new SurfaceSession(candidate, context, scope);
+    const signals = [this.preparationSignal, signal].filter((value): value is AbortSignal => !!value);
+    const preparing = signals.length ? AbortSignal.any(signals) : undefined;
+    const cancel = () => { void scope.dispose().catch(error => this.report(error)); };
+    preparing?.addEventListener('abort', cancel, { once: true });
+    if (preparing?.aborted) cancel();
     try {
-      const cleanup = await contribution.mount(session);
-      if (cleanup) await scope.own(cleanup);
+      const work = Promise.resolve().then(() => contribution.mount(session)).then(async cleanup => {
+        if (cleanup) await scope.own(cleanup);
+      });
+      await abortable(work, scope.signal);
       scope.signal.throwIfAborted();
       element.append(candidate);
       return session;
@@ -205,7 +242,7 @@ export class FrontendRegistry {
         throw new AggregateError([error, cleanupError], 'Surface mount and cleanup failed');
       }
       throw error;
-    }
+    } finally { preparing?.removeEventListener('abort', cancel); }
   }
 
   private commit(
@@ -217,6 +254,12 @@ export class FrontendRegistry {
     localeListeners: Set<(locale: string) => void>
   ): void {
     const paths = new Set(this.listRoutes().map((route) => route.path));
+    const cards = new Set(this.listSurfaces('overview.cards').flatMap(item => item.dashboard ? [item.dashboard.key] : []));
+    for (const surface of surfaces) {
+      if (!surface.dashboard) continue;
+      if (cards.has(surface.dashboard.key)) throw new Error('Dashboard key already registered');
+      cards.add(surface.dashboard.key);
+    }
     for (const route of routes) {
       if (paths.has(route.path)) throw new Error('Route already registered');
       paths.add(route.path);

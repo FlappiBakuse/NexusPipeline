@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { AppStore } from '../app/store';
 import DashboardMain from './DashboardMain.vue';
-defineProps<{ store: AppStore; visible: boolean; overviewAvailable?: boolean }>();
+import type { SurfaceContribution } from '@nexuspipeline/extension-sdk';
+defineProps<{ store: AppStore; visible: boolean; overviewCards?: readonly { extensionId: string; id: string; dashboard?: SurfaceContribution['dashboard'] }[] }>();
 </script>
-<template><DashboardMain :store="store" :visible="visible" :overview-available="overviewAvailable" /></template>
+<template><DashboardMain :store="store" :visible="visible" :overview-cards="overviewCards" /></template>

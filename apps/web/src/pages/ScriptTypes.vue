@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import { scriptIcon } from './script-icons';
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
-import type { AppStore } from '../app/store';
+import { computed, onBeforeUnmount, watch, ref } from 'vue';
+import type { AutomationStore } from '../app/store-ports';
 import { extensionList, type ExtensionState } from '../control/extensions';
 import { metadataText } from '../control/extension-metadata';
 import { t, locale, registerMessages } from '../app/locale';
 
-registerMessages({ 'MaaFramework 框架直驱': 'MaaFramework direct execution', '由驱动插件编译并执行项目': 'Compile and run the project with the driver plugin' });
+registerMessages({ '由驱动插件编译并执行项目': 'Compile and run the project with the driver plugin' });
 export type ScriptChoice = { extensionId: string; label: string; artifact: string; driver?: boolean };
-const props = defineProps<{ store: AppStore; visible: boolean }>();
+const props = defineProps<{ store: AutomationStore; visible: boolean; active: boolean }>();
 const emit = defineEmits<{ choose: [value?: ScriptChoice]; close: [] }>();
 const installed = ref<ExtensionState[]>([]);
 const choices = computed<ScriptChoice[]>(() => installed.value.filter(item => item.isInstalled && item.desiredEnabled &&
@@ -18,30 +18,36 @@ const choices = computed<ScriptChoice[]>(() => installed.value.filter(item => it
     driver: item.kind === 'managed-code', artifact: item.artifactName || item.extensionId })).sort((a, b) => Number(!!b.driver) - Number(!!a.driver) || a.artifact.localeCompare(b.artifact, 'en')));
 const loading = ref(false);
 const error = ref('');
-const owner = new AbortController();
+const ready = ref(false);
+let owner: AbortController | undefined;
 const instance = props.store.state.capabilities?.instanceId;
 
-onMounted(async () => {
-  if (!props.store.can('extensions.read')) return;
+watch(() => [props.active, props.visible, props.store.state.settings?.saved.revision] as const, async ([active]) => {
+  if (!active || !props.store.can('extensions.read')) return;
+  owner?.abort();
+  const current = new AbortController();
+  owner = current;
   loading.value = true;
+  error.value = '';
   try {
-    const catalog = await props.store.client.read('/control/v1/extensions', extensionList, owner.signal);
-    if (!owner.signal.aborted && props.store.state.capabilities?.instanceId === instance)
+    const catalog = await props.store.client.read('/control/v1/extensions', extensionList, current.signal);
+    if (!current.signal.aborted && props.store.state.capabilities?.instanceId === instance) {
       installed.value = catalog.items;
-  } catch (reason) {
-    if (!owner.signal.aborted) {
-      error.value = '脚本类型加载失败，请重新打开。';
+      ready.value = true;
     }
+  } catch (reason) {
+    if (!current.signal.aborted) error.value = '脚本类型加载失败，请重新打开。';
   } finally {
-    loading.value = false;
+    if (owner === current) loading.value = false;
   }
-});
-onBeforeUnmount(() => owner.abort());
+}, { immediate: true });
+onBeforeUnmount(() => owner?.abort());
 </script>
 
 <template>
   <nexus-modal :open.prop="visible" :title="t('新建脚本实例')" @nexus-close="emit('close')">
     <div class="script-types" :aria-busy="loading">
+      <template v-if="ready || !store.can('extensions.read')">
       <button type="button" class="type-choice" @click="emit('choose')">
         <span class="type-icon"><img :src="scriptIcon()" alt="" /></span>
         <span>
@@ -59,11 +65,13 @@ onBeforeUnmount(() => owner.abort());
         >
           <span class="type-icon"><img :src="scriptIcon(choice.extensionId)" alt="" /></span>
           <span>
-            <strong>{{ choice.driver && choice.extensionId === 'maa-framework' ? t('MaaFramework 框架直驱') : choice.label + ' ' + t('专项') }}</strong>
+            <strong>{{ choice.driver ? choice.label : choice.label + ' ' + t('专项') }}</strong>
             <small>{{ t(choice.driver ? '由驱动插件编译并执行项目' : '由专用插件自动适配配置') }}</small>
           </span>
         </button>
       </template>
+      </template>
+      <p v-if="!ready && loading" role="status">{{ t('加载中…') }}</p>
       <p v-if="choices.length && !store.can('automation.declare')">{{ t('请在 Host 本机创建专项脚本实例。') }}</p>
       <p v-if="error" role="alert">{{ t(error) }}</p>
     </div>

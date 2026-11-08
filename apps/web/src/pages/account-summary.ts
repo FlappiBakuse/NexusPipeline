@@ -1,8 +1,8 @@
 import { onBeforeUnmount, reactive, watch } from 'vue';
-import type { AppStore } from '../app/store';
+import type { AutomationStore } from '../app/store-ports';
 import { accountSummaries, type AccountSummary } from '../control/account-summary';
 
-export function useAccountSummaries(store: AppStore, visible: () => boolean) {
+export function useAccountSummaries(store: AutomationStore, visible: () => boolean) {
   const state = reactive({ items: new Map<string, AccountSummary>(), now: Date.now(), error: '', busy: false });
   let owner: AbortController | undefined, timer: ReturnType<typeof setInterval> | undefined;
   let again = false;
@@ -35,7 +35,8 @@ export function useAccountSummaries(store: AppStore, visible: () => boolean) {
     owner?.abort(); owner = undefined; again = false; state.busy = false;
     clearInterval(timer); timer = undefined;
   }
-  watch(() => [visible(), store.state.capabilities, store.state.automation?.catalogRevision, store.state.events], () => {
+  watch(() => [visible(), store.state.capabilities, store.state.automation?.catalogRevision,
+    store.state.events?.attempts, store.state.events?.completedRuns, store.state.events?.settingsRevision], () => {
     if (!visible()) { stop(); return; }
     if (!allowed()) { stop(); state.items.clear(); state.error = '账号摘要不可读取；缺少所需权限。'; return; }
     if (!timer) timer = setInterval(() => {

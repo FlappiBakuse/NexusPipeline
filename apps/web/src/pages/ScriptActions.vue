@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref } from 'vue';
-import type { AppStore } from '../app/store';
+import type { AutomationStore } from '../app/store-ports';
 import type { AutomationBundle } from '../control/wire.generated';
 import { arrayValue, objectValue, stringValue } from '../control/client';
 import { t } from '../app/locale';
 
 const props = defineProps<{
-  store: AppStore;
+  store: AutomationStore;
   script: AutomationBundle['scripts'][number];
   existing: boolean;
   locked: boolean;

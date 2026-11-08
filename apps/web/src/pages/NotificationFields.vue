@@ -59,7 +59,7 @@ function editSecret(field: SecretField, value: string): void {
     <div class="switches">
       <nexus-switch-setting
         :title="t('启用此任务')"
-        :description="t('启用后，选择此任务的用户、队列或签到任务可发送通知；禁用时跳过发送。')"
+        :description="t('启用后，选择此任务的用户、队列或扩展任务可发送通知；禁用时跳过发送。')"
         :value.prop="modelValue.isEnabled"
         :disabled.prop="disabled"
         @nexus-change="patch({ isEnabled: $event.detail.value })"

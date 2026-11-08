@@ -1,20 +1,24 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
-import type { AppStore } from '../app/store';
-import { arrayValue, boundedBytes, objectValue } from '../control/client';
+import type { RecordsStore } from '../app/store-ports';
+import { arrayValue, boundedBytes, objectValue, stringValue } from '../control/client';
 import { BlobDownloads } from '../control/blob-downloads';
 import { decodeLogPart, neighborLogPart, trailingLogBytes } from './log-part-text';
 import { t } from '../app/locale';
+import { attemptTitle } from './history-detail';
+import { historyLogId, type HistoryLog } from './attempt-resources';
+import HistoryCatalogWindow from '../components/HistoryCatalogWindow.vue';
 const props = defineProps<{
-  store: AppStore;
+  store: RecordsStore;
   runId: string;
   attemptId: string;
   visible: boolean;
-  logs: (Record<string, unknown> & { key: { stepId: string; role: string; invocationOrdinal?: number } })[];
+  logs: HistoryLog[];
+  initialLog?: HistoryLog;
 }>();
 const emit = defineEmits<{ close: [] }>();
 const downloads = new BlobDownloads();
-const selected = ref<Record<string, unknown>>();
+const selected = ref<HistoryLog>();
 const description = ref<Record<string, unknown>>();
 const logText = ref('');
 const logDownloadBusy = ref(false);
@@ -37,6 +41,7 @@ function invocationQuery(prefix: string): string {
 }
 let logOwner: AbortController | undefined;
 let downloadOwner: AbortController | undefined;
+const tails = new Map<number, Uint8Array>();
 type SaveSink = WritableStream<Uint8Array> & { abort(reason?: unknown): Promise<void> };
 type SaveHandle = { createWritable(): Promise<SaveSink> };
 type SavePicker = (options: { suggestedName: string }) => Promise<SaveHandle>;
@@ -51,12 +56,18 @@ const partMeta = computed(() =>
     sizeBytes: Number(part.sizeBytes)
   }))
 );
-async function selectLog(log: Record<string, unknown>): Promise<void> {
+function rememberTail(index: number, bytes: Uint8Array): void {
+  tails.delete(index);
+  tails.set(index, bytes.slice(-3));
+  if (tails.size > 128) tails.delete(tails.keys().next().value!);
+}
+async function selectLog(log: HistoryLog): Promise<void> {
   logOwner?.abort();
   downloadOwner?.abort();
   const controller = new AbortController();
   logOwner = controller;
   selected.value = log;
+  tails.clear();
   logText.value = '';
   description.value = undefined;
   partIndex.value = 0;
@@ -67,6 +78,10 @@ async function selectLog(log: Record<string, unknown>): Promise<void> {
       controller.signal
     );
     controller.signal.throwIfAborted();
+    const key = objectValue(value.key), requested = log.key;
+    if (key.runId !== props.runId || key.attemptId !== props.attemptId || key.stepId !== requested.stepId ||
+        key.role !== requested.role || (key.invocationOrdinal ?? null) !== (requested.invocationOrdinal ?? null) ||
+        !/^[a-f0-9]{64}$/.test(stringValue(value.snapshotSha256))) throw Error('history_log_identity_invalid');
     description.value = value;
     await readPart(0);
   } catch (error) {
@@ -83,11 +98,17 @@ async function readPart(index: number): Promise<void> {
     const previous = neighborLogPart(partMeta.value, index, -1);
     let prefix: Uint8Array = new Uint8Array();
     if (previous) {
-      const response = await props.store.client.response(
-        logBase.value + '/parts/' + previous.index + query,
-        controller.signal
-      );
-      prefix = await trailingLogBytes(response, 1024 * 1024, controller.signal);
+      const cached = tails.get(previous.index);
+      if (cached) prefix = cached;
+      else {
+        const response = await props.store.client.response(
+          logBase.value + '/parts/' + previous.index + query,
+          controller.signal
+        );
+        prefix = await trailingLogBytes(response, 1024 * 1024, controller.signal);
+        controller.signal.throwIfAborted();
+        rememberTail(previous.index, prefix);
+      }
     }
     const response = await props.store.client.response(
       logBase.value + '/parts/' + parts.value[index].index + query,
@@ -95,6 +116,7 @@ async function readPart(index: number): Promise<void> {
     );
     const bytes = await boundedBytes(response, 1024 * 1024);
     controller.signal.throwIfAborted();
+    rememberTail(Number(parts.value[index].index), bytes);
     logText.value = decodeLogPart(bytes, prefix, !!neighborLogPart(partMeta.value, index, 1));
     partIndex.value = index;
     if (follow.value) {
@@ -179,12 +201,20 @@ watch(
     downloads.release();
     selected.value = undefined;
     description.value = undefined;
+    tails.clear();
     logText.value = '';
     logDownloadBusy.value = false;
-    if (props.visible && props.logs[0]) void selectLog(props.logs[0]);
+    const first = props.initialLog && props.logs.find(log => historyLogId(log) === historyLogId(props.initialLog!)) || props.logs[0];
+    if (props.visible && first) void selectLog(first);
   },
   { immediate: true }
 );
+watch(() => props.logs, logs => {
+  if (!props.visible) return;
+  if (selected.value && logs.some(log => historyLogId(log) === historyLogId(selected.value!))) return;
+  if (logs[0]) void selectLog(logs[0]);
+  else { logOwner?.abort(); selected.value = undefined; description.value = undefined; logText.value = ''; tails.clear(); }
+});
 onBeforeUnmount(() => {
   logOwner?.abort();
   downloadOwner?.abort();
@@ -193,15 +223,14 @@ onBeforeUnmount(() => {
 </script>
 <template>
   <nexus-modal :open.prop="visible" :title="t('查看完整日志')" size="wide" @nexus-close="emit('close')">
-    <nav v-if="logs.length > 1" class="subtabs" :aria-label="t('脚本日志')">
-      <button
-        v-for="log in logs"
-        :key="log.key.stepId + log.key.role"
-        :aria-pressed="selected === log"
-        @click="selectLog(log)"
-      >
-        {{ log.key.stepId }} · {{ t(log.key.role) }}
-      </button>
+    <nav v-if="logs.length > 1" :aria-label="t('脚本日志')">
+      <HistoryCatalogWindow :items="logs" :item-key="historyLogId" :label="t('脚本日志')" :visible="visible">
+        <template #default="{ item: log }">
+          <button :aria-pressed="!!selected && historyLogId(selected) === historyLogId(log)" @click="selectLog(log)">
+            {{ log.key.stepId }} · {{ t(log.key.role) }}<template v-if="log.key.invocationOrdinal"> · {{ attemptTitle(log.key.invocationOrdinal) }}</template>
+          </button>
+        </template>
+      </HistoryCatalogWindow>
     </nav>
     <nexus-scroll-area class="log-window" direction="both" :label="t('运行日志')" style="height: 50vh">
       <pre>{{ logText }}</pre>

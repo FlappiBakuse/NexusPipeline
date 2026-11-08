@@ -13,7 +13,7 @@ export async function executionCommandContract(): Promise<{ checks: string[]; ch
   const checks: string[] = [];
   const item = { scriptId: 'script-a', userId: 'user-a', disposition: 'runnable',
     reasonCode: 'execution_inputs_verified', successfulRunsToday: 0, maximumSuccessfulRunsPerDay: -1 };
-  const preview = (value: unknown) => executionPreview({ hasRunnable: true, hasBlockedItems: false, reasonCode: null,
+  const preview = (value: unknown) => executionPreview({ hasRunnable: true, canPrepareInitialConfiguration: false, hasBlockedItems: false, reasonCode: null,
     completionAction: 'none', groups: [], items: [value] });
   requireValue(planAccounts(preview(item))[0]?.maximumSuccessfulRunsPerDay === -1,
     'an unlimited daily quota remains a runnable account in the plan', checks);

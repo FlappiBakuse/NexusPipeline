@@ -63,12 +63,6 @@ html[data-desktop='true'] .ambient-layer {
   line-height: 1.55;
   max-width: 72ch;
 }
-.workspace-header .eyebrow {
-  margin: 0;
-  color: var(--faint);
-  font-size: 11px;
-  letter-spacing: 0.08em;
-}
 .page-heading {
   min-width: 0;
 }
@@ -103,13 +97,6 @@ html[data-desktop='true'] .ambient-layer {
   height: 100%;
   background: var(--accent);
   animation: navigation-progress 1.4s ease-in-out infinite;
-}
-.theme-notice {
-  position: fixed;
-  z-index: 120;
-  right: 24px;
-  bottom: 24px;
-  max-width: calc(100vw - 48px);
 }
 @keyframes navigation-progress {
   from {

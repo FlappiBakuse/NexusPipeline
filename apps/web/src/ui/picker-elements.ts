@@ -52,6 +52,9 @@ export class PathPicker extends NexusElement {
   protected render(): void {
     if (this.root.activeElement !== this.field) this.field.value = String(this.values.value);
     this.field.readOnly = Boolean(this.values.readOnly);
+    this.field.disabled = Boolean(this.values.disabled);
+    this.field.required = this.getAttribute('aria-required') === 'true';
+    this.field.setAttribute('aria-invalid', this.getAttribute('aria-invalid') ?? 'false');
     this.field.placeholder = this.getAttribute('placeholder') || '';
     this.field.setAttribute('aria-label', this.getAttribute('aria-label') ?? 'Path');
     this.actions.replaceChildren(
@@ -70,7 +73,7 @@ export class PathPicker extends NexusElement {
             ? '<path d="M6 3h8l4 4v14H6zM14 3v5h4M9 12h6M9 16h6"/>'
             : '<path d="M3 7h6l2 2h10v11H3zM3 7V4h6l2 2h8v3"/>') +
           '</svg>';
-        button.disabled = !this.values.browseAllowed;
+        button.disabled = Boolean(this.values.disabled) || !this.values.browseAllowed;
         return button;
       })
     );

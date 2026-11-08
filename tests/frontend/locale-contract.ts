@@ -1,6 +1,7 @@
 import { formLabelContract } from './form-label-contract';
 import { DateControl } from '../../apps/web/src/ui/date-control.js';
 import { locale, t } from '../../apps/web/src/app/locale.js';
+import { errorMessages } from '../../apps/web/src/app/error-messages.js';
 import type { UiElement } from '@nexuspipeline/extension-sdk';
 
 export async function localeContract(fixture: HTMLElement, check: (condition: unknown, name: string) => void): Promise<void> {
@@ -11,7 +12,8 @@ export async function localeContract(fixture: HTMLElement, check: (condition: un
   const color = document.createElement('nexus-color-picker') as UiElement<'nexus-color-picker'>;
   color.value = '#334455';
   const holder = document.createElement('span');
-  fixture.append(number, color, holder);
+  const toast = document.createElement('nexus-toast') as UiElement<'nexus-toast'>;
+  fixture.append(number, color, holder, toast);
   const root = holder.attachShadow({ mode: 'open' });
   const date = new DateControl(root, () => { throw new Error('Locale changes must not commit date drafts'); });
   date.set({ value: '2030-01-01', kind: 'date', label: 'Date' });
@@ -42,9 +44,22 @@ export async function localeContract(fixture: HTMLElement, check: (condition: un
       check(t('视图设置保存失败，选择已保留。') === (language === 'en-US'
         ? 'View settings save failed; choices preserved.' : '视图设置保存失败，选择已保留。'),
         language + ': stored dynamic outcomes translate when rendered');
+      toast.message = t('project_script_missing');
+      check(toast.shadowRoot!.querySelector('span')!.textContent === (language === 'en-US'
+        ? 'Save the script instance before reading its project configuration.' : '请先保存脚本实例，再读取项目配置。'),
+        language + ': project failure toast explains the required action');
+      for (const code of Object.keys(errorMessages)) {
+        const text = t(code);
+        check((text !== code || code.includes(' ')) && (language === 'en-US' ? !/[\u4e00-\u9fff]/.test(text) : /[\u4e00-\u9fff]/.test(text)),
+          language + ': known feedback has a localized explanation: ' + code);
+      }
+      toast.message = 'unknown_fixture_failure';
+      check(toast.shadowRoot!.querySelector('span')!.textContent?.includes(language === 'en-US'
+        ? 'Diagnostic code: unknown_fixture_failure' : '错误码：unknown_fixture_failure'),
+        language + ': an unknown toast code keeps a localized explanation and its diagnostic identity');
     }
   } finally {
-    date.dispose(); number.remove(); color.remove(); holder.remove();
+    date.dispose(); number.remove(); color.remove(); holder.remove(); toast.remove();
     document.documentElement.lang = original; locale.value = originalLocale;
   }
 }

@@ -7,8 +7,22 @@ import { recordWindowContract } from './record-window-contract.js';
 import { interfaceCommandContract } from './interface-command-contract.js';
 import { desktopCaptionContract } from './desktop-caption-contract.js';
 import { scrollAreaContract } from './scroll-area-contract.js';
+import { validationLayoutContract } from './validation-layout-contract.js';
 import { tooltipContract } from './tooltip-contract.js';
 import { modalOwnershipContract } from './modal-ownership-contract.js';
+import { adapterFormContract } from './adapter-form-contract.js';
+import { historyLinkContract } from './history-link-contract.js';
+import { historyIndexContract } from './history-index-contract.js';
+import { historyPaginationContract } from './history-pagination-contract.js';
+import { historyCatalogContract } from './history-catalog-contract.js';
+import { bindingLayoutContract } from './binding-layout-contract.js';
+import { scriptCreationContract } from './script-creation-contract.js';
+import { settingsCategoryContract } from './settings-category-contract.js';
+import { preparationContract } from './preparation-contract.js';
+import { loaderContract } from './loader-contract.js';
+import { frontendLoadingContract } from './frontend-loading-contract.js';
+import { startupAppearanceContract } from './startup-appearance-contract.js';
+import { pageLoadingContract } from './page-loading-contract.js';
 
 const checks: string[] = [];
 const create = <N extends UiElementName>(name: N): UiElement<N> => document.createElement(name) as UiElement<N>;
@@ -36,6 +50,8 @@ let innerClose = 0;
 let returnFocus: UiElement<'nexus-button'>;
 let accessibilityFixture: HTMLElement;
 
+import { feedbackLayoutContract } from './feedback-layout-contract';
+
 async function structural(): Promise<void> {
   registerElements();
   paintedControls(fixture, assert);
@@ -43,8 +59,23 @@ async function structural(): Promise<void> {
   desktopCaptionContract(fixture, assert);
   modalOwnershipContract(fixture, assert);
   await scrollAreaContract(fixture, assert);
+  await validationLayoutContract(fixture, assert);
   await tooltipContract(fixture, assert);
   await recordWindowContract(assert);
+  await adapterFormContract(fixture, assert);
+  await historyLinkContract(assert);
+  await historyIndexContract(fixture, assert);
+  await historyPaginationContract(fixture, assert);
+  await historyCatalogContract(fixture, assert);
+  await settingsCategoryContract(fixture, assert);
+  await frontendLoadingContract(assert);
+  await startupAppearanceContract(fixture, assert);
+  await preparationContract(assert);
+  await loaderContract(assert);
+  await pageLoadingContract(fixture, assert);
+  await scriptCreationContract(fixture, assert);
+  await bindingLayoutContract(fixture, assert);
+  await feedbackLayoutContract(fixture, assert);
   await interfaceCommandContract(assert);
   assert(!customElements.get('nxp-button'), 'new realm registers no retired element alias');
   const button = create('nexus-button');

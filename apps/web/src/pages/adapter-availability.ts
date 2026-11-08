@@ -1,9 +1,9 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
-import type { AppStore } from '../app/store';
+import type { ConfigurationStore } from '../app/store-ports';
 import { extensionList, extensionDetails, type ExtensionState, type ExtensionDetails } from '../control/extensions';
 
 export function useAdapterAvailability(
-  store: AppStore,
+  store: ConfigurationStore,
   extensionId: () => string | null,
   visible: () => boolean,
   unavailable: (reason?: unknown) => void

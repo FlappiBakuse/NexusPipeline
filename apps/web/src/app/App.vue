@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onBeforeUnmount, ref, watch, markRaw, provide } from 'vue';
+import { computed, nextTick, onMounted, onBeforeUnmount, ref, watch, markRaw, provide } from 'vue';
 import { ControlClient } from '../control/client';
 import { createStore, navigation, routePage, type PageId, type AppRoute } from './store';
 import { desktop } from './desktop';
@@ -22,7 +22,11 @@ import { FrontendLoader } from '../extensions/frontend-loader';
 import { locale, t, registerMessages } from './locale';
 import { pageMeta } from './page-meta';
 import { confirmAction } from './confirmation';
+import StartupPreparation from './StartupPreparation.vue';
+import { interfacePreparation } from './interface-preparation';
+import { clearExtensionIcons } from '../control/extension-icons';
 registerMessages({
+  '部分界面准备失败，可重新准备。': 'Some interface preparation failed. Retry preparation.',
   '与宿主的连接已中断，请重新连接。': 'Connection to the Host was lost. Reconnect to continue.',
   查询界面设置原操作: 'Check original interface change',
   '界面设置结果待确认，请查询原操作。': 'Interface change outcome is unknown. Check the original operation.'
@@ -42,11 +46,17 @@ const registry = markRaw(
   })
 );
 provide(registryKey, registry);
-const frontend = markRaw(new FrontendLoader(client, store.media, registry, store.report));
-watch(() => [store.state.capabilities?.instanceId, store.state.settings?.saved.revision,
-  store.state.events?.extensionGeneration], () => {
-  if (store.state.capabilities) void frontend.synchronize().catch(store.report);
-  else frontend.disconnect();
+const frontend = markRaw(new FrontendLoader(client, store.media, registry, error => preparation.report(error)));
+watch(() => [store.state.capabilities?.instanceId, store.state.capabilities?.capabilities.join(','),
+  store.state.events?.extensionGeneration, !!store.state.feedError], (next, previous) => {
+  if (!previous || previous[0] === undefined || previous[2] === undefined) return;
+  if (next.every((value, index) => value === previous[index])) return;
+  if (!store.state.capabilities) { preparation.cancel(); frontend.disconnect(); clearExtensionIcons(); preparation.preparing.value = false; return; }
+  if (next[3]) return;
+  if (next[0] !== previous[0] || next[1] !== previous[1]) {
+    preparation.cancel(); client.clearPrepared(); frontend.disconnect(); clearExtensionIcons();
+  }
+  void prepareInterface().catch(store.report);
 });
 watch(() => store.state.events, () => { frontend.notify(); });
 const routes = ref(registry.listRoutes());
@@ -54,19 +64,21 @@ watch(locale, () => {
   registry.refreshLocale();
   routes.value = registry.listRoutes();
 });
-const overviewAvailable = ref(false), wallpaperAvailable = ref(false);
+const overviewCards = ref(registry.listSurfaces('overview.cards'));
 const stopRoutes = registry.subscribe(() => {
-  overviewAvailable.value = registry.listSurfaces('overview.cards').some(item => item.extensionId === 'game-activities');
-  wallpaperAvailable.value = registry.listSurfaces('settings.panels').some(item => item.extensionId === 'custom-wallpaper');
+  overviewCards.value = registry.listSurfaces('overview.cards');
   routes.value = registry.listRoutes();
 });
 const visited = ref(new Set<AppRoute>());
 watch(
   () => store.state.capabilities?.instanceId,
   () => {
-    visited.value = new Set([store.state.page]);
+    visited.value = new Set();
   }
 );
+const preparation = interfacePreparation(store, frontend, registry);
+const { preparing, surfacesReady, failed: preparationFailed, coreFailed, stage: preparationStage, count: preparationCount } = preparation;
+const prepareInterface = preparation.prepare;
 const credential = ref('');
 const desktopReady = ref(false);
 const authenticating = ref(false);
@@ -89,18 +101,20 @@ const context = (target: 'overview.cards' | 'settings.panels' | 'settings.extra'
   instanceId: store.state.capabilities?.instanceId || ''
 });
 watch(
-  () => store.state.page,
-  (page) => {
-    visited.value = new Set([...visited.value, page]);
+  () => [store.state.page, surfacesReady.value] as const,
+  ([page, ready]) => {
+    if (ready) visited.value = new Set([...visited.value, page]);
   },
   { immediate: true }
 );
 async function authenticate(): Promise<void> {
   authenticating.value = true;
-  client.authenticate(credential.value);
+  frontend.disconnect();
+  clearExtensionIcons();
+  if (credential.value) client.authenticate(credential.value);
   credential.value = '';
   try {
-    await store.start();
+    await prepareInterface();
   } catch (error) {
     store.report(error);
   } finally {
@@ -130,12 +144,18 @@ onMounted(async () => {
       desktopReady.value = true;
       if (session.route !== '/' && !location.hash) history.replaceState(null, '', '#' + session.route);
     }
-    await store.start();
+    await prepareInterface();
   } catch (error) {
     store.report(error);
+    preparing.value = false;
+    await nextTick();
+    await desktop?.presented?.();
   }
 });
 onBeforeUnmount(() => {
+  preparation.cancel();
+  clearExtensionIcons();
+  client.clearPrepared();
   void frontend.dispose().catch(store.report);
   stopRoutes();
   store.dispose();
@@ -150,9 +170,10 @@ onBeforeUnmount(() => {
     :disconnected="!!store.state.feedError"
     @error="store.report"
   />
+  <StartupPreparation v-if="preparing" :stage="preparationStage" :completed="preparationCount.done" :total="preparationCount.total" />
   <AmbientLayer :visible="store.state.visible" />
   <ExtensionOutlet
-    v-if="store.state.capabilities"
+    v-if="store.state.capabilities && surfacesReady"
     class="appearance-layer"
     :store="store"
     target="application.appearance"
@@ -173,54 +194,32 @@ onBeforeUnmount(() => {
       <main class="workspace">
         <header v-show="!!title" class="workspace-header">
           <div class="page-heading">
-            <p class="eyebrow">{{ t(pageMeta[store.state.page]?.eyebrow || '插件') }}</p>
             <h1>{{ title ? t(title[1]) : routeFor(store.state.page)?.label }}</h1>
             <p class="page-description">
               <span class="default-description">{{ t(pageMeta[store.state.page]?.description || '') }}</span>
               <span id="page-description-override"></span>
             </p>
           </div>
-          <div class="header-actions"><div id="page-actions"></div></div>
+          <div class="header-actions"><div id="page-actions"></div>
+            <nexus-button v-if="preparationFailed && !coreFailed" :disabled.prop="preparing" @click="prepareInterface().catch(store.report)">{{ t('重试') }}</nexus-button>
+            <nexus-button v-if="store.state.error === 'connection_lost'" @click="authenticate">{{ t('重新连接') }}</nexus-button>
+            <nexus-button v-if="store.interfaceChange.pending?.state === 'unknown'" @click="store.inspectInterface().catch(store.report)">{{ t('查询界面设置原操作') }}</nexus-button>
+          </div>
         </header>
-        <div v-if="store.state.error" class="error-banner" role="alert">
-          <strong>{{ t('操作未完成') }}</strong>
-          <span>{{ t(store.state.error === 'connection_lost' ? '与宿主的连接已中断，请重新连接。' : store.state.error) }}</span>
-          <button v-if="store.state.error !== 'settings_invalid'"
-            @click="
-              store.state.error = '';
-              store.start().catch(store.report);
-            "
-          >
-            {{ t('重新连接') }}
-          </button>
-          <p v-if="store.state.uncertainOperation">
-            {{ t('写入结果待确认，请先核实操作结果。') }}
-            <code>{{ store.state.uncertainOperation }}</code>
-            <button
-              v-if="store.interfaceChange.pending"
-              :disabled="store.interfaceChange.pending.state !== 'unknown'"
-              @click="store.inspectInterface().catch(store.report)"
-            >
-              {{ t('查询界面设置原操作') }}
-            </button>
-          </p>
-        </div>
-        <div v-if="store.state.feedError" class="error-banner" role="alert">
-          <strong>{{ t('事件连接中断，正在重连') }}</strong>
-          <span>{{ t(store.state.feedError === 'connection_lost' ? '与宿主的连接已中断，请重新连接。' : store.state.feedError) }}</span>
-        </div>
-        <form v-if="!store.state.capabilities" class="authentication" @submit.prevent="authenticate">
+        <nexus-toast v-if="store.state.error || store.state.uncertainOperation" class="operation-toast" tone="danger"
+          :message.prop="t(store.state.uncertainOperation ? '写入结果待确认，请返回原操作查询状态。' : store.state.error === 'connection_lost' ? '与宿主的连接已中断，请重新连接。' : store.state.error)">
+        </nexus-toast>
+        <nexus-toast v-if="store.state.feedError" class="connection-toast" tone="warning" :message.prop="t('事件连接中断，正在重连')" />
+        <form v-if="!preparing && (!store.state.capabilities || coreFailed)" class="authentication" @submit.prevent="authenticate">
           <label>
             {{ t('远程访问令牌') }}
             <input v-model="credential" type="password" autocomplete="off" />
           </label>
           <button :disabled="authenticating">{{ t('连接') }}</button>
         </form>
-        <p v-if="store.state.notice" role="status" class="notice-banner">
-          {{ t(store.state.notice) }}
-          <button :aria-label="t('关闭提示')" @click="store.state.notice = ''">×</button>
-        </p>
-        <template v-if="store.state.capabilities">
+        <nexus-toast v-if="store.state.notice" :message.prop="t(store.state.notice)" @nexus-close="store.state.notice = ''" />
+        <nexus-toast v-if="preparationFailed && !coreFailed" tone="warning" :message.prop="t('部分界面准备失败，可重新准备。')" />
+        <template v-if="store.state.capabilities && surfacesReady">
           <section
             v-for="page in visited"
             :key="(store.state.capabilities?.instanceId || '') + '/' + page"
@@ -233,8 +232,7 @@ onBeforeUnmount(() => {
             <component
               v-if="isHost(page)"
               :is="pages[page]"
-              :overview-available="overviewAvailable"
-              :wallpaper-available="wallpaperAvailable"
+              :overview-cards="overviewCards"
               :store="store"
               :kind="page"
               :visible="store.state.visible && store.state.page === page"

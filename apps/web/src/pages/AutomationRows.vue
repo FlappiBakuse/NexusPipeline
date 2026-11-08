@@ -1,18 +1,20 @@
 <script setup lang="ts">
+import { computed } from 'vue';
+import type { AutomationEntity, UserDraft } from '../app/automation-draft';
 import { scriptIcon } from './script-icons';
-import type { AppStore } from '../app/store';
+import type { AutomationStore } from '../app/store-ports';
 import type { AutomationBundle } from '../control/wire.generated';
 import ExtensionOutlet from '../extensions/ExtensionOutlet.vue';
 import AccountAvatar from './AccountAvatar.vue';
 import { t } from '../app/locale';
 import { completionLabels } from './execution-plan';
 import type { AccountSummary } from '../control/account-summary';
-type Row = { id: string; name?: string; extensionId?: string; [key: string]: unknown };
+type Row = AutomationEntity;
 const props = defineProps<{
   kind: 'scripts' | 'users' | 'queues';
   rows: Row[];
   bundle: AutomationBundle;
-  store: AppStore;
+  store: AutomationStore;
   visible: boolean;
   locked: boolean;
   summaries: ReadonlyMap<string, AccountSummary>;
@@ -26,6 +28,14 @@ const emit = defineEmits<{
   avatar: [user: AutomationBundle['users'][number], revision: number, catalogRevision: number];
   error: [message: string];
 }>();
+const bindingCounts = computed(() => {
+  const counts = new Map<string, number>();
+  for (const binding of props.bundle.bindings) counts.set(binding.userId, (counts.get(binding.userId) || 0) + 1);
+  return counts;
+});
+const revisions = computed(() => new Map((props.store.state.automation?.revisions || []).filter(item => item.kind === 'user').map(item => [item.id, item.revision])));
+const isUser = (row: Row): row is UserDraft => !('judgement' in row) && !('scriptIds' in row);
+const extensionId = (row: Row): string | undefined => 'extensionId' in row ? row.extensionId : undefined;
 function badges(row: Row): { label: string; tone: string }[] {
   if (props.kind === 'users')
     return [
@@ -33,27 +43,24 @@ function badges(row: Row): { label: string; tone: string }[] {
         label:
           t('已绑定') +
           ' ' +
-          props.bundle.bindings.filter((item) => item.userId === row.id).length +
+          (bindingCounts.value.get(row.id) || 0) +
           ' ' +
           t('个脚本'),
         tone: 'neutral'
       },
       { label: nextLabel(props.summaries.get(row.id)), tone: 'info' }
     ];
-  if (props.kind === 'scripts') {
-    const judgement = row.judgement as {
-      language: string;
-      successKeywords: string[];
-      failureKeywords: string[];
-    };
+  if ('judgement' in row) {
+    const judgement = row.judgement;
     const result = [{ label: t(row.kind === 'specialized' ? '专项脚本' : '通用脚本'), tone: 'neutral' }];
     if (judgement?.language !== 'keywords') result.push({ label: t('判定脚本'), tone: 'neutral' });
     else if (judgement.successKeywords.length || judgement.failureKeywords.length)
       result.push({ label: t('关键字判断'), tone: 'neutral' });
     return result;
   }
+  if (!('scriptIds' in row)) return [];
   return [
-    { label: (row.scriptIds as string[]).length + ' ' + t('个任务'), tone: 'neutral' },
+    { label: row.scriptIds.length + ' ' + t('个任务'), tone: 'neutral' },
     {
       label:
         t(row.completionAction === 'none' ? '完成后无操作' : '完成后') +
@@ -64,8 +71,7 @@ function badges(row: Row): { label: string; tone: string }[] {
       label: t(
         row.runOnStartup
           ? '启动时运行'
-          : (row.scheduleEnabled ??
-              props.bundle.schedules.some((item) => item.queueId === row.id && item.enabled))
+          : (props.bundle.schedules.some((item) => item.queueId === row.id && item.enabled))
             ? '定时运行'
             : '不自动运行'
       ),
@@ -90,7 +96,7 @@ async function openSummary(row: Row): Promise<void> {
   const run = props.summaries.get(row.id)?.runId;
   if (!run) { emit('edit', row); return; }
   await props.store.navigate('history');
-  if (props.store.state.page === 'history') location.hash = '#/history?run=' + encodeURIComponent(run);
+  if (props.store.state.page === 'history') location.hash = '#/history?run=' + encodeURIComponent(run) + '&user=' + encodeURIComponent(row.id);
 }
 </script>
 
@@ -105,18 +111,15 @@ async function openSummary(row: Row): Promise<void> {
     <article v-for="row in rows" :key="row.id" :data-item-id="row.id" class="automation-row">
       <nexus-drag-handle :item-id="row.id" :label="t('拖动或使用方向键排序')" :disabled.prop="locked" />
       <AccountAvatar
-        v-if="kind === 'users'"
-        :user="row as unknown as AutomationBundle['users'][number]"
+        v-if="kind === 'users' && isUser(row)"
+        :user="row"
         :disabled="locked || !store.can('automation.write')"
-        :revision="
-          store.state.automation?.revisions.find((item) => item.kind === 'user' && item.id === row.id)
-            ?.revision || 0
-        "
+        :revision="revisions.get(row.id) || 0"
         :catalog-revision="store.state.automation?.catalogRevision || 0"
         @change="(user, revision, catalogRevision) => emit('avatar', user, revision, catalogRevision)"
         @error="emit('error', $event)"
       />
-      <span v-else class="script-avatar"><img v-if="kind === 'scripts'" :src="scriptIcon(row.extensionId)" alt="" /><nexus-icon v-else aria-hidden="true" name="queues" /></span>
+      <span v-else class="script-avatar"><img v-if="kind === 'scripts'" :src="scriptIcon(extensionId(row))" alt="" /><nexus-icon v-else aria-hidden="true" name="queues" /></span>
       <div class="row-main">
         <button class="entity-link" :disabled="locked" @click="emit('edit', row)">{{ row.name }}</button>
         <div class="row-meta">
@@ -167,21 +170,18 @@ async function openSummary(row: Row): Promise<void> {
 
 <style scoped>
 .automation-rows {
-  display: block;
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  overflow: hidden;
-  background: var(--panel);
+  display: grid;
+  gap: 14px;
 }
 .automation-row {
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--panel);
   display: flex;
-  min-height: 104px;
+  min-height: 80px;
   gap: 8px;
   align-items: center;
-  padding: 20px 12px;
-}
-.automation-row + .automation-row {
-  border-top: 1px solid var(--border);
+  padding: 12px;
 }
 nexus-drag-handle {
   flex: none;
@@ -195,8 +195,7 @@ nexus-drag-handle {
 }
 .scripts .row-main,
 .queues .row-main {
-  gap: 10px;
-  padding-top: 4px;
+  gap: 6px;
 }
 .entity-link {
   display: block;

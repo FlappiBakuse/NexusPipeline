@@ -8,21 +8,18 @@ p {
   margin: 0;
 }
 .task-list {
-  display: block;
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  overflow: hidden;
-  background: var(--panel);
+  display: grid;
+  gap: 14px;
 }
 .task {
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--panel);
   display: flex;
   align-items: center;
   gap: 8px;
-  min-height: 104px;
-  padding: 18px 12px;
-}
-.task + .task {
-  border-top: 1px solid var(--border);
+  min-height: 80px;
+  padding: 12px;
 }
 .avatar {
   display: grid;
@@ -37,7 +34,7 @@ p {
 }
 .copy {
   display: grid;
-  gap: 8px;
+  gap: 6px;
   flex: 1;
   min-width: 0;
   padding-left: 4px;

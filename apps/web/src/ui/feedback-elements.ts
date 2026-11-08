@@ -3,6 +3,7 @@ import type { UiElement } from '@nexuspipeline/extension-sdk';
 import { controlStyles } from './control-styles.js';
 import { iconPaths } from './icon-paths.js';
 
+
 const tones = `:host{color:var(--nx-color-text,#e9edf5)}:host([data-tone=info]){--tone:var(--nx-color-accent,#80a7ff)}
 :host([data-tone=success]){--tone:var(--success,#6bcf9b)}:host([data-tone=warning]){--tone:var(--warning,#e9b66b)}
 :host([data-tone=danger]){--tone:var(--nx-color-danger,#ef7070)}`;
@@ -122,34 +123,7 @@ export class EmptyState extends NexusElement {
 
 export { NexusTooltipElement } from './tooltip-element.js';
 
-export class NexusToastElement extends NexusElement {
-  static readonly observedAttributes = elementAttributes('nexus-toast');
-  constructor() {
-    super(
-      'nexus-toast',
-      controlStyles +
-        tones +
-        `:host{display:flex;align-items:center;gap:12px;padding:12px 16px;
-    border:1px solid var(--nx-color-border);border-radius:8px;background:var(--nx-color-surface,#1e2330);
-    box-shadow:0 12px 28px #0005}:host(:is([data-tone=success],[data-tone=warning],[data-tone=danger])){border-color:var(--tone)}span{flex:1;white-space:pre-wrap}`,
-      '<span></span><slot name="actions"></slot>'
-    );
-  }
-  protected connect(signal: AbortSignal): void {
-    this.addEventListener(
-      'keydown',
-      (event) => {
-        if (event.key === 'Escape') this.emit('nexus-close', { reason: 'escape' });
-      },
-      { signal }
-    );
-  }
-  protected render(): void {
-    this.dataset.tone = String(this.values.tone);
-    this.root.querySelector('span')!.textContent = String(this.values.message);
-    this.setAttribute('role', this.values.tone === 'danger' ? 'alert' : 'status');
-  }
-}
+export { NexusToastElement } from './toast-element.js';
 
 export class NexusIconElement extends NexusElement {
   static readonly observedAttributes = elementAttributes('nexus-icon');

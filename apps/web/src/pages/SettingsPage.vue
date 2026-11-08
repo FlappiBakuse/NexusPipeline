@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { createIdentity } from '../control/identity';
-import { computed, reactive, ref } from 'vue';
+import { computed, reactive, ref, watch } from 'vue';
 import type { AppStore } from '../app/store';
 import type { InterfaceCategory } from '../control/interface';
 import { integerValue, objectValue } from '../control/client';
@@ -8,13 +8,14 @@ import { validateForm } from '../components/form-validation';
 import { useSettingsSecrets } from './settings-secret-state';
 import { useSettingsSession } from './settings-session';
 import { useSettingsView } from './settings-view-state';
+import { useSettingsCategories } from './settings-categories';
 import SettingsFields from './SettingsFields.vue';
 import SettingsDiagnostics from './SettingsDiagnostics.vue';
 import SettingsUpdates from './SettingsUpdates.vue';
 import { t } from '../app/locale';
 import './settings-messages';
 
-const props = defineProps<{ store: AppStore; visible: boolean; wallpaperAvailable?: boolean }>();
+const props = defineProps<{ store: AppStore; visible: boolean }>();
 const form = ref<HTMLElement>();
 const notice = ref('');
 const restartPort = ref<number | null>(null);
@@ -27,12 +28,11 @@ const categories: { id: InterfaceCategory; label: string; description: string }[
   { id: 'diagnostics', label: '系统诊断', description: '检查运行环境、恢复现场与插件状态' }
 ];
 const host = reactive(useSettingsSession(props.store, () => validateForm(form.value)));
-const view = reactive(
-  useSettingsView(
-    props.store,
-    categories.map((item) => item.id)
-  )
-);
+const categoryIds = reactive(categories.map(item => item.id));
+const view = reactive(useSettingsView(props.store, categoryIds));
+const categoryOwner = useSettingsCategories(form, categoryIds, view);
+const extensionCategories = categoryOwner.extensions;
+watch(() => [view.state.values.pinnedSettings, view.state.values.collapsedSettings], categoryOwner.synchronize, { flush: 'post' });
 const secrets = reactive(useSettingsSecrets(props, notice));
 const panels = computed(() =>
   [...categories].sort(
@@ -78,67 +78,66 @@ async function restart(): Promise<void> {
 </script>
 
 <template>
-  <main ref="form" class="settings-page">
-    <p v-if="host.session.error" role="alert" class="error">
-      {{ t(host.session.error) }}
+  <main ref="form" class="settings-page" @nexus-toggle="categoryOwner.toggle">
+    <nexus-toast v-if="host.session.error" tone="danger" :message.prop="t(host.session.error)" />
+    <div v-if="host.session.error" class="row">
       <button v-if="host.session.uncertain" :disabled="host.session.busy" @click="host.inspect">
         {{ t('查询原操作') }}
       </button>
       <button v-else-if="!host.conflict" :disabled="host.session.busy" @click="host.save">
         {{ t('重试保存') }}
       </button>
-    </p>
-    <p v-if="host.conflict && !host.session.pending" role="alert" class="notice">
-      {{ t('设置已在其他位置更改，当前草稿已保留。') }}
+    </div>
+    <nexus-toast v-if="host.conflict && !host.session.pending" tone="warning" :message.prop="t('设置已在其他位置更改，当前草稿已保留。')" />
+    <div v-if="host.conflict && !host.session.pending" class="row">
       <button @click="host.loadLatest">{{ t('载入最新') }}</button>
-    </p>
-    <p v-if="view.state.error" role="alert" class="error">
-      {{ t(view.state.error) }}
+    </div>
+    <nexus-toast v-if="view.state.error" tone="danger" :message.prop="t(view.state.error)" />
+    <div v-if="view.state.error" class="row">
       <button v-if="view.state.pending" :disabled="view.state.busy" @click="view.checkPending">
         {{ t('查询原操作') }}
       </button>
       <button v-else-if="!view.conflict" :disabled="view.state.busy" @click="view.save">
         {{ t('重试保存') }}
       </button>
-    </p>
-    <p v-if="view.conflict && !view.state.pending" role="alert" class="notice">
-      {{ t('视图设置已在其他位置更新。') }}
+    </div>
+    <nexus-toast v-if="view.conflict && !view.state.pending" tone="warning" :message.prop="t('视图设置已在其他位置更新。')" />
+    <div v-if="view.conflict && !view.state.pending" class="row">
       <button @click="view.loadLatest">{{ t('载入最新') }}</button>
-    </p>
-    <p v-if="notice" role="status">{{ t(notice) }}{{ restartPort ? ' ' + restartPort : '' }}</p>
+    </div>
+    <nexus-toast v-if="notice" :message.prop="t(notice) + (restartPort ? ' ' + restartPort : '')" @nexus-close="notice = ''" />
     <p v-if="store.state.settings?.restartReasons.length" class="notice">
       {{ t('更改等待重启：') }} {{ store.state.settings.restartReasons.join('、') }}
       <button :disabled="!store.can('maintenance.write')" @click="restart">{{ t('重启服务') }}</button>
     </p>
     <nav class="categories" :aria-label="t('设置类别')">
       <template v-for="item in categories" :key="item.id">
-      <button v-if="item.id === 'diagnostics' && wallpaperAvailable" type="button"
-        @click="form?.querySelector('#settings-extension-panels')?.scrollIntoView({ block: 'start' })">{{ t('自定义壁纸') }}</button>
       <button
         type="button"
         :aria-controls="'settings-' + item.id"
         :aria-expanded="view.isExpanded(item.id)"
-        @click="view.choose(item.id)"
+        @click="categoryOwner.choose(item.id)"
       >
         {{ t(item.label) }}
       </button>
       </template>
+      <button v-for="item in extensionCategories" :key="item.id" type="button" :aria-expanded="view.isExpanded(item.id)" @click="categoryOwner.choose(item.id)">{{ item.label }}</button>
     </nav>
+    <div id="settings-extension-panels"><slot name="settings-panels" /></div>
     <template v-for="item in panels" :key="item.id">
-    <div v-if="item.id === 'diagnostics'" id="settings-extension-panels"><slot name="settings-panels" /></div>
-    <section :id="'settings-' + item.id" class="panel">
-      <button class="panel-heading" :aria-expanded="view.isExpanded(item.id)" @click="view.toggle(item.id)">
+    <section :id="'settings-' + item.id" class="panel" :style="{ order: categoryOwner.order(item.id) }">
+      <button class="panel-heading" :aria-expanded="categoryOwner.isExpanded(item.id)" @click="categoryOwner.toggleCard(item.id)">
         <span>
           <strong>{{ t(item.label) }}</strong>
           <small>{{ t(item.description) }}</small>
         </span>
-        <nexus-icon aria-hidden="true" :name="view.isExpanded(item.id) ? 'chevronDown' : 'chevronRight'" />
+        <nexus-icon aria-hidden="true" :name="categoryOwner.isExpanded(item.id) ? 'chevronDown' : 'chevronRight'" />
       </button>
-      <div v-show="view.isExpanded(item.id)" class="panel-body" :inert="!view.isExpanded(item.id)">
+      <div class="panel-reveal" :data-expanded="categoryOwner.isExpanded(item.id)" :inert="!categoryOwner.isExpanded(item.id)"><div class="panel-clip"><div class="panel-body">
         <SettingsDiagnostics
           v-if="item.id === 'diagnostics'"
           :store="store"
-          :visible="visible && view.isExpanded(item.id)"
+          :visible="visible && categoryOwner.isExpanded(item.id)"
         />
         <SettingsFields
           v-else
@@ -266,12 +265,12 @@ async function restart(): Promise<void> {
           <template #updates>
             <SettingsUpdates
               :store="store"
-              :visible="visible && view.isExpanded(item.id)"
+              :visible="visible && categoryOwner.isExpanded(item.id)"
               :channel="host.session.draft.updates.channel"
             />
           </template>
         </SettingsFields>
-      </div>
+      </div></div></div>
     </section>
     </template>
     <slot name="settings-extra" />

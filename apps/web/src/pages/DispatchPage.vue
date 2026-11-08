@@ -127,7 +127,7 @@ async function runSelected(confirmedInitialization = false): Promise<void> {
   if (
     !props.visible ||
     JSON.stringify(selected) !== JSON.stringify(selection()) ||
-    preview.value?.hasRunnable !== true
+    preview.value?.hasRunnable !== true && preview.value?.canPrepareInitialConfiguration !== true
   )
     return;
   planOpen.value = false;
@@ -151,7 +151,7 @@ async function checkOperation(): Promise<void> {
 }
 let activeOwner: AbortController | undefined;
 watch(
-  [() => props.store.state.revision, () => props.visible],
+  [() => props.store.state.revision, () => props.store.state.preparationRevision, () => props.visible],
   async () => {
     activeOwner?.abort();
     if (!props.visible) {
@@ -223,11 +223,9 @@ onBeforeUnmount(() => {
         :disabled.prop="busy || !!pending || !store.can('execution.start')"
         @click="runSelected()"
       />
+      <button v-if="pending && !commands.state.sending" @click="checkOperation">{{ t('查询操作状态') }}</button>
     </div>
-    <p v-if="pending && !commands.state.sending" role="alert">
-      {{ t('写入结果待确认，请先核实原操作。') }}
-      <button @click="checkOperation">{{ t('查询操作状态') }}</button>
-    </p>
+    <nexus-toast v-if="pending && !commands.state.sending" tone="warning" :message.prop="t('写入结果待确认，请先核实原操作。')" />
   </section>
   <nexus-toast
     v-if="visible && targetHint"

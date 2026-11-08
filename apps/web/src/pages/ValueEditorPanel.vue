@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, reactive, toRefs, watch } from 'vue';
-import type { AppStore } from '../app/store';
+import type { ConfigurationStore } from '../app/store-ports';
 import { t } from '../app/locale';
 import JsonValueInput from '../components/JsonValueInput.vue';
 import type { ConfigurationOverview } from './configuration-types';
@@ -8,7 +8,7 @@ import { ConfigurationDocument, type ConfigurationValueDraft } from './configura
 import { ConfigurationValueCommands } from './configuration-value-commands';
 import './configuration-messages';
 
-const props = defineProps<{ store: AppStore; overview: ConfigurationOverview; visible: boolean }>();
+const props = defineProps<{ store: ConfigurationStore; overview: ConfigurationOverview; visible: boolean }>();
 const emit = defineEmits<{ changed: [] }>();
 const key =
   'configuration/value/' + props.store.state.capabilities?.instanceId + '/' + props.overview.bindingId;
@@ -168,13 +168,13 @@ onBeforeUnmount(() => {
     <p v-if="note" role="status">{{ t(note) }}</p>
     <p v-if="state.pending" role="alert">
       {{ t('写入结果待确认，请先核实原操作。') }}
-      <button @click="commands.inspect()">
+      <button type="button" @click="commands.inspect()">
         {{ t(state.pendingAction === 'preview' ? '读取资源重新开始' : '查询操作状态') }}
       </button>
     </p>
     <div class="row">
-      <button :disabled="!canEdit" @click="commands.execute('preview')">{{ t('预览修改') }}</button>
-      <button :disabled="!canEdit || !state.preview" @click="commands.execute('apply')">
+      <button type="button" :disabled="!canEdit" @click="commands.execute('preview')">{{ t('预览修改') }}</button>
+      <button type="button" :disabled="!canEdit || !state.preview" @click="commands.execute('apply')">
         {{ t('保存配置') }}
       </button>
     </div>

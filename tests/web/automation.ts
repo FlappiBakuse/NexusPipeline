@@ -4,6 +4,7 @@ import { createStore } from '../../apps/web/src/app/store';
 import { automationSession } from '../../apps/web/src/pages/automation-session';
 import { fixture } from './automation-fixture';
 import { sessionCases } from './app-session';
+import { snapshotCases } from './session-snapshots';
 export async function run(): Promise<string[]> {
   const previous = Object.getOwnPropertyDescriptor(globalThis, 'document');
   Object.defineProperty(globalThis, 'document', { configurable: true, value: Object.assign(new EventTarget(), { hidden: false }) });
@@ -11,8 +12,8 @@ export async function run(): Promise<string[]> {
   try {
     const first = automationSession(store, 'queues');
     first.notice = 'retained';
-    assert.equal(automationSession(store, 'queues'), first);
-    assert.notEqual(automationSession(store, 'users'), first);
+    automationSession(store, 'users').notice = 'user notice';
+    assert.equal(automationSession(store, 'users').notice, 'user notice');
     assert.equal(automationSession(store, 'queues').notice, 'retained');
     const cases = ['queue owner survives page reattachment and stays separate from users'];
     const reopened = fixture();
@@ -71,7 +72,7 @@ export async function run(): Promise<string[]> {
         cases.push('queue real editor save/reopen and owned draft policy: ' + mode);
       } finally { item.store.dispose(); }
     }
-    return [...cases, ...await sessionCases()];
+    return [...cases, ...await sessionCases(), ...await snapshotCases()];
   } finally {
     store.dispose();
     if (previous) Object.defineProperty(globalThis, 'document', previous);

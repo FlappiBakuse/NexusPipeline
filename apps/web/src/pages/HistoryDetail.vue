@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
-import type { AppStore } from '../app/store';
+import type { RecordsStore } from '../app/store-ports';
 import type { RecordRow } from '../control/models';
 import { historyAttempts, historyDisplay, type HistoryAttempt, type HistoryDisplay } from '../control/records';
 import { executionRun, type ActiveStep } from '../control/execution';
@@ -16,7 +16,7 @@ import HistoryTasks from './HistoryTasks.vue';
 import { t } from '../app/locale';
 import './history-detail.css';
 
-const props = defineProps<{ store: AppStore; row: RecordRow; attemptId: string; visible: boolean }>();
+const props = defineProps<{ store: RecordsStore; row: RecordRow; attemptId: string; visible: boolean }>();
 const emit = defineEmits<{ close: []; attempt: [id: string] }>();
 const attempts = ref<HistoryAttempt[]>([]);
 const display = ref<HistoryDisplay>();
@@ -111,6 +111,11 @@ onBeforeUnmount(() => owner?.abort());
     @nexus-close="close"
   >
     <div class="history-detail-content">
+      <ul v-if="display?.diagnostics?.length" role="status">
+        <li v-for="item in display.diagnostics.filter(item => !row.userId || item.userId === row.userId)" :key="item.recordedAt + item.stepId">
+          {{ historyTime(item.recordedAt) }} · {{ item.stepId }} · {{ item.phase }} · {{ historyReason(item.reasonCode) }} ({{ item.exceptionType }})
+        </li>
+      </ul>
       <p v-if="error" role="alert">
         {{ t(error) }}
         <button @click="load">{{ t('重试') }}</button>

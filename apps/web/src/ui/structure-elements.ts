@@ -85,10 +85,13 @@ export class CollapsibleCard extends NexusElement {
       controlStyles +
         cardStyle +
         `:host{padding:0;overflow:hidden}button{width:100%;min-height:72px;display:flex;align-items:center;justify-content:space-between;text-align:left;border:0;border-radius:0;background:transparent;padding:16px 24px}
-      button:hover{background:transparent}button span{font-size:15px;line-height:1.45}.body[hidden]{display:none}.body{margin:0;border-top:1px solid var(--nx-color-border);padding:24px;overflow:hidden;animation:reveal .2s ease}@keyframes reveal{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}`,
-      '<button type="button"><span></span><b aria-hidden="true">⌄</b></button><slot name="actions"></slot><div class="body"><slot></slot></div>'
+      button:hover{background:transparent}.heading{display:grid;gap:4px}.title{font-size:15px;line-height:1.45}.description{font-size:12px;color:var(--nx-color-muted);line-height:1.5}.description:empty{display:none}
+      nexus-icon{color:var(--nx-color-accent)}.reveal{display:grid;grid-template-rows:0fr;opacity:0;visibility:hidden;transition:grid-template-rows .22s ease,opacity .22s ease,visibility 0s .22s}
+      .reveal[data-expanded=true]{grid-template-rows:1fr;opacity:1;visibility:visible;transition-delay:0s}.clip{min-height:0;overflow:hidden}.body{margin:0;border-top:1px solid var(--nx-color-border);padding:24px}
+      @media(prefers-reduced-motion:reduce){.reveal{transition:none}}`,
+      '<button type="button"><span class="heading"><strong class="title"></strong><span class="description"></span></span><nexus-icon aria-hidden="true"></nexus-icon></button><slot name="actions"></slot><div class="reveal"><div class="clip"><div class="body"><slot></slot></div></div></div>'
     );
-    this.panel = this.root.querySelector('.body')!;
+    this.panel = this.root.querySelector('.reveal')!;
   }
   protected connect(signal: AbortSignal): void {
     this.root.querySelector('button')!.addEventListener(
@@ -106,11 +109,13 @@ export class CollapsibleCard extends NexusElement {
   }
   protected render(): void {
     const button = this.root.querySelector('button')!;
-    button.querySelector('span')!.textContent = String(this.values.title);
+    button.querySelector('.title')!.textContent = String(this.values.title);
+    button.querySelector('.description')!.textContent = String(this.values.description);
+    button.querySelector('nexus-icon')!.setAttribute('name', this.values.expanded ? 'chevronDown' : 'chevronRight');
     button.setAttribute('aria-expanded', String(this.values.expanded));
     this.panel.id = String(this.values.panelId) || 'panel-' + this.localName;
     button.setAttribute('aria-controls', this.panel.id);
-    this.panel.hidden = !this.values.expanded;
+    this.panel.dataset.expanded = String(this.values.expanded);
     this.panel.inert = !this.values.expanded;
   }
 }

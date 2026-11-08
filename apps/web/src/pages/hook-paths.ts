@@ -1,14 +1,14 @@
 import { createIdentity } from '../control/identity';
-import type { AppStore } from '../app/store';
+import type { AutomationStore } from '../app/store-ports';
 import type { AutomationBundle, ControlAutomationChange } from '../control/wire.generated';
 
 type Hook = NonNullable<AutomationBundle['bindings'][number]['preHook']>;
 type HookValues = { preHook?: Hook; postHook?: Hook; preOnceAfterSuccess?: boolean; postFinalOnly?: boolean };
 type Paths = { pre: string; post: string };
-export const hookPathKey = (store: AppStore, id: string): string =>
+export const hookPathKey = (store: AutomationStore, id: string): string =>
   'hook-paths/' + store.state.capabilities?.instanceId + '/' + id;
 
-export function hookPaths(store: AppStore, id: string, value: HookValues): Paths {
+export function hookPaths(store: AutomationStore, id: string, value: HookValues): Paths {
   const key = hookPathKey(store, id);
   const retained = store.drafts.get(key);
   if (retained) return retained as Paths;
@@ -28,7 +28,7 @@ export function hookPaths(store: AppStore, id: string, value: HookValues): Paths
 }
 
 export function prepareHooks<T extends HookValues>(
-  store: AppStore,
+  store: AutomationStore,
   id: string,
   value: T,
   roots: ControlAutomationChange['roots'][number][]

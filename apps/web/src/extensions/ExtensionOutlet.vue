@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { computed, inject } from 'vue';
 import type { SurfaceId, SurfaceContext } from '@nexuspipeline/extension-sdk';
-import type { AppStore } from '../app/store';
+import type { SurfaceStore } from '../app/store-ports';
 import { registryKey } from './registry-context';
 import SurfaceOutlet from './SurfaceOutlet.vue';
 const props = defineProps<{
   target: SurfaceId;
-  store: AppStore;
+  store: SurfaceStore;
   visible: boolean;
   entityId?: string;
   runId?: string;

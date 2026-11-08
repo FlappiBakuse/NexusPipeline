@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import type { AppStore } from '../app/store';
+import type { RecordsStore } from '../app/store-ports';
 import type { RecordPage, RecordRow } from '../control/models';
 import ExtensionOutlet from '../extensions/ExtensionOutlet.vue';
 import { historyRow, recordBusiness, recordLifecycle } from './history-row';
 import { t } from '../app/locale';
 const props = defineProps<{
-  store: AppStore;
+  store: RecordsStore;
   visible: boolean;
   page?: RecordPage;
   pageNumber: number;

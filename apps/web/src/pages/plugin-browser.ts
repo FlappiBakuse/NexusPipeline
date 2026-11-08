@@ -230,6 +230,9 @@ export function usePluginBrowser(store: AppStore, visible: () => boolean) {
     owner?.abort();
     detailOwner?.abort();
   });
+  watch(() => store.state.preparationRevision, () => {
+    if (visible()) void load();
+  });
   return {
     installed,
     catalog,

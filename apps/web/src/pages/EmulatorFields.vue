@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import type { AutomationBundle, ControlEmulatorDiscover } from '../control/wire.generated';
-import type { AppStore } from '../app/store';
+import type { AutomationStore } from '../app/store-ports';
 import { objectValue } from '../control/client';
 import { matchesSchema, schemaAt } from '../control/schema';
 import { locale } from '../app/locale';
@@ -10,7 +10,7 @@ type Script = AutomationBundle['scripts'][number];
 type Selection = NonNullable<NonNullable<Script['target']>['android']>['emulator'];
 interface Root { id: string; name: string; path: string; isDeclared: boolean }
 interface Option { selection: NonNullable<Selection>; name: string; endpoint: string; adb: { rootId: string; relativePath: string } }
-const props = defineProps<{ modelValue: Script; store: AppStore }>();
+const props = defineProps<{ modelValue: Script; store: AutomationStore }>();
 const emit = defineEmits<{ 'update:modelValue': [value: Script] }>();
 const rootId = ref(props.modelValue.rootId), loading = ref(false), options = ref<Option[]>([]), roots = ref<Root[]>([]), diagnostics = ref<string[]>([]);
 const english = computed(() => locale.value === 'en-US');

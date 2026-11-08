@@ -29,99 +29,100 @@ const identity = computed(() =>
     props.extensionIds
   ])
 );
-let generation = 0;
-let sessions: SurfaceSession[] = [];
+interface MountedEntry {
+  extensionId: string;
+  id: string;
+  slot: HTMLElement;
+  owner: AbortController;
+  session?: SurfaceSession;
+  pending?: Promise<void>;
+  error?: unknown;
+}
+const entries = new Map<string, MountedEntry>();
 let detached = false;
 let unsubscribe: (() => void) | undefined;
-
+let stopRetry: (() => void) | undefined;
+const refreshError = () => {
+  const error = [...entries.values()].find(entry => entry.error)?.error;
+  errorText.value = error instanceof Error ? error.message : error ? String(error) : '';
+};
 function report(error: unknown) {
-  errorText.value = error instanceof Error ? error.message : String(error);
   emit('error', error);
-  document.dispatchEvent(new CustomEvent('nexus-extension-error', { detail: error }));
+  props.registry.reportMountFailure(error);
 }
-
-async function dispose(surfaces: SurfaceSession[]) {
-  for (const session of surfaces.reverse()) {
+async function release(entry: MountedEntry) {
+  entry.owner.abort(); entry.slot.remove();
+  try { await entry.session?.scope.dispose(); } catch (error) { report(error); }
+}
+async function mount(entry: MountedEntry): Promise<void> {
+  if (entry.pending) return entry.pending;
+  entry.error = undefined; refreshError();
+  entry.pending = (async () => {
     try {
-      await session.scope.dispose();
+      const session = await props.registry.mount(entry.extensionId, entry.id, entry.slot, props.context, entry.owner.signal);
+      if (entry.owner.signal.aborted || detached) { await session.scope.dispose(); return; }
+      entry.session = session;
+      await nextTick(); session.setVisible(props.visible);
     } catch (error) {
-      report(error);
-    }
-  }
+      if (!entry.owner.signal.aborted && !detached) { entry.error = error; report(error); }
+    } finally { entry.pending = undefined; refreshError(); }
+  })();
+  return entry.pending;
 }
-
-async function replace() {
-  const own = ++generation;
-  const previous = sessions;
-  sessions = [];
-  await dispose(previous);
-  if (detached || own !== generation) return;
-  const host = container.value;
-  if (!host) return;
-  host.replaceChildren();
-  errorText.value = '';
-  if (props.context.surfaceId !== props.target) {
-    report(new Error('Surface target and context disagree'));
-    return;
-  }
-  const entries = (props.entry ? [props.entry] : props.registry.listSurfaces(props.target))
+async function reconcile(changed?: string) {
+  if (detached || !container.value) return;
+  if (props.context.surfaceId !== props.target) { report(new Error('Surface target and context disagree')); return; }
+  const wanted = (props.entry ? [props.entry] : props.registry.listSurfaces(props.target))
     .filter(entry => !props.extensionIds || props.extensionIds.includes(entry.extensionId));
-  for (const entry of entries) {
-    if (detached || own !== generation) return;
-    const slot = document.createElement('div');
-    slot.dataset.extensionId = entry.extensionId;
-    host.append(slot);
-    try {
-      const session = await props.registry.mount(entry.extensionId, entry.id, slot, props.context);
-      if (detached || own !== generation) {
-        await dispose([session]);
-        slot.remove();
-        return;
-      }
-      sessions.push(session);
-      await nextTick();
-      session.setVisible(props.visible);
-    } catch (error) {
-      slot.remove();
-      report(error);
-    }
+  const keys = new Set(wanted.map(entry => entry.extensionId + '/' + entry.id));
+  const retired: Promise<void>[] = [];
+  for (const [key, entry] of entries) if (!keys.has(key) || entry.extensionId === changed) {
+    entries.delete(key); retired.push(release(entry));
   }
+  const pending: Promise<void>[] = [];
+  for (const value of wanted) {
+    const key = value.extensionId + '/' + value.id;
+    if (entries.has(key)) continue;
+    const slot = document.createElement('div'); slot.dataset.extensionId = value.extensionId;
+    container.value.append(slot);
+    const entry: MountedEntry = { ...value, slot, owner: new AbortController() };
+    entries.set(key, entry); pending.push(mount(entry));
+  }
+  await Promise.all([...retired, ...pending]); refreshError();
 }
-
-watch(
-  [() => props.registry, identity],
-  () => {
-    void replace();
-  },
-  { flush: 'post' }
-);
+async function retryFailed() {
+  await Promise.all([...entries.values()].filter(entry => entry.error).map(mount));
+}
+function reset() {
+  const previous = [...entries.values()]; entries.clear();
+  for (const entry of previous) void release(entry);
+  props.registry.trackMount(reconcile());
+}
+watch([() => props.registry, identity], reset, { flush: 'post' });
 onMounted(() => {
-  unsubscribe = props.registry.subscribe((extensionId) => {
-    if (props.entry && props.entry.extensionId !== extensionId) return;
+  stopRetry = props.registry.subscribeRetry(retryFailed);
+  unsubscribe = props.registry.subscribe(extensionId => {
+    if (!extensionId || (props.entry && props.entry.extensionId !== extensionId)) return;
     if (props.extensionIds && !props.extensionIds.includes(extensionId)) return;
-    void replace();
+    props.registry.trackMount(reconcile(extensionId));
   });
-  void replace();
+  props.registry.trackMount(reconcile());
 });
-watch(
-  () => props.visible,
-  (visible) => {
-    for (const session of sessions) session.setVisible(visible);
-  }
-);
+watch(() => props.visible, visible => {
+  for (const entry of entries.values()) entry.session?.setVisible(visible);
+});
 onBeforeUnmount(() => {
-  detached = true;
-  unsubscribe?.();
-  generation++;
-  const previous = sessions;
-  sessions = [];
-  void dispose(previous);
+  detached = true; unsubscribe?.(); stopRetry?.();
+  for (const entry of entries.values()) void release(entry);
+  entries.clear();
 });
 </script>
 
 <template>
   <div class="surface-outlet">
-    <p v-if="errorText" role="alert">{{ t('扩展界面加载失败：') }}{{ t(errorText) }}</p>
+    <p v-if="errorText" role="alert">{{ t('扩展界面加载失败：') }}{{ t(errorText) }}
+      <button @click="registry.trackMount(retryFailed())">{{ t('重试') }}</button>
+    </p>
     <div ref="container" class="surface-outlet-content" />
   </div>
 </template>

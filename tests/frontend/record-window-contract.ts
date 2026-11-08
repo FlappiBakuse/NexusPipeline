@@ -1,4 +1,4 @@
-import { RecordWindow, groupPage } from '../../apps/web/src/pages/record-window.js';
+import { RecordWindow } from '../../apps/web/src/pages/record-window.js';
 import type { RecordPage } from '../../apps/web/src/control/models.js';
 
 export async function recordWindowContract(check: (condition: unknown, name: string) => void): Promise<void> {
@@ -33,20 +33,11 @@ export async function recordWindowContract(check: (condition: unknown, name: str
   check(invalid, 'non-advancing history cursors fail instead of looping forever');
   page = await window.read(100, async cursor => ({ items: [{runId:cursor?.runId || id(0)}] }), scope.signal, true);
   check(page.number === 1 && !page.data.next, 'a shorter refreshed history stops at the actual cursor end without inventing pages');
-  const mixed = (total: number) => async (cursor: RecordPage['next'], limit: number): Promise<RecordPage> => {
-    const start = cursor ? parseInt(cursor.runId.slice(-12), 16) + 1 : 0;
-    const items = Array.from({length:Math.min(limit, total - start)}, (_, offset) => ({runId:id(start + offset),
-      ...(start + offset & 1 ? {userId:id(999)} : {})}));
-    const last = start + items.length - 1;
-    return { items, ...(last < total - 1 ? {next:{endedAt:'2026-10-24T00:00:00Z',runId:id(last)}} : {}) };
-  };
-  let groups = await groupPage(undefined, mixed(101), scope.signal);
-  check(groups.items.length === 50 && groups.next?.runId === id(98),
-    'script-group windows fill matching rows and retain the exact boundary before lookahead');
-  groups = await groupPage(groups.next, mixed(101), scope.signal);
-  check(groups.items.length === 1 && groups.items[0]!.runId === id(100) && !groups.next,
-    'the next script-group window retains the lookahead match and reaches the actual end');
-  groups = await groupPage(undefined, mixed(100), scope.signal);
-  check(groups.items.length === 50 && !groups.next,
-    'trailing account records do not advertise an empty script-group page');
+  let groupRequests = 0;
+  const groups = await new RecordWindow().read(1, async () => {
+    groupRequests++;
+    return { items: [] };
+  }, scope.signal, true);
+  check(groupRequests === 1 && groups.data.items.length === 0 && !groups.data.next,
+    'an empty server-filtered group page needs no scan of unmatched account history');
 }

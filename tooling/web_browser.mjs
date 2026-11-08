@@ -26,7 +26,7 @@ const scenarios = {
   'host-automation': 'automation-module.mjs', 'host-source': 'source-module.mjs', 'host-installed': 'installed-module.mjs',
   'host-checkin': 'checkin-module.mjs', 'host-activities': 'activities-module.mjs', 'host-screenshot': 'screenshot-module.mjs',
   'host-plugin-list': 'plugin-list-module.mjs',
-  'desktop-native': 'desktop', 'desktop-browser': 'desktop'
+  'desktop-native': 'desktop', 'desktop-browser': 'desktop', 'desktop-failed': 'desktop'
 };
 if (!Object.hasOwn(scenarios, scenario)) throw new Error('Unknown browser scenario');
 externalDirectory(root, runtime);

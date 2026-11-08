@@ -49,8 +49,8 @@ registerMessages({
   编辑通知: 'Edit notification',
   任务名称: 'Task name',
   启用此任务: 'Enable this task',
-  '启用后，选择此任务的用户、队列或签到任务可发送通知；禁用时跳过发送。':
-    'Users, queues and check-in tasks can send through this task when enabled; delivery is skipped when disabled.',
+  '启用后，选择此任务的用户、队列或扩展任务可发送通知；禁用时跳过发送。':
+    'Users, queues and extension tasks can send through this task when enabled; delivery is skipped when disabled.',
   发送截图: 'Attach screenshots',
   '脚本完成通知附带所选截图；队列汇总通知不附图':
     'Attach selected screenshots to script completion notices; queue summaries have no images.',

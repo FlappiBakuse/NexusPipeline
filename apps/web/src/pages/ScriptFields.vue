@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from 'vue';
 import type { AutomationBundle } from '../control/wire.generated';
-import type { AppStore } from '../app/store';
+import type { AutomationStore } from '../app/store-ports';
 import { desktop } from '../app/desktop';
 import { t } from '../app/locale';
 import { templateKey } from './script-template';
@@ -9,7 +9,7 @@ import { scriptPaths, scriptPathKey, type ScriptPaths } from './script-paths';
 import GameFields from './GameFields.vue';
 import ScriptSourceFields from './ScriptSourceFields.vue';
 type Script = AutomationBundle['scripts'][number];
-const props = defineProps<{ modelValue: Script; store: AppStore }>();
+const props = defineProps<{ modelValue: Script; store: AutomationStore }>();
 const emit = defineEmits<{ 'update:modelValue': [value: Script] }>();
 const paths = computed(() => scriptPaths(props.store, props.modelValue));
 const uploadInput = ref<HTMLInputElement>();
@@ -106,6 +106,7 @@ async function upload(event: Event): Promise<void> {
         <em>*</em>
         <nexus-path-picker
           :aria-label="t('脚本根目录')"
+          aria-required="true"
           :value.prop="paths.root"
           :kinds.prop="['folder']"
           :browse-allowed.prop.camel="!!desktop"
@@ -119,6 +120,7 @@ async function upload(event: Event): Promise<void> {
           <em>*</em>
           <nexus-path-picker
             :aria-label="t('脚本主程序路径')"
+            aria-required="true"
             :value.prop="paths.executable"
             :disabled.prop="!paths.root.trim()"
             :kinds.prop="['file']"
@@ -142,6 +144,7 @@ async function upload(event: Event): Promise<void> {
           <em>*</em>
           <nexus-path-picker
             :aria-label="t('配置文件路径/文件夹')"
+            aria-required="true"
             :value.prop="paths.configuration"
             :disabled.prop="!paths.root.trim()"
             :kinds.prop="['file', 'folder']"
@@ -155,6 +158,7 @@ async function upload(event: Event): Promise<void> {
           <em>*</em>
           <nexus-path-picker
             :aria-label="t('日志路径')"
+            aria-required="true"
             :value.prop="paths.logs"
             :disabled.prop="!paths.root.trim()"
             :kinds.prop="['file', 'folder']"
@@ -213,7 +217,7 @@ async function upload(event: Event): Promise<void> {
         </label>
       </div>
     </section>
-    <section class="script-section judgement">
+    <section v-if="modelValue.kind === 'generic'" class="script-section judgement">
       <h3>{{ t('自定义完成标志') }}</h3>
       <template v-if="modelValue.judgement.language === 'keywords'">
         <label>

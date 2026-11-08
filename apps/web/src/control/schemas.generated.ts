@@ -217,6 +217,56 @@ export default {
       }
     }
   },
+  "automation-binding-source.schema.json": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://schemas.nexuspipeline.invalid/1/automation-binding-source.schema.json",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "candidateId",
+      "rootId",
+      "executable",
+      "arguments",
+      "configurationPaths",
+      "logPaths"
+    ],
+    "properties": {
+      "candidateId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 1024
+      },
+      "rootId": {
+        "$ref": "common.schema.json#/$defs/uuid"
+      },
+      "executable": {
+        "$ref": "automation-paths.schema.json#/$defs/portablePath"
+      },
+      "arguments": {
+        "type": "array",
+        "maxItems": 128,
+        "items": {
+          "type": "string",
+          "maxLength": 4096
+        }
+      },
+      "configurationPaths": {
+        "type": "array",
+        "minItems": 1,
+        "maxItems": 31,
+        "items": {
+          "$ref": "automation-paths.schema.json#/$defs/portablePath"
+        }
+      },
+      "logPaths": {
+        "type": "array",
+        "maxItems": 32,
+        "items": {
+          "$ref": "automation-paths.schema.json#/$defs/portablePath"
+        }
+      }
+    }
+  },
   "automation-bundle.schema.json": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "$id": "https://schemas.nexuspipeline.invalid/1/automation-bundle.schema.json",
@@ -650,6 +700,9 @@ export default {
             "items": {
               "$ref": "common.schema.json#/$defs/uuid"
             }
+          },
+          "source": {
+            "$ref": "automation-binding-source.schema.json"
           }
         },
         "allOf": [
@@ -1099,14 +1152,14 @@ export default {
         "type": "string",
         "format": "uuid"
       },
-      "sha256": {
-        "type": "string",
-        "pattern": "^[0-9a-f]{64}$"
-      },
       "extensionId": {
         "type": "string",
         "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
         "maxLength": 80
+      },
+      "sha256": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{64}$"
       },
       "relativePath": {
         "type": "string",
@@ -2909,11 +2962,10 @@ export default {
         ],
         "properties": {
           "vendor": {
-            "enum": [
-              "ldplayer",
-              "nox",
-              "bluestacks"
-            ]
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80,
+            "pattern": "^[a-z][a-z0-9.-]{0,79}$"
           },
           "rootId": {
             "$ref": "common.schema.json#/$defs/uuid"
@@ -2923,6 +2975,13 @@ export default {
           },
           "generation": {
             "$ref": "common.schema.json#/$defs/sha256"
+          },
+          "extensionId": {
+            "$ref": "common.schema.json#/$defs/extensionId"
+          },
+          "providerId": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9.-]{0,95}$"
           }
         }
       }
@@ -3547,6 +3606,10 @@ export default {
       },
       "localization": {
         "$ref": "extension-localization.schema.json"
+      },
+      "icon": {
+        "$ref": "common.schema.json#/$defs/relativePath",
+        "pattern": "\\.(?:png|ico)$"
       }
     },
     "allOf": [

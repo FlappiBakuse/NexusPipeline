@@ -1,5 +1,5 @@
 import { createIdentity } from '../control/identity';
-import type { AppStore } from '../app/store';
+import type { AutomationStore } from '../app/store-ports';
 import type { AutomationBundle, ControlAutomationChange } from '../control/wire.generated';
 
 type Script = AutomationBundle['scripts'][number];
@@ -71,7 +71,7 @@ export function argumentValues(text: string): string[] {
   return values;
 }
 
-export function scriptPaths(store: AppStore, script: Script): ScriptPaths {
+export function scriptPaths(store: AutomationStore, script: Script): ScriptPaths {
   const key = scriptPathKey(script.id);
   const saved = store.drafts.get(key);
   if (saved) return saved as ScriptPaths;
@@ -95,7 +95,7 @@ export function scriptPaths(store: AppStore, script: Script): ScriptPaths {
 }
 
 export function prepareScript(
-  store: AppStore,
+  store: AutomationStore,
   value: Script
 ): { value: Script; roots: ControlAutomationChange['roots'] } {
   const state = store.drafts.get(scriptPathKey(value.id)) as ScriptPaths | undefined;

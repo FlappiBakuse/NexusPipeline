@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { AppStore } from '../app/store';
+import type { RecordsStore } from '../app/store-ports';
 import type { ActiveStep } from '../control/execution';
 import type { HistoryImage } from '../control/records';
 import AttemptLogs from './AttemptLogs.vue';
@@ -7,11 +7,14 @@ import AttemptImages from './AttemptImages.vue';
 import { t } from '../app/locale';
 import { outcomeName } from './history-row';
 import { attemptTitle, historyDuration, historyReason, historyTime, startedInvocations } from './history-detail';
-const props = defineProps<{ store: AppStore; runId: string; attemptId: string; visible: boolean;
+import type { HistoryLog } from './attempt-resources';
+const props = defineProps<{ store: RecordsStore; runId: string; attemptId: string; visible: boolean;
   steps: ActiveStep[]; stepNames?: { stepId: string; scriptName: string }[]; images: HistoryImage[];
-  logs: (Record<string, unknown> & { key: { stepId: string; role: string } })[] }>();
+  logs: HistoryLog[];
+  logsReady: boolean; imagesReady: boolean }>();
 function logsFor(stepId: string, ordinal: number) {
-  return props.logs.filter(log => log.key.stepId === stepId).map(log =>
+  return props.logs.filter(log => log.key.stepId === stepId &&
+    (log.key.invocationOrdinal == null || log.key.invocationOrdinal === ordinal)).map(log =>
     ({ ...log, key: { ...log.key, invocationOrdinal: ordinal } }));
 }
 </script>
@@ -38,9 +41,9 @@ function logsFor(stepId: string, ordinal: number) {
           <dd>{{ historyReason(invocation.reasonCode) }}</dd>
         </div>
       </dl>
-      <AttemptLogs :store="store" :run-id="runId" :attempt-id="attemptId" :visible="visible"
+      <AttemptLogs v-if="logsReady" :store="store" :run-id="runId" :attempt-id="attemptId" :visible="visible"
         :ordinal="invocation.ordinal" :logs="logsFor(step.stepId, invocation.ordinal)" />
-      <AttemptImages :store="store" :run-id="runId" :attempt-id="attemptId" :visible="visible"
+      <AttemptImages v-if="imagesReady" :store="store" :run-id="runId" :attempt-id="attemptId" :visible="visible"
         :images="images.filter(image => image.key.stepId === step.stepId && image.invocationOrdinal === invocation.ordinal)" />
     </article>
   </section>

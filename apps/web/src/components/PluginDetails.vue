@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent } from 'vue';
 import { locale, t } from '../app/locale';
-import type { PluginRow } from '../pages/plugin-browser';
+import type { CatalogEntry, ExtensionState } from '../control/extensions';
+import type { ExtensionMetadata } from '../control/extension-metadata';
+type PluginDetailsInput = { name: string; summary: string; kind: string; version: string; metadata?: ExtensionMetadata; candidate?: CatalogEntry; installed?: ExtensionState };
 import { releaseDocument, type ExtensionDetails } from '../control/extensions';
 import { metadataText } from '../control/extension-metadata';
 const MarkdownDocument = defineAsyncComponent(() => import('./MarkdownDocument.vue'));
 const props = defineProps<{
-  row: PluginRow;
+  row: PluginDetailsInput;
   details?: ExtensionDetails;
   loading: boolean;
   error: string;

@@ -124,21 +124,15 @@ function select(id: string): void {
     >
       {{ t('插件仓库') }}
     </button>
+      <button v-if="session.pending" :disabled="session.busy || !store.can('operations.read')" @click="inspect()">{{ t('读取操作结果') }}</button>
+    <button v-if="session.pending && session.retryable" :disabled="session.busy || !canManage" @click="inspect(true)">{{ t('重试应用') }}</button>
   </PageActions>
   <Teleport :to="descriptionTarget || 'body'" :disabled="!descriptionTarget">
     <span v-if="visible && view === 'store'">{{ t('浏览官方插件并管理安装版本。') }}</span>
   </Teleport>
-  <div v-if="session.pending" class="plugin-outcome" role="status">
-    <span>{{ t('原操作尚待确认，请先读取结果。') }}</span>
-    <button :disabled="session.busy || !store.can('operations.read')" @click="inspect()">
-      {{ t('读取操作结果') }}
-    </button>
-    <button v-if="session.retryable" :disabled="session.busy || !canManage" @click="inspect(true)">
-      {{ t('重试应用') }}
-    </button>
-  </div>
-  <p v-if="session.error || error" role="alert" class="plugin-error">{{ t(session.error || error) }}</p>
-  <p v-else-if="session.notice" role="status" class="plugin-notice">{{ t(session.notice) }}</p>
+  <nexus-toast v-if="session.pending" tone="warning" :message.prop="t('原操作尚待确认，请先读取结果。')" />
+  <nexus-toast v-if="session.error || error" tone="danger" :message.prop="t(session.error || error)" />
+  <nexus-toast v-else-if="session.notice" :message.prop="t(session.notice)" @nexus-close="session.notice = ''" />
   <div
     ref="workspace"
     class="plugin-workspace"
@@ -170,8 +164,13 @@ function select(id: string): void {
         :aria-busy="busy"
       >
         <div class="plugin-list-items">
+          <nexus-loading-state
+            v-if="busy && !browser.rows.value.length"
+            :progress.prop="null"
+            :label="t('正在加载插件…')"
+          />
           <nexus-empty-state
-            v-if="!filtered.length"
+            v-else-if="!filtered.length"
             :title="t('没有匹配的插件')"
             :description="t('调整搜索或筛选条件后重试。')"
           />

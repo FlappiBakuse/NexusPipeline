@@ -24,6 +24,7 @@ export interface RecordPage { items: RecordRow[]; next?: { endedAt: string; runI
 export interface HistoryAttempt { attemptId: string; ordinal: number; facts: AttemptFacts }
 export interface AttemptTiming { attemptId: string; startedAt: string | null; endedAt: string | null; durationMilliseconds: number | null }
 export interface HistoryDisplay {
+  diagnostics?: { recordedAt: string; stepId: string; userId: string | null; phase: string; reasonCode: string; exceptionType: string }[];
   steps: { stepId: string; scriptName: string }[];
   accounts: { userId: string; name: string; stepIds: string[] }[];
   runId: string;
@@ -115,7 +116,10 @@ export function historyDisplay(value: unknown, runId: string): HistoryDisplay {
     return { userId: uuidValue(account.userId), name: stringValue(account.name), stepIds: arrayValue(account.stepIds, stringValue) };
   });
   if (new Set(accounts.map(account => account.userId)).size !== accounts.length) throw new TypeError('record_accounts_invalid');
-  return { runId, accounts, targetName: stringValue(row.targetName), userName: row.userName === null ? null : stringValue(row.userName),
+  return { runId, accounts, diagnostics: arrayValue(row.diagnostics ?? [], value => { const item = objectValue(value);
+    return { recordedAt: dateValue(item.recordedAt), stepId: stringValue(item.stepId), userId: item.userId === null ? null : uuidValue(item.userId),
+      phase: stringValue(item.phase), reasonCode: stringValue(item.reasonCode), exceptionType: stringValue(item.exceptionType) }; }),
+    targetName: stringValue(row.targetName), userName: row.userName === null ? null : stringValue(row.userName),
     mode: row.mode === null ? null : enumValue(row.mode, ['manual', 'auto']),
     steps: arrayValue(row.steps, value => { const step = objectValue(value);
       return { stepId: stringValue(step.stepId), scriptName: stringValue(step.scriptName) }; }),

@@ -102,7 +102,7 @@ onBeforeUnmount(() => {
                 :aria-current="'/' + store.state.page === route.path ? 'page' : undefined"
                 @click="visit($event, route.path.slice(1) as AppRoute)"
               >
-                <span class="nav-icon"><nexus-icon aria-hidden="true" name="plugins" /></span>
+                <span class="nav-icon"><nexus-icon aria-hidden="true" :name="route.path.startsWith('/plugin/game-checkin') ? 'checkin' : 'plugins'" /></span>
                 {{ route.label }}
               </a>
             </template>

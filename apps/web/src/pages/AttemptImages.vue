@@ -1,14 +1,16 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
-import type { AppStore } from '../app/store';
+import type { RecordsStore } from '../app/store-ports';
 import { boundedBytes } from '../control/client';
 import type { HistoryImage } from '../control/records';
 import { historyReason } from './history-detail';
 import { BlobDownloads } from '../control/blob-downloads';
 import ImageGallery from '../components/ImageGallery.vue';
 import HistoryImagePreview from './HistoryImagePreview.vue';
+import HistoryCatalogWindow from '../components/HistoryCatalogWindow.vue';
+import { t } from '../app/locale';
 const props = defineProps<{
-  store: AppStore;
+  store: RecordsStore;
   runId: string;
   attemptId: string;
   visible: boolean;
@@ -64,9 +66,12 @@ onBeforeUnmount(close);
     :visible="visible"
     @select="displayed = captured[$event] || null"
   />
-  <p v-for="image in unavailable" :key="image.key.captureId" role="status" class="history-image-unavailable">
-    {{ historyReason(image.reasonCode) }}
-  </p>
+  <HistoryCatalogWindow v-if="unavailable.length" :items="unavailable" :item-key="image => image.key.captureId"
+    :label="t('运行截图')" :visible="visible">
+    <template #default="{ item: image }">
+      <p role="status" class="history-image-unavailable">{{ historyReason(image.reasonCode) }}</p>
+    </template>
+  </HistoryCatalogWindow>
   <!-- Keep one accessibility identity across opens; visibility controls media release. -->
   <HistoryImagePreview
     :pool="store.media"

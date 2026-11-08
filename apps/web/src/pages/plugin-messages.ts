@@ -1,5 +1,6 @@
 import { registerMessages } from '../app/locale';
 registerMessages({
+  '正在加载插件…': 'Loading plugins…',
   返回插件列表: 'Back to plugin list',
   通用: 'General',
   插件详情: 'Plugin details',
