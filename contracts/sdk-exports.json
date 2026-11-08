@@ -77,7 +77,8 @@
     "secret-status.schema.json",
     "store-catalog.schema.json",
     "store-pointer.schema.json",
-    "update-feed.schema.json"
+    "update-feed.schema.json",
+    "automation-binding-source.schema.json"
   ],
   "internalRoots": [
     "asset-preparation-defs.schema.json",

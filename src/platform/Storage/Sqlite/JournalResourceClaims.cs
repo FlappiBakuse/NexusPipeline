@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using System.Runtime.ExceptionServices;
 using NexusPipeline.Extensibility.Protocol;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Maintenance;
@@ -59,13 +60,12 @@ internal static class JournalResourceClaims
 
     internal static void VerifyInventory(RuntimeInstance instance, StateDatabase database, ContractReader contracts, PayloadApplyRoots? payloadRoots = null)
     {
-        var codec = new ConfigurationPlanCodec(instance, contracts, new(instance, contracts));
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
         using var transaction = connection.BeginTransaction(deferred: true);
         foreach (var batch in RecoveryJournalRegistry.ReadHistoryInside(connection, transaction).Chunk(128))
         {
             var claims = ReadBatch(connection, transaction, batch.Select(item => item.JournalId).ToArray());
-            foreach (var journal in batch) Verify(journal, claims[journal.JournalId]);
+            VerifyBatch(instance, database, contracts, batch, journal => Verify(journal, claims[journal.JournalId]));
         }
 
         void Verify(RegisteredJournal journal, IReadOnlyDictionary<string, ResourceClaimMode> actual)
@@ -79,10 +79,8 @@ internal static class JournalResourceClaims
             {
                 var roots = payloadRoots ?? new PayloadApplyRoots(PhysicalPathPolicy.RuntimeApplicationDirectory(), Path.Combine(instance.RuntimeRoot, "extensions"));
                 var reference = new BlobReference(journal.PlanPath, new FileInfo(Path.Combine(instance.RuntimeRoot, journal.PlanPath)).Length, journal.PlanDigest);
-                var payload = new PayloadPlanCodec(instance, contracts, new(instance, contracts), roots).ReadStructure(reference);
-                if (payload.ExtensionSource is null) throw new IOException("extension_payload_source_required");
-                var sourceCodec = new PayloadSourceCodec(instance, contracts);
-                var source = sourceCodec.ReadMetadata(payload.ExtensionSource); sourceCodec.RequireFrozenBinding(source, payload);
+                var payload = new PayloadPlanCodec(instance, contracts, new(instance, contracts), roots).ReadStructure(reference, out var source);
+                if (payload.ExtensionSource is null || source is null) throw new IOException("extension_payload_source_required");
                 if (source.Claims.Length != actual.Count || source.Claims.Any(claim =>
                     !actual.TryGetValue(claim.ResourceKey, out var mode) || mode != claim.Mode))
                     throw new IOException("journal_resource_claims_unbound");
@@ -100,7 +98,8 @@ internal static class JournalResourceClaims
                 if (actual.Count != 0) throw new IOException("journal_resource_claim_kind_invalid");
                 return;
             }
-            var plan = codec.ReadStructure(new(journal.PlanPath, new FileInfo(Path.Combine(instance.RuntimeRoot, journal.PlanPath)).Length, journal.PlanDigest));
+            var plan = new ConfigurationPlanCodec(instance, contracts, new(instance, contracts)).ReadStructure(
+                new(journal.PlanPath, new FileInfo(Path.Combine(instance.RuntimeRoot, journal.PlanPath)).Length, journal.PlanDigest));
             var controlled = plan.Editor is not null || plan.Kind == JournalKind.ConfigExchange && plan.RunState is not null && plan.EditPolicy is not null && !plan.PhysicalClaims.IsDefaultOrEmpty;
             var expected = !controlled ? new Dictionary<string, ResourceClaimMode>(StringComparer.Ordinal) :
                 journal.ResourceKeys.ToDictionary(key => key, key => key is "automation:definitions" or "blobs:content" ? ResourceClaimMode.Reference : ResourceClaimMode.Mutation, StringComparer.Ordinal);
@@ -112,6 +111,25 @@ internal static class JournalResourceClaims
             if (expected.Count != actual.Count || expected.Any(item => !actual.TryGetValue(item.Key, out var mode) || mode != item.Value))
                 throw new IOException("journal_resource_claims_unbound");
         }
+    }
+
+    private static void VerifyBatch(RuntimeInstance instance, StateDatabase database, ContractReader contracts,
+        RegisteredJournal[] batch, Action<RegisteredJournal> verify)
+    {
+        ExceptionDispatchInfo? failure = null;
+        Parallel.ForEach(batch, new ParallelOptions { MaxDegreeOfParallelism = 4 },
+            () => new HistoryReadScope(instance, database, contracts),
+            (journal, loop, scope) =>
+            {
+                try { verify(journal); }
+                catch (Exception error)
+                {
+                    Interlocked.CompareExchange(ref failure, ExceptionDispatchInfo.Capture(error), null);
+                    loop.Stop();
+                }
+                return scope;
+            }, scope => scope.Dispose());
+        failure?.Throw();
     }
 
     internal static void VerifyAttempt(RuntimeInstance instance, StateDatabase database, ContractReader contracts,

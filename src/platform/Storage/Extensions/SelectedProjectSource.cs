@@ -268,7 +268,7 @@ internal sealed class SelectedProjectSource : IDisposable
         var root = catalog.Roots.SingleOrDefault(item => item.Id == script.RootId) ?? throw Changed();
         if (script.Kind != AutomationKind.Specialized || script.ExtensionId != _extensionId || root.Kind != AutomationRootKind.Script ||
             binding is not null && !catalog.Users.Any(item => item.Id == binding.UserId)) throw Changed();
-        return (binding, script, root);
+        return (binding, binding is null ? script : BindingScriptSource.Resolve(script, binding), root);
     }
 
     private ProjectDirectoryRead Observe(string relative, string path)

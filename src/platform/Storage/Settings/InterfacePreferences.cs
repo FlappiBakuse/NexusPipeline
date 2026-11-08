@@ -17,7 +17,7 @@ public sealed class InterfacePreferences
         Guid OperationId, string Subject, string RequestSha256);
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
         { UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow };
-    private static readonly InterfaceValues Default = new("dark", ["game-activities", "status", "running", "history-duration"],
+    private static readonly InterfaceValues Default = new("dark", ["status", "running", "history-duration"],
         [], ["remote", "proxy", "advanced", "updates", "diagnostics"], "zh-CN");
     private readonly InstanceLease _owner;
     private readonly ResourceLeaseManager _resources;
@@ -108,13 +108,19 @@ public sealed class InterfacePreferences
     {
         if (values is null || values.Theme is not ("dark" or "light" or "system") || values.Locale is not ("zh-CN" or "en-US"))
             throw new ArgumentException("interface_values_invalid");
-        Check(values.DashboardCards, ["game-activities", "status", "running", "history-duration", "history-counts"]);
-        Check(values.PinnedSettings, ["service", "remote", "proxy", "advanced", "updates", "diagnostics"]);
-        Check(values.CollapsedSettings, ["service", "remote", "proxy", "advanced", "updates", "diagnostics"]);
+        if (values.DashboardCards is null || values.DashboardCards.Count > 64 ||
+            values.DashboardCards.Distinct(StringComparer.Ordinal).Count() != values.DashboardCards.Count ||
+            values.DashboardCards.Any(value => value is null || !System.Text.RegularExpressions.Regex.IsMatch(value,
+                "^[a-z][a-z0-9.-]{0,95}$", System.Text.RegularExpressions.RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100))))
+            throw new ArgumentException("interface_values_invalid");
+        Check(values.PinnedSettings, ["service", "remote", "proxy", "advanced", "updates", "diagnostics"], settings: true);
+        Check(values.CollapsedSettings, ["service", "remote", "proxy", "advanced", "updates", "diagnostics"], settings: true);
     }
-    private static void Check(IReadOnlyList<string> values, string[] allowed)
+    private static void Check(IReadOnlyList<string> values, string[] allowed, bool settings = false)
     {
-        if (values is null || values.Count > allowed.Length || values.Distinct(StringComparer.Ordinal).Count() != values.Count ||
-            values.Any(value => !allowed.Contains(value, StringComparer.Ordinal))) throw new ArgumentException("interface_values_invalid");
+        if (values is null || values.Count > (settings ? 64 : allowed.Length) || values.Distinct(StringComparer.Ordinal).Count() != values.Count ||
+            values.Any(value => !allowed.Contains(value, StringComparer.Ordinal) && !(settings &&
+                System.Text.RegularExpressions.Regex.IsMatch(value, "^extension:[a-z0-9-]{1,80}:[a-z0-9-]{1,40}$", System.Text.RegularExpressions.RegexOptions.CultureInvariant,
+                    TimeSpan.FromMilliseconds(100))))) throw new ArgumentException("interface_values_invalid");
     }
 }

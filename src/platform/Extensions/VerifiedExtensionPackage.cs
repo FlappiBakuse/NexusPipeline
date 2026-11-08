@@ -157,6 +157,7 @@ internal sealed class VerifiedExtensionPackage : IDisposable
         {
             var allowed = new HashSet<string>(StringComparer.Ordinal)
                 { "manifest.json", "README.md", "CHANGELOG.md", "CHANGELOG.en.md", manifest.Specialized?.AdapterEntry ?? "" };
+            if (manifest.Icon is { } icon) allowed.Add(icon);
             if (manifest.Localization is { } localization)
                 foreach (var path in localization.Locales.Values) allowed.Add(path.GetString() ?? throw Invalid());
             if (manifest.Managed is not null || manifest.Execution is not null || manifest.Frontend is not null ||
@@ -172,6 +173,7 @@ internal sealed class VerifiedExtensionPackage : IDisposable
         PhysicalPathPolicy.ValidateRelativePath(activation);
         RequireFile(activation);
         if (manifest.Specialized is { } adapter) RequireFile(adapter.AdapterEntry);
+        if (manifest.Icon is { } iconPath) RequireFile(iconPath);
         if (manifest.Frontend is { } frontend)
         {
             RequireFile(frontend.Entry);

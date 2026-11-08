@@ -242,6 +242,7 @@ export interface NexusSectionCardProperties {
 
 
 export interface NexusCollapsibleCardProperties {
+  description: string;
   expanded: boolean;
   panelId: string;
   title: string;
@@ -881,11 +882,13 @@ export const uiElementDefinitions = {
   },
   "nexus-collapsible-card": {
     "properties": {
+      "description": "string",
       "expanded": "boolean",
       "panelId": "string",
       "title": "string"
     },
     "defaults": {
+      "description": "",
       "expanded": false,
       "panelId": "",
       "title": ""

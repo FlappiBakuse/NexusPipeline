@@ -1,6 +1,7 @@
 using System.Runtime.Versioning;
 using NexusPipeline.Platform.Extensions;
 using NexusPipeline.Extensibility.Protocol;
+using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Execution;
 using Xunit;
 
@@ -76,6 +77,27 @@ public sealed class ProviderPackageTests
             await new ExecutionRegistrationPort(scope, package, registry).RegisterAsync(default));
         scope.Publish();
         Assert.Throws<IOException>(() => registry.Acquire("provider-fixture"));
+        Assert.Equal(before, fixture.Fingerprint());
+    }
+
+    [Theory(DisplayName = "Independent Registration Rechecks Digests After Same-Size Worker Or Archive Changes")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RejectsAlteredBytes(bool archive)
+    {
+        using var fixture = new ProviderPackageFixture();
+        var package = fixture.Verify();
+        var path = archive ? fixture.Archive : fixture.Worker;
+        var identity = PhysicalObjectIdentity.Read(path);
+        var bytes = File.ReadAllBytes(path); bytes[0] ^= 0xff; File.WriteAllBytes(path, bytes);
+        Assert.Equal(identity, PhysicalObjectIdentity.Read(path));
+        Assert.Equal(archive ? package.Archive.SizeBytes : package.Files.Single(file =>
+            file.RelativePath == Path.GetFileName(fixture.Worker)).SizeBytes, new FileInfo(path).Length);
+        var before = fixture.Fingerprint();
+        var registry = new ExecutionProviderRegistry(); await using var scope = new ExtensionScope("provider-fixture");
+        await Assert.ThrowsAsync<IOException>(async () =>
+            await new ExecutionRegistrationPort(scope, package, registry).RegisterAsync(default));
+        scope.Publish(); Assert.Throws<IOException>(() => registry.Acquire("provider-fixture"));
         Assert.Equal(before, fixture.Fingerprint());
     }
 }

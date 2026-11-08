@@ -8,6 +8,8 @@ internal sealed class DatabaseReadScope : IDisposable
     private readonly DatabaseReadScope? _previous = _current;
     private readonly int _thread = Environment.CurrentManagedThreadId;
     private readonly string _path;
+    private readonly DatabaseReadScope? _owner;
+    private DatabaseReadScope Owner => _owner ?? this;
     private StableDirectoryLease? _directory;
     private FileStream? _file;
     private string? _pool;
@@ -16,6 +18,7 @@ internal sealed class DatabaseReadScope : IDisposable
     private DatabaseReadScope(string path)
     {
         _path = PhysicalPathPolicy.NormalizeWithoutLinks(path);
+        if (_previous is { } prior && StringComparer.OrdinalIgnoreCase.Equals(prior._path, _path)) _owner = prior.Owner;
         _current = this;
     }
 
@@ -39,13 +42,13 @@ internal sealed class DatabaseReadScope : IDisposable
         if (_current is not { } scope || !StringComparer.OrdinalIgnoreCase.Equals(
                 PhysicalPathPolicy.NormalizeSyntax(path), scope._path)) return null;
         _ = PhysicalPathPolicy.NormalizeWithoutLinks(path);
-        scope.Protect();
+        scope.Owner.Protect();
         return scope._path;
     }
 
     internal static void Track(SqliteConnection connection)
     {
-        if (_current is { } scope) scope._pool ??= connection.ConnectionString;
+        if (_current is { } scope) scope.Owner._pool ??= connection.ConnectionString;
     }
 
     public void Dispose()
@@ -54,6 +57,7 @@ internal sealed class DatabaseReadScope : IDisposable
         if (_thread != Environment.CurrentManagedThreadId || !ReferenceEquals(_current, this))
             throw new InvalidOperationException("database_read_scope_order");
         _disposed = true; _current = _previous;
+        if (_owner is not null) return;
         // Native connections must close while the file and its pathname are still protected.
         try
         {

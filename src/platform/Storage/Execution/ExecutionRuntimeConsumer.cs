@@ -1,5 +1,6 @@
 using System.Runtime.Versioning;
 using NexusPipeline.Core.Configuration;
+using NexusPipeline.Platform.Storage.Configuration;
 using NexusPipeline.Core.Execution;
 using NexusPipeline.Core.Extensions;
 using NexusPipeline.Platform.Storage.Extensions;
@@ -12,6 +13,7 @@ namespace NexusPipeline.Platform.Storage.Execution;
 [SupportedOSPlatform("windows")]
 public sealed class ExecutionRuntimeConsumer
 {
+    private readonly ConfigurationSessionFactory _configurationFactory;
     private readonly RuntimeInstance _instance;
     private readonly ExecutionLiveMedia? _liveMedia;
     private TaskAdapterService? _adapters;
@@ -42,8 +44,9 @@ public sealed class ExecutionRuntimeConsumer
     public int PendingReconciliationCount { get { lock (_gate) return _reconciliationRequired ? Math.Max(_reconciliation.Count, 1) : 0; } }
 
     public ExecutionRuntimeConsumer(RuntimeInstance instance, StateDatabase database, ContractReader contracts, InstanceLease lease,
-        ResourceLeaseManager resources, RecoveryIndex index, ExecutionAdmissionInbox inbox, IAttemptTerminalObserver? terminalObserver = null, ExecutionLiveMedia? liveMedia = null)
+        ResourceLeaseManager resources, RecoveryIndex index, ExecutionAdmissionInbox inbox, IAttemptTerminalObserver? terminalObserver = null, ExecutionLiveMedia? liveMedia = null, ConfigurationSessionFactory? configurationFactory = null)
     {
+        _configurationFactory = configurationFactory ?? new(instance, database, contracts, lease, index);
         lease.VerifyHeld(instance); inbox.Bind(instance, resources, index);
         if (!resources.UsesRecoveryIndex(index)) throw new IOException("execution_runtime_recovery_index_unbound");
         _liveMedia = liveMedia; _instance = instance; _database = database; _contracts = contracts; _lease = lease; _resources = resources; _index = index; _inbox = inbox; _terminalObserver = terminalObserver;
@@ -111,7 +114,7 @@ public sealed class ExecutionRuntimeConsumer
         Interlocked.Increment(ref _progressRevision);
         try
         {
-            session = new(_instance, _database, _contracts, _lease, _resources, _index, accepted, liveMedia: _liveMedia, adapters: _adapters, progress: progress);
+            session = new(_instance, _database, _contracts, _lease, _resources, _index, accepted, liveMedia: _liveMedia, adapters: _adapters, progress: progress, configurationFactory: _configurationFactory);
             var receipt = await new ExecutionAttemptCoordinator().RunAsync(session, hostStopping).ConfigureAwait(false);
             ObserveTerminal(receipt);
             return receipt;

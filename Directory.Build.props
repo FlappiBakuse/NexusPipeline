@@ -21,7 +21,7 @@
   <ItemGroup Condition="'$(MSBuildProjectName)' == 'NexusPipeline.Platform' Or '$(MSBuildProjectName)' == 'NexusPipeline.Host' Or '$(MSBuildProjectName)' == 'NexusPipeline.Maintenance' Or '$(MSBuildProjectName)' == 'NexusPipeline.ContractTests' Or '$(MSBuildProjectName)' == 'NexusPipeline.StorageTests' Or '$(MSBuildProjectName)' == 'NexusPipeline.WindowsTests' Or '$(MSBuildProjectName)' == 'OwnedWriter'">
     <Using Include="NexusPipeline.Platform.Serialization.Protocol" />
   </ItemGroup>
-  <ItemGroup Condition="'$(MSBuildProjectName)' == 'NexusPipeline.Host' Or '$(MSBuildProjectName)' == 'NexusPipeline.Maintenance' Or '$(MSBuildProjectName)' == 'NexusPipeline.Installer'">
+  <ItemGroup Condition="'$(MSBuildProjectName)' == 'NexusPipeline.Host' Or '$(MSBuildProjectName)' == 'NexusPipeline.Launcher' Or '$(MSBuildProjectName)' == 'NexusPipeline.Maintenance' Or '$(MSBuildProjectName)' == 'NexusPipeline.Installer'">
     <AssemblyMetadata Include="Nexus.BuildProfile" Value="production" Condition="'$(NexusTestHost)' != 'true'" />
     <AssemblyMetadata Include="Nexus.BuildProfile" Value="test" Condition="'$(NexusTestHost)' == 'true'" />
   </ItemGroup>

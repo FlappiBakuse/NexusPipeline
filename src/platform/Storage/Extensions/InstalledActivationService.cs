@@ -18,8 +18,9 @@ internal sealed class InstalledActivationService(RuntimeInstance instance, State
     RecoveryIndex recovery, ExtensionCatalogStore catalog, ExtensionActivator activator)
 {
     internal async ValueTask<InstalledActivationResult> ActivateAsync(string extensionId,
-        CancellationToken acceptedHostCancellation)
+        CancellationToken acceptedHostCancellation, NexusPipeline.Platform.Processes.ProcessIdentityLease? executor = null)
     {
+        using var profile = StartupProfile.Begin("extension.activation", extensionId);
         lease.VerifyHeld(instance);
         lease.RequireExtensionActivator(activator, resources);
         acceptedHostCancellation.ThrowIfCancellationRequested();
@@ -27,6 +28,9 @@ internal sealed class InstalledActivationService(RuntimeInstance instance, State
         ExtensionProjectionPublication.PublishIfDirty(instance, database, lease, contracts, roots, resources, recovery);
         IReadOnlyList<ResourceClaim> claims;
         using (DirectoryAttributeScope.Hold(instance))
+        using (InstanceReadScope.Hold(instance, contracts))
+        using (DatabaseReadScope.Hold(database.DatabasePath))
+        using (BlobReadScope.Hold(instance))
         {
             var installed = new ExtensionInstalledEvidence(instance, database, contracts, roots).ReadCurrent(extensionId)
                 ?? throw new IOException("extension_installed_activation_unbound");
@@ -35,16 +39,17 @@ internal sealed class InstalledActivationService(RuntimeInstance instance, State
         using var root = resources.TryAcquire(Guid.NewGuid(), claims).Lease
             ?? throw new IOException("extension_installed_activation_resources_unavailable");
         using var inventory = await activator.ReserveForApplyAsync(root, extensionId, acceptedHostCancellation).ConfigureAwait(false);
-        return await ActivateReservedAsync(root, inventory, extensionId, acceptedHostCancellation).ConfigureAwait(false);
+        return await ActivateReservedAsync(root, inventory, extensionId, acceptedHostCancellation, executor).ConfigureAwait(false);
     }
 
     internal async ValueTask<InstalledActivationResult> ActivateReservedAsync(ResourceOperationLease root,
-        ExtensionActivator.ApplyReservation inventory, string extensionId, CancellationToken acceptedHostCancellation)
+        ExtensionActivator.ApplyReservation inventory, string extensionId, CancellationToken acceptedHostCancellation,
+        NexusPipeline.Platform.Processes.ProcessIdentityLease? executor = null)
     {
         lease.VerifyHeld(instance); lease.RequireExtensionActivator(activator, resources);
         acceptedHostCancellation.ThrowIfCancellationRequested();
         using var origin = InstalledActivationOrigin.Prepare(instance, database, lease, contracts, roots, catalog,
-            resources, recovery, root, inventory, extensionId);
+            resources, recovery, root, inventory, extensionId, executor);
         await using var source = PreparedExtensionActivation.PrepareInstalled(origin, instance, database, lease,
             contracts, roots, root, inventory, acceptedHostCancellation);
         await using var activation = await inventory.PrepareCandidateAsync(source).ConfigureAwait(false);

@@ -124,7 +124,7 @@ public static class ExecutionSelectionPolicy
 
     private static ExecutionSelectionItem Item(AutomationCatalog catalog, HostSettingsSnapshot settings, AutomationBinding binding, int ordinal, int successesToday, bool initialize)
     {
-        var original = catalog.Scripts.Single(item => item.Id == binding.ScriptId);
+        var original = BindingScriptSource.Resolve(catalog.Scripts.Single(item => item.Id == binding.ScriptId), binding);
         var script = original with
         {
             Target = AutomationTargetPolicy.Freeze(original.Target),

@@ -1,11 +1,9 @@
 using System.ComponentModel;
 using System.Net;
 using System.Runtime.Versioning;
-using System.Security.Cryptography;
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
 using NexusPipeline.Platform.Processes;
-using NexusPipeline.Platform.Storage;
 
 namespace NexusPipeline.Platform.Networking;
 
@@ -13,41 +11,42 @@ namespace NexusPipeline.Platform.Networking;
 public sealed class NativeClientBinding : IDisposable
 {
     private readonly ProcessIdentity _registered;
-    private readonly ProcessIdentityMetadata _metadata;
-    private readonly PhysicalObjectIdentity _imageIdentity;
-    private readonly FileStream _image;
+    private readonly ProcessIdentityLease _image;
     private readonly SafeKernelHandle _process;
     private readonly object _gate = new();
     private bool _disposed;
 
-    public NativeClientBinding(int trustedProcessId) : this(ProcessIdentityReader.Read(trustedProcessId)) { }
+    public NativeClientBinding(int trustedProcessId) : this(trustedProcessId, null) { }
 
-    public NativeClientBinding(ProcessIdentity trustedIdentity)
+    public NativeClientBinding(ProcessIdentity trustedIdentity) : this(trustedIdentity.ProcessId, trustedIdentity) { }
+
+    // A successful registration takes ownership; failed registration leaves the caller's protection intact.
+    internal NativeClientBinding(ProcessIdentity trustedIdentity, ProcessIdentityLease protectedImage)
+        : this(trustedIdentity.ProcessId, trustedIdentity, protectedImage) { }
+
+    private NativeClientBinding(int trustedProcessId, ProcessIdentity? trustedIdentity, ProcessIdentityLease? protectedImage = null)
     {
-        var trustedProcessId = trustedIdentity.ProcessId;
         if (trustedProcessId <= 0) throw new ArgumentOutOfRangeException(nameof(trustedIdentity));
         _process = JobNative.OpenProcess(0x101000, false, trustedProcessId);
         try
         {
             if (_process.IsInvalid) throw new Win32Exception(Marshal.GetLastPInvokeError());
             if (!IsRunning()) throw new IOException("native_client_not_running");
-            _registered = ProcessIdentityReader.Read(_process, trustedProcessId);
-            if (_registered != trustedIdentity) throw new IOException("native_client_registration_identity_mismatch");
-            _metadata = ProcessIdentityMetadata.From(_registered);
-            var host = ProcessIdentityReader.Read(Environment.ProcessId);
-            if (_registered.UserSid != host.UserSid) throw new IOException("native_client_user_mismatch");
-            var image = new FileStream(_registered.ImagePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            var metadata = ProcessIdentityReader.ReadMetadata(_process, trustedProcessId);
+            using var host = JobNative.OpenProcess(0x1000, false, Environment.ProcessId);
+            if (metadata.UserSid != ProcessIdentityReader.ReadMetadata(host, Environment.ProcessId).UserSid)
+                throw new IOException("native_client_user_mismatch");
+            var image = protectedImage ?? ProcessIdentityLease.HoldImage(metadata.ImagePath);
             try
             {
-                var imageIdentity = PhysicalObjectIdentity.Read(image.SafeFileHandle);
-                if (Convert.ToHexStringLower(SHA256.HashData(image)) != _registered.ImageSha256 ||
-                    PhysicalObjectIdentity.Read(_registered.ImagePath) != imageIdentity ||
-                    ProcessIdentityReader.ReadMetadata(_process, trustedProcessId) != _metadata || !IsRunning())
+                _registered = image.Read(_process, trustedProcessId);
+                if (trustedIdentity is not null && _registered != trustedIdentity)
+                    throw new IOException("native_client_registration_identity_mismatch");
+                if (ProcessIdentityMetadata.From(_registered) != metadata || image.Read(_process, trustedProcessId) != _registered || !IsRunning())
                     throw new IOException("native_client_changed_during_registration");
-                _imageIdentity = imageIdentity;
                 _image = image;
             }
-            catch { image.Dispose(); throw; }
+            catch { if (protectedImage is null) image.Dispose(); throw; }
         }
         catch { _process.Dispose(); throw; }
     }
@@ -142,7 +141,5 @@ public sealed class NativeClientBinding : IDisposable
 
     private bool IsRunning() => JobNative.WaitForSingleObject(_process, 0) == 258;
 
-    private bool MatchesPinnedIdentity(int processId) =>
-        ProcessIdentityReader.ReadMetadata(_process, processId) == _metadata &&
-        PhysicalObjectIdentity.Read(_registered.ImagePath) == _imageIdentity;
+    private bool MatchesPinnedIdentity(int processId) => _image.Read(_process, processId) == _registered;
 }

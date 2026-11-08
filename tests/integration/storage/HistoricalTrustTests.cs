@@ -26,7 +26,7 @@ public sealed class HistoricalTrustTests
         } : null);
         _ = fixture.Catalog.Store.Accept(Guid.NewGuid(), "local", fixture.Catalog.Verify(next));
         using var root = fixture.Acquire();
-        fixture.Catalog.Store.RequireInstalledHistory(root, original, entry);
+        using var history = fixture.Catalog.Store.ProtectInstalledHistory(root, original, entry);
         Assert.Equal(2, Saved(fixture).Identity.Sequence);
         Assert.Equal(1, original.Identity.Sequence);
     }
@@ -42,7 +42,7 @@ public sealed class HistoricalTrustTests
             verifier.Verify(signed.Pointer, signed.Catalog, signed.Signature, ExtensionStoreChannel.Stable)).Message);
         var store = fixture.Catalog.NewStore(verifier);
         using var root = fixture.Acquire();
-        store.RequireInstalledHistory(root, original, entry);
+        using var history = store.ProtectInstalledHistory(root, original, entry);
         Assert.Equal(original, Saved(fixture));
         Assert.Equal(1, fixture.Catalog.Count("extension_catalog_acceptances"));
     }
@@ -55,7 +55,7 @@ public sealed class HistoricalTrustTests
         using var other = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         var store = fixture.Catalog.NewStore(fixture.Catalog.NewVerifier(other.ExportSubjectPublicKeyInfo()));
         using var root = fixture.Acquire();
-        Assert.Throws<IOException>(() => store.RequireInstalledHistory(root, original, entry));
+        Assert.Throws<IOException>(() => { using var history = store.ProtectInstalledHistory(root, original, entry); });
         Assert.Equal(original, Saved(fixture));
     }
 
@@ -75,13 +75,13 @@ public sealed class HistoricalTrustTests
             var changed = originalBytes.ToArray(); changed[^2] ^= 1; File.WriteAllBytes(path, changed);
         }
         else fixture.Catalog.Sql("UPDATE extension_catalog_heads SET sequence=1,catalog_sha='" + original.Identity.Sha256 + "' WHERE channel='stable';");
-        try { Assert.Throws<IOException>(() => fixture.Catalog.Store.RequireInstalledHistory(root, original, entry)); }
+        try { Assert.Throws<IOException>(() => { using var history = fixture.Catalog.Store.ProtectInstalledHistory(root, original, entry); }); }
         finally
         {
             if (bytes) File.WriteAllBytes(path, originalBytes);
             else fixture.Catalog.Sql("UPDATE extension_catalog_heads SET sequence=2,catalog_sha='" + current.Identity.Sha256 + "' WHERE channel='stable';");
         }
-        fixture.Catalog.Store.RequireInstalledHistory(root, original, entry);
+        using var history = fixture.Catalog.Store.ProtectInstalledHistory(root, original, entry);
         Assert.Equal(originalBytes, File.ReadAllBytes(path));
     }
 
@@ -92,7 +92,7 @@ public sealed class HistoricalTrustTests
         using var other = new BoundPackageFixture(); other.Publish();
         var original = Saved(fixture); var entry = fixture.Catalog.Store.ReadCached(ExtensionStoreChannel.Stable)!.Entries.Single();
         using var root = other.Acquire();
-        Assert.Throws<InvalidOperationException>(() => fixture.Catalog.Store.RequireInstalledHistory(root, original, entry));
+        Assert.Throws<InvalidOperationException>(() => { using var history = fixture.Catalog.Store.ProtectInstalledHistory(root, original, entry); });
         Assert.Equal(original, Saved(fixture));
     }
 

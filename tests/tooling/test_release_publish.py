@@ -87,7 +87,7 @@ class ReleasePublishTests(GitFixture):
         for suffix in ("Portable.zip", "Update.zip"):
             with zipfile.ZipFile(self.directory / (base + suffix), "x") as archive:
                 for name in ("NexusPipeline.exe", "NexusPipeline.update.exe", "README.md",
-                             "resources/payload-manifest.json", "package-info/recipe.json"):
+                             "resources/payload-manifest.json", "resources/desktop/NexusPipeline.Launcher.exe", "package-info/recipe.json"):
                     archive.writestr(name, b"Controlled format fixture")
         files = inventory(self.directory)
         self.verified = {"candidate": {"kind": "host", "files": list(files.values()),

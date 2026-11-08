@@ -13,6 +13,7 @@ using NexusPipeline.Platform.Networking;
 using NexusPipeline.Core.Maintenance;
 using NexusPipeline.Host.Control.Http;
 using NexusPipeline.Host.Lifecycle;
+using NexusPipeline.Host.Desktop;
 using NexusPipeline.Platform.Storage.Automation;
 using NexusPipeline.Platform.Storage.Secrets;
 using NexusPipeline.Platform.Storage.Configuration;
@@ -26,22 +27,25 @@ namespace NexusPipeline.Host.Composition;
 internal static class ApplicationHost
 {
     [SupportedOSPlatform("windows")]
-    public static async Task<int> RunAsync(string runtimeRoot, int? requestedPort, int? nativeClientProcessId = null,
+    internal static async Task<int> RunCoreAsync(string runtimeRoot, int? requestedPort, int? nativeClientProcessId = null,
         InstanceLease? startupLease = null, NexusPipeline.Platform.Processes.MaintenanceStartupOrigin? maintenanceOrigin = null,
-        bool launchDesktop = false, UpdateWindowIntent? resumeWindow = null, string? installationBundle = null)
+        bool launchDesktop = false, UpdateWindowIntent? resumeWindow = null, string? installationBundle = null,
+        bool showStartupProgress = false, StartupProgress? startup = null)
     {
         using var externalNativeBinding = nativeClientProcessId is { } nativePid ? new NativeClientBinding(nativePid) : null;
         var contracts = new ContractReader();
-        var instance = startupLease?.Instance ?? new InstanceRoot(contracts).OpenOrCreate(runtimeRoot);
-        using var instanceLease = startupLease ?? InstanceLease.Acquire(instance, contracts);
+        var instanceLease = startupLease ?? throw new InvalidOperationException("startup_lease_required");
+        var instance = instanceLease.Instance;
         instanceLease.VerifyHeld(instance);
-        var payloadRoots = new PayloadApplyRoots(Path.GetDirectoryName(
-            Platform.Processes.ProcessIdentityReader.Read(Environment.ProcessId).ImagePath)!, Path.Combine(instance.RuntimeRoot, "extensions"));
-        var runtime = RuntimeReadiness.Verify(instance, contracts, instanceLease, payloadRoots);
+        var payloadRoots = new PayloadApplyRoots(PhysicalPathPolicy.RuntimeApplicationDirectory(),
+            Path.Combine(instance.RuntimeRoot, "extensions"));
+        var runtime = RuntimeReadiness.Verify(instance, contracts, instanceLease, payloadRoots,
+            stage => startup?.Advance(stage));
         Directory.CreateDirectory(PhysicalPathPolicy.NormalizeWithoutLinks(payloadRoots.ExtensionPayloadRoot));
         var lifecycle = new HostLifecycle(runtime.Recovery, TimeProvider.System);
         var resources = new ResourceLeaseManager(lifecycle);
         var controlSettings = new NexusPipeline.Platform.Storage.Sqlite.HostSettingsStore(runtime.Database);
+        startup?.Advance(StartupStage.LoadingSettings);
         var savedStartup = controlSettings.Read().Values;
         var controlStartup = savedStartup.Service;
         var port = requestedPort ?? controlStartup.WebPort;
@@ -49,17 +53,17 @@ internal static class ApplicationHost
         if (port != 0 && port == mcpPort) throw new ArgumentException("control_listener_ports_conflict");
         using var listener = new ControlListener(controlStartup.AllowRemoteAccess ? IPAddress.Any : IPAddress.Loopback, port, mcpPort);
         port = listener.Port;
-        var windowIntent = resumeWindow ?? (launchDesktop ? new UpdateWindowIntent(
-            savedStartup.Desktop.Mode == NexusPipeline.Core.Settings.DesktopMode.Desktop ? UpdateWindowMode.Desktop : UpdateWindowMode.Browser,
-            savedStartup.Desktop.OpenOnStartup, "/") : null);
-        using var desktopSigner = new NexusPipeline.Platform.Security.DesktopResponseSigner();
-        using var ownedDesktop = windowIntent is not null && windowIntent.Mode != UpdateWindowMode.Headless ?
-            new NexusPipeline.Host.Desktop.OwnedDesktop(instance, payloadRoots.HostPayloadRoot, port, desktopSigner,
-                windowIntent, savedStartup.Desktop.MinimizeToTray) : null;
+        var windowIntent = startup?.Intent ?? resumeWindow;
+        using var headlessSigner = startup is null ? new NexusPipeline.Platform.Security.DesktopResponseSigner() : null;
+        var desktopSigner = startup?.Signer ?? headlessSigner!;
+        var ownedDesktop = startup?.Desktop;
         var nativeBinding = ownedDesktop?.Binding ?? externalNativeBinding;
-        new RecoveryCompletionService(instance, runtime.Database, contracts, instanceLease, resources, runtime.Recovery).ReconcilePending();
+        startup?.Advance(StartupStage.RestoringExecution);
+        using (StartupProfile.Begin("execution.reconcile"))
+            new RecoveryCompletionService(instance, runtime.Database, contracts, instanceLease, resources, runtime.Recovery).ReconcilePending();
         var providers = new ExecutionProviderRegistry();
-        providers.RestoreSavedReferences(instance, runtime.Database, contracts, instanceLease, resources);
+        using (StartupProfile.Begin("providers.restore"))
+            providers.RestoreSavedReferences(instance, runtime.Database, contracts, instanceLease, resources);
         var secretService = new SecretFieldService(instance, runtime.Database, instanceLease, resources, runtime.Recovery, contracts);
         var secrets = new SecretsControl(secretService);
         var settingsService = HostStartupSettings.Create(instance, runtime.Database, instanceLease, resources, runtime.Recovery);
@@ -76,6 +80,7 @@ internal static class ApplicationHost
             payloadRoots,
             resources, runtime.Recovery, extensions, () => settingsService.Read().Effective.Proxy, secretService);
         var operations = new OperationQueryService(instance, instanceLease, runtime.Database);
+        startup?.Advance(StartupStage.PreparingServices);
         var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions { ContentRootPath = payloadRoots.HostPayloadRoot });
         await using var services = new ExecutionRuntimeServices(instance, runtime.Database, contracts, instanceLease, resources, lifecycle, runtime.Recovery, providers, secretService, nativeBinding);
         var extensionSecrets = new SecretAccessPolicy(instance, runtime.Database, instanceLease, resources);
@@ -97,8 +102,10 @@ internal static class ApplicationHost
         var execution = services.Consumer;
         var configurationValues = new NexusPipeline.Host.Control.Configuration.ValueUseCases(
             new ValueService(instance, runtime.Database, contracts, instanceLease, resources));
-        var configurationImports = new NexusPipeline.Host.Control.Configuration.ImportUseCases(
-            new ConfigurationImportService(instance, runtime.Database, contracts, instanceLease, resources, providers: providers), contracts);
+        var importService = new ConfigurationImportService(instance, runtime.Database, contracts, instanceLease, resources, providers: providers);
+        var configurationImports = new NexusPipeline.Host.Control.Configuration.ImportUseCases(importService, contracts,
+            new BindingSourceImport(runtime.Database, new ScriptSourceService(instance, runtime.Database, instanceLease, resources,
+                contracts, payloadRoots, extensions.Activator), importService));
         var executionControlUseCases = new NexusPipeline.Host.Control.Execution.ExecutionUseCases(services.Admission,
             new ExecutionControlService(instance, runtime.Database, contracts, instanceLease, services.Admission, services.Retry, services.Consumer),
             services.Authorization);
@@ -245,12 +252,12 @@ internal static class ApplicationHost
             new ExecutionLogReader(instance, runtime.Database, contracts),
             new ImageCatalogReader(instance, runtime.Database, contracts),
             new NexusPipeline.Platform.Storage.Records.ContentRetirementService(instance, runtime.Database,
-                contracts, instanceLease, resources, runtime.Recovery));
+                contracts, instanceLease, resources, runtime.Recovery), services.History);
         var eventStatistics = new NexusPipeline.Host.Control.Events.ControlEventStatistics(
             () => runtime.Database.CommitSequence, () =>
             {
                 var counts = doctor.ReadCounts();
-                return new(definitions.Read().Revision, controlSettings.Read().Revision,
+                return new(definitions.ReadRevision(), controlSettings.Read().Revision,
                     counts.PendingOperations, counts.Attempts, counts.CompletedRuns);
             });
         var eventFeed = new NexusPipeline.Host.Control.Events.ControlEventFeed(instance.InstanceId,
@@ -306,15 +313,22 @@ internal static class ApplicationHost
         new CompletionLocalControl(services.Authorization, services.Admission, services.Completion, controlAuthority).Map(app);
         try
         {
+            startup?.Advance(StartupStage.InstallingExtensions);
             var bundle = installationBundle ?? Path.Combine(payloadRoots.HostPayloadRoot, "plugins");
             if (installationBundle is not null || Directory.Exists(bundle))
                 await packages.InstallBundledAsync(bundle, allPackages: installationBundle is not null);
             if (installationBundle is not null) return 0;
+            startup?.Advance(StartupStage.StartingExtensions);
             await extensions.StartAsync(CancellationToken.None);
+            startup?.Advance(StartupStage.StartingServer);
             await app.StartAsync();
-            ownedDesktop?.Start();
+            startup?.Advance(StartupStage.StartingDesktop);
+            if (startup is not null) await startup.ConfigureAsync(port, savedStartup.Desktop);
+
+            startup?.Advance(StartupStage.StartupUpdates);
             var startupUpdating = await automaticUpdates.ApplyStartupAsync();
             if (!startupUpdating) { services.Start(app.Lifetime); automaticUpdates.Start(); }
+            if (!startupUpdating && startup is not null) await startup.CompleteAsync();
             var webAddress = app.Urls.Single(value => new Uri(value).Port != mcpPort);
             var advertised = new UriBuilder(webAddress) { Host = IPAddress.Loopback.ToString() }.Uri.GetLeftPart(UriPartial.Authority);
             Console.WriteLine(JsonSerializer.Serialize(new

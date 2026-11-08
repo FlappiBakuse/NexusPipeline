@@ -15,20 +15,17 @@ internal static class ProcessOutputFixture
             await Console.OpenStandardOutput().WriteAsync(Encoding.UTF8.GetBytes("own-output"));
             return 0;
         }
-        if (args is ["bettergi-restart", var bettergiConfiguration, var bettergiLog])
-            return await BetterGiRetryOutput.RunAsync(bettergiConfiguration, bettergiLog);
-        if (args is [var adapterMode, var configuration, var adapterLog] && adapterMode.StartsWith("bettergi-", StringComparison.Ordinal))
-            return await BetterGiOutput.RunAsync(adapterMode, configuration, adapterLog);
-        if (args is [var marchMode, var marchConfiguration, var marchLog] && marchMode.StartsWith("march7th-", StringComparison.Ordinal))
-            return await March7thOutput.RunAsync(marchMode, marchConfiguration, marchLog);
-        if (args is ["baah-restart", var baahConfiguration, var baahLog])
-            return await BaahOutput.RunAsync(baahConfiguration, baahLog);
-        if (args is ["baah-unknown", var unknownConfiguration, var unknownLog])
-            return await BaahOutput.RunAsync(unknownConfiguration, unknownLog, failFirst: false);
-        if (args is ["oknte-restart", var oknteConfiguration, var oknteLog])
-            return await OkNteOutput.RunAsync(oknteConfiguration, oknteLog);
-        if (args is ["native-resume", var extension, var resumeConfiguration, var resumeLog])
-            return await NativeResumeOutput.RunAsync(extension, resumeConfiguration, resumeLog);
+        if (args is ["configuration-checkpoint", var progressMarker, var progressConfiguration])
+        {
+            OwnedFixtureEvidence.RequirePath(progressMarker); OwnedFixtureEvidence.RequirePath(progressConfiguration);
+            var document = System.Text.Json.Nodes.JsonNode.Parse(await File.ReadAllTextAsync(progressConfiguration))!.AsObject();
+            var checkpoint = document["checkpoint"]?.GetValue<int>() ?? 0;
+            await File.AppendAllTextAsync(progressMarker, checkpoint + "\n");
+            document["checkpoint"] = checkpoint + 1;
+            await File.WriteAllTextAsync(progressConfiguration, document.ToJsonString());
+            if (checkpoint > 0) await Console.OpenStandardOutput().WriteAsync("done\n"u8.ToArray());
+            return 0;
+        }
         if (args is ["configuration-repeat", var repeatMarker, var repeatedConfiguration])
         {
             OwnedFixtureEvidence.RequirePath(repeatMarker); OwnedFixtureEvidence.RequirePath(repeatedConfiguration);
@@ -43,6 +40,7 @@ internal static class ProcessOutputFixture
         File.WriteAllText(marker, Environment.ProcessId.ToString(), new UTF8Encoding(false));
         using var output = Console.OpenStandardOutput();
         using var error = Console.OpenStandardError();
+        if (mode == "quiet") return 0;
         if (mode == "release-exit")
         {
             var deadline = Stopwatch.StartNew();

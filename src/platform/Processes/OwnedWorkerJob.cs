@@ -115,11 +115,11 @@ public sealed class OwnedWorkerJob : IDisposable
         => StartCore(executable, arguments, workingDirectory, instanceId, attemptId, persistBeforeExecution, output, CommandLineSyntax.ArgumentVector);
 
     internal OwnedWorkerIdentity StartDesktop(string executable, IReadOnlyList<string> arguments, string workingDirectory,
-        Guid instanceId, Guid launchId, Action<OwnedWorkerIdentity>? beforeStart = null)
+        Guid instanceId, Guid launchId, Action<OwnedWorkerIdentity>? beforeStart = null, ProcessIdentityLease? imageProtection = null)
     {
         using var environment = MaintenanceStartupEnvironment.Freeze(MaintenanceStartupRole.DesktopRoot);
         return _targetLifetime.UseOwned(() => StartOwnedCore(executable, arguments, workingDirectory, instanceId,
-            launchId, beforeStart ?? (_ => { }), null, CommandLineSyntax.ArgumentVector, frozenEnvironment: environment));
+            launchId, beforeStart ?? (_ => { }), null, CommandLineSyntax.ArgumentVector, frozenEnvironment: environment, imageProtection: imageProtection));
     }
 
     internal OwnedWorkerIdentity StartFrozen(string executable, IReadOnlyList<string> arguments, string workingDirectory,
@@ -149,7 +149,8 @@ public sealed class OwnedWorkerJob : IDisposable
 
     private OwnedWorkerIdentity StartOwnedCore(string executable, IReadOnlyList<string> arguments, string workingDirectory,
         Guid instanceId, Guid attemptId, Action<OwnedWorkerIdentity> persistBeforeExecution, OwnedProcessOutput? output,
-        CommandLineSyntax syntax, OwnedWorkerJob? actualParent = null, OwnedPreviewJob? actualPreview = null, MaintenanceStartupEnvironment? frozenEnvironment = null)
+        CommandLineSyntax syntax, OwnedWorkerJob? actualParent = null, OwnedPreviewJob? actualPreview = null,
+        MaintenanceStartupEnvironment? frozenEnvironment = null, ProcessIdentityLease? imageProtection = null)
     {
         ObjectDisposedException.ThrowIf(_isDisposed, this);
         ArgumentNullException.ThrowIfNull(persistBeforeExecution);
@@ -161,7 +162,7 @@ public sealed class OwnedWorkerJob : IDisposable
             throw new IOException("Worker input is missing");
         PhysicalPathPolicy.NormalizeWithoutLinks(image);
         PhysicalPathPolicy.NormalizeWithoutLinks(directory);
-        var imageHash = HashFile(image);
+        var imageHash = imageProtection?.Sha256 ?? HashFile(image);
         var commandLine = WindowsCommandLine.Build(image, arguments, syntax);
         if (commandLine.Length >= 32767)
             throw new ArgumentException("Worker command line is too long");
@@ -190,7 +191,7 @@ public sealed class OwnedWorkerJob : IDisposable
             ReserveObservedIdentity(process, checked((int)created.ProcessId));
             // Failed registration still leaves an owned suspended process whose original handle is needed for stop proof.
             lock (_handleGate) { _processHandles.Add(process); retained = true; }
-            var identity = ReadIdentity(process, checked((int)created.ProcessId), instanceId, attemptId);
+            var identity = ReadIdentity(process, checked((int)created.ProcessId), instanceId, attemptId, imageProtection);
             if (!string.Equals(identity.ImagePath, image, StringComparison.OrdinalIgnoreCase) || identity.ImageSha256 != imageHash)
                 throw new IOException("Started worker image identity differs from its frozen input");
             persistBeforeExecution(identity);
@@ -407,14 +408,15 @@ public sealed class OwnedWorkerJob : IDisposable
         reserve(pid, created);
     }
 
-    private ProcessIdentity ObserveIdentity(SafeKernelHandle process, int pid)
+    private ProcessIdentity ObserveIdentity(SafeKernelHandle process, int pid, ProcessIdentityLease? imageProtection = null)
     {
         if (!JobNative.GetProcessTimes(process, out var created, out _, out _, out _)) throw NativeFailure();
+        var pinned = imageProtection?.Read(process, pid);
         lock (_handleGate)
-            if (_observedIdentities.TryGetValue((pid, created), out var cached)) return cached;
+            if (_observedIdentities.TryGetValue((pid, created), out var cached) && (pinned is null || pinned == cached)) return cached;
         _reserveObservedIdentity?.Invoke(pid, created);
         if (JobNative.WaitForSingleObject(process, 0) != 258) throw new IOException("worker_process_identity_not_observed");
-        var identity = ProcessIdentityReader.Read(process, pid);
+        var identity = pinned ?? ProcessIdentityReader.Read(process, pid);
         if (identity.ProcessId != pid || identity.CreatedAtUtc.ToFileTimeUtc() != created)
             throw new IOException("worker_process_identity_changed");
         lock (_handleGate)
@@ -431,9 +433,9 @@ public sealed class OwnedWorkerJob : IDisposable
         return identity;
     }
 
-    private OwnedWorkerIdentity ReadIdentity(SafeKernelHandle process, int pid, Guid instanceId, Guid attemptId)
+    private OwnedWorkerIdentity ReadIdentity(SafeKernelHandle process, int pid, Guid instanceId, Guid attemptId, ProcessIdentityLease? imageProtection)
     {
-        var identity = ObserveIdentity(process, pid);
+        var identity = ObserveIdentity(process, pid, imageProtection);
         return new(identity.ProcessId, identity.CreatedAtUtc, identity.ImagePath, identity.ImageSha256,
             identity.UserSid, identity.IsElevated, instanceId, attemptId);
     }

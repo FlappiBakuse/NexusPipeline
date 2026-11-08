@@ -3,6 +3,7 @@
   <Project Path="src/platform/NexusPipeline.Platform.csproj" />
   <Project Path="sdk/dotnet/NexusPipeline.Extensibility.csproj" />
   <Project Path="apps/host/NexusPipeline.Host.csproj" />
+  <Project Path="apps/launcher/NexusPipeline.Launcher.csproj" />
   <Project Path="apps/maintenance/NexusPipeline.Maintenance.csproj" />
   <Project Path="apps/installer/NexusPipeline.Installer.csproj" />
   <Project Path="tooling/boundaries/NexusPipeline.Boundaries.csproj" />

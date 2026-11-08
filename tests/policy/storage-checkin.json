@@ -1,9 +1,9 @@
 {
   "group": "storage-checkin",
-  "expectedMethods": {
-    "NexusPipeline.StorageTests.CheckInTests.RunsInstalledTask": 3,
-    "NexusPipeline.StorageTests.PlatformSignTests.RunsAllPlatforms": 2,
-    "NexusPipeline.StorageTests.CheckInLogin.SavesNativeCandidate": 5,
-    "NexusPipeline.StorageTests.CheckInSchedule.DispatchesSavedSelection": 2
-  }
+  "classes": [
+    "NexusPipeline.StorageTests.CheckInLogin",
+    "NexusPipeline.StorageTests.CheckInSchedule",
+    "NexusPipeline.StorageTests.CheckInTests",
+    "NexusPipeline.StorageTests.PlatformSignTests"
+  ]
 }

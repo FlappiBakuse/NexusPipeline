@@ -45,7 +45,7 @@ public sealed class InstalledPortFactory
     }
 
     internal ExtensionActivationContext Create(PreparedExtensionActivation source, ExtensionScope scope,
-        out InstalledExtensionConsumption consumption)
+        TreeReadLease.TreeBorrow files, out InstalledExtensionConsumption consumption)
     {
         _lease.VerifyHeld(_instance); _lease.RequireExtensionActivator(_activator, _resources);
         source.RequirePortOwner(_instance, _database, _lease, scope);
@@ -72,7 +72,7 @@ public sealed class InstalledPortFactory
             notifications is null ? unavailable : new InstalledNotificationPort(consumption, notifications),
             previews is null ? unavailable : new InstalledMediaPort(source, consumption, previews),
             screenshots is null ? unavailable : new InstalledScreenshotPort(consumption, screenshots),
-            source.CaptureAssets(scope, consumption),
+            source.CaptureAssets(scope, consumption, files),
             new InstalledRuntimeOutputs(_instance, source, scope, consumption),
             new InstalledDocumentPort(_database, _resources, consumption, manifest.ExtensionId,
                 manifest.Permissions.FileAccess?.Contains("instance-data", StringComparer.Ordinal) == true),

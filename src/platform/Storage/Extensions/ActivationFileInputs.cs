@@ -23,27 +23,30 @@ internal sealed class ActivationFileInputs : IDisposable
         _current = staged as TreeReadLease ?? TreeReadLease.Acquire(target, parent, tree);
     }
 
-    internal IDisposable Borrow()
+    internal TreeReadLease.TreeBorrow Borrow()
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         return _current.Borrow();
     }
 
-    internal ReadProviderPackage ReadPackage(string requestedArchive, string extensionId, byte[] manifestBytes,
+    internal ReadProviderPackage ReadPackage(RuntimeInstance instance, string extensionId, byte[] manifestBytes,
         ContractReader contracts, List<IDisposable> held)
     {
+        var verifiedArchive = new ImmutableBlobStore(instance, contracts).OpenVerified(_archive);
+        held.Add(verifiedArchive);
         held.Add(Borrow());
-        var archivePath = PhysicalPathPolicy.NormalizeWithoutLinks(requestedArchive);
+        var archivePath = PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(instance.RuntimeRoot, _archive.RelativePath));
         var relative = Path.GetRelativePath(_target, archivePath);
         if (relative != ".." && !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal) &&
             !Path.IsPathRooted(relative)) throw new IOException("execution_provider_archive_inside_package");
         held.Add(StableDirectoryLease.Acquire(Path.GetDirectoryName(archivePath)!));
         var input = ProviderPackageReader.OpenRead(archivePath, held);
-        var archive = new VerifiedPackageFile(Path.GetFileName(archivePath), input.Length,
-            Convert.ToHexStringLower(SHA256.HashData(input)), PhysicalObjectIdentity.Read(input.SafeFileHandle),
-            PhysicalObjectIdentity.Read(Path.GetDirectoryName(archivePath)!));
-        if (archive.SizeBytes != _archive.SizeBytes || archive.Sha256 != _archive.Sha256)
+        var identity = PhysicalObjectIdentity.Read(input.SafeFileHandle);
+        if (input.Length != _archive.SizeBytes || verifiedArchive.Length != _archive.SizeBytes ||
+            PhysicalObjectIdentity.Read(verifiedArchive.SafeFileHandle) != identity)
             throw new IOException("execution_provider_package_changed");
+        var archive = new VerifiedPackageFile(Path.GetFileName(archivePath), input.Length, _archive.Sha256, identity,
+            PhysicalObjectIdentity.Read(Path.GetDirectoryName(archivePath)!));
         var identities = _tree.OriginalObjects.ToDictionary(item => item.RelativePath, item => item.Identity, StringComparer.Ordinal);
         var files = ImmutableArray.CreateBuilder<VerifiedPackageFile>();
         foreach (var entry in _tree.Snapshot.Entries.Where(item => item.Kind == FileObjectKind.File)

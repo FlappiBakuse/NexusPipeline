@@ -14,6 +14,7 @@ public sealed record RecordDisplay(Guid RunId, string TargetName, string? UserNa
 {
     public IReadOnlyList<RecordAccountDisplay> Accounts { get; init; } = [];
     public IReadOnlyList<RecordStepDisplay> Steps { get; init; } = [];
+    public IReadOnlyList<RunDiagnostic> Diagnostics { get; init; } = [];
 }
 public sealed record RecordStepDisplay(string StepId, string ScriptName);
 public sealed record RecordAccountDisplay(Guid UserId, string Name, IReadOnlyList<string> StepIds);
@@ -70,6 +71,7 @@ public sealed class RecordDisplayReader(RuntimeInstance instance, StateDatabase 
         return new(runId, target, user, budget is null ? null : budget.OccurrenceId.HasValue ? "auto" : "manual",
             total.RetryPolicy.MaximumAttempts, budget?.FirstPreparedAtUtc, timings.AsReadOnly())
         {
+            Diagnostics = new RunDiagnosticStore(instance, database).Read(receipts.Select(item => item.JournalId)),
             Steps = total.Selection.Select(item => new RecordStepDisplay(item.StepId,
                 bundle.Scripts.Single(script => script.Id == item.ScriptId).Name)).ToArray(),
             Accounts = total.Selection.GroupBy(item => item.UserId).Select(group => new RecordAccountDisplay(

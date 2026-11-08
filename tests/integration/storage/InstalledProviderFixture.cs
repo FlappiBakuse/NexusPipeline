@@ -30,17 +30,18 @@ internal sealed class InstalledProviderFixture : IAsyncDisposable
     internal readonly ExecutionAdmissionService Service;
     internal readonly ExecutionRuntimeConsumer Consumer;
     internal readonly string Marker;
+    internal readonly string ActivationDirectory;
     private ExtensionActivator.ApplyReservation? _inventory;
     private PreparedExtensionActivation? _source;
     private ExtensionApplyActivation? _activation;
     private bool _committed;
     internal PlanBuilderFixture Source => Execution.Source;
 
-    internal InstalledProviderFixture()
+    internal InstalledProviderFixture(string activationMode = "return")
     {
         Marker = Path.Combine(Source.Root, "installed-provider-ready");
-        var activationDirectory = Path.Combine(Source.Root, "managed-activation");
-        Directory.CreateDirectory(activationDirectory);
+        ActivationDirectory = Path.Combine(Source.Root, "managed-activation");
+        Directory.CreateDirectory(ActivationDirectory);
         var nonce = Guid.NewGuid().ToString("N");
         var worker = Environment.GetEnvironmentVariable("NEXUS_PROCESS_FIXTURE_EXE")!;
         var runtime = JudgementInterpreterLease.Inspect(worker);
@@ -62,7 +63,7 @@ internal sealed class InstalledProviderFixture : IAsyncDisposable
         {
             File.Copy(managed, Path.Combine(directory, "entry.dll"), overwrite: true);
             File.WriteAllBytes(Path.Combine(directory, "activation-input.json"),
-                JsonSerializer.SerializeToUtf8Bytes(new { Directory = activationDirectory, Nonce = nonce, Mode = "return" }));
+                JsonSerializer.SerializeToUtf8Bytes(new { Directory = ActivationDirectory, Nonce = nonce, Mode = activationMode }));
             foreach (var relative in runtime.RuntimeFiles.Select(item => item.RelativePath).Append(Path.GetFileName(worker)))
             {
                 var path = Path.Combine(directory, "worker", relative);
@@ -112,12 +113,17 @@ internal sealed class InstalledProviderFixture : IAsyncDisposable
         Consumer = new(Source.Instance, Source.Database, new(), Source.Lease, Execution.Resources, Execution.Index, Execution.Inbox);
     }
 
-    internal async Task PublishAsync()
+    internal string TargetPath => _source?.TargetPath ?? throw new IOException("fixture_activation_source_missing");
+    internal string ArchivePath => Path.Combine(Source.Instance.RuntimeRoot,
+        new ExtensionPayloadBinding(Source.Instance, Source.Database, new(), Roots)
+            .Read(Accepted.JournalId, Accepted.Plan).Source.Package!.Archive.RelativePath);
+
+    internal async Task PublishAsync(CancellationToken cancellation = default)
     {
-        _inventory = await Activator.ReserveForApplyAsync(Root, "fixture-plugin", default);
+        _inventory = await Activator.ReserveForApplyAsync(Root, "fixture-plugin", cancellation);
         _ = new ExtensionPhysicalJournal(Source.Instance, Source.Database, new(), Roots).Apply(Prepared, _inventory, default);
         _source = PreparedExtensionActivation.Prepare(Source.Instance, Source.Database, Source.Lease, new(), Roots,
-            Prepared, _inventory, default);
+            Prepared, _inventory, cancellation);
         _activation = await _inventory.PrepareCandidateAsync(_source);
         var store = new PayloadCommitStore(Source.Instance, Source.Database, new(), Roots);
         _activation.Publish(store.PrepareActivation(Prepared, _inventory, _activation, default));

@@ -26,9 +26,11 @@ internal sealed class ExtensionPayloadBinding(RuntimeInstance instance, StateDat
 {
     internal BoundExtensionPayload Read(Guid journalId, BlobReference? originalPlan = null)
     {
+        using var timing = StartupProfile.Measure("extension.binding");
         if (database.InstanceId != instance.InstanceId ||
             !StringComparer.OrdinalIgnoreCase.Equals(database.RuntimeRoot, instance.RuntimeRoot)) throw Invalid();
-        var registered = new RecoveryJournalRegistry(database).ReadJournal(journalId);
+        var registered = HistoryReadScope.ReadDatabase(database, (connection, transaction) =>
+            RecoveryJournalRegistry.ReadJournalInside(connection, transaction, journalId));
         if (registered.Kind != JournalKind.ExtensionApply) throw Invalid();
         if (originalPlan is not null &&
             (registered.PlanPath != originalPlan.RelativePath || registered.PlanDigest != originalPlan.Sha256))
@@ -36,12 +38,12 @@ internal sealed class ExtensionPayloadBinding(RuntimeInstance instance, StateDat
         var reference = originalPlan ?? new(registered.PlanPath,
             new FileInfo(PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(instance.RuntimeRoot, registered.PlanPath))).Length,
             registered.PlanDigest);
-        var plan = new PayloadPlanCodec(instance, contracts, new(instance, contracts), roots).ReadStructure(reference);
+        var plan = new PayloadPlanCodec(instance, contracts, new(instance, contracts), roots).ReadStructure(reference, out var source);
         if (plan.OperationId != registered.OperationId || plan.JournalId != registered.JournalId ||
             plan.Kind != registered.Kind || !plan.ResourceKeys.SequenceEqual(registered.ResourceKeys) ||
-            plan.ExtensionSource is null) throw Invalid();
-        var sourceCodec = new PayloadSourceCodec(instance, contracts);
-        var source = sourceCodec.ReadMetadata(plan.ExtensionSource); sourceCodec.RequireFrozenBinding(source, plan);
+            plan.ExtensionSource is null || source is null) throw Invalid();
+        // The fresh digest binds the decoded source, and this handle keeps its bytes fixed through the final SQL check.
+        using var sourceProtection = new ImmutableBlobStore(instance, contracts).OpenVerified(plan.ExtensionSource);
         var history = new JournalStore(instance, contracts).ReadAllRevisions(journalId).ToImmutableArray();
         var projected = history.SingleOrDefault(item => item.Revision == registered.Revision) ?? throw Invalid();
         if (projected.Phase != registered.Phase) throw Invalid();
@@ -70,23 +72,27 @@ internal sealed class ExtensionPayloadBinding(RuntimeInstance instance, StateDat
         {
             if (commit.BeforeRevision != commitIntent!.BeforeRevision) throw Invalid();
             var saved = DerivedInstallation(plan, commit, footprint!);
-            footprintCodec.RequireBinding(footprint!, saved, plan, plan.ExtensionSource, physical[^1]);
+            footprintCodec.RequireBinding(footprint!, saved, plan, plan.ExtensionSource, physical[^1], source);
             commitCodec.RequireBinding(commit, plan, source, physical[^1], footprint!, commit.Footprint,
                 preparation, preparationIntent?.Artifact);
         }
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
-        using var transaction = connection.BeginTransaction(deferred: true);
-        var identity = RequireSql(connection, transaction, registered, source);
-        var result = new BoundExtensionPayload(plan, reference, source, registered, history, physical, identity,
-            preparationIntent, preparation, commitIntent, commit, footprint, restoration);
-        RequireInside(connection, transaction, result);
-        transaction.Commit();
-        return result;
+        return HistoryReadScope.ReadDatabase(database, (connection, transaction) =>
+        {
+            var identity = RequireSql(connection, transaction, registered, source);
+            var result = new BoundExtensionPayload(plan, reference, source, registered, history, physical, identity,
+                preparationIntent, preparation, commitIntent, commit, footprint, restoration);
+            RequireInside(connection, transaction, result, null, identity);
+            return result;
+        });
     }
 
     internal void RequireInside(SqliteConnection connection, SqliteTransaction transaction, BoundExtensionPayload bound,
-        IReadOnlyList<FileEffect>? frozenEffects = null)
+        IReadOnlyList<FileEffect>? frozenEffects = null) => RequireInside(connection, transaction, bound, frozenEffects, null);
+
+    private void RequireInside(SqliteConnection connection, SqliteTransaction transaction, BoundExtensionPayload bound,
+        IReadOnlyList<FileEffect>? frozenEffects, OperationIdentity? checkedIdentity)
     {
+        using var timing = StartupProfile.Measure("extension.binding-sql");
         var (plan, reference, source, registered, history, physical, _, _, _, _, commit, footprint, restoration) = bound;
         var journalId = registered.JournalId;
         var footprintCodec = new InstalledFootprintCodec(instance, roots, contracts);
@@ -95,10 +101,10 @@ internal sealed class ExtensionPayloadBinding(RuntimeInstance instance, StateDat
             current.Phase != registered.Phase || current.Revision != registered.Revision ||
             current.PlanPath != reference.RelativePath || current.PlanDigest != reference.Sha256 ||
             !current.ResourceKeys.SequenceEqual(registered.ResourceKeys)) throw Invalid();
-        if (RequireSql(connection, transaction, registered, source) != bound.Identity) throw Invalid();
+        if ((checkedIdentity ?? RequireSql(connection, transaction, registered, source)) != bound.Identity) throw Invalid();
         if (!restoration.IsEmpty && restoration[0].Record.Failure is { } failure)
             ExtensionRestorationCodec.RequireFailureInside(connection, transaction, journalId, failure);
-        _ = RequireSourceSettings(connection, transaction, source);
+        var sourceSettings = RequireSourceSettings(connection, transaction, source);
         if (frozenEffects is null)
             PayloadEffectCursor.RequireEffectsInside(connection, transaction, registered, plan, history, physical, restoration);
         else PayloadEffectCursor.RequireFrozenEffectsInside(connection, transaction, registered.JournalId, frozenEffects);
@@ -107,7 +113,7 @@ internal sealed class ExtensionPayloadBinding(RuntimeInstance instance, StateDat
             if (commit is null || history[^1].Revision != registered.Revision) throw Invalid();
             var saved = ExtensionInstalledRows.ReadMetadataAt(connection, transaction, source.ExtensionId, commit.InstalledRevision);
             if (saved != DerivedInstallation(plan, commit, footprint!)) throw Invalid();
-            RequireSettings(connection, transaction, source, commit);
+            RequireSettings(connection, transaction, source, commit, sourceSettings);
         }
         if (registered.Phase == JournalPhase.Committed && !restoration.IsEmpty)
         {
@@ -237,9 +243,8 @@ internal sealed class ExtensionPayloadBinding(RuntimeInstance instance, StateDat
     }
 
     private static void RequireSettings(SqliteConnection connection, SqliteTransaction transaction,
-        ExtensionPayloadSource source, ExtensionInstallationCommit commit)
+        ExtensionPayloadSource source, ExtensionInstallationCommit commit, HostSettingsSnapshot before)
     {
-        var before = RequireSourceSettings(connection, transaction, source);
         var expected = source.InitializeEnabledPreference ? HostSettingsPolicy.Next(before, before.Revision,
             before.Values with { Extensions = before.Values.Extensions.Add(new(source.ExtensionId, source.DesiredEnabled))
                 .OrderBy(item => item.ExtensionId, StringComparer.Ordinal).ToImmutableArray() }) : before;

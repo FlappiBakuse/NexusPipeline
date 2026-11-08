@@ -1,9 +1,9 @@
 {
   "format": "nexus.extension.manifest",
   "version": 1,
-  "extensionId": "live-screenshot",
-  "artifactName": "LiveScreenshot",
-  "displayName": "实时截图窗口",
+  "extensionId": "example-managed",
+  "artifactName": "ExampleManaged",
+  "displayName": "托管扩展示例",
   "packageVersion": "0.5.0",
   "kind": "managed-code",
   "minHostVersion": "0.18.0",
@@ -21,8 +21,8 @@
     ]
   },
   "managed": {
-    "entryAssembly": "lib/NexusPipeline.Extensions.LiveScreenshot.dll",
-    "entryType": "NexusPipeline.Extensions.LiveScreenshot.Extension"
+    "entryAssembly": "lib/NexusPipeline.Extensions.ExampleManaged.dll",
+    "entryType": "NexusPipeline.Extensions.ExampleManaged.Extension"
   },
   "frontend": {
     "entry": "web/entry.js",

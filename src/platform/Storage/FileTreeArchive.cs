@@ -46,6 +46,7 @@ public sealed class FileTreeArchive(FileTreeScanner scanner, ImmutableBlobStore 
         var before = scanner.Capture(destination, cancellationToken);
         if (before.Shape != FileObjectKind.Missing) throw new IOException("file_tree_destination_not_empty");
         ValidateArchive(archive);
+        var contents = archive.Contents.ToDictionary(blob => blob.Sha256, StringComparer.Ordinal);
         var held = new Dictionary<BlobReference, FileStream>();
         try
         {
@@ -59,7 +60,7 @@ public sealed class FileTreeArchive(FileTreeScanner scanner, ImmutableBlobStore 
                 var path = entry.RelativePath.Length == 0 ? destination : Path.Combine(destination, entry.RelativePath);
                 PhysicalPathPolicy.NormalizeWithoutLinks(path);
                 if (entry.Kind == FileObjectKind.Directory) ExclusiveDirectory.Create(path);
-                else WriteNewFile(path, held[archive.Contents.Single(blob => blob.Sha256 == entry.Sha256)], cancellationToken);
+                else WriteNewFile(path, held[contents[entry.Sha256!]], cancellationToken);
             }
             var actual = scanner.Capture(destination, cancellationToken);
             if (actual.Shape != archive.Snapshot.Shape || !actual.Entries.SequenceEqual(archive.Snapshot.Entries))
@@ -72,19 +73,22 @@ public sealed class FileTreeArchive(FileTreeScanner scanner, ImmutableBlobStore 
     internal static void ValidateArchive(ArchivedFileTree archive)
     {
         var snapshot = archive.Snapshot;
+        var entries = new Dictionary<string, FileTreeEntry>(StringComparer.OrdinalIgnoreCase);
+        var contents = new Dictionary<string, BlobReference>(StringComparer.Ordinal);
         if (!Enum.IsDefined(snapshot.Shape) || snapshot.Entries.Count > 4096 || archive.Contents.Count > 4096 ||
-            archive.Contents.Distinct().Count() != archive.Contents.Count ||
-            snapshot.Entries.Select(entry => entry.RelativePath).Distinct(StringComparer.OrdinalIgnoreCase).Count() != snapshot.Entries.Count)
+            snapshot.Entries.Any(entry => !entries.TryAdd(entry.RelativePath, entry)) ||
+            archive.Contents.Any(blob => !contents.TryAdd(blob.Sha256, blob)))
             throw new IOException("file_tree_archive_invalid");
         if (snapshot.Shape == FileObjectKind.Missing)
         {
             if (snapshot.Entries.Count != 0 || archive.Contents.Count != 0) throw new IOException("file_tree_archive_invalid");
             return;
         }
-        var root = snapshot.Entries.SingleOrDefault(entry => entry.RelativePath == "");
+        var root = entries.GetValueOrDefault("");
         if (root?.Kind != snapshot.Shape || snapshot.Shape == FileObjectKind.File && snapshot.Entries.Count != 1)
             throw new IOException("file_tree_archive_shape_invalid");
         long total = 0;
+        var referenced = new HashSet<string>(StringComparer.Ordinal);
         foreach (var entry in snapshot.Entries)
         {
             if (entry.RelativePath.Length != 0) PhysicalPathPolicy.ValidateRelativePath(entry.RelativePath);
@@ -96,19 +100,20 @@ public sealed class FileTreeArchive(FileTreeScanner scanner, ImmutableBlobStore 
             {
                 total = checked(total + entry.SizeBytes);
                 if (entry.SizeBytes < 0 || total > 1_073_741_824 ||
-                    archive.Contents.Count(blob => blob.Sha256 == entry.Sha256 && blob.SizeBytes == entry.SizeBytes) != 1)
+                    entry.Sha256 is null || !contents.TryGetValue(entry.Sha256, out var blob) || blob.SizeBytes != entry.SizeBytes)
                     throw new IOException("file_tree_archive_content_invalid");
+                referenced.Add(entry.Sha256!);
             }
             else throw new IOException("file_tree_archive_entry_invalid");
             if (entry.RelativePath.Length != 0)
             {
                 var separator = entry.RelativePath.LastIndexOf('/');
                 var parent = separator < 0 ? "" : entry.RelativePath[..separator];
-                if (!snapshot.Entries.Any(candidate => candidate.RelativePath == parent && candidate.Kind == FileObjectKind.Directory))
+                if (!entries.TryGetValue(parent, out var directory) || directory.RelativePath != parent || directory.Kind != FileObjectKind.Directory)
                     throw new IOException("file_tree_archive_parent_missing");
             }
         }
-        if (archive.Contents.Any(blob => !snapshot.Entries.Any(entry => entry.Kind == FileObjectKind.File && entry.Sha256 == blob.Sha256)))
+        if (contents.Keys.Any(digest => !referenced.Contains(digest)))
             throw new IOException("file_tree_archive_unreferenced_content");
     }
 

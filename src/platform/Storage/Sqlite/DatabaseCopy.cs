@@ -28,27 +28,30 @@ internal sealed class DatabaseCopy
             return new FileObjectDeletion(path, identity, PhysicalObjectIdentity.Read(input.SafeFileHandle),
                 FileObjectKind.File, input.Length, Convert.ToHexStringLower(SHA256.HashData(input)));
         }).ToArray();
+        Console.Error.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { kind = "startup.database-copy-capture",
+            digestReadBytes = files.Sum(file => file.SizeBytes) }));
         return new(root, identity, files);
     }
 
     internal void Discard()
     {
+        using var timing = StartupProfile.Measure("database.discard");
         using (var lease = StableDirectoryLease.Acquire(_root))
         {
             if (PhysicalObjectIdentity.Read(_root) != _identity) throw new IOException("inspection_copy_replaced");
             var actual = Directory.EnumerateFileSystemEntries(_root).ToHashSet(StringComparer.OrdinalIgnoreCase);
             if (actual.Any(path => !Known(path)) || _files.Any(file => !actual.Contains(file.Path)))
                 throw new IOException("inspection_copy_unknown_entry");
-            foreach (var file in _files)
-            {
-                using var input = File.OpenRead(file.Path);
-                if (PhysicalObjectIdentity.Read(input.SafeFileHandle) != file.Identity || input.Length != file.SizeBytes ||
-                    Convert.ToHexStringLower(SHA256.HashData(input)) != file.Sha256) throw new IOException("inspection_copy_changed");
-            }
-            // SQLite read-only admission creates its WAL/SHM in this exclusively owned database group.
-            // Admit only its reserved names; arbitrary extra entries keep the diagnostic copy intact.
+            // Capture verifies the whole group once; compare the original members before deleting any file.
+            // SQLite may have created reserved WAL/SHM members while inspecting this owned copy.
             var final = Capture(_root, _identity);
-            foreach (var file in final._files) PhysicalObjectDeletion.DeleteVerified(file);
+            var current = final._files.ToDictionary(file => file.Path, StringComparer.OrdinalIgnoreCase);
+            foreach (var file in _files)
+                if (!current.TryGetValue(file.Path, out var observed) || observed != file)
+                    throw new IOException("inspection_copy_changed");
+            foreach (var file in final._files) PhysicalObjectDeletion.DeleteInspectionCopy(file);
+            Console.Error.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { kind = "startup.database-copy-delete",
+                digestReadBytes = final._files.Sum(file => file.SizeBytes) }));
         }
         PhysicalObjectDeletion.DeleteVerified(new(_root, _parent, _identity, FileObjectKind.Directory, 0, null));
     }

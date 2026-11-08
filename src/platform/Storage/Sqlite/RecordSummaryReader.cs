@@ -58,15 +58,42 @@ public sealed class RecordSummaryReader(StateDatabase database)
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
         using var transaction = connection.BeginTransaction(deferred: true);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
+        var where = Prepare(command, query);
+        var days = ReadDays(command, query, where);
+        var users = ReadUsers(command, query, where);
+        transaction.Commit();
+        return new(days.Totals, days.Days, users.Users, users.NextUserId);
+    }
+
+    public RecordDaySummary ReadDays(RecordSummaryQuery query)
+    {
+        query.Validate();
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var command = connection.CreateCommand();
+        return ReadDays(command, query, Prepare(command, query));
+    }
+
+    public RecordUserPage ReadUsers(RecordSummaryQuery query)
+    {
+        query.Validate();
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var command = connection.CreateCommand();
+        return ReadUsers(command, query, Prepare(command, query));
+    }
+
+    private static string Prepare(SqliteCommand command, RecordSummaryQuery query)
+    {
         var where = "history_retired_at_utc_ticks IS NULL AND ended_at_utc_ticks >= $from AND ended_at_utc_ticks < $until";
         command.Parameters.AddWithValue("$from", query.From.UtcTicks);
         command.Parameters.AddWithValue("$until", query.Until.UtcTicks);
         if (query.UserId is { } user) { where += " AND user_id=$user"; command.Parameters.AddWithValue("$user", user.ToString("D")); }
         if (query.Business is { } business) { where += " AND business_outcome=$business"; command.Parameters.AddWithValue("$business", (int)business); }
         if (query.Lifecycle is { } lifecycle) { where += " AND lifecycle_outcome=$lifecycle"; command.Parameters.AddWithValue("$lifecycle", (int)lifecycle); }
-        command.CommandText = "SELECT " + Measures + " FROM account_history WHERE " + where;
-        RecordTotals totals;
-        using (var reader = command.ExecuteReader()) { reader.Read(); totals = ReadTotals(reader, 0); }
+        return where;
+    }
+
+    private static RecordDaySummary ReadDays(SqliteCommand command, RecordSummaryQuery query, string where)
+    {
         // Integer day keys retain the caller's selected offset without relying on SQLite's local timezone.
         command.Parameters.AddWithValue("$offset", query.OffsetMinutes * TimeSpan.TicksPerMinute);
         command.Parameters.AddWithValue("$day", TimeSpan.TicksPerDay);
@@ -76,6 +103,15 @@ public sealed class RecordSummaryReader(StateDatabase database)
         using (var reader = command.ExecuteReader())
             while (reader.Read()) days.Add(new(new DateTime(reader.GetInt64(0) * TimeSpan.TicksPerDay, DateTimeKind.Utc)
                 .ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), ReadTotals(reader, 1)));
+        var totals = new RecordTotals(days.Sum(day => day.Totals.Runs), days.Sum(day => day.Totals.Succeeded),
+            days.Sum(day => day.Totals.Failed), days.Sum(day => day.Totals.Cancelled), days.Sum(day => day.Totals.Unverified),
+            days.Sum(day => day.Totals.MeasuredCount), days.Sum(day => day.Totals.MeasuredMilliseconds),
+            days.Sum(day => day.Totals.LowerBoundCount), days.Sum(day => day.Totals.UnknownDurationCount));
+        return new(totals, days.AsReadOnly());
+    }
+
+    private static RecordUserPage ReadUsers(SqliteCommand command, RecordSummaryQuery query, string where)
+    {
         var userWhere = where;
         if (query.AfterUserId is { } after)
         { userWhere += " AND user_id>$after"; command.Parameters.AddWithValue("$after", after.ToString("D")); }
@@ -86,8 +122,7 @@ public sealed class RecordSummaryReader(StateDatabase database)
             while (reader.Read()) users.Add(new(reader.IsDBNull(0) ? null : Guid.Parse(reader.GetString(0)), ReadTotals(reader, 1)));
         var more = users.Count > 200;
         if (more) users.RemoveAt(200);
-        transaction.Commit();
-        return new(totals, days.AsReadOnly(), users.AsReadOnly(), more ? users[^1].UserId : null);
+        return new(users.AsReadOnly(), more ? users[^1].UserId : null);
     }
 
     private static RecordTotals ReadTotals(SqliteDataReader reader, int start)

@@ -57,6 +57,13 @@ internal sealed class JournalHistoryProtection : IDisposable
         RequireInventory();
     }
 
+    internal FileStream BorrowRevision(int index, string name)
+    {
+        if (index < 0 || index >= _revisions.Count || _names[index] != name) throw Invalid();
+        var input = _revisions[index]; input.Position = 0;
+        return input;
+    }
+
     internal bool CanRetain(long nextBytes) => _documents.Count < MaximumProtectedRevisions &&
         nextBytes >= 0 && nextBytes <= MaximumProtectedBytes - TotalBytes;
 

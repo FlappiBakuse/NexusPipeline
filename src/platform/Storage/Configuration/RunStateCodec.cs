@@ -152,13 +152,13 @@ public sealed class RunStateCodec(RuntimeInstance instance, ContractReader contr
     };
 
     internal static void RequireRetrySource(FrozenRunState state, FrozenRunState previous, ExecutionTaskRetry? retry = null,
-        StoredConfigurationRevision? publication = null)
+        StoredConfigurationRevision? publication = null, RetryConfigurationInput? input = null)
     {
         if (state.SyncInitially || state.SnapshotReference is null || previous.SnapshotReference is null) throw new IOException("configuration_retry_source_unbound");
         var expected = previous with { OwnerOperationId = state.OwnerOperationId, ConfigurationOperationId = state.ConfigurationOperationId,
             InitialPublicationRevision = state.InitialPublicationRevision, SyncInitially = false,
-            InputReference = retry is null ? null : (publication ?? throw new IOException("configuration_retry_input_missing")).Manifest,
-            InputTree = retry is null ? null : publication!.Revision.Tree };
+            InputReference = retry is null ? input?.Reference : (publication ?? throw new IOException("configuration_retry_input_missing")).Manifest,
+            InputTree = retry is null ? input?.Tree : publication!.Revision.Tree };
         if (retry is not null) expected = expected with { Tasks = expected.Tasks.Select(item => item with
             { Rule = RunTaskPolicy.Freeze(item.Rule with { SelectedIds = retry.Selection.SelectedIds.Where(id =>
                 item.Rule.Declaration.AuthorizedIds.Contains(id, StringComparer.Ordinal)).ToImmutableArray() }) }).ToImmutableArray() };

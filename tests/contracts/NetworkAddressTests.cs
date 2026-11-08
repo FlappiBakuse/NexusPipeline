@@ -1,6 +1,5 @@
 using System.Net;
-using System.Reflection;
-using NexusPipeline.Platform.Storage.Sqlite;
+using NexusPipeline.Platform.Networking;
 using Xunit;
 
 namespace NexusPipeline.ContractTests;
@@ -34,8 +33,7 @@ public sealed class NetworkAddressTests
     [InlineData("::1", false)]
     public void ClassifiesPublicAddresses(string address, bool expected)
     {
-        var owner = typeof(StateDatabase).Assembly.GetType("NexusPipeline.Platform.Networking.NetworkAccessAddresses", throwOnError: true)!;
-        var policy = owner.GetMethod("IsPublic", BindingFlags.Static | BindingFlags.NonPublic)!.CreateDelegate<Func<IPAddress, bool>>();
-        Assert.Equal(expected, policy(IPAddress.Parse(address)));
+        var projected = NetworkAccessAddresses.Project([IPAddress.Parse(address)], 5000);
+        Assert.Equal(expected, projected.Public.Count == 1);
     }
 }

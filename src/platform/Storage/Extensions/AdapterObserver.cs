@@ -91,17 +91,18 @@ internal sealed class AdapterObserver
         current.Require(retry.Attempt);
         if (current.Observed.IsDefault || !current.Observed.SequenceEqual(retry.Observations) || retry.IdempotencyKey != current.RetryKey)
             throw new UnauthorizedAccessException("adapter_retry_observation_unbound");
-        if (!current.HasCompleteOutput || current.ObservationUnavailable || !RequestFits(current, "retry")) return [];
+        if (!current.HasCompleteOutput || current.ObservationUnavailable || !RequestFits(current, "retry"))
+        { current.RetryFailure = new IOException("adapter_retry_unavailable"); return []; }
         TaskAdapter response;
         try { response = await ExecuteAttemptAsync(current, "retry", cancellationToken).ConfigureAwait(false); }
-        catch (Exception error) when (IsAdapterFailure(error)) { current.Require(retry.Attempt); return []; }
+        catch (Exception error) when (IsAdapterFailure(error)) { current.Require(retry.Attempt); current.RetryFailure = error; return []; }
         var selected = response.SelectedTaskIds!.ToImmutableArray();
         try
         {
             AdapterTaskPolicy.RequireOriginalResults(current.Step.Tasks.Select(TaskAdapterProtocol.ReadTask).ToImmutableArray(),
                 current.Observed, selected);
         }
-        catch (ArgumentException) { current.Require(retry.Attempt); return []; }
+        catch (ArgumentException error) { current.Require(retry.Attempt); current.RetryFailure = error; return []; }
         current.Require(retry.Attempt); return selected;
     }
 
@@ -162,6 +163,9 @@ internal sealed class AdapterObserver
                 invocation.Observed = observations;
             }
             var proposed = await SelectRetryAsync(new(identity, invocation.RetryKey, observations), default).ConfigureAwait(false);
+            if (invocation.RetryFailure is { } failure)
+                new Records.RunDiagnosticStore(_instance, _database).Record(binding.ParentJournalId, binding.StepId,
+                    step.UserId is { } user ? Guid.Parse(user) : null, "adapter-retry", "adapter_retry_unavailable", failure);
             invocation.Require(identity);
             var reference = AdapterObservationCodec.Write(blobs, binding, rawOutput, step, observations, proposed, retry, retry is null ? null : current);
             return (reference, observations);
@@ -281,6 +285,7 @@ internal sealed class AdapterObserver
         internal string RetryKey => retryKey;
         internal ImmutableArray<AdapterTaskObservation> Observed;
         internal bool ObservationUnavailable;
+        internal Exception? RetryFailure;
         internal void Require(FrozenAdapterAttempt requested)
         {
             if (Volatile.Read(ref _expired) != 0 || requested != identity) throw new UnauthorizedAccessException("adapter_attempt_expired");

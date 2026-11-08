@@ -1,9 +1,14 @@
 using System.Reflection;
 using NexusPipeline.Host.Composition;
+using NexusPipeline.Host.Desktop;
 using NexusPipeline.Platform.Execution.Judgement;
 using NexusPipeline.Platform.Storage;
 
-if (args.Length == 0 && OperatingSystem.IsWindows())
+if (OperatingSystem.IsWindows() && args.Length > 0 && args[0] is "serve" or "control" or "--version")
+    DesktopConsole.AttachParent();
+
+var interactiveDesktopLaunch = args.Length == 0 && OperatingSystem.IsWindows();
+if (interactiveDesktopLaunch)
 {
     var application = Path.TrimEndingDirectorySeparator(AppContext.BaseDirectory);
     if (!StringComparer.OrdinalIgnoreCase.Equals(Path.GetFileName(Environment.ProcessPath), ApplicationTree.HostEntry))
@@ -15,7 +20,7 @@ if (args.Length == 0 && OperatingSystem.IsWindows())
 }
 
 if (args is ["install-bundle", "--runtime-root", var installationRoot, "--bundle", var bundleRoot] && OperatingSystem.IsWindows())
-    return await ApplicationHost.RunAsync(installationRoot, 0, installationBundle: bundleRoot);
+    return await NexusPipeline.Host.Desktop.DesktopStartup.RunAsync(installationRoot, 0, installationBundle: bundleRoot);
 
 if (args is ["--mumu-live-capture-worker"] && OperatingSystem.IsWindows())
     return await NexusPipeline.Platform.Media.MuMuLiveWorker.RunAsync();
@@ -59,12 +64,20 @@ if (OperatingSystem.IsWindows() && (args.Length == 5 || args.Length == 7 && args
     try
     {
         int? port = portValue == "saved" ? null : int.Parse(portValue, System.Globalization.CultureInfo.InvariantCulture);
-        return await ApplicationHost.RunAsync(runtimeRoot, port, args.Length == 7 ? int.Parse(args[6]) : null, launchDesktop: entry == "desktop");
+        return await NexusPipeline.Host.Desktop.DesktopStartup.RunAsync(runtimeRoot, port, args.Length == 7 ? int.Parse(args[6]) : null,
+            launchDesktop: entry == "desktop", showStartupProgress: interactiveDesktopLaunch);
     }
     catch (Exception exception) when (exception is IOException or System.Text.Json.JsonException or ArgumentException or
         System.ComponentModel.Win32Exception or UnauthorizedAccessException)
     {
-        Console.Error.WriteLine("Host initialization rejected an invalid or unavailable input.");
+        // Keep domain reason codes, never echo arbitrary input/credentials from exception messages.
+        var reason = exception.Message.Length is > 0 and <= 160 &&
+            exception.Message.All(character => character is >= 'a' and <= 'z' or >= '0' and <= '9' or '_')
+                ? exception.Message : exception.GetType().Name;
+        var errorCode = exception is System.ComponentModel.Win32Exception native ? native.NativeErrorCode : exception.HResult;
+        Console.Error.WriteLine(System.Text.Json.JsonSerializer.Serialize(new
+            { kind = "host.startup.failed", reason, errorCode }));
+        if (interactiveDesktopLaunch) StartupProgress.ShowFailure(reason, errorCode, runtimeRoot);
         return 1;
     }
 }

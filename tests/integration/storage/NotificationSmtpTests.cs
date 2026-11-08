@@ -90,6 +90,23 @@ public sealed class NotificationSmtpTests
         Assert.Equal(fixture.Receipt, new AttemptReceiptStore(fixture.Source.Database).Read(fixture.Receipt.Facts.AttemptId));
     }
 
+    [Fact(DisplayName = "An Invalid Local Recipient Fails Before The Transport Entry Boundary")]
+    public async Task RejectsLocalRecipient()
+    {
+        await using var sink = new NotificationSmtpSink(false, false);
+        using var fixture = new NotificationReceiptFixture(new("smtp local validation", "", NotificationTaskKind.Smtp, true,
+            NotificationChannelConfiguration.Default with { SmtpHost = "127.0.0.1", SmtpPort = sink.Port,
+                SmtpSecurity = NotificationSmtpSecurity.None, SmtpUser = "sender@example.invalid",
+                SmtpFrom = "sender@example.invalid", SmtpTo = "recipient@example.invalid，invalid@" }));
+        using var password = new SecretValue("fixture-password");
+        await fixture.Execute(edits: [new(NotificationSecretField.SmtpPassword, 0, SecretDisposition.Set, password)]);
+        fixture.Delivery.MaterializePending();
+        await using var sender = Sender(fixture, sink, false);
+        var reference = Assert.Single(sender.ReadQueuedForSource(fixture.Snapshot.Reference));
+        Assert.Equal(NotificationDeliveryState.Failed, await NotificationWebhookTests.Send(fixture, sender, reference));
+        Assert.Equal(0, sink.Authenticated); Assert.Equal(0, sink.Messages);
+    }
+
     private static NotificationReceiptFixture Create(int port, NotificationSmtpSecurity security, bool screenshot = false) =>
         new(new("smtp local sink", "", NotificationTaskKind.Smtp, true, NotificationChannelConfiguration.Default with {
             SmtpHost = "127.0.0.1", SmtpPort = port, SmtpSecurity = security, SmtpUser = "sender@example.invalid",

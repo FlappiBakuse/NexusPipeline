@@ -61,8 +61,7 @@ internal static class SourceNames
     private static int WordCount(string name)
     {
         name = Regex.Replace(name, "^I(?=[A-Z][a-z])", "");
-        name = name.Replace("BetterGi", "Bettergi", StringComparison.Ordinal)
-            .Replace("MuMu", "Mumu", StringComparison.Ordinal);
+        name = name.Replace("MuMu", "Mumu", StringComparison.Ordinal);
         return Regex.Matches(name, "[A-Z]+(?=[A-Z][a-z]|[0-9]|$)|[A-Z]?[a-z]+[0-9]*|[0-9]+").Count;
     }
 }

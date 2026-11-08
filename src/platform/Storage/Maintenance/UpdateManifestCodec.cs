@@ -13,6 +13,7 @@ internal sealed record UpdatePayloadManifest(ApplicationManifest Application, Up
     internal string HostVersion => Application.HostVersion;
     internal string SdkVersion => SdkIdentity.Version;
     internal string HostEntry => ApplicationTree.HostEntry;
+    internal string LauncherEntry => ApplicationTree.LauncherEntry;
     internal string MaintenanceEntry => ApplicationTree.MaintenanceEntry;
     internal string DesktopEntry => ApplicationTree.DesktopEntry;
     internal ImmutableArray<UpdatePayloadFile> Files => Application.Files;

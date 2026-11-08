@@ -21,8 +21,9 @@ public sealed class ImageCatalogProjection(RuntimeInstance instance, StateDataba
         });
     }
 
-    public Guid? ReconcilePage(Guid? after = null, int maximum = 64)
+    public Guid? ReconcilePage(Guid? after = null, int maximum = 64, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         lease.VerifyHeld(instance);
         if (after == Guid.Empty || maximum is < 1 or > 200) throw new ArgumentOutOfRangeException(nameof(maximum));
         var ids = new List<Guid>();
@@ -40,13 +41,20 @@ public sealed class ImageCatalogProjection(RuntimeInstance instance, StateDataba
                 ids.Add(id);
             }
         }
-        foreach (var id in ids) OnCommitted(new AttemptReceiptStore(database).Read(id) ?? throw ImageCatalogRows.Invalid());
+        Console.Error.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { kind = "startup.projection-page",
+            projection = "images", inspected = ids.Count, maximum, after }));
+        foreach (var id in ids)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            OnCommitted(new AttemptReceiptStore(database).Read(id) ?? throw ImageCatalogRows.Invalid());
+        }
         return ids.Count == maximum ? ids[^1] : null;
     }
 
     [SupportedOSPlatform("windows")]
-    public Guid? ReconcileAssetsPage(Guid? after = null, int maximum = 64)
+    public Guid? ReconcileAssetsPage(Guid? after = null, int maximum = 64, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         lease.VerifyHeld(instance);
         if (after == Guid.Empty || maximum is < 1 or > 200) throw new ArgumentOutOfRangeException(nameof(maximum));
         var ids = new List<(Guid Run, Guid Attempt)>();
@@ -62,8 +70,11 @@ public sealed class ImageCatalogProjection(RuntimeInstance instance, StateDataba
             using var rows = command.ExecuteReader();
             while (rows.Read()) ids.Add((Guid.ParseExact(rows.GetString(0), "D"), Guid.ParseExact(rows.GetString(1), "D")));
         }
+        Console.Error.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { kind = "startup.projection-page",
+            projection = "image-assets", inspected = ids.Count, maximum, after }));
         foreach (var item in ids)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var receipt = new AttemptReceiptStore(database).Read(item.Attempt) ?? throw ImageCatalogRows.Invalid();
             if (receipt.Facts.RunId != item.Run) throw ImageCatalogRows.Invalid();
             lease.PublishExecution(() =>

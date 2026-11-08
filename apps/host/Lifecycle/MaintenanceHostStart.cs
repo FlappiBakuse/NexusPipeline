@@ -83,7 +83,7 @@ internal static class MaintenanceHostStart
                 using var origin = startup.DetachCompletedOrigin(lease);
                 startup.Dispose(); bootstrap.Dispose(); producer.Dispose(); restored?.Dispose();
                 Enter("application");
-                return await ApplicationHost.RunAsync(instance.RuntimeRoot, null, startupLease: lease, maintenanceOrigin: origin, resumeWindow: windowIntent);
+                return await NexusPipeline.Host.Desktop.DesktopStartup.RunAsync(instance.RuntimeRoot, null, startupLease: lease, maintenanceOrigin: origin, resumeWindow: windowIntent);
             }
             catch (Exception error)
             {

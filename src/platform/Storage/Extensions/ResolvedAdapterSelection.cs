@@ -194,7 +194,7 @@ internal sealed class ResolvedAdapterSelection : IDisposable
         var script = catalog.Scripts.SingleOrDefault(item => item.Id == binding.ScriptId) ?? throw Invalid();
         if (binding.Revision != Selection.ExpectedBindingRevision || script.Kind != AutomationKind.Specialized ||
             script.ExtensionId != Selection.ExtensionId || !catalog.Users.Any(user => user.Id == binding.UserId)) throw Invalid();
-        return (binding, script);
+        return (binding, BindingScriptSource.Resolve(script, binding));
     }
 
     private ConfigurationRevision ReadResource(AdapterResourceSelection resource, AutomationBinding binding, AutomationScript script)

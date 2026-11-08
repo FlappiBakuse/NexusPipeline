@@ -113,13 +113,84 @@ public sealed class StartupAdmissionTests(ITestOutputHelper output)
         Assert.Equal(ConfigurationRecoveryResult.NotExecuted, new ConfigurationRecovery(session).Recover());
     }
 
-    private static Fixture Create(string fault, bool retainWal)
+    [Theory(DisplayName = "Completed Families Are Verified During Admission And Recovery Without Rewriting Corrupt History")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ChecksCompletedFamilies(bool corrupt)
     {
-        var root = Path.Combine(Environment.GetEnvironmentVariable("NEXUS_TEST_ROOT")!, Guid.NewGuid().ToString("N"));
-        var contracts = new ContractReader();
-        var instance = new InstanceRoot(contracts).OpenOrCreate(Path.Combine(root, "runtime"));
+        var fixture = CompletedFamilies();
+        var admission = new JournalStartupAdmission(fixture.Instance, fixture.Contracts);
+        var original = Fingerprints(fixture.Instance.RuntimeRoot);
+        var database = StateDatabase.OpenExisting(fixture.Instance, Path.Combine(fixture.Root, "diagnostics"), admission);
+        Assert.Equal(original, Fingerprints(fixture.Instance.RuntimeRoot));
+        if (corrupt)
+        {
+            var journal = Path.Combine(fixture.Instance.RuntimeRoot, "journals", fixture.JournalId.ToString("D"));
+            var path = Directory.GetFiles(journal).Order(StringComparer.Ordinal).Last();
+            var document = JsonNode.Parse(File.ReadAllBytes(path))!; document["version"] = 999;
+            File.WriteAllBytes(path, JsonSerializer.SerializeToUtf8Bytes(document));
+        }
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+            _ = DatabaseConnections.Scalar(connection, "SELECT count(*) FROM operation_journals;");
+        var before = Fingerprints(fixture.Instance.RuntimeRoot);
+        var roots = new PayloadApplyRoots(fixture.Root, Path.Combine(fixture.Instance.RuntimeRoot, "extensions"));
+        var recovery = new StartupJournalRecovery(fixture.Instance, fixture.Contracts, database, roots);
+        if (corrupt)
+        {
+            Assert.ThrowsAny<Exception>(() => StateDatabase.OpenExisting(fixture.Instance, Path.Combine(fixture.Root, "diagnostics"), admission));
+            Assert.Equal(before, Fingerprints(fixture.Instance.RuntimeRoot));
+            using (var lease = InstanceLease.Acquire(fixture.Instance, fixture.Contracts))
+                Assert.ThrowsAny<Exception>(() => recovery.Recover(lease));
+        }
+        else recovery.InspectCompletedHistory();
+        Assert.Equal(before, Fingerprints(fixture.Instance.RuntimeRoot));
+        Directory.Move(fixture.Instance.RuntimeRoot, fixture.Instance.RuntimeRoot + "-released");
+    }
+
+    [Fact(DisplayName = "Parallel Claim Inventory Rejects A Late Invalid Claim And Releases Every Protected File Without Rewriting Data")]
+    public void ChecksClaimBatches()
+    {
+        var fixture = CompletedFamilies();
+        JournalResourceClaims.VerifyInventory(fixture.Instance, fixture.Database, fixture.Contracts);
+        fixture.Database.Write((connection, transaction) =>
+        {
+            using var command = connection.CreateCommand(); command.Transaction = transaction;
+            command.CommandText = "INSERT INTO journal_resource_claims VALUES($journal,'configuration:startup-fixture',1);";
+            command.Parameters.AddWithValue("$journal", fixture.JournalId.ToString("D"));
+            return command.ExecuteNonQuery();
+        });
+        using (var connection = DatabaseConnections.Open(fixture.Database.DatabasePath))
+            _ = DatabaseConnections.Scalar(connection, "PRAGMA journal_mode=DELETE;");
+        var before = Fingerprints(fixture.Instance.RuntimeRoot);
+        Assert.Equal("journal_resource_claims_unbound", Assert.Throws<IOException>(() =>
+            JournalResourceClaims.VerifyInventory(fixture.Instance, fixture.Database, fixture.Contracts)).Message);
+        Assert.Equal(before, Fingerprints(fixture.Instance.RuntimeRoot));
+        Assert.Equal("journal_resource_claims_unbound", Assert.Throws<IOException>(() =>
+            StateDatabase.OpenExisting(fixture.Instance, Path.Combine(fixture.Root, "diagnostics"),
+                new JournalStartupAdmission(fixture.Instance, fixture.Contracts))).Message);
+        Assert.Equal(before, Fingerprints(fixture.Instance.RuntimeRoot));
+        Directory.Move(fixture.Instance.RuntimeRoot, fixture.Instance.RuntimeRoot + "-released");
+    }
+
+    private static Fixture CompletedFamilies()
+    {
+        var families = new List<Fixture>();
+        for (var index = 0; index < 10; index++)
+        {
+            var fixture = Create("known-active", retainWal: false, families.LastOrDefault());
+            Complete(fixture);
+            families.Add(fixture);
+        }
+        return families.OrderBy(item => item.JournalId.ToString("D"), StringComparer.Ordinal).Last();
+    }
+
+    private static Fixture Create(string fault, bool retainWal, Fixture? previous = null)
+    {
+        var root = previous?.Root ?? Path.Combine(Environment.GetEnvironmentVariable("NEXUS_TEST_ROOT")!, Guid.NewGuid().ToString("N"));
+        var contracts = previous?.Contracts ?? new ContractReader();
+        var instance = previous?.Instance ?? new InstanceRoot(contracts).OpenOrCreate(Path.Combine(root, "runtime"));
         using var lease = InstanceLease.Acquire(instance, contracts);
-        var database = StateDatabase.CreateFresh(instance);
+        var database = previous?.Database ?? StateDatabase.CreateFresh(instance);
         var target = Path.Combine(root, "target.config");
         File.WriteAllBytes(target, [1, 2, 3]);
         var candidate = Path.Combine(root, "candidate.config");

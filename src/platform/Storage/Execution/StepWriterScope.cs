@@ -67,6 +67,13 @@ internal sealed class StepWriterScope : IConfigurationWriterScope
 
     public void RequirePrepared() => RequirePrepared(Read());
 
+    public void RequirePreviousWriter(RunWriterProcess previous, StoppedConfigurationEditor stopped)
+    {
+        var parent = Read();
+        var job = parent.Jobs.Single(job => job.JobName == previous.JobName);
+        previous.UseStepEvidence(StepResultCodec.Binding(parent.Latest.Root, job), stopped, (_, _) => true);
+    }
+
     private void RequirePrepared(AttemptWriterState state)
     {
         if (_jobName is null) { RequireAdmission(state); return; }

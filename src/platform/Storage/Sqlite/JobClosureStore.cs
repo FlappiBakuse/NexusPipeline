@@ -1,6 +1,7 @@
 using Microsoft.Data.Sqlite;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Execution;
+using NexusPipeline.Extensibility.Protocol;
 using NexusPipeline.Platform.Processes;
 using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage.Journals;
@@ -170,7 +171,7 @@ internal sealed class JobClosureStore(RuntimeInstance instance, StateDatabase da
         transaction.Commit();
     }
 
-    private static void VerifyBinding(SqliteConnection connection, SqliteTransaction transaction, FrozenJobClosure value,
+    private void VerifyBinding(SqliteConnection connection, SqliteTransaction transaction, FrozenJobClosure value,
         Guid journalId, Guid writerId, string jobName, int sessionId, AttemptWriterState? attempt)
     {
         using var command = Key(connection, transaction, journalId, writerId, jobName);
@@ -221,19 +222,7 @@ internal sealed class JobClosureStore(RuntimeInstance instance, StateDatabase da
         command.Parameters.AddWithValue("$operation", value.OperationId.ToString("D"));
         var kind = command.ExecuteScalar() as string;
         if (kind == "execution.start") return AttemptWriterState.BindClosure(instance, database, contracts, value);
-        if (kind != "configuration.run.begin") return null;
-        command.CommandText = "SELECT parent_journal_id,step_id FROM configuration_run_sessions WHERE session_id=$operation;";
-        Guid parent; string step;
-        using (var row = command.ExecuteReader())
-        {
-            if (!row.Read()) throw new IOException("configuration_group_parent_unbound");
-            parent = Guid.Parse(row.GetString(0)); step = row.GetString(1);
-        }
-        var registered = new RecoveryJournalRegistry(database).ReadJournal(parent);
-        var plan = AttemptPreparedBinding.ReadPlan(instance, contracts, registered);
-        var total = new ExecutionPlanCodec(instance, contracts, new(instance, contracts)).Read(AttemptPlanCodec.Reference(plan.ExecutionPlan)).ReadWire();
-        return total.Steps.Single(item => item.StepId == step).Hooks is { Count: > 0 } ?
-            AttemptWriterState.Read(instance, database, contracts, parent) : null;
+        return null;
     }
 
     internal void RequireAttemptStart(AttemptWriterState state, StepWriterState step)
@@ -320,25 +309,53 @@ internal sealed class JobClosureStore(RuntimeInstance instance, StateDatabase da
     }
     private static ProcessIdentity ReadProcess(SqliteDataReader row, int offset) => new(row.GetInt32(offset), DateTime.FromFileTimeUtc(row.GetInt64(offset + 1)),
         row.GetString(offset + 2), row.GetString(offset + 3), row.GetString(offset + 4), row.GetBoolean(offset + 5));
-    private static bool VerifyGroupClosure(SqliteConnection connection, SqliteTransaction transaction,
+    private bool VerifyGroupClosure(SqliteConnection connection, SqliteTransaction transaction,
         FrozenJobClosure value, AttemptWriterState? state)
     {
-        if (state is null) return false;
-        var job = state.AllJobs.SingleOrDefault(job => job.JobName == value.JobName);
-        if (job is null || job.Role == "judgement" || state.Total.Steps.Single(step => step.StepId == job.StepId).Hooks is not { Count: > 0 } ||
+        RegisteredJournal parent;
+        ExecutionPlan total;
+        JournalDocument latest;
+        if (state is not null) { parent = state.Journal; total = state.Total; latest = state.Latest; }
+        else
+        {
+            using var session = connection.CreateCommand(); session.Transaction = transaction;
+            session.CommandText = "SELECT parent_journal_id,step_id FROM configuration_run_sessions WHERE session_id=$session;";
+            session.Parameters.AddWithValue("$session", value.OperationId.ToString("D"));
+            Guid parentId; string stepId;
+            using (var row = session.ExecuteReader())
+            {
+                if (!row.Read()) throw new IOException("configuration_group_parent_unbound");
+                parentId = Guid.Parse(row.GetString(0)); stepId = row.GetString(1);
+            }
+            parent = new RecoveryJournalRegistry(database).ReadJournal(parentId);
+            var plan = AttemptPreparedBinding.ReadPlan(instance, contracts, parent);
+            total = new ExecutionPlanCodec(instance, contracts, new(instance, contracts)).Read(AttemptPlanCodec.Reference(plan.ExecutionPlan)).ReadWire();
+            if (total.Steps.Single(item => item.StepId == stepId).Hooks is not { Count: > 0 }) return false;
+            var history = new JournalStore(instance, contracts).ReadAllRevisions(parentId);
+            var projected = history.SingleOrDefault(item => item.Revision == parent.Revision);
+            if (projected is null || projected.PlanPath != parent.PlanPath || projected.PlanDigest != parent.PlanDigest ||
+                projected.Phase != parent.Phase) throw new IOException("configuration_group_parent_unbound");
+            latest = history[^1];
+        }
+        var job = WriterIntentCodec.ReadAllJobs(latest.Root, total).SingleOrDefault(job => job.JobName == value.JobName);
+        if (job is null || job.Role == "judgement" || total.Steps.Single(step => step.StepId == job.StepId).Hooks is not { Count: > 0 } ||
             job.WriterId != value.WriterId || job.SessionId != value.SessionId || job.ClosedElapsedMilliseconds != value.RunElapsedMilliseconds)
             throw new IOException("configuration_group_closure_unbound");
-        AttemptWriterState.RequireCursor(connection, transaction, state.Journal, state.Gate.State);
+        // Stop ownership is read directly so output verification cannot re-enter the parent attempt verifier.
+        var gate = new JournalEffectGate(database).Read(parent.JournalId);
+        if (gate.InstanceId != instance.InstanceId || gate.OperationId != parent.OperationId || gate.PlanDigest != parent.PlanDigest ||
+            gate.Kind != JournalKind.RunAttempt) throw new IOException("configuration_group_parent_unbound");
+        AttemptWriterState.RequireCursor(connection, transaction, parent, gate.State);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
         command.CommandText = "SELECT EXISTS(SELECT 1 FROM configuration_run_sessions WHERE session_id=$session AND owner_operation_id=$owner " +
             "AND parent_journal_id=$parent AND step_id=$step AND invocation_ordinal=$invocation AND ($primary=0 OR primary_job_name=$job));";
         command.Parameters.AddWithValue("$invocation", ExecutionInvocationCodec.Ordinal(
-            ExecutionInvocationCodec.ForJob(state.Latest.Root, state.Total, job.JobName), job.StepId));
+            ExecutionInvocationCodec.ForJob(latest.Root, total, job.JobName), job.StepId));
         command.Parameters.AddWithValue("$primary", job.Role == "process"); command.Parameters.AddWithValue("$job", job.JobName);
-        command.Parameters.AddWithValue("$session", value.OperationId.ToString("D")); command.Parameters.AddWithValue("$owner", state.Journal.OperationId.ToString("D"));
-        command.Parameters.AddWithValue("$parent", state.Journal.JournalId.ToString("D")); command.Parameters.AddWithValue("$step", job.StepId);
+        command.Parameters.AddWithValue("$session", value.OperationId.ToString("D")); command.Parameters.AddWithValue("$owner", parent.OperationId.ToString("D"));
+        command.Parameters.AddWithValue("$parent", parent.JournalId.ToString("D")); command.Parameters.AddWithValue("$step", job.StepId);
         if ((long)command.ExecuteScalar()! != 1) throw new IOException("configuration_group_closure_unbound");
-        VerifyJobOwner(connection, transaction, value, state.Journal.JournalId, value.WriterId, value.JobName, value.SessionId);
+        VerifyJobOwner(connection, transaction, value, parent.JournalId, value.WriterId, value.JobName, value.SessionId);
         return true;
     }
 }

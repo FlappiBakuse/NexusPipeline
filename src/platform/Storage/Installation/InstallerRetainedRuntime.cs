@@ -47,7 +47,7 @@ internal sealed class InstallerRetainedRuntime(InstallerPaths paths)
     {
         if (string.IsNullOrWhiteSpace(workRoot)) throw new IOException("installer_runtime_inspection_required");
         InstallerRuntimeGate.RequireHeld(identity.ApplicationRoot);
-        foreach (var name in new[] { ApplicationTree.HostEntry, ApplicationTree.MaintenanceEntry, ApplicationTree.DesktopEntry })
+        foreach (var name in new[] { ApplicationTree.HostEntry, ApplicationTree.LauncherEntry, ApplicationTree.MaintenanceEntry, ApplicationTree.DesktopEntry })
             ExclusiveProgramAdmission.RequireStopped(Path.Combine(identity.ApplicationRoot, name));
         var runtime = RequireRuntime(identity);
         using var lease = InstanceLease.AcquireInstaller(runtime, new ContractReader(), setup);

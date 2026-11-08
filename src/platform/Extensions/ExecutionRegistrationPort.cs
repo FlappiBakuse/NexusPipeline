@@ -9,13 +9,16 @@ internal sealed class ExecutionRegistrationPort : IExecutionRegistrationPort
     private readonly ExtensionScope _scope;
     private readonly VerifiedProviderPackage _package;
     private readonly ExecutionProviderRegistry _registry;
+    private readonly VerifiedProviderPackage.Prepared? _prepared;
     private int _registered;
 
-    internal ExecutionRegistrationPort(ExtensionScope scope, VerifiedProviderPackage package, ExecutionProviderRegistry registry)
+    internal ExecutionRegistrationPort(ExtensionScope scope, VerifiedProviderPackage package, ExecutionProviderRegistry registry,
+        VerifiedProviderPackage.Prepared? prepared = null)
     {
-        if (scope.Activation.ExtensionId != package.Manifest.ExtensionId)
+        if (scope.Activation.ExtensionId != package.Manifest.ExtensionId ||
+            prepared is not null && !ReferenceEquals(prepared.Package, package))
             throw new IOException("execution_provider_activation_unbound");
-        _scope = scope; _package = package; _registry = registry;
+        _scope = scope; _package = package; _registry = registry; _prepared = prepared;
     }
 
     public async ValueTask RegisterAsync(CancellationToken cancellationToken)
@@ -27,7 +30,7 @@ internal sealed class ExecutionRegistrationPort : IExecutionRegistrationPort
         IAsyncDisposable? registration = null;
         try
         {
-            using var verified = _package.Hold();
+            using var verified = _prepared is null ? _package.Hold() : _prepared.TakeHold(_package);
             registration = _registry.Register(_scope, _package);
             await _scope.OwnAsync(registration).ConfigureAwait(false);
             _scope.Cancellation.ThrowIfCancellationRequested();

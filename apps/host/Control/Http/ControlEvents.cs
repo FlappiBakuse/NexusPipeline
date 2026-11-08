@@ -25,7 +25,6 @@ internal sealed class ControlEvents(ControlAuthentication authority, ControlEven
             context.Response.ContentType = "text/event-stream";
             context.Response.Headers.CacheControl = "no-store";
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted);
-            deadline.CancelAfter(TimeSpan.FromMinutes(5));
             using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
             try
             {

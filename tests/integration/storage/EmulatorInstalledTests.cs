@@ -8,10 +8,10 @@ namespace NexusPipeline.StorageTests;
 public sealed class EmulatorInstalledTests
 {
     [Theory(DisplayName = "The Original Emulator ZIP Registers Its Actual Vendor Provider And Drains Escaped Sessions Without Running A Vendor Program")]
-    [InlineData(EmulatorVendor.LdPlayer)]
-    [InlineData(EmulatorVendor.Nox)]
-    [InlineData(EmulatorVendor.BlueStacks)]
-    public async Task RunsInstalledProvider(EmulatorVendor vendor)
+    [InlineData("LdPlayer")]
+    [InlineData("Nox")]
+    [InlineData("BlueStacks")]
+    public async Task RunsInstalledProvider(string vendor)
     {
         using var input = new SpecializedPackageInputs("emulator-support", "NEXUS_FORMAL_EMULATOR_PACKAGE_RECEIPT", "managed-code");
         using var fixture = new InstallRuntimeFixture(originalManifest: input.Manifest, originalManifestBytes: input.ManifestBytes,
@@ -44,9 +44,9 @@ public sealed class EmulatorInstalledTests
                 Assert.Equal(target.Id, device.TargetId); Assert.Equal(endpoint, device.Endpoint);
                 Assert.Equal("captured", (await escaped.CaptureAsync(default)).State);
                 await escaped.CloseAsync(true, default); await escaped.CancelAsync(default);
-                Assert.Equal(vendor == EmulatorVendor.BlueStacks ? 1 : 2, host.Commands.Count);
+                Assert.Equal(vendor == "BlueStacks" ? 1 : 2, host.Commands.Count);
                 Assert.All(host.Commands, command => Assert.Equal(target.Installation.Control.Id, command.ToolId));
-                Assert.Equal(vendor == EmulatorVendor.BlueStacks ? "--instance" : "launch", host.Commands[0].Arguments[0]);
+                Assert.Equal(vendor == "BlueStacks" ? "--instance" : "launch", host.Commands[0].Arguments[0]);
                 Assert.Equal(1, host.Cancelled); current(); return true;
             }, default);
         }

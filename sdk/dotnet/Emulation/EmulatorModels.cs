@@ -1,22 +1,11 @@
 namespace NexusPipeline.Extensibility.Emulation;
 
-/// <summary>Vendor semantics are provided by the selected extension, independently of generic Android control.</summary>
-public enum EmulatorVendor
-{
-    /// <summary>LDPlayer installations controlled by the selected ldconsole or dnconsole tool.</summary>
-    LdPlayer,
-    /// <summary>Nox installations with separately identified virtual machines.</summary>
-    Nox,
-    /// <summary>BlueStacks installations with explicit instance identifiers.</summary>
-    BlueStacks
-}
-
 /// <summary>A Host-captured tool identity. A path in this value never grants execution authority.</summary>
 public sealed record EmulatorTool(string Id, string Path, string PhysicalId, string Sha256, long Revision);
 /// <summary>A copy of the original bounded configuration bytes and their Host-captured identity.</summary>
 public sealed record EmulatorConfig(string Id, string RelativePath, string PhysicalId, string Sha256, long Revision, ReadOnlyMemory<byte> Bytes);
 /// <summary>One physical installation and its complete captured vendor configuration set.</summary>
-public sealed record EmulatorInstallation(string Id, EmulatorVendor Vendor, string RootPath, string RootPhysicalId,
+public sealed record EmulatorInstallation(string Id, string Vendor, string RootPath, string RootPhysicalId,
     EmulatorTool Control, EmulatorTool? Adb, IReadOnlyList<EmulatorConfig> Configurations);
 /// <summary>Display names are separate from the vendor's persistent instance selector.</summary>
 public sealed record EmulatorInstance(string Identity, string DisplayName, string? ControlName, int? Index, int? ProcessId,
@@ -36,12 +25,25 @@ public sealed record EmulatorProcess(string EvidenceId, string InstallationId, i
 /// <summary>A fixed vendor operation against a Host-bound tool; the Host independently admits each operation.</summary>
 public sealed record EmulatorCommand(string ToolId, IReadOnlyList<string> Arguments, bool Detached = false);
 /// <summary>Bounded inventory hints. The Host owns permitted roots and never treats hints as a file grant.</summary>
-public sealed record EmulatorLayout(EmulatorVendor Vendor, string DisplayName, IReadOnlyList<string> InstallHints,
+public sealed record EmulatorLayout(string Vendor, string DisplayName, IReadOnlyList<string> InstallHints,
     IReadOnlyList<string> ControlPaths, IReadOnlyList<string> AdbPaths, IReadOnlyList<string> ConfigPaths,
-    IReadOnlyList<string> SharedDataPaths, IReadOnlyList<string> WorkerNames);
+    IReadOnlyList<string> SharedDataPaths, IReadOnlyList<string> WorkerNames)
+{
+    /// <summary>Control executable directories whose parent is the installation root.</summary>
+    public IReadOnlyList<string> ControlParentDirectories { get; init; } = [];
+    /// <summary>Only these exact arguments may enumerate the captured control executable.</summary>
+    public IReadOnlyList<string> EnumerationArguments { get; init; } = [];
+    /// <summary>Configuration discovery filters declared extensions within captured roots.</summary>
+    public IReadOnlyList<string> ConfigurationExtensions { get; init; } = [];
+}
+/// <summary>A location relative to an admitted installation or captured configuration's directory.</summary>
+public sealed record EmulatorInstanceLocation(string? ConfigurationId, string RelativePath);
+/// <summary>Vendor output is revalidated by Host against captured roots, tools and selected instance evidence.</summary>
+public sealed record EmulatorTargetDescription(IReadOnlyList<EmulatorInstanceLocation> Locations,
+    EmulatorCommand Launch, EmulatorCommand? Quit);
 /// <summary>One installation's parsed native enumeration.</summary>
 public sealed record EmulatorSource(EmulatorInstallation Installation, EmulatorEnumeration Enumeration);
 /// <summary>A vendor-specific refusal without exposing configuration bytes or command output.</summary>
-public sealed record EmulatorDiagnostic(EmulatorVendor Vendor, string? InstallationId, string Code);
+public sealed record EmulatorDiagnostic(string Vendor, string? InstallationId, string Code);
 /// <summary>Independent vendor failures remain visible alongside successfully discovered installations.</summary>
 public sealed record EmulatorDiscoveryResult(string State, IReadOnlyList<EmulatorSource> Sources, IReadOnlyList<EmulatorDiagnostic> Diagnostics);

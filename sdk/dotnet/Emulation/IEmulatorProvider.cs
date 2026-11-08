@@ -10,6 +10,10 @@ public interface IEmulatorRegistration
 /// <summary>Vendor semantics use explicit Host inventory and control scopes rather than direct OS access.</summary>
 public interface IEmulatorProvider
 {
+    /// <summary>Captured inventory follows the installed provider's bounded declarations.</summary>
+    IReadOnlyList<EmulatorLayout> Layouts { get; }
+    /// <summary>Returns vendor selectors and commands without granting filesystem or process authority.</summary>
+    EmulatorTargetDescription Describe(EmulatorTarget target);
     /// <summary>Produces distinct installation, enumeration and mapping diagnostics.</summary>
     ValueTask<EmulatorDiscoveryResult> DiscoverAsync(IEmulatorInventory inventory, bool supportsAndroid, CancellationToken cancellationToken);
     /// <summary>Resolves an exact selection from the complete captured source set.</summary>

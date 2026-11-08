@@ -8,38 +8,23 @@ namespace NexusPipeline.StorageTests;
 
 public sealed class StartupConnectionTests
 {
-    [Fact(DisplayName = "Startup Reads Reuse Native Connections While Observing Current Committed Facts")]
+    [Fact(DisplayName = "New Readers See Committed Facts Without Crossing Runtime Instances")]
     public void ReadsCurrentFacts()
     {
         var (database, _) = RecordStoreFixture.NewStore();
-        using var scope = DatabaseReadScope.Hold(database.DatabasePath);
-        SQLitePCL.sqlite3 native;
-        using (var first = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
-        {
-            native = first.Handle!;
-            Assert.True(new SqliteConnectionStringBuilder(first.ConnectionString).Pooling);
-            Assert.Equal(0L, DatabaseConnections.Scalar(first, "SELECT count(*) FROM operations;"));
-        }
-        database.Accept(new OperationIdentity(Guid.NewGuid(), "fixture", new string('a', 64), "fixture.command"), DateTimeOffset.UtcNow);
-        using (var second = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
-        {
-            Assert.Same(native, second.Handle);
-            Assert.Equal(1L, DatabaseConnections.Scalar(second, "SELECT count(*) FROM operations;"));
-        }
-        using (var alias = DatabaseConnections.Open(database.DatabasePath.ToUpperInvariant(), readOnly: true))
-            Assert.Same(native, alias.Handle);
-        using (DatabaseReadScope.Hold(database.DatabasePath))
-        using (DatabaseConnections.Open(database.DatabasePath, readOnly: true)) { }
-        using (DatabaseConnections.Open(database.DatabasePath, readOnly: true)) { }
-        using (var writer = DatabaseConnections.Open(database.DatabasePath))
-            Assert.False(new SqliteConnectionStringBuilder(writer.ConnectionString).Pooling);
         var (foreign, _) = RecordStoreFixture.NewStore();
-        using (var outside = DatabaseConnections.Open(foreign.DatabasePath, readOnly: true))
-            Assert.False(new SqliteConnectionStringBuilder(outside.ConnectionString).Pooling);
-        scope.Dispose();
-        Assert.True(native.IsClosed);
+        using (DatabaseReadScope.Hold(database.DatabasePath))
+        {
+            using (var first = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+                Assert.Equal(0L, DatabaseConnections.Scalar(first, "SELECT count(*) FROM operations;"));
+            database.Accept(new OperationIdentity(Guid.NewGuid(), "fixture", new string('a', 64), "fixture.command"), DateTimeOffset.UtcNow);
+            using (var second = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+                Assert.Equal(1L, DatabaseConnections.Scalar(second, "SELECT count(*) FROM operations;"));
+            using (var outside = DatabaseConnections.Open(foreign.DatabasePath, readOnly: true))
+                Assert.Equal(0L, DatabaseConnections.Scalar(outside, "SELECT count(*) FROM operations;"));
+        }
         using var after = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
-        Assert.False(new SqliteConnectionStringBuilder(after.ConnectionString).Pooling);
+        Assert.Equal(1L, DatabaseConnections.Scalar(after, "SELECT count(*) FROM operations;"));
     }
 
     [Fact(DisplayName = "A Startup Database Name Is Pinned Until Its Pool Closes And Replacement Is Observed In The Next Scope")]

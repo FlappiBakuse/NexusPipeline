@@ -82,6 +82,20 @@ public sealed class FrontendInstalledTests
             Assert.Equal("fixture-plugin", (await frontend.ReadManifestAsync(default)).GetProperty("extensionId").GetString());
             Assert.Equal("export const identity = 'fixture';\n", System.Text.Encoding.UTF8.GetString(await frontend.ReadAssetAsync("entry", default)));
             Assert.Contains(".fixture", System.Text.Encoding.UTF8.GetString(await frontend.ReadAssetAsync("0", default)));
+            var assets = await frontend.ReadAssetsAsync(default);
+            Assert.Equal(await frontend.ReadAssetAsync("entry", default), assets.Entry);
+            Assert.Equal(await frontend.ReadAssetAsync("0", default), Assert.Single(assets.Styles));
+            var entry = Path.Combine(fixture.Target, "frontend", "main.js");
+            Assert.Throws<IOException>(() => File.WriteAllText(entry, "replaced"));
+            var sibling = Path.Combine(fixture.Target, "unexpected.js");
+            File.WriteAllText(sibling, "unexpected");
+            try
+            {
+                await Assert.ThrowsAsync<IOException>(() => frontend.ReadAssetAsync("entry", default).AsTask());
+                await Assert.ThrowsAsync<IOException>(() => frontend.ReadAssetsAsync(default).AsTask());
+            }
+            finally { File.Delete(sibling); }
+            Assert.Equal("export const identity = 'fixture';\n", System.Text.Encoding.UTF8.GetString(await frontend.ReadAssetAsync("entry", default)));
             await Assert.ThrowsAsync<IOException>(() => frontend.ReadAssetAsync("../entry.dll", default).AsTask());
             await Assert.ThrowsAsync<IOException>(() => frontend.ReadAssetAsync("1", default).AsTask());
             var clientId = Guid.NewGuid();
@@ -98,6 +112,8 @@ public sealed class FrontendInstalledTests
         }
         finally { await fixture.Activator.StopAllAsync(TimeSpan.FromSeconds(10)); }
         await Assert.ThrowsAnyAsync<Exception>(() => frontend.ReadAssetAsync("entry", default).AsTask());
+        await Assert.ThrowsAnyAsync<Exception>(() => frontend.ReadAssetsAsync(default).AsTask());
+        using var released = File.Open(Path.Combine(fixture.Target, "frontend", "main.js"), FileMode.Open, FileAccess.Write, FileShare.Read);
     }
 
     [Theory(DisplayName = "Installed Browser Operations Preserve The Host Permission Categories And Require Write Identity")]

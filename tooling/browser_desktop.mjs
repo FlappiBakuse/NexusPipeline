@@ -19,7 +19,7 @@ export function runDesktopFixture({ root, runtime, output, manifest, scenario })
   const profile = path.join(output, 'profile');
   for (const child of ['', 'session', 'dumps']) fs.mkdirSync(path.join(profile, child), { recursive: true });
   const target = path.join(root, 'tests/frontend/desktop-runtime.cjs');
-  const mode = scenario === 'desktop-native' ? 'desktop' : 'browser';
+  const mode = scenario === 'desktop-native' ? 'desktop' : scenario === 'desktop-failed' ? 'failed' : 'browser';
   const bootstrap = path.join(output, 'fixture-bootstrap.cjs');
   const script = [
     "const { app } = require('electron');",
@@ -38,7 +38,7 @@ export function runDesktopFixture({ root, runtime, output, manifest, scenario })
     env: { ...process.env, TEMP: temporary, TMP: temporary } });
   fs.writeFileSync(path.join(output, 'native.log'), (result.stdout || '') + (result.stderr || ''));
   const receipts = fs.readdirSync(output).filter(name => /^receipt-.*\.json$/.test(name));
-  if (result.status !== 0 || result.error || receipts.length !== 1) throw new Error('Desktop fixture did not complete');
+  if (result.status !== 0 || result.error || receipts.length !== 1) throw new Error('Desktop fixture did not complete: ' + JSON.stringify({ exitCode: result.status, signal: result.signal, error: result.error?.message, receipts: receipts.length }));
   const native = JSON.parse(fs.readFileSync(path.join(output, receipts[0])));
   if (native.status !== 'PASS' || !native.cases?.length) throw new Error('Desktop fixture failed or had zero cases');
   const sha = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');

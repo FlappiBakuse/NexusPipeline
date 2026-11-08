@@ -21,7 +21,7 @@ internal static class ExecutionTaskProjection
         using var input = blobs.OpenVerified(new(reference.RelativePath, reference.SizeBytes, reference.Sha256));
         var bytes = new byte[checked((int)input.Length)]; input.ReadExactly(bytes);
         var bundle = contracts.Read<AutomationBundle>(bytes, "automation-bundle.schema.json");
-        var script = bundle.Scripts.Single(item => item.Id == step.ScriptId);
+        var script = NexusPipeline.Platform.Storage.Automation.BindingSourceCodec.Resolve(bundle, step);
         foreach (var task in tasks.Where(task => task.Projection is not null))
             if (!script.AdapterResources.Any(resource => resource.ResourceId == task.Projection!.ResourceId &&
                 resource.RelativePath == task.Projection.RelativePath)) throw Invalid();

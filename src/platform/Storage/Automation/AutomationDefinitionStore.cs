@@ -16,16 +16,16 @@ public sealed class AutomationDefinitionStore(StateDatabase database) : IAutomat
 
     public AutomationCatalog Read()
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
         using var transaction = connection.BeginTransaction(deferred: true);
-        var result = AutomationRows.Read(connection, transaction);
+        var result = Configuration.BindingConfigurationSource.Read(database, connection, transaction, AutomationRows.Read(connection, transaction));
         VerifyRoots(result.Roots);
         transaction.Commit();
         return result;
     }
 
     // The source lease re-checks its definitions on every read, so it needs the revision without materializing the catalog.
-    internal long ReadRevision()
+    public long ReadRevision()
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
         using var command = connection.CreateCommand();
@@ -60,6 +60,13 @@ public sealed class AutomationDefinitionStore(StateDatabase database) : IAutomat
         using (var transaction = connection.BeginTransaction(deferred: true))
             if (OperationRows.ReadExisting(connection, transaction, operation) is not null) return ReadResult(connection, transaction, operation.OperationId);
         var current = Read();
+        foreach (var updated in changes.Scripts)
+        {
+            if (!current.Bindings.Any(binding => binding.ScriptId == updated.Id && binding.Source is not null)) continue;
+            var existing = current.Scripts.Single(item => item.Id == updated.Id);
+            if (Configuration.BindingConfigurationSource.Contract(existing) != Configuration.BindingConfigurationSource.Contract(updated))
+                throw new Core.Configuration.ConfigurationException("configuration_binding_source_declaration_changed");
+        }
         _ = AutomationEdits.Apply(current, changes);
         foreach (var schedule in changes.Schedules)
         {
@@ -81,7 +88,6 @@ public sealed class AutomationDefinitionStore(StateDatabase database) : IAutomat
             _ = BoundedJson.Serialize(next);
             retirement?.RetireOwners(connection, transaction);
             AutomationRowWriter.Write(connection, transaction, before, next);
-            _ = AutomationRows.Read(connection, transaction);
             AutomationRowWriter.Row(connection, transaction, "INSERT INTO automation_mutations VALUES($0,$1);", operation.OperationId, next.Revision);
             AutomationRowWriter.Row(connection, transaction, "UPDATE operations SET status='completed' WHERE operation_id=$0;", operation.OperationId);
             return ReadResult(connection, transaction, operation.OperationId) with { IsNew = true };

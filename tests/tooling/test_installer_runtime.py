@@ -60,13 +60,14 @@ class RuntimeTests(unittest.TestCase):
         application(changed, version='10.0.13')
         with self.assertRaisesRegex(ValueError, 'actual program'):
             render_runtime(self.root, changed)
-        for value in (dict(framework=dict(name=FRAMEWORKS[0], version='10.0.1')),
-                      dict(framework=dict(name='Microsoft.WindowsDesktop.App', version='10.0.0')),
-                      dict(includedFrameworks=[dict(name=FRAMEWORKS[0], version='10.0.0')])):
-            worker = self.work / 'NexusPipeline.Installer.exe'
-            worker.write_bytes(bundle('Installer', value))
-            with self.subTest(installer=value), self.assertRaises(ValueError):
-                render_runtime(self.root, self.software, worker)
+        for project, program in (('Installer', self.work / 'NexusPipeline.Installer.exe'),
+                                 ('Launcher', self.software / 'resources/desktop/NexusPipeline.Launcher.exe')):
+            for value in (dict(framework=dict(name=FRAMEWORKS[0], version='10.0.1')),
+                          dict(framework=dict(name='Microsoft.WindowsDesktop.App', version='10.0.0')),
+                          dict(includedFrameworks=[dict(name=FRAMEWORKS[0], version='10.0.0')])):
+                program.write_bytes(bundle(project, value))
+                with self.subTest(project=project, frameworks=value), self.assertRaises(ValueError):
+                    render_runtime(self.root, self.software, program if project == 'Installer' else None)
 
     def test_native_runtime(self):
         compiler = Path(os.environ['NEXUS_INSTALLER_COMPILER'])

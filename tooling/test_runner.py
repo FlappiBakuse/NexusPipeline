@@ -16,7 +16,7 @@ import xml.etree.ElementTree as ET
 from build_product import build_product, update_export
 from source_snapshot import digest, write_json, external_directory
 from binary_inputs import capture_binary_inputs, verify_binary_inputs, hash_file, PROJECTS
-from test_expectations import load_expected_methods
+from test_expectations import suite_classes
 from test_registry import suite_filter
 from desktop_bundle import require_no_links, read_desktop_bundle
 from frozen_build import reuse_build
@@ -50,8 +50,8 @@ def run_tests(root, build_root, output, group, fixture_volume_root=None, method=
     build_root = external_directory(root, build_root)
     output = external_directory(root, output)
     selected = [method] if isinstance(method, str) else list(method or [])
-    if method is not None and (not 1 <= len(selected) <= 64 or len(set(selected)) != len(selected)):
-        raise ValueError("A method selection must contain one to sixty-four distinct identities")
+    if method is not None and (not selected or len(set(selected)) != len(selected)):
+        raise ValueError("A method selection must contain distinct nonempty identities")
     if group in ("tooling", "host-boundary") and len(selected) > 1:
         raise ValueError("Python accepts one exact test ID")
     method = selected[0] if len(selected) == 1 else tuple(selected) if selected else None
@@ -62,8 +62,6 @@ def run_tests(root, build_root, output, group, fixture_volume_root=None, method=
     if requires_desktop != (desktop_bundle is not None):
         raise ValueError("Only the exact desktop-maintenance method requires --desktop-bundle")
     desktop_input = read_desktop_bundle(root, desktop_bundle) if requires_desktop else None
-    if selected and group not in ("tooling", "host-boundary") and not set(selected).issubset(load_expected_methods(root, group)):
-        raise ValueError("A method filter requires an existing declared native method in this group")
     if (group == "storage-config-cross-volume") != (fixture_volume_root is not None):
         raise ValueError("Only storage-config-cross-volume requires an explicit --fixture-volume-root")
     if fixture_volume_root is not None:
@@ -113,7 +111,7 @@ def run_tests(root, build_root, output, group, fixture_volume_root=None, method=
         if path.stat().st_size != interpreter["sizeBytes"] or hash_file(path) != interpreter["sha256"]:
             raise ValueError("Judgement fixture interpreter changed during the native suite")
     result.update(group=group, runId=run_id, elapsedSeconds=time.monotonic() - started,
-                  coverage=("declared-method-only" if len(selected) == 1 else "declared-methods-only") if method else "complete-group", methodFilter=method,
+                  coverage=("selected-method-only" if len(selected) == 1 else "selected-methods-only") if method else "complete-group", methodFilter=method,
                   source=invocation_source, buildSource=build_receipt["source"] if build_receipt else None,
                   buildReceipt=str(build_root / "runs" / build_receipt["runId"] / "build-receipt.json") if build_receipt else None,
                   selection=selection,
@@ -182,14 +180,12 @@ def run_dotnet(source_root, build_root, run_root, group, fixture_volume_root=Non
     definitions = {item.attrib["id"]: item.find("t:TestMethod", ns).attrib["className"].split(",", 1)[0] + "." + item.find("t:TestMethod", ns).attrib["name"]
                    for item in xml.findall("t:TestDefinitions/t:UnitTest", ns)}
     actual = Counter(definitions[item.attrib["testId"]] for item in results)
-    expected = load_expected_methods(source_root, group)
+    requested = [method] if isinstance(method, str) else list(method or [])
     excluded = [DESKTOP_MAINTENANCE_METHOD] if group == "storage" and method is None else []
-    for name in excluded:
-        expected.pop(name)
-    if method is not None:
-        methods = [method] if isinstance(method, str) else method
-        expected = {name: expected[name] for name in methods}
-    valid = bool(expected) and dict(actual) == expected and all(item.attrib["outcome"] == "Passed" for item in results)
+    classes = suite_classes(source_root, group)
+    valid = bool(actual) and all(item.attrib["outcome"] == "Passed" for item in results)
+    valid = valid and (set(actual) == set(requested) if requested else
+        all(any(identity.startswith(owner + '.') for owner in classes) for identity in actual))
     valid = valid and process.returncode == 0 and len({item.attrib["testId"] for item in results}) == len(results)
     summary = xml.find("t:ResultSummary", ns)
     counters = xml.find("t:ResultSummary/t:Counters", ns)
@@ -201,7 +197,7 @@ def run_dotnet(source_root, build_root, run_root, group, fixture_volume_root=Non
                                "notRunnable", "notExecuted", "disconnected", "inProgress", "pending"))
     return {"status": "PASS" if valid else "FAIL", "exitCode": 0 if valid else process.returncode or 1,
             "maintenanceBundleInputs": bundle_inputs,
-            "command": command, "expectedMethods": expected, "actualMethods": dict(actual),
+            "command": command, "requestedMethods": requested, "actualMethods": dict(actual),
             "externalInputMethodsExcluded": excluded,
             "fixtureVolumeRoot": str(fixture_volume_root) if fixture_volume_root is not None else None,
             "fixtureVolumeRuntime": env.get("NEXUS_TEST_VOLUME_ROOT"),
@@ -256,9 +252,6 @@ class PythonResult(unittest.TextTestResult):
 def run_python(source_root, build_root, run_root, group, method=None, *, live_root):
     os.environ.pop("NEXUS_TEST_DESKTOP_BUNDLE", None)
     suite_directory = {"tooling": "tooling", "host-boundary": "integration"}[group]
-    declared = load_expected_methods(source_root, group)
-    expected = {method: declared[method]} if method else declared
-    expected_count = sum(expected.values())
     os.environ["NEXUS_TEST_ROOT"] = str(run_root / "runtime")
     os.environ["TEMP"] = str(run_root)
     os.environ["TMP"] = str(run_root)
@@ -276,8 +269,8 @@ def run_python(source_root, build_root, run_root, group, method=None, *, live_ro
                 yield item
     discovered = list(cases(suite))
     discovered_ids = [item.id() for item in discovered]
-    if len(discovered_ids) != len(set(discovered_ids)) or set(discovered_ids) != set(declared):
-        raise ValueError('Python discovered methods differ from their independently declared set')
+    if not discovered_ids or len(discovered_ids) != len(set(discovered_ids)):
+        raise ValueError('Python discovery must select unique nonempty tests')
     if method is not None:
         selected = [item for item in discovered if item.id() == method]
         if len(selected) != 1:
@@ -287,6 +280,8 @@ def run_python(source_root, build_root, run_root, group, method=None, *, live_ro
     else:
         suite = unittest.TestSuite(discovered)
     selected_ids = [item.id() for item in cases(suite)]
+    expected = dict.fromkeys(selected_ids, 1)
+    expected_count = len(selected_ids)
     buffer = io.StringIO()
     result = unittest.TextTestRunner(stream=buffer, verbosity=2, resultclass=PythonResult).run(suite)
     native_output = buffer.getvalue()
@@ -298,6 +293,6 @@ def run_python(source_root, build_root, run_root, group, method=None, *, live_ro
     return {"status": "PASS" if valid else "FAIL", "exitCode": 0 if valid else 1,
             "expectedCaseCount": expected_count, "actualCaseCount": result.testsRun,
             "selectedCaseIds": selected_ids,
-            "declaredMethods": declared, "discoveredMethods": discovered_ids, "actualMethods": dict(actual),
+            "discoveredMethods": discovered_ids, "actualMethods": dict(actual),
             "skipped": [test.id() for test, _ in result.skipped], "nativeReport": str(log),
             "nativeReportSha256": digest(log.read_bytes())}

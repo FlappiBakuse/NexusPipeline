@@ -161,7 +161,7 @@ public sealed class ValueService
         var catalog = _definitions.Read();
         var binding = catalog.Bindings.SingleOrDefault(item => item.Id == bindingId)
             ?? throw new ConfigurationException("configuration_binding_missing");
-        var script = catalog.Scripts.Single(item => item.Id == binding.ScriptId);
+        var script = Core.Automation.BindingScriptSource.Resolve(catalog.Scripts.Single(item => item.Id == binding.ScriptId), binding);
         if (script.Kind != AutomationKind.Generic) throw new ConfigurationException("configuration_generic_definition_unbound");
         return (binding, script);
     }

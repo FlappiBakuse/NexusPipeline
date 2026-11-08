@@ -10,7 +10,7 @@ function installLoginBridge(config, parent, connect, generation) {
     nativeClientId: session.clientId, sessionId: session.sessionId, correlationId: crypto.randomUUID() });
   async function post(request) {
     const response = await fetch(new URL('control/v1/desktop/login', config.address), { method: 'POST',
-      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request), redirect: 'error', signal: AbortSignal.timeout(5000) });
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request), redirect: 'error', signal: AbortSignal.timeout(request.type === 'candidate' ? 60000 : 5000) });
     return readLogin(await responseText(response), config.verificationKey, request);
   }
   async function complete(state, status, values) {
@@ -33,7 +33,10 @@ function installLoginBridge(config, parent, connect, generation) {
     if (active.size >= 128) throw new Error('desktop_login_limit');
     const state = { offer, session, cleaned: false, window: undefined }; active.set(offer.captureId, state);
     if (offer.isCanceled || stale) { await complete(state, 'canceled', Object.create(null)); return; }
-    state.window = createLoginWindow(offer, typeof parent === 'function' ? parent() : parent, (status, values) => complete(state, status, values));
+    state.window = createLoginWindow(offer, typeof parent === 'function' ? parent() : parent, (status, values) => complete(state, status, values), async values => {
+      const result = await post({ ...identity(session), type: 'candidate', captureId: offer.captureId, nonce: offer.nonce, values });
+      return result.accepted;
+    });
   }
   async function poll() {
     if (ended) return;

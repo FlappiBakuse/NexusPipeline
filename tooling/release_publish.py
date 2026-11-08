@@ -58,7 +58,7 @@ def host_plan(directory, verified):
                 require(len(entries) == len(set(item.casefold() for item in entries)) and archive.testzip() is None,
                         "Host ZIP contains repeated or damaged members")
                 required = {"NexusPipeline.exe", "NexusPipeline.update.exe", "README.md",
-                            "resources/payload-manifest.json", "package-info/recipe.json"}
+                            "resources/payload-manifest.json", "resources/desktop/NexusPipeline.Launcher.exe", "package-info/recipe.json"}
                 require(required <= set(entries) and not any(item.startswith("application/") for item in entries),
                         "Host ZIP differs from the public payload layout")
     return plan, files

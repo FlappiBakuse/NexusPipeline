@@ -78,6 +78,17 @@ internal sealed class InstalledDesktopPort(InstalledExtensionConsumption consump
     }
 
     public async ValueTask<BrowserLoginCapture> CaptureAsync(SdkPolicy policy, CancellationToken cancellationToken)
+        => await CaptureCoreAsync(policy, null, cancellationToken).ConfigureAwait(false);
+
+    public ValueTask<BrowserLoginCapture> CaptureValidatedAsync(SdkPolicy policy,
+        Func<BrowserLoginCapture, CancellationToken, ValueTask<bool>> validate, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(validate);
+        return CaptureCoreAsync(policy, validate, cancellationToken);
+    }
+
+    private async ValueTask<BrowserLoginCapture> CaptureCoreAsync(SdkPolicy policy,
+        Func<BrowserLoginCapture, CancellationToken, ValueTask<bool>>? validate, CancellationToken cancellationToken)
     {
         using var use = await consumption.BeginAsync(cancellationToken).ConfigureAwait(false);
         var actual = RequireNative();
@@ -85,15 +96,26 @@ internal sealed class InstalledDesktopPort(InstalledExtensionConsumption consump
             throw new UnauthorizedAccessException("browser_login_permission_required");
         var frozen = BrowserPolicyRules.Freeze(Copy(policy), manifest.Permissions.LoginOrigins ?? []);
         void Current() { actual.RequireCurrent(); use.RequireCurrent(); }
+        async ValueTask<bool> Validate(Core.Desktop.BrowserLoginMaterial candidate, CancellationToken cancellation)
+        {
+            Current();
+            using var capture = CopyCapture(candidate);
+            var accepted = await validate!(capture, cancellation).ConfigureAwait(false);
+            Current(); return accepted;
+        }
         using var material = await browserLogins.CaptureAsync(actual, manifest.ExtensionId, scope.ActivationId, operation,
-            frozen, Current, consumption.CallbackLifetime, cancellationToken).ConfigureAwait(false);
+            frozen, Current, consumption.CallbackLifetime, cancellationToken, validate is null ? null : Validate).ConfigureAwait(false);
+        Current(); cancellationToken.ThrowIfCancellationRequested(); return CopyCapture(material);
+    }
+
+    private static BrowserLoginCapture CopyCapture(Core.Desktop.BrowserLoginMaterial material)
+    {
         var drafts = new Dictionary<string, SecretDraft>(StringComparer.Ordinal);
         try
         {
-            Current(); cancellationToken.ThrowIfCancellationRequested();
             foreach (var (id, secret) in material.Values)
             { SecretDraft? draft = null; secret.Use(value => draft = new(value)); drafts.Add(id, draft!); }
-            Current(); cancellationToken.ThrowIfCancellationRequested(); return new(drafts);
+            return new(drafts);
         }
         catch { foreach (var draft in drafts.Values) draft.Dispose(); throw; }
     }

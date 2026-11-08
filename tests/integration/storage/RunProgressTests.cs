@@ -130,6 +130,9 @@ public sealed class RunProgressTests
         }
         Assert.Equal(identity, PhysicalObjectIdentity.Read(target));
         AssertSavedOutput(fixture);
+        var diagnostics = new NexusPipeline.Platform.Storage.Records.RunDiagnosticStore(fixture.Base.Source.Instance,
+            fixture.Base.Source.Database).Read([fixture.Session.ParentJournalId]);
+        Assert.Contains(diagnostics, item => item.StepId == fixture.Session.StepId && item.ReasonCode == "configuration_sync_capture_rejected");
     }
 
     private static RunProgressCapture Capture(RunWriterFixture fixture) =>

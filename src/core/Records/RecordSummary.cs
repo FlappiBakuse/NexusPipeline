@@ -20,5 +20,7 @@ public sealed record RecordTotals(long Runs, long Succeeded, long Failed, long C
     long MeasuredCount, long MeasuredMilliseconds, long LowerBoundCount, long UnknownDurationCount);
 public sealed record RecordDay(string Date, RecordTotals Totals);
 public sealed record RecordUser(Guid? UserId, RecordTotals Totals);
+public sealed record RecordDaySummary(RecordTotals Totals, IReadOnlyList<RecordDay> Days);
+public sealed record RecordUserPage(IReadOnlyList<RecordUser> Users, Guid? NextUserId);
 public sealed record RecordSummary(RecordTotals Totals, IReadOnlyList<RecordDay> Days,
     IReadOnlyList<RecordUser> Users, Guid? NextUserId);

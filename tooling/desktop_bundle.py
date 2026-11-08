@@ -8,6 +8,7 @@ import zipfile
 
 from source_snapshot import write_json
 from desktop_archive import pack_application, source_entries, source_records, verify_archive, verify_lock
+from desktop_branding import brand_executable
 from desktop_runtime import read_profile, selected_member, runtime_identity
 
 
@@ -71,6 +72,8 @@ def bundle_desktop(root, archive, output):
     files['resources/app.asar'] = (app.read_bytes(), 'desktop-source')
     if 'NexusPipeline.Desktop.exe' not in files:
         raise ValueError('Desktop entry is missing')
+    branded, branding = brand_executable(files['NexusPipeline.Desktop.exe'][0], (source / 'nexuspipeline.ico').read_bytes(), output.parent / 'desktop-branding')
+    files['NexusPipeline.Desktop.exe'] = (branded, 'electron-runtime')
     expected = {name: {'path': name, 'sha256': hashlib.sha256(data).hexdigest(), 'sizeBytes': len(data), 'owner': owner}
                 for name, (data, owner) in files.items()}
     runtime = runtime_identity(root, lock, expected.values())
@@ -101,7 +104,7 @@ def bundle_desktop(root, archive, output):
         if not path.exists() or sha(path) != expected[name]['sha256']:
             path.write_bytes(data)
     write_json(receipt_path, {'format': 'nexus.desktop.bundle', 'version': 1, 'status': 'PASS',
-        'runtime': lock, 'runtimeIdentity': runtime, 'application': application, 'files': [expected[name] for name in sorted(expected)],
+        'runtime': lock, 'runtimeIdentity': runtime, 'branding': branding, 'application': application, 'files': [expected[name] for name in sorted(expected)],
         'scope': 'Pinned Electron shell loading the same embedded Host Web assets as browser mode'})
     return {'status': 'PASS', 'output': str(output), 'files': len(files), 'runtimeVersion': lock['version']}
 
@@ -118,6 +121,11 @@ def read_desktop_bundle(root, directory):
     if (saved.get('format') != 'nexus.desktop.bundle' or saved.get('version') != 1 or
             saved.get('status') != 'PASS' or saved.get('runtime') != lock):
         raise ValueError('Desktop bundle must identify the current pinned runtime')
+    branding = saved.get('branding', {})
+    if (branding.get('iconSha256') != sha(root / 'apps/desktop/nexuspipeline.ico') or
+            branding.get('producerSha256') != sha(root / 'tooling/desktop_branding.py') or
+            branding.get('executableSha256') != sha(directory / 'NexusPipeline.Desktop.exe')):
+        raise ValueError('Desktop branding differs from its product inputs')
     records = saved.get('files')
     if not isinstance(records, list) or not 1 <= len(records) <= 512:
         raise ValueError('Desktop bundle inventory is invalid')

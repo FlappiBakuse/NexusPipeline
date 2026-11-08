@@ -1,7 +1,7 @@
 {
   "algorithm": "nexus-sdk-public-semantic-sha256-v1",
   "sdkVersion": "0.1.0",
-  "contractFingerprint": "4c5557fd5a023eeeed2991fa6ae447259a9431563ee205c945fbdf3d4ddc9e98",
+  "contractFingerprint": "8bd6ec7b8b74e19814789d421cbde374f630a988b1a6322efa3106addbd4097e",
   "publicSchemaNames": [
     "adapter-instance-policy.schema.json",
     "adapter-source-policy.schema.json",

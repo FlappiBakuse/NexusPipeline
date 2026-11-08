@@ -15,6 +15,8 @@ public sealed class RetryClassificationTests
     [InlineData(EngineOutcome.Cancelled, BusinessOutcome.Succeeded, "execution_business_succeeded", AttemptOutcome.Cancelled)]
     [InlineData(EngineOutcome.Failed, BusinessOutcome.Failed, "execution_business_failed", AttemptOutcome.Failed)]
     [InlineData(EngineOutcome.Unknown, BusinessOutcome.Unverified, "fixture", AttemptOutcome.Unverified)]
+    [InlineData(EngineOutcome.Succeeded, BusinessOutcome.Failed, "execution_completion_missing", AttemptOutcome.Failed)]
+    [InlineData(EngineOutcome.Succeeded, BusinessOutcome.Unverified, "execution_engine_succeeded", AttemptOutcome.Unverified)]
     [InlineData(EngineOutcome.NotStarted, BusinessOutcome.Succeeded, "execution_business_succeeded", AttemptOutcome.Unverified)]
     [InlineData(EngineOutcome.Failed, BusinessOutcome.NotApplicable, "fixture", AttemptOutcome.Failed)]
     [InlineData(EngineOutcome.Failed, BusinessOutcome.Succeeded, "fixture", AttemptOutcome.Failed)]

@@ -24,6 +24,7 @@ internal sealed class ExecutionRuntimeServices : IAsyncDisposable
     private Task _retentionTask = Task.CompletedTask;
     private readonly NexusPipeline.Platform.Storage.Records.RecordHistoryRetention _retention;
     private int _stopped;
+    internal HistoryProjection History { get; }
     internal ExecutionAdmissionService Admission { get; }
     internal ExecutionRuntimeConsumer Consumer { get; }
     internal ExecutionLiveMedia LiveMedia { get; }
@@ -43,16 +44,10 @@ internal sealed class ExecutionRuntimeServices : IAsyncDisposable
         var inbox = new ExecutionAdmissionInbox();
         _retention = new(database, new(instance, database, contracts, lease, resources, recovery));
         Admission = new(instance, database, contracts, lease, resources, recovery, inbox, new(5, 5, 30),
-            judgementRuntime: new(NexusPipeline.Platform.Processes.ProcessIdentityReader.Read(Environment.ProcessId).ImagePath,
+            judgementRuntime: new(PhysicalPathPolicy.NormalizeWithoutLinks(Environment.ProcessPath
+                ?? throw new IOException("host_process_path_unavailable")),
                 JudgementRuntimeDiscovery.FindPython()), providers: providers);
-        var logs = new LogCatalogProjection(instance, database, contracts, lease);
-        Guid? logCursor = null;
-        do { logCursor = logs.ReconcilePage(logCursor, 64); } while (logCursor is not null);
-        var images = new ImageCatalogProjection(instance, database, contracts, lease);
-        Guid? imageCursor = null;
-        do { imageCursor = images.ReconcilePage(imageCursor, 64); } while (imageCursor is not null);
-        imageCursor = null;
-        do { imageCursor = images.ReconcileAssetsPage(imageCursor, 64); } while (imageCursor is not null);
+        History = new(instance, database, contracts, lease);
         Notifications = new(instance, database, contracts, lease, resources, recovery, secrets);
         try { Notifications.InitializeStartup(); }
         catch { Notifications.DisposeAsync().AsTask().GetAwaiter().GetResult(); throw; }
@@ -67,7 +62,7 @@ internal sealed class ExecutionRuntimeServices : IAsyncDisposable
         }
         var terminal = new TerminalObserver(Notifications, Completion);
         LiveMedia = new(instance.InstanceId);
-        Consumer = new(instance, database, contracts, lease, resources, recovery, inbox, terminal, LiveMedia);
+        Consumer = new(instance, database, contracts, lease, resources, recovery, inbox, terminal, LiveMedia, new(instance, database, contracts, lease, recovery));
         Retry = new(instance, database, contracts, lease, Admission, terminal);
         try
         {
@@ -95,7 +90,11 @@ internal sealed class ExecutionRuntimeServices : IAsyncDisposable
         _consumerTask = Consumer.RunAsync(lifetime.ApplicationStopping);
         Scheduling.Start();
         _retryTask = Retry.RunAsync(_retryStopping.Token);
-        _retentionTask = Task.Run(() => _retention.RunAsync(_retryStopping.Token));
+        _retentionTask = Task.Run(async () =>
+        {
+            await History.RunAsync(_retryStopping.Token).ConfigureAwait(false);
+            if (History.IsComplete) await _retention.RunAsync(_retryStopping.Token).ConfigureAwait(false);
+        });
     }
 
     internal async Task StopAsync()

@@ -98,6 +98,14 @@ internal sealed class StepEvidenceFactory(RuntimeInstance instance, StateDatabas
             var adapterDecision = AdapterBusinessPolicy.Decide(step.Tasks.Select(TaskAdapterProtocol.ReadTask).ToImmutableArray(), observed.Observations);
             business = adapterDecision.Outcome; reason = adapterDecision.ReasonCode;
         }
+        var ordinary = context.Total.Steps.Single(item => item.StepId == binding.StepId);
+        if (collected && raw.IsComplete && root is not null && exitCode == 0 && business == BusinessOutcome.Unverified &&
+            ordinary.Adapter is null && ordinary.Provider is null && close is null && acceptedClose is null &&
+            (judgement is { Mode: not ExecutionJudgementMode.None } && continuous || script is not null))
+        {
+            business = BusinessOutcome.Failed;
+            reason = "execution_completion_missing";
+        }
         if (close is not null || acceptedClose is not null)
         {
             var prior = previousObservation is null ? null : _reader.Read(binding, previousObservation, false);

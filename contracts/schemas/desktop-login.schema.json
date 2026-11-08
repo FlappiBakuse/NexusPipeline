@@ -1,33 +1,208 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.nexuspipeline.invalid/1/desktop-login.schema.json",
-  "type": "object", "additionalProperties": false,
-  "required": ["format", "version", "instanceId", "nativeClientId", "sessionId", "correlationId", "type"],
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format",
+    "version",
+    "instanceId",
+    "nativeClientId",
+    "sessionId",
+    "correlationId",
+    "type"
+  ],
   "properties": {
-    "format": {"const": "nexus.desktop.login"}, "version": {"const": 1},
-    "instanceId": {"$ref": "common.schema.json#/$defs/uuid"}, "nativeClientId": {"$ref": "common.schema.json#/$defs/uuid"},
-    "sessionId": {"$ref": "common.schema.json#/$defs/uuid"}, "correlationId": {"$ref": "common.schema.json#/$defs/uuid"},
-    "type": {"enum": ["poll", "offers", "complete", "completed"]},
-    "captureId": {"$ref": "common.schema.json#/$defs/uuid"}, "nonce": {"$ref": "common.schema.json#/$defs/uuid"},
-    "status": {"enum": ["completed", "canceled", "failed"]},
-    "values": {"type": "object", "maxProperties": 28, "additionalProperties": {"type": "string", "minLength": 1, "maxLength": 32768}},
-    "offers": {"type": "array", "maxItems": 1, "items": {"$ref": "#/$defs/offer"}}
+    "format": {
+      "const": "nexus.desktop.login"
+    },
+    "version": {
+      "const": 1
+    },
+    "instanceId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "nativeClientId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "sessionId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "correlationId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "type": {
+      "enum": [
+        "poll",
+        "offers",
+        "complete",
+        "completed",
+        "candidate",
+        "candidateResult"
+      ]
+    },
+    "captureId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "nonce": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "status": {
+      "enum": [
+        "completed",
+        "canceled",
+        "failed"
+      ]
+    },
+    "values": {
+      "type": "object",
+      "maxProperties": 28,
+      "additionalProperties": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 32768
+      }
+    },
+    "offers": {
+      "type": "array",
+      "maxItems": 1,
+      "items": {
+        "$ref": "#/$defs/offer"
+      }
+    },
+    "accepted": {
+      "type": "boolean"
+    }
   },
   "oneOf": [
-    {"properties": {"type": {"const": "poll"}, "captureId": false, "nonce": false, "status": false, "values": false, "offers": false}},
-    {"required": ["offers"], "properties": {"type": {"const": "offers"}, "captureId": false, "nonce": false, "status": false, "values": false}},
-    {"required": ["captureId", "nonce", "status", "values"], "properties": {"type": {"const": "complete"}, "offers": false}},
-    {"required": ["captureId", "nonce"], "properties": {"type": {"const": "completed"}, "status": false, "values": false, "offers": false}}
+    {
+      "properties": {
+        "type": {
+          "const": "poll"
+        },
+        "captureId": false,
+        "nonce": false,
+        "status": false,
+        "values": false,
+        "offers": false,
+        "accepted": false
+      }
+    },
+    {
+      "required": [
+        "offers"
+      ],
+      "properties": {
+        "type": {
+          "const": "offers"
+        },
+        "captureId": false,
+        "nonce": false,
+        "status": false,
+        "values": false,
+        "accepted": false
+      }
+    },
+    {
+      "required": [
+        "captureId",
+        "nonce",
+        "status",
+        "values"
+      ],
+      "properties": {
+        "type": {
+          "const": "complete"
+        },
+        "offers": false,
+        "accepted": false
+      }
+    },
+    {
+      "required": [
+        "captureId",
+        "nonce"
+      ],
+      "properties": {
+        "type": {
+          "const": "completed"
+        },
+        "status": false,
+        "values": false,
+        "offers": false,
+        "accepted": false
+      }
+    },
+    {
+      "required": [
+        "captureId",
+        "nonce",
+        "values"
+      ],
+      "properties": {
+        "type": {
+          "const": "candidate"
+        },
+        "status": false,
+        "offers": false,
+        "accepted": false
+      }
+    },
+    {
+      "required": [
+        "captureId",
+        "nonce",
+        "accepted"
+      ],
+      "properties": {
+        "type": {
+          "const": "candidateResult"
+        },
+        "status": false,
+        "values": false,
+        "offers": false
+      }
+    }
   ],
   "$defs": {
     "offer": {
-      "type": "object", "additionalProperties": false,
-      "required": ["captureId", "nonce", "clientId", "extensionId", "activationId", "operationId", "policy", "isCanceled"],
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "captureId",
+        "nonce",
+        "clientId",
+        "extensionId",
+        "activationId",
+        "operationId",
+        "policy",
+        "isCanceled"
+      ],
       "properties": {
-        "captureId": {"$ref": "common.schema.json#/$defs/uuid"}, "nonce": {"$ref": "common.schema.json#/$defs/uuid"},
-        "clientId": {"$ref": "common.schema.json#/$defs/uuid"}, "extensionId": {"$ref": "common.schema.json#/$defs/extensionId"},
-        "activationId": {"$ref": "common.schema.json#/$defs/uuid"}, "operationId": {"$ref": "common.schema.json#/$defs/uuid"},
-        "policy": {"$ref": "browser-login-policy.schema.json"}, "isCanceled": {"type": "boolean"}
+        "captureId": {
+          "$ref": "common.schema.json#/$defs/uuid"
+        },
+        "nonce": {
+          "$ref": "common.schema.json#/$defs/uuid"
+        },
+        "clientId": {
+          "$ref": "common.schema.json#/$defs/uuid"
+        },
+        "extensionId": {
+          "$ref": "common.schema.json#/$defs/extensionId"
+        },
+        "activationId": {
+          "$ref": "common.schema.json#/$defs/uuid"
+        },
+        "operationId": {
+          "$ref": "common.schema.json#/$defs/uuid"
+        },
+        "policy": {
+          "$ref": "browser-login-policy.schema.json"
+        },
+        "isCanceled": {
+          "type": "boolean"
+        }
       }
     }
   }

@@ -29,7 +29,7 @@ internal sealed class EmulatorRuntimeFixture : IDisposable
     private readonly ExtensionCatalogFixture _catalog;
     private readonly Guid _rootId;
 
-    internal EmulatorRuntimeFixture(string vendor, bool close = true, bool mainWait = false)
+    internal EmulatorRuntimeFixture(string vendor, bool close = true, bool mainWait = false, bool bindProvider = false)
     {
         Vendor = vendor; Runtime = new(forceClose: close, accept: false, capture: true, mainWait: mainWait);
         _catalog = Runtime.Base.CreateCatalog();
@@ -39,26 +39,32 @@ internal sealed class EmulatorRuntimeFixture : IDisposable
         Installed.Prepared.Dispose(); Installed.Verified.Dispose(); Installed.Root.Dispose();
         var source = Runtime.Source;
         _rootId = source.Definitions.Read().Roots.Single(root => root.Path == Runtime.Directory).Id;
-        var control = vendor switch { "ldplayer" => "ldconsole", "nox" => "NoxConsole", _ => "HD-Player" };
-        var adb = vendor switch { "ldplayer" => "adb", "nox" => "nox_adb", _ => "HD-Adb" };
-        Alias(Runtime.ToolImage, Path.Combine(Runtime.Directory, control + ".exe"));
-        Adb = Path.Combine(Runtime.Directory, adb + ".exe"); Alias(Runtime.ToolImage, Adb);
-        VmDirectory = Path.Combine(Runtime.Directory, vendor switch { "ldplayer" => "vms/leidian0", "nox" => "BignoxVMS/nox", _ => "Engine/Pie64" });
+        var fixture = EmulatorInventoryFixture.ReadFixture(vendor);
+        var control = fixture.GetProperty("control").GetString()!;
+        var adb = fixture.GetProperty("adb").GetString()!;
+        var runtime = fixture.GetProperty("runtime");
+        Alias(Runtime.ToolImage, Path.Combine(Runtime.Directory, control));
+        Adb = Path.Combine(Runtime.Directory, adb); Alias(Runtime.ToolImage, Adb);
+        VmDirectory = Path.Combine(Runtime.Directory, runtime.GetProperty("vmDirectory").GetString()!);
         Directory.CreateDirectory(VmDirectory);
-        var config = vendor switch { "nox" => Path.Combine(VmDirectory, "nox.vbox"), "bluestacks" => Path.Combine(Runtime.Directory, "bluestacks.conf"), _ => null };
-        if (config is not null) File.WriteAllText(config, vendor == "nox"
-            ? "<VirtualBox><Machine><Hardware><Network><Adapter><NAT><Forwarding name=\"adb\" proto=\"1\" hostport=\"16384\" guestport=\"5555\"/></NAT></Adapter></Network></Hardware></Machine></VirtualBox>"
-            : "bst.instance.Pie64.display_name=\"Controlled VM\"\nbst.instance.Pie64.adb_port=\"16384\"\n");
+        foreach (var configuration in runtime.GetProperty("configurations").EnumerateArray())
+        {
+            var path = Path.Combine(Runtime.Directory, configuration.GetProperty("path").GetString()!);
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, configuration.GetProperty("text").GetString());
+        }
         File.WriteAllBytes(Path.Combine(Runtime.Directory, "fixture-vendor.json"), JsonSerializer.SerializeToUtf8Bytes(new { vendor, nonce = Runtime.Nonce }));
-        Device(node => { node["online"] = false; if (vendor == "ldplayer") { node["endpoint"] = "127.0.0.1:5555"; node["port"] = 5555; } });
+        var port = runtime.GetProperty("port").GetInt32();
+        Device(node => { node["online"] = false; node["endpoint"] = "127.0.0.1:" + port; node["port"] = port; });
         var shared = Path.Combine(source.Root, "shared-emulator-data"); Directory.CreateDirectory(shared);
         Emulators = new(source.Instance, source.Database, new(), source.Lease, Runtime.Base.Resources, Installed.Roots, Installed.Activator, () => [], shared);
         var catalog = source.Definitions.Read();
         var found = Emulators.DiscoverAsync(source.ScriptId, catalog.Revision, [_rootId], () => { }, default).AsTask().GetAwaiter().GetResult();
-        Selected = Assert.Single(found.Targets, target => vendor != "ldplayer" || target.Endpoint == "127.0.0.1:5555"); Assert.Equal(vendor, Selected.Selection.Vendor);
+        Selected = Assert.Single(found.Targets, target => target.Endpoint == "127.0.0.1:" + port); Assert.Equal(vendor, Selected.Selection.Vendor);
         var script = catalog.Scripts.Single(script => script.Id == source.ScriptId);
-        var android = script.Target!.Android! with { Tool = new(_rootId, adb + ".exe"), Endpoint = Selected.Endpoint,
-            Emulator = new(vendor, _rootId, Selected.Selection.TargetId, Selected.Selection.Generation) };
+        var android = script.Target!.Android! with { Tool = new(_rootId, adb), Endpoint = Selected.Endpoint,
+            Emulator = new(vendor, _rootId, Selected.Selection.TargetId, Selected.Selection.Generation)
+            { ExtensionId = bindProvider ? Selected.Selection.ExtensionId : null, ProviderId = bindProvider ? Selected.Selection.ProviderId : null } };
         var changes = new AutomationChanges(catalog.Revision, [], [script with { Target = script.Target with { Android = android } }], [], [], [], [], []);
         source.Definitions.Commit(AutomationDefinitionStore.Identity(Guid.NewGuid(), "emulator-fixture", changes), changes, DateTimeOffset.UtcNow);
         Admission = new(source.Instance, source.Database, new(), source.Lease, Runtime.Base.Resources, Runtime.Base.Index,

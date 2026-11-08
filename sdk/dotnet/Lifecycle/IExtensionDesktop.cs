@@ -15,6 +15,10 @@ public interface IExtensionDesktop
     /// <summary>Captures only declared login values in an isolated native session and returns after its window and session are cleaned.</summary>
     ValueTask<BrowserLoginCapture> CaptureAsync(BrowserLoginPolicy policy, CancellationToken cancellationToken) =>
         ValueTask.FromException<BrowserLoginCapture>(new NotSupportedException("browser_login_unavailable"));
+    /// <summary>Keeps the isolated window available after a rejected candidate and cleans it after validation succeeds.</summary>
+    ValueTask<BrowserLoginCapture> CaptureValidatedAsync(BrowserLoginPolicy policy,
+        Func<BrowserLoginCapture, CancellationToken, ValueTask<bool>> validate, CancellationToken cancellationToken) =>
+        ValueTask.FromException<BrowserLoginCapture>(new NotSupportedException("browser_login_validation_unavailable"));
 }
 
 /// <summary>Native binding and available browser capture are distinct current Host facts; neither grants execution authority.</summary>

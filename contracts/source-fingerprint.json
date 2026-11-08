@@ -1,11 +1,11 @@
 {
   "algorithm": "nexus-sdk-source-manifest-sha256-v1",
-  "sourceFingerprint": "e42f4b211533379da4a2432f6d866dc6007def3e9dead6d06e391424e4fed820",
+  "sourceFingerprint": "289bb46b4ad9a872e4fec4d9e7863371ac961fec1c4c7982270ff6a8081fe3b3",
   "inputs": [
     {
       "path": "Directory.Build.props",
-      "sizeBytes": 2219,
-      "sha256": "109285338f2fdfedd3b708f64d757e9284e6a4a06e811ace8568189daae6d82f"
+      "sizeBytes": 2274,
+      "sha256": "ced5dd4e106d239ed2219b52898c18e1217aaff952713f3c5aa7a33449980d5b"
     },
     {
       "path": "contracts/http/automation-binding-effective.json",
@@ -223,6 +223,11 @@
       "sha256": "6a83a7b5a1b7eae988d74ae492f51d5d5f296feeae8f2cefc1cb78a782d1c634"
     },
     {
+      "path": "contracts/schemas/automation-binding-source.schema.json",
+      "sizeBytes": 1123,
+      "sha256": "f893fb14dcfc3c979b3c88c16949f5a8bab4d3a88695551e41ca22d642dcbd51"
+    },
+    {
       "path": "contracts/schemas/automation-bundle.schema.json",
       "sizeBytes": 2455,
       "sha256": "e2dbd33fb2204989979dd1156a803116f063232669b0ede25771e02e7ce545fd"
@@ -234,8 +239,8 @@
     },
     {
       "path": "contracts/schemas/automation-relations.schema.json",
-      "sizeBytes": 6313,
-      "sha256": "c82d600ced6e16ca1b05df79208ed9e6dd1f9585ff5c24911ced9a2dd71da8b0"
+      "sizeBytes": 6402,
+      "sha256": "dcd4859266fee375dfcc6f0702eb255e39b77aea51b9443d71a4d316e48eae9d"
     },
     {
       "path": "contracts/schemas/automation-script.schema.json",
@@ -319,8 +324,8 @@
     },
     {
       "path": "contracts/schemas/control-configuration-import.schema.json",
-      "sizeBytes": 1207,
-      "sha256": "b38ac1e0c26cb73d4f0b08212150cbb882ec18afc9883d3ca6346e1ec038377d"
+      "sizeBytes": 1837,
+      "sha256": "3b68b388b9170e660e574d12f125124c0d98168cf480953b74966917a62ace38"
     },
     {
       "path": "contracts/schemas/control-configuration-value.schema.json",
@@ -364,8 +369,8 @@
     },
     {
       "path": "contracts/schemas/control-interface-change.schema.json",
-      "sizeBytes": 1869,
-      "sha256": "7352802e713e31ab0ac62880eefaf00cff91b46a39f6270873320121599c6e68"
+      "sizeBytes": 1755,
+      "sha256": "a264c3eb6b5097340857ae7aabef6380fcb5ec2b8dc2f5c7abd58f371adb6e97"
     },
     {
       "path": "contracts/schemas/control-maintenance-prepare.schema.json",
@@ -429,8 +434,8 @@
     },
     {
       "path": "contracts/schemas/desktop-login.schema.json",
-      "sizeBytes": 2388,
-      "sha256": "47e1c0286216303321c4ee9283415884b2de655ebc6db3f769d1076ce496fce1"
+      "sizeBytes": 4127,
+      "sha256": "ce8e7433450d52c0953a60edfe47f10f12758764a452aa8e0062b260bf9f3b2b"
     },
     {
       "path": "contracts/schemas/desktop-proof.schema.json",
@@ -454,8 +459,8 @@
     },
     {
       "path": "contracts/schemas/emulator-target.schema.json",
-      "sizeBytes": 2155,
-      "sha256": "9c34696aaf75efd12818427fc6b43b61a25bcc4b77020e37ddfe5067621fe0c4"
+      "sizeBytes": 3187,
+      "sha256": "bb4e69de800c2786f6b99bcbd11e2f261d091777202a2770981b728c4d2a46bb"
     },
     {
       "path": "contracts/schemas/event.schema.json",
@@ -569,8 +574,8 @@
     },
     {
       "path": "contracts/schemas/extension-manifest.schema.json",
-      "sizeBytes": 7458,
-      "sha256": "f62a34d8a4938abc2cc4059717a361e10b7d5360f07d95ff3d75ccc0743f2dfb"
+      "sizeBytes": 7570,
+      "sha256": "27c9d9c689270d5cb68e703200bf25c0d4b0b670cfdf45c5b92fdcffff994ec9"
     },
     {
       "path": "contracts/schemas/extension-metadata.schema.json",
@@ -734,18 +739,18 @@
     },
     {
       "path": "contracts/sdk-exports.json",
-      "sizeBytes": 6104,
-      "sha256": "16c3a8f8ddc263184e885e85b345ccbae71bbf9186d32a8f4fa024bd001b4eda"
+      "sizeBytes": 6149,
+      "sha256": "02b1d6f57022c16b1817672105ed8264b39af3fb850a125348e09d8f2d2c205d"
     },
     {
       "path": "contracts/sdk-frontend-api.json",
-      "sizeBytes": 56002,
-      "sha256": "69bfc8a77ede53cbd4570cbb5f10ec0cd5a0a645e8d13c5639a8006019bc6380"
+      "sizeBytes": 56398,
+      "sha256": "3da0c27483c8464f633f89efb6c1102ecbff5d9e086b2f56cef8604fa6c1aa69"
     },
     {
       "path": "contracts/sdk-public-api.json",
-      "sizeBytes": 1835924,
-      "sha256": "12390a348d45364a2bebf414b30bd94e3924305aebdebc3571a852cf91534c68"
+      "sizeBytes": 1863316,
+      "sha256": "170b66dbf16ab5786085d1db523726df9dbac11828732081dbecb5792aac65e6"
     },
     {
       "path": "contracts/ui-elements.json",
@@ -774,8 +779,8 @@
     },
     {
       "path": "contracts/ui-elements/nexus-collapsible-card.json",
-      "sizeBytes": 441,
-      "sha256": "4be134422b23a87cfa6e3b6b49b14ca8882e22b723486700a0c7ae1901bd9ec7"
+      "sizeBytes": 493,
+      "sha256": "3811595d1857ea0acf48f2216cb9f4d22d3b6060da737b3f4ae078749aa6ff98"
     },
     {
       "path": "contracts/ui-elements/nexus-color-picker.json",
@@ -994,8 +999,8 @@
     },
     {
       "path": "sdk/dotnet/Emulation/EmulatorModels.cs",
-      "sizeBytes": 3885,
-      "sha256": "4fb57fae7353e33829645ef54de322725ef2bea1261941f070fff92758d905ed"
+      "sizeBytes": 4395,
+      "sha256": "22f5cc0210cb56a32087f7ad64fddf07a21e09982983a99d1789f18a2338d650"
     },
     {
       "path": "sdk/dotnet/Emulation/IEmulatorHost.cs",
@@ -1004,8 +1009,8 @@
     },
     {
       "path": "sdk/dotnet/Emulation/IEmulatorProvider.cs",
-      "sizeBytes": 2014,
-      "sha256": "28f5b326fc3f39d2bebf5fae67d609889af4adfe67316e126f39c470335d90ca"
+      "sizeBytes": 2344,
+      "sha256": "5de504f739859effb82d6e5855122a3e7ce7d54d1f89e5605817ad3be1b22c15"
     },
     {
       "path": "sdk/dotnet/Execution/ExecutionDeviceClient.cs",
@@ -1069,8 +1074,8 @@
     },
     {
       "path": "sdk/dotnet/Lifecycle/IExtensionDesktop.cs",
-      "sizeBytes": 2123,
-      "sha256": "61710fafd85d89bdfd7a86cbfeb7d3cccf780c33e1ef7dbe99be2e19deb8614c"
+      "sizeBytes": 2579,
+      "sha256": "a46ceaaae9cbcb7c6bb88aa49842559d48e578c2f9c28b5a273fef393c690ba4"
     },
     {
       "path": "sdk/dotnet/Media/IMediaPreviewRegistrationPort.cs",
@@ -1174,8 +1179,8 @@
     },
     {
       "path": "sdk/frontend/src/frontend-extension.ts",
-      "sizeBytes": 2465,
-      "sha256": "0c6aee5bb4935c77f4163073f8c2cebe1a0c2d2c522b7dbdfa16fc4b47433e06"
+      "sizeBytes": 2699,
+      "sha256": "8ed427e78fe6ac141f251ff34c255e335b18cb6909317deab472b61ab558393d"
     },
     {
       "path": "sdk/frontend/src/frontend-transport.ts",
@@ -1194,8 +1199,8 @@
     },
     {
       "path": "tooling/boundaries/Program.cs",
-      "sizeBytes": 5117,
-      "sha256": "151a06bf10b99c49eb3dfef75836791f313445a77f37243bde27a76a62ef72d8"
+      "sizeBytes": 4975,
+      "sha256": "c390f885e3a9c4e35b7c8c6710ad54debb443742d23561aeb62bfc47ceedbdc2"
     },
     {
       "path": "tooling/boundaries/PublicSdkSignatures.cs",

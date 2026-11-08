@@ -5,5 +5,54 @@
     "name": "LookupPrivilegeValueW",
     "count": 1,
     "reason": "Native entrypoint: advapi32.dll!LookupPrivilegeValueW"
+  },
+  {
+    "path": "apps/host/Desktop/DesktopActivation.cs",
+    "kind": "method",
+    "name": "GetNamedPipeClientProcessId",
+    "count": 1,
+    "reason": "Native entrypoint: kernel32.dll!GetNamedPipeClientProcessId"
+  },
+  {
+    "path": "apps/host/Desktop/DesktopActivation.cs",
+    "kind": "method",
+    "name": "GetNamedPipeServerProcessId",
+    "count": 1,
+    "reason": "Native entrypoint: kernel32.dll!GetNamedPipeServerProcessId"
+  },
+  {
+    "path": "apps/host/Desktop/StartupChannel.cs",
+    "kind": "method",
+    "name": "GetNamedPipeClientProcessId",
+    "count": 1,
+    "reason": "Native entrypoint: kernel32.dll!GetNamedPipeClientProcessId"
+  },
+  {
+    "path": "apps/host/Desktop/NativeTrayMenu.cs",
+    "kind": "method",
+    "name": "CreateWindowExW",
+    "count": 1,
+    "reason": "Native entrypoint: user32.dll!CreateWindowExW"
+  },
+  {
+    "path": "apps/host/Desktop/NativeTrayMenu.cs",
+    "kind": "method",
+    "name": "TrackPopupMenuEx",
+    "count": 1,
+    "reason": "Native entrypoint: user32.dll!TrackPopupMenuEx"
+  },
+  {
+    "path": "apps/host/Desktop/NativeTrayMenu.cs",
+    "kind": "method",
+    "name": "GetCurrentThreadId",
+    "count": 1,
+    "reason": "Native entrypoint: kernel32.dll!GetCurrentThreadId"
+  },
+  {
+    "path": "apps/host/Desktop/NativeTrayMenu.cs",
+    "kind": "method",
+    "name": "GetWindowThreadProcessId",
+    "count": 1,
+    "reason": "Native entrypoint: user32.dll!GetWindowThreadProcessId"
   }
 ]

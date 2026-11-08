@@ -101,8 +101,7 @@ internal sealed class ExecutionInvocationStore(RuntimeInstance instance, StateDa
                 !FileTreeDelta.Compare(old.Before.Snapshot, child.Before.Snapshot).Changes.IsEmpty) throw ExecutionInvocationCodec.Invalid();
             var saved = states.ReadStructure(child.RunState);
             RunConfigurationBinding.Require(saved, item.StepId, child.TargetPath, state.Attempt, state.Total, blobs, contracts, laterInvocation: true, taskRetry: item.TaskRetry);
-            if (item.TaskRetry is null) RunStateCodec.RequireRetrySource(saved, states.ReadStructure(old.RunState));
-            else if (!inputs.TryAdd(saved.Source.Address, saved)) throw ExecutionInvocationCodec.Invalid();
+            if (!inputs.TryAdd(saved.Source.Address, saved)) throw ExecutionInvocationCodec.Invalid();
         }
         if (!seen.SetEquals(previous.Keys)) throw ExecutionInvocationCodec.Invalid();
         if (inputs.Count != 0) PreparedRetryOrigin.RequireInvocationSource(instance, database, contracts, state.Attempt, state.Total, item, inputs);

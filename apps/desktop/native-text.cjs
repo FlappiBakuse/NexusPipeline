@@ -1,6 +1,12 @@
 'use strict';
 let locale = 'zh-CN';
 const words = {
+  loginLoading: ['正在加载官方登录页', 'Loading official login page'], loginActions: ['登录操作', 'Sign-in actions'], loginRefresh: ['刷新登录页', 'Refresh sign-in page'],
+  loginLoadFailed: ['官方页面加载失败，请在登录操作中刷新', 'Page failed to load; refresh from Sign-in actions'],
+  loginComplete: ['完成并验证', 'Finish and verify'],
+  loginRejected: ['验证未通过，可继续登录后再次完成', 'Verification rejected; continue signing in and finish again'],
+  loginIncomplete: ['登录信息尚未齐全，请继续登录', 'Sign-in values are incomplete; continue signing in'],
+  loginRetry: ['验证暂不可用，请重试完成', 'Verification unavailable; try finishing again'],
   show: ['显示', 'Show'], hide: ['隐藏', 'Hide'], quit: ['退出 NexusPipeline', 'Quit NexusPipeline'],
   reload: ['重启页面', 'Reload page'], lightweight: ['轻量模式', 'Lightweight mode'],
   cancel: ['取消', 'Cancel'], save: ['允许保存', 'Allow save'],

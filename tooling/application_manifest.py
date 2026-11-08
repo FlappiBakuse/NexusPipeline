@@ -6,6 +6,7 @@ import re
 
 
 HOST = 'NexusPipeline.exe'
+LAUNCHER = 'resources/desktop/NexusPipeline.Launcher.exe'
 HELPER = 'NexusPipeline.update.exe'
 ENTRY = 'resources/desktop/NexusPipeline.Desktop.exe'
 ASAR = 'resources/desktop/resources/app.asar'
@@ -44,7 +45,7 @@ def create_manifest(root, source, profile, published, desktop, frontend):
     if hashlib.sha256(source_file.read_bytes()).hexdigest() != readme['sha256']:
         raise ValueError('Application README changed from the frozen source')
     rows = []
-    for project, name in (('Host', HOST), ('Maintenance', HELPER)):
+    for project, name in (('Host', HOST), ('Launcher', LAUNCHER), ('Maintenance', HELPER)):
         records = published[project]
         if len(records) != 1 or records[0]['path'] != 'NexusPipeline.' + project + '.exe':
             raise ValueError('Only single-file product publications belong to the application')
@@ -55,7 +56,7 @@ def create_manifest(root, source, profile, published, desktop, frontend):
         rows.append(dict(path=name, sizeBytes=item['sizeBytes'], sha256=item['sha256'], kind=kind(name)))
     rows.sort(key=lambda item: item['path'])
     names = [item['path'] for item in rows] + [MANIFEST]
-    required = {HOST, HELPER, 'README.md', ENTRY, ASAR, 'resources/desktop/locales/en-US.pak', 'resources/desktop/locales/zh-CN.pak'}
+    required = {HOST, LAUNCHER, HELPER, 'README.md', ENTRY, ASAR, 'resources/desktop/locales/en-US.pak', 'resources/desktop/locales/zh-CN.pak'}
     if not required <= set(names) or any(item['sizeBytes'] <= 0 for item in rows if item['path'] in required):
         raise ValueError('Application public entries and selected locales are incomplete')
     directories = {''} | {'/'.join(name.split('/')[:index]) for name in names for index in range(1, len(name.split('/')))}
@@ -66,10 +67,19 @@ def create_manifest(root, source, profile, published, desktop, frontend):
         raise ValueError('Application exceeds the public file or byte bound')
     if rows[0]['sha256'] == rows[1]['sha256']:
         raise ValueError('Host and update entry must be distinct programs')
+    runtime = dict(desktop['runtimeIdentity'])
+    # The final desktop closure also owns the GUI launcher. Keep the Electron archive/profile
+    # identity intact and bind every final helper byte, without claiming it came from that archive.
+    runtime_inventory = dict(schemaVersion=2, electronVersion=desktop['runtime']['version'],
+        electronArchiveSha256=desktop['runtime']['sha256'], runtimeProfileId=runtime['runtimeProfileId'],
+        runtimeProfileSha256=runtime['runtimeProfileSha256'],
+        files=[dict(path=item['path'][18:], sizeBytes=item['sizeBytes'], sha256=item['sha256'])
+               for item in rows if item['path'].startswith('resources/desktop/') and item['kind'] != 'desktop-app'])
+    runtime['runtimeInventorySha256'] = hashlib.sha256(canonical(runtime_inventory)).hexdigest()
     desktop_identity = dict(entryPoint=ENTRY, appArchive=ASAR, electronVersion=desktop['runtime']['version'],
         electronArchiveSha256=desktop['runtime']['sha256'],
         packageLockSha256=hashlib.sha256((root / 'tooling/desktop-tools/package-lock.json').read_bytes()).hexdigest(),
-        bootstrapProtocolVersion=1, **desktop['runtimeIdentity'])
+        bootstrapProtocolVersion=1, **runtime)
     inputs = dict(sourceSnapshotHash=source['sourceSnapshotHash'], sourceSha=commit, sourceTreeSha=tree,
         hostVersion='0.18.0', sdkVersion='0.1.0', profile=profile, frontendHash=frontend, desktop=desktop_identity, files=rows)
     return dict(schemaVersion=2, product='NexusPipeline', productVersion='0.18.0', installationGeneration='g0180', rid='win-x64',

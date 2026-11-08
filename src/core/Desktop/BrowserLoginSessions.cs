@@ -39,12 +39,13 @@ public sealed class BrowserLoginSessions(TimeProvider? timeProvider = null) : IA
     }
 
     public async ValueTask<BrowserLoginMaterial> CaptureAsync(NativeClientAccess client, string extensionId, Guid activationId,
-        Guid operationId, BrowserLoginPolicy policy, Action requireCurrent, CancellationToken callbackLifetime, CancellationToken cancellation)
+        Guid operationId, BrowserLoginPolicy policy, Action requireCurrent, CancellationToken callbackLifetime, CancellationToken cancellation,
+        Func<BrowserLoginMaterial, CancellationToken, ValueTask<bool>>? validate = null)
     {
         if (string.IsNullOrEmpty(extensionId) || activationId == Guid.Empty || operationId == Guid.Empty || !callbackLifetime.CanBeCanceled)
             throw new UnauthorizedAccessException("browser_login_callback_unbound");
         requireCurrent(); client.RequireCurrent(); cancellation.ThrowIfCancellationRequested(); callbackLifetime.ThrowIfCancellationRequested();
-        var entry = new Entry(client, extensionId, activationId, operationId, policy, requireCurrent, callbackLifetime, cancellation);
+        var entry = new Entry(client, extensionId, activationId, operationId, policy, requireCurrent, callbackLifetime, cancellation) { Validate = validate };
         lock (_gate)
         {
             if (!CanCapture(client)) { entry.Dispose(); throw new IOException("browser_login_peer_unavailable"); }
@@ -78,9 +79,40 @@ public sealed class BrowserLoginSessions(TimeProvider? timeProvider = null) : IA
             if (status != "completed") { entry.Completion.TrySetException(new IOException("browser_login_" + status)); return; }
             if (!BrowserValueRules.IsReady(entry.Offer.Policy, values))
             { entry.Completion.TrySetException(new IOException("browser_login_capture_incomplete")); return; }
-            var material = new BrowserLoginMaterial(values);
+            if (entry.Validate is not null && entry.Validated is null)
+                throw new IOException("browser_login_validation_required");
+            var material = entry.Validated ?? new BrowserLoginMaterial(values);
+            entry.Validated = null;
             if (!entry.Completion.TrySetResult(material)) material.Dispose();
         }
+    }
+
+    public async ValueTask<bool> ValidateAsync(DesktopSessionIdentity native, Guid captureId, Guid nonce,
+        IReadOnlyDictionary<string, SecretValue> values)
+    {
+        Entry entry;
+        lock (_gate)
+        {
+            if (!_entries.TryGetValue(captureId, out entry!) || entry.Client.Desktop != native || entry.Offer.Nonce != nonce ||
+                !entry.Offered || entry.Completion.Task.IsCompleted || entry.IsValidating || entry.Validated is not null)
+                throw new UnauthorizedAccessException("browser_login_capture_unbound");
+            entry.Client.RequireCurrent(); entry.RequireCurrent(); entry.Cancellation.Token.ThrowIfCancellationRequested();
+            if (!BrowserValueRules.IsReady(entry.Offer.Policy, values)) return false;
+            entry.IsValidating = true;
+        }
+        using var material = new BrowserLoginMaterial(values);
+        try
+        {
+            var accepted = entry.Validate is null || await entry.Validate(material, entry.Cancellation.Token).ConfigureAwait(false);
+            lock (_gate)
+            {
+                entry.Client.RequireCurrent(); entry.RequireCurrent(); entry.Cancellation.Token.ThrowIfCancellationRequested();
+                if (entry.Completion.Task.IsCompleted) throw new IOException("browser_login_capture_retired");
+                if (accepted) entry.Validated = new(material.Values);
+                return accepted;
+            }
+        }
+        finally { lock (_gate) entry.IsValidating = false; }
     }
 
     private void Cancel(Entry entry)
@@ -121,6 +153,9 @@ public sealed class BrowserLoginSessions(TimeProvider? timeProvider = null) : IA
         internal TaskCompletionSource Finished { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal bool Offered { get; set; }
         internal long LastOffered { get; set; }
+        internal Func<BrowserLoginMaterial, CancellationToken, ValueTask<bool>>? Validate { get; init; }
+        internal BrowserLoginMaterial? Validated;
+        internal bool IsValidating;
         internal Entry(NativeClientAccess client, string extensionId, Guid activationId, Guid operationId, BrowserLoginPolicy policy,
             Action requireCurrent, CancellationToken callbackLifetime, CancellationToken cancellation)
         {
@@ -129,6 +164,6 @@ public sealed class BrowserLoginSessions(TimeProvider? timeProvider = null) : IA
             Cancellation = CancellationTokenSource.CreateLinkedTokenSource(client.Lifetime, callbackLifetime, cancellation);
             Cancellation.CancelAfter(TimeSpan.FromMinutes(5));
         }
-        public void Dispose() => Cancellation.Dispose();
+        public void Dispose() { Validated?.Dispose(); Cancellation.Dispose(); }
     }
 }

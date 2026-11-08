@@ -11,6 +11,8 @@ if (process.isMainFrame) {
   const action = (type, url) => ipcRenderer.invoke('desktop.action', { type, sessionId, ...(url === undefined ? {} : { url }) });
   contextBridge.exposeInMainWorld('nexusDesktopChannel', Object.freeze({
     version: 1,
+    presented: () => ipcRenderer.invoke('desktop.presented'),
+    preparation: value => ipcRenderer.invoke('desktop.preparation', value),
     connect: async () => { const session = await ipcRenderer.invoke('desktop.connect'); sessionId = session.sessionId; return session; },
     bindFrontend: async (clientId, token) => {
       if (!sessionId) { const session = await ipcRenderer.invoke('desktop.connect'); sessionId = session.sessionId; }

@@ -46,6 +46,9 @@ def application(path, version='10.0.0', fault=None):
         host['frameworks'] = [dict(name='Microsoft.WindowsDesktop.App', version=version), values[0]]
     (path / 'NexusPipeline.exe').write_bytes(bundle('Host', host))
     (path / 'NexusPipeline.update.exe').write_bytes(bundle('Maintenance', helper))
+    desktop = path / 'resources/desktop'
+    desktop.mkdir(parents=True)
+    (desktop / 'NexusPipeline.Launcher.exe').write_bytes(bundle('Launcher', dict(framework=values[0])))
 
 
 def native_probe(root, work, software, compiler, packages):

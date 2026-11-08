@@ -15,7 +15,7 @@ internal static class Program
         var relative = Path.GetRelativePath(temporary, root);
         if (relative is "." or ".." || Path.IsPathRooted(relative) || relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal))
             throw new IOException("fixture_output_outside_declared_temp");
-        if (await EmulatorVendorFixture.RunAsync(root, args) is { } vendorExit) return vendorExit;
+        if (await FixtureExtensions.RunAsync(args) is { } vendorExit) return vendorExit;
         var path = Path.Combine(root, "fixture-device.json");
         var device = JsonSerializer.Deserialize<Device>(File.ReadAllBytes(path), Options) ?? throw new IOException("fixture_device_invalid");
         if (args.Length == 2 && args[0] == "--fixture-server" && args[1] == device.Nonce)

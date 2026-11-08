@@ -65,6 +65,7 @@ internal sealed class HistoryReadServer : IAsyncDisposable
             builder.Logging.ClearProviders();
             builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0));
             app = builder.Build();
+            app.Use(ControlExceptionBoundary.InvokeAsync);
             var authority = new ControlAuthentication(instance.InstanceId, false, null,
                 () => new HostSettingsStore(database).Read(), null!, TimeProvider.System);
             app.Use(async (context, next) =>

@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using Microsoft.Data.Sqlite;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Maintenance;
@@ -35,6 +34,11 @@ public sealed class SettingsStartupTests
         var enabled = fixture.Service.Save(operation, change, DateTimeOffset.UtcNow);
         Assert.Equal(StartupEffectState.Completed, enabled.StartupEffect!.State);
         Assert.True(fixture.Service.Read().Effective.AutoStart);
+        var definition = System.Xml.Linq.XDocument.Load(fixture.Effects.Path);
+        var principal = definition.Descendants().First(item => item.Name.LocalName == "UserId").Value;
+        var executable = definition.Descendants().First(item => item.Name.LocalName == "Command").Value;
+        Assert.Equal(ProcessIdentityReader.Read(Environment.ProcessId).UserSid, principal);
+        Assert.Equal(Environment.GetEnvironmentVariable("NEXUS_PROCESS_FIXTURE_EXE"), executable);
         Assert.Empty(fixture.Index.Current.ResourceHolds);
         var disable = new HostSettingsChange(1, change.Values with { AutoStart = false });
         var disabled = fixture.Service.Save(Identity(disable), disable, DateTimeOffset.UtcNow);
@@ -143,11 +147,7 @@ public sealed class SettingsStartupTests
             Resources = new(Lifecycle);
             Effects = new(System.IO.Path.Combine(Root, "controlled-task.xml"));
             var executable = Environment.GetEnvironmentVariable("NEXUS_PROCESS_FIXTURE_EXE")!;
-            var template = new StartupRegistrationCommand(new(Instance.InstanceId, Guid.NewGuid(), ProcessIdentityReader.Read(Environment.ProcessId).UserSid,
-                executable, ["--fixture-only"], Root, DateTimeOffset.UtcNow), Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(executable))));
-            var startup = new StartupRegistrationCoordinator(Instance, Database, Lease, Index, Effects, template);
-            var defaults = HostSettings.Default;
-            Service = new(Instance, Database, Lease, Resources, new(defaults.Desktop.Mode, defaults.Service, defaults.Updates.PluginSource, false), startup);
+            Service = HostStartupSettings.CreateForInstallation(Instance, Database, Lease, Resources, Index, executable, Effects);
         }
         public void Dispose() => Lease.Dispose();
     }

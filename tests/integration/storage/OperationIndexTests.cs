@@ -16,7 +16,8 @@ public sealed class OperationIndexTests
         using (var connection = DatabaseConnections.Open(database.DatabasePath))
         {
             using var command = connection.CreateCommand();
-            command.CommandText = "DROP INDEX operations_parent_read; DROP INDEX operations_kind_read;"; command.ExecuteNonQuery();
+            command.CommandText = "DROP INDEX operations_parent_read; DROP INDEX operations_kind_read; DROP INDEX account_run_records_ended_read;";
+            command.ExecuteNonQuery();
         }
         var before = File.ReadAllBytes(database.DatabasePath);
         var inspection = DatabaseInspector.Inspect(database.DatabasePath, instance.InstanceId, Path.Combine(instance.RuntimeRoot, "diagnostics"));
@@ -27,9 +28,20 @@ public sealed class OperationIndexTests
             using var query = copy.CreateCommand();
             query.CommandText = "EXPLAIN QUERY PLAN SELECT operation_id FROM operations WHERE initial_journal_id=$parent AND operation_kind='execution.cancel';";
             query.Parameters.AddWithValue("$parent", Guid.NewGuid().ToString("D"));
-            using var rows = query.ExecuteReader(); Assert.True(rows.Read());
-            Assert.Contains("SEARCH operations USING INDEX operations_", rows.GetString(3), StringComparison.Ordinal);
-            Assert.DoesNotContain("SCAN", rows.GetString(3), StringComparison.Ordinal);
+            using (var rows = query.ExecuteReader())
+            {
+                Assert.True(rows.Read());
+                Assert.Contains("SEARCH operations", rows.GetString(3), StringComparison.Ordinal);
+                Assert.DoesNotContain("SCAN", rows.GetString(3), StringComparison.Ordinal);
+            }
+            query.CommandText = "EXPLAIN QUERY PLAN SELECT count(*) FROM account_history WHERE history_retired_at_utc_ticks IS NULL " +
+                "AND ended_at_utc_ticks>=100 AND ended_at_utc_ticks<200;";
+            query.Parameters.Clear();
+            using var history = query.ExecuteReader();
+            var plan = new List<string>();
+            while (history.Read()) plan.Add(history.GetString(3));
+            Assert.DoesNotContain(plan, detail => detail == "SCAN a" || detail.StartsWith("SCAN a ", StringComparison.Ordinal));
+            Assert.Contains(plan, detail => detail.Contains("ended_at_utc_ticks>? AND ended_at_utc_ticks<?", StringComparison.Ordinal));
         }
         finally { inspection.OwnedCopy!.Discard(); }
         Assert.Equal(before, File.ReadAllBytes(database.DatabasePath));
@@ -42,16 +54,21 @@ public sealed class OperationIndexTests
     }
 
     [Theory(DisplayName = "Unknown Or Altered Read Indexes Fail Closed And Preserve Original Bytes")]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void RejectsAlteredIndexes(bool unknown)
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public void RejectsAlteredIndexes(int kind)
     {
         var instance = CreateInstance(); var database = StateDatabase.CreateFresh(instance);
         using (var connection = DatabaseConnections.Open(database.DatabasePath))
         {
             using var command = connection.CreateCommand();
-            command.CommandText = unknown ? "CREATE INDEX unknown_read ON operations(subject_id);" :
-                "DROP INDEX operations_parent_read; CREATE UNIQUE INDEX operations_parent_read ON operations(initial_journal_id);";
+            command.CommandText = kind switch
+            {
+                0 => "CREATE INDEX unknown_read ON operations(subject_id);",
+                1 => "DROP INDEX operations_parent_read; CREATE UNIQUE INDEX operations_parent_read ON operations(initial_journal_id);",
+                _ => "DROP INDEX account_run_records_ended_read; CREATE INDEX account_run_records_ended_read ON account_run_records(user_id);"
+            };
             command.ExecuteNonQuery();
         }
         var before = File.ReadAllBytes(database.DatabasePath);

@@ -35,7 +35,8 @@ def read_dependencies(root):
 
 def required_frameworks(application, installer=None):
     result = {}
-    programs = [(application / 'NexusPipeline.exe', 'Host'), (application / 'NexusPipeline.update.exe', 'Maintenance')]
+    programs = [(application / 'NexusPipeline.exe', 'Host'), (application / 'NexusPipeline.update.exe', 'Maintenance'),
+                (application / 'resources/desktop/NexusPipeline.Launcher.exe', 'Launcher')]
     if installer is not None:
         programs.append((installer, 'Installer'))
     for path, project in programs:

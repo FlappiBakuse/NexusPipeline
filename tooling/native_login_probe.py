@@ -84,7 +84,7 @@ def main():
     native = json.loads(receipt.read_bytes()) if receipt.exists() else None
     unchanged = source_files(root) == files
     no_canary = b"synthetic_fixture_login_token" not in (run / "native.log").read_bytes()
-    passed = code == 0 and native is not None and native["status"] == "PASS" and len(native["cases"]) == 5 and unchanged and no_canary
+    passed = code == 0 and native is not None and native["status"] == "PASS" and bool(native["cases"]) and all(case["status"] == "PASS" for case in native["cases"]) and unchanged and no_canary
     result = {"status": "PASS" if passed else "FAIL", "command": command, "exitCode": code, "error": error,
               "elapsedSeconds": time.monotonic() - started, "runtimeVersion": runtime["runtime"]["version"],
               "binarySha256": sha(executable), "sourceManifest": str(run / "source-manifest.json"),

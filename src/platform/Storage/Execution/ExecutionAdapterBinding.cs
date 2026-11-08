@@ -16,7 +16,7 @@ internal static class ExecutionAdapterBinding
         var held = new List<BlobReference>();
         foreach (var step in plan.Steps)
         {
-            var script = bundle.Scripts.Single(item => item.Id == step.ScriptId);
+            var script = NexusPipeline.Platform.Storage.Automation.BindingSourceCodec.Resolve(bundle, step);
             if (step.Adapter is not { } adapter)
             {
                 if (script.AdapterResources.Count != 0) throw Invalid();
@@ -84,7 +84,7 @@ internal static class ExecutionAdapterBinding
         using var input = blobs.OpenVerified(new(reference.RelativePath, reference.SizeBytes, reference.Sha256));
         var bytes = new byte[checked((int)input.Length)]; input.ReadExactly(bytes);
         var bundle = contracts.Read<AutomationBundle>(bytes, "automation-bundle.schema.json");
-        var script = bundle.Scripts.Single(item => item.Id == step.ScriptId);
+        var script = NexusPipeline.Platform.Storage.Automation.BindingSourceCodec.Resolve(bundle, step);
         var declaration = script.AdapterResources.SingleOrDefault(item => item.ResourceId == resource.ResourceId && item.RelativePath == resource.RelativePath) ?? throw Invalid();
         var target = script.ConfigurationPaths[checked((int)declaration.DeclarationIndex)];
         var contract = AdapterConfigurationPolicy.Contract(script.ExtensionId!, new AutomationAdapterResource(declaration.ResourceId,

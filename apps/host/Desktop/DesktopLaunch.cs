@@ -12,7 +12,7 @@ internal sealed class DesktopLaunch : IDisposable
     internal OwnedWorkerIdentity Identity { get; }
 
     internal DesktopLaunch(OwnedWorkerJob job, string executable, IReadOnlyList<string> arguments,
-        string directory, Guid instanceId)
+        string directory, Guid instanceId, ProcessIdentityLease image)
     {
         var registered = new TaskCompletionSource<OwnedWorkerIdentity>(TaskCreationOptions.RunContinuationsAsynchronously);
         _launch = Task.Factory.StartNew(() =>
@@ -23,7 +23,7 @@ internal sealed class DesktopLaunch : IDisposable
                 {
                     registered.TrySetResult(identity);
                     _release.Wait(_stop.Token);
-                });
+                }, image);
             }
             catch (Exception error) { registered.TrySetException(error); throw; }
         }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);

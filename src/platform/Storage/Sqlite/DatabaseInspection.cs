@@ -18,6 +18,7 @@ public static class DatabaseInspector
 {
     public static DatabaseInspection Inspect(string databasePath, Guid instanceId, string diagnosticRoot)
     {
+        using var timing = StartupProfile.Measure("database.inspect");
         var database = Path.GetFullPath(databasePath);
         var destination = Path.GetFullPath(diagnosticRoot);
         var sourceDirectory = Path.GetDirectoryName(database)!;
@@ -45,6 +46,8 @@ public static class DatabaseInspector
             ExclusiveDirectory.Create(copyRoot);
             var identity = PhysicalObjectIdentity.Read(copyRoot);
             var evidence = CopyFrozenGroup(sources, copyRoot);
+            Console.Error.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { kind = "startup.database-copy",
+                groupBytes = evidence.Sum(file => file.SizeBytes), digestReadBytes = evidence.Sum(file => file.SizeBytes) }));
             // SQLite readers can update WAL shared memory; inspect only the isolated file group.
             string version, digest;
             using (var connection = DatabaseConnections.Open(Path.Combine(copyRoot, "nexus.db")))
@@ -52,7 +55,7 @@ public static class DatabaseInspector
                 digest = DatabaseSchema.VerifyCatalog(connection);
                 VerifyIdentity(connection, instanceId, digest);
                 VerifyIntegrity(connection);
-                OperationReadIndexes.Ensure(connection);
+                DatabaseReadIndexes.Ensure(connection);
                 version = Convert.ToString(DatabaseConnections.Scalar(connection, "SELECT sqlite_version();"), CultureInfo.InvariantCulture)!;
             }
             return new(instanceId, digest, version, copyRoot, evidence, walEvidence)
@@ -70,6 +73,7 @@ public static class DatabaseInspector
 
     private static IReadOnlyList<DatabaseFileEvidence> CopyFrozenGroup(IReadOnlyList<(string Suffix, FileStream Stream)> sources, string destination)
     {
+        using var timing = StartupProfile.Measure("database.copy");
         var evidence = new List<DatabaseFileEvidence>();
         foreach (var (suffix, source) in sources)
         {
@@ -117,6 +121,7 @@ public static class DatabaseInspector
 
     internal static void VerifyIntegrity(SqliteConnection connection, SqliteTransaction? transaction = null)
     {
+        using var timing = StartupProfile.Measure("database.integrity");
         using var check = connection.CreateCommand(); check.Transaction = transaction; check.CommandText = "PRAGMA quick_check;";
         if (!string.Equals(Convert.ToString(check.ExecuteScalar(), CultureInfo.InvariantCulture), "ok", StringComparison.Ordinal))
             throw new IOException("database_integrity_failure");

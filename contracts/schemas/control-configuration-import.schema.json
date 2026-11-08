@@ -3,24 +3,80 @@
   "$id": "https://schemas.nexuspipeline.invalid/1/control-configuration-import.schema.json",
   "type": "object",
   "additionalProperties": false,
-  "required": ["format", "version", "operationId", "bindingId", "expectedBindingRevision", "expectedScriptRevision", "resources"],
+  "required": [
+    "format",
+    "version",
+    "operationId",
+    "bindingId",
+    "expectedBindingRevision",
+    "expectedScriptRevision",
+    "resources"
+  ],
   "properties": {
-    "format": { "const": "nexus.control.configuration-import" },
-    "version": { "const": 1 },
-    "operationId": { "$ref": "common.schema.json#/$defs/uuid" },
-    "bindingId": { "$ref": "common.schema.json#/$defs/uuid" },
-    "expectedBindingRevision": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
-    "expectedScriptRevision": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+    "format": {
+      "const": "nexus.control.configuration-import"
+    },
+    "version": {
+      "const": 1
+    },
+    "operationId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "bindingId": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "expectedBindingRevision": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "expectedScriptRevision": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
     "resources": {
-      "type": "array", "minItems": 1, "maxItems": 32,
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 32,
       "items": {
-        "type": "object", "additionalProperties": false,
-        "required": ["resourceId", "expectedRevision"],
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "resourceId",
+          "expectedRevision"
+        ],
         "properties": {
-          "resourceId": { "type": "string", "minLength": 1, "maxLength": 120 },
-          "expectedRevision": { "type": "integer", "minimum": 0, "maximum": 9007199254740990 }
+          "resourceId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740990
+          }
         }
       }
+    },
+    "candidateId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "expectedInstalledRevision": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
     }
+  },
+  "dependentRequired": {
+    "candidateId": [
+      "expectedInstalledRevision"
+    ],
+    "expectedInstalledRevision": [
+      "candidateId"
+    ]
   }
 }

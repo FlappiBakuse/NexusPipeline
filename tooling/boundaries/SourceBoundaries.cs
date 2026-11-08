@@ -35,6 +35,15 @@ internal static class SourceBoundaries
             var source = Path.GetRelativePath(root, tree.FilePath).Replace('\\', '/');
             var model = compilation.GetSemanticModel(tree);
             var syntax = tree.GetRoot();
+            if (!source.EndsWith(".g.cs", StringComparison.Ordinal) &&
+                (source.StartsWith("src/", StringComparison.Ordinal) || source.StartsWith("apps/host/", StringComparison.Ordinal)))
+                foreach (var comparison in syntax.DescendantNodes().OfType<BinaryExpressionSyntax>())
+                    if (comparison.Kind() is SyntaxKind.EqualsExpression or SyntaxKind.NotEqualsExpression &&
+                        new[] { comparison.Left, comparison.Right }.Any(value => value is LiteralExpressionSyntax literal && literal.Token.Value is string { Length: > 0 }) &&
+                        new[] { comparison.Left, comparison.Right }.Any(value =>
+                            value is MemberAccessExpressionSyntax member && member.Name.Identifier.ValueText is "ExtensionId" or "ProviderId" or "Vendor" ||
+                            value is IdentifierNameSyntax identifier && identifier.Identifier.ValueText is "extensionId" or "providerId"))
+                        Error("PLUGIN_ID_BRANCH", comparison, comparison.ToString());
             foreach (var invocation in syntax.DescendantNodes().OfType<InvocationExpressionSyntax>())
             {
                 var method = invocation.Expression switch
@@ -58,8 +67,20 @@ internal static class SourceBoundaries
                         type.ContainingNamespace.ToDisplayString() == "NexusPipeline.Platform.Storage.Sqlite" &&
                         (type.Name.EndsWith("Store", StringComparison.Ordinal) || type.Name == "StateDatabase"))
                         Error("HTTP_USE_CASE_REQUIRED", creation, type.ToDisplayString());
+            if (source.StartsWith("src/platform/Storage/Execution/", StringComparison.Ordinal))
+                foreach (var creation in syntax.DescendantNodes().OfType<BaseObjectCreationExpressionSyntax>())
+                    if (model.GetTypeInfo(creation).Type is INamedTypeSymbol configuration &&
+                        configuration.ContainingNamespace.ToDisplayString() == "NexusPipeline.Platform.Storage.Configuration" &&
+                        configuration.Name is "ConfigurationRunController" or "ConfigurationEditExchange")
+                        Error("CONFIGURATION_SESSION_FACTORY_REQUIRED", creation, configuration.ToDisplayString());
             foreach (var identifier in syntax.DescendantNodes().OfType<IdentifierNameSyntax>())
             {
+                var referencedType = model.GetSymbolInfo(identifier).Symbol;
+                var dependency = referencedType as INamedTypeSymbol ?? referencedType?.ContainingType;
+                if (source == "src/platform/Storage/Configuration/ConfigurationRunController.cs" &&
+                    dependency?.ContainingNamespace.ToDisplayString() == "NexusPipeline.Platform.Storage.Execution" &&
+                    dependency.Name is "StepWriterScope" or "StepResultCodec" or "AttemptWriterState" or "ExecutionInvocationStore")
+                    Error("CONFIGURATION_WRITER_OWNER_REQUIRED", identifier, dependency.ToDisplayString());
                 var declaration = identifier.Ancestors().OfType<BaseTypeDeclarationSyntax>().FirstOrDefault();
                 if (declaration is null || model.GetDeclaredSymbol(declaration) is not INamedTypeSymbol owner || !symbols.TryGetValue(owner, out var from)) continue;
                 var referenced = model.GetSymbolInfo(identifier).Symbol;

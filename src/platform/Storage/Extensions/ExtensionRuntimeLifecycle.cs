@@ -71,6 +71,10 @@ public sealed class ExtensionRuntimeLifecycle : IExtensionRuntimeLifecycle, IAsy
     public IReadOnlyList<ExtensionRuntimeState> ReadStates()
     {
         _lease.VerifyHeld(_instance);
+        using var identity = InstanceReadScope.Hold(_instance, _contracts);
+        using var reads = DatabaseReadScope.Hold(_database.DatabasePath);
+        using var paths = DirectoryAttributeScope.Hold(_instance);
+        using var blobs = BlobReadScope.Hold(_instance);
         var settings = new HostSettingsStore(_database).Read();
         var active = Activator.ReadPublishedScopes().ToDictionary(item => item.ExtensionId, StringComparer.Ordinal);
         var result = new List<ExtensionRuntimeState>();
@@ -159,21 +163,36 @@ public sealed class ExtensionRuntimeLifecycle : IExtensionRuntimeLifecycle, IAsy
         await Task.Yield();
         cancellationToken.ThrowIfCancellationRequested();
         ExtensionProjectionPublication.PublishIfDirty(_instance, _database, _lease, _contracts, _roots, _resources, _recovery);
-        var selected = ReadStates().Where(item => item.IsInstalled && item.DesiredEnabled).ToArray();
         if (_activation is null) return;
+        var selected = ReadEnabledInstallations();
+        using var executor = NexusPipeline.Platform.Processes.ProcessIdentityLease.HoldCurrent();
         await Parallel.ForEachAsync(selected, new ParallelOptions
         {
             MaxDegreeOfParallelism = 4,
             CancellationToken = cancellationToken
-        }, async (state, cancellation) =>
+        }, async (id, cancellation) =>
         {
-            try { _ = await _activation.ActivateAsync(state.ExtensionId, cancellation).ConfigureAwait(false); }
+            try { _ = await _activation.ActivateAsync(id, cancellation, executor).ConfigureAwait(false); }
             catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { throw; }
             catch (Exception)
             {
-                lock (_gate) _failures[state.ExtensionId] = "extension_startup_activation_failed";
+                lock (_gate) _failures[id] = "extension_startup_activation_failed";
             }
         }).ConfigureAwait(false);
+    }
+
+    private string[] ReadEnabledInstallations()
+    {
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var transaction = connection.BeginTransaction(deferred: true);
+        // Larger installation evidence starts earlier so expensive activation does not occupy the final slot alone.
+        var selected = HostSettingsRows.ReadCurrent(connection, transaction).Values.Extensions
+            .Where(item => item.Enabled)
+            .Select(item => ExtensionInstalledRows.ReadCurrentMetadata(connection, transaction, item.ExtensionId))
+            .OfType<ExtensionInstalledMetadata>().Where(item => item.IsInstalled)
+            .OrderByDescending(item => item.Footprint.SizeBytes).Select(item => item.ExtensionId).ToArray();
+        transaction.Commit();
+        return selected;
     }
 
     public async Task StopAsync(TimeSpan timeout)

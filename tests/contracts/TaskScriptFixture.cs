@@ -12,15 +12,15 @@ internal sealed class TaskScriptFixture : IAsyncDisposable
 {
     internal const string Response = "globalThis.nexusTaskAdapter = input => ({...input, direction:'response', resources:undefined, tasks:[]});";
     internal ContractReader Reader { get; } = new();
-    internal ExtensionScope Scope { get; private set; } = new("bettergi");
+    internal ExtensionScope Scope { get; private set; } = new("sample-adapter");
     internal TaskAdapter Request { get; set; } = new()
     {
-        Format = "nexus.task.adapter", Version = 1, Direction = "request", Phase = "discover", ExtensionId = "bettergi",
+        Format = "nexus.task.adapter", Version = 1, Direction = "request", Phase = "discover", ExtensionId = "sample-adapter",
         OperationId = Guid.NewGuid().ToString("D"), Resources = []
     };
     internal ExtensionManifest Manifest { get; set; } = new()
     {
-        Format = "nexus.extension.manifest", Version = 1, ExtensionId = "bettergi", ArtifactName = "BetterGI", DisplayName = "BetterGI",
+        Format = "nexus.extension.manifest", Version = 1, ExtensionId = "sample-adapter", ArtifactName = "SampleAdapter", DisplayName = "SampleAdapter",
         PackageVersion = "0.5.0", Kind = "data-specialized", MinHostVersion = "0.18.0", SdkVersion = SdkIdentity.Version,
         ContractFingerprint = SdkIdentity.ContractFingerprint, Capabilities = ["task.adapt", "configuration.edit"], Permissions = new(),
         Specialized = new() { AdapterEntry = "adapter/main.js" }
@@ -31,7 +31,7 @@ internal sealed class TaskScriptFixture : IAsyncDisposable
     internal async Task ActivateAsync()
     {
         await Scope.DisposeAsync();
-        Scope = await new ExtensionActivator(Reader).ActivateSpecializedAsync(JsonSerializer.SerializeToUtf8Bytes(Manifest), "bettergi",
+        Scope = await new ExtensionActivator(Reader).ActivateSpecializedAsync(JsonSerializer.SerializeToUtf8Bytes(Manifest), "sample-adapter",
             static (_, _, _) => ValueTask.CompletedTask, default);
     }
 

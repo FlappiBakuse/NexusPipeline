@@ -114,13 +114,14 @@ public sealed class ManagedExtension(ExtensionActivationContext context) : IExte
             await context.MediaPreviews.RegisterAsync("frame", new FixedProvider(), cancellationToken);
         if (input.Mode is "throw" or "throw-cleanup") throw new InvalidOperationException("controlled_activation_failure");
         if (input.Mode == "wait") await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken).ConfigureAwait(false);
-        if (input.Mode == "late")
+        if (input.Mode is "late" or "late-throw")
         {
             var deadline = Environment.TickCount64 + 30000;
             while (!File.Exists(Path.Combine(directory, "release")) && Environment.TickCount64 < deadline)
                 await Task.Delay(20, CancellationToken.None).ConfigureAwait(false);
             if (!File.Exists(Path.Combine(directory, "release"))) throw new IOException("fixture_release_missing");
         }
+        if (input.Mode == "late-throw") throw new InvalidOperationException("controlled_activation_failure");
         if (input.Mode is not ("return" or "throw" or "throw-cleanup" or "wait" or "late" or "media-wait" or "media-frame" or "output" or "schedule-wait" or "frontend" or "frontend-ready"))
             throw new IOException("fixture_mode_unknown");
     }

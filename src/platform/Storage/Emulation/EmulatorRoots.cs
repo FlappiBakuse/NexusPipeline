@@ -12,7 +12,7 @@ internal sealed record EmulatorRoot(Guid Id, string Name, string Path, bool IsDe
 internal static class EmulatorRoots
 {
     internal static IReadOnlyList<EmulatorRoot> Read(IReadOnlyList<AutomationRoot> selected,
-        Func<IEnumerable<string>>? registry = null, string? sharedDataRoot = null)
+        Func<IEnumerable<string>>? registry = null, string? sharedDataRoot = null, IReadOnlyList<string>? hints = null)
     {
         var result = new Dictionary<string, EmulatorRoot>(StringComparer.OrdinalIgnoreCase);
         foreach (var root in selected)
@@ -21,7 +21,7 @@ internal static class EmulatorRoots
             if (!Directory.Exists(path)) throw new IOException("emulator_root_missing");
             result[path] = new(root.Id, root.Name, path, true);
         }
-        foreach (var candidate in (registry ?? RegistryRoots)().Append(sharedDataRoot ?? Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData)))
+        foreach (var candidate in (registry ?? (() => RegistryRoots(hints ?? [])))().Append(sharedDataRoot ?? Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData)))
         {
             try
             {
@@ -38,7 +38,7 @@ internal static class EmulatorRoots
         return result.Values.OrderBy(value => value.Path, StringComparer.OrdinalIgnoreCase).ToArray();
     }
 
-    private static IEnumerable<string> RegistryRoots()
+    private static IEnumerable<string> RegistryRoots(IReadOnlyList<string> hints)
     {
         var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var hive in new[] { RegistryHive.LocalMachine, RegistryHive.CurrentUser })
@@ -53,7 +53,7 @@ internal static class EmulatorRoots
                     {
                         using var entry = uninstall.OpenSubKey(name, writable: false);
                         var label = name + " " + entry?.GetValue("DisplayName");
-                        if (!new[] { "ldplayer", "leidian", "nox", "bluestacks" }.Any(value => label.Contains(value, StringComparison.OrdinalIgnoreCase))) continue;
+                        if (!hints.Any(value => label.Contains(value, StringComparison.OrdinalIgnoreCase))) continue;
                         if (entry?.GetValue("InstallLocation") is string path && !string.IsNullOrWhiteSpace(path)) result.Add(path);
                     }
                 }

@@ -42,7 +42,16 @@ export interface AppearanceOverrides {
 export interface SurfaceContribution {
   readonly id: string;
   readonly target: SurfaceId;
+  readonly dashboard?: DashboardContribution;
   mount(surface: ExtensionSurface): void | Cleanup | Promise<void | Cleanup>;
+}
+
+export interface DashboardContribution {
+  readonly key: string;
+  readonly title: string;
+  readonly description: string;
+  readonly defaultVisible: boolean;
+  readonly order: number;
 }
 
 export interface RouteContribution {

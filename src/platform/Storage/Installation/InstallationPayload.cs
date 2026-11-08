@@ -45,6 +45,11 @@ internal sealed class InstallationPayload : IDisposable
                 using var program = new FileStream(Path.Combine(root, entry), FileMode.Open, FileAccess.Read, FileShare.Read);
                 UpdateBuildProfile.RequireBundle(program, assembly, profile);
             }
+            if (manifest.Files.Any(file => file.RelativePath == ApplicationTree.LauncherEntry))
+            {
+                using var launcher = new FileStream(Path.Combine(root, ApplicationTree.LauncherEntry), FileMode.Open, FileAccess.Read, FileShare.Read);
+                UpdateBuildProfile.RequireBundle(launcher, "NexusPipeline.Launcher.dll", profile);
+            }
             return new(root, expectedManifestSha256, manifest, objects.Single(item => item.RelativePath.Length == 0).Identity,
                 snapshot, Array.AsReadOnly(objects.ToArray()), held);
         }

@@ -85,32 +85,78 @@ internal sealed class ExtensionCatalogStore
         });
     }
 
-    internal void RequireInstalledHistory(ResourceOperationLease root, ExtensionCatalogSaved original, ExtensionCatalogEntry entry)
+    internal InstalledHistory ProtectInstalledHistory(ResourceOperationLease root, ExtensionCatalogSaved original, ExtensionCatalogEntry entry)
     {
+        using var timing = StartupProfile.Measure("catalog.verify");
         _lease.VerifyHeld(_instance);
-        using var borrow = root.Borrow(_resources, root.OperationId, ReadClaims);
-        borrow.Use(() =>
+        var borrow = root.Borrow(_resources, root.OperationId, ReadClaims);
+        var held = new List<IDisposable>();
+        try
         {
-            ExtensionCatalogSaved current;
-            using (var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true))
-            using (var transaction = connection.BeginTransaction(deferred: true))
+            return borrow.Use(() =>
             {
-                ExtensionCatalogRows.RequireAcceptedInside(connection, transaction, original);
-                current = ExtensionCatalogRows.ReadHead(connection, transaction, original.Identity.Channel) ?? throw Invalid();
-                transaction.Commit();
-            }
-            _verifier.RequireRecorded(Read(original.Pointer), Read(original.Catalog), Read(original.Signature),
-                original.Identity, original.KeyId, entry);
-            _verifier.RequireRecorded(Read(current.Pointer), Read(current.Catalog), Read(current.Signature),
-                current.Identity, current.KeyId, null);
-            if (current.Identity.Sequence < original.Identity.Sequence) throw Invalid();
-            using var fresh = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
-            using var tx = fresh.BeginTransaction(deferred: true);
-            ExtensionCatalogRows.RequireAcceptedInside(fresh, tx, original);
-            if (ExtensionCatalogRows.ReadHead(fresh, tx, original.Identity.Channel) != current) throw Invalid();
-            tx.Commit();
-            return true;
-        });
+                ExtensionCatalogSaved current;
+                using (var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true))
+                using (var transaction = connection.BeginTransaction(deferred: true))
+                {
+                    ExtensionCatalogRows.RequireAcceptedInside(connection, transaction, original);
+                    current = ExtensionCatalogRows.ReadHead(connection, transaction, original.Identity.Channel) ?? throw Invalid();
+                    transaction.Commit();
+                }
+                held.Add(StableDirectoryLease.Acquire(Path.Combine(_instance.RuntimeRoot, "blobs", "plans")));
+                var bytes = new Dictionary<BlobReference, byte[]>();
+                foreach (var reference in new[] { original.Pointer, original.Catalog, original.Signature,
+                    current.Pointer, current.Catalog, current.Signature }.Distinct())
+                {
+                    var input = _blobs.OpenVerified(reference); held.Add(input);
+                    var value = new byte[checked((int)input.Length)]; input.ReadExactly(value); bytes.Add(reference, value);
+                }
+                _verifier.RequireRecorded(bytes[original.Pointer], bytes[original.Catalog], bytes[original.Signature],
+                    original.Identity, original.KeyId, entry);
+                if (current != original)
+                    _verifier.RequireRecorded(bytes[current.Pointer], bytes[current.Catalog], bytes[current.Signature],
+                        current.Identity, current.KeyId, null);
+                if (current.Identity.Sequence < original.Identity.Sequence) throw Invalid();
+                var sql = new DatabaseValidationLease(_database.DatabasePath, "catalog.sql.validate");
+                held.Add(sql);
+                var result = new InstalledHistory(this, borrow, original, current, held, sql);
+                result.RequireCurrent(); return result;
+            });
+        }
+        catch
+        {
+            for (var index = held.Count - 1; index >= 0; index--) held[index].Dispose();
+            borrow.Dispose(); throw;
+        }
+    }
+
+    internal sealed class InstalledHistory(ExtensionCatalogStore owner, ResourceOperationBorrow borrow,
+        ExtensionCatalogSaved original, ExtensionCatalogSaved current, IReadOnlyList<IDisposable> held,
+        DatabaseValidationLease sql) : IDisposable
+    {
+        private int _disposed;
+
+        internal void RequireCurrent()
+        {
+            ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+            owner._lease.VerifyHeld(owner._instance);
+            borrow.Use(() =>
+            {
+                sql.RequireCurrent((connection, transaction) =>
+                {
+                    ExtensionCatalogRows.RequireAcceptedInside(connection, transaction, original);
+                    if (ExtensionCatalogRows.ReadHead(connection, transaction, original.Identity.Channel) != current) throw Invalid();
+                });
+                return true;
+            });
+        }
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+            try { for (var index = held.Count - 1; index >= 0; index--) held[index].Dispose(); }
+            finally { borrow.Dispose(); }
+        }
     }
 
     internal ResourceOperationBorrow BorrowPackage(ResourceOperationLease root, Guid operationId)

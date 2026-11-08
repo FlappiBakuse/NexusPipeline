@@ -9,7 +9,6 @@ namespace NexusPipeline.Platform.Storage.Extensions;
 internal sealed class InstallationReadLease : IDisposable
 {
     private readonly RuntimeInstance _instance;
-    private readonly StateDatabase _database;
     private readonly InstanceLease _lease;
     private readonly ExtensionPayloadBinding _binding;
     private readonly JournalHistoryProtection _history;
@@ -18,16 +17,20 @@ internal sealed class InstallationReadLease : IDisposable
     private BoundExtensionPayload _bound = null!;
     private IReadOnlyList<FileEffect> _effects = [];
     private ExtensionInstalledMetadata _expected = null!;
+    private DatabaseValidationLease? _sql;
     private bool _disposed;
 
     private InstallationReadLease(RuntimeInstance instance, StateDatabase database, InstanceLease lease,
         ContractReader contracts, PayloadApplyRoots roots, JournalHistoryProtection history, DirectoryAttributeProtection paths)
-    { _instance = instance; _database = database; _lease = lease; _binding = new(instance, database, contracts, roots); _history = history; _paths = paths; }
+    { _instance = instance; _lease = lease; _binding = new(instance, database, contracts, roots); _history = history; _paths = paths; }
 
     [SupportedOSPlatform("windows")]
     internal static InstallationReadLease? TryAcquire(RuntimeInstance instance, StateDatabase database, InstanceLease lease,
         ContractReader contracts, PayloadApplyRoots roots, Guid journal, Func<BoundExtensionPayload> read)
     {
+        using var identity = InstanceReadScope.Hold(instance, contracts);
+        using var reads = DatabaseReadScope.Hold(database.DatabasePath);
+        using var blobsScope = BlobReadScope.Hold(instance);
         DirectoryAttributeProtection? paths = DirectoryAttributeProtection.Acquire(instance);
         try
         {
@@ -59,6 +62,7 @@ internal sealed class InstallationReadLease : IDisposable
                 result._bound = bound;
                 result._effects = PayloadEffectCursor.ExpectedEffects(bound.Registered, bound.Plan, bound.History, bound.Physical, bound.Restoration);
                 result._expected = ExtensionPayloadBinding.DerivedInstallation(bound.Plan, bound.Commit, bound.Footprint);
+                result._sql = new(database.DatabasePath);
                 result.RequireCurrent();
                 return result;
             }
@@ -81,17 +85,18 @@ internal sealed class InstallationReadLease : IDisposable
 
     internal void RequireCurrent()
     {
+        using var timing = StartupProfile.Measure("installation.revalidate");
         ObjectDisposedException.ThrowIf(_disposed, this);
         using var paths = DirectoryAttributeScope.Enter(_paths);
         _lease.VerifyHeld(_instance);
         _ = _history.Read();
-        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
-        using var transaction = connection.BeginTransaction(deferred: true);
-        _binding.RequireInside(connection, transaction, _bound, _effects);
-        if (ExtensionInstalledRows.ReadCurrentMetadata(connection, transaction, _expected.ExtensionId) != _expected ||
-            HostSettingsRows.ReadCurrent(connection, transaction).Values.Extensions
-                .SingleOrDefault(item => item.ExtensionId == _expected.ExtensionId)?.Enabled != true) throw Invalid();
-        transaction.Commit();
+        _sql!.RequireCurrent((connection, transaction) =>
+        {
+            _binding.RequireInside(connection, transaction, _bound, _effects);
+            if (ExtensionInstalledRows.ReadCurrentMetadata(connection, transaction, _expected.ExtensionId) != _expected ||
+                HostSettingsRows.ReadCurrent(connection, transaction).Values.Extensions
+                    .SingleOrDefault(item => item.ExtensionId == _expected.ExtensionId)?.Enabled != true) throw Invalid();
+        });
     }
 
     public void Dispose()
@@ -102,7 +107,7 @@ internal sealed class InstallationReadLease : IDisposable
         finally
         {
             _held.Clear();
-            try { _history.Dispose(); }
+            try { try { _sql?.Dispose(); } finally { _history.Dispose(); } }
             finally { _paths.Dispose(); }
         }
     }

@@ -29,38 +29,43 @@ internal sealed class ExtensionApplyActivation : IAsyncDisposable
         source.RequireReservation(inventory); source.RequireBeforeCallback();
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var scope = inventory.BeginCandidate(source, completion.Task);
-        VerifiedProviderPackage? provider = null;
+        VerifiedProviderPackage.Prepared? provider = null;
+        Task runner;
         try
         {
             source.RegisterCallback(scope, completion.Task);
             if (source.ReadManifest().Execution is not null)
                 provider = VerifiedProviderPackage.VerifyInstalled(source, contracts);
+            runner = Task.Run(async () =>
+            {
+                try
+                {
+                    using (provider)
+                    {
+                        using var linked = CancellationTokenSource.CreateLinkedTokenSource(source.AcceptedCancellation, scope.Cancellation);
+                        using (scope.BeginActivationUse())
+                        {
+                            source.RequireBeforeCallback();
+                            var runtime = InstalledExtensionRuntime.Load(source, scope, contracts, providers, ports, inventory.Native);
+                            await scope.OwnAsync(runtime).ConfigureAwait(false);
+                            inventory.AttachRuntime(scope, runtime);
+                            await runtime.ActivateAsync(scope, linked.Token, provider).ConfigureAwait(false);
+                            source.RequireForPreparation(scope.ActivationId);
+                        }
+                    }
+                    completion.TrySetResult();
+                }
+                catch (Exception failure) { completion.TrySetException(failure); }
+                finally { inventory.CandidateEnded(); }
+            });
         }
         catch (Exception preparationFailure)
         {
+            provider?.Dispose();
             completion.TrySetException(preparationFailure); Observe(completion.Task);
             source.RecordCallbackFailure(completion.Task, preparationFailure);
             await scope.DisposeAsync().ConfigureAwait(false); inventory.CandidateEnded(); throw;
         }
-        var runner = Task.Run(async () =>
-        {
-            try
-            {
-                using var linked = CancellationTokenSource.CreateLinkedTokenSource(source.AcceptedCancellation, scope.Cancellation);
-                using (scope.BeginActivationUse())
-                {
-                    source.RequireBeforeCallback();
-                    var runtime = InstalledExtensionRuntime.Load(source, scope, contracts, providers, ports, inventory.Native);
-                    await scope.OwnAsync(runtime).ConfigureAwait(false);
-                    inventory.AttachRuntime(scope, runtime);
-                    await runtime.ActivateAsync(scope, linked.Token, provider).ConfigureAwait(false);
-                    source.RequireForPreparation(scope.ActivationId);
-                }
-                completion.TrySetResult();
-            }
-            catch (Exception failure) { completion.TrySetException(failure); }
-            finally { inventory.CandidateEnded(); }
-        });
         Observe(runner);
         try
         {

@@ -54,7 +54,7 @@ public static class ConfigurationSynchronizationPolicy
         var delta = FileTreeDelta.Compare(saved, candidate);
         if (delta.Changes.Any(change => change.Kind == TreeChangeKind.Reshaped))
             return new(false, "configuration_sync_shape_conflict", null);
-        if (previous.Length > 0 && (files.Length * 2 < previous.Length || bytes * 2 < previous.Sum(entry => entry.SizeBytes)))
+        if (saved.Shape == FileObjectKind.Directory && previous.Length > 0 && files.Length * 2 <= previous.Length)
             return new(false, "configuration_sync_shrinking", null);
         return new(true, "configuration_sync_allowed", delta);
     }

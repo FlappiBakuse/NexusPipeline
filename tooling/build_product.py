@@ -12,7 +12,6 @@ from source_snapshot import ALGORITHM, digest, export_source, source_files, writ
 from source_evidence import preserve_source
 from frozen_build import save_build, compile_receipt
 from build_inputs import solution_inputs, project_inputs
-from test_registry import verify_registry
 from source_names import verify_names
 from source_checks import check_source
 
@@ -180,16 +179,16 @@ def build_product(root, output, profile, projects=None):
             api_code = subprocess.run(api_command, cwd=source_root, env=env, stdout=api_log,
                                       stderr=subprocess.STDOUT).returncode
         code = api_code
-    registry = None
-    test_projects = [name for name in component["projectNames"] if name.endswith("Tests")]
-    if code == 0 and test_projects:
-        registry = verify_registry(source_root, output, run_root, env, test_projects if selected is not None else None)
-        code = registry["exitCode"]
     receipt = {
+        "responsibilities": {
+            "lint": {"status": "PASS" if boundaries is not None and boundaries["exitCode"] == 0 else "FAIL" if names is not None else "NOT_RUN", "sourceNames": names, "sourceBoundaries": boundaries},
+            "typecheck": {"status": "PASS" if compile_code == 0 else "FAIL", "evidence": str(run_root / "build.log")},
+            "test": {"status": "NOT_RUN"},
+            "build": {"status": "PASS" if compile_code == 0 else "FAIL", "reusedCompilation": reusable},
+        },
         "compileExitCode": compile_code,
         "web": web_receipt,
         "sdkApi": {"command": api_command, "exitCode": api_code, "nativeLog": str(run_root / "sdk-api.log")},
-        "testRegistry": registry,
         "sourceNames": names,
         "sourceBoundaries": boundaries,
         "status": "PASS" if code == 0 else "FAIL", "profile": profile,

@@ -22,4 +22,12 @@ public sealed record EmulatorTargetSelection
     /// <summary>Schema field <c>generation</c>; constraints are owned by emulator-target.schema.json.</summary>
     [JsonPropertyName("generation")]
     public required string Generation { get; init; }
+    /// <summary>Schema field <c>extensionId</c>; constraints are owned by emulator-target.schema.json.</summary>
+    [JsonPropertyName("extensionId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ExtensionId { get; init; }
+    /// <summary>Schema field <c>providerId</c>; constraints are owned by emulator-target.schema.json.</summary>
+    [JsonPropertyName("providerId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ProviderId { get; init; }
 }

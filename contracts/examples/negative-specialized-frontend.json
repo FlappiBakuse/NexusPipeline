@@ -1,9 +1,9 @@
 {
   "format": "nexus.extension.manifest",
   "version": 1,
-  "extensionId": "bettergi",
-  "artifactName": "BetterGI",
-  "displayName": "更好的原神",
+  "extensionId": "example-specialized",
+  "artifactName": "ExampleSpecialized",
+  "displayName": "专项扩展示例",
   "packageVersion": "0.5.0",
   "kind": "data-specialized",
   "minHostVersion": "0.18.0",

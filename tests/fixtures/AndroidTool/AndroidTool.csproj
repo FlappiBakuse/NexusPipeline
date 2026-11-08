@@ -3,4 +3,7 @@
     <OutputType>Exe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>
   </PropertyGroup>
+  <ItemGroup Condition="'$(NexusPluginFixturesRoot)' != ''">
+    <Compile Include="$(NexusPluginFixturesRoot)/android-tool/*.cs" Link="PluginFixtures/%(Filename)%(Extension)" />
+  </ItemGroup>
 </Project>

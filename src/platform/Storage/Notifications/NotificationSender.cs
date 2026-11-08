@@ -85,12 +85,17 @@ internal sealed class NotificationSender : IAsyncDisposable
                 using var material = NotificationSecretMaterial.Capture(preparedSecrets);
                 using var attachment = NotificationAttachment.Open(_instance, _database, _contracts, snapshot.Document.Attachment);
                 borrow.VerifyHeld(); _lease.VerifyHeld(_instance); timeout.Token.ThrowIfCancellationRequested();
-                dispatched = true;
-                outcome = task.Kind switch {
-                    NotificationTaskKind.Smtp => await NotificationSmtpTransport.SendAsync(snapshot, task, material, attachment, timeout.Token, _smtpClientFactory).ConfigureAwait(false),
+                if (task.Kind == NotificationTaskKind.Smtp)
+                    outcome = await NotificationSmtpTransport.SendAsync(snapshot, task, material, attachment, timeout.Token,
+                        _smtpClientFactory, () => dispatched = true).ConfigureAwait(false);
+                else
+                {
+                    dispatched = true;
+                    outcome = task.Kind switch {
                     NotificationTaskKind.Webhook => await new NotificationWebhookTransport(_endpoints).SendAsync(snapshot, task,
                         material, preparedNetwork, attachment, timeout.Token).ConfigureAwait(false),
                     _ => throw new IOException("notification_task_kind_invalid") };
+                }
             }
             catch (Exception error) when (error is not (OutOfMemoryException or StackOverflowException))
             { outcome = new(dispatched ? NotificationTransportOutcome.Unknown : NotificationTransportOutcome.Rejected, null); }

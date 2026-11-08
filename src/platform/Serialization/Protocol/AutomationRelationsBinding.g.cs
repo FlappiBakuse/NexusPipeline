@@ -55,4 +55,8 @@ public sealed record AutomationRelationsBinding
     /// <summary>Schema field <c>notificationTaskIds</c>; constraints are owned by automation-relations.schema.json.</summary>
     [JsonPropertyName("notificationTaskIds")]
     public required IReadOnlyList<string> NotificationTaskIds { get; init; }
+    /// <summary>Schema field <c>source</c>; constraints are owned by automation-relations.schema.json.</summary>
+    [JsonPropertyName("source")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public AutomationBindingSource? Source { get; init; }
 }

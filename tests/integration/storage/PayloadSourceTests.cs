@@ -96,6 +96,37 @@ public sealed class PayloadSourceTests
         Assert.False(Directory.Exists(fixture.Plan.TargetPath));
     }
 
+    [Fact(DisplayName = "A Decoded Payload Source Does Not Permit A Later Read To Accept Changed Source Bytes")]
+    public void RechecksDecodedSource()
+    {
+        using var fixture = new PayloadSourceFixture();
+        var codec = new PayloadPlanCodec(fixture.Package.Catalog.Instance, fixture.Package.Catalog.Contracts,
+            fixture.Package.Blobs, fixture.Roots);
+        using var frozen = codec.Freeze(fixture.Plan);
+        var plan = codec.ReadStructure(frozen.Reference, out var source);
+        Assert.NotNull(source);
+        Assert.Equal(fixture.Source.OperationId, source.OperationId);
+        Assert.Equal(fixture.SourceReference, plan.ExtensionSource);
+        fixture.SourceCodec.RequireFrozenBinding(source, plan);
+        var path = Path.Combine(fixture.Package.Catalog.Instance.RuntimeRoot, fixture.SourceReference.RelativePath);
+        var bytes = File.ReadAllBytes(path);
+        var changed = bytes.ToArray(); changed[0] = (byte)'!';
+        try
+        {
+            File.WriteAllBytes(path, changed);
+            Assert.Throws<IOException>(() => codec.ReadStructure(frozen.Reference, out _));
+            Assert.Throws<IOException>(() => fixture.SourceCodec.ReadMetadata(fixture.SourceReference));
+            Assert.Equal(changed, File.ReadAllBytes(path));
+        }
+        finally { File.WriteAllBytes(path, bytes); }
+        var reloaded = codec.ReadStructure(frozen.Reference, out var restored);
+        Assert.NotNull(restored);
+        fixture.SourceCodec.RequireFrozenBinding(restored, reloaded);
+        Assert.Equal(plan.ExtensionSource, reloaded.ExtensionSource);
+        Assert.Equal(source.SettingsRevision, restored.SettingsRevision);
+        Assert.Equal(source.Claims.ToArray(), restored.Claims.ToArray());
+    }
+
     private static JsonObject Read(PayloadSourceFixture fixture)
     {
         using var input = fixture.Package.Blobs.OpenVerified(fixture.SourceReference);

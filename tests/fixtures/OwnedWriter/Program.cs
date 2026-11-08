@@ -1,10 +1,9 @@
 using System.Text;
 using System.Text.Json;
+if (await FixtureExtensions.RunAsync(args) is { } pluginExit) return pluginExit;
 if (args is ["installer-shortcut-native", .. var shortcutArgs]) return await InstallerShortcutFixture.RunAsync(shortcutArgs);
 if (args is ["account-task-fixture", var accountOutcome, var accountMarker]) return await AccountTaskFixture.RunAsync(accountOutcome, accountMarker);
 if (args is ["console-stop-fixture", var stopPid, var stopImage, var stopCreated]) return await ConsoleStopFixture.RunAsync(stopPid, stopImage, stopCreated);
-if (args is ["--pretask", "LaunchGamePC"] && File.Exists(Path.Combine(AppContext.BaseDirectory, "maa-startup-fixture.json")))
-    return await MaaStartupFixture.RunAsync();
 if (args is ["list2"] && File.Exists(Path.Combine(AppContext.BaseDirectory, "emulator-command-fixture.json")))
     return await EmulatorCommandFixture.RunAsync();
 if (args is ["provider-device-probe", var deviceInput, var deviceReport]) return await DeviceReaderFixture.ProbeAsync(deviceInput, deviceReport);
@@ -49,13 +48,6 @@ if (args is ["secret-store-read", .. var secretReadArgs]) return await SecretSto
 
 if (args is ["media-plugin", .. var mediaArgs]) return await MediaPluginFixture.RunAsync(mediaArgs);
 if (args is ["media-plugin-harness", .. var mediaHarnessArgs]) return await PluginSliceHarness.RunAsync(mediaHarnessArgs, "media-plugin");
-if (args is ["maa-plugin", .. var maaArgs]) return await MaaPluginFixture.RunAsync(maaArgs);
-if (args is ["maa-plugin-harness", .. var maaHarnessArgs]) return await PluginSliceHarness.RunAsync(maaHarnessArgs, "maa-plugin");
-if (args is ["checkin-plugin", .. var checkinArgs]) return await GamePluginFixture.RunAsync(checkinArgs);
-if (args is ["checkin-plugin-harness", .. var checkinHarnessArgs]) return await PluginSliceHarness.RunAsync(checkinHarnessArgs, "checkin-plugin");
-if (args is ["bettergi-plugin", .. var bettergiArgs]) return await BetterGiPluginFixture.RunAsync(bettergiArgs);
-if (args is ["bettergi-plugin-harness", .. var bettergiHarnessArgs]) return await PluginSliceHarness.RunAsync(bettergiHarnessArgs, "bettergi-plugin");
-
 if (args is ["history-dataset", .. var datasetArgs]) return HistoryDatasetFixture.Run(datasetArgs);
 if (args is ["history-dataset-harness", .. var datasetHarnessArgs]) return await HistoryDatasetHarness.RunAsync(datasetHarnessArgs);
 if (args is ["history-query", .. var queryArgs]) return HistoryDatasetFixture.QueryExisting(queryArgs);

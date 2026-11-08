@@ -51,4 +51,8 @@ public sealed record DesktopLogin
     [JsonPropertyName("offers")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<DesktopLoginOffer>? Offers { get; init; }
+    /// <summary>Schema field <c>accepted</c>; constraints are owned by desktop-login.schema.json.</summary>
+    [JsonPropertyName("accepted")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? Accepted { get; init; }
 }

@@ -11,7 +11,7 @@ using NexusPipeline.Platform.Storage.Sqlite;
 namespace NexusPipeline.Platform.Storage.Configuration;
 
 internal sealed record ConfigurationRetrySource(FrozenRunState State, StoredConfigurationRevision Publication,
-    Guid PreviousSessionId, BlobReference PreviousChild);
+    Guid PreviousSessionId, BlobReference PreviousChild, RetryConfigurationInput? Input);
 
 internal sealed class PreparedRetryOrigin
 {
@@ -92,7 +92,8 @@ internal sealed class PreparedRetryOrigin
                     publication.Revision.Contract != original.State.Source.Contract || publication.Revision.Tree.Shape != original.State.Source.Tree.Shape)
                     throw Invalid();
                 var child = new BlobReference(resource.PlanPath, new FileInfo(Path.Combine(instance.RuntimeRoot, resource.PlanPath)).Length, resource.PlanDigest);
-                items.Add(resource.Address, new(original.State, publication, sessionId, child));
+                var input = invocation is null ? null : RetryConfigurationInput.Read(instance, database, contracts, resource, original.State);
+                items.Add(resource.Address, new(original.State, publication, sessionId, child, input));
             }
             if (items.Count != total.ConfigurationSlots.Count(slot => slot.StepId == step.StepId)) throw Invalid();
             sources.Add(step.StepId, items.ToImmutable());
@@ -131,7 +132,7 @@ internal sealed class PreparedRetryOrigin
             var previous = expected[pair.Key];
             if (pair.Value.OwnerOperationId != _nextOperation || pair.Value.InitialPublicationRevision != previous.Publication.Revision.Revision)
                 throw Invalid();
-            RunStateCodec.RequireRetrySource(pair.Value, previous.State, TaskRetry, previous.Publication);
+            RunStateCodec.RequireRetrySource(pair.Value, previous.State, TaskRetry, previous.Publication, previous.Input);
         }
     }
 
@@ -202,7 +203,7 @@ internal sealed class PreparedRetryOrigin
         foreach (var pair in states)
         {
             if (pair.Value.InitialPublicationRevision != previous[pair.Key].Publication.Revision.Revision) throw Invalid();
-            RunStateCodec.RequireRetrySource(pair.Value, previous[pair.Key].State, invocation.TaskRetry, previous[pair.Key].Publication);
+            RunStateCodec.RequireRetrySource(pair.Value, previous[pair.Key].State, invocation.TaskRetry, previous[pair.Key].Publication, previous[pair.Key].Input);
         }
     }
 

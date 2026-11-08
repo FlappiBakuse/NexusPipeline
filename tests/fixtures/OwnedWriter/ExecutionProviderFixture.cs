@@ -72,7 +72,10 @@ internal static class ExecutionProviderFixture
             if (mode is "retry-config-failed" or "retry-config-interrupted" or "retry-channel-loss" or "ordinary-config-retry")
             {
                 var target = bootstrap.ConfigurationTargets.Single();
-                if (await File.ReadAllTextAsync(target, deadline.Token) != "{\"fixture\":true}")
+                var expected = mode == "ordinary-config-retry" && physicalOrdinal > 1
+                    ? "{\"fixture\":true,\"providerChanged\":true,\"count\":" + (39 + physicalOrdinal) + "}"
+                    : "{\"fixture\":true}";
+                if (await File.ReadAllTextAsync(target, deadline.Token) != expected)
                     throw new IOException("provider_fixture_retry_candidate_replaced");
                 await File.WriteAllTextAsync(target, "{\"fixture\":true,\"providerChanged\":true,\"count\":" +
                     (40 + (mode == "ordinary-config-retry" ? physicalOrdinal : bootstrap.AttemptOrdinal)) + "}", deadline.Token);

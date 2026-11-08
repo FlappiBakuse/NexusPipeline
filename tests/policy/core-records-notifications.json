@@ -1,30 +1,10 @@
 {
   "group": "core-records-notifications",
-  "expectedMethods": {
-    "NexusPipeline.CoreTests.NotificationTaskTests.KeepsExistingTasks": 1,
-    "NexusPipeline.CoreTests.NotificationTaskTests.ValidatesTaskLimits": 3,
-    "NexusPipeline.CoreTests.NotificationTaskTests.RejectsInvalidText": 3,
-    "NexusPipeline.CoreTests.NotificationTaskTests.BoundsUniqueNames": 1,
-    "NexusPipeline.CoreTests.NotificationTaskTests.RequiresCompleteOrder": 1,
-    "NexusPipeline.CoreTests.NotificationTaskTests.RequiresOriginalRevisions": 1,
-    "NexusPipeline.CoreTests.NotificationTaskTests.KeepsDeletedReferences": 1,
-    "NexusPipeline.CoreTests.NotificationTaskTests.RejectsInvalidEndpoints": 4,
-    "NexusPipeline.CoreTests.NotificationKeyTests.BindsNotificationIdentity": 5,
-    "NexusPipeline.CoreTests.NotificationKeyTests.RejectsForeignOwners": 1,
-    "NexusPipeline.CoreTests.NotificationKeyTests.RejectsIncompleteKeys": 5,
-    "NexusPipeline.CoreTests.NotificationKeyTests.RejectsBorrowedScope": 2,
-    "NexusPipeline.CoreTests.NotificationRoutingTests.HonorsEmptyQueue": 1,
-    "NexusPipeline.CoreTests.NotificationRoutingTests.PreservesBindingRoutes": 1,
-    "NexusPipeline.CoreTests.NotificationRoutingTests.PreservesDeletedReferences": 1,
-    "NexusPipeline.CoreTests.NotificationRoutingTests.RejectsMalformedSelections": 3,
-    "NexusPipeline.CoreTests.NotificationRoutingTests.PreservesDisabledSelections": 1,
-    "NexusPipeline.CoreTests.NotificationRoutingTests.KeepsDistinctDefaults": 1,
-    "NexusPipeline.CoreTests.AcceptedQueueTests.PublishesDuringDrain": 1,
-    "NexusPipeline.CoreTests.AcceptedQueueTests.PinsStartupMetadata": 1,
-    "NexusPipeline.CoreTests.AcceptedQueueTests.RejectsReleasedContinuations": 1,
-    "NexusPipeline.CoreTests.LiveLogTests.BoundsTailStorage": 1,
-    "NexusPipeline.CoreTests.LiveLogTests.DisconnectsSlowReaders": 1,
-    "NexusPipeline.CoreTests.LiveLogTests.OwnsSubscriberBytes": 1,
-    "NexusPipeline.CoreTests.LiveLogTests.ReleasesSubscriptionClaims": 1
-  }
+  "classes": [
+    "NexusPipeline.CoreTests.AcceptedQueueTests",
+    "NexusPipeline.CoreTests.LiveLogTests",
+    "NexusPipeline.CoreTests.NotificationKeyTests",
+    "NexusPipeline.CoreTests.NotificationRoutingTests",
+    "NexusPipeline.CoreTests.NotificationTaskTests"
+  ]
 }

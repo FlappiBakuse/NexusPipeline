@@ -1,14 +1,9 @@
 {
   "group": "windows-records-notifications",
-  "expectedMethods": {
-    "NexusPipeline.WindowsTests.SecretBoundaryTests.RequiresNotificationOwner": 3,
-    "NexusPipeline.WindowsTests.SecretBoundaryTests.RejectsForeignInstances": 1,
-    "NexusPipeline.WindowsTests.CatalogPublicationTests.CommitsCatalogAtomically": 2,
-    "NexusPipeline.WindowsTests.CatalogPublicationTests.BoundsMaximumTemplates": 1,
-    "NexusPipeline.WindowsTests.CatalogPublicationTests.RejectsUnknownMetadata": 2,
-    "NexusPipeline.WindowsTests.CatalogSecretTests.PreservesCredentialReplay": 1,
-    "NexusPipeline.WindowsTests.CatalogSecretTests.KeepsFailedPublication": 1,
-    "NexusPipeline.WindowsTests.RgbCaptureTests.StreamsBoundedCapture": 1,
-    "NexusPipeline.WindowsTests.RgbCaptureTests.RejectsInvalidEnvelopes": 8
-  }
+  "classes": [
+    "NexusPipeline.WindowsTests.CatalogPublicationTests",
+    "NexusPipeline.WindowsTests.CatalogSecretTests",
+    "NexusPipeline.WindowsTests.RgbCaptureTests",
+    "NexusPipeline.WindowsTests.SecretBoundaryTests"
+  ]
 }

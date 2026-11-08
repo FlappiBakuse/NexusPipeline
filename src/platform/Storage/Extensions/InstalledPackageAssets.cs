@@ -8,7 +8,7 @@ namespace NexusPipeline.Platform.Storage.Extensions;
 
 [SupportedOSPlatform("windows")]
 internal sealed class InstalledPackageAssets(PreparedExtensionActivation source, ExtensionScope scope,
-    InstalledExtensionConsumption consumption, string root, PhysicalObjectIdentity parent, ArchivedFileTree original)
+    InstalledExtensionConsumption consumption, string root, TreeReadLease.TreeBorrow files, ArchivedFileTree original)
     : IExtensionPackageAssets
 {
     internal IDisposable? Enter()
@@ -24,7 +24,7 @@ internal sealed class InstalledPackageAssets(PreparedExtensionActivation source,
     {
         cancellationToken.ThrowIfCancellationRequested();
         using var access = Enter();
-        var held = TreeReadLease.Acquire(root, parent, original);
+        var held = files.Borrow();
         PackageLease? result = null;
         try
         {

@@ -30,12 +30,20 @@ internal sealed class DesktopLoginControl(ControlAuthentication authority, Deskt
                 return desktop.SignedFrontend(new { format = "nexus.desktop.login", version = 1, instanceId = native.InstanceId,
                     nativeClientId = native.ClientId, sessionId = native.SessionId, correlationId = correlation, type = "offers", offers });
             }
-            if (value.GetProperty("type").GetString() != "complete") throw new ControlRequestException(400, "browser_login_request_invalid");
+            var candidate = value.GetProperty("type").GetString() == "candidate";
+            if (!candidate && value.GetProperty("type").GetString() != "complete") throw new ControlRequestException(400, "browser_login_request_invalid");
             var capture = ControlRequestBody.Uuid(value.GetProperty("captureId")); var nonce = ControlRequestBody.Uuid(value.GetProperty("nonce"));
             var values = new Dictionary<string, SecretValue>(StringComparer.Ordinal);
             try
             {
                 foreach (var member in value.GetProperty("values").EnumerateObject()) values.Add(member.Name, new(member.Value.GetString()!));
+                if (candidate)
+                {
+                    var accepted = await sessions.ValidateAsync(native, capture, nonce, values);
+                    return desktop.SignedFrontend(new { format = "nexus.desktop.login", version = 1, instanceId = native.InstanceId,
+                        nativeClientId = native.ClientId, sessionId = native.SessionId, correlationId = correlation,
+                        type = "candidateResult", captureId = capture, nonce, accepted });
+                }
                 sessions.Complete(native, capture, nonce, value.GetProperty("status").GetString()!, values);
                 return desktop.SignedFrontend(new { format = "nexus.desktop.login", version = 1, instanceId = native.InstanceId,
                     nativeClientId = native.ClientId, sessionId = native.SessionId, correlationId = correlation, type = "completed", captureId = capture, nonce });

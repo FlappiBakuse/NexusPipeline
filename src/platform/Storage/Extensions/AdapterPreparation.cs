@@ -15,7 +15,8 @@ namespace NexusPipeline.Platform.Storage.Extensions;
 internal sealed class AdapterPreparation(StateDatabase database, ExtensionActivator activator, SecretAccessPolicy secrets,
     ProjectCompilationService compilation, ImmutableBlobStore blobs)
 {
-    internal ValueTask<TaskAdapter> ExecuteAsync(ResolvedAdapterSelection source, string phase, CancellationToken cancellation)
+    internal ValueTask<TaskAdapter> ExecuteAsync(ResolvedAdapterSelection source, string phase, CancellationToken cancellation,
+        IReadOnlyList<TaskDefinitionsResource>? candidateResources = null)
     {
         if (phase != "configuration" && !source.Selection.ConfigurationIntents.IsDefaultOrEmpty)
             throw new IOException("adapter_configuration_intent_phase_invalid");
@@ -23,7 +24,7 @@ internal sealed class AdapterPreparation(StateDatabase database, ExtensionActiva
         var request = new TaskAdapter
         {
             Format = "nexus.task.adapter", Version = 1, Direction = "request", Phase = phase,
-            ExtensionId = identity.ExtensionId, OperationId = identity.OperationId.ToString("D"), Resources = source.Resources,
+            ExtensionId = identity.ExtensionId, OperationId = identity.OperationId.ToString("D"), Resources = candidateResources ?? source.Resources,
             ConfigurationIntents = phase == "configuration" ? Intents(source) : null
         };
         return activator.RequirePublishedRuntime(identity.ExtensionId).InvokeAdapterAsync(source.Root, source.RequireCurrent,

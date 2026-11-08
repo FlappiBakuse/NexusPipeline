@@ -50,7 +50,7 @@ def publish_product(root, build_root, output, runtime_archive, profile):
             raise ValueError('Existing product workspace is not owned by this build')
     output.mkdir(parents=True, exist_ok=True)
     write_json(ownership, expected_owner)
-    result = build_product(root, build_root, profile, ['NexusPipeline.Host', 'NexusPipeline.Maintenance', 'NexusPipeline.Installer'])
+    result = build_product(root, build_root, profile, ['NexusPipeline.Host', 'NexusPipeline.Launcher', 'NexusPipeline.Maintenance', 'NexusPipeline.Installer'])
     if result:
         raise ValueError('Product compile failed; original build reports retained')
     build = json.loads((build_root / 'build-receipt.json').read_bytes())
@@ -66,7 +66,7 @@ def publish_product(root, build_root, output, runtime_archive, profile):
     env = build_environment(build_root)
     published = {}
     try:
-        for project in ('Host', 'Maintenance', 'Installer'):
+        for project in ('Host', 'Launcher', 'Maintenance', 'Installer'):
             publish_component(root, build_root, output, profile, build, source, frozen, run, env, report, published, project)
         report['installerWorker'] = dict(path=str(output / 'publish/installer/NexusPipeline.Installer.exe'), file=published.pop('Installer')[0])
         desktop = output / 'desktop'
@@ -146,14 +146,18 @@ def publish_component(root, build_root, output, profile, build, source, frozen, 
         raise ValueError('Framework-dependent single-file publish failed: ' + str(log))
     entry = destination / ('NexusPipeline.' + project + '.exe')
     bundle = verify_publish(entry, project, shared_sdk(build_root, build).read_bytes())
-    from verify_manifests import embedded_manifest
+    from verify_manifests import embedded_manifest, pe_subsystem
     import xml.etree.ElementTree as ET
     levels = [element.attrib['level'] for element in ET.fromstring(embedded_manifest(entry)).iter()
               if element.tag.endswith('requestedExecutionLevel')]
     expected_level = 'asInvoker' if project == 'Installer' or profile == 'test' else 'requireAdministrator'
     if levels != [expected_level]:
         raise ValueError('Published executable privilege differs from its role')
+    expected_subsystem = 2 if project in ('Host', 'Launcher') else 3
+    if pe_subsystem(entry) != expected_subsystem:
+        raise ValueError('Published executable subsystem differs from its GUI or console role')
     bundle['executionLevel'] = levels[0]
+    bundle['subsystem'] = expected_subsystem
     if inventory(destination) != [dict(path=entry.name, sizeBytes=entry.stat().st_size, sha256=hash_file(entry))]:
         raise ValueError('Single-file publication contains additional runtime or debug files')
     write_json(slot_receipt, inventory(destination))

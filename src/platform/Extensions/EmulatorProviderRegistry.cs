@@ -8,6 +8,23 @@ internal sealed class EmulatorProviderRegistry
     private readonly Dictionary<(Guid Activation, string Id), Entry> _entries = [];
     private sealed record Entry(ExtensionScope Scope, string Id, IEmulatorProvider Provider);
 
+    internal (string ExtensionId, string ProviderId) Select(string? extensionId = null, string? providerId = null)
+    {
+        lock (_gate)
+        {
+            var available = _entries.Values.Where(entry => entry.Scope.IsPublished && !entry.Scope.Cancellation.IsCancellationRequested &&
+                (extensionId is null || entry.Scope.Activation.ExtensionId == extensionId && entry.Id == providerId)).Take(2).ToArray();
+            if (available.Length != 1) throw new IOException(available.Length == 0 ? "emulator_provider_unavailable" : "emulator_provider_ambiguous");
+            return (available[0].Scope.Activation.ExtensionId, available[0].Id);
+        }
+    }
+
+    internal IReadOnlyList<(string ExtensionId, string ProviderId)> List()
+    {
+        lock (_gate) return _entries.Values.Where(entry => entry.Scope.IsPublished && !entry.Scope.Cancellation.IsCancellationRequested)
+            .Select(entry => (entry.Scope.Activation.ExtensionId, entry.Id)).OrderBy(entry => entry.ExtensionId).ThenBy(entry => entry.Id).ToArray();
+    }
+
     internal IAsyncDisposable Register(ExtensionScope scope, string providerId, IEmulatorProvider provider)
     {
         ArgumentNullException.ThrowIfNull(provider); ProjectCompilerRegistry.RequireId(providerId);

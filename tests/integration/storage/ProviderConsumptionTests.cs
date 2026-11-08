@@ -56,6 +56,7 @@ public sealed class ProviderConsumptionTests
     {
         await using var fixture = new InstalledProviderFixture();
         await fixture.PublishAsync();
+        var archive = fixture.ArchivePath;
         var before = fixture.Execution.Count("attempt_receipts");
         Assert.ThrowsAny<IOException>(() => fixture.Providers.Acquire("fixture-plugin"));
         Assert.ThrowsAny<Exception>(() => fixture.Start());
@@ -64,6 +65,7 @@ public sealed class ProviderConsumptionTests
         Assert.Equal(before, fixture.Execution.Count("attempt_receipts"));
         Assert.Equal(0, fixture.Execution.Inbox.PendingCount); Assert.False(File.Exists(fixture.Marker));
         await fixture.CommitPreparationAsync();
+        using (var released = File.Open(archive, FileMode.Open, FileAccess.Write, FileShare.Read)) { }
         using (var actual = fixture.Providers.Acquire("fixture-plugin"))
             Assert.Equal("fixture-plugin", actual.Use(package => package.Manifest.ExtensionId));
         var accepted = fixture.Start();
@@ -104,5 +106,52 @@ public sealed class ProviderConsumptionTests
         Assert.Equal(0, fixture.Execution.Inbox.PendingCount); Assert.False(File.Exists(fixture.Marker));
         Assert.Equal(JournalPhase.Committed, new RecoveryJournalRegistry(fixture.Source.Database)
             .ReadJournal(fixture.Accepted.JournalId).Phase);
+    }
+
+    [Theory(DisplayName = "Provider Protection Survives The Activation Callback And Releases After Rejection")]
+    [InlineData("namespace")]
+    [InlineData("callback")]
+    [InlineData("cancel")]
+    [InlineData("stop")]
+    public async Task ProtectsPendingActivation(string failure)
+    {
+        await using var fixture = new InstalledProviderFixture(failure == "callback" ? "late-throw" : "late");
+        using var cancellation = new CancellationTokenSource();
+        var running = fixture.PublishAsync(cancellation.Token);
+        var release = Path.Combine(fixture.ActivationDirectory, "release");
+        string? archive = null, unexpected = null;
+        Task? stopping = null;
+        try
+        {
+            _ = await OwnedCrashProcess.ReadReportAsync(Path.Combine(fixture.ActivationDirectory, "activated.json"));
+            var protectedArchive = fixture.ArchivePath; archive = protectedArchive;
+            var workerDirectory = Path.Combine(fixture.TargetPath, "worker");
+            var worker = Path.Combine(workerDirectory, Path.GetFileName(Environment.GetEnvironmentVariable("NEXUS_PROCESS_FIXTURE_EXE")!));
+            Assert.Throws<IOException>(() => { using var writer = File.Open(protectedArchive, FileMode.Open, FileAccess.Write, FileShare.Read); });
+            Assert.Throws<IOException>(() => File.Delete(worker));
+            Assert.Throws<IOException>(() => Directory.Move(workerDirectory, workerDirectory + "-moved"));
+            if (failure == "namespace")
+            {
+                unexpected = Path.Combine(fixture.TargetPath, "unexpected.txt");
+                File.WriteAllText(unexpected, "preserve");
+            }
+            if (failure == "cancel") cancellation.Cancel();
+            if (failure == "stop") stopping = fixture.Activator.StopAllAsync(TimeSpan.FromSeconds(5));
+            Assert.False(running.IsCompleted);
+            Assert.Throws<IOException>(() => { using var writer = File.Open(protectedArchive, FileMode.Open, FileAccess.Write, FileShare.Read); });
+        }
+        finally
+        {
+            File.WriteAllText(release, "release");
+            try { await running; } catch { }
+        }
+        var error = await Assert.ThrowsAnyAsync<Exception>(async () => await running);
+        if (failure == "namespace") Assert.Equal("execution_provider_package_changed", error.Message);
+        if (failure == "callback") Assert.Equal("controlled_activation_failure", error.Message);
+        if (stopping is not null) await stopping;
+        Assert.Empty(fixture.Activator.ReadPublishedScopes());
+        Assert.Throws<IOException>(() => fixture.Providers.Acquire("fixture-plugin"));
+        if (unexpected is not null) { Assert.Equal("preserve", File.ReadAllText(unexpected)); File.Delete(unexpected); }
+        using var released = File.Open(archive!, FileMode.Open, FileAccess.Write, FileShare.Read);
     }
 }

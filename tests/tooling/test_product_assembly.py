@@ -22,7 +22,7 @@ class ProductAssemblyTests(unittest.TestCase):
         self.workspace = self.root / 'published'
         self.output = self.root / 'assembled'
         components = {}
-        for project in ('Host', 'Maintenance'):
+        for project in ('Host', 'Launcher', 'Maintenance'):
             directory = self.workspace / 'publish' / project.lower()
             directory.mkdir(parents=True)
             (directory / ('NexusPipeline.' + project + '.exe')).write_bytes(project.encode())
@@ -84,6 +84,7 @@ class ProductAssemblyTests(unittest.TestCase):
         assemble_product(self.workspace, self.output)
         self.assertEqual(b'Host', (self.output / 'NexusPipeline.exe').read_bytes())
         self.assertEqual(b'Maintenance', (self.output / 'NexusPipeline.update.exe').read_bytes())
+        self.assertEqual(b'Launcher', (self.output / 'resources/desktop/NexusPipeline.Launcher.exe').read_bytes())
         runtime = self.output / 'runtime'
         runtime.mkdir()
         (runtime / 'user-data').write_bytes(b'preserve')
@@ -104,6 +105,23 @@ class ProductAssemblyTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'changed or unowned'):
                 assemble_product(self.workspace, self.output, replace_application=replace)
         self.assertEqual(b'changed', changed.read_bytes())
+
+    def test_requires_launcher(self):
+        receipt = json.loads(self.receipt.read_bytes())
+        del receipt['published']['Launcher']
+        write_json(self.receipt, receipt)
+        write_json(self.workspace / 'publish-current.json', dict(receipt=str(self.receipt), sha256=hash_file(self.receipt)))
+        with self.assertRaisesRegex(ValueError, 'Product entry is missing'):
+            assemble_product(self.workspace, self.output)
+        self.assertFalse(self.output.exists())
+
+    def test_rejects_shadowing(self):
+        desktop = self.workspace / 'desktop'
+        (desktop / 'NexusPipeline.Launcher.exe').write_bytes(b'foreign launcher')
+        self.refresh_desktop(desktop)
+        with self.assertRaisesRegex(ValueError, 'conflicts with a published product entry'):
+            assemble_product(self.workspace, self.output)
+        self.assertFalse(self.output.exists())
 
     def test_replaces_payload(self):
         desktop = self.workspace / 'desktop'

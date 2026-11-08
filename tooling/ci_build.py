@@ -7,7 +7,7 @@ import subprocess
 import sys
 import time
 
-from ci_assets import desktop_archive, maa_runtime
+from ci_assets import desktop_archive
 from ci_plan import REPOSITORIES, full_sha, plugins, source_identity, verify_plan
 
 
@@ -119,7 +119,9 @@ def run_check(root, kind, plan, partner, output):
 
 
 def package_plugins(python, run, host, consumer, build, output, selected, report):
-    declarations = plugins(consumer)
+    declarations = json.loads(python("plugin-build-declarations", consumer, "tooling/build_inputs.py"))
+    if selected == ["@bundled"]:
+        selected = sorted(name for name, value in declarations.items() if value["bundled"])
     if any(name not in declarations for name in selected):
         raise ValueError("Selected plugin is absent from the fixed source")
     python("sdk-packages", host, "tooling/nexus.py", "sdk-packages", "--build-root", build,
@@ -133,7 +135,6 @@ def package_plugins(python, run, host, consumer, build, output, selected, report
         for name in frontend_names:
             command.extend(["--extension", name])
         run("plugin-frontend", command, consumer)
-    runtime = maa_runtime(consumer, output / "binary-inputs/maa") if "maa-framework" in selected else None
     packages = []
     for name in selected:
         kind = declarations[name]["kind"]
@@ -144,8 +145,10 @@ def package_plugins(python, run, host, consumer, build, output, selected, report
         arguments = ["--build-receipt", result["receipt"], "--sdk-receipt", sdk, "--output", output / "packages"]
         if name in frontend_names:
             arguments.extend(["--frontend-receipt", output / "frontend/build-receipt.json"])
-        if name == "maa-framework":
-            arguments.extend(["--runtime-receipt", runtime])
+        if declarations[name]["native"]:
+            native = json.loads(python(name + "-native", consumer, "tooling/build_inputs.py", "--extension", name,
+                "--output", output / "binary-inputs" / name))
+            arguments.extend(["--runtime-receipt", native["receipt"]])
         text = python(name + "-package", consumer, "tooling/package_extension.py", *arguments)
         result = json.loads(text.splitlines()[-1])
         packages.append({"extensionId": name, **result})

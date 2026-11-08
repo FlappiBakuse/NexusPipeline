@@ -43,6 +43,7 @@ internal static class RecordPageQuery
         string Where(bool account)
         {
             var clauses = new List<string> { "r.history_retired_at_utc_ticks IS NULL" };
+            if (query.Scope == RecordScope.Groups) clauses.Add("r.user_id IS NULL");
             clauses.AddRange(filters.Select(filter => Field(filter.Column, account) + filter.Operator + filter.Parameter));
             if (query.After is not null)
                 clauses.Add("(" + Field("ended_at_utc_ticks", account) + "," + Field("run_id", account) + ")>($ended,$run)");

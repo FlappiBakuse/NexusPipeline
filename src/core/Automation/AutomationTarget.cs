@@ -18,7 +18,11 @@ public sealed record AutomationAndroidTarget(AutomationAndroidDriver Driver, Aut
     public AutomationEmulatorSelection? Emulator { get; init; }
 }
 
-public sealed record AutomationEmulatorSelection(string Vendor, Guid RootId, string TargetId, string Generation);
+public sealed record AutomationEmulatorSelection(string Vendor, Guid RootId, string TargetId, string Generation)
+{
+    public string? ExtensionId { get; init; }
+    public string? ProviderId { get; init; }
+}
 
 public static class AutomationTargetPolicy
 {
@@ -52,7 +56,9 @@ public static class AutomationTargetPolicy
                 android.ScreenshotTool is { } screenshot &&
                     (android.Driver != AutomationAndroidDriver.Mumu || Extension(screenshot) != "exe")) Reject();
             if (android.Emulator is { } emulator && (android.Driver != AutomationAndroidDriver.GenericAdb ||
-                emulator.Vendor is not ("ldplayer" or "nox" or "bluestacks") || emulator.RootId != android.Tool.RootId ||
+                !Identifier(emulator.Vendor, 80) || emulator.RootId != android.Tool.RootId ||
+                (emulator.ExtensionId is null) != (emulator.ProviderId is null) ||
+                emulator.ExtensionId is { } owner && !Identifier(owner, 80) || emulator.ProviderId is { } provider && !Identifier(provider, 96) ||
                 !roots.Contains(emulator.RootId) || !FileTreePolicy.Digest(emulator.TargetId) || !FileTreePolicy.Digest(emulator.Generation))) Reject();
         }
     }
@@ -72,6 +78,8 @@ public static class AutomationTargetPolicy
         }
     };
 
+    private static bool Identifier(string value, int limit) => value.Length > 0 && value.Length <= limit &&
+        value[0] is >= 'a' and <= 'z' && value.All(character => char.IsAsciiLetterLower(character) || char.IsAsciiDigit(character) || character is '-' or '.');
     private static bool Arguments(ImmutableArray<string> values) => !values.IsDefault && values.Length <= 128 &&
         values.All(value => value is not null && value.Length <= 4096 && !value.Contains('\0'));
     private static string Extension(AutomationPath path) => path.RelativePath[(path.RelativePath.LastIndexOf('.') + 1)..].ToLowerInvariant();

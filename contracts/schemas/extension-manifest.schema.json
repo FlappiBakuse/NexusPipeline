@@ -291,6 +291,10 @@
     },
     "localization": {
       "$ref": "extension-localization.schema.json"
+    },
+    "icon": {
+      "$ref": "common.schema.json#/$defs/relativePath",
+      "pattern": "\\.(?:png|ico)$"
     }
   },
   "allOf": [

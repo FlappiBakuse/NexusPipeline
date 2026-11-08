@@ -83,7 +83,8 @@ public sealed class ConfigurationRunPreparation
                     ExecutionTaskProjection.RequireBoundRules(execution.ReadWire(), step, source, resource.Tasks, blobs, _contracts);
                     var captured = new ConfigurationTaskTransformation(blobs).Capture(resource.OperationId, source, resource.Tasks, cancellationToken);
                     ExecutionTaskProjection.RequireValues(step, captured);
-                    var inputTree = origin?.TaskRetry is null ? null : historical![resource.Target.Address].Publication.Revision.Tree;
+                    var inputTree = origin?.TaskRetry is not null ? historical![resource.Target.Address].Publication.Revision.Tree :
+                        historical?[resource.Target.Address].Input?.Tree;
                     using var state = new RunStateCodec(_instance, _contracts, blobs).Freeze(new(_instance.InstanceId,
                         ownerOperationId, resource.OperationId, source, request.ExpectedBindingRevision, request.AutoSyncEnabled, captured) { SyncInitially = request.SyncInitially, SyncAtFinish = request.SyncAtFinish,
                         InitialPublicationRevision = historical?[resource.Target.Address].Publication.Revision.Revision ?? source.Revision, InputTree = inputTree });
@@ -150,6 +151,7 @@ public sealed class ConfigurationRunPreparation
         var catalog = new AutomationDefinitionStore(_database).Read();
         var binding = catalog.Bindings.SingleOrDefault(item => item.Id.ToString("D") == step.BindingId);
         var script = catalog.Scripts.SingleOrDefault(item => item.Id.ToString("D") == step.ScriptId);
+        if (script is not null && binding is not null) script = BindingScriptSource.Resolve(script, binding);
         var user = catalog.Users.SingleOrDefault(item => item.Id.ToString("D") == step.UserId);
         if (binding is not null && user is not null) binding = AutomationBindingPolicy.Resolve(user, binding);
         if (binding is null || script is null || user is null || !binding.IsEnabled || binding.ScriptId != script.Id || binding.UserId != user.Id ||

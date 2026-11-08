@@ -46,6 +46,7 @@ internal sealed class InstalledExtensionRuntime : IAsyncDisposable
     internal static InstalledExtensionRuntime Load(PreparedExtensionActivation source, ExtensionScope scope, ContractReader contracts, ExecutionProviderRegistry? providers,
         InstalledPortFactory? ports, InstalledNativeSlot nativeSlot)
     {
+        using var timing = Storage.StartupProfile.Measure("managed.load");
         source.RequireBeforeCallback();
         var manifest = source.ReadManifest();
         var files = source.HoldRuntimeFiles();
@@ -62,7 +63,7 @@ internal sealed class InstalledExtensionRuntime : IAsyncDisposable
                 var entry = assembly.GetType(manifest.Managed.EntryType, throwOnError: true, ignoreCase: false)!;
                 if (!entry.IsPublic || entry.IsAbstract || !typeof(IExtension).IsAssignableFrom(entry) ||
                     entry.GetConstructor([typeof(ExtensionActivationContext)]) is null) throw new IOException("extension_managed_entry_invalid");
-                var activationContext = (ports ?? throw new IOException("extension_port_factory_unavailable")).Create(source, scope, out var consumption);
+                var activationContext = (ports ?? throw new IOException("extension_port_factory_unavailable")).Create(source, scope, files, out var consumption);
                 return new(source, scope, files, nativeSlot, nativeSource, context, entry.GetConstructor([typeof(ExtensionActivationContext)]), activationContext, manifest.Specialized is null ? null : ReadAdapter(source, scope, contracts), providers,
                     consumption);
             }
@@ -90,7 +91,7 @@ internal sealed class InstalledExtensionRuntime : IAsyncDisposable
             Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bytes)));
     }
 
-    internal async ValueTask ActivateAsync(ExtensionScope scope, CancellationToken cancellation, VerifiedProviderPackage? preparedProvider)
+    internal async ValueTask ActivateAsync(ExtensionScope scope, CancellationToken cancellation, VerifiedProviderPackage.Prepared? preparedProvider)
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         _source.RequireBeforeCallback(); cancellation.ThrowIfCancellationRequested();
@@ -98,7 +99,8 @@ internal sealed class InstalledExtensionRuntime : IAsyncDisposable
         {
             var extension = (IExtension)_entry.Invoke([_activationContext!]);
             if (extension is IAsyncDisposable lifetime) await scope.OwnAsync(lifetime).ConfigureAwait(false);
-            await extension.ActivateAsync(scope, cancellation).ConfigureAwait(false);
+            using (Storage.StartupProfile.Measure("managed.callback"))
+                await extension.ActivateAsync(scope, cancellation).ConfigureAwait(false);
             if (_source.ReadManifest().Frontend is not null)
                 Frontend = new(_source.ReadManifest(), _activationContext!.PackageAssets,
                     _consumption!, scope, extension as IExtensionFrontend, _activationContext.Activation!);
@@ -107,8 +109,8 @@ internal sealed class InstalledExtensionRuntime : IAsyncDisposable
         if (_source.ReadManifest().Execution is not null)
         {
             var registry = _providers ?? throw new IOException("extension_execution_registration_unavailable");
-            var package = preparedProvider ?? throw new IOException("extension_provider_preparation_missing");
-            await new ExecutionRegistrationPort(scope, package, registry).RegisterAsync(cancellation).ConfigureAwait(false);
+            var prepared = preparedProvider ?? throw new IOException("extension_provider_preparation_missing");
+            await new ExecutionRegistrationPort(scope, prepared.Package, registry, prepared).RegisterAsync(cancellation).ConfigureAwait(false);
         }
     }
 
@@ -178,6 +180,7 @@ internal sealed class InstalledExtensionRuntime : IAsyncDisposable
         internal PackageLoadContext(ImmutableArray<string> files, string entryPath, ImmutableArray<string> nativeFiles,
             ExtensionScope scope, InstalledNativeSlot nativeSlot) : base(isCollectible: true)
         {
+            using var timing = Storage.StartupProfile.Measure("managed.metadata");
             var candidates = new List<(string Path, AssemblyName Name)>();
             foreach (var path in files)
             {

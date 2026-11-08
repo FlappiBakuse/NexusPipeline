@@ -4,6 +4,8 @@ using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Maintenance;
 using NexusPipeline.Core.Settings;
 using NexusPipeline.Platform.Processes;
+using NexusPipeline.Platform.Serialization;
+using NexusPipeline.Platform.Storage.Maintenance;
 using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Settings;
 using NexusPipeline.Platform.Storage.Sqlite;
@@ -16,13 +18,28 @@ public static class HostStartupSettings
 {
     public static HostSettingsService Create(RuntimeInstance instance, StateDatabase database, InstanceLease lease,
         ResourceLeaseManager resources, RecoveryIndex recovery)
-        => CreateForInstallation(instance, database, lease, resources, recovery,
-            ProcessIdentityReader.Read(Environment.ProcessId).ImagePath, new StartupRegistrationEffects());
+    {
+        var host = PhysicalPathPolicy.NormalizeWithoutLinks(Environment.ProcessPath ?? throw new IOException("host_process_path_unavailable"));
+        var executable = host;
+        var manifestPath = Path.Combine(Path.GetDirectoryName(host)!, ApplicationTree.ManifestPath);
+        if (StringComparer.OrdinalIgnoreCase.Equals(Path.GetFileName(host), ApplicationTree.HostEntry) && File.Exists(manifestPath))
+        {
+            manifestPath = PhysicalPathPolicy.NormalizeWithoutLinks(manifestPath);
+            using var manifest = new FileStream(manifestPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            if (manifest.Length is < 1 or > StrictJson.MaximumBytes) throw ApplicationTree.Changed();
+            var bytes = new byte[checked((int)manifest.Length)]; manifest.ReadExactly(bytes);
+            // Existing v2 applications keep their declared entries; new applications select their owned GUI launcher.
+            if (ApplicationManifest.Read(new(), bytes, null).Files.Any(file => file.RelativePath == ApplicationTree.LauncherEntry))
+                executable = Path.Combine(Path.GetDirectoryName(host)!, ApplicationTree.LauncherEntry);
+        }
+        return CreateForInstallation(instance, database, lease, resources, recovery, executable, new StartupRegistrationEffects());
+    }
 
     internal static HostSettingsService CreateForInstallation(RuntimeInstance instance, StateDatabase database, InstanceLease lease,
         ResourceLeaseManager resources, RecoveryIndex recovery, string executable, IStartupRegistrationEffects effects)
     {
-        var identity = ProcessIdentityReader.Read(Environment.ProcessId);
+        using var process = JobNative.OpenProcess(0x1000, false, Environment.ProcessId);
+        var identity = ProcessIdentityReader.ReadMetadata(process, Environment.ProcessId);
         executable = PhysicalPathPolicy.NormalizeWithoutLinks(executable);
         using var image = new FileStream(executable, FileMode.Open, FileAccess.Read, FileShare.Read);
         var definition = new StartupRegistrationDefinition(instance.InstanceId, Guid.NewGuid(), identity.UserSid, executable,

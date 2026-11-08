@@ -33,8 +33,8 @@ public sealed class EmulatorSourceTests
         var authorized = true;
         await using var inventory = EmulatorInventoryScope.Prepare(owner.Instance, owner.Lease, owner.Resources, [directory],
             () => { if (!authorized) throw new UnauthorizedAccessException("fixture_emulator_revoked"); }, TimeSpan.FromSeconds(mode == "timeout" ? 2 : 30));
-        var layout = new EmulatorLayout(EmulatorVendor.LdPlayer, "Controlled fixture", [], [Path.GetFileName(worker)],
-            [Path.GetFileName(worker)], [Path.GetFileName(config)], [], []);
+        var layout = new EmulatorLayout("arbitrary-engine", "Controlled fixture", [], [Path.GetFileName(worker)],
+            [Path.GetFileName(worker)], [Path.GetFileName(config)], [], []) { EnumerationArguments = ["list2"] };
         var found = Assert.Single(await inventory.DiscoverAsync(layout, default));
         Assert.Equal(directory, found.RootPath); Assert.NotNull(found.Adb);
         Assert.Equal(EmulatorSourceLease.Identity(PhysicalObjectIdentity.Read(directory)), found.RootPhysicalId);

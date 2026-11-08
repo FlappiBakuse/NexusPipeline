@@ -1,15 +1,15 @@
 'use strict';
 const crypto = require('node:crypto');
+const path = require('node:path');
 const { strictJson } = require('./strict-json.cjs');
 const { setLocale, text } = require('./native-text.cjs');
 
-function createTrayLifecycle(config, bridge, windows, electron) {
+function createTrayLifecycle(config, bridge, windows, electron, startup) {
   let mode = config.mode;
   let busy = false;
   let tray;
   let ended = false;
   let refresh;
-  let contextMenu;
   async function json(path, init) {
     const response = await fetch(new URL(path, config.address), {
       ...init, redirect: 'error', signal: AbortSignal.timeout(5000)
@@ -23,18 +23,8 @@ function createTrayLifecycle(config, bridge, windows, electron) {
     }
     return strictJson(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks)));
   }
-  function menu() {
-    if (!tray || ended) return;
-    contextMenu = electron.Menu.buildFromTemplate([
-      { label: text('show'), enabled: !busy, click: () => run(show) },
-      { label: text('hide'), enabled: !busy && mode === 'desktop', click: () => windows.hide() },
-      { label: text('lightweight'), type: 'checkbox', checked: mode === 'browser', enabled: !busy,
-        click: () => run(changeMode) },
-      { label: text('reload'), enabled: !busy, click: () => run(reload) },
-      { type: 'separator' },
-      { label: text('quit'), enabled: !busy, click: () => run(() => bridge.requestClose()) }
-    ]);
-  }
+  let ready = false;
+  function menu() { }
   async function run(action) {
     if (busy || ended) return;
     busy = true; menu();
@@ -47,9 +37,14 @@ function createTrayLifecycle(config, bridge, windows, electron) {
   }
   async function refreshLocale() {
     const saved = await json('control/v1/settings/interface');
-    setLocale(saved.values.locale); menu();
+    config.locale = saved.values.locale; setLocale(config.locale); menu();
   }
   async function show() {
+    if (!ready) {
+      config.visible = true;
+      if (mode === 'desktop') await windows.show();
+      return;
+    }
     if (mode === 'browser') await electron.shell.openExternal(new URL(config.route, config.address).href);
     else await windows.show();
   }
@@ -72,19 +67,33 @@ function createTrayLifecycle(config, bridge, windows, electron) {
     });
   }
   async function start() {
-    tray = new electron.Tray(await electron.app.getFileIcon(process.execPath, { size: 'small' }));
+    tray = new electron.Tray(path.join(__dirname, 'nexuspipeline.ico'));
     tray.setToolTip('NexusPipeline'); menu();
     tray.on('click', () => run(show));
+    startup.subscribe(value => {
+      if (value.kind === 'stage') tray.setToolTip(`NexusPipeline · ${value.stage + 1}/${value.total}`);
+      if (value.kind === 'failed') tray.setToolTip('NexusPipeline · ' + (config.locale === 'zh-CN' ? '启动失败' : 'Startup failed'));
+    });
     tray.on('right-click', () => {
       if (refresh || ended) return;
       refresh = (async () => {
-        await refreshLocale().catch(() => {});
-        if (!ended) tray.popUpContextMenu(contextMenu);
-      })().finally(() => { refresh = undefined; });
+        const action = await startup.menu(mode === 'browser', busy || (!ready && !startup.failed), config.locale);
+        if (ended) return;
+        if (action === 3 && startup.failed) { startup.dismiss(); return; }
+        if (!ready) return;
+        if (action === 1) await run(changeMode);
+        if (action === 2) await run(reload);
+        if (action === 3) await run(() => bridge.requestClose());
+      })().catch(() => {}).finally(() => { refresh = undefined; });
+      return refresh;
     });
-    await refreshLocale();
-    if (config.visible) await show();
+    if (config.visible && mode === 'desktop') await windows.show();
   }
-  return Object.freeze({ start, refreshMenu: menu, dispose() { ended = true; tray?.destroy(); } });
+  async function complete() {
+    ready = true; tray.setToolTip('NexusPipeline');
+    await refreshLocale();
+    if (config.visible && mode === 'browser') await show();
+  }
+  return Object.freeze({ start, complete, show, refreshMenu: menu, dispose() { ended = true; tray?.destroy(); } });
 }
 module.exports = { createTrayLifecycle };

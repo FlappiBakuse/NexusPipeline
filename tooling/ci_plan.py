@@ -8,7 +8,7 @@ from git_source import clean_commit, git, git_identity
 from source_snapshot import source_files
 
 REPOSITORIES = {"host": "FlappiBakuse/NexusPipeline", "plugins": "FlappiBakuse/NexusPipeline-Plugins"}
-DEFAULTS = ["emulator-support", "live-screenshot"]
+DEFAULTS = ["@bundled"]
 
 
 def source_identity(root, commit=None):
@@ -53,7 +53,7 @@ def plugins(root):
     for kind in ("managed", "specialized"):
         for file in (root / "plugins" / kind).glob("*/extension.json"):
             manifest = json.loads(file.read_bytes())
-            result[manifest["extensionId"]] = {"kind": kind, "frontend": manifest.get("frontend") is not None,
+            result[manifest["extensionId"]] = {"kind": kind, "frontend": manifest.get("frontend") is not None, "specialized": manifest.get("specialized") is not None,
                                                  "path": file.parent.relative_to(root).as_posix()}
     if not result:
         raise ValueError("Plugin production declarations are missing")
@@ -72,13 +72,15 @@ def host_scope(paths):
             scope["desktop"] = True
         elif path.startswith("apps/installer/"):
             projects.add("NexusPipeline.Installer")
+        elif path.startswith("apps/launcher/"):
+            projects.add("NexusPipeline.Launcher")
         elif path.startswith(("sdk/", "contracts/")):
-            projects.update(["NexusPipeline.Host", "NexusPipeline.Installer", "NexusPipeline.Maintenance"])
+            projects.update(["NexusPipeline.Host", "NexusPipeline.Launcher", "NexusPipeline.Installer", "NexusPipeline.Maintenance"])
             scope.update(web=True, extensions=DEFAULTS)
         elif path.startswith(("src/", "apps/host/", "apps/maintenance/")):
-            projects.update(["NexusPipeline.Host", "NexusPipeline.Installer", "NexusPipeline.Maintenance"])
+            projects.update(["NexusPipeline.Host", "NexusPipeline.Launcher", "NexusPipeline.Installer", "NexusPipeline.Maintenance"])
         else:
-            projects.update(["NexusPipeline.Host", "NexusPipeline.Installer", "NexusPipeline.Maintenance"])
+            projects.update(["NexusPipeline.Host", "NexusPipeline.Launcher", "NexusPipeline.Installer", "NexusPipeline.Maintenance"])
             scope.update(web=True, desktop=True, extensions=DEFAULTS)
     scope["projects"] = sorted(projects)
     scope["web"] |= "NexusPipeline.Host" in projects
@@ -97,7 +99,7 @@ def plugin_scope(root, paths):
         elif path.startswith("plugins/managed/frontend-ui/"):
             selected.update(name for name, item in declarations.items() if item["frontend"])
         elif path.startswith("adapter-runtime/"):
-            selected.update(name for name, item in declarations.items() if item["kind"] == "specialized" or name == "maa-framework")
+            selected.update(name for name, item in declarations.items() if item["specialized"])
         else:
             selected.update(declarations)
     return {"projects": [], "web": False, "desktop": False, "extensions": sorted(selected)}

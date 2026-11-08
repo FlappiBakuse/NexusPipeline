@@ -7,6 +7,7 @@ namespace NexusPipeline.Platform.Storage;
 internal static class ApplicationTree
 {
     internal const string HostEntry = "NexusPipeline.exe";
+    internal const string LauncherEntry = "resources/desktop/NexusPipeline.Launcher.exe";
     internal const string MaintenanceEntry = "NexusPipeline.update.exe";
     internal const string DesktopEntry = "resources/desktop/NexusPipeline.Desktop.exe";
     internal const string DesktopArchive = "resources/desktop/resources/app.asar";

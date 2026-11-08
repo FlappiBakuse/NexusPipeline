@@ -3,6 +3,7 @@ using Microsoft.Data.Sqlite;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Operations;
 using NexusPipeline.Core.Maintenance;
+using NexusPipeline.Platform.Storage.Journals;
 
 namespace NexusPipeline.Platform.Storage.Sqlite;
 
@@ -195,7 +196,7 @@ public sealed class RecoveryJournalRegistry(StateDatabase database) : IRecoveryR
         }
     }
 
-    internal void VisitCompleted(Action<RecoveryRegistrySnapshot> visit)
+    internal IEnumerable<RecoveryRegistrySnapshot> ReadCompleted()
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
         using var transaction = connection.BeginTransaction(deferred: true);
@@ -209,7 +210,7 @@ public sealed class RecoveryJournalRegistry(StateDatabase database) : IRecoveryR
             command.Parameters.AddWithValue("$after", after);
             var owners = new List<Guid>();
             using (var rows = command.ExecuteReader()) while (rows.Read()) owners.Add(Guid.ParseExact(rows.GetString(0), "D"));
-            foreach (var owner in owners) visit(ReadSnapshot(connection, transaction, owner));
+            foreach (var owner in owners) yield return ReadSnapshot(connection, transaction, owner);
             if (owners.Count < 128) break;
             after = owners[^1].ToString("D");
         }
@@ -309,14 +310,8 @@ public sealed class RecoveryJournalRegistry(StateDatabase database) : IRecoveryR
     RecoveryRegistrySnapshot IRecoveryRegistry.ReadSnapshot() => ReadActiveSnapshot();
     internal RecoveryRegistrySnapshot ReadActiveSnapshot() => ReadSnapshot(null);
 
-    internal RecoveryRegistrySnapshot ReadSnapshot(Guid? requiredJournalId)
-    {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
-        using var transaction = connection.BeginTransaction(deferred: true);
-        var result = ReadSnapshot(connection, transaction, requiredJournalId);
-        transaction.Commit();
-        return result;
-    }
+    internal RecoveryRegistrySnapshot ReadSnapshot(Guid? requiredJournalId) =>
+        HistoryReadScope.ReadDatabase(database, (connection, transaction) => ReadSnapshot(connection, transaction, requiredJournalId));
 
     internal static RecoveryRegistrySnapshot ReadInspectedSnapshot(DatabaseInspection inspection)
     {
@@ -345,6 +340,7 @@ public sealed class RecoveryJournalRegistry(StateDatabase database) : IRecoveryR
     private static RecoveryRegistrySnapshot ReadSnapshot(SqliteConnection connection, SqliteTransaction transaction, Guid? requiredJournalId = null,
         bool includeHistory = false)
     {
+        using var timing = StartupProfile.Measure("history.sql-snapshot");
         if (requiredJournalId is null) RecoveryCapacityStore.VerifyGlobal(connection, transaction);
         var journals = ReadJournals(connection, transaction, requiredJournalId, includeHistory);
         var effects = new List<FileEffect>();

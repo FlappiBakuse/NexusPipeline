@@ -108,6 +108,26 @@ public sealed class StepEvidenceTests
         _ = await collector.CollectAsync(await fixture.Writer.StopAsync(TimeSpan.FromSeconds(10)), TimeSpan.FromSeconds(10));
     }
 
+    [Fact(DisplayName = "A Generic Zero Exit Without Its Configured Completion Marker Retains Retryable Failure")]
+    public async Task RejectsMissingCompletion()
+    {
+        using var fixture = new StepWriterFixture("quiet", judgement: new(AutomationJudgementLanguage.Keywords, ["done"], [], null));
+        var source = fixture.Base.Source; var binding = Binding(fixture);
+        using var collector = new StepEvidenceCollector(source.Instance, source.Database, new(), source.Lease, binding, fixture.Writer);
+        fixture.Scope.EnterApplying(); collector.Start();
+        Assert.Equal(0, await fixture.Writer.AwaitRootAsync(TimeSpan.FromSeconds(10)));
+        await collector.ObserveExitAsync();
+        var proof = await collector.CollectAsync(await fixture.Writer.StopAsync(TimeSpan.FromSeconds(10)), TimeSpan.FromSeconds(10));
+        var result = proof.Use(binding, value => value);
+        Assert.Equal(EngineOutcome.Succeeded, result.Engine); Assert.Equal(BusinessOutcome.Failed, result.Business);
+        Assert.Equal("execution_completion_missing", result.ReasonCode);
+        var document = StepEvidenceCodec.Read(new(source.Instance, new()), binding, result.Artifact);
+        Assert.Equal(0, document.ExitCode); Assert.True(document.RawOutput is not null);
+        Assert.Equal(result, new StepEvidenceReader(source.Instance, source.Database, new()).Read(binding, result.Artifact, true));
+        new AttemptTerminalStore(source.Instance, source.Database, new(), source.Lease).FreezeDispatch(fixture.JournalId, true);
+        Assert.Throws<IOException>(() => new StepEvidenceReader(source.Instance, source.Database, new()).Read(binding, result.Artifact, true));
+    }
+
     private static StepEvidenceBinding Binding(StepWriterFixture fixture)
     {
         var state = fixture.Scope.VerifyReadOnly();

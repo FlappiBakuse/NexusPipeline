@@ -163,8 +163,8 @@ internal sealed class TaskAdapterService : ITaskAdapterPort
         var patches = (response.ConfigPatches ?? []).Select(patch => new ConfigurationPatchReader(_contracts)
             .Read(JsonSerializer.SerializeToUtf8Bytes(patch))).ToImmutableArray();
         var diagnostics = Diagnostics(response);
-        if (ProposalDigest(source.Stamp, patches, diagnostics) != expected || index >= patches.Length ||
-            diagnostics.Any(item => item.Severity == AdapterDiagnosticSeverity.Blocking)) throw new IOException("adapter_repair_proposal_changed");
+        if (ProposalDigest(source.Stamp, patches, diagnostics) != expected || index >= patches.Length)
+            throw new IOException("adapter_repair_proposal_changed");
         var patch = patches[index];
         var script = new AutomationDefinitionStore(_database).Read().Scripts.Single(item => item.ExtensionId == source.Selection.ExtensionId &&
             item.Id == source.Configurations.Single(configuration => configuration.Address.ResourceId == patch.Binding.ResourceId).ScriptId);
@@ -180,7 +180,20 @@ internal sealed class TaskAdapterService : ITaskAdapterPort
             try
             {
                 using var original = new ConfigurationDocument(patch.Binding, declaration.Syntax, declaration.Access, bytes);
-                var candidate = original.Apply(patch); CryptographicOperations.ZeroMemory(candidate);
+                var candidate = original.Apply(patch);
+                try
+                {
+                    var resources = source.Resources.Select(resource => resource.ResourceId != saved.Address.ResourceId ? resource :
+                        TaskResourceValue.Create(source.Selection.OperationId, resource.ResourceId, saved.Revision,
+                            Convert.ToHexStringLower(SHA256.HashData(candidate)), candidate, declaration.Syntax) with
+                        { RelativePath = resource.RelativePath, SourcePath = resource.SourcePath }).ToArray();
+                    var checkedCandidate = await new AdapterPreparation(_database, _activator, _secrets, _compilation, new(_instance, _contracts))
+                        .ExecuteAsync(source, "discover", cancellationToken, resources).ConfigureAwait(false);
+                    if (Diagnostics(checkedCandidate).Any(item => item.Severity == AdapterDiagnosticSeverity.Blocking &&
+                        (item.ResourceId is null || item.ResourceId == saved.Address.ResourceId)))
+                        throw new IOException("adapter_repair_candidate_blocked");
+                }
+                finally { CryptographicOperations.ZeroMemory(candidate); }
             }
             finally { CryptographicOperations.ZeroMemory(bytes); }
         }

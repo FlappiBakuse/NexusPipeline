@@ -74,7 +74,7 @@ internal static class ExecutionLogSelectors
     {
         var step = total.Steps.Single(item => item.StepId == stepId);
         var bundle = new ExecutionJudgementInputs(instance, contracts).ReadBundle(total);
-        var paths = bundle.Scripts.Single(item => item.Id == step.ScriptId).LogPaths;
+        var paths = NexusPipeline.Platform.Storage.Automation.BindingSourceCodec.Resolve(bundle, step).LogPaths;
         if (paths.Count != step.LogTargets.Count) throw Invalid();
         var roots = total.RootBindings.ToDictionary(item => item.RootId, item => item.Path);
         return paths.Select((path, index) =>

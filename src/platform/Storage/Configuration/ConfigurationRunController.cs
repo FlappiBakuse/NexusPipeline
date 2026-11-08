@@ -1,3 +1,4 @@
+using StepEvidenceBinding = NexusPipeline.Platform.Storage.Execution.StepEvidenceBinding;
 using System.Runtime.Versioning;
 using System.Collections.Immutable;
 using NexusPipeline.Core.Configuration;
@@ -5,7 +6,6 @@ using NexusPipeline.Platform.Processes;
 using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage.Journals;
 using NexusPipeline.Platform.Storage.Sqlite;
-using NexusPipeline.Platform.Storage.Execution;
 
 namespace NexusPipeline.Platform.Storage.Configuration;
 
@@ -36,6 +36,7 @@ public sealed class ConfigurationRunController : IDisposable
     private bool _emptyJobReleased;
     private StoppedConfigurationEditor? _collectedForParent;
     private StoppedConfigurationEditor? _lastConfigurationStopped;
+    private Exception? _diagnosticFailure;
     public string? SynchronizationFailureCode { get; private set; }
 
     public ConfigurationRunController(RuntimeInstance instance, StateDatabase database, ContractReader contracts, InstanceLease lease,
@@ -67,7 +68,7 @@ public sealed class ConfigurationRunController : IDisposable
     internal bool HasConfigurationHistory => HasConfigurationJobRegistration || _lastConfigurationStopped is not null;
     internal void RegisterPreparedJob() => _writer.RegisterPreparedJob();
 
-    internal void AttachNextWriter(StepWriterScope parentScope)
+    internal void AttachNextWriter(IConfigurationWriterScope parentScope)
     {
         _gate.Wait();
         try
@@ -75,9 +76,7 @@ public sealed class ConfigurationRunController : IDisposable
             Verify();
             if (!_writer.IsHookGroup || _completed || !_closing || !_monitor.IsCompletedSuccessfully || _collectedForParent is null)
                 throw new IOException("configuration_group_predecessor_uncollected");
-            var parent = AttemptWriterState.Read(_instance, _database, _contracts, Required().ParentJournalId);
-            var job = parent.Jobs.Single(job => job.JobName == _writer.JobName);
-            _writer.UseStepEvidence(StepResultCodec.Binding(parent.Latest.Root, job), _collectedForParent, (_, _) => true);
+            parentScope.RequirePreviousWriter(_writer, _collectedForParent);
             var previous = _writer;
             _writer = new(_instance, _database, _contracts, _lease, _sessionId, _subject, parentScope, deferRegistration: true);
             previous.Dispose();
@@ -319,6 +318,7 @@ public sealed class ConfigurationRunController : IDisposable
             }
             ConfigurationRecoveryHolds.Publish(_database, _index, _payloadRoots);
             if (failure is not null) throw failure;
+            if (_diagnosticFailure is not null) throw new IOException("configuration_diagnostic_persistence_failed", _diagnosticFailure);
             var result = _prepared.Use(_ =>
             {
                 using var sample = _writer.IsHookGroup
@@ -341,7 +341,19 @@ public sealed class ConfigurationRunController : IDisposable
             await SynchronizeAsync(Guid.NewGuid()).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (_timerCancellation.IsCancellationRequested) { }
-        catch { SynchronizationFailureCode = "configuration_run_synchronization_failed"; }
+        catch (Exception error)
+        {
+            SynchronizationFailureCode = "configuration_run_synchronization_failed";
+            try
+            {
+                var session = Required();
+                var user = ConfigurationRunBinding.Read(_instance, _database, _contracts, session).Step.UserId;
+                new Records.RunDiagnosticStore(_instance, _database).Record(session.ParentJournalId, session.StepId,
+                    user is null ? null : Guid.Parse(user), "configuration-sync", SynchronizationFailureCode, error);
+            }
+            catch (Exception failure) when (failure is IOException or System.Text.Json.JsonException)
+            { _diagnosticFailure = failure; }
+        }
     }
 
     private ConfigurationRunStatus Required() => _runs.Read(_sessionId, _subject) ?? throw new ConfigurationException("configuration_run_missing");

@@ -8,7 +8,7 @@ import subprocess
 
 def word_count(name):
     name = re.sub(r"^I(?=[A-Z][a-z])", "", name)
-    name = name.replace("BetterGi", "Bettergi").replace("MuMu", "Mumu")
+    name = name.replace("MuMu", "Mumu")
     return len(re.findall(r"[A-Z]+(?=[A-Z][a-z]|[0-9]|$)|[A-Z]?[a-z]+[0-9]*|[0-9]+", name))
 
 

@@ -9,6 +9,7 @@ internal static class ExclusiveProgramAdmission
 {
     internal static void RequireStopped(string executable)
     {
+        executable = Path.GetFullPath(executable);
         var candidates = Process.GetProcessesByName(Path.GetFileNameWithoutExtension(executable));
         try
         {

@@ -1,19 +1,14 @@
 using Microsoft.Data.Sqlite;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Platform.Storage.Execution;
+using NexusPipeline.Platform.Storage.Journals;
 
 namespace NexusPipeline.Platform.Storage.Sqlite;
 
 public sealed class JournalEffectGate(StateDatabase database) : IJournalEffectGate
 {
-    public EffectGateSnapshot Read(Guid journalId)
-    {
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
-        using var transaction = connection.BeginTransaction(deferred: true);
-        var snapshot = Read(connection, transaction, journalId).Gate;
-        transaction.Commit();
-        return snapshot;
-    }
+    public EffectGateSnapshot Read(Guid journalId) => HistoryReadScope.ReadDatabase(database,
+        (connection, transaction) => Read(connection, transaction, journalId).Gate);
 
     public EffectGateSnapshot Enter(RegisteredJournal expected, long expectedGateRevision)
         => Move(expected, expectedGateRevision, EffectGateState.Entered);

@@ -214,11 +214,25 @@ internal sealed class StepEvidenceReader(RuntimeInstance instance, StateDatabase
         }
         if (!verifyContents) return document;
         var definition = Judgement(context.Total, binding.StepId);
+        if (document.ReasonCode == "execution_completion_missing")
+        {
+            var step = context.Total.Steps.Single(item => item.StepId == binding.StepId);
+            if (!collected || document.Root is null || document.ExitCode != 0 || document.Engine != EngineOutcome.Succeeded ||
+                document.Business != BusinessOutcome.Failed || document.Stop is not null || AcceptedClose(binding) is not null && !IsPublishedResult(binding, artifact) || raw is not { IsComplete: true } || step.Adapter is not null || step.Provider is not null ||
+                definition.Language == AutomationJudgementLanguage.Keywords && definition.SuccessKeywords.IsEmpty && definition.FailureKeywords.IsEmpty ||
+                definition.Language != AutomationJudgementLanguage.Keywords && scriptEvidence is null)
+                throw Invalid();
+        }
         if (definition.Language != AutomationJudgementLanguage.Keywords)
         {
             if (document.Business == BusinessOutcome.NotApplicable) throw Invalid();
             var decision = scriptEvidence is null ? null : new JudgementEvidenceReader(instance, database, contracts)
                 .Replay(context.Total, scriptEvidence, definition, retirement, document.Judgement);
+            if (document.ReasonCode == "execution_completion_missing")
+            {
+                if (decision is { Outcome: not BusinessOutcome.Unverified }) throw Invalid();
+                return document;
+            }
             if (document.Business != BusinessOutcome.Unverified && prior?.Business != document.Business &&
                 (decision is null || decision.Outcome != document.Business ||
                     decision.ReasonCode != document.ReasonCode && document.ReasonCode != document.Stop?.ReasonCode)) throw Invalid();
@@ -246,10 +260,28 @@ internal sealed class StepEvidenceReader(RuntimeInstance instance, StateDatabase
                 document.ReasonCode != "execution_judgement_not_applicable" && document.ReasonCode != document.Stop?.ReasonCode) throw Invalid();
             return document;
         }
+        if (document.ReasonCode == "execution_completion_missing")
+        {
+            if (!retiredRaw && (!continuous || judgement.Business != BusinessOutcome.Unverified)) throw Invalid();
+            return document;
+        }
         if (document.Business != BusinessOutcome.Unverified && prior?.Business != document.Business &&
             !retiredRaw && (!continuous || judgement.Decision is null || judgement.Business != document.Business || judgement.Decision.ReasonCode != document.ReasonCode)) throw Invalid();
         if (document.Business == BusinessOutcome.Partial && prior?.Business != BusinessOutcome.Partial) throw Invalid();
         return document;
+    }
+
+    private bool IsPublishedResult(StepEvidenceBinding binding, BlobReference artifact)
+    {
+        var parent = new RecoveryJournalRegistry(database).ReadJournal(binding.ParentJournalId);
+        if (parent.Kind != JournalKind.RunAttempt || parent.OperationId != binding.ParentOperationId || parent.PlanDigest != binding.PlanDigest)
+            throw Invalid();
+        var projected = new JournalStore(instance, contracts).ReadAllRevisions(parent.JournalId)
+            .SingleOrDefault(item => item.Revision == parent.Revision) ?? throw Invalid();
+        if (projected.Phase != parent.Phase || projected.PlanDigest != parent.PlanDigest || projected.PlanPath != parent.PlanPath)
+            throw Invalid();
+        // Admission freezes business changes after close; only the exact already indexed artifact can survive that boundary.
+        return StepResultCodec.ReadAll(projected.Root).Any(item => item.Binding == binding && item.Artifact == artifact && item.Stage == "collected");
     }
 
     private void VerifyStop(ExecutionPlan total, string stepId, StepEvidenceDocument document, StepStopObservation stop)

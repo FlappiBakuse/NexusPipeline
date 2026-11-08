@@ -45,16 +45,11 @@
         },
         "dashboardCards": {
           "type": "array",
-          "maxItems": 4,
+          "maxItems": 64,
           "uniqueItems": true,
           "items": {
-            "enum": [
-              "game-activities",
-              "status",
-              "running",
-              "history-duration",
-              "history-counts"
-            ]
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9.-]{0,95}$"
           }
         },
         "pinnedSettings": {
@@ -75,17 +70,11 @@
   "$defs": {
     "settings": {
       "type": "array",
-      "maxItems": 6,
+      "maxItems": 64,
       "uniqueItems": true,
       "items": {
-        "enum": [
-          "service",
-          "remote",
-          "proxy",
-          "advanced",
-          "updates",
-          "diagnostics"
-        ]
+        "type": "string",
+        "pattern": "^(service|remote|proxy|advanced|updates|diagnostics|extension:[a-z0-9-]{1,80}:[a-z0-9-]{1,40})$"
       }
     }
   }

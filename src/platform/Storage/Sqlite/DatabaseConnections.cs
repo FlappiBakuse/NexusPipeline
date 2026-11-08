@@ -4,21 +4,22 @@ namespace NexusPipeline.Platform.Storage.Sqlite;
 
 internal static class DatabaseConnections
 {
-    internal static SqliteConnection Open(string path, bool readOnly = false)
+    internal static SqliteConnection Open(string path, bool readOnly = false, bool allowPooling = true)
     {
+        using var timing = StartupProfile.Measure("database.open");
         var protectedPath = readOnly ? DatabaseReadScope.ProtectedPath(path) : null;
         var connection = new SqliteConnection(new SqliteConnectionStringBuilder
         {
             DataSource = OperatingSystem.IsWindows() ? PhysicalPathPolicy.NativePath(protectedPath ?? path) : path,
             Mode = readOnly ? SqliteOpenMode.ReadOnly : SqliteOpenMode.ReadWrite,
             Cache = SqliteCacheMode.Private,
-            Pooling = protectedPath is not null,
+            Pooling = allowPooling && protectedPath is not null,
             DefaultTimeout = 2
         }.ToString());
         try
         {
             connection.Open();
-            if (protectedPath is not null) DatabaseReadScope.Track(connection);
+            if (allowPooling && protectedPath is not null) DatabaseReadScope.Track(connection);
             using var command = connection.CreateCommand();
             command.CommandText = "PRAGMA foreign_keys=ON; PRAGMA trusted_schema=OFF;";
             command.ExecuteNonQuery();

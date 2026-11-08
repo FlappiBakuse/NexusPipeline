@@ -22,6 +22,8 @@ internal sealed class InstalledEmulatorPort(PreparedExtensionActivation source, 
 
     private sealed class Provider(InstalledExtensionConsumption consumption, IEmulatorProvider inner) : IEmulatorProvider
     {
+        public IReadOnlyList<EmulatorLayout> Layouts { get { using var use = consumption.Begin(); var result = inner.Layouts.ToArray(); use.RequireCurrent(); return result; } }
+        public EmulatorTargetDescription Describe(EmulatorTarget target) { using var use = consumption.Begin(); var result = inner.Describe(target); use.RequireCurrent(); return result; }
         public async ValueTask<EmulatorDiscoveryResult> DiscoverAsync(IEmulatorInventory inventory, bool supportsAndroid, CancellationToken cancellationToken)
         {
             using var use = await consumption.BeginAsync(cancellationToken).ConfigureAwait(false);

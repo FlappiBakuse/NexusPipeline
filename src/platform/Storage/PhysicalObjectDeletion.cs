@@ -16,6 +16,12 @@ public static class PhysicalObjectDeletion
         _ = Delete(intent, static () => true);
     }
 
+    internal static void DeleteInspectionCopy(FileObjectDeletion intent)
+    {
+        if (intent.Kind != FileObjectKind.File) throw new ArgumentException("An inspection file is required");
+        _ = Delete(intent, static () => true, long.MaxValue);
+    }
+
     public static bool TryDeleteUnreferenced(FileObjectDeletion intent, Func<bool> isUnreferenced)
     {
         if (intent.Kind != FileObjectKind.File) throw new ArgumentException("A content file is required");
@@ -23,9 +29,9 @@ public static class PhysicalObjectDeletion
         return Delete(intent, isUnreferenced);
     }
 
-    private static bool Delete(FileObjectDeletion intent, Func<bool> authorize)
+    private static bool Delete(FileObjectDeletion intent, Func<bool> authorize, long maximumBytes = 1_073_741_824)
     {
-        if (intent.Kind is not (FileObjectKind.File or FileObjectKind.Directory) || intent.SizeBytes is < 0 or > 1_073_741_824 ||
+        if (intent.Kind is not (FileObjectKind.File or FileObjectKind.Directory) || intent.SizeBytes < 0 || intent.SizeBytes > maximumBytes ||
             intent.Kind == FileObjectKind.Directory && (intent.SizeBytes != 0 || intent.Sha256 is not null) ||
             intent.Kind == FileObjectKind.File && (intent.Sha256 is null || intent.Sha256.Length != 64))
             throw new ArgumentException("Invalid exact-object deletion intent");

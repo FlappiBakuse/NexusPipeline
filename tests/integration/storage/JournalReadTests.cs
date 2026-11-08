@@ -41,6 +41,10 @@ public sealed class JournalReadTests
         File.WriteAllText(path, "changed");
         Assert.ThrowsAny<Exception>(() => reader.Read(id));
         Assert.Equal("changed", File.ReadAllText(path));
+        Assert.ThrowsAny<Exception>(() => { using var rejected = JournalReadScope.Hold(reader, id); });
+        File.WriteAllBytes(path, bytes);
+        using var restored = JournalReadScope.Hold(reader, id);
+        Assert.Equal(id, reader.Read(id).JournalId);
     }
 
     [Fact(DisplayName = "Journal Read Scopes Keep Separate Instances And Restore Their Outer Owner")]

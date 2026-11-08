@@ -5,6 +5,7 @@ using NexusPipeline.Core.Execution;
 using NexusPipeline.Core.Maintenance;
 using NexusPipeline.Platform.Extensions;
 using NexusPipeline.Platform.Serialization;
+using NexusPipeline.Platform.Processes;
 using NexusPipeline.Platform.Storage.Journals;
 using NexusPipeline.Platform.Storage.Sqlite;
 
@@ -18,7 +19,6 @@ internal sealed class InstalledActivationOrigin : IDisposable
     private readonly InstanceLease _lease;
     private readonly ContractReader _contracts;
     private readonly PayloadApplyRoots _roots;
-    private readonly ExtensionCatalogStore _catalog;
     private readonly ResourceOperationLease _root;
     private readonly ResourceOperationBorrow _borrow;
     private readonly ExtensionActivator.ApplyReservation _inventory;
@@ -27,17 +27,21 @@ internal sealed class InstalledActivationOrigin : IDisposable
     private readonly IReadOnlyList<ResourceClaim> _claims;
     private readonly BlobReference _plan;
     private readonly long _settingsRevision;
+    private ProcessIdentityLease? _processIdentity;
+    private bool _ownsIdentity;
     private InstallationReadLease? _evidence;
+    private ExtensionCatalogStore.InstalledHistory? _catalogEvidence;
+    private DatabaseValidationLease? _sql;
     private int _disposed;
     internal long InstalledRevision => _installed.Revision;
 
     private InstalledActivationOrigin(RuntimeInstance instance, StateDatabase database, InstanceLease lease,
-        ContractReader contracts, PayloadApplyRoots roots, ExtensionCatalogStore catalog, ResourceOperationLease root,
+        ContractReader contracts, PayloadApplyRoots roots, ResourceOperationLease root,
         ResourceOperationBorrow borrow, ExtensionActivator.ApplyReservation inventory, BoundExtensionInstallation installed,
         RecoveryIndex recovery, IReadOnlyList<ResourceClaim> claims, long settingsRevision)
     {
         _instance = instance; _database = database; _lease = lease; _contracts = contracts; _roots = roots;
-        _catalog = catalog; _root = root; _borrow = borrow; _inventory = inventory;
+        _root = root; _borrow = borrow; _inventory = inventory;
         _installed = installed.Metadata; _plan = installed.Operation.PlanReference;
         _recovery = recovery; _claims = Array.AsReadOnly(claims.ToArray()); _settingsRevision = settingsRevision;
     }
@@ -45,7 +49,7 @@ internal sealed class InstalledActivationOrigin : IDisposable
     internal static InstalledActivationOrigin Prepare(RuntimeInstance instance, StateDatabase database,
         InstanceLease lease, ContractReader contracts, PayloadApplyRoots roots, ExtensionCatalogStore catalog,
         ResourceLeaseManager resources, RecoveryIndex recovery, ResourceOperationLease root, ExtensionActivator.ApplyReservation inventory,
-        string extensionId)
+        string extensionId, ProcessIdentityLease? executor = null)
     {
         lease.VerifyHeld(instance);
         using var reads = DatabaseReadScope.Hold(database.DatabasePath);
@@ -64,9 +68,17 @@ internal sealed class InstalledActivationOrigin : IDisposable
             var settingsRevision = new HostSettingsStore(database).Read().Revision;
             var borrow = root.Borrow(resources, root.OperationId, claims);
             var result = new InstalledActivationOrigin(instance, database, lease, contracts, roots,
-                catalog, root, borrow, inventory, installed, recovery, claims, settingsRevision) { _evidence = evidence };
+                root, borrow, inventory, installed, recovery, claims, settingsRevision) { _evidence = evidence };
             evidence = null;
-            try { _ = result.RequireCurrent(); return result; }
+            try
+            {
+                result._processIdentity = executor ?? ProcessIdentityLease.HoldCurrent();
+                result._ownsIdentity = executor is null;
+                var package = installed.Operation.Source.Package ?? throw Invalid();
+                result._catalogEvidence = catalog.ProtectInstalledHistory(root, package.Catalog, package.Entry);
+                result._sql = new(database.DatabasePath, "activation.sql.validate");
+                _ = result.RequireCurrent(); return result;
+            }
             catch { result.Dispose(); throw; }
         }
         finally { evidence?.Dispose(); }
@@ -94,6 +106,7 @@ internal sealed class InstalledActivationOrigin : IDisposable
 
     internal BoundExtensionPayload RequireCurrent()
     {
+        using var timing = StartupProfile.Measure("activation.revalidate");
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         using var reads = DatabaseReadScope.Hold(_database.DatabasePath);
         using var paths = _evidence?.ProtectPaths();
@@ -108,20 +121,21 @@ internal sealed class InstalledActivationOrigin : IDisposable
                 .Read(_installed.JournalId, _plan);
             if (bound.Commit is null || bound.Footprint is null ||
                 ExtensionPayloadBinding.DerivedInstallation(bound.Plan, bound.Commit, bound.Footprint) != _installed ||
-                bound.Registered.Phase != JournalPhase.Committed || bound.Source.Package is not { } package) throw Invalid();
-            _catalog.RequireInstalledHistory(_root, package.Catalog, package.Entry);
-            var stopped = new JournalWriterStore(_database).ObserveForCurrentExecutor(_installed.JournalId);
+                bound.Registered.Phase != JournalPhase.Committed || bound.Source.Package is null) throw Invalid();
+            _catalogEvidence!.RequireCurrent();
+            var stopped = _sql!.Read((connection, transaction) => new JournalWriterStore(_database)
+                .ObserveWithExecutor(connection, transaction, _installed.JournalId, _processIdentity));
             if (!stopped.IsComplete || stopped.State != WriterState.Stopped)
                 throw new IOException("extension_original_writer_stop_unconfirmed");
-            using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
-            using var transaction = connection.BeginTransaction(deferred: true);
-            var saved = RecoveryJournalRegistry.ReadValidatedSnapshotInside(connection, transaction);
-            var settings = HostSettingsRows.ReadCurrent(connection, transaction);
-            if (settings.Revision != _settingsRevision || !saved.IsReady || saved.Isolations.Any(item => Conflicts(item.ResourceKey, item.Mode)) ||
-                ExtensionInstalledRows.ReadCurrentMetadata(connection, transaction, _installed.ExtensionId) != _installed ||
-                settings.Values.Extensions
-                    .SingleOrDefault(item => item.ExtensionId == _installed.ExtensionId)?.Enabled != true) throw Invalid();
-            transaction.Commit();
+            _sql!.RequireCurrent((connection, transaction) =>
+            {
+                var saved = RecoveryJournalRegistry.ReadValidatedSnapshotInside(connection, transaction);
+                var settings = HostSettingsRows.ReadCurrent(connection, transaction);
+                if (settings.Revision != _settingsRevision || !saved.IsReady || saved.Isolations.Any(item => Conflicts(item.ResourceKey, item.Mode)) ||
+                    ExtensionInstalledRows.ReadCurrentMetadata(connection, transaction, _installed.ExtensionId) != _installed ||
+                    settings.Values.Extensions
+                        .SingleOrDefault(item => item.ExtensionId == _installed.ExtensionId)?.Enabled != true) throw Invalid();
+            });
             return bound;
         }));
     }
@@ -155,8 +169,14 @@ internal sealed class InstalledActivationOrigin : IDisposable
     public void Dispose()
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+        try { try { _sql?.Dispose(); } finally { _catalogEvidence?.Dispose(); } }
+        finally { DisposeEvidence(); }
+    }
+
+    private void DisposeEvidence()
+    {
         try { _evidence?.Dispose(); }
-        finally { _borrow.Dispose(); }
+        finally { try { if (_ownsIdentity) _processIdentity?.Dispose(); } finally { _borrow.Dispose(); } }
     }
 
     private static IOException Invalid() => new("extension_installed_activation_unbound");

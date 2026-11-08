@@ -108,12 +108,20 @@ class RecipeTests(unittest.TestCase):
         source = dict(sourceCommit=None, sourceTree=None, sourceMode='local-uncommitted', sourceManifestPath=str(source_manifest),
             sourceSnapshotHash=hashlib.sha256(source_manifest.read_bytes()).hexdigest())
         published = {project: [dict(path='NexusPipeline.' + project + '.exe', sizeBytes=1, sha256=letter * 64)]
-            for project, letter in (('Host', 'a'), ('Maintenance', 'b'))}
+            for project, letter in (('Host', 'a'), ('Launcher', 'f'), ('Maintenance', 'b'))}
         desktop_files = [dict(path=name, sizeBytes=1, sha256='c' * 64) for name in
             (ENTRY[18:], ASAR[18:], 'locales/en-US.pak', 'locales/zh-CN.pak')]
         desktop = dict(files=desktop_files, runtime=dict(version='44.9.0', sha256='d' * 64),
             runtimeIdentity=dict(runtimeProfileId='win-x64-en-zh-v1', runtimeProfileSha256='e' * 64, runtimeInventorySha256='f' * 64))
         value = create_manifest(source_root, source, 'test', published, desktop, 'a' * 64)
         self.assertIsNone(value['sourceSha']); self.assertIsNone(value['sourceTreeSha'])
+        self.assertEqual('desktop-runtime', next(item['kind'] for item in value['files']
+            if item['path'] == 'resources/desktop/NexusPipeline.Launcher.exe'))
+        changed = deepcopy(published)
+        changed['Launcher'][0]['sha256'] = '9' * 64
+        replacement = create_manifest(source_root, source, 'test', changed, desktop, 'a' * 64)
+        self.assertNotEqual(value['buildId'], replacement['buildId'])
+        self.assertNotEqual(value['desktop']['runtimeInventorySha256'], replacement['desktop']['runtimeInventorySha256'])
+        self.assertEqual(value['desktop']['electronArchiveSha256'], replacement['desktop']['electronArchiveSha256'])
         with self.assertRaisesRegex(ValueError, 'exact clean Git source'):
             create_manifest(source_root, source, 'production', published, desktop, 'a' * 64)

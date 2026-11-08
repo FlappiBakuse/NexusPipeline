@@ -21,6 +21,13 @@ internal static class UpdateBuildProfile
             using var input = blobs.OpenVerified(reference);
             RequireBundle(input, assembly, profile);
         }
+        if (manifest.Files.SingleOrDefault(file => file.RelativePath == manifest.LauncherEntry) is { } launcher)
+        {
+            var reference = contents.Contents.SingleOrDefault(blob => blob.Sha256 == launcher.Sha256 && blob.SizeBytes == launcher.SizeBytes)
+                ?? throw Invalid();
+            using var input = blobs.OpenVerified(reference);
+            RequireBundle(input, "NexusPipeline.Launcher.dll", profile);
+        }
     }
 
     internal static void RequireBundle(Stream input, string assembly, string profile)

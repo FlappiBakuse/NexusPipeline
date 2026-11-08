@@ -19,4 +19,6 @@ internal interface IConfigurationWriterScope
     void CloseAdmission(long elapsedMilliseconds);
     FrozenJobClosure BindClosure(FrozenJobClosure closure, long elapsedMilliseconds);
     BlobReference RecordClosed(FrozenJobClosure closure);
+    void RequirePreviousWriter(RunWriterProcess previous, StoppedConfigurationEditor stopped) =>
+        throw new IOException("configuration_writer_continuation_unavailable");
 }

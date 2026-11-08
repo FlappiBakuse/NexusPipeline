@@ -17,9 +17,37 @@ public sealed record ExtensionDetails(string ExtensionId, long InstalledRevision
 public sealed class ExtensionDetailsReader(RuntimeInstance instance, StateDatabase database, InstanceLease lease,
     ContractReader contracts, PayloadApplyRoots roots)
 {
+    public (byte[] Bytes, string ContentType)? ReadIcon(string extensionId)
+    {
+        lease.VerifyHeld(instance);
+        NexusPipeline.Core.Extensions.ExtensionIdentifiers.Require(extensionId);
+        var installed = new ExtensionInstalledEvidence(instance, database, contracts, roots).ReadCurrent(extensionId);
+        if (installed?.Metadata.IsInstalled != true) return null;
+        using var held = TreeReadLease.Acquire(installed.Footprint.TargetPath, installed.Footprint.ParentIdentity, installed.Footprint.Payload);
+        var manifest = ReadHeldListing(installed, contracts);
+        if (manifest.Icon is not { } name) return null;
+        var file = installed.Footprint.Payload.Snapshot.Entries.SingleOrDefault(item => item.RelativePath == name);
+        if (file is null || file.SizeBytes is < 1 or > 1048576) throw new IOException("extension_icon_invalid");
+        var bytes = File.ReadAllBytes(PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(installed.Footprint.TargetPath, name)));
+        if (bytes.LongLength != file.SizeBytes || Convert.ToHexStringLower(SHA256.HashData(bytes)) != file.Sha256)
+            throw new IOException("extension_icon_changed");
+        var png = bytes.AsSpan().StartsWith(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 });
+        var ico = bytes.AsSpan().StartsWith(new byte[] { 0, 0, 1, 0 });
+        if (!(name.EndsWith(".png", StringComparison.Ordinal) && png || name.EndsWith(".ico", StringComparison.Ordinal) && ico))
+            throw new IOException("extension_icon_format_invalid");
+        var current = new ExtensionInstalledEvidence(instance, database, contracts, roots).ReadCurrent(extensionId);
+        if (current?.Metadata != installed.Metadata) throw new IOException("extension_installed_evidence_changed");
+        return (bytes, png ? "image/png" : "image/x-icon");
+    }
+
     internal static NexusPipeline.Extensibility.Protocol.ExtensionManifest ReadListing(BoundExtensionInstallation installed, ContractReader contracts)
     {
         using var held = TreeReadLease.Acquire(installed.Footprint.TargetPath, installed.Footprint.ParentIdentity, installed.Footprint.Payload);
+        return ReadHeldListing(installed, contracts);
+    }
+
+    private static NexusPipeline.Extensibility.Protocol.ExtensionManifest ReadHeldListing(BoundExtensionInstallation installed, ContractReader contracts)
+    {
         var file = installed.Footprint.Payload.Snapshot.Entries.Single(item => item.RelativePath == "manifest.json");
         if (file.SizeBytes > 262144) throw new IOException("extension_manifest_limit");
         var bytes = File.ReadAllBytes(PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(installed.Footprint.TargetPath, "manifest.json")));

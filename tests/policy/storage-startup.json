@@ -1,19 +1,11 @@
 {
   "group": "storage-startup",
-  "expectedMethods": {
-    "NexusPipeline.StorageTests.StartupConnectionTests.ReadsCurrentFacts": 1,
-    "NexusPipeline.StorageTests.StartupConnectionTests.PinsDatabaseIdentity": 1,
-    "NexusPipeline.StorageTests.RecoveryOwnershipTests.RejectsMissingJobs": 1,
-    "NexusPipeline.StorageTests.RecoveryOwnershipTests.RecoversRecordedCreators": 1,
-    "NexusPipeline.StorageTests.RecoveryOwnershipTests.RejectsUnknownSuffix": 1,
-    "NexusPipeline.StorageTests.RecoveryOwnershipTests.RequiresStoppedCreator": 2,
-    "NexusPipeline.StorageTests.RecoveryOwnershipTests.RejectsLivingCreator": 1,
-    "NexusPipeline.StorageTests.RecoveryOwnershipTests.RejectsLivingJobs": 1,
-    "NexusPipeline.StorageTests.RecoveryOwnershipTests.RequiresWriterEvidence": 5,
-    "NexusPipeline.StorageTests.RecoveryOwnershipTests.RejectsExpiredLease": 1,
-    "NexusPipeline.StorageTests.RecoveryOwnershipTests.BindsKernelIdentity": 1,
-    "NexusPipeline.StorageTests.StartupAdmissionTests.PreservesUnrecognizedPlans": 10,
-    "NexusPipeline.StorageTests.StartupAdmissionTests.AdmitsCompletedPlans": 1,
-    "NexusPipeline.StorageTests.StartupAdmissionTests.ServesRecoveredState": 1
-  }
+  "classes": [
+    "NexusPipeline.StorageTests.InspectionCleanupTests",
+    "NexusPipeline.StorageTests.RecoveryOwnershipTests",
+    "NexusPipeline.StorageTests.StartupAdmissionTests",
+    "NexusPipeline.StorageTests.StartupConnectionTests",
+    "NexusPipeline.StorageTests.StartupPresentationTests",
+    "NexusPipeline.StorageTests.StartupChannelTests"
+  ]
 }

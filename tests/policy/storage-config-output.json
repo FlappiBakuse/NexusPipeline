@@ -1,19 +1,7 @@
 {
   "group": "storage-config-output",
-  "expectedMethods": {
-    "NexusPipeline.StorageTests.EditorOutputTests.ClosesWriterAdmission": 1,
-    "NexusPipeline.StorageTests.OutputCrashTests.RecoversFrozenOutput": 9,
-    "NexusPipeline.StorageTests.EditorOutputTests.ReplaysStoppedFacts": 1,
-    "NexusPipeline.StorageTests.EditorOutputTests.RejectsForeignStops": 1,
-    "NexusPipeline.StorageTests.EditorOutputTests.RejectsLateChanges": 1,
-    "NexusPipeline.StorageTests.EditorOutputTests.RejectsCorruptClosure": 1,
-    "NexusPipeline.StorageTests.EditorOutputTests.RequiresWritePolicy": 1,
-    "NexusPipeline.StorageTests.EditorOutputTests.RestoresFrozenOutput": 6,
-    "NexusPipeline.StorageTests.EditorOutputTests.BindsChildWriters": 2,
-    "NexusPipeline.StorageTests.EditorOutputTests.RejectsChangedUnexecuted": 1,
-    "NexusPipeline.StorageTests.EditorOutputTests.KeepsDurableClosure": 1,
-    "NexusPipeline.StorageTests.EditorOutputTests.PreservesUnlistedObjects": 1,
-    "NexusPipeline.StorageTests.EditorOutputTests.RejectsUnauthorizedOutput": 2,
-    "NexusPipeline.StorageTests.EditorOutputTests.RejectsChangedEditors": 1
-  }
+  "classes": [
+    "NexusPipeline.StorageTests.EditorOutputTests",
+    "NexusPipeline.StorageTests.OutputCrashTests"
+  ]
 }

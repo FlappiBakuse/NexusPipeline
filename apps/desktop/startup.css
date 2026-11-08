@@ -1,0 +1,14 @@
+@import url("startup-content.css");
+:root { color-scheme: dark; font: 14px "Segoe UI", sans-serif; color: #e9effb; background: #131f33; }
+* { box-sizing: border-box; }
+body { margin: 0; }
+header { height: 39px; display: flex; align-items: center; justify-content: space-between; padding-left: 18px; -webkit-app-region: drag; }
+nav { display: flex; height: 100%; -webkit-app-region: no-drag; }
+button { border: 0; color: inherit; background: transparent; cursor: pointer; font: inherit; }
+nav button { width: 46px; font-size: 18px; }
+button:hover, button:focus-visible { background: #2b405d; }
+#hide:hover { background: #b92c3c; }
+main { height: calc(100vh - 39px); }
+pre { max-width: 80vw; white-space: pre-wrap; overflow-wrap: anywhere; }
+#actions button { border: 1px solid #456080; border-radius: 8px; padding: 10px 20px; margin: 8px; }
+[hidden] { display: none !important; }

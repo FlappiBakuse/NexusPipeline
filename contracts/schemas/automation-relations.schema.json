@@ -116,6 +116,9 @@
           "items": {
             "$ref": "common.schema.json#/$defs/uuid"
           }
+        },
+        "source": {
+          "$ref": "automation-binding-source.schema.json"
         }
       },
       "allOf": [

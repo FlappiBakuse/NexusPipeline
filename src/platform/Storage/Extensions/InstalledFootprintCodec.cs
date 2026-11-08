@@ -34,7 +34,12 @@ internal sealed class InstalledFootprintCodec(RuntimeInstance instance, PayloadA
 
     internal void RequireBinding(ExtensionInstalledFootprint footprint, ExtensionInstalledMetadata saved,
         FrozenPayloadApply original, BlobReference originalPlanSource,
-        ExtensionPhysicalEntry physical)
+        ExtensionPhysicalEntry physical) => RequireBinding(footprint, saved, original, originalPlanSource, physical,
+            new PayloadSourceCodec(instance, contracts).ReadMetadata(originalPlanSource));
+
+    internal void RequireBinding(ExtensionInstalledFootprint footprint, ExtensionInstalledMetadata saved,
+        FrozenPayloadApply original, BlobReference originalPlanSource,
+        ExtensionPhysicalEntry physical, ExtensionPayloadSource source)
     {
         Validate(footprint);
         if (original.Kind != JournalKind.ExtensionApply || original.InstanceId != instance.InstanceId ||
@@ -52,7 +57,6 @@ internal sealed class InstalledFootprintCodec(RuntimeInstance instance, PayloadA
             !footprint.Payload.Contents.SequenceEqual(expected.Contents) ||
             (footprint.IsInstalled ? !footprint.Payload.OriginalObjects.SequenceEqual(physical.Record.CandidateObjects) :
                 footprint.Payload.OriginalObjects.Count != 0)) throw Invalid();
-        var source = new PayloadSourceCodec(instance, contracts).ReadMetadata(originalPlanSource);
         if (source.OperationId != original.OperationId || source.JournalId != original.JournalId ||
             footprint.Revision != checked(source.ExpectedInstalledRevision + 1)) throw Invalid();
         if (source.Package is { } package)

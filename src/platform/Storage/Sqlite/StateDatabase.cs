@@ -51,6 +51,7 @@ public sealed class StateDatabase
     public static StateDatabase OpenExisting(RuntimeInstance instance, string diagnosticRoot,
         IDatabaseStartupAdmission? admission = null, InstanceLease? startupLease = null)
     {
+        using var profile = StartupProfile.Begin("database.admission");
         var actual = new InstanceRoot(new ContractReader()).OpenExisting(instance.RuntimeRoot);
         if (actual.InstanceId != instance.InstanceId) throw new IOException("runtime_identity_mismatch");
         var guard = PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(actual.RuntimeRoot, "state-initialization.guard"));
@@ -73,6 +74,8 @@ public sealed class StateDatabase
             if (source.Length != expected.SizeBytes || Convert.ToHexStringLower(SHA256.HashData(source)) != expected.Sha256)
                 throw new IOException("database_group_changed_after_inspection");
         }
+        Console.Error.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { kind = "startup.database-source-recheck",
+            digestReadBytes = evidence.Values.Sum(file => file.SizeBytes) }));
         if (startupLease is not null)
         {
             startupLease.VerifyHeld(actual);
@@ -80,7 +83,7 @@ public sealed class StateDatabase
             using var transaction = connection.BeginTransaction(deferred: false);
             if (DatabaseSchema.VerifyCatalog(connection, transaction) != DatabaseSchema.Digest)
                 throw new IOException("database_group_changed_after_inspection");
-            OperationReadIndexes.Ensure(connection, transaction);
+            DatabaseReadIndexes.Ensure(connection, transaction);
             startupLease.VerifyHeld(actual);
             transaction.Commit();
         }
@@ -128,7 +131,7 @@ public sealed class StateDatabase
         command.Transaction = transaction;
         command.CommandText = DatabaseSchema.Sql;
         command.ExecuteNonQuery();
-        OperationReadIndexes.Ensure(connection, transaction);
+        DatabaseReadIndexes.Ensure(connection, transaction);
         command.CommandText = "INSERT INTO schema_info VALUES(1,'nexus.state.database',1,$instance,$digest,$created);";
         command.Parameters.AddWithValue("$instance", instance.InstanceId.ToString("D"));
         command.Parameters.AddWithValue("$digest", SchemaDigest);

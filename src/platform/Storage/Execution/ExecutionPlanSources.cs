@@ -34,6 +34,7 @@ internal static class ExecutionPlanSources
             if (step.UserId is not null) { RequireCanonicalId(step.UserId); RequireCanonicalId(step.BindingId!); }
             if (!scripts.TryGetValue(step.ScriptId, out var script) || !revisions.Contains(("script", step.ScriptId)) ||
                 !physical.ContainsKey(script.RootId)) throw new IOException("execution_script_unbound");
+            script = NexusPipeline.Platform.Storage.Automation.BindingSourceCodec.Resolve(bundle, step);
             ValidateStep(plan, step, script, physical);
             if (step.UserId is not null && (!users.ContainsKey(step.UserId) || !bindings.TryGetValue(step.BindingId!, out var binding) ||
                 !binding.Enabled || binding.ScriptId != step.ScriptId || binding.UserId != step.UserId ||

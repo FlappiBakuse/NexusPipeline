@@ -70,12 +70,15 @@ function readFrontend(text, trustedKey, request, clientId) {
 function readLogin(text, trustedKey, request) {
   const value = verifiedPayload(text, trustedKey);
   const common = ['format', 'version', 'instanceId', 'nativeClientId', 'sessionId', 'correlationId', 'type'];
-  if (!exactFields(value, [...common, ...(request.type === 'poll' ? ['offers'] : ['captureId', 'nonce'])]) ||
+  if (!exactFields(value, [...common, ...(request.type === 'poll' ? ['offers'] : ['captureId', 'nonce', ...(request.type === 'candidate' ? ['accepted'] : [])])]) ||
       value.format !== 'nexus.desktop.login' || value.version !== 1 ||
       ['instanceId', 'nativeClientId', 'sessionId', 'correlationId'].some(key => value[key] !== request[key])) throw new Error('desktop_login_reply_invalid');
-  if (request.type === 'complete') {
+  if (request.type === 'candidate') {
+    if (value.type !== 'candidateResult' || value.captureId !== request.captureId || value.nonce !== request.nonce ||
+        typeof value.accepted !== 'boolean') throw new Error('desktop_login_reply_invalid');
+  } else if (request.type === 'complete') {
     if (value.type !== 'completed' || value.captureId !== request.captureId || value.nonce !== request.nonce) throw new Error('desktop_login_reply_invalid');
-  } else {
+  } else if (request.type === 'poll') {
     if (value.type !== 'offers' || !Array.isArray(value.offers) || value.offers.length > 1) throw new Error('desktop_login_reply_invalid');
     for (const offer of value.offers) {
       if (!exactFields(offer, ['captureId', 'nonce', 'clientId', 'extensionId', 'activationId', 'operationId', 'policy', 'isCanceled']) ||
@@ -84,7 +87,7 @@ function readLogin(text, trustedKey, request) {
           !exactFields(offer.policy, ['id', 'startUrl', 'origins', 'popupOrigins', 'cookies', 'storage', 'jsonRequests', 'readySets', 'checks', 'equalSets']) ||
           JSON.stringify(offer.policy).length > 8192) throw new Error('desktop_login_offer_invalid');
     }
-  }
+  } else throw new Error('desktop_login_reply_invalid');
   return value;
 }
 function readSession(text, trustedKey, expectedInstance, challenge) {

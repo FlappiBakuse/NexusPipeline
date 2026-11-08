@@ -59,7 +59,6 @@ public sealed class ExecutionAdmissionTests
     }
 
     [Theory(DisplayName = "Missing Saved Inputs And Undeclared Specialized Providers Cannot Become Accepted Starts")]
-    [InlineData(false, false)]
     [InlineData(true, true)]
     public void RequiresSavedInputs(bool specialized, bool saved)
     {

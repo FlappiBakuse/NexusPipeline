@@ -16,7 +16,8 @@ def prepare_bundles(source, build_root, run_root, methods):
         'NexusPipeline.StorageTests.MaintenanceBinaryTests.' + name for name in (
             'RestoresFailedCandidate', 'RestoresDerivedPayload', 'CommitsPreparedCandidate',
             'ConsumesStartupUpdate', 'ConsumesDeferredStartup', 'RestartsOwnedDesktop')}
-    if not required.intersection(methods):
+    if not any(required_method == selected or required_method.startswith(selected + '.')
+               for required_method in required for selected in methods):
         return None
     output = build_root / 'test-publication'
     require_no_links(output)

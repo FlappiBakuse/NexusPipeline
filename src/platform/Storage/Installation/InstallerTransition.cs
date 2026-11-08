@@ -65,7 +65,7 @@ internal sealed class InstallerTransition(InstallerPaths paths, string profile)
         frame = _store.RequireStopped(frame.Root, frame.TransactionId);
         InstallerSourceBinding.Require(frame);
         new InstallerOwnedRuntime(paths, profile).RequireInspectionRoot(frame.Root, workRoot);
-        foreach (var name in new[] { ApplicationTree.HostEntry, ApplicationTree.MaintenanceEntry, ApplicationTree.DesktopEntry })
+        foreach (var name in new[] { ApplicationTree.HostEntry, ApplicationTree.LauncherEntry, ApplicationTree.MaintenanceEntry, ApplicationTree.DesktopEntry })
             if (File.Exists(Path.Combine(frame.Root, name))) ExclusiveProgramAdmission.RequireStopped(Path.Combine(frame.Root, name));
         var runtime = new InstallerRetainedRuntime(paths).RequireRuntime(frame.OwnedSource!.Identity);
         using var lease = InstanceLease.AcquireInstaller(runtime, new ContractReader(), setup);

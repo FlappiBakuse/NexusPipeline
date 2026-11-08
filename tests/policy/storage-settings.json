@@ -1,27 +1,12 @@
 {
   "group": "storage-settings",
-  "expectedMethods": {
-    "NexusPipeline.StorageTests.DesktopModeTests.ConfirmsOwnedMode": 1,
-    "NexusPipeline.StorageTests.SettingsCrashTests.IsolatesChangedRegistration": 1,
-    "NexusPipeline.StorageTests.SettingsCrashTests.RequiresStoppedCreator": 10,
-    "NexusPipeline.StorageTests.SettingsCrashTests.PreservesUnknownIntents": 3,
-    "NexusPipeline.StorageTests.SettingsStartupTests.OrdersStartupEffects": 1,
-    "NexusPipeline.StorageTests.SettingsStartupTests.RejectsFailedPreparation": 4,
-    "NexusPipeline.StorageTests.SettingsStartupTests.PreservesUnknownEffects": 1,
-    "NexusPipeline.StorageTests.SettingsStartupTests.BlocksPendingWrites": 1,
-    "NexusPipeline.StorageTests.SettingsStoreTests.ReopensSavedPreferences": 1,
-    "NexusPipeline.StorageTests.SettingsStoreTests.ReplaysOriginalSnapshot": 1,
-    "NexusPipeline.StorageTests.SettingsStoreTests.SerializesSettingsEdits": 1,
-    "NexusPipeline.StorageTests.SettingsStoreTests.RejectsInvalidSave": 3,
-    "NexusPipeline.StorageTests.SettingsStoreTests.PreservesUnknownSettings": 2,
-    "NexusPipeline.StorageTests.SettingsServiceTests.PublishesCommittedSettings": 1,
-    "NexusPipeline.StorageTests.SettingsServiceTests.RequiresSettingsAdmission": 4,
-    "NexusPipeline.StorageTests.SettingsServiceTests.SeparatesExtensionPreferences": 5,
-    "NexusPipeline.StorageTests.SettingsServiceTests.KeepsPreferenceAdmission": 3,
-    "NexusPipeline.StorageTests.ServiceSettingsTests.ReplaysStoredRevision": 1,
-    "NexusPipeline.StorageTests.InterfacePreferenceTests.PreservesPreferences": 1,
-    "NexusPipeline.StorageTests.InterfacePreferenceTests.PublishesLightweightRevision": 1,
-    "NexusPipeline.StorageTests.SettingsServiceTests.WaitsForReaders": 5,
-    "NexusPipeline.StorageTests.SettingsStoreTests.PersistsAutomaticPort": 1
-  }
+  "classes": [
+    "NexusPipeline.StorageTests.DesktopModeTests",
+    "NexusPipeline.StorageTests.InterfacePreferenceTests",
+    "NexusPipeline.StorageTests.ServiceSettingsTests",
+    "NexusPipeline.StorageTests.SettingsCrashTests",
+    "NexusPipeline.StorageTests.SettingsServiceTests",
+    "NexusPipeline.StorageTests.SettingsStartupTests",
+    "NexusPipeline.StorageTests.SettingsStoreTests"
+  ]
 }

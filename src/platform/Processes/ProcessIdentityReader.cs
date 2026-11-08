@@ -29,6 +29,7 @@ public static class ProcessIdentityReader
     {
         var metadata = ReadMetadata(process, processId);
         using var file = File.OpenRead(metadata.ImagePath);
+        using var timing = Storage.StartupProfile.Measure("process.image-hash");
         return new(metadata.ProcessId, metadata.CreatedAtUtc, metadata.ImagePath,
             Convert.ToHexStringLower(SHA256.HashData(file)), metadata.UserSid, metadata.IsElevated);
     }

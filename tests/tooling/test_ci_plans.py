@@ -83,11 +83,12 @@ class CiPlanTests(GitFixture):
                  ("apps/web/src/main.ts", [], True, False, []),
                  ("apps/desktop/main.cjs", [], False, True, []),
                  ("apps/installer/Program.cs", ["NexusPipeline.Installer"], False, False, []),
-                 ("apps/maintenance/InstallerEntry.cs", ["NexusPipeline.Host", "NexusPipeline.Installer", "NexusPipeline.Maintenance"], True, False, []),
-                 ("src/core/a.cs", ["NexusPipeline.Host", "NexusPipeline.Installer", "NexusPipeline.Maintenance"], True, False, []),
-                 ("sdk/frontend/a.ts", ["NexusPipeline.Host", "NexusPipeline.Installer", "NexusPipeline.Maintenance"], True, False,
+                 ("apps/launcher/Program.cs", ["NexusPipeline.Launcher"], False, False, []),
+                 ("apps/maintenance/InstallerEntry.cs", ["NexusPipeline.Host", "NexusPipeline.Installer", "NexusPipeline.Launcher", "NexusPipeline.Maintenance"], True, False, []),
+                 ("src/core/a.cs", ["NexusPipeline.Host", "NexusPipeline.Installer", "NexusPipeline.Launcher", "NexusPipeline.Maintenance"], True, False, []),
+                 ("sdk/frontend/a.ts", ["NexusPipeline.Host", "NexusPipeline.Installer", "NexusPipeline.Launcher", "NexusPipeline.Maintenance"], True, False,
                   ["emulator-support", "live-screenshot"]),
-                 ("unknown.props", ["NexusPipeline.Host", "NexusPipeline.Installer", "NexusPipeline.Maintenance"], True, True,
+                 ("unknown.props", ["NexusPipeline.Host", "NexusPipeline.Installer", "NexusPipeline.Launcher", "NexusPipeline.Maintenance"], True, True,
                   ["emulator-support", "live-screenshot"])]
         for root in (HOST,):
             with production_tools(root) as owner:

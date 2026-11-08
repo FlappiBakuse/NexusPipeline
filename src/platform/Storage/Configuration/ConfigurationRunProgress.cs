@@ -84,7 +84,11 @@ internal sealed class RunProgressCapture(RuntimeInstance instance, StateDatabase
                 if (reason == "configuration_sync_allowed") candidate = normalized;
             }
             catch (Exception error) when (error is IOException or ConfigurationException or System.Text.Json.JsonException)
-            { reason = "configuration_sync_capture_rejected"; }
+            {
+                reason = "configuration_sync_capture_rejected";
+                new Records.RunDiagnosticStore(instance, database).Record(session.ParentJournalId, session.StepId,
+                    frozen.State.Source.UserId, "configuration-sync", reason, error);
+            }
             result.Add(new(resource, saved, candidate, reason));
         }
         var sample = new ConfigurationRunProgress(session, checked((long)elapsed.TotalMilliseconds), wasExecuted, result.ToImmutable());

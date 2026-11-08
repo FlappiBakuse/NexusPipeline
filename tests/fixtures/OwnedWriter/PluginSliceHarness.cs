@@ -2,7 +2,7 @@ internal static class PluginSliceHarness
 {
     internal static async Task<int> RunAsync(string[] args, string operation)
     {
-        if (operation is not ("media-plugin" or "maa-plugin" or "checkin-plugin" or "bettergi-plugin")) throw new ArgumentException("Unknown plugin slice operation");
+        if (!operation.EndsWith("-plugin", StringComparison.Ordinal) || operation.Any(value => !char.IsAsciiLetterLower(value) && value != '-')) throw new ArgumentException("Unknown plugin slice operation");
         if (args is not [var input, var report, var receipt]) return 2;
         var root = Path.GetFullPath(Environment.GetEnvironmentVariable("NEXUS_TEST_ROOT") ?? throw new IOException("Missing fixture root"));
         var working = Path.GetDirectoryName(Path.GetFullPath(input))!;

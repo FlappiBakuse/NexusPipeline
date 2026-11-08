@@ -56,7 +56,7 @@ public sealed class JournalTextTests
     {
         await Task.WhenAll(Enumerable.Range(0, 4).Select(_ => Task.Run(() =>
         {
-            for (var index = 0; index < 50; index++)
+            for (var index = 0; index < 300; index++)
             {
                 var node = JsonNode.Parse(Example())!.AsObject(); var id = Guid.NewGuid();
                 node["journalId"] = id.ToString("D"); var bytes = JsonSerializer.SerializeToUtf8Bytes(node);

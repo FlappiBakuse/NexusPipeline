@@ -47,7 +47,7 @@ def assemble_product(workspace, output, bundle_root=None, replace_application=Fa
     record = dict(format='nexus.product.assembly', version=1, status='ASSEMBLY_INCOMPLETE',
         profile=published['profile'], source=published['source'], publicationWorkspace=str(workspace),
         publishReceipt=pointer, bundleReceipt=bundle_receipt, toolSha256=hash_file(Path(__file__)),
-        scope='Host, maintenance runtime, desktop shell and declared default bundle. Runtime acceptance is separate.')
+        scope='Host, GUI launcher, maintenance runtime, desktop shell and declared default bundle. Runtime acceptance is separate.')
     known_files = expected + previous['files']
     known = {(item['path'], item['sizeBytes'], item['sha256']) for item in known_files}
     try:
@@ -138,12 +138,11 @@ def collect_bundle(directory, profile, sources):
     catalog = json.loads((bundle / 'catalog.json').read_bytes())
     if hash_file(bundle / 'catalog.json') != stored['pointer']['catalogSha256']:
         raise ValueError('Signed bundle catalog changed')
-    selected = [item for item in catalog['entries'] if item['extensionId'] in ('emulator-support', 'live-screenshot')]
-    if len(selected) != 2 or len({item['extensionId'] for item in selected}) != 2:
-        raise ValueError('Default bundled extensions are incomplete')
+    ids = stored['bundledExtensions']
+    selected = [item for item in catalog['entries'] if item['extensionId'] in ids]
+    if len(set(ids)) != len(ids) or len(selected) != len(ids) or not 1 <= len(ids) <= 64:
+        raise ValueError('Declared bundled extensions are incomplete')
     for item in selected:
-        if item['artifactName'] != {'emulator-support': 'EmulatorSupport', 'live-screenshot': 'LiveScreenshot'}[item['extensionId']]:
-            raise ValueError('Default bundle artifact identity differs from its public directory')
         names = ['index.json', 'catalog.json', 'catalog.sig.json', item['artifactName'] + '-' + item['packageVersion'] + '.zip']
         for name in names:
             if name not in {record['path'] for record in stored['files']}:
@@ -155,13 +154,15 @@ def collect_bundle(directory, profile, sources):
 def collect_inputs(workspace, published):
     sources = {}
     for project, records in published['published'].items():
-        if project not in ('Host', 'Maintenance'):
+        entries = {'Host': 'NexusPipeline.exe', 'Maintenance': 'NexusPipeline.update.exe',
+                   'Launcher': 'resources/desktop/NexusPipeline.Launcher.exe'}
+        if project not in entries:
             raise ValueError('Unknown product publication')
         directory = workspace / 'publish' / project.lower()
         if inventory(directory) != records:
             raise ValueError('Published component changed')
         for record in records:
-            name = 'NexusPipeline.update.exe' if project == 'Maintenance' else 'NexusPipeline.exe'
+            name = entries[project]
             if record['path'] != 'NexusPipeline.' + project + '.exe':
                 raise ValueError('Product publication must contain its single-file entry')
             path = directory / record['path']
@@ -178,8 +179,12 @@ def collect_inputs(workspace, published):
             sorted((item for item in actual if item['path'] != 'desktop-bundle.json'), key=lambda item: item['path'])):
         raise ValueError('Desktop publication changed')
     for record in expected:
-        sources['resources/desktop/' + record['path']] = desktop / record['path']
-    for entry in ('NexusPipeline.exe', 'NexusPipeline.update.exe', 'resources/desktop/NexusPipeline.Desktop.exe'):
+        name = 'resources/desktop/' + record['path']
+        if name in sources:
+            raise ValueError('Desktop runtime conflicts with a published product entry')
+        sources[name] = desktop / record['path']
+    for entry in ('NexusPipeline.exe', 'NexusPipeline.update.exe', 'resources/desktop/NexusPipeline.Launcher.exe',
+                  'resources/desktop/NexusPipeline.Desktop.exe'):
         if entry not in sources:
             raise ValueError('Product entry is missing: ' + entry)
     source = published['source']

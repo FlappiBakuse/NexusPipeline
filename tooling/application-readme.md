@@ -2,7 +2,8 @@
 
 Windows 11 x64 本地自动化管家。
 
-启动 `NexusPipeline.exe`。运行数据保存在同目录的 `runtime`，桌面与浏览器模式共用同一实例。
+通过安装的快捷方式，或双击 `NexusPipeline.exe` 启动，无需打开命令行窗口。
+`NexusPipeline.exe` 保留命令行入口。运行数据保存在应用根目录的 `runtime`，桌面与浏览器模式共用同一实例。
 程序需要 .NET 10 x64 共享运行时；Setup 会检测所需组件。
 
 `NexusPipeline.update.exe` 由宿主完成更新交接后启动。更新只切换应用文件，保留运行数据及已有插件。
@@ -15,7 +16,8 @@ Windows 11 x64 本地自动化管家。
 
 ---
 
-Start `NexusPipeline.exe`. Runtime data is stored in the adjacent `runtime` directory.
+Use the installed shortcut or start `NexusPipeline.exe` to launch without a console window.
+`NexusPipeline.exe` retains the command-line entry. Runtime data is stored in the application root's `runtime` directory.
 Desktop and browser modes use the same instance. The application requires the .NET 10 x64 shared runtime; Setup checks the required components.
 
 The Host starts `NexusPipeline.update.exe` after the update handoff. Application updates preserve runtime data and existing plugins.

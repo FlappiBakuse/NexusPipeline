@@ -85,4 +85,8 @@ public sealed record ExtensionManifest
     [JsonPropertyName("localization")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public ExtensionLocalization? Localization { get; init; }
+    /// <summary>Schema field <c>icon</c>; constraints are owned by extension-manifest.schema.json.</summary>
+    [JsonPropertyName("icon")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Icon { get; init; }
 }

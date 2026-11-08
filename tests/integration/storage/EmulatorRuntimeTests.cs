@@ -12,12 +12,13 @@ namespace NexusPipeline.StorageTests;
 public sealed class EmulatorRuntimeTests
 {
     [Theory(DisplayName = "The Original Emulator Provider Selects A Physical Instance And Actual Host Commands Launch Capture And Shut Down The Controlled Vendor Before Final Collection")]
-    [InlineData("ldplayer")]
-    [InlineData("nox")]
-    [InlineData("bluestacks")]
-    public async Task RunsVendorStage(string vendor)
+    [InlineData("ldplayer", false)]
+    [InlineData("nox", false)]
+    [InlineData("bluestacks", false)]
+    [InlineData("ldplayer", true)]
+    public async Task RunsVendorStage(string vendor, bool bindProvider)
     {
-        using var fixture = new EmulatorRuntimeFixture(vendor);
+        using var fixture = new EmulatorRuntimeFixture(vendor, bindProvider: bindProvider);
         _ = fixture.Start(); var receipt = await fixture.Runtime.RunAsync();
         Assert.Equal(LifecycleOutcome.Completed, receipt.Facts.Lifecycle); Assert.Equal(BusinessOutcome.Succeeded, receipt.Facts.Business);
         var state = fixture.State; var reader = new AndroidControlEvidence(fixture.Runtime.Source.Instance, fixture.Runtime.Source.Database, new());

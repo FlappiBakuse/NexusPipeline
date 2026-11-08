@@ -7,8 +7,8 @@ namespace NexusPipeline.Platform.Storage.Journals;
 
 public sealed class JournalDocument
 {
-    private const int MaximumMemoDocuments = 128;
-    private const int MaximumMemoOriginalBytes = 1024 * 1024;
+    private const int MaximumMemoDocuments = 1024;
+    private const int MaximumMemoOriginalBytes = 4 * 1024 * 1024;
     private readonly record struct TextKey(int Length, string Sha256);
     private readonly record struct SuccessorKey(TextKey Before, TextKey After);
     private const int MaximumSuccessorProofs = 8192;
@@ -69,6 +69,7 @@ public sealed class JournalDocument
         // Reusing immutable parsed text grants no authority over freshly read files, SQL or native ownership.
         lock (MemoGate)
             if (Memo.TryGetValue(key, out var cached) && cached._bytes.AsSpan().SequenceEqual(ownedBytes)) return cached;
+        using var timing = StartupProfile.Measure("history.text.parse");
         using var document = contracts.Read(ownedBytes, "execution-journal.schema.json");
         var result = new JournalDocument(ownedBytes, document.RootElement.Clone(), key);
         if (result.InstanceId == Guid.Empty || result.JournalId == Guid.Empty ||

@@ -44,6 +44,7 @@ internal sealed class TreeReadLease : IDisposable
     private static TreeReadLease AcquireSnapshot(string target, PhysicalObjectIdentity parentIdentity, FileTreeSnapshot snapshot,
         IReadOnlyList<PhysicalTreeObject> objects, bool application)
     {
+        using var timing = StartupProfile.Measure("payload.verify");
         var lease = new TreeReadLease(target, snapshot, objects, application);
         try
         {
@@ -64,7 +65,7 @@ internal sealed class TreeReadLease : IDisposable
         catch { lease.Dispose(); throw; }
     }
 
-    internal IDisposable Borrow()
+    internal TreeBorrow Borrow()
     {
         lock (_gate)
         {
@@ -119,14 +120,30 @@ internal sealed class TreeReadLease : IDisposable
         _held.Clear();
     }
 
-    private sealed class TreeBorrow(TreeReadLease owner) : IDisposable
+    internal sealed class TreeBorrow : IDisposable
     {
-        private TreeReadLease? _owner = owner;
+        private readonly TreeReadLease _owner;
+        private bool _disposed;
+        internal TreeBorrow(TreeReadLease owner) => _owner = owner;
+        internal TreeBorrow Borrow()
+        {
+            lock (_owner._gate)
+            {
+                ObjectDisposedException.ThrowIf(_disposed, this);
+                _owner.RequireNamespace();
+                _owner._references++;
+                return new(_owner);
+            }
+        }
+
         public void Dispose()
         {
-            var current = Interlocked.Exchange(ref _owner, null);
-            if (current is null) return;
-            lock (current._gate) current.ReleaseInside();
+            lock (_owner._gate)
+            {
+                if (_disposed) return;
+                _disposed = true;
+                _owner.ReleaseInside();
+            }
         }
     }
 }

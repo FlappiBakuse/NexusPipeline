@@ -12,6 +12,7 @@ public sealed class DatabaseCopyTests
     [InlineData("source", "database_group_changed_after_inspection")]
     [InlineData("unknown", "inspection_copy_unknown_entry")]
     [InlineData("replacement", "inspection_copy_changed")]
+    [InlineData("bytes", "inspection_copy_changed")]
     public void PreservesFailedCopies(string fault, string expected)
     {
         var root = Path.Combine(Environment.GetEnvironmentVariable("NEXUS_TEST_ROOT")!, "copy-" + Guid.NewGuid().ToString("N"));
@@ -23,6 +24,11 @@ public sealed class DatabaseCopyTests
             if (fault == "admission") throw new IOException("fixture_admission_failed");
             if (fault == "source") database.Accept(new OperationIdentity(Guid.NewGuid(), "fixture", new string('a', 64), "fixture.command"), DateTimeOffset.UtcNow);
             if (fault == "unknown") File.WriteAllText(Path.Combine(inspection.DiagnosticCopyRoot, "keep.bin"), "keep");
+            if (fault == "bytes")
+            {
+                using var changed = new FileStream(Path.Combine(inspection.DiagnosticCopyRoot, "nexus.db"), FileMode.Open, FileAccess.Write, FileShare.ReadWrite);
+                changed.Position = changed.Length - 1; changed.WriteByte(123);
+            }
             if (fault == "replacement")
             {
                 var path = Path.Combine(inspection.DiagnosticCopyRoot, "nexus.db");

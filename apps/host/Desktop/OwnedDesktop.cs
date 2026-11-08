@@ -19,12 +19,13 @@ internal sealed class OwnedDesktop : IDisposable
     private DesktopControl? _control;
     internal NativeClientBinding Binding { get; }
 
-    internal OwnedDesktop(RuntimeInstance instance, string payloadRoot, int port, DesktopResponseSigner signer,
-        UpdateWindowIntent intent, bool minimizeToTray)
+    internal OwnedDesktop(RuntimeInstance instance, string payloadRoot, DesktopResponseSigner signer,
+        UpdateWindowIntent intent, bool minimizeToTray, StartupChannel channel, string locale)
     {
-        if (port is < 1 or > 65535) throw new IOException("desktop_requires_fixed_listener");
         _observer = _job.ObserveProcessStarts(_ => { });
         DesktopLaunch? launch = null;
+        ProcessIdentityLease? image = null;
+        NativeClientBinding? binding = null;
         try
         {
             var executable = PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(payloadRoot, ApplicationTree.DesktopEntry));
@@ -34,20 +35,24 @@ internal sealed class OwnedDesktop : IDisposable
                 Directory.CreateDirectory(PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(profile, name)));
             var bootstrap = Convert.ToBase64String(JsonSerializer.SerializeToUtf8Bytes(new
             {
-                address = "http://127.0.0.1:" + port.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                startupPipe = channel.Name, nonce = channel.Nonce, locale,
                 instanceId = instance.InstanceId, verificationKey = signer.VerificationKeyBase64,
                 profilePath = profile, visible = intent.Visible, route = intent.Route, minimizeToTray,
                 mode = intent.Mode == UpdateWindowMode.Desktop ? "desktop" : "browser"
             }));
             // Native Chromium diagnostics may be emitted before Electron configures its application paths.
             var log = PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(profile, "logs", "chromium.log"));
+            image = ProcessIdentityLease.HoldImage(executable);
             launch = new(_job, executable, ["--js-flags=--max-semi-space-size=1", "--enable-logging=file",
-                "--log-file=" + log, "--nexus-bootstrap=" + bootstrap], profile, instance.InstanceId);
+                "--log-file=" + log, "--nexus-bootstrap=" + bootstrap], profile, instance.InstanceId, image);
             _launch = launch;
             _root = launch.Identity;
-            Binding = new(_root.ProcessId);
+            binding = new(new ProcessIdentity(_root.ProcessId, _root.CreatedAtUtc, _root.ImagePath,
+                _root.ImageSha256, _root.UserSid, _root.IsElevated), image);
+            Binding = binding;
+            channel.Bind(_root.ProcessId);
         }
-        catch { launch?.Dispose(); _observer.Dispose(); _job.Dispose(); throw; }
+        catch { launch?.Dispose(); binding?.Dispose(); image?.Dispose(); _observer.Dispose(); _job.Dispose(); throw; }
     }
 
     internal void Start() => _launch.Start();

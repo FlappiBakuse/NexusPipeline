@@ -24,7 +24,7 @@ internal sealed class InstallerOwnedRuntime(InstallerPaths paths, string profile
         new InstallerRetainedRuntime(paths).RequireManager(checkpoint);
         var metadata = InstallerMetadataInventory.Capture(destination.Root, paths);
         InstallerRegistration.RequireNative(metadata, identity.ProductVersion);
-        foreach (var name in new[] { ApplicationTree.HostEntry, ApplicationTree.MaintenanceEntry, ApplicationTree.DesktopEntry })
+        foreach (var name in new[] { ApplicationTree.HostEntry, ApplicationTree.LauncherEntry, ApplicationTree.MaintenanceEntry, ApplicationTree.DesktopEntry })
             ExclusiveProgramAdmission.RequireStopped(Path.Combine(destination.Root, name));
         using var payload = InstallationPayload.Open(destination.Root, identity.ManifestSha256, profile);
         if (payload.RootIdentity != identity.RootIdentity) throw InstallationIdentityCodec.Invalid();

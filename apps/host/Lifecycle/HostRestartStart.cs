@@ -46,7 +46,7 @@ internal static class HostRestartStart
             await producer.WaitForExitAsync(deadline.Token);
             origin.RequireReleasedSuccessor();
             pipe.Dispose(); producer.Dispose();
-            return await ApplicationHost.RunAsync(instance.RuntimeRoot, null, maintenanceOrigin: origin, resumeWindow: frame.Window);
+            return await NexusPipeline.Host.Desktop.DesktopStartup.RunAsync(instance.RuntimeRoot, null, maintenanceOrigin: origin, resumeWindow: frame.Window);
         }
         catch (Exception error) when (error is IOException or ArgumentException or JsonException or
             System.ComponentModel.Win32Exception or UnauthorizedAccessException or OperationCanceledException or InvalidOperationException)

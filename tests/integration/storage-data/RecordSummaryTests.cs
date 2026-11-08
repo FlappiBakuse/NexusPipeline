@@ -43,6 +43,10 @@ public sealed class RecordSummaryTests(ITestOutputHelper output)
         Assert.Null(second.NextUserId);
         Assert.Equal(count, first.Users.Concat(second.Users).Sum(user => user.Totals.Runs));
         Assert.Equal(496, reader.Read(query with { UserId = users[0] }).Totals.Runs);
+        Assert.Equal(first.Totals, reader.ReadDays(query).Totals);
+        Assert.Equal(first.Days, reader.ReadDays(query).Days);
+        Assert.Equal(first.Users, reader.ReadUsers(query).Users);
+        Assert.Equal(second.Users, reader.ReadUsers(query with { AfterUserId = first.NextUserId }).Users);
         foreach (var index in new[] { 0, count / 2, count - 1 })
             Assert.Equal(Saved(index), reader.Read(Saved(index).FinalAttempt.RunId));
 
@@ -96,6 +100,13 @@ public sealed class RecordSummaryTests(ITestOutputHelper output)
         var summary = reader.Read(new RecordSummaryQuery(from, until, 120));
 
         Assert.Equal(new RecordTotals(4, 1, 1, 1, 1, 1, 125, 2, 1), summary.Totals);
+        var daySummary = reader.ReadDays(new(from, until, 120));
+        Assert.Equal(summary.Totals, daySummary.Totals);
+        Assert.Equal(summary.Days, daySummary.Days);
+        Assert.Equal(summary.Users, reader.ReadUsers(new(from, until, 120)).Users);
+        var empty = reader.ReadDays(new(until, until.AddDays(1), -840));
+        Assert.Empty(empty.Days);
+        Assert.Equal(new RecordTotals(0, 0, 0, 0, 0, 0, 0, 0, 0), empty.Totals);
         Assert.Collection(summary.Days,
             day => { Assert.Equal("2026-03-02", day.Date); Assert.Equal(3, day.Totals.Runs); },
             day => { Assert.Equal("2026-03-01", day.Date); Assert.Equal(1, day.Totals.Runs); });
@@ -112,6 +123,8 @@ public sealed class RecordSummaryTests(ITestOutputHelper output)
         Assert.Equal(1, filtered.Totals.Succeeded);
         Assert.Equal(1, Assert.Single(filtered.Days).Totals.Runs);
         Assert.Equal(1, Assert.Single(filtered.Users).Totals.Runs);
+        Assert.Equal(filtered.Totals, reader.ReadDays(new(from, until, 0, Lifecycle: LifecycleOutcome.Cancelled)).Totals);
+        Assert.Equal(filtered.Users, reader.ReadUsers(new(from, until, 0, Lifecycle: LifecycleOutcome.Cancelled)).Users);
         Assert.Equal(0, reader.Read(new RecordSummaryQuery(from, until, 0, Business: BusinessOutcome.Failed,
             Lifecycle: LifecycleOutcome.Cancelled)).Totals.Runs);
         Assert.Throws<ArgumentException>(() => reader.Read(new RecordSummaryQuery(from, until, 0, Lifecycle: LifecycleOutcome.Running)));

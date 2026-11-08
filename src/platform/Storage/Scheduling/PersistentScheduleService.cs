@@ -224,9 +224,9 @@ public sealed class PersistentScheduleService
     private async Task Observe(ScheduleRuntimeService runtime)
     {
         try { runtime.Initialize(); await runtime.RunAsync().ConfigureAwait(false); }
-        catch (Exception)
+        catch (Exception error)
         {
-            FailureCode = "schedule_reconciliation_required";
+            FailureCode = "schedule_reconciliation_required:" + error.GetType().Name;
             _recovery.BlockUnknown(FailureCode);
         }
     }

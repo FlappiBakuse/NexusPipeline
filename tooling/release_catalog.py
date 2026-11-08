@@ -71,8 +71,8 @@ def package_inputs(path):
                 manifest['contractFingerprint'] != package['contractFingerprint'] or manifest['sdkVersion'] != '0.1.0'):
             raise ValueError('Package manifest changed')
         result.append((package, manifest, archive))
-    if len(result) != 14 or len({item[1]['extensionId'] for item in result}) != 14:
-        raise ValueError('Exactly fourteen distinct current packages required')
+    if not 1 <= len(result) <= 64 or len({item[1]['extensionId'] for item in result}) != len(result):
+        raise ValueError('A bounded set of distinct packages is required')
     if len({item[1]['contractFingerprint'] for item in result}) != 1:
         raise ValueError('Mixed SDK contract fingerprints')
     return result
@@ -135,6 +135,7 @@ def assemble_catalog(args):
         raise ValueError('Metadata producer source changed')
     files = [dict(path=path.name, sizeBytes=path.stat().st_size, sha256=hash_file(path)) for path in sorted(bundle.iterdir())]
     publish_generation(output, directory, dict(status='PASS_LOCAL_SIGNED_STORE', profile=args.profile, keyId=args.key_id,
+        bundledExtensions=[manifest['extensionId'] for package, manifest, _ in inputs if package['bundledByDefault']],
         publicKey=signed['publicKey'], packageSet=str(args.package_set), packageSetSha256=hash_file(args.package_set),
         producerSourceSha256=digest(json.dumps(source, sort_keys=True).encode()), files=files, pointer=pointer,
         scope='Local signed metadata and original packages; no upload or production release qualification.'), previous)

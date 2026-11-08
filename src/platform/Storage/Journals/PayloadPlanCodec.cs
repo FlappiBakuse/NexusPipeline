@@ -33,7 +33,7 @@ public sealed class PayloadPlanCodec(RuntimeInstance instance, ContractReader co
     {
         Validate(plan);
         var bytes = JsonSerializer.SerializeToUtf8Bytes(ToWire(plan));
-        var frozen = Decode(bytes);
+        var frozen = Decode(bytes, out _);
         var held = new List<FileStream>();
         try
         {
@@ -68,18 +68,19 @@ public sealed class PayloadPlanCodec(RuntimeInstance instance, ContractReader co
         return plan;
     }
 
-    internal FrozenPayloadApply ReadStructure(BlobReference reference)
+    internal FrozenPayloadApply ReadStructure(BlobReference reference) => ReadStructure(reference, out _);
+
+    internal FrozenPayloadApply ReadStructure(BlobReference reference, out ExtensionPayloadSource? source)
     {
         if (reference.SizeBytes > StrictJson.MaximumBytes || reference.RelativePath != $"blobs/plans/{reference.Sha256}.json")
             throw new IOException("payload_plan_reference_invalid");
         using var input = blobs.OpenVerified(reference);
         var bytes = new byte[checked((int)input.Length)];
         input.ReadExactly(bytes);
-        var plan = Decode(bytes);
-        return plan;
+        return Decode(bytes, out source);
     }
 
-    private FrozenPayloadApply Decode(ReadOnlyMemory<byte> bytes)
+    private FrozenPayloadApply Decode(ReadOnlyMemory<byte> bytes, out ExtensionPayloadSource? source)
     {
         var wire = contracts.Read<PayloadApplyPlan>(bytes, "payload-apply-plan.schema.json");
         var identities = Array.AsReadOnly(wire.OriginalObjects.Select(item => new PhysicalTreeObject(item.RelativePath, FileTreeProtocol.FromWire(item.Identity))).ToArray());
@@ -93,12 +94,13 @@ public sealed class PayloadPlanCodec(RuntimeInstance instance, ContractReader co
             MaintenanceSource = wire.MaintenanceSource is null ? null : new(wire.MaintenanceSource.RelativePath,
                 wire.MaintenanceSource.SizeBytes, wire.MaintenanceSource.Sha256)
         };
-        Validate(plan);
+        source = Validate(plan);
         return plan;
     }
 
-    private void Validate(FrozenPayloadApply plan)
+    private ExtensionPayloadSource? Validate(FrozenPayloadApply plan)
     {
+        ExtensionPayloadSource? source = null;
         if (plan.InstanceId != instance.InstanceId || blobs.Instance.InstanceId != instance.InstanceId ||
             plan.OperationId == Guid.Empty || plan.JournalId == Guid.Empty || !Enum.IsDefined(plan.Action) ||
             plan.Kind is not (JournalKind.UpdateApply or JournalKind.ExtensionApply)) throw new IOException("payload_plan_identity_invalid");
@@ -125,12 +127,14 @@ public sealed class PayloadPlanCodec(RuntimeInstance instance, ContractReader co
             if (plan.MaintenanceSource is not null) throw new IOException("payload_resource_scope_unbound");
             var sourceCodec = new PayloadSourceCodec(instance, contracts);
             if (plan.ExtensionSource is null) throw new IOException("extension_payload_source_required");
-            sourceCodec.RequireFrozenBinding(sourceCodec.ReadMetadata(plan.ExtensionSource), plan);
+            source = sourceCodec.ReadMetadata(plan.ExtensionSource);
+            sourceCodec.RequireFrozenBinding(source, plan);
         }
         var identities = plan.Before.OriginalObjects;
         if (identities.Count != plan.Before.Snapshot.Entries.Count || identities.Select(item => item.RelativePath).Distinct(StringComparer.OrdinalIgnoreCase).Count() != identities.Count ||
             identities.Any(item => item.Identity.VolumeSerial != plan.ParentIdentity.VolumeSerial || !plan.Before.Snapshot.Entries.Any(entry => entry.RelativePath == item.RelativePath)))
             throw new IOException("payload_original_identity_incomplete");
+        return source;
     }
 
     private static bool IsWithin(string parent, string child)

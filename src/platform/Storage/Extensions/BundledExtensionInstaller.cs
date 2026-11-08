@@ -20,10 +20,16 @@ internal sealed class BundledExtensionInstaller(RuntimeInstance instance, StateD
 
     internal async Task InstallDefaultsAsync(string directory, CancellationToken cancellation)
     {
-        foreach (var (id, artifact) in new[] { ("emulator-support", "EmulatorSupport"), ("live-screenshot", "LiveScreenshot") })
+        directory = PhysicalPathPolicy.NormalizeWithoutLinks(directory);
+        if (!Directory.Exists(directory)) return;
+        var packages = Directory.EnumerateDirectories(directory).Take(65).ToArray();
+        if (packages.Length > 64) throw new IOException("extension_bundle_count_invalid");
+        foreach (var path in packages.Order(StringComparer.Ordinal))
         {
-            var path = PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(directory, artifact));
-            if (Directory.Exists(path)) await InstallAsync(path, [id], artifact, cancellation);
+            var artifact = Path.GetFileName(path);
+            if (artifact.Length is < 1 or > 80 || !char.IsAsciiLetter(artifact[0]) || artifact.Any(value => !char.IsAsciiLetterOrDigit(value)))
+                throw new IOException("extension_bundle_artifact_invalid");
+            await InstallAsync(path, [], artifact, cancellation);
         }
     }
 
@@ -35,7 +41,9 @@ internal sealed class BundledExtensionInstaller(RuntimeInstance instance, StateD
         var catalog = new ExtensionCatalogVerifier(contracts, trust.Policy).Verify(
             Read(directory, "index.json"), Read(directory, "catalog.json"), Read(directory, "catalog.sig.json"), ExtensionStoreChannel.Stable);
         var allPackages = selection is null;
-        var ids = selection ?? catalog.Entries.Select(item => item.ExtensionId).ToArray();
+        var ids = selection is null ? catalog.Entries.Select(item => item.ExtensionId).ToArray() :
+            catalog.Entries.Where(item => item.ArtifactName == artifact).Select(item => item.ExtensionId).ToArray();
+        if (artifact is not null && ids.Length != 1) throw new IOException("extension_bundle_entry_ambiguous");
         if (artifact is not null && ids.Any(id => catalog.Entries.SingleOrDefault(item => item.ExtensionId == id)?.ArtifactName != artifact))
             throw new IOException("extension_bundle_artifact_unbound");
         var evidence = new ExtensionInstalledEvidence(instance, database, contracts, roots);

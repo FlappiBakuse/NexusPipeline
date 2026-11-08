@@ -27,13 +27,16 @@ public sealed record CompletedRunRecord(Guid AutomationId, Guid? UserId, DateTim
 }
 
 public sealed record RecordCursor(DateTimeOffset EndedAt, Guid RunId);
+public enum RecordScope { All, Groups }
 public sealed record RecordQuery(int Limit = 50, Guid? AutomationId = null, Guid? UserId = null,
     BusinessOutcome? Business = null, RecordCursor? After = null,
-    DateTimeOffset? EndedFromInclusive = null, DateTimeOffset? EndedUntilExclusive = null, LifecycleOutcome? Lifecycle = null)
+    DateTimeOffset? EndedFromInclusive = null, DateTimeOffset? EndedUntilExclusive = null, LifecycleOutcome? Lifecycle = null,
+    RecordScope Scope = RecordScope.All)
 {
     public void Validate()
     {
-        if (Limit is < 1 or > 200 || AutomationId == Guid.Empty || UserId == Guid.Empty ||
+        if (Limit is < 1 or > 200 || AutomationId == Guid.Empty || UserId == Guid.Empty || !Enum.IsDefined(Scope) ||
+            Scope == RecordScope.Groups && UserId is not null ||
             Business is { } business && !Enum.IsDefined(business) ||
             Lifecycle is { } lifecycle && (!Enum.IsDefined(lifecycle) || lifecycle is LifecycleOutcome.NotStarted or LifecycleOutcome.Running) ||
             After is { } cursor && (cursor.RunId == Guid.Empty || cursor.EndedAt == default || cursor.EndedAt.Offset != TimeSpan.Zero) ||

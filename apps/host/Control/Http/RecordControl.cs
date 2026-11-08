@@ -17,14 +17,16 @@ internal sealed class RecordControl(ControlAuthentication authority, RecordUseCa
         {
             var request = authority.Require(context, ControlCapability.RecordsRead);
             var query = new ControlQueryValues(context.Request.Query, "limit", "automationId", "userId", "business",
-                "afterEndedAt", "afterRunId", "endedFromInclusive", "endedUntilExclusive", "lifecycle");
+                "afterEndedAt", "afterRunId", "endedFromInclusive", "endedUntilExclusive", "lifecycle", "scope");
             query.Validate();
             var afterTime = query.Utc("afterEndedAt"); var afterRun = query.OptionalId("afterRunId");
             if ((afterTime is null) != (afterRun is null)) throw new ControlRequestException(400, "query_invalid");
             return Json(useCases.Read(request, new(query.Integer("limit", 50), query.OptionalId("automationId"),
                 query.OptionalId("userId"), query.Business("business"),
                 afterTime is null ? null : new(afterTime.Value, afterRun!.Value),
-                query.Utc("endedFromInclusive"), query.Utc("endedUntilExclusive"), query.Lifecycle("lifecycle"))));
+                query.Utc("endedFromInclusive"), query.Utc("endedUntilExclusive"), query.Lifecycle("lifecycle"),
+                context.Request.Query["scope"].ToString() switch { "" or "all" => RecordScope.All, "groups" => RecordScope.Groups,
+                    _ => throw new ControlRequestException(400, "query_invalid") })));
         });
         app.MapGet("/control/v1/records/{runId}/attempts", (HttpContext context, string runId) =>
         {

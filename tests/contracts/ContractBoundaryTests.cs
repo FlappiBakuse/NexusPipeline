@@ -98,6 +98,50 @@ public sealed class ContractBoundaryTests
         Assert.Throws<JsonException>(() => Reader.Read(JsonSerializer.SerializeToUtf8Bytes(node), schema));
     }
 
+    [Fact(DisplayName = "Concurrent Cold Schema Reads Keep All Seed Acceptance And Rejection Rules Across Forward References")]
+    public void ChecksConcurrentSchemas()
+    {
+        var cases = SeedCases().Select(item => (Bytes: ReadExample((string)item[0]),
+            Schema: (string)item[1], Accepted: (bool)item[2])).ToList();
+        foreach (var (file, schema, field, value) in new[]
+        {
+            ("event-state.json", "event.schema.json", "streamId", "not-a-uuid"),
+            ("event-state.json", "event.schema.json", "occurredAt", "2026-02-30T00:00:00Z"),
+            ("store-pointer.json", "store-pointer.schema.json", "catalogUrl", "https://")
+        })
+        {
+            var node = System.Text.Json.Nodes.JsonNode.Parse(ReadExample(file))!; node[field] = value;
+            cases.Add((JsonSerializer.SerializeToUtf8Bytes(node), schema, false));
+        }
+        Parallel.For(0, 12, new ParallelOptions { MaxDegreeOfParallelism = 12 }, worker =>
+        {
+            var reader = new ContractReader();
+            for (var index = 0; index < cases.Count; index++)
+            {
+                var item = cases[(worker * 7 + index) % cases.Count];
+                var bytes = UniqueJson(item.Bytes); var before = bytes.ToArray();
+                if (item.Accepted)
+                {
+                    using var document = reader.Read(bytes, item.Schema);
+                    Assert.Equal(JsonValueKind.Object, document.RootElement.ValueKind);
+                }
+                else Assert.Throws<JsonException>(() => reader.Read(bytes, item.Schema));
+                Assert.Equal(before, bytes);
+            }
+        });
+    }
+
+    private static byte[] UniqueJson(byte[] input)
+    {
+        var nonce = Guid.NewGuid().ToByteArray();
+        var prefixLength = nonce.Length * 8;
+        var result = new byte[prefixLength + input.Length];
+        for (var index = 0; index < prefixLength; index++)
+            result[index] = (nonce[index / 8] & (1 << (index % 8))) == 0 ? (byte)' ' : (byte)'\t';
+        input.CopyTo(result, prefixLength);
+        return result;
+    }
+
     private static byte[] ReadExample(string name)
     {
         using var stream = typeof(ContractBoundaryTests).Assembly.GetManifestResourceStream("Examples." + name)!;

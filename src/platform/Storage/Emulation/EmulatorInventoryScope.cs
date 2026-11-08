@@ -23,6 +23,7 @@ internal sealed class EmulatorInventoryScope : IEmulatorInventory, IAsyncDisposa
     private readonly EmulatorSourceLease _source = new();
     private readonly Dictionary<string, (EmulatorInstallation Value, ExecutionPlanInterpreterImage Control)> _installations = [];
     private readonly List<EmulatorCommandEvidence> _evidence = [];
+    private readonly Dictionary<string, EmulatorLayout> _layouts = [];
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly object _disposeGate = new();
     private readonly CancellationTokenSource _stopping = new();
@@ -58,14 +59,19 @@ internal sealed class EmulatorInventoryScope : IEmulatorInventory, IAsyncDisposa
         await _gate.WaitAsync(lifetime.Token).ConfigureAwait(false);
         try
         {
-            RequireCurrent(); RequireLayout(layout); var found = new Dictionary<string, EmulatorInstallation>(StringComparer.Ordinal);
+            RequireCurrent(); RequireLayout(layout);
+            layout = layout with { ControlPaths = layout.ControlPaths.ToArray(), AdbPaths = layout.AdbPaths.ToArray(),
+                ConfigPaths = layout.ConfigPaths.ToArray(), SharedDataPaths = layout.SharedDataPaths.ToArray(),
+                EnumerationArguments = layout.EnumerationArguments.ToArray(), ConfigurationExtensions = layout.ConfigurationExtensions.ToArray(),
+                ControlParentDirectories = layout.ControlParentDirectories.ToArray() };
+            var found = new Dictionary<string, EmulatorInstallation>(StringComparer.Ordinal);
             foreach (var root in _roots)
                 foreach (var relative in layout.ControlPaths)
                 {
                     lifetime.Token.ThrowIfCancellationRequested(); var path = Resolve(root, relative);
                     if (!File.Exists(path)) continue;
                     var installRoot = Path.GetDirectoryName(path)!;
-                    if (Path.GetFileName(installRoot).Equals("bin", StringComparison.OrdinalIgnoreCase) &&
+                    if (layout.ControlParentDirectories.Contains(Path.GetFileName(installRoot), StringComparer.OrdinalIgnoreCase) &&
                         Path.GetDirectoryName(installRoot) is { } parent && _roots.Any(root => Within(root, parent))) installRoot = parent;
                     var physical = _source.HoldRoot(installRoot);
                     var id = "install:" + EmulatorSourceLease.Hash(layout.Vendor + "\n" + physical + "\n" +
@@ -80,6 +86,7 @@ internal sealed class EmulatorInventoryScope : IEmulatorInventory, IAsyncDisposa
                         captured = (new(id, layout.Vendor, installRoot, physical, control.Value,
                             adb.Length == 0 ? null : _source.Tool(adb[0]).Value, configs), control.Image);
                         _installations.Add(id, captured);
+                        _layouts.Add(id, layout);
                     }
                     found[id] = Copy(captured.Value);
                 }
@@ -96,8 +103,8 @@ internal sealed class EmulatorInventoryScope : IEmulatorInventory, IAsyncDisposa
         {
             RequireCurrent();
             if (!_installations.TryGetValue(installation.Id, out var captured) || !Same(installation, captured.Value) || command.Detached ||
-                command.ToolId != captured.Value.Control.Id || captured.Value.Vendor == EmulatorVendor.BlueStacks ||
-                !command.Arguments.SequenceEqual(captured.Value.Vendor == EmulatorVendor.LdPlayer ? ["list2"] : ["list"], StringComparer.Ordinal))
+                command.ToolId != captured.Value.Control.Id || _layouts[installation.Id].EnumerationArguments.Count == 0 ||
+                !command.Arguments.SequenceEqual(_layouts[installation.Id].EnumerationArguments, StringComparer.Ordinal))
                 throw new EmulatorException("emulator_enumeration_unbound");
             if (++_commands > 128) throw new EmulatorException("emulator_command_limit");
             var remaining = _timeout - _clock.Elapsed; if (remaining <= TimeSpan.Zero) throw new EmulatorException("emulator_inventory_timeout");
@@ -123,21 +130,23 @@ internal sealed class EmulatorInventoryScope : IEmulatorInventory, IAsyncDisposa
         finally { _gate.Release(); }
     }
 
-    internal string InstanceDirectory(EmulatorTarget target)
+    internal string InstanceDirectory(EmulatorTarget target, EmulatorTargetDescription description)
     {
         RequireCurrent();
         if (!_installations.TryGetValue(target.Installation.Id, out var captured) || !Same(target.Installation, captured.Value))
             throw new EmulatorException("emulator_installation_unbound");
         var candidates = new List<string>();
-        if (target.Installation.Vendor == EmulatorVendor.LdPlayer && target.Instance.Index is { } index)
-            candidates.Add(Path.Combine(target.Installation.RootPath, "vms", "leidian" + index));
-        foreach (var config in target.Installation.Configurations.Where(value => target.Instance.ConfigIds.Contains(value.Id, StringComparer.Ordinal)))
+        if (description.Locations.Count > 32) throw new EmulatorException("emulator_instance_location_limit");
+        foreach (var location in description.Locations)
         {
-            var directory = Path.GetDirectoryName(_source.ConfigPath(config))!;
-            if (target.Installation.Vendor == EmulatorVendor.Nox && Path.GetFileName(directory).Equals(target.Instance.Identity, StringComparison.OrdinalIgnoreCase))
-                candidates.Add(directory);
-            else if (target.Installation.Vendor == EmulatorVendor.BlueStacks)
-                candidates.Add(Path.Combine(directory, "Engine", target.Instance.Identity));
+            var root = target.Installation.RootPath;
+            if (location.ConfigurationId is { } id)
+            {
+                var config = target.Installation.Configurations.SingleOrDefault(value => value.Id == id && target.Instance.ConfigIds.Contains(id))
+                    ?? throw new EmulatorException("emulator_config_unbound");
+                root = Path.GetDirectoryName(_source.ConfigPath(config))!;
+            }
+            candidates.Add(location.RelativePath == "." ? root : Resolve(root, location.RelativePath));
         }
         var found = candidates.Where(Directory.Exists).Select(PhysicalPathPolicy.NormalizeWithoutLinks)
             .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
@@ -155,7 +164,7 @@ internal sealed class EmulatorInventoryScope : IEmulatorInventory, IAsyncDisposa
         {
             if (File.Exists(path)) configs.TryAdd(path, _source.Config(path, relative));
             else if (Directory.Exists(path))
-                foreach (var file in _source.ConfigFiles(path)) configs.TryAdd(file,
+                foreach (var file in _source.ConfigFiles(path, layout.ConfigurationExtensions)) configs.TryAdd(file,
                     _source.Config(file, relative.TrimEnd('/') + "/" + Path.GetRelativePath(path, file).Replace('\\', '/')));
         }
         return configs.Values.OrderBy(item => item.RelativePath, StringComparer.Ordinal).ToArray();
@@ -174,8 +183,15 @@ internal sealed class EmulatorInventoryScope : IEmulatorInventory, IAsyncDisposa
         path.StartsWith(root.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
     private static void RequireLayout(EmulatorLayout layout)
     {
-        if (!Enum.IsDefined(layout.Vendor) || layout.ControlPaths.Count is < 1 or > 16 || layout.AdbPaths.Count > 16 ||
-            layout.ConfigPaths.Count > 16 || layout.SharedDataPaths.Count > 16) throw new EmulatorException("emulator_layout_invalid");
+        if (layout.Vendor is not { Length: >= 1 and <= 80 } || !char.IsAsciiLetter(layout.Vendor[0]) ||
+            layout.Vendor.Any(value => !char.IsAsciiLetterOrDigit(value) && value is not ('-' or '.')) ||
+            layout.ControlPaths.Count is < 1 or > 16 || layout.AdbPaths.Count > 16 ||
+            layout.ConfigPaths.Count > 16 || layout.SharedDataPaths.Count > 16 || layout.EnumerationArguments.Count > 8 ||
+            layout.EnumerationArguments.Any(value => value.Length is < 1 or > 512 || value.Any(char.IsControl)) ||
+            layout.ConfigurationExtensions.Count > 16 || layout.ConfigurationExtensions.Any(value => value.Length is < 2 or > 16 ||
+                value[0] != '.' || value[1..].Any(character => !char.IsAsciiLetterOrDigit(character))) ||
+            layout.ControlParentDirectories.Count > 16 || layout.ControlParentDirectories.Any(value => value.Length is < 1 or > 64 ||
+                value.Any(character => !char.IsAsciiLetterOrDigit(character) && character is not ('-' or '_')))) throw new EmulatorException("emulator_layout_invalid");
     }
     private static bool Same(EmulatorInstallation value, EmulatorInstallation expected) => value.Id == expected.Id && value.Vendor == expected.Vendor &&
         value.RootPath == expected.RootPath && value.RootPhysicalId == expected.RootPhysicalId && value.Control == expected.Control && value.Adb == expected.Adb &&

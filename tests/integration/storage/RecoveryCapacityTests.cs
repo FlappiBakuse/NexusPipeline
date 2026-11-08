@@ -36,7 +36,8 @@ public sealed class RecoveryCapacityTests
         _ = Seed(fixture, JournalKind.RunAttempt, new(1, 0, 1));
         var registry = new RecoveryJournalRegistry(fixture.Database);
         var timer = System.Diagnostics.Stopwatch.StartNew(); var observed = 0;
-        registry.VisitCompleted(snapshot => { Assert.Single(snapshot.Journals); Assert.Empty(snapshot.FileEffects); observed++; });
+        foreach (var snapshot in registry.ReadCompleted())
+        { Assert.Single(snapshot.Journals); Assert.Empty(snapshot.FileEffects); observed++; }
         Assert.Equal(count, observed);
         Assert.Equal(count, registry.ReadInactiveIds().Count);
         using var connection = DatabaseConnections.Open(fixture.Database.DatabasePath, readOnly: true);

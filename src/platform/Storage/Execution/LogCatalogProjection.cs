@@ -23,8 +23,9 @@ public sealed class LogCatalogProjection(RuntimeInstance instance, StateDatabase
         });
     }
 
-    public Guid? ReconcilePage(Guid? after = null, int maximum = 64)
+    public Guid? ReconcilePage(Guid? after = null, int maximum = 64, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         lease.VerifyHeld(instance);
         if (after == Guid.Empty || maximum is < 1 or > 200) throw new ArgumentOutOfRangeException(nameof(maximum));
         var ids = new List<Guid>();
@@ -42,7 +43,13 @@ public sealed class LogCatalogProjection(RuntimeInstance instance, StateDatabase
                 ids.Add(id);
             }
         }
-        foreach (var id in ids) OnCommitted(new AttemptReceiptStore(database).Read(id) ?? throw LogCatalogRows.Invalid());
+        Console.Error.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { kind = "startup.projection-page",
+            projection = "logs", inspected = ids.Count, maximum, after }));
+        foreach (var id in ids)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            OnCommitted(new AttemptReceiptStore(database).Read(id) ?? throw LogCatalogRows.Invalid());
+        }
         return ids.Count == maximum ? ids[^1] : null;
     }
 }

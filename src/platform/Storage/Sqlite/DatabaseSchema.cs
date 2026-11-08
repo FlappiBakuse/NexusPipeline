@@ -35,7 +35,7 @@ internal static class DatabaseSchema
         {
             if (result.Count >= 1024) throw new IOException("database_catalog_limit");
             // Exact nonunique read indexes do not change the logical state contract.
-            if (OperationReadIndexes.Recognize(rows.GetString(0), rows.GetString(1), rows.GetString(2),
+            if (DatabaseReadIndexes.Recognize(rows.GetString(0), rows.GetString(1), rows.GetString(2),
                     rows.IsDBNull(3) ? null : rows.GetString(3))) continue;
             result.Add(JsonSerializer.Serialize(Enumerable.Range(0, 4).Select(index => rows.IsDBNull(index) ? null : rows.GetString(index))));
         }

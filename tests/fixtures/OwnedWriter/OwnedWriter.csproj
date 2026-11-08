@@ -9,4 +9,7 @@
     <ProjectReference Include="../../../src/platform/NexusPipeline.Platform.csproj" />
     <ProjectReference Include="../TargetGame/TargetGame.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
+  <ItemGroup Condition="'$(NexusPluginFixturesRoot)' != ''">
+    <Compile Include="$(NexusPluginFixturesRoot)/owned-writer/*.cs" Link="PluginFixtures/%(Filename)%(Extension)" />
+  </ItemGroup>
 </Project>

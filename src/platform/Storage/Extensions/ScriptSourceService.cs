@@ -12,8 +12,12 @@ namespace NexusPipeline.Platform.Storage.Extensions;
 internal sealed class ScriptSourceService(RuntimeInstance instance, StateDatabase database, InstanceLease lease,
     ResourceLeaseManager resources, ContractReader contracts, PayloadApplyRoots roots, ExtensionActivator activator)
 {
-    internal async ValueTask<ScriptSource> DiscoverAsync(Guid operationId, string extensionId, long revision,
-        string rootPath, Action requireCaller, CancellationToken cancellation)
+    internal ValueTask<ScriptSource> DiscoverAsync(Guid operationId, string extensionId, long revision,
+        string rootPath, Action requireCaller, CancellationToken cancellation) =>
+        UseAsync(operationId, extensionId, revision, rootPath, requireCaller, cancellation, (result, _) => result);
+
+    internal async ValueTask<T> UseAsync<T>(Guid operationId, string extensionId, long revision,
+        string rootPath, Action requireCaller, CancellationToken cancellation, Func<ScriptSource, Action, T> consume)
     {
         requireCaller(); lease.VerifyHeld(instance); cancellation.ThrowIfCancellationRequested();
         using var use = resources.TryAcquire(operationId, [new("extension:" + extensionId, ResourceClaimMode.Reference),
@@ -38,7 +42,7 @@ internal sealed class ScriptSourceService(RuntimeInstance instance, StateDatabas
                 if (response.Candidates!.Any(candidate => candidate.ExclusiveProgram == true && installed.Manifest.Specialized?.ExclusiveProgram != true))
                     throw Invalid();
                 source.RequireCurrent(); installed.RequireCurrent(); Check();
-                return ValueTask.FromResult(response);
+                return ValueTask.FromResult(consume(response, () => { source.RequireCurrent(); installed.RequireCurrent(); Check(); }));
             });
         return result;
     }

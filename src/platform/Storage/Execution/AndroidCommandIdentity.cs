@@ -49,7 +49,7 @@ internal static class AndroidCommandIdentity
             parameters.Arguments, Path.GetDirectoryName(tool.Path)!));
         var request = new AndroidCommandRequest(actualBinding with { }, sequence, purpose, action, actualParentSubject,
             android.Endpoint, android.Package, android.Driver, android.Mapping, tool, command, limits,
-            action == ExecutionAndroidAction.LaunchDevice && android.Emulator is { Selection.Vendor: "bluestacks", Launch.Detached: true });
+            action == ExecutionAndroidAction.LaunchDevice && android.Emulator is { Launch.Detached: true });
         var files = request.Tool.RuntimeFiles ?? throw Invalid();
         // Other request branches are sealed scalar records or ImmutableArray; only this generated list needs detaching.
         return request with { Tool = request.Tool with { RuntimeFiles = Array.AsReadOnly(files.ToArray()) } };

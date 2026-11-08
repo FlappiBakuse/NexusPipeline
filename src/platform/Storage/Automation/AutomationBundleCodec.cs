@@ -66,6 +66,7 @@ public sealed class AutomationBundleCodec(ContractReader contracts)
             {
                 Id = value.Id.ToString("D"), UserId = value.UserId.ToString("D"), ScriptId = value.ScriptId.ToString("D"), Enabled = value.IsEnabled, Priority = value.Priority,
                 RunDays = value.RunDays, MaximumSuccessfulRunsPerDay = value.MaximumSuccessfulRunsPerDay,
+                Source = BindingSourceCodec.Write(value.Source),
                 PreHook = Hook(value.PreHook), PostHook = Hook(value.PostHook),
                 PreOnceAfterSuccess = value.PreOnceAfterSuccess, PostFinalOnly = value.PostFinalOnly,
                 NotifyEnabled = value.NotifyEnabled, NotificationTaskIds = value.NotificationTaskIds.Select(id => id.ToString("D")).ToArray()

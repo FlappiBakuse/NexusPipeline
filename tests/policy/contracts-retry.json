@@ -1,7 +1,6 @@
 {
   "group": "contracts-retry",
-  "expectedMethods": {
-    "NexusPipeline.ContractTests.RetryContractTests.RequiresRetryOutcomes": 1,
-    "NexusPipeline.ContractTests.RetryContractTests.RejectsUnknownDeclarations": 7
-  }
+  "classes": [
+    "NexusPipeline.ContractTests.RetryContractTests"
+  ]
 }

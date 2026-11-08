@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text.Json.Nodes;
 using NexusPipeline.Core.Maintenance;
 using NexusPipeline.Core.Settings;
+using NexusPipeline.Platform.Processes;
 using NexusPipeline.Platform.Extensions;
 using NexusPipeline.Platform.Storage.Extensions;
 using NexusPipeline.Platform.Storage.Sqlite;
@@ -100,7 +101,63 @@ public sealed class InstalledActivationTests
         {
             var bound = origin.RequireCurrent();
             Assert.Same(bound, origin.RequireCurrent());
+            await RechecksWriterState(context.Database, bound.Registered.JournalId, origin);
+            var catalog = bound.Source.Package!.Catalog;
+            void SetReady(int ready)
+            {
+                using var connection = DatabaseConnections.Open(context.Database.DatabasePath);
+                using var command = connection.CreateCommand();
+                command.CommandText = "UPDATE recovery_index_state SET ready=$ready WHERE singleton=1;";
+                command.Parameters.AddWithValue("$ready", ready);
+                Assert.Equal(1, command.ExecuteNonQuery());
+            }
+            SetReady(0);
+            try
+            {
+                Assert.Throws<IOException>(() => origin.RequireCurrent());
+                Assert.Throws<IOException>(() => origin.RequireCurrent());
+            }
+            finally { SetReady(1); }
+            Assert.Same(bound, origin.RequireCurrent());
+            foreach (var reference in new[] { catalog.Pointer, catalog.Catalog, catalog.Signature })
+                Assert.Throws<IOException>(() => { using var writer = File.Open(Path.Combine(context.Instance.RuntimeRoot,
+                    reference.RelativePath), FileMode.Open, FileAccess.Write, FileShare.Read); });
+            context.Database.Write((connection, transaction) =>
+            {
+                using var command = connection.CreateCommand(); command.Transaction = transaction;
+                command.CommandText = "DELETE FROM extension_catalog_heads;";
+                return command.ExecuteNonQuery();
+            });
+            try { Assert.Throws<IOException>(() => origin.RequireCurrent()); }
+            finally
+            {
+                context.Database.Write((connection, transaction) =>
+                {
+                    using var command = connection.CreateCommand(); command.Transaction = transaction;
+                    command.CommandText = "INSERT INTO extension_catalog_heads(format,channel,sequence,catalog_sha) " +
+                        "SELECT format,channel,sequence,catalog_sha FROM extension_catalog_acceptances;";
+                    return command.ExecuteNonQuery();
+                });
+            }
+            Assert.Same(bound, origin.RequireCurrent());
             Assert.Throws<IOException>(() => { using var writer = File.Open(revision, FileMode.Open, FileAccess.Write, FileShare.Read); });
+            void ChangePhase(string phase)
+            {
+                using var connection = DatabaseConnections.Open(context.Database.DatabasePath);
+                using var command = connection.CreateCommand();
+                command.CommandText = "UPDATE operation_journals SET phase=$phase WHERE journal_id=$journal;";
+                command.Parameters.AddWithValue("$phase", phase);
+                command.Parameters.AddWithValue("$journal", bound.Registered.JournalId.ToString("D"));
+                Assert.Equal(1, command.ExecuteNonQuery());
+            }
+            ChangePhase("applied");
+            try
+            {
+                Assert.Throws<IOException>(() => origin.RequireCurrent());
+                Assert.Throws<IOException>(() => origin.RequireCurrent());
+            }
+            finally { ChangePhase("committed"); }
+            Assert.Same(bound, origin.RequireCurrent());
             var unexpected = Path.Combine(directory, "unexpected.bin");
             File.WriteAllBytes(unexpected, [1]);
             try { Assert.Throws<IOException>(() => origin.RequireCurrent()); }
@@ -117,6 +174,38 @@ public sealed class InstalledActivationTests
         new(fixture.Package.Catalog.Instance, fixture.Package.Catalog.Database, fixture.Package.Catalog.Lease,
             fixture.Package.Catalog.Contracts, fixture.Roots, fixture.Package.Catalog.Resources, fixture.Package.Catalog.Index,
             catalog, fixture.Activator);
+
+    private static async Task RechecksWriterState(StateDatabase database, Guid journal, InstalledActivationOrigin origin)
+    {
+        var directory = Path.Combine(Environment.GetEnvironmentVariable("NEXUS_TEST_ROOT")!, "writer-read-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        using var job = new OwnedWorkerJob();
+        var process = job.Start(Environment.GetEnvironmentVariable("NEXUS_PROCESS_FIXTURE_EXE")!,
+            ["process-output", "wait", Path.Combine(directory, "ready")], directory, Guid.NewGuid(), Guid.NewGuid(), _ => { });
+        var writer = new JournalWriter(Guid.NewGuid(), ProcessIdentityReader.Read(process.ProcessId));
+        try
+        {
+            database.Write((connection, transaction) =>
+            {
+                JournalWriterStore.Insert(connection, transaction, journal, writer); return true;
+            });
+            Assert.Equal("extension_original_writer_stop_unconfirmed", Assert.Throws<IOException>(() => origin.RequireCurrent()).Message);
+            Assert.True(await job.StopAsync(TimeSpan.FromSeconds(10)));
+            _ = origin.RequireCurrent();
+        }
+        finally
+        {
+            database.Write((connection, transaction) =>
+            {
+                using var command = connection.CreateCommand(); command.Transaction = transaction;
+                command.CommandText = "DELETE FROM journal_writers WHERE journal_id=$journal AND writer_id=$writer;";
+                command.Parameters.AddWithValue("$journal", journal.ToString("D"));
+                command.Parameters.AddWithValue("$writer", writer.WriterId.ToString("D"));
+                return command.ExecuteNonQuery();
+            });
+        }
+        _ = origin.RequireCurrent();
+    }
 
     private static void Enable(InstallRuntimeFixture fixture)
     {

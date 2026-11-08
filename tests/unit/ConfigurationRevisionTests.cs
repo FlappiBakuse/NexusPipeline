@@ -46,7 +46,7 @@ public sealed class ConfigurationRevisionTests
     [InlineData(14, true, 100, true, "configuration_sync_not_due")]
     [InlineData(15, false, 100, true, "configuration_sync_invalid_content")]
     [InlineData(15, true, 0, true, "configuration_sync_empty")]
-    [InlineData(15, true, 49, true, "configuration_sync_shrinking")]
+    [InlineData(15, true, 30, true, "configuration_sync_allowed")]
     [InlineData(15, true, 50, true, "configuration_sync_allowed")]
     [InlineData(15, true, 100, false, "configuration_sync_shape_conflict")]
     public void ValidatesProgressBoundaries(int seconds, bool valid, long bytes, bool sameShape, string reason)

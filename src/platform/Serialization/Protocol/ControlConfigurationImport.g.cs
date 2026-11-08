@@ -31,4 +31,12 @@ public sealed record ControlConfigurationImport
     /// <summary>Schema field <c>resources</c>; constraints are owned by control-configuration-import.schema.json.</summary>
     [JsonPropertyName("resources")]
     public required IReadOnlyList<ControlConfigurationImportResourcesItem> Resources { get; init; }
+    /// <summary>Schema field <c>candidateId</c>; constraints are owned by control-configuration-import.schema.json.</summary>
+    [JsonPropertyName("candidateId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CandidateId { get; init; }
+    /// <summary>Schema field <c>expectedInstalledRevision</c>; constraints are owned by control-configuration-import.schema.json.</summary>
+    [JsonPropertyName("expectedInstalledRevision")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? ExpectedInstalledRevision { get; init; }
 }

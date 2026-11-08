@@ -20,7 +20,7 @@ public sealed class SourceAdapterTests
         await using var fixture = new TaskScriptFixture(); Enable(fixture);
         await fixture.ActivateAsync();
         var calls = new List<string>();
-        var result = fixture.Executor(Script).DiscoverSource(Guid.Parse(fixture.Request.OperationId), "bettergi",
+        var result = fixture.Executor(Script).DiscoverSource(Guid.Parse(fixture.Request.OperationId), "sample-adapter",
             path => { calls.Add(path); return "[{\"name\":\"account.json\",\"kind\":\"file\"}]"; },
             path => { calls.Add(path); return "{\"name\":\"Selected account\"}"; }, default);
         Assert.Equal(new[] { "config", "config/account.json" }, calls);
@@ -36,7 +36,7 @@ public sealed class SourceAdapterTests
         fixture.Manifest = declared ? fixture.Manifest with { Permissions = new() } : fixture.Manifest with
             { Specialized = fixture.Manifest.Specialized! with { SourceDiscovery = false } };
         await fixture.ActivateAsync();
-        Assert.Throws<UnauthorizedAccessException>(() => fixture.Executor(Script).DiscoverSource(Guid.NewGuid(), "bettergi",
+        Assert.Throws<UnauthorizedAccessException>(() => fixture.Executor(Script).DiscoverSource(Guid.NewGuid(), "sample-adapter",
             _ => throw new InvalidOperationException("must_not_read"), _ => throw new InvalidOperationException("must_not_read"), default));
     }
 
@@ -44,10 +44,10 @@ public sealed class SourceAdapterTests
     public async Task RejectsUnboundResponse()
     {
         await using var fixture = new TaskScriptFixture(); Enable(fixture); await fixture.ActivateAsync();
-        const string wrong = "globalThis.nexusDiscoverScript = input => ({...input, direction:'response',extensionId:'baah',candidates:[],diagnostics:[]});";
-        Assert.Throws<JsonException>(() => fixture.Executor(wrong).DiscoverSource(Guid.NewGuid(), "bettergi", _ => "[]", _ => "{}", default));
+        const string wrong = "globalThis.nexusDiscoverScript = input => ({...input, direction:'response',extensionId:'foreign-adapter',candidates:[],diagnostics:[]});";
+        Assert.Throws<JsonException>(() => fixture.Executor(wrong).DiscoverSource(Guid.NewGuid(), "sample-adapter", _ => "[]", _ => "{}", default));
         await fixture.Scope.DisposeAsync();
-        Assert.ThrowsAny<Exception>(() => fixture.Executor(Script).DiscoverSource(Guid.NewGuid(), "bettergi", _ => "[]", _ => "{}", default));
+        Assert.ThrowsAny<Exception>(() => fixture.Executor(Script).DiscoverSource(Guid.NewGuid(), "sample-adapter", _ => "[]", _ => "{}", default));
     }
 
     private static void Enable(TaskScriptFixture fixture) => fixture.Manifest = fixture.Manifest with

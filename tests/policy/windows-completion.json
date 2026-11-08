@@ -1,7 +1,6 @@
 {
   "group": "windows-completion",
-  "expectedMethods": {
-    "NexusPipeline.WindowsTests.PowerBindingTests.InspectsNativeExports": 1,
-    "NexusPipeline.WindowsTests.PowerBindingTests.RejectsOtherActions": 3
-  }
+  "classes": [
+    "NexusPipeline.WindowsTests.PowerBindingTests"
+  ]
 }

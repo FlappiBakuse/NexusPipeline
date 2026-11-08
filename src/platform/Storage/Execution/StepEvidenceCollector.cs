@@ -12,6 +12,8 @@ namespace NexusPipeline.Platform.Storage.Execution;
 internal sealed class StepEvidenceCollector : IDisposable
 {
     private readonly StepEvidenceBinding _binding;
+    private readonly Records.RunDiagnosticStore _diagnostics;
+    private readonly Guid? _userId;
     private readonly StepEvidenceFactory _factory;
     private readonly AttemptTerminalStore _terminal;
     private readonly ConfigurationWriterProcess? _writer;
@@ -70,6 +72,8 @@ internal sealed class StepEvidenceCollector : IDisposable
         var reader = new StepEvidenceReader(instance, database, contracts);
         var context = preparedState is null ? reader.Context(binding) : reader.ContextFromValidatedRead(binding,
             preparedState.Journal, preparedState.Attempt, preparedState.Total, preparedState.Latest);
+        _diagnostics = new(instance, database);
+        _userId = context.Total.Steps.Single(step => step.StepId == binding.StepId).UserId is { } user ? Guid.Parse(user) : null;
         _factory = new(instance, database, contracts, lease); _terminal = new(instance, database, contracts, lease);
         _judgement = judgement ?? new(binding.AttemptId, reader.Judgement(context.Total, binding.StepId));
         _worker = worker; _provider = provider; _observeAdapter = observeAdapter;
@@ -202,7 +206,7 @@ internal sealed class StepEvidenceCollector : IDisposable
             await _gate.WaitAsync().ConfigureAwait(false);
             try { Observe(await _raw.SnapshotAsync().ConfigureAwait(false)); }
             catch (Exception error) when (error is IOException or UnauthorizedAccessException)
-            { ObservationFailureCode ??= "execution_observation_not_persisted"; }
+            { RecordFailure("execution_observation_not_persisted", error); }
             finally { _gate.Release(); }
         }
     }
@@ -216,7 +220,7 @@ internal sealed class StepEvidenceCollector : IDisposable
     {
         try { await _capture.Completion.ConfigureAwait(false); await _raw.Completion.ConfigureAwait(false); }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
-        { ObservationFailureCode ??= "execution_capture_cleanup_failed"; }
+        { RecordFailure("execution_capture_cleanup_failed", error); }
         finally { _raw.Dispose(); _output.Dispose(); _gate.Dispose(); }
     }
 
@@ -244,12 +248,19 @@ internal sealed class StepEvidenceCollector : IDisposable
         await _gate.WaitAsync().ConfigureAwait(false);
         try { Observe(await _raw.SnapshotAsync().ConfigureAwait(false)); }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException)
-        { ObservationFailureCode ??= "execution_observation_not_persisted"; }
+        { RecordFailure("execution_observation_not_persisted", error); }
         finally { _gate.Release(); }
     }
 
     private T UseNative<T>(StoppedConfigurationEditor? stopped, Func<ProcessIdentity?, int?, T> callback) => _writer is not null ?
         _writer.UseStepEvidence(_binding, stopped, callback) : _controller!.UseStepEvidence(_binding, stopped, callback);
+
+    private void RecordFailure(string reason, Exception error)
+    {
+        if (ObservationFailureCode == reason) return;
+        ObservationFailureCode = reason;
+        _diagnostics.Record(_binding.ParentJournalId, _binding.StepId, _userId, "execution-observation", reason, error);
+    }
 
     public void Dispose()
     {

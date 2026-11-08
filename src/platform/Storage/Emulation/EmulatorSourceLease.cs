@@ -10,7 +10,7 @@ internal sealed class EmulatorSourceLease : IDisposable
 {
     private readonly List<IDisposable> _held = [];
     private readonly Dictionary<string, (FileStream File, string Sha)> _files = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, string[]> _sets = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, (string[] Files, string[] Extensions)> _sets = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, (string Path, PhysicalObjectIdentity Identity)> _roots = [];
     private long _bytes;
     private bool _disposed;
@@ -50,12 +50,12 @@ internal sealed class EmulatorSourceLease : IDisposable
         return new("config:" + Hash(path + "\n" + physical), relative, physical, previous.Sha, 1, bytes);
     }
 
-    internal IReadOnlyList<string> ConfigFiles(string root)
+    internal IReadOnlyList<string> ConfigFiles(string root, IReadOnlyList<string> extensions)
     {
-        var found = Scan(root);
-        if (_sets.TryGetValue(root, out var prior) && !prior.SequenceEqual(found, StringComparer.OrdinalIgnoreCase))
+        var found = Scan(root, extensions);
+        if (_sets.TryGetValue(root, out var prior) && !prior.Files.SequenceEqual(found, StringComparer.OrdinalIgnoreCase))
             throw new EmulatorException("emulator_config_set_changed");
-        _sets[root] = found; return found;
+        _sets[root] = (found, extensions.ToArray()); return found;
     }
 
     internal string ConfigPath(EmulatorConfig config)
@@ -69,7 +69,7 @@ internal sealed class EmulatorSourceLease : IDisposable
         throw new EmulatorException("emulator_config_unbound");
     }
 
-    private string[] Scan(string root)
+    private string[] Scan(string root, IReadOnlyList<string> extensions)
     {
         var pending = new Stack<(string Path, int Depth)>(); pending.Push((root, 0));
         var files = new List<string>(); var count = 0;
@@ -82,7 +82,7 @@ internal sealed class EmulatorSourceLease : IDisposable
                 if (++count > 16384) throw new EmulatorException("emulator_config_entry_limit");
                 var path = PhysicalPathPolicy.NormalizeWithoutLinks(entry);
                 if (Directory.Exists(path)) pending.Push((path, item.Depth + 1));
-                else if (Path.GetExtension(path).Equals(".vbox", StringComparison.OrdinalIgnoreCase)) files.Add(path);
+                else if (extensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase)) files.Add(path);
             }
         }
         return files.Order(StringComparer.OrdinalIgnoreCase).ToArray();
@@ -99,7 +99,7 @@ internal sealed class EmulatorSourceLease : IDisposable
             if (Convert.ToHexStringLower(SHA256.HashData(item.File)) != item.Sha) throw new EmulatorException("emulator_config_changed");
         }
         foreach (var (path, expected) in _sets.ToArray())
-            if (!expected.SequenceEqual(Scan(path), StringComparer.OrdinalIgnoreCase)) throw new EmulatorException("emulator_config_set_changed");
+            if (!expected.Files.SequenceEqual(Scan(path, expected.Extensions), StringComparer.OrdinalIgnoreCase)) throw new EmulatorException("emulator_config_set_changed");
     }
 
     internal static string Identity(PhysicalObjectIdentity identity) => identity.VolumeSerial + ":" + identity.FileId;

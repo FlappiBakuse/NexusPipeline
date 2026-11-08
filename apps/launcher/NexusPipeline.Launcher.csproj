@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.22621.0</TargetFramework>
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+    <ApplicationIcon>../desktop/nexuspipeline.ico</ApplicationIcon>
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>false</SelfContained>
+    <ApplicationManifest Condition="'$(NexusTestHost)' != 'true'">app.manifest</ApplicationManifest>
+    <ApplicationManifest Condition="'$(NexusTestHost)' == 'true'">test.manifest</ApplicationManifest>
+  </PropertyGroup>
+</Project>

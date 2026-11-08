@@ -43,7 +43,6 @@ public sealed class SynchronizationTriggerTests
     [InlineData("empty-file", "configuration_sync_empty")]
     [InlineData("empty-directory", "configuration_sync_empty")]
     [InlineData("reshaped", "configuration_sync_shape_conflict")]
-    [InlineData("shrinking-bytes", "configuration_sync_shrinking")]
     [InlineData("shrinking-files", "configuration_sync_shrinking")]
     public void RejectsInvalidCandidates(string scenario, string reason)
     {
@@ -59,15 +58,16 @@ public sealed class SynchronizationTriggerTests
         Assert.False(result.IsAllowed); Assert.Equal(reason, result.ReasonCode); Assert.Null(result.Delta);
     }
 
-    [Theory(DisplayName = "Finalization Retains The Exact Half Size Boundary For Both File Bytes And Directory Counts")]
+    [Theory(DisplayName = "Directory Halving Is Rejected While Valid Single File Compaction Is Accepted")]
     [InlineData(false)]
     [InlineData(true)]
     public void KeepsShrinkBoundary(bool directory)
     {
         var saved = directory ? DirectoryFiles(4, 25) : Single(100);
-        var candidate = directory ? DirectoryFiles(2, 25, 'b') : Single(50, 'b');
+        var candidate = directory ? DirectoryFiles(2, 25, 'b') : Single(30, 'b');
         var result = ConfigurationSynchronizationPolicy.Evaluate(saved, candidate, TimeSpan.Zero, true, ConfigurationSyncTrigger.Finalization);
-        Assert.True(result.IsAllowed); Assert.Equal("configuration_sync_allowed", result.ReasonCode); Assert.NotNull(result.Delta);
+        Assert.Equal(!directory, result.IsAllowed);
+        Assert.Equal(directory ? "configuration_sync_shrinking" : "configuration_sync_allowed", result.ReasonCode);
     }
 
     [Theory(DisplayName = "Negative Durations And Unknown Triggers Cannot Become Synchronization Decisions")]

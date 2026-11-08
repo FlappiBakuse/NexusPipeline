@@ -4,6 +4,16 @@ import struct
 import xml.etree.ElementTree as ET
 
 
+def pe_subsystem(path):
+    data = Path(path).read_bytes()
+    if len(data) < 64 or data[:2] != b'MZ':
+        raise ValueError('Not a Windows PE executable')
+    offset = struct.unpack_from('<I', data, 60)[0]
+    if offset + 94 > len(data) or data[offset:offset + 4] != b'PE\0\0':
+        raise ValueError('Missing PE optional header')
+    return struct.unpack_from('<H', data, offset + 24 + 68)[0]
+
+
 def embedded_manifest(path):
     data = Path(path).read_bytes()
     if data[:2] != b"MZ":
@@ -49,7 +59,7 @@ def embedded_manifest(path):
 
 def verify_manifests(build_bin, expected):
     results = []
-    for assembly in ("NexusPipeline.Host", "NexusPipeline.Maintenance"):
+    for assembly in ("NexusPipeline.Host", "NexusPipeline.Launcher", "NexusPipeline.Maintenance"):
         path = Path(build_bin) / assembly / "release" / (assembly + ".exe")
         root = ET.fromstring(embedded_manifest(path))
         levels = [element.attrib["level"] for element in root.iter()

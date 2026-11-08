@@ -35,6 +35,8 @@ public sealed record AutomationUser(Guid Id, long Revision, string Name, int Ord
 public sealed record AutomationHook(AutomationPath Executable, ImmutableArray<string> Arguments);
 public sealed record AutomationBinding(Guid Id, long Revision, Guid UserId, Guid ScriptId, bool IsEnabled, int Priority)
 {
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public BindingScriptSource? Source { get; init; }
     public int RunDays { get; init; } = -1;
     public int MaximumSuccessfulRunsPerDay { get; init; } = -1;
     public AutomationHook? PreHook { get; init; }

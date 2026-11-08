@@ -135,14 +135,7 @@ internal sealed class PreparedExtensionActivation : IAsyncDisposable
         return path;
     }
 
-    internal string ResolveArchive()
-    {
-        RequireLifetime();
-        new ImmutableBlobStore(_instance, _contracts).Verify(_archive);
-        return PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(_instance.RuntimeRoot, _archive.RelativePath));
-    }
-
-    internal IDisposable HoldRuntimeFiles()
+    internal TreeReadLease.TreeBorrow HoldRuntimeFiles()
     {
         RequireLifetime();
         using var paths = _installedOrigin?.ProtectPaths();
@@ -152,7 +145,8 @@ internal sealed class PreparedExtensionActivation : IAsyncDisposable
     internal ReadProviderPackage ReadPackageInputs(List<IDisposable> held)
     {
         using var paths = _installedOrigin?.ProtectPaths() ?? DirectoryAttributeScope.Hold(_instance);
-        return _trees.ReadPackage(ResolveArchive(), ExtensionId, _manifest, _contracts, held);
+        RequireLifetime();
+        return _trees.ReadPackage(_instance, ExtensionId, _manifest, _contracts, held);
     }
 
     internal void RequirePortOwner(RuntimeInstance instance, StateDatabase database, InstanceLease lease, ExtensionScope scope)
@@ -162,12 +156,13 @@ internal sealed class PreparedExtensionActivation : IAsyncDisposable
         lock (_gate) if (!ReferenceEquals(_scope, scope) || _dispose is not null) throw Invalid();
     }
 
-    internal InstalledPackageAssets CaptureAssets(ExtensionScope scope, InstalledExtensionConsumption consumption)
+    internal InstalledPackageAssets CaptureAssets(ExtensionScope scope, InstalledExtensionConsumption consumption,
+        TreeReadLease.TreeBorrow files)
     {
         RequireBeforeCallback();
         lock (_gate)
             if (!ReferenceEquals(_scope, scope) || _dispose is not null) throw Invalid();
-        return new(this, scope, consumption, TargetPath, _trees.ParentIdentity, _runtimeTree);
+        return new(this, scope, consumption, TargetPath, files, _runtimeTree);
     }
 
     internal ImmutableArray<string> AssemblyFiles() =>

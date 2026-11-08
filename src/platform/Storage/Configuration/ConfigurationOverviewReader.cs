@@ -24,7 +24,7 @@ public sealed class ConfigurationOverviewReader(RuntimeInstance instance, StateD
         var catalog = new AutomationDefinitionStore(database).Read();
         var binding = catalog.Bindings.SingleOrDefault(item => item.Id == bindingId)
             ?? throw new ConfigurationException("configuration_binding_missing");
-        var script = catalog.Scripts.Single(item => item.Id == binding.ScriptId);
+        var script = Core.Automation.BindingScriptSource.Resolve(catalog.Scripts.Single(item => item.Id == binding.ScriptId), binding);
         var revisions = new ConfigurationRevisionStore(instance, database, contracts);
         var resources = new List<ConfigurationResourceView>();
         using var provider = ProviderConfigurationPolicy.Acquire(script, providers);

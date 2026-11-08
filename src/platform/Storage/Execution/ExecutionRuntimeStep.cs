@@ -40,6 +40,7 @@ internal sealed class ExecutionRuntimeStep : IDisposable
     private readonly AcceptedExecutionAdmission _accepted;
     private readonly AttemptTerminalStore _terminal;
     private readonly Guid _parentJournalId;
+    private readonly ConfigurationSessionFactory _configurationFactory;
     private readonly RuntimeInstance _instance;
     private readonly StateDatabase _database;
     private readonly ContractReader _contracts;
@@ -60,8 +61,9 @@ internal sealed class ExecutionRuntimeStep : IDisposable
         (_controller is null || !_controller.HasConfigurationHistory);
 
     internal ExecutionRuntimeStep(RuntimeInstance instance, StateDatabase database, ContractReader contracts, InstanceLease lease,
-        RecoveryIndex index, AcceptedExecutionAdmission accepted, ExecutionPlanStep step, Guid? configurationSessionId, ResourceLeaseManager? resources = null, ITargetPersistenceObserver? targetObserver = null, ExecutionLiveMedia? liveMedia = null, TaskAdapterService? adapters = null, PreparedConfigurationRun? preparedConfiguration = null, BindingRawAllowance? rawAllowance = null, Func<TimeSpan>? bindingElapsed = null)
+        RecoveryIndex index, AcceptedExecutionAdmission accepted, ExecutionPlanStep step, Guid? configurationSessionId, ResourceLeaseManager? resources = null, ITargetPersistenceObserver? targetObserver = null, ExecutionLiveMedia? liveMedia = null, TaskAdapterService? adapters = null, PreparedConfigurationRun? preparedConfiguration = null, BindingRawAllowance? rawAllowance = null, Func<TimeSpan>? bindingElapsed = null, ConfigurationSessionFactory? configurationFactory = null)
     {
+        _configurationFactory = configurationFactory ?? new(instance, database, contracts, lease, index);
         _parentJournalId = accepted.Receipt.JournalId; StepId = step.StepId;
         _bindingElapsed = bindingElapsed ?? (() => TimeSpan.Zero);
         _preparedConfiguration = preparedConfiguration; _rawAllowance = rawAllowance ?? new(BindingOutputBudget.MaximumForStep(step), 0);
@@ -95,8 +97,8 @@ internal sealed class ExecutionRuntimeStep : IDisposable
         if (_configurationSession is { } session)
         {
             if (_controller is null)
-                _controller = new(_instance, _database, _contracts, _lease, _index, session, _accepted.Identity.SubjectId,
-                    _preparedConfiguration ?? _accepted.Prepared.Configurations[StepId], scope, deferRegistration: true, payloadRoots: _accepted.Prepared.PayloadRoots);
+                _controller = _configurationFactory.Control(session, _accepted.Identity.SubjectId,
+                    _preparedConfiguration ?? _accepted.Prepared.Configurations[StepId], scope, _accepted.Prepared.PayloadRoots);
             else _controller.AttachNextWriter(scope);
             _scope = scope; _activeCollected = false; _collected = false;
             _controller.RegisterPreparedJob();

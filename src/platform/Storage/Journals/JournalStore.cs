@@ -37,6 +37,7 @@ public sealed class JournalStore
 
     internal IDisposable ProtectReadHistory(Guid journalId)
     {
+        using var timing = StartupProfile.Measure("history.protect");
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
         lock (_gate)
         {
@@ -47,7 +48,7 @@ public sealed class JournalStore
             try
             {
                 var documents = new List<JournalDocument>();
-                ReadHistory(journalId, documents);
+                ReadHistory(journalId, documents, held);
                 held.Bind(_instance, documents); _protection = held;
                 return new ProtectionScope(this, held);
             }
@@ -136,7 +137,8 @@ public sealed class JournalStore
         }
     }
 
-    private JournalDocument ReadHistory(Guid journalId, List<JournalDocument>? snapshots = null)
+    private JournalDocument ReadHistory(Guid journalId, List<JournalDocument>? snapshots = null,
+        JournalHistoryProtection? initialProtection = null)
     {
         var protectedDocuments = ReadProtectedHistory(journalId) ?? JournalReadScope.Read(this, journalId);
         if (protectedDocuments is not null)
@@ -154,7 +156,8 @@ public sealed class JournalStore
             PhysicalPathPolicy.NormalizeWithoutLinks(file);
             var expected = (previous?.Revision ?? 0) + 1;
             if (Path.GetFileName(file) != FileName(expected)) throw new IOException("journal_unknown_entry_or_revision_gap");
-            using var input = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read);
+            using var owned = initialProtection is null ? new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read) : null;
+            var input = owned ?? initialProtection!.BorrowRevision(checked((int)expected - 1), Path.GetFileName(file));
             total = checked(total + input.Length);
             if (input.Length > StrictJson.MaximumBytes || total > MaximumHistoryBytes) throw new IOException("journal_history_byte_limit");
             var length = checked((int)input.Length);
@@ -177,7 +180,8 @@ public sealed class JournalStore
             snapshots?.Add(current);
             previous = current;
         }
-        VerifyPlan(previous!);
+        // Protected admission binds and hashes the plan before publishing the retained history.
+        if (initialProtection is null) VerifyPlan(previous!);
         return previous!;
     }
 

@@ -40,6 +40,64 @@ public sealed class PayloadAcceptanceTests
         Assert.False(replay.Acceptance.IsNew); Assert.Equal(accepted.Plan, replay.Plan);
     }
 
+    [Fact(DisplayName = "Extension Claim Inventory Rejects Changed Sql Modes And Preserves Its Frozen Plan And Source")]
+    public void RechecksExtensionClaims()
+    {
+        using var fixture = new PayloadAcceptanceFixture();
+        _ = fixture.Prepare(); var accepted = fixture.Accept();
+        var catalog = fixture.Package.Catalog;
+        var plan = new PayloadPlanCodec(catalog.Instance, catalog.Contracts, fixture.Package.Blobs, fixture.Roots)
+            .ReadStructure(accepted.Plan, out var source);
+        Assert.NotNull(source);
+        var planPath = Path.Combine(catalog.Instance.RuntimeRoot, accepted.Plan.RelativePath);
+        var sourcePath = Path.Combine(catalog.Instance.RuntimeRoot, plan.ExtensionSource!.RelativePath);
+        var planBytes = File.ReadAllBytes(planPath); var sourceBytes = File.ReadAllBytes(sourcePath);
+        JournalResourceClaims.VerifyInventory(catalog.Instance, catalog.Database, catalog.Contracts, fixture.Roots);
+        catalog.Database.Write((connection, transaction) =>
+        {
+            using var command = connection.CreateCommand(); command.Transaction = transaction;
+            command.CommandText = "UPDATE journal_resource_claims SET mode=$mode WHERE journal_id=$journal AND resource_key='settings:host';";
+            command.Parameters.AddWithValue("$mode", (int)ResourceClaimMode.Reference);
+            command.Parameters.AddWithValue("$journal", accepted.JournalId.ToString("D"));
+            Assert.Equal(1, command.ExecuteNonQuery());
+            return true;
+        });
+        var error = Assert.Throws<IOException>(() => JournalResourceClaims.VerifyInventory(
+            catalog.Instance, catalog.Database, catalog.Contracts, fixture.Roots));
+        Assert.Equal("journal_resource_claims_unbound", error.Message);
+        Assert.Equal(planBytes, File.ReadAllBytes(planPath)); Assert.Equal(sourceBytes, File.ReadAllBytes(sourcePath));
+    }
+
+    [Fact(DisplayName = "Protected Gate And Registry Reads Observe Commits Even Inside Another Read Transaction")]
+    public void ReadsCurrentRecovery()
+    {
+        using var fixture = new PayloadAcceptanceFixture();
+        _ = fixture.Prepare(); var accepted = fixture.Accept();
+        var catalog = fixture.Package.Catalog; var database = catalog.Database;
+        var registry = new RecoveryJournalRegistry(database); var gate = new JournalEffectGate(database);
+        using var history = new HistoryReadScope(catalog.Instance, database, catalog.Contracts);
+        var before = registry.ReadSnapshot(accepted.JournalId);
+        var journal = Assert.Single(before.Journals);
+        Assert.Equal(EffectGateState.Unentered, gate.Read(accepted.JournalId).State);
+        var currentRevision = HistoryReadScope.ReadDatabase(database, (connection, transaction) =>
+        {
+            using var command = connection.CreateCommand(); command.Transaction = transaction;
+            command.CommandText = "SELECT revision FROM recovery_index_state WHERE singleton=1;";
+            Assert.Equal(before.Revision, (long)command.ExecuteScalar()!);
+            Assert.Equal(EffectGateState.Entered, gate.Enter(journal, 1).State);
+            Assert.Equal(EffectGateState.Entered, gate.Read(accepted.JournalId).State);
+            var after = registry.ReadSnapshot(accepted.JournalId);
+            Assert.True(after.Revision > before.Revision);
+            Assert.Equal(before.Revision, (long)command.ExecuteScalar()!);
+            return after.Revision;
+        });
+        Assert.Equal(currentRevision, registry.ReadSnapshot(accepted.JournalId).Revision);
+        Assert.Equal(EffectGateState.Entered, gate.Read(accepted.JournalId).State);
+        Assert.Throws<IOException>(() => HistoryReadScope.ReadDatabase<int>(database,
+            (_, _) => throw new IOException("controlled_history_read_failure")));
+        Assert.Equal(currentRevision, registry.ReadSnapshot(accepted.JournalId).Revision);
+    }
+
     [Fact(DisplayName = "A First Preference Cannot Be Accepted Under A Reference Lease")]
     public void RequiresMutationLease()
     {

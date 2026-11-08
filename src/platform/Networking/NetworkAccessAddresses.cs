@@ -9,8 +9,7 @@ public sealed record NetworkAccessAddresses(IReadOnlyList<string> Lan, IReadOnly
     public static NetworkAccessAddresses Read(int port)
     {
         if (port is < 1 or > 65535) throw new ArgumentOutOfRangeException(nameof(port));
-        var lan = new SortedSet<string>(StringComparer.Ordinal);
-        var publicAddresses = new SortedSet<string>(StringComparer.Ordinal);
+        var addresses = new List<IPAddress>();
         try
         {
             foreach (var network in NetworkInterface.GetAllNetworkInterfaces())
@@ -18,19 +17,30 @@ public sealed record NetworkAccessAddresses(IReadOnlyList<string> Lan, IReadOnly
                 if (network.OperationalStatus != OperationalStatus.Up || network.NetworkInterfaceType == NetworkInterfaceType.Loopback) continue;
                 foreach (var unicast in network.GetIPProperties().UnicastAddresses)
                 {
-                    var address = unicast.Address;
-                    if (address.AddressFamily != AddressFamily.InterNetwork || IPAddress.IsLoopback(address)) continue;
-                    var bytes = address.GetAddressBytes();
-                    if (bytes[0] is 0 or >= 224 || bytes[0] == 169 && bytes[1] == 254) continue;
-                    var privateAddress = bytes[0] == 10 || bytes[0] == 172 && bytes[1] is >= 16 and <= 31
-                        || bytes[0] == 192 && bytes[1] == 168 || bytes[0] == 100 && bytes[1] is >= 64 and <= 127;
-                    if (!privateAddress && !IsPublic(address)) continue;
-                    var target = privateAddress ? lan : publicAddresses;
-                    if (target.Count < 32) target.Add(new UriBuilder("http", address.ToString(), port).Uri.GetLeftPart(UriPartial.Authority));
+                    addresses.Add(unicast.Address);
                 }
             }
         }
         catch (NetworkInformationException) { }
+        return Project(addresses, port);
+    }
+
+    public static NetworkAccessAddresses Project(IEnumerable<IPAddress> addresses, int port)
+    {
+        if (port is < 1 or > 65535) throw new ArgumentOutOfRangeException(nameof(port));
+        var lan = new SortedSet<string>(StringComparer.Ordinal);
+        var publicAddresses = new SortedSet<string>(StringComparer.Ordinal);
+        foreach (var address in addresses)
+        {
+            if (address.AddressFamily != AddressFamily.InterNetwork || IPAddress.IsLoopback(address)) continue;
+            var bytes = address.GetAddressBytes();
+            if (bytes[0] is 0 or >= 224 || bytes[0] == 169 && bytes[1] == 254) continue;
+            var privateAddress = bytes[0] == 10 || bytes[0] == 172 && bytes[1] is >= 16 and <= 31 ||
+                bytes[0] == 192 && bytes[1] == 168 || bytes[0] == 100 && bytes[1] is >= 64 and <= 127;
+            if (!privateAddress && !IsPublic(address)) continue;
+            var target = privateAddress ? lan : publicAddresses;
+            if (target.Count < 32) target.Add(new UriBuilder("http", address.ToString(), port).Uri.GetLeftPart(UriPartial.Authority));
+        }
         return new(lan.ToArray(), publicAddresses.ToArray());
     }
 

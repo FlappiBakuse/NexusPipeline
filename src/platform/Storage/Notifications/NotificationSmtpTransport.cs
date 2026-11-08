@@ -14,7 +14,7 @@ internal static class NotificationSmtpTransport
 {
     internal static async Task<NotificationTransportResult> SendAsync(NotificationDeliverySnapshot snapshot,
         NotificationTaskDefinition task, NotificationSecretMaterial material, NotificationAttachment? attachment, CancellationToken cancellation,
-        Func<SmtpClient>? createClient = null)
+        Func<SmtpClient>? createClient = null, Action? enteringTransport = null)
     {
         var configuration = task.Configuration;
         if (!NotificationReadiness.Configured(task, material.Has)) return new(NotificationTransportOutcome.Rejected, null);
@@ -23,12 +23,13 @@ internal static class NotificationSmtpTransport
         material.Use(NotificationSecretField.SmtpPassword, value => { foreach (var character in value) secure.AppendChar(character); });
         secure.MakeReadOnly();
         var credential = new NetworkCredential(configuration.SmtpUser, secure);
-        using var client = createClient?.Invoke() ?? new SmtpClient();
-        if (client.GetType() != typeof(SmtpClient) || client.IsConnected) throw new IOException("notification_smtp_client_not_fresh");
-        client.Timeout = checked(configuration.TimeoutSeconds * 1000);
+        var client = createClient?.Invoke() ?? new SmtpClient();
         try
         {
+            if (client.GetType() != typeof(SmtpClient) || client.IsConnected) throw new IOException("notification_smtp_client_not_fresh");
+            client.Timeout = checked(configuration.TimeoutSeconds * 1000);
             cancellation.ThrowIfCancellationRequested();
+            enteringTransport?.Invoke();
             await client.ConnectAsync(configuration.SmtpHost, configuration.SmtpPort, Security(configuration), cancellation).ConfigureAwait(false);
             await client.AuthenticateAsync(credential, cancellation).ConfigureAwait(false);
             _ = await client.SendAsync(message, cancellation).ConfigureAwait(false);
@@ -42,7 +43,12 @@ internal static class NotificationSmtpTransport
         catch (Exception error) when (error is IOException or OperationCanceledException or MailKit.ProtocolException or
             MailKit.ServiceNotAuthenticatedException or MailKit.ServiceNotConnectedException or System.Net.Sockets.SocketException)
         { return new(NotificationTransportOutcome.Unknown, null); }
-        finally { credential.Password = string.Empty; }
+        finally
+        {
+            credential.Password = string.Empty;
+            try { client.Dispose(); }
+            catch (Exception error) when (error is IOException or SmtpProtocolException or SmtpCommandException) { }
+        }
     }
 
     internal static SecureSocketOptions Security(NotificationChannelConfiguration configuration) => configuration.SmtpSecurity switch

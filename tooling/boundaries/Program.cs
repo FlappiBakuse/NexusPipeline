@@ -7,12 +7,6 @@ if (args.Length == 3 && args[0] == "--source-names")
 if (args.Length == 2 && args[0] == "--source-boundaries")
     return SourceBoundaries.Verify(args[1]);
 
-if (args.Length is 2 or 3 && args[0] == "--test-identities")
-{
-    Console.WriteLine(TestIdentities.Read(args[1], args.Length == 3 ? args[2].Split(',') : null));
-    return 0;
-}
-
 if (args.Length == 4 && args[0] == "--sdk-surface" && args[2] is "--write" or "--verify")
 {
     try
@@ -37,6 +31,7 @@ var allowed = new Dictionary<string, string[]>
     ["NexusPipeline.Extensibility"] = [],
     ["NexusPipeline.Platform"] = ["NexusPipeline.Core", "NexusPipeline.Extensibility"],
     ["NexusPipeline.Host"] = ["NexusPipeline.Core", "NexusPipeline.Platform", "NexusPipeline.Extensibility"],
+    ["NexusPipeline.Launcher"] = [],
     ["NexusPipeline.Maintenance"] = ["NexusPipeline.Core", "NexusPipeline.Platform"],
     ["NexusPipeline.Installer"] = ["NexusPipeline.Core", "NexusPipeline.Platform"]
 };

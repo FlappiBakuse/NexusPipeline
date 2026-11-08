@@ -140,12 +140,26 @@ public sealed class JournalWriterStore(StateDatabase database)
         if (command.ExecuteNonQuery() != 1) throw new IOException("execution_writer_job_registration_unbound");
     }
 
-    internal WriterStopObservation ObserveForCurrentExecutor(Guid journalId)
+    internal WriterStopObservation ObserveForCurrentExecutor(Guid journalId, ProcessIdentityLease? identity = null)
+    {
+        using var timing = StartupProfile.Measure("writer.executor");
+        return Observe(journalId, null, RequireExecutor(identity));
+    }
+
+    internal WriterStopObservation ObserveWithExecutor(SqliteConnection connection, SqliteTransaction transaction,
+        Guid journalId, ProcessIdentityLease? identity)
+    {
+        using var timing = StartupProfile.Measure("writer.executor");
+        return ObserveInside(connection, transaction, journalId, null, RequireExecutor(identity));
+    }
+
+    private static ProcessIdentity RequireExecutor(ProcessIdentityLease? identity)
     {
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
         var current = CurrentWriter;
-        if (ProcessIdentityReader.Read(Environment.ProcessId) != current.Process) throw new IOException("journal_executor_identity_changed");
-        return Observe(journalId, null, current.Process);
+        if ((identity?.ReadCurrent() ?? ProcessIdentityReader.Read(Environment.ProcessId)) != current.Process)
+            throw new IOException("journal_executor_identity_changed");
+        return current.Process;
     }
 
     private Guid RequireCurrentWriter(Guid journalId, bool requireNoWorkers)
@@ -202,6 +216,16 @@ public sealed class JournalWriterStore(StateDatabase database)
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
         using var transaction = connection.BeginTransaction(deferred: true);
+        var result = ObserveInside(connection, transaction, journalId, executingRecovery, executingProcess, maintenanceActor, creatorsOnly);
+        transaction.Commit();
+        return result;
+    }
+
+    private WriterStopObservation ObserveInside(SqliteConnection connection, SqliteTransaction transaction,
+        Guid journalId, Guid? executingRecovery, ProcessIdentity? executingProcess,
+        Maintenance.MaintenanceRegisteredActor? maintenanceActor = null, bool creatorsOnly = false)
+    {
+        if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
         maintenanceActor?.RequireRegisteredInside(connection, transaction, journalId);
@@ -249,7 +273,6 @@ public sealed class JournalWriterStore(StateDatabase database)
                 }
             }
         }
-        transaction.Commit();
         return new(true, state);
     }
 

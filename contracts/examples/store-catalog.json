@@ -7,14 +7,14 @@
   "publishedAt": "2026-10-19T00:00:00Z",
   "entries": [
     {
-      "extensionId": "live-screenshot",
-      "artifactName": "LiveScreenshot",
+      "extensionId": "example-managed",
+      "artifactName": "ExampleManaged",
       "packageVersion": "0.5.0-beta.1",
       "kind": "managed-code",
       "minHostVersion": "0.18.0",
       "sdkVersion": "0.1.0",
       "artifact": {
-        "url": "https://example.invalid/LiveScreenshot.zip",
+        "url": "https://example.invalid/ExampleManaged.zip",
         "sizeBytes": 1024,
         "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
       },

@@ -1,0 +1,17 @@
+.startup-surface {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  padding: 32px;
+  color-scheme: dark;
+  font: 14px "Segoe UI", sans-serif;
+  color: #e9effb;
+  background: #131f33;
+}
+.startup-surface .startup-icon { display: block; width: 64px; height: 64px; flex: none; }
+.startup-surface h1 { font: 700 24px "Segoe UI", sans-serif; margin: 18px 0; }
+.startup-surface .startup-stage { margin: 6px 0 20px; line-height: normal; }
+.startup-surface progress { width: min(420px, 80vw); height: 8px; accent-color: #3989ff; }
+.startup-surface .startup-elapsed { color: #94a8c4; margin: 14px 0; line-height: normal; }

@@ -6,6 +6,21 @@ namespace NexusPipeline.CoreTests;
 
 public sealed class AutomationTargetTests
 {
+    [Theory]
+    [InlineData("custom-engine", true)]
+    [InlineData("engine.variant-2", true)]
+    [InlineData("../engine", false)]
+    [InlineData("", false)]
+    public void AcceptsProviderVendor(string vendor, bool valid)
+    {
+        var root = Guid.NewGuid();
+        var target = new AutomationTarget(AutomationTargetKind.Android, true, 10, false, null,
+            new(AutomationAndroidDriver.GenericAdb, new(root, "device.exe"), "127.0.0.1:5555", "test.game", [])
+            { Emulator = new(vendor, root, new string('a', 64), new string('b', 64))
+                { ExtensionId = "arbitrary-provider", ProviderId = "devices" } });
+        var error = Record.Exception(() => AutomationTargetPolicy.Validate(target, new HashSet<Guid> { root }));
+        if (valid) Assert.Null(error); else Assert.IsType<AutomationDefinitionException>(error);
+    }
     [Theory(DisplayName = "Invalid Targets Cannot Enter The Definition Graph")]
     [InlineData("root")]
     [InlineData("escape")]

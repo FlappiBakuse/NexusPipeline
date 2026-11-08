@@ -71,7 +71,11 @@ internal sealed class ExecutionAdmissionPort : IExecutionAdmissionPort
         using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
         using var transaction = connection.BeginTransaction(deferred: true);
         ExecutionRetryRows.RequireExplicit(connection, transaction, operationId, _retryOrigin?.Intent);
-        return ExecutionStartIdentity.Create(operationId, subject, request);
+        transaction.Commit();
+        var identity = ExecutionStartIdentity.Create(operationId, subject, request);
+        if (_retryOrigin is null && _acceptance.LookupStart(identity) is null)
+            new InitialConfigurationSnapshots(_instance, _database, _contracts, _lease, _resources).Establish(subject, request, DateTimeOffset.UtcNow);
+        return identity;
     }
     public IExecutionAdmissionReceipt? Lookup(OperationIdentity identity)
     {

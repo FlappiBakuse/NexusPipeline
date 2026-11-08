@@ -22,13 +22,17 @@ internal sealed class RecordSummaryControl(ControlAuthentication authority, Reco
         app.MapGet("/control/v1/records/summary", (HttpContext context) =>
         {
             authority.Require(context, ControlCapability.RecordsRead);
-            var query = new ControlQueryValues(context.Request.Query, "endedFromInclusive", "endedUntilExclusive",
-                "offsetMinutes", "userId", "business", "afterUserId", "lifecycle"); query.Validate();
-            return Results.Json(records.Read(new RecordSummaryQuery(
-                query.Utc("endedFromInclusive") ?? throw new ControlRequestException(400, "query_invalid"),
-                query.Utc("endedUntilExclusive") ?? throw new ControlRequestException(400, "query_invalid"),
-                query.Integer("offsetMinutes", 0), query.OptionalId("userId"), query.Business("business"),
-                query.OptionalId("afterUserId"), query.Lifecycle("lifecycle"))), NotificationUseCases.Json);
+            return Results.Json(records.Read(Query(context)), NotificationUseCases.Json);
+        });
+        app.MapGet("/control/v1/records/summary/days", (HttpContext context) =>
+        {
+            authority.Require(context, ControlCapability.RecordsRead);
+            return Results.Json(records.ReadDays(Query(context)), NotificationUseCases.Json);
+        });
+        app.MapGet("/control/v1/records/summary/users", (HttpContext context) =>
+        {
+            authority.Require(context, ControlCapability.RecordsRead);
+            return Results.Json(records.ReadUsers(Query(context)), NotificationUseCases.Json);
         });
         app.MapGet("/control/v1/records/{runId}", (HttpContext context, string runId) =>
         {
@@ -37,5 +41,15 @@ internal sealed class RecordSummaryControl(ControlAuthentication authority, Reco
             var record = records.Read(ControlQueryValues.Id(runId), query.OptionalId("userId"));
             return record is null ? ControlErrors.Result(404, "record_not_found") : Results.Json(record, NotificationUseCases.Json);
         });
+    }
+
+    private static RecordSummaryQuery Query(HttpContext context)
+    {
+        var query = new ControlQueryValues(context.Request.Query, "endedFromInclusive", "endedUntilExclusive",
+            "offsetMinutes", "userId", "business", "afterUserId", "lifecycle"); query.Validate();
+        return new(query.Utc("endedFromInclusive") ?? throw new ControlRequestException(400, "query_invalid"),
+            query.Utc("endedUntilExclusive") ?? throw new ControlRequestException(400, "query_invalid"),
+            query.Integer("offsetMinutes", 0), query.OptionalId("userId"), query.Business("business"),
+            query.OptionalId("afterUserId"), query.Lifecycle("lifecycle"));
     }
 }

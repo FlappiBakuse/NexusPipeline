@@ -20,16 +20,27 @@ internal sealed class ExtensionFrontendControl(ControlAuthentication authority, 
         app.MapGet("/control/v1/extensions/frontend", async (HttpContext context) =>
         {
             var caller = authority.Require(context, ControlCapability.ExtensionsRead); Query(context);
-            var values = new List<object>();
-            foreach (var item in activator.ReadPublishedScopes())
+            var scopes = activator.ReadPublishedScopes();
+            var values = new object?[scopes.Count];
+            await Parallel.ForEachAsync(Enumerable.Range(0, scopes.Count), new ParallelOptions
+                { MaxDegreeOfParallelism = 4, CancellationToken = context.RequestAborted }, async (index, cancellation) =>
             {
+                var item = scopes[index];
                 var runtime = activator.RequirePublishedRuntime(item.ExtensionId);
                 if (runtime.Frontend is { } frontend)
-                    values.Add(new { item.ActivationId, manifest = await frontend.ReadManifestAsync(context.RequestAborted) });
-            }
+                    values[index] = new { item.ActivationId, manifest = await frontend.ReadManifestAsync(cancellation) };
+            });
             caller.Require(ControlCapability.ExtensionsRead);
-            return Results.Json(new { connectionKind = caller.Origin == ControlOrigin.Local ? "local" : "remote", extensions = values },
+            return Results.Json(new { connectionKind = caller.Origin == ControlOrigin.Local ? "local" : "remote", extensions = values.Where(value => value is not null) },
                 NotificationUseCases.Json);
+        });
+        app.MapGet("/control/v1/extensions/{extensionId}/frontend/{activationId}/assets",
+            async (HttpContext context, string extensionId, string activationId) =>
+        {
+            var caller = authority.Require(context, ControlCapability.ExtensionsRead); Query(context);
+            var assets = await Current(extensionId, activationId).ReadAssetsAsync(context.RequestAborted);
+            caller.Require(ControlCapability.ExtensionsRead);
+            return Results.Json(assets, NotificationUseCases.Json);
         });
         app.MapGet("/control/v1/extensions/{extensionId}/frontend/{activationId}/assets/{asset}",
             async (HttpContext context, string extensionId, string activationId, string asset) =>

@@ -35,7 +35,7 @@ def main():
     test.add_argument("--group", choices=["contracts", "core", "windows", "windows-secrets", "storage", "storage-checkin", "storage-wal", "storage-startup", "storage-automation", "storage-execution", "storage-android", "storage-provider", "storage-judgement", "storage-file-logs", "storage-settings", "storage-secrets", "storage-config-revisions", "storage-config-output", "storage-config-controller", "storage-config-cross-volume", "tooling", "host-boundary"], required=True)
     test.add_argument("--build-root", type=Path, required=True)
     test.add_argument("--output", type=Path, required=True)
-    test.add_argument("--method", action="append", help="Select declared native methods; repeat to batch them. Python accepts one exact ID.")
+    test.add_argument("--method", action="append", help="Select exact native methods within the suite; repeat to batch them. Python accepts one exact ID.")
     test.add_argument("--desktop-bundle", type=Path, help="Owned complete Electron bundle; required only by the exact desktop-maintenance method")
     test.add_argument("--fixture-volume-root", type=Path, help="Explicit existing second-volume root; required only by storage-config-cross-volume")
     dependencies = commands.add_parser("dependencies", help="Update locks from current explicit project pins")
@@ -97,4 +97,6 @@ def main():
 
 
 if __name__ == "__main__":
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
     raise SystemExit(main())

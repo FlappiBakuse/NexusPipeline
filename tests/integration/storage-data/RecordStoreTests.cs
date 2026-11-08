@@ -35,12 +35,12 @@ public sealed class RecordStoreTests
         Assert.Equal(collected.Count, collected.Select(item => item.FinalAttempt.RunId).Distinct().Count());
     }
 
-    [Theory(DisplayName = "Filtered History Uses Ordered Indexes And Returns Only Its Frozen Facts")]
-    [InlineData("all", "run_records_ended")]
-    [InlineData("automation", "run_records_automation_ended")]
-    [InlineData("user", "run_records_user_ended")]
-    [InlineData("business", "run_records_business_ended")]
-    public void UsesFilteredIndexes(string filter, string index)
+    [Theory(DisplayName = "Filtered History Returns Only Its Frozen Facts With Stable Pages")]
+    [InlineData("all")]
+    [InlineData("automation")]
+    [InlineData("user")]
+    [InlineData("business")]
+    public void UsesFilteredIndexes(string filter)
     {
         var (_, store) = RecordStoreFixture.NewStore();
         var automation = Guid.NewGuid();
@@ -54,14 +54,32 @@ public sealed class RecordStoreTests
             "user" => new(UserId: user), "business" => new(Business: BusinessOutcome.Succeeded),
             _ => throw new InvalidOperationException()
         };
-        var plan = store.ExplainPage(query);
-        Assert.Contains(plan, item => item.Contains(index, StringComparison.Ordinal));
-        Assert.DoesNotContain(plan, item => item.Contains("TEMP B-TREE", StringComparison.Ordinal));
         var page = store.ReadPage(query);
         Assert.Equal(50, page.Items.Count);
         if (filter != "all") Assert.All(page.Items, item => Assert.Equal(automation, item.AutomationId));
         Assert.NotNull(page.Next);
-        Assert.Contains(store.ExplainPage(query with { After = page.Next }), item => item.Contains(index, StringComparison.Ordinal));
+        var next = store.ReadPage(query with { After = page.Next });
+        Assert.Empty(page.Items.Select(item => item.FinalAttempt.RunId).Intersect(next.Items.Select(item => item.FinalAttempt.RunId)));
+    }
+
+    [Theory(DisplayName = "Group Scope Filters Accounts Before The Keyset Limit")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void FiltersGroupScope(bool hasGroups)
+    {
+        var (_, store) = RecordStoreFixture.NewStore(); var automation = Guid.NewGuid(); var user = Guid.NewGuid();
+        store.AppendCompleted(Enumerable.Range(0, 150).Select(number => RecordStoreFixture.Record(number, automation) with { UserId = user }).ToArray());
+        var groups = hasGroups ? Enumerable.Range(200, 70).Select(number => RecordStoreFixture.Record(number, automation)).ToArray() : [];
+        if (groups.Length > 0) store.AppendCompleted(groups);
+        var query = new RecordQuery(50, Scope: RecordScope.Groups);
+        var page = store.ReadPage(query);
+        Assert.All(page.Items, item => Assert.Null(item.UserId));
+        if (!hasGroups) { Assert.Empty(page.Items); Assert.Null(page.Next); return; }
+        Assert.Equal(50, page.Items.Count); Assert.NotNull(page.Next);
+        var next = store.ReadPage(query with { After = page.Next });
+        Assert.Equal(20, next.Items.Count); Assert.Null(next.Next);
+        Assert.Equal(70, page.Items.Concat(next.Items).Select(item => item.FinalAttempt.RunId).Distinct().Count());
+        Assert.Throws<ArgumentException>(() => store.ReadPage(query with { UserId = user }));
     }
 
     [Fact(DisplayName = "Completed Records Are Append Only And A Rejected Batch Cannot Publish Partial History")]

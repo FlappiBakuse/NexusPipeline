@@ -57,6 +57,7 @@ public sealed class InstanceRoot
 
     private RuntimeInstance ReadExisting(string root)
     {
+        if (InstanceReadScope.Read(root) is { } held) return held;
         var identityPath = Path.Combine(root, "instance.json");
         if ((File.GetAttributes(identityPath) & FileAttributes.ReparsePoint) != 0)
             throw new IOException("invalid_runtime_identity");

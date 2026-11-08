@@ -10,12 +10,17 @@ namespace NexusPipeline.WindowsTests;
 public sealed class NativePeerTests
 {
     [Theory(DisplayName = "A Trusted Launch Registration Requires The Complete Observed Identity")]
-    [InlineData("creation")]
-    [InlineData("image")]
-    [InlineData("path")]
-    [InlineData("user")]
-    [InlineData("elevation")]
-    public void RequiresObservedIdentity(string mutation)
+    [InlineData("creation", false)]
+    [InlineData("image", false)]
+    [InlineData("path", false)]
+    [InlineData("user", false)]
+    [InlineData("elevation", false)]
+    [InlineData("creation", true)]
+    [InlineData("image", true)]
+    [InlineData("path", true)]
+    [InlineData("user", true)]
+    [InlineData("elevation", true)]
+    public void RequiresObservedIdentity(string mutation, bool protectedLaunch)
     {
         var observed = ProcessIdentityReader.Read(Environment.ProcessId);
         var expected = mutation switch
@@ -27,7 +32,12 @@ public sealed class NativePeerTests
             "elevation" => observed with { IsElevated = !observed.IsElevated },
             _ => throw new InvalidOperationException()
         };
-        Assert.Throws<IOException>(() => { using var rejected = new NativeClientBinding(expected); });
+        using var image = ProcessIdentityLease.HoldCurrent();
+        Assert.Throws<IOException>(() =>
+        {
+            using var rejected = protectedLaunch ? new NativeClientBinding(expected, image) : new NativeClientBinding(expected);
+        });
+        Assert.Equal(observed, image.ReadCurrent());
     }
 
     [Fact(DisplayName = "Registered Native Ownership Ends With The Process Even While Its Kernel Identity Handle Is Retained")]

@@ -25,6 +25,7 @@ internal static class AutomationTargetCodec
             ScreenshotTool = android.ScreenshotTool is { } screenshot ? Path(screenshot) : null,
             Emulator = android.Emulator is not { } emulator ? null : new(emulator.Vendor,
                 Guid.ParseExact(emulator.RootId, "D"), emulator.TargetId, emulator.Generation)
+                { ExtensionId = emulator.ExtensionId, ProviderId = emulator.ProviderId }
         });
 
     internal static WireTarget? ToWire(Target? value) => value is null ? null : new()
@@ -42,7 +43,8 @@ internal static class AutomationTargetCodec
             Tool = Path(android.Tool), Endpoint = android.Endpoint, Package = android.Package, StartArguments = android.StartArguments,
             ScreenshotTool = android.ScreenshotTool is { } screenshot ? Path(screenshot) : null,
             Emulator = android.Emulator is not { } emulator ? null : new()
-            { Vendor = emulator.Vendor, RootId = emulator.RootId.ToString("D"), TargetId = emulator.TargetId, Generation = emulator.Generation }
+            { Vendor = emulator.Vendor, RootId = emulator.RootId.ToString("D"), TargetId = emulator.TargetId, Generation = emulator.Generation,
+                ExtensionId = emulator.ExtensionId, ProviderId = emulator.ProviderId }
         }
     };
 
@@ -61,6 +63,9 @@ internal static class AutomationTargetCodec
         var resolver = new DefaultJsonTypeInfoResolver();
         resolver.Modifiers.Add(type =>
         {
+            if (type.Type == typeof(AutomationEmulatorSelection))
+                foreach (var name in new[] { nameof(AutomationEmulatorSelection.ExtensionId), nameof(AutomationEmulatorSelection.ProviderId) })
+                    type.Properties.Single(property => property.Name == name).ShouldSerialize = static (_, value) => value is not null;
             if (type.Type != typeof(AutomationAndroidTarget)) return;
             // Absent optional inputs must retain the original canonical target bytes.
             foreach (var name in new[] { nameof(AutomationAndroidTarget.ScreenshotTool), nameof(AutomationAndroidTarget.Emulator) })

@@ -20,6 +20,8 @@ internal sealed class ExecutionUseCases(ExecutionAdmissionService admission, Exe
         return new
         {
             draft.PlanDigest, explanation.HasRunnable, explanation.HasBlockedItems, explanation.ReasonCode,
+            canPrepareInitialConfiguration = explanation.Items.Any(item => item.Source.Script.Kind == NexusPipeline.Core.Automation.AutomationKind.Generic &&
+                item.Disposition == ExecutionExplanationDisposition.Blocked && item.ReasonCode == "configuration_required"),
             explanation.Selection.CatalogRevision, explanation.Selection.SettingsRevision,
             completionAction = explanation.Selection.CompletionAction,
             groups = explanation.Groups,

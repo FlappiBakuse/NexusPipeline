@@ -76,17 +76,44 @@ internal sealed class InstalledFrontend
     {
         await _readiness.WaitReadyAsync(cancellation).ConfigureAwait(false);
         using var use = await _consumption.BeginAsync(cancellation).ConfigureAwait(false);
+        return await _consumption.InvokeAcceptedAsync(use.Root, () => { },
+            () => ReadBytesAsync(asset, cancellation), invocationCancellation: cancellation, acceptedUse: use).ConfigureAwait(false);
+    }
+
+    internal async ValueTask<FrontendAssets> ReadAssetsAsync(CancellationToken cancellation)
+    {
+        await _readiness.WaitReadyAsync(cancellation).ConfigureAwait(false);
+        using var use = await _consumption.BeginAsync(cancellation).ConfigureAwait(false);
+        return await _consumption.InvokeAcceptedAsync(use.Root, () => { }, async () =>
+        {
+            await using var lease = await _assets.AcquireAsync(cancellation).ConfigureAwait(false);
+            var entry = await ReadFileAsync(lease, _manifest.Frontend!.Entry, 2 * 1024 * 1024, cancellation);
+            var styles = new List<byte[]>();
+            foreach (var path in _manifest.Frontend.Styles)
+                styles.Add(await ReadFileAsync(lease, path, 128 * 1024, cancellation));
+            return new FrontendAssets(entry, styles);
+        }, invocationCancellation: cancellation, acceptedUse: use).ConfigureAwait(false);
+    }
+
+    private async ValueTask<byte[]> ReadBytesAsync(string asset, CancellationToken cancellation)
+    {
         var path = asset == "entry" ? _manifest.Frontend!.Entry :
             int.TryParse(asset, out var index) && index >= 0 && index < _manifest.Frontend!.Styles.Count ?
                 _manifest.Frontend.Styles[index] : throw new IOException("extension_frontend_asset_unavailable");
         var maximum = asset == "entry" ? 2 * 1024 * 1024 : 128 * 1024;
         await using var lease = await _assets.AcquireAsync(cancellation).ConfigureAwait(false);
+        return await ReadFileAsync(lease, path, maximum, cancellation).ConfigureAwait(false);
+    }
+
+    private static async ValueTask<byte[]> ReadFileAsync(IExtensionPackageReadLease lease, string path,
+        int maximum, CancellationToken cancellation)
+    {
         var file = lease.File(path);
         if (file.SizeBytes is < 1 || file.SizeBytes > maximum) throw new IOException("extension_frontend_asset_limit");
         using var input = lease.OpenRead(path);
         var bytes = new byte[checked((int)file.SizeBytes)];
         await input.ReadExactlyAsync(bytes, cancellation).ConfigureAwait(false);
-        use.RequireCurrent(); return bytes;
+        return bytes;
     }
 
     internal async ValueTask<FrontendContent> InvokeAsync(string operation, Guid? operationId, string subjectId,
@@ -128,7 +155,7 @@ internal sealed class InstalledFrontend
         bool isLocal, Action requireCaller, CancellationToken cancellation)
     {
         await _readiness.WaitReadyAsync(cancellation).ConfigureAwait(false);
-        using var use = await _consumption.BeginAsync(cancellation).ConfigureAwait(false);
+        using var use = _scope.BeginUse();
         if (Access(operation) != FrontendAccess.Read || assetId is not { Length: >= 1 and <= 128 } ||
             assetId.Any(value => !char.IsAsciiLetterOrDigit(value) && value != '-'))
             throw new IOException("extension_frontend_image_request_invalid");
@@ -144,3 +171,4 @@ internal sealed class InstalledFrontend
 }
 
 internal sealed record FrontendContent(string ContentType, ReadOnlyMemory<byte> Content);
+internal sealed record FrontendAssets(byte[] Entry, IReadOnlyList<byte[]> Styles);

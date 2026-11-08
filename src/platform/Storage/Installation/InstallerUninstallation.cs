@@ -242,7 +242,7 @@ internal sealed class InstallerUninstallation(InstallerPaths paths, string profi
 
     private static void RequireStopped(string root)
     {
-        foreach (var name in new[] { ApplicationTree.HostEntry, ApplicationTree.MaintenanceEntry, ApplicationTree.DesktopEntry })
+        foreach (var name in new[] { ApplicationTree.HostEntry, ApplicationTree.LauncherEntry, ApplicationTree.MaintenanceEntry, ApplicationTree.DesktopEntry })
             ExclusiveProgramAdmission.RequireStopped(Path.Combine(root, name));
     }
 

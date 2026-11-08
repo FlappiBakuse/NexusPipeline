@@ -1,19 +1,7 @@
 {
   "group": "storage-config-controller",
-  "expectedMethods": {
-    "NexusPipeline.StorageTests.EditControllerTests.OwnsEditorLifecycle": 6,
-    "NexusPipeline.StorageTests.EditControllerTests.ValidatesFrozenOutput": 4,
-    "NexusPipeline.StorageTests.EditControllerTests.RestoresInvalidOutput": 3,
-    "NexusPipeline.StorageTests.EditControllerTests.RejectsChangedBegins": 1,
-    "NexusPipeline.StorageTests.EditControllerTests.RejectsForeignCompletion": 3,
-    "NexusPipeline.StorageTests.EditControllerTests.ScopesPhysicalConflicts": 1,
-    "NexusPipeline.StorageTests.EditControllerTests.PreservesAncestorClaims": 1,
-    "NexusPipeline.StorageTests.EditControllerTests.RejectsLockedOriginals": 1,
-    "NexusPipeline.StorageTests.EditControllerTests.ReplaysFailedSave": 1,
-    "NexusPipeline.StorageTests.EditControllerTests.RejectsHardLinks": 2,
-    "NexusPipeline.StorageTests.EditControllerTests.RejectsInstalledAliases": 1,
-    "NexusPipeline.StorageTests.EditControllerTests.RejectsWeakenedClaims": 1,
-    "NexusPipeline.StorageTests.ControllerCrashTests.RecoversControllerLoss": 16,
-    "NexusPipeline.StorageTests.EditControllerTests.PreservesEntrySpelling": 1
-  }
+  "classes": [
+    "NexusPipeline.StorageTests.ControllerCrashTests",
+    "NexusPipeline.StorageTests.EditControllerTests"
+  ]
 }

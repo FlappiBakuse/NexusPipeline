@@ -12,6 +12,7 @@ public sealed class AutomationDefinitionService(RuntimeInstance instance, Contra
     InstanceLease instanceLease, ResourceLeaseManager resources, RecoveryIndex index, NexusPipeline.Platform.Storage.Journals.PayloadApplyRoots? payloadRoots = null)
 {
     public AutomationCatalog Read() => new AutomationDefinitionStore(database).Read();
+    public long ReadRevision() => new AutomationDefinitionStore(database).ReadRevision();
 
     public AutomationChangeResult? ReadAccepted(OperationIdentity operation, AutomationChanges changes)
     {

@@ -1,10 +1,6 @@
 {
   "group": "storage-wal",
-  "expectedMethods": {
-    "NexusPipeline.StorageTests.WalEvidenceTests.PreservesCheckpointState": 2,
-    "NexusPipeline.StorageTests.WalEvidenceTests.RejectsCorruptFrames": 6,
-    "NexusPipeline.StorageTests.WalEvidenceTests.InspectsCompleteGroups": 1,
-    "NexusPipeline.StorageTests.WalEvidenceTests.PreservesUnknownEvidence": 8,
-    "NexusPipeline.StorageTests.WalEvidenceTests.PreservesUnverifiedGroups": 2
-  }
+  "classes": [
+    "NexusPipeline.StorageTests.WalEvidenceTests"
+  ]
 }

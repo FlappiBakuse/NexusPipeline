@@ -15,6 +15,7 @@ namespace NexusPipeline.Platform.Storage.Execution;
 [SupportedOSPlatform("windows")]
 internal sealed class AttemptRuntimeSession : IExecutionAttemptSession, IDisposable
 {
+    private readonly ConfigurationSessionFactory _configurationFactory;
     private readonly RuntimeInstance _instance;
     private readonly ExecutionLiveMedia? _liveMedia;
     private readonly ExecutionProgress? _progress;
@@ -45,8 +46,9 @@ internal sealed class AttemptRuntimeSession : IExecutionAttemptSession, IDisposa
     public bool HasEnteredEffect => new JournalEffectGate(_database).Read(_parent.JournalId).State == EffectGateState.Entered;
 
     internal AttemptRuntimeSession(RuntimeInstance instance, StateDatabase database, ContractReader contracts, InstanceLease lease,
-        ResourceLeaseManager resources, RecoveryIndex index, AcceptedExecutionAdmission accepted, ITargetPersistenceObserver? targetObserver = null, ExecutionLiveMedia? liveMedia = null, TaskAdapterService? adapters = null, ExecutionProgress? progress = null)
+        ResourceLeaseManager resources, RecoveryIndex index, AcceptedExecutionAdmission accepted, ITargetPersistenceObserver? targetObserver = null, ExecutionLiveMedia? liveMedia = null, TaskAdapterService? adapters = null, ExecutionProgress? progress = null, ConfigurationSessionFactory? configurationFactory = null)
     {
+        _configurationFactory = configurationFactory ?? new(instance, database, contracts, lease, index);
         lease.VerifyHeld(instance); accepted.Prepared.RequireLive();
         if (!resources.UsesRecoveryIndex(index) || !accepted.Root.IsActive || accepted.Root.OperationId != accepted.Identity.OperationId)
             throw new IOException("execution_runtime_ownership_unbound");
@@ -95,18 +97,14 @@ internal sealed class AttemptRuntimeSession : IExecutionAttemptSession, IDisposa
         _bindingStarts.TryAdd(stepId, TimeSpan.FromMilliseconds(_accepted.Prepared.TimeBudget.Read().ConsumedMilliseconds));
         if (_currentConfigurations.TryGetValue(stepId, out var prepared))
         {
-            var runs = new ConfigurationRunStore(_instance, _database, _contracts);
             var id = Guid.NewGuid();
-            var identity = ConfigurationRunStore.BeginIdentity(id, _accepted.Identity.SubjectId, _parent.JournalId, stepId, prepared);
-            var session = runs.Begin(identity, _parent.JournalId, stepId, prepared, DateTimeOffset.UtcNow);
+            _configurationFactory.Begin(id, _accepted.Identity.SubjectId, _parent.JournalId, stepId, prepared);
             _configurationSessions.Add(stepId, id);
-            var exchange = new ConfigurationEditExchange(_instance, _database, _contracts);
-            foreach (var resource in session.Resources) exchange.Materialize(resource.JournalId);
             PublishVerified();
         }
         var step = new ExecutionRuntimeStep(_instance, _database, _contracts, _lease, _index, _accepted, input,
             _configurationSessions.TryGetValue(stepId, out var sessionId) ? sessionId : null, _resources, _targetObserver, _liveMedia, _adapters, prepared,
-            _rawAllowances.TryGetValue(stepId, out var allowance) ? allowance : _rawAllowances[stepId] = new(BindingOutputBudget.MaximumForStep(input), 0), () => BindingElapsed(stepId));
+            _rawAllowances.TryGetValue(stepId, out var allowance) ? allowance : _rawAllowances[stepId] = new(BindingOutputBudget.MaximumForStep(input), 0), () => BindingElapsed(stepId), _configurationFactory);
         _steps.Add(stepId, step); step.InitializeCapture();
     }
 
@@ -200,16 +198,9 @@ internal sealed class AttemptRuntimeSession : IExecutionAttemptSession, IDisposa
         Verify(); var interrupted = (_stop ?? reason) != ExecutionStopReason.Completed;
         foreach (var stepId in StepIds)
             if (_steps.TryGetValue(stepId, out var step)) await step.RestoreAsync(interrupted).ConfigureAwait(false);
-        var runs = new ConfigurationRunStore(_instance, _database, _contracts);
-        var exchange = new ConfigurationEditExchange(_instance, _database, _contracts);
         var pending = _configurationSessions.Where(item => !_steps.TryGetValue(item.Key, out var step) || step.RequiresUnregisteredConfigurationCompletion).ToArray();
         foreach (var item in pending)
-        {
-            var session = runs.Read(item.Value, _accepted.Identity.SubjectId) ?? throw new IOException("configuration_run_missing");
-            foreach (var resource in session.Resources)
-                if (exchange.Restore(resource.JournalId) == ConfigurationRecoveryResult.Quarantined)
-                    throw new IOException("execution_configuration_restoration_unverified");
-        }
+            _configurationFactory.Restore(item.Value, _accepted.Identity.SubjectId);
         PublishVerified();
         foreach (var item in pending)
         {

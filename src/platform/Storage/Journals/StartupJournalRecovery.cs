@@ -3,6 +3,8 @@ using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage.Execution;
 using NexusPipeline.Platform.Storage.Sqlite;
 using NexusPipeline.Platform.Storage.Automation;
+using System.Collections.Concurrent;
+using System.Runtime.ExceptionServices;
 
 namespace NexusPipeline.Platform.Storage.Journals;
 
@@ -13,20 +15,24 @@ public sealed class StartupJournalRecovery(RuntimeInstance instance, ContractRea
 
     public RecoveryIndex Recover(InstanceLease lease)
     {
+        using var profile = StartupProfile.Begin("operations.recovery");
         lease.VerifyHeld(instance);
         using var reads = DatabaseReadScope.Hold(database.DatabasePath);
         InspectCompletedHistory();
         var registry = new RecoveryJournalRegistry(database);
         var before = registry.ReadActiveSnapshot();
+        Console.Error.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { kind = "startup.active-journals", count = before.Journals.Count }));
         InspectBindings(before);
         ReleaseStoppedMaintenance(lease, before);
         var evidence = new JournalRecoveryEvidence(instance, new(instance, contracts), database);
         IRecoveryEvidence completionEvidence = OperatingSystem.IsWindows()
             ? new SnapshotCompletionEvidence(instance, database, contracts) : evidence;
         var index = new RecoveryIndex();
-        new RecoveryCoordinator(registry, completionEvidence, index, _ownership).RecoverAndPublish(
-            completionEvidence as IRecoveryPreflight ?? evidence, Handlers(lease));
-        Configuration.ConfigurationEditRecovery.ReconcileAndPublish(instance, database, contracts, lease, index, roots);
+        using (StartupProfile.Measure("recovery.publish"))
+            new RecoveryCoordinator(registry, completionEvidence, index, _ownership).RecoverAndPublish(
+                completionEvidence as IRecoveryPreflight ?? evidence, Handlers(lease));
+        using (StartupProfile.Measure("recovery.configuration"))
+            Configuration.ConfigurationEditRecovery.ReconcileAndPublish(instance, database, contracts, lease, index, roots);
         return index;
     }
 
@@ -38,7 +44,10 @@ public sealed class StartupJournalRecovery(RuntimeInstance instance, ContractRea
 
     internal void InspectBindings(RecoveryRegistrySnapshot snapshot, bool completeActiveInventory = true)
     {
+        using var timing = StartupProfile.Measure("history.bindings");
         using var parents = JournalReadScope.HoldParents(instance, contracts);
+        if (snapshot.Journals.Count == 1 && Directory.Exists(Path.Combine(instance.RuntimeRoot, "journals", snapshot.Journals[0].JournalId.ToString("D"))))
+            JournalReadScope.SelectParent(instance, contracts, snapshot.Journals[0].JournalId);
         RecoveryRegistryPolicy.Verify(snapshot);
         if (!completeActiveInventory)
         {
@@ -51,7 +60,11 @@ public sealed class StartupJournalRecovery(RuntimeInstance instance, ContractRea
         var prepared = new List<IJournalRecoveryWork>();
         try
         {
-            foreach (var journal in snapshot.Journals) prepared.Add(handlers[journal.Kind].Prepare(journal));
+            foreach (var journal in snapshot.Journals)
+            {
+                using var preparation = StartupProfile.Measure("history.prepare." + journal.Kind);
+                prepared.Add(handlers[journal.Kind].Prepare(journal));
+            }
         }
         finally
         {
@@ -61,8 +74,28 @@ public sealed class StartupJournalRecovery(RuntimeInstance instance, ContractRea
 
     internal void InspectCompletedHistory()
     {
+        using var timing = StartupProfile.Measure("history.completed");
         var registry = new RecoveryJournalRegistry(database);
-        registry.VisitCompleted(snapshot => InspectBindings(snapshot, completeActiveInventory: false));
+        long count = 0;
+        ExceptionDispatchInfo? failure = null;
+        Parallel.ForEach(Partitioner.Create(registry.ReadCompleted(), EnumerablePartitionerOptions.NoBuffering),
+            new ParallelOptions { MaxDegreeOfParallelism = Math.Clamp(Environment.ProcessorCount, 1, 8) },
+            () => new HistoryReadScope(instance, database, contracts), (snapshot, loop, scope) =>
+            {
+                try
+                {
+                    InspectBindings(snapshot, completeActiveInventory: false);
+                    Interlocked.Add(ref count, snapshot.Journals.Count);
+                }
+                catch (Exception error)
+                {
+                    Interlocked.CompareExchange(ref failure, ExceptionDispatchInfo.Capture(error), null);
+                    loop.Stop();
+                }
+                return scope;
+            }, scope => scope.Dispose());
+        failure?.Throw();
+        Console.Error.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { kind = "startup.completed-journals", count }));
     }
 
     private void ReleaseStoppedMaintenance(InstanceLease lease, RecoveryRegistrySnapshot verified)

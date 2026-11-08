@@ -255,6 +255,7 @@ export interface ExtensionManifest {
   readonly tags?: ReadonlyArray<string>;
   readonly metadata?: ExtensionMetadata;
   readonly localization?: ExtensionLocalization;
+  readonly icon?: string;
 }
 
 export interface ExtensionManifestExecution {

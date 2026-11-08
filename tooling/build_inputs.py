@@ -123,7 +123,10 @@ def solution_inputs(root, profile, environment=None, projects=None, source_recor
                     pending.extend(expand(project.parent, node.attrib["Include"]))
                 elif tag == "Compile":
                     if "Include" in node.attrib:
-                        compile_items.update(expand(project.parent, node.attrib["Include"]))
+                        included = node.attrib["Include"]
+                        if included.startswith("$(NexusPluginFixturesRoot)/"):
+                            continue
+                        compile_items.update(expand(project.parent, included))
                     if "Remove" in node.attrib:
                         compile_items.difference_update(expand(project.parent, node.attrib["Remove"]))
                 elif tag in ("EmbeddedResource", "Content", "None") and "Include" in node.attrib:
@@ -157,13 +160,32 @@ def solution_inputs(root, profile, environment=None, projects=None, source_recor
                     "TargetFramework", "Nullable", "ImplicitUsings", "TreatWarningsAsErrors", "Deterministic", "Version",
                     "LangVersion", "DefineConstants", "UseArtifactsOutput", "ArtifactsPath", "RestorePackagesPath",
                     "EnableDefaultCompileItems", "RestorePackagesWithLockFile", "NuGetLockFilePath", "RestoreLockedMode",
-                    "Using", "AssemblyMetadata", "PublishReadyToRunExclude"} for node in tree.iter()):
+                    "Using", "AssemblyMetadata", "PublishReadyToRunExclude", "FilesToBundle", "RelativePath"} for node in tree.iter()):
                 unknown.append("Unresolved shared build evaluation: " + path.relative_to(root).as_posix())
     if unknown:
         records = conservative_records(root, source_records)
     else:
         records = file_records(root, paths)
-    value = {"algorithm": "nexus-solution-inputs-v1", "files": records,
+    fixture_records = []
+    supplied = (environment or os.environ).get("NexusPluginFixturesRoot")
+    fixture_kinds = {"OwnedWriter": "owned-writer", "AndroidTool": "android-tool", "NexusPipeline.StorageTests": "storage"}
+    if supplied and any(path.stem in fixture_kinds for path in visited):
+        fixture_root = Path(supplied).resolve(strict=True)
+        if fixture_root == root or root in fixture_root.parents:
+            raise ValueError("Plugin test sources must be an explicit external producer input")
+        for project in visited:
+            if project.stem not in fixture_kinds:
+                continue
+            for file in sorted((fixture_root / fixture_kinds[project.stem]).glob("*")):
+                if file.suffix not in (".cs", ".json"):
+                    continue
+                if file.is_symlink() or file.is_junction():
+                    raise ValueError("Plugin fixture source is linked")
+                data = file.read_bytes()
+                fixture_records.append(dict(path=str(file), sizeBytes=len(data), sha256=digest(data)))
+        if not fixture_records:
+            raise ValueError("Explicit plugin fixture source is empty")
+    value = {"algorithm": "nexus-solution-inputs-v1", "files": records, "pluginFixtureInputs": fixture_records,
              "projectNames": sorted(path.stem for path in visited),
              "context": build_context(profile, environment), "conservativeReasons": sorted(set(unknown))}
     return {**value, "sha256": digest(json.dumps(value, sort_keys=True, separators=(",", ":")).encode())}
@@ -183,6 +205,7 @@ def web_inputs(root, environment=None):
     root = Path(root).resolve(strict=True)
     paths = {path for folder in (root / "apps/web", root / "sdk/frontend/src") for path in folder.rglob("*")
              if path.is_file() and path.suffix != ".md"}
+    paths.update(root / 'apps/desktop' / name for name in ('startup-content.css', 'nexuspipeline.ico'))
     paths.update(python_inputs(root, ["web_build.py"]))
     paths.update(root / "tooling" / name for name in ("frontend_names.mjs", "frontend_boundaries.mjs",
                                                      "frontend-exceptions.json", "generated_sources.json"))
