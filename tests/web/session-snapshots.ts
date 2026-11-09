@@ -14,6 +14,7 @@ export async function snapshotCases(): Promise<string[]> {
     let snapshot = { instanceId: 'instance', streamId: 'stream', sequence: 1,
       state: { catalogRevision: 1, settingsRevision: 1, interfaceRevision: 1, mutationSequence: 1 } };
     const reads = new Map<string, number>();
+    let pendingOperations = 0;
     let stream!: ReadableStreamDefaultController<Uint8Array>;
     client.read = (async (path: string) => {
       const count = (reads.get(path) ?? 0) + 1; reads.set(path, count);
@@ -27,7 +28,7 @@ export async function snapshotCases(): Promise<string[]> {
       if (path === '/control/v1/automation') return { catalogRevision: snapshot.state.catalogRevision };
       if (path === '/control/v1/settings') return { saved: { revision: snapshot.state.settingsRevision } };
       if (path === '/control/v1/settings/interface') return { revision: snapshot.state.interfaceRevision };
-      if (path === '/control/v1/status') return { instanceId: access.instanceId };
+      if (path === '/control/v1/status') return { instanceId: access.instanceId, pendingOperations };
       throw Error('unexpected_session_read:' + path);
     }) as never;
     client.response = async (_path, signal) => new Response(new ReadableStream<Uint8Array>({ start(controller) {
@@ -41,27 +42,31 @@ export async function snapshotCases(): Promise<string[]> {
     const session = new AppSession(client, state, snapshots, error => failures.push(error), () => 'users');
     try {
       await session.start(); await settle();
-      assert.equal(reads.get('/control/v1/settings'), change === 'stream' ? 2 : 1);
-      assert.equal(reads.get('/control/v1/settings/interface'), change === 'stream' ? 2 : 1);
-      assert.equal(reads.get('/control/v1/automation'), change === 'stream' || change === 'revision' ? 2 : 1);
-      assert.equal(reads.get('/control/v1/status'), change === 'stream' || change === 'revision' ? 2 : 1);
+      assert.equal(state.settings?.saved.revision, snapshot.state.settingsRevision);
+      assert.equal(state.interface?.revision, snapshot.state.interfaceRevision);
+      assert.equal(state.status?.pendingOperations, 0);
+      assert.equal(snapshots.streamId, snapshot.streamId);
       assert.equal(state.automation?.catalogRevision, snapshot.state.catalogRevision);
       assert.equal(snapshots.mutation, snapshot.state.mutationSequence);
       if (change === 'reconnect') {
         Object.assign(document, { hidden: true }); document.dispatchEvent(new Event('visibilitychange')); await settle();
+        pendingOperations = 3;
+        snapshot = { ...snapshot, sequence: snapshot.sequence + 1,
+          state: { ...snapshot.state, settingsRevision: 3, mutationSequence: 3 } };
         Object.assign(document, { hidden: false }); document.dispatchEvent(new Event('visibilitychange')); await settle();
-        assert.equal(reads.get('/control/v1/status'), 2);
-        assert.equal(reads.get('/control/v1/settings'), 2);
+        assert.equal(state.status?.pendingOperations, 3);
+        assert.equal(state.settings?.saved.revision, 3);
+        assert.equal(snapshots.mutation, 3);
       }
-      snapshot = { ...snapshot, sequence: snapshot.sequence + 1, state: { ...snapshot.state, settingsRevision: 2 } };
+      snapshot = { ...snapshot, sequence: snapshot.sequence + 1, state: { ...snapshot.state, settingsRevision: 4 } };
       stream.enqueue(new TextEncoder().encode('data: ' + JSON.stringify({ format: 'nexus.event', version: 1,
         kind: 'state', topic: 'host.state', streamId: snapshot.streamId, instanceId: snapshot.instanceId,
         sequence: snapshot.sequence, subject: { type: 'instance', id: snapshot.instanceId }, data: snapshot.state }) + '\n\n'));
       await settle();
-      assert.equal(state.settings?.saved.revision, 2);
+      assert.equal(state.settings?.saved.revision, 4);
       assert.equal(state.revision, snapshot.sequence);
       assert.deepEqual(failures, []);
-      cases.push('initial subscription avoids redundant reads without losing current revisions or reconnect refresh: ' + change);
+      cases.push('initial subscription preserves current revisions and reconnect refreshes visible state: ' + change);
     } finally { session.dispose(); await settle(); }
   }
   return cases;

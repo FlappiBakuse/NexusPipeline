@@ -21,7 +21,7 @@ test('desktop does not retry permanent page failures or a destroyed window', asy
     let attempts = 0;
     const failure = Object.assign(new Error('page rejected'), { code });
     const window = { isDestroyed: () => attempts > 0 && destroyedAfterFailure, async loadURL() { attempts++; throw failure; } };
-    await assert.rejects(loadHostPage(window, 'http://127.0.0.1:1234/'), error => error === failure);
+    await assert.rejects(loadHostPage(window, 'http://127.0.0.1:1234/'), error => error.code === code && error.message === 'page rejected');
     assert.equal(attempts, 1);
   }
 });

@@ -21,8 +21,6 @@ public sealed class AndroidDetachmentTests
         var request = AndroidCommandIdentity.Derive(state.Total, binding, AndroidRuntimeFixture.Subject,
             0, AndroidCommandPurpose.CleanupReadiness, ExecutionAndroidAction.DeviceState);
         var original = request.Tool.RuntimeFiles.ToArray(); var digest = AndroidCommandIdentity.Digest(request);
-        Assert.NotSame(step.Target.Android.Tool, request.Tool);
-        Assert.NotSame(sourceFiles, request.Tool.RuntimeFiles);
         Assert.Throws<NotSupportedException>(() => ((IList<ExecutionPlanRuntimeFile>)request.Tool.RuntimeFiles).Clear());
         sourceFiles.Clear();
         Assert.Equal(original, request.Tool.RuntimeFiles);

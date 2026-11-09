@@ -22,11 +22,13 @@ public sealed class ControlTokenTests
         var pending = service.ChangeAsync(operation, 0, SecretDisposition.Set, value);
         await dialog.Seen.Task.WaitAsync(TimeSpan.FromSeconds(10));
         Assert.False((await fixture.Service.GetStateAsync(SecretFieldKey.HostControlBearer(fixture.Instance.InstanceId), default)).IsConfigured);
-        Assert.Same(pending, service.ChangeAsync(operation, 0, SecretDisposition.Set, value));
+        var repeated = service.ChangeAsync(operation, 0, SecretDisposition.Set, value);
+        Assert.False(pending.IsCompleted); Assert.False(repeated.IsCompleted);
         Assert.Throws<OperationConflictException>(() => { _ = service.ChangeAsync(operation, 1, SecretDisposition.Set, value); });
         dialog.Answer.TrySetResult(true);
         var saved = await pending.WaitAsync(TimeSpan.FromSeconds(15));
-        Assert.True(saved.IsConfigured);
+        Assert.True(saved.IsConfigured); Assert.Equal(1, saved.Revision);
+        Assert.Equal(saved, await repeated.WaitAsync(TimeSpan.FromSeconds(15)));
         Assert.Equal(saved, await service.ChangeAsync(operation, 0, SecretDisposition.Set, value));
         Assert.Equal(1, dialog.Calls);
         using var verifier = new ControlBearerVerifier(fixture.Instance, fixture.Database, fixture.Lease, fixture.Index, fixture.Service);

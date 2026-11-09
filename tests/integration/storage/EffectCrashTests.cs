@@ -36,38 +36,56 @@ public sealed class EffectCrashTests(ITestOutputHelper output)
         var ready = await OwnedCrashProcess.ReadReportAsync(readyPath);
         Assert.Equal("faultReady", ready.GetProperty("status").GetString());
         Assert.Equal(identity.ProcessId, ready.GetProperty("processId").GetInt32());
+        var expected = mode switch { "entered" => EffectGateState.Entered, "sealed" => EffectGateState.Sealed, _ => EffectGateState.Unentered };
+        var before = ready.GetProperty("gate").Deserialize<EffectGateSnapshot>()!;
+        Assert.Equal(expected, before.State);
+        Assert.Equal(instance.InstanceId, before.InstanceId);
+        Assert.Equal(journal.JournalId, before.JournalId);
+        Assert.Equal(journal.OperationId, before.OperationId);
+        Assert.Equal(journal.Kind, before.Kind);
+        Assert.Equal(journal.PlanDigest, before.PlanDigest);
         var stopped = await writer.StopAsync();
+        Assert.True(stopped.CompleteJobStopped);
+        Assert.Equal(0u, stopped.Accounting.ActiveProcesses);
         var inspectInput = Path.Combine(root, "inspect-input.json");
         File.WriteAllBytes(inspectInput, JsonSerializer.SerializeToUtf8Bytes(new
         {
             runtimeRoot = instance.RuntimeRoot, journal,
             stoppedWriter = new { completeJobStopped = stopped.CompleteJobStopped, identity = stopped.Identity, family = stopped.Family, accounting = stopped.Accounting }
         }));
-        var expected = mode switch { "entered" => EffectGateState.Entered, "sealed" => EffectGateState.Sealed, _ => EffectGateState.Unentered };
-        var observed = new List<EffectGateSnapshot>();
-        for (var index = 0; index < 2; index++)
+        using var reader = new OwnedCrashProcess();
+        var report = Path.Combine(root, "inspection.json");
+        var readerIdentity = reader.Start(["effect-gate", "inspect", inspectInput, report], root, instance.InstanceId, journal.JournalId,
+            Path.Combine(root, "reader-identity.json"));
+        var result = await OwnedCrashProcess.ReadReportAsync(report);
+        Assert.Equal(0, await reader.AwaitExitAsync());
+        var readerStopped = await reader.StopAsync();
+        Assert.Equal("inspected", result.GetProperty("status").GetString());
+        Assert.Equal(readerIdentity.ProcessId, result.GetProperty("processId").GetInt32());
+        var observed = result.GetProperty("gate").Deserialize<EffectGateSnapshot>()!;
+        Assert.Equal(before, observed);
+        var reopened = StateDatabase.OpenExisting(instance, Path.Combine(root, "reopen-diagnostics"));
+        var registry = new RecoveryJournalRegistry(reopened);
+        var durable = registry.ReadOperationJournal(journal.OperationId);
+        Assert.Equal(journal.JournalId, durable.JournalId);
+        Assert.Equal(journal.PlanDigest, durable.PlanDigest);
+        Assert.Equal(JournalPhase.Prepared, durable.Phase);
+        var gate = new JournalEffectGate(reopened);
+        Assert.Equal(observed, gate.Read(durable.JournalId));
+        var decision = observed;
+        if (expected == EffectGateState.Unentered)
         {
-            using var reader = new OwnedCrashProcess();
-            var report = Path.Combine(root, $"inspection-{index}.json");
-            reader.Start(["effect-gate", "inspect", inspectInput, report], root, instance.InstanceId, journal.JournalId,
-                Path.Combine(root, $"reader-{index}-identity.json"));
-            var result = await OwnedCrashProcess.ReadReportAsync(report);
-            Assert.Equal(0, await reader.AwaitExitAsync());
-            var readerStopped = await reader.StopAsync();
-            Assert.Equal("inspected", result.GetProperty("status").GetString());
-            var gate = result.GetProperty("gate").Deserialize<EffectGateSnapshot>()!;
-            Assert.Equal(expected, gate.State);
-            Assert.Equal(mode == "accepted" ? 1 : 2, gate.Revision);
-            Assert.Equal(instance.InstanceId, gate.InstanceId);
-            Assert.Equal(journal.OperationId, gate.OperationId);
-            Assert.Equal(journal.PlanDigest, gate.PlanDigest);
-            observed.Add(gate);
-            output.WriteLine(JsonSerializer.Serialize(new { index, readerStopped, result }));
+            decision = gate.SealUnentered(durable, observed.Revision);
+            Assert.Equal(EffectGateState.Sealed, decision.State);
         }
-        Assert.Equal(observed[0], observed[1]);
-        Assert.Equal(observed[0], new JournalEffectGate(database).Read(journal.JournalId));
-        Assert.Single(new RecoveryJournalRegistry(database).ReadSnapshot().Isolations);
-        output.WriteLine(JsonSerializer.Serialize(new { kind, mode, stopped, observed,
+        Assert.Equal("effect_gate_already_decided", Assert.Throws<IOException>(() => gate.Enter(durable, decision.Revision)).Message);
+        if (decision.State == EffectGateState.Sealed) Assert.Equal(decision, gate.SealUnentered(durable, decision.Revision));
+        else Assert.Equal("effect_gate_already_decided", Assert.Throws<IOException>(() => gate.SealUnentered(durable, decision.Revision)).Message);
+        Assert.Equal(decision, gate.Read(durable.JournalId));
+        var isolation = Assert.Single(registry.ReadSnapshot().Isolations);
+        Assert.Equal(journal.JournalId, isolation.JournalId);
+        Assert.Equal(Assert.Single(journal.ResourceKeys), isolation.ResourceKey);
+        output.WriteLine(JsonSerializer.Serialize(new { kind, mode, stopped, readerStopped, observed, decision,
             scope = "Actual SQL effect-admission decision across process kill; no typed-plan or complete no-effect recovery approval" }));
     }
 }

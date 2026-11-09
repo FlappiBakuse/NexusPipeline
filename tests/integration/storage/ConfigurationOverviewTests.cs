@@ -10,36 +10,24 @@ namespace NexusPipeline.StorageTests;
 
 public sealed class ConfigurationOverviewTests
 {
-    [Fact(DisplayName = "A Generic Configuration Overview Binds Its Unsaved And Captured Snapshot To The Declared Resource")]
+    [Fact(DisplayName = "A Generic Configuration Overview Can Import Its Declared Resource For Only The Selected Binding")]
     public void BindsGenericRevisions()
     {
         using var fixture = new PlanBuilderFixture(saveConfigurations: false);
         var catalog = fixture.Definitions.Read();
         var binding = catalog.Bindings.Single(item => item.Id == fixture.BindingA);
         var script = catalog.Scripts.Single(item => item.Id == fixture.ScriptId);
-        var path = Assert.Single(script.ConfigurationPaths);
         var overview = new ConfigurationOverviewReader(fixture.Instance, fixture.Database, fixture.Lease, new ContractReader());
 
         var beforeSave = overview.Read(binding.Id);
         var unsaved = Assert.Single(beforeSave.Resources);
-        var resourceId = GenericConfigurationPolicy.ResourceId(path);
-        Assert.Equal(binding.Id, beforeSave.BindingId);
-        Assert.Equal(binding.Revision, beforeSave.BindingRevision);
-        Assert.Equal(script.Id, beforeSave.ScriptId);
-        Assert.Equal(script.Revision, beforeSave.ScriptRevision);
-        Assert.Equal(resourceId, unsaved.ResourceId);
         Assert.Equal(0, unsaved.Revision);
         Assert.False(unsaved.IsSaved);
         Assert.Equal(FileObjectKind.Missing, unsaved.Shape);
 
-        var root = catalog.Roots.Single(item => item.Id == path.RootId);
-        var target = Path.Combine(root.Path, path.RelativePath);
-        var captured = new FileTreeArchive(new(SnapshotBudget.Default), new(fixture.Instance, new()))
-            .Capture(target, CancellationToken.None).Snapshot;
-        var change = new ConfigurationRevisionChange(new(binding.Id, resourceId), 0, binding.Revision,
-            GenericConfigurationPolicy.Contract(path), captured, ConfigurationUpdateKind.Manual);
-        var revisions = new ConfigurationRevisionStore(fixture.Instance, fixture.Database, new ContractReader());
-        revisions.Commit(ConfigurationRevisionStore.Identity(Guid.NewGuid(), "configuration-overview", change), change, DateTimeOffset.UtcNow);
+        var importer = new ConfigurationImportService(fixture.Instance, fixture.Database, new(), fixture.Lease, fixture.Resources);
+        importer.Import("configuration-overview", new(Guid.NewGuid(), beforeSave.BindingId,
+            beforeSave.BindingRevision, beforeSave.ScriptRevision, [new(unsaved.ResourceId, unsaved.Revision)]), DateTimeOffset.UtcNow);
 
         var afterSave = overview.Read(binding.Id);
         var saved = Assert.Single(afterSave.Resources);
@@ -47,11 +35,16 @@ public sealed class ConfigurationOverviewTests
         Assert.Equal(binding.Revision, afterSave.BindingRevision);
         Assert.Equal(script.Id, afterSave.ScriptId);
         Assert.Equal(script.Revision, afterSave.ScriptRevision);
-        Assert.Equal(resourceId, saved.ResourceId);
+        Assert.Equal(unsaved.ResourceId, saved.ResourceId);
         Assert.Equal(1, saved.Revision);
         Assert.True(saved.IsSaved);
         Assert.Equal(FileObjectKind.File, saved.Shape);
         Assert.Equal(1, saved.FileCount);
+
+        var other = Assert.Single(overview.Read(fixture.BindingB).Resources);
+        Assert.Equal(unsaved.ResourceId, other.ResourceId);
+        Assert.Equal(0, other.Revision);
+        Assert.False(other.IsSaved);
     }
 
     [Fact(DisplayName = "A Specialized Configuration Overview Binds Its Resource And Rejects A Foreign Owner Contract")]

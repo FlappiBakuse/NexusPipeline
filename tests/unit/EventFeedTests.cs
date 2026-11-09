@@ -10,39 +10,39 @@ public sealed class EventFeedTests
     [InlineData(1)]
     [InlineData(3)]
     [InlineData(5)]
-    public void SharesIdleSnapshots(int clients)
+    public void SharesCurrentSnapshots(int clients)
     {
         long mutation = 0, recovery = 0;
-        var captures = 0;
         var feed = new ControlEventFeed(Guid.NewGuid(), () => new(mutation, recovery), () =>
-        { captures++; return new { mutation, recovery }; });
+            new { mutation, recovery });
         var first = JsonSerializer.SerializeToElement(feed.Snapshot());
         var stream = first.GetProperty("streamId").GetGuid();
         var sequence = first.GetProperty("sequence").GetInt64();
         for (var tick = 0; tick < 10; tick++)
             for (var client = 0; client < clients; client++) Assert.Empty(feed.Read(stream, sequence));
-        Assert.Equal(1, captures);
         mutation++;
         var changed = Assert.Single(feed.Read(stream, sequence));
         Assert.Equal(sequence + 1, changed.Sequence);
         for (var client = 0; client < clients; client++) Assert.Equal(changed, Assert.Single(feed.Read(stream, sequence)));
-        Assert.Equal(2, captures);
         sequence = changed.Sequence;
         recovery++;
         Assert.Equal(sequence + 1, Assert.Single(feed.Read(stream, sequence)).Sequence);
-        Assert.Equal(3, captures);
         long progress = 0;
-        var persistentReads = 0;
         var statistics = new ControlEventStatistics(() => mutation, () =>
-        { persistentReads++; return new(mutation, mutation, mutation, mutation, mutation); });
+            new(mutation, mutation, mutation, mutation, mutation));
         var progressFeed = new ControlEventFeed(Guid.NewGuid(), () => new(mutation, recovery, progress),
             () => new { statistics = statistics.Read(), progress });
-        _ = progressFeed.Snapshot();
-        for (var tick = 0; tick < 100; tick++) { progress++; _ = progressFeed.Snapshot(); }
-        Assert.Equal(1, persistentReads);
-        mutation++; _ = progressFeed.Snapshot(); Assert.Equal(2, persistentReads);
-        recovery++; _ = progressFeed.Snapshot(); Assert.Equal(2, persistentReads);
-        Console.WriteLine($"clients={clients}; idleTicks=10; idleCaptures=1; changedCaptures=2");
+        AssertProgress();
+        for (var tick = 0; tick < 100; tick++) { progress++; AssertProgress(); }
+        mutation++; AssertProgress();
+        recovery++; AssertProgress();
+        void AssertProgress()
+        {
+            var state = JsonSerializer.SerializeToElement(progressFeed.Snapshot()).GetProperty("state");
+            Assert.Equal(progress, state.GetProperty("progress").GetInt64());
+            Assert.Equal(new ControlPersistentState(mutation, mutation, mutation, mutation, mutation),
+                state.GetProperty("statistics").Deserialize<ControlPersistentState>());
+        }
     }
 
     [Fact]

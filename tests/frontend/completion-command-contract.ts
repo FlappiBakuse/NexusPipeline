@@ -1,7 +1,7 @@
 import { CompletionCommands, type CompletionContext } from '../../apps/web/src/pages/completion-commands.js';
 import { ControlClient } from '../../apps/web/src/control/client.js';
 
-export async function completionCommands(): Promise<{ checks: string[]; checkCount: number }> {
+export async function completionCommands(): Promise<string[]> {
   const checks: string[] = [];
   const requireValue = (value: unknown, description: string): void => {
     if (!value) throw new Error(description);
@@ -42,5 +42,5 @@ export async function completionCommands(): Promise<{ checks: string[]; checkCou
   third.observe('completion-c', 'Cancelled');
   requireValue(!third.state.pending && writes.at(-1)?.endsWith('/completion-c/cancel'),
     'an explicit cancelled observation releases exactly the current countdown');
-  return { checks, checkCount: checks.length };
+  return checks;
 }

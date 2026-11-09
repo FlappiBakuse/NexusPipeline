@@ -84,9 +84,9 @@ internal static class CatalogCapacityData
             {
                 var number = int.Parse(record.FinalAttempt.RunId.ToString("N")[20..], NumberStyles.HexNumber, CultureInfo.InvariantCulture) - 1;
                 Assert.InRange(number, 0, RecordCount - 1); Assert.True(Matches(number, query)); Assert.Equal(Record(number), record);
-                if (previous is not null) Assert.True(previous.EndedAt > record.EndedAt ||
+                if (previous is not null) Assert.True(previous.EndedAt < record.EndedAt ||
                     previous.EndedAt == record.EndedAt && StringComparer.Ordinal.Compare(
-                        previous.FinalAttempt.RunId.ToString("D"), record.FinalAttempt.RunId.ToString("D")) > 0);
+                        previous.FinalAttempt.RunId.ToString("D"), record.FinalAttempt.RunId.ToString("D")) < 0);
                 previous = record; count++;
             }
             cursor = page.Next;

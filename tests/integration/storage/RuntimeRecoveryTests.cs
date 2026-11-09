@@ -29,9 +29,10 @@ public sealed class RuntimeRecoveryTests
         fixture.Base.Execute("CREATE TRIGGER fixture_preparation_failure BEFORE INSERT ON configuration_run_sessions " +
             "BEGIN SELECT RAISE(ABORT, 'fixture_preparation_failure'); END;");
         await Assert.ThrowsAsync<SqliteException>(() => consumer.RunNextAsync());
-        Assert.Equal(1, fixture.Base.Count("attempt_receipts"));
-        Assert.Equal(1, fixture.Base.Count("run_records"));
-        Assert.True(fixture.Base.Count("account_run_records") > 0);
+        var receipt = Assert.IsType<AttemptReceipt>(new AttemptReceiptStore(source.Database)
+            .Read(Guid.Parse(fixture.State.Attempt.AttemptId)));
+        Assert.Equal(EngineOutcome.NotStarted, receipt.Facts.Engine);
+        AssertPublishedHistory(fixture, receipt);
         Assert.Equal(0, consumer.PendingReconciliationCount);
         Assert.False(File.Exists(fixture.Marker));
     }
@@ -69,9 +70,9 @@ public sealed class RuntimeRecoveryTests
         var finality = new ExecutionRunFinality(source.Instance, source.Database, new());
         Assert.True(finality.IsFinal(receipt));
         new ExecutionRecordProjection(source.Instance, source.Database, new(), source.Lease, finality).OnCommitted(receipt);
-        Assert.Equal(1, fixture.Base.Count("run_records"));
-        Assert.True(fixture.Base.Count("account_run_records") > 0);
+        Assert.Equal(LifecycleOutcome.Cancelled, receipt.Facts.Lifecycle);
         Assert.Equal(EngineOutcome.NotStarted, receipt.Facts.Engine);
+        AssertPublishedHistory(fixture, receipt);
         Assert.False(File.Exists(fixture.Marker));
         Assert.True(fixture.Base.Index.Current.IsReady);
     }
@@ -103,7 +104,9 @@ public sealed class RuntimeRecoveryTests
             operation = Assert.Single(intents).CompletionOperationId;
             Assert.Null(new ConfigurationRunStore(source.Instance, source.Database, new()).Read(intents[0].SessionId,
                 ExecutionSequentialFixture.Subject)!.CompletionOperationId);
-            Assert.Equal(0, fixture.Base.Count("attempt_receipts")); Assert.Equal(0, fixture.Base.Count("journal_writer_jobs"));
+            var state = fixture.State;
+            Assert.Null(new AttemptReceiptStore(source.Database).Read(Guid.Parse(state.Attempt.AttemptId)));
+            Assert.Empty(state.AllJobs);
         }
         finally { fixture.Base.Execute("DROP TRIGGER fixture_owned_completion_failure;"); }
         await session.RestoreRemainingAsync(ExecutionStopReason.Cancelled);
@@ -116,10 +119,32 @@ public sealed class RuntimeRecoveryTests
         var finality = new ExecutionRunFinality(source.Instance, source.Database, new());
         Assert.True(finality.IsFinal(receipt));
         new ExecutionRecordProjection(source.Instance, source.Database, new(), source.Lease, finality).OnCommitted(receipt);
-        Assert.Equal(1, fixture.Base.Count("run_records"));
+        AssertPublishedHistory(fixture, receipt);
         Assert.Equal(bytes, File.ReadAllBytes(source.Configuration)); Assert.Equal(original, PhysicalObjectIdentity.Read(source.Configuration));
-        Assert.True(fixture.Base.Index.Current.IsReady); Assert.Equal(0, fixture.Base.Count("resource_isolations"));
+        Assert.True(fixture.Base.Index.Current.IsReady); Assert.Empty(fixture.Base.Index.Current.Isolations);
         session.Dispose();
+    }
+
+    private static void AssertPublishedHistory(ExecutionRuntimeFixture fixture, AttemptReceipt receipt)
+    {
+        var source = fixture.Source;
+        Assert.Equal(fixture.Accepted.JournalId, receipt.JournalId);
+        Assert.Equal(fixture.Accepted.Acceptance.OperationId, receipt.OperationId);
+        Assert.Equal(receipt, Assert.Single(new AttemptHistoryReader(source.Database).ReadPage(new(receipt.Facts.RunId)).Items));
+        var records = new RunRecordStore(source.Database);
+        var group = Assert.Single(records.ReadPage(new()).Items);
+        Assert.Equal(source.QueueId, group.AutomationId);
+        Assert.Null(group.UserId);
+        Assert.Equal(receipt.Facts, group.FinalAttempt);
+        foreach (var user in new[] { source.UserA, source.UserB, source.UserC })
+        {
+            var account = Assert.Single(records.ReadPage(new(UserId: user)).Items);
+            Assert.Equal(user, account.UserId);
+            Assert.Equal(source.QueueId, account.AutomationId);
+            Assert.Equal(receipt.Facts.RunId, account.FinalAttempt.RunId);
+            Assert.Equal(receipt.Facts.AttemptId, account.FinalAttempt.AttemptId);
+            Assert.Equal(EngineOutcome.NotStarted, account.FinalAttempt.Engine);
+        }
     }
 
     [Theory(DisplayName = "An Independent Native Consumer Preserves An Unmaterialized Manual Edit And Its Exact Isolation")]

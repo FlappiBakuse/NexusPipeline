@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using NexusPipeline.Core.Configuration;
+using NexusPipeline.Core.Execution;
 using NexusPipeline.Core.Operations;
 using NexusPipeline.Extensibility.Protocol;
 using NexusPipeline.Platform.Storage.Configuration;
@@ -23,22 +24,29 @@ public sealed class RunStoreTests
         using var root = fixture.Acquire(fixture.Request);
         using var prepared = Prepare(fixture, root);
         var parent = fixture.Parent(prepared); fixture.Accept(parent);
-        var before = Counts(fixture); var store = Store(fixture); var sessionId = Guid.NewGuid();
+        var store = Store(fixture); var sessionId = Guid.NewGuid();
         var operation = Identity(sessionId, parent, prepared);
         var accepted = store.Begin(operation, Guid.Parse(parent.JournalId), fixture.StepId, prepared, DateTimeOffset.UtcNow);
         Assert.True(accepted.IsNew); Assert.Equal(ConfigurationRunPhase.Prepared, accepted.Phase); Assert.Equal(1, accepted.Revision);
-        Assert.Equal(2, accepted.Resources.Length);
-        Assert.Equal(before["operations"] + 3, fixture.Count("operations"));
-        Assert.Equal(before["operation_journals"] + 2, fixture.Count("operation_journals"));
-        Assert.Equal(before["journal_writers"] + 2, fixture.Count("journal_writers"));
-        Assert.Equal(before["file_effects"] + 8, fixture.Count("file_effects"));
-        Assert.Equal(1, fixture.Count("configuration_run_sessions")); Assert.Equal(2, fixture.Count("configuration_run_resources"));
+        Assert.Equal(fixture.Request.Resources.Select(item => item.Target.Address).OrderBy(item => item.ResourceId),
+            accepted.Resources.Select(item => item.Address).OrderBy(item => item.ResourceId));
+        Assert.Equal(sessionId, accepted.SessionId); Assert.Equal(Guid.Parse(parent.JournalId), accepted.ParentJournalId);
+        Assert.Equal(fixture.StepId, accepted.StepId); Assert.Equal(prepared.OwnerOperationId, accepted.OwnerOperationId);
         var registered = new RecoveryJournalRegistry(fixture.Source.Database).ReadSnapshot();
         foreach (var resource in accepted.Resources)
         {
             var journal = Assert.Single(registered.Journals, item => item.JournalId == resource.JournalId);
             Assert.Equal(resource.OperationId, journal.OperationId); Assert.Equal(JournalPhase.Prepared, journal.Phase);
-            Assert.Equal(4, registered.FileEffects.Count(item => item.JournalId == resource.JournalId));
+            var expected = prepared.Use(items => items.Single(item => item.Address == resource.Address));
+            Assert.Equal(expected.Plan.OperationId, resource.OperationId); Assert.Equal(expected.Plan.JournalId, resource.JournalId);
+            Assert.Equal(expected.Reference.RelativePath, journal.PlanPath); Assert.Equal(expected.Reference.Sha256, journal.PlanDigest);
+            var effects = registered.FileEffects.Where(item => item.JournalId == resource.JournalId).ToArray();
+            foreach (var action in new[] { FileEffectAction.PreserveOriginal, FileEffectAction.InstallCandidate,
+                FileEffectAction.RetireCandidate, FileEffectAction.RestoreOriginal })
+                Assert.Contains(effects, effect => effect.Action == action && effect.State == FileEffectState.Pending &&
+                    effect.IntentDigest == expected.Reference.Sha256 && effect.ReceiptDigest is null);
+            var writer = new JournalWriterStore(fixture.Source.Database).Observe(resource.JournalId);
+            Assert.True(writer.IsComplete); Assert.Equal(WriterState.Running, writer.State);
             Assert.Equal(1, resource.CurrentRevision);
         }
         var recreated = Store(fixture);

@@ -16,6 +16,7 @@ using NexusPipeline.Platform.Storage.Journals;
 using NexusPipeline.Platform.Storage.Sqlite;
 using Xunit;
 using Xunit.Abstractions;
+using static NexusPipeline.StorageTests.InitialRecoveryTests;
 
 namespace NexusPipeline.StorageTests;
 
@@ -37,17 +38,33 @@ public sealed class StartupAdmissionTests(ITestOutputHelper output)
     {
         var fixture = Create(fault, retainWal);
         var before = Fingerprints(fixture.Instance.RuntimeRoot);
+        var target = PhysicalObjectIdentity.Read(fixture.Target);
         using var job = new OwnedWorkerJob();
-        var identity = Start(job, fixture, 0);
+        using var streams = new OwnedProcessOutput();
+        var identity = Start(job, fixture, 0, streams);
+        using var stderr = new StreamReader(streams.StandardError);
+        var errors = stderr.ReadToEndAsync();
+        var stdout = streams.StandardOutput.CopyToAsync(Stream.Null);
         using var process = Process.GetProcessById(identity.ProcessId);
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         await process.WaitForExitAsync(timeout.Token);
         Assert.Equal(1, process.ExitCode);
         await Stopped(job);
+        var diagnostic = await errors.WaitAsync(timeout.Token);
+        await stdout.WaitAsync(timeout.Token);
+        File.WriteAllText(Path.Combine(fixture.Root, "host-startup.stderr.log"), diagnostic);
+        var reason = fault switch
+        {
+            "unbound-plan" => "configuration_journal_plan_unbound",
+            "known-active" => "startup_journal_writer_stop_unconfirmed",
+            _ => "unsupported_or_invalid_contract"
+        };
+        Assert.Equal(reason, Assert.Single(ReadFailureReasons(diagnostic)));
         var after = Fingerprints(fixture.Instance.RuntimeRoot);
         Assert.Equal(before, after);
+        Assert.Equal(target, PhysicalObjectIdentity.Read(fixture.Target));
         Assert.Equal(new byte[] { 1, 2, 3 }, File.ReadAllBytes(fixture.Target));
-        output.WriteLine(JsonSerializer.Serialize(new { faultPoint = fault, retainWal, identity, before, after,
+        output.WriteLine(JsonSerializer.Serialize(new { faultPoint = fault, retainWal, identity, reason, before, after,
             nativeExitCode = process.ExitCode, accounting = job.GetAccounting(), allProcessesStopped = job.ActiveProcessIds().Count == 0 }));
     }
 
@@ -62,10 +79,7 @@ public sealed class StartupAdmissionTests(ITestOutputHelper output)
         Assert.Equal(fixture.Database.InstanceId, reopened.InstanceId);
         Assert.Equal(before, Fingerprints(fixture.Instance.RuntimeRoot));
         Assert.Empty(Directory.EnumerateFileSystemEntries(Path.Combine(fixture.Root, "diagnostics")));
-        for (var repeat = 0; repeat < 2; repeat++)
-            _ = StateDatabase.OpenExisting(fixture.Instance, Path.Combine(fixture.Root, "diagnostics"),
-                new JournalStartupAdmission(fixture.Instance, fixture.Contracts));
-        Assert.Empty(Directory.EnumerateFileSystemEntries(Path.Combine(fixture.Root, "diagnostics")));
+        AssertCompleted(fixture, reopened);
     }
 
     [Fact(DisplayName = "Actual Host Serves The Current Control Plane After A Typed Configuration Journal Has Completed")]
@@ -73,7 +87,10 @@ public sealed class StartupAdmissionTests(ITestOutputHelper output)
     {
         var fixture = Create("known-active", retainWal: false);
         Complete(fixture);
-        var reservation = new TcpListener(IPAddress.Loopback, 0);
+        var original = PhysicalObjectIdentity.Read(fixture.Target);
+        var journals = new JournalStore(fixture.Instance, fixture.Contracts);
+        var history = journals.ReadAllRevisions(fixture.JournalId).Select(item => item.Export()).ToArray();
+        using var reservation = new TcpListener(IPAddress.Loopback, 0);
         reservation.Start();
         var port = ((IPEndPoint)reservation.LocalEndpoint).Port;
         reservation.Stop();
@@ -100,8 +117,12 @@ public sealed class StartupAdmissionTests(ITestOutputHelper output)
             Assert.NotNull(capability);
             Assert.Equal(fixture.Instance.InstanceId, capability.RootElement.GetProperty("instanceId").GetGuid());
         }
-        Assert.Equal(new byte[] { 1, 2, 3 }, File.ReadAllBytes(fixture.Target));
         Assert.True(await job.StopAsync(TimeSpan.FromSeconds(5)));
+        Assert.Equal(0u, job.GetAccounting().ActiveProcesses);
+        AssertCompleted(fixture, fixture.Database);
+        Assert.Equal(history, journals.ReadAllRevisions(fixture.JournalId).Select(item => item.Export()));
+        Assert.Equal(original, PhysicalObjectIdentity.Read(fixture.Target));
+        Assert.Equal(new byte[] { 1, 2, 3 }, File.ReadAllBytes(fixture.Target));
         output.WriteLine(JsonSerializer.Serialize(new { identity, servedCurrentControlPlane = true, forcedFixtureStop = true,
             allProcessesStopped = job.ActiveProcessIds().Count == 0, scope = "Startup admission only; fixture termination is not graceful desktop shutdown evidence" }));
     }
@@ -113,37 +134,33 @@ public sealed class StartupAdmissionTests(ITestOutputHelper output)
         Assert.Equal(ConfigurationRecoveryResult.NotExecuted, new ConfigurationRecovery(session).Recover());
     }
 
-    [Theory(DisplayName = "Completed Families Are Verified During Admission And Recovery Without Rewriting Corrupt History")]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void ChecksCompletedFamilies(bool corrupt)
+    [Fact(DisplayName = "Completed Families Are Verified During Admission And Recovery Without Rewriting Corrupt History")]
+    public void ChecksCompletedFamilies()
     {
         var fixture = CompletedFamilies();
         var admission = new JournalStartupAdmission(fixture.Instance, fixture.Contracts);
         var original = Fingerprints(fixture.Instance.RuntimeRoot);
         var database = StateDatabase.OpenExisting(fixture.Instance, Path.Combine(fixture.Root, "diagnostics"), admission);
         Assert.Equal(original, Fingerprints(fixture.Instance.RuntimeRoot));
-        if (corrupt)
-        {
-            var journal = Path.Combine(fixture.Instance.RuntimeRoot, "journals", fixture.JournalId.ToString("D"));
-            var path = Directory.GetFiles(journal).Order(StringComparer.Ordinal).Last();
-            var document = JsonNode.Parse(File.ReadAllBytes(path))!; document["version"] = 999;
-            File.WriteAllBytes(path, JsonSerializer.SerializeToUtf8Bytes(document));
-        }
-        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
-            _ = DatabaseConnections.Scalar(connection, "SELECT count(*) FROM operation_journals;");
+        AssertCompleted(fixture, database);
+        var journal = Path.Combine(fixture.Instance.RuntimeRoot, "journals", fixture.JournalId.ToString("D"));
+        var path = Directory.GetFiles(journal).Order(StringComparer.Ordinal).Last();
+        var document = JsonNode.Parse(File.ReadAllBytes(path))!; document["version"] = 999;
+        File.WriteAllBytes(path, JsonSerializer.SerializeToUtf8Bytes(document));
         var before = Fingerprints(fixture.Instance.RuntimeRoot);
         var roots = new PayloadApplyRoots(fixture.Root, Path.Combine(fixture.Instance.RuntimeRoot, "extensions"));
         var recovery = new StartupJournalRecovery(fixture.Instance, fixture.Contracts, database, roots);
-        if (corrupt)
-        {
-            Assert.ThrowsAny<Exception>(() => StateDatabase.OpenExisting(fixture.Instance, Path.Combine(fixture.Root, "diagnostics"), admission));
-            Assert.Equal(before, Fingerprints(fixture.Instance.RuntimeRoot));
-            using (var lease = InstanceLease.Acquire(fixture.Instance, fixture.Contracts))
-                Assert.ThrowsAny<Exception>(() => recovery.Recover(lease));
-        }
-        else recovery.InspectCompletedHistory();
+        Assert.Equal("unsupported_or_invalid_contract", Assert.Throws<JsonException>(() =>
+            StateDatabase.OpenExisting(fixture.Instance, Path.Combine(fixture.Root, "diagnostics"), admission)).Message);
         Assert.Equal(before, Fingerprints(fixture.Instance.RuntimeRoot));
+        using (var lease = InstanceLease.Acquire(fixture.Instance, fixture.Contracts))
+        using (var observation = new DatabaseObservation(database))
+        {
+            var beforeRecovery = Fingerprints(fixture.Instance.RuntimeRoot, lockHeld: true);
+            Assert.Equal("unsupported_or_invalid_contract", Assert.Throws<JsonException>(() => recovery.Recover(lease)).Message);
+            Assert.Equal(beforeRecovery, Fingerprints(fixture.Instance.RuntimeRoot, lockHeld: true));
+            lease.VerifyHeld(fixture.Instance);
+        }
         Directory.Move(fixture.Instance.RuntimeRoot, fixture.Instance.RuntimeRoot + "-released");
     }
 
@@ -226,7 +243,7 @@ public sealed class StartupAdmissionTests(ITestOutputHelper output)
             if (retainWal) group = new[] { "", "-wal", "-shm" }.ToDictionary(suffix => suffix, suffix => Quiescent(database.DatabasePath + suffix));
         }
         if (group is not null) foreach (var (suffix, bytes) in group) File.WriteAllBytes(database.DatabasePath + suffix, bytes);
-        return new(root, instance, contracts, database, target, plan.JournalId);
+        return new(root, instance, contracts, database, target, registered);
     }
 
     private static void WriteJournal(RuntimeInstance instance, ContractReader contracts, RegisteredJournal journal, string fault)
@@ -248,10 +265,34 @@ public sealed class StartupAdmissionTests(ITestOutputHelper output)
         new JournalStore(instance, contracts).Create(JsonSerializer.SerializeToUtf8Bytes(document));
     }
 
-    private static OwnedWorkerIdentity Start(OwnedWorkerJob job, Fixture fixture, int port) => job.Start(
+    private static OwnedWorkerIdentity Start(OwnedWorkerJob job, Fixture fixture, int port, OwnedProcessOutput? streams = null) => job.Start(
         Environment.GetEnvironmentVariable("NEXUS_TEST_HOST_EXE")!, ["serve", "--runtime-root", fixture.Instance.RuntimeRoot, "--port", port.ToString()],
         fixture.Root, fixture.Instance.InstanceId, Guid.NewGuid(), identity =>
-            File.WriteAllBytes(Path.Combine(fixture.Root, "host-launch.json"), JsonSerializer.SerializeToUtf8Bytes(identity)));
+            File.WriteAllBytes(Path.Combine(fixture.Root, "host-launch.json"), JsonSerializer.SerializeToUtf8Bytes(identity)), streams);
+
+    private static IEnumerable<string?> ReadFailureReasons(string diagnostic)
+    {
+        foreach (var line in diagnostic.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (!line.StartsWith('{')) continue;
+            using var document = JsonDocument.Parse(line);
+            var root = document.RootElement;
+            if (root.TryGetProperty("kind", out var kind) && kind.GetString() == "host.startup.failed")
+                yield return root.GetProperty("reason").GetString();
+        }
+    }
+
+    private static void AssertCompleted(Fixture fixture, StateDatabase database)
+    {
+        var registry = new RecoveryJournalRegistry(database);
+        var journal = AssertRegistration(registry, fixture.Registered, JournalPhase.Committed);
+        Assert.DoesNotContain(registry.ReadSnapshot().Isolations, item => item.JournalId == journal.JournalId);
+        var effect = Assert.Single(new FileEffectOutbox(database).Read(journal.JournalId));
+        Assert.Equal(FileEffectAction.InstallCandidate, effect.Action);
+        Assert.Equal(FileEffectState.NotExecuted, effect.State);
+        Assert.Equal(journal.PlanDigest, effect.IntentDigest);
+        Assert.NotNull(effect.ReceiptDigest);
+    }
 
     private static async Task Stopped(OwnedWorkerJob job)
     {
@@ -268,9 +309,14 @@ public sealed class StartupAdmissionTests(ITestOutputHelper output)
         return bytes;
     }
 
-    private static string[] Fingerprints(string root) => Directory.GetFiles(root, "*", SearchOption.AllDirectories)
+    private static string[] Fingerprints(string root, bool lockHeld = false) => Directory.GetFiles(root, "*", SearchOption.AllDirectories)
         .Where(path => !Path.GetRelativePath(root, path).StartsWith("diagnostics" + Path.DirectorySeparatorChar, StringComparison.Ordinal))
-        .Order(StringComparer.Ordinal).Select(path => Path.GetRelativePath(root, path) + ":" + Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(path)))).ToArray();
+        .Where(path => !lockHeld || !StringComparer.OrdinalIgnoreCase.Equals(path, Path.Combine(root, "instance.lock")))
+        .Order(StringComparer.Ordinal).Select(path => Path.GetRelativePath(root, path) + ":" +
+            Convert.ToHexStringLower(SHA256.HashData(lockHeld ? Quiescent(path) : File.ReadAllBytes(path)))).ToArray();
 
-    private sealed record Fixture(string Root, RuntimeInstance Instance, ContractReader Contracts, StateDatabase Database, string Target, Guid JournalId);
+    private sealed record Fixture(string Root, RuntimeInstance Instance, ContractReader Contracts, StateDatabase Database, string Target, RegisteredJournal Registered)
+    {
+        internal Guid JournalId => Registered.JournalId;
+    }
 }

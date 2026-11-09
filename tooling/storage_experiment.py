@@ -12,7 +12,7 @@ import uuid
 import zlib
 from build_product import build_product
 from binary_inputs import capture_binary_inputs, verify_binary_inputs
-from source_snapshot import write_json
+from source_snapshot import external_directory, write_json
 
 
 def verify_png(raw):
@@ -51,24 +51,33 @@ def verify_images(runtime, report):
 
 
 def run_experiment(root, build_root, output):
-    code = build_product(root, build_root, "test")
-    if code: return code
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:8]
-    run = Path(output).resolve() / run_id
-    if run == root or root in run.parents: raise ValueError("Experiment output must be outside source")
-    runtime = run / "runtime"
-    runtime.mkdir(parents=True)
-    binary_identity, binaries = capture_binary_inputs(build_root, run, "storage")
-    build_receipt = json.loads((build_root / "build-receipt.json").read_bytes())
-    fixture = build_root / "build/bin/OwnedWriter/release/OwnedWriter.exe"
-    dataset = runtime / "dataset"
-    report_path = dataset / "dataset-report.json"
-    process_receipt = runtime / "owned-process.json"
-    command = [str(fixture), "history-dataset-harness", str(dataset), str(report_path), str(process_receipt)]
-    env = os.environ.copy()
-    env.update(TEMP=str(runtime), TMP=str(runtime), NEXUS_TEST_ROOT=str(runtime), PYTHONDONTWRITEBYTECODE="1")
+    run = external_directory(root, output) / run_id
+    run.mkdir(parents=True)
+    projects = ["OwnedWriter"]
+    responsibilities = dict(lint="NOT_RUN", typecheck="NOT_RUN", test="NOT_RUN", build="NOT_RUN")
+    receipt = dict(status="FAIL", exitCode=1, preparation="FAIL", responsibilities=responsibilities)
     started = time.monotonic()
     try:
+        code = build_product(root, build_root, "test", projects)
+        if code:
+            receipt.update(exitCode=code, reason="Storage experiment fixture build failed")
+            return code
+        build_receipt = json.loads((build_root / "build-receipt.json").read_bytes())
+        receipt.update(source=build_receipt["source"],
+                       buildReceipt=str(build_root / "runs" / build_receipt["runId"] / "build-receipt.json"))
+        binary_identity, binaries = capture_binary_inputs(build_root, run, "storage-experiment", projects)
+        runtime = run / "runtime"
+        runtime.mkdir()
+        fixture = build_root / "build/bin/OwnedWriter/release/OwnedWriter.exe"
+        dataset = runtime / "dataset"
+        report_path = dataset / "dataset-report.json"
+        process_receipt = runtime / "owned-process.json"
+        command = [str(fixture), "history-dataset-harness", str(dataset), str(report_path), str(process_receipt)]
+        env = {**os.environ, "TEMP": str(runtime), "TMP": str(runtime), "NEXUS_TEST_ROOT": str(runtime), "PYTHONDONTWRITEBYTECODE": "1"}
+        receipt.update(preparation="PASS", command=command)
+        responsibilities["test"] = "FAIL"
+        started = time.monotonic()
         process = subprocess.run(command, env=env, capture_output=True, encoding="utf-8", errors="replace", timeout=720)
         (run / "native.log").write_bytes((process.stdout + process.stderr).encode())
         print(process.stdout + process.stderr, flush=True)
@@ -81,15 +90,16 @@ def run_experiment(root, build_root, output):
         images = verify_images(dataset / "runtime", report)
         write_json(run / "image-byte-verification.json", {"status": "PASS", "decoder": "Independent Python PNG CRC/chunk/zlib verification", "images": images})
         verify_binary_inputs(build_root, binaries)
-        write_json(run / "test-receipt.json", {"status": "PASS", "exitCode": 0, "command": command,
-            "source": build_receipt["source"], "buildReceipt": str(build_root / "build-receipt.json"),
-            "elapsedSeconds": time.monotonic() - started, "datasetReport": str(report_path), "ownedProcessReceipt": str(process_receipt),
-            "applicationBinaryInputs": {**binary_identity, "verifiedUnchangedAfterRun": True},
-            "scope": "P0 actual SQLite keyset/index, synthetic PNG and consistent database/content snapshot experiment; no full product backup approval"})
-        print(str(run / "test-receipt.json"), flush=True)
+        responsibilities["test"] = "PASS"
+        receipt.update(status="PASS", exitCode=0, datasetReport=str(report_path), ownedProcessReceipt=str(process_receipt),
+            applicationBinaryInputs={**binary_identity, "verifiedUnchangedAfterRun": True},
+            scope="SQLite keyset history, synthetic PNG and consistent database/content snapshot experiment")
         return 0
-    except (OSError, ValueError, subprocess.TimeoutExpired) as error:
-        write_json(run / "test-receipt.json", {"status": "FAIL", "exitCode": 1, "command": command,
-            "elapsedSeconds": time.monotonic() - started, "reason": str(error), "source": build_receipt["source"]})
+    except (OSError, ValueError, KeyError, subprocess.TimeoutExpired) as error:
+        receipt["reason"] = str(error)
         print(str(error), file=sys.stderr)
         return 1
+    finally:
+        receipt["elapsedSeconds"] = time.monotonic() - started
+        write_json(run / "test-receipt.json", receipt)
+        print(str(run / "test-receipt.json"), flush=True)

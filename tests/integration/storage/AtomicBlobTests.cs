@@ -22,15 +22,23 @@ public sealed class AtomicBlobTests
         using var cancellation = new CancellationTokenSource();
         using var input = new FaultReadStream(fault == "short" ? bytes[..70000] : bytes, fault,
             () => { if (fault == "cancel") cancellation.Cancel(); });
-        if (fault == "cancel") Assert.Throws<OperationCanceledException>(() => store.PersistContent(input, requested, cancellation.Token));
-        else Assert.Throws<IOException>(() => store.PersistContent(input, requested, cancellation.Token));
-        Assert.True(input.Reads > 0);
-        Assert.False(File.Exists(Path.Combine(root, requested.RelativePath)));
-        Assert.Empty(Directory.GetFiles(Path.Combine(root, "blobs/content"), "*.staging"));
+        if (fault == "cancel")
+        {
+            Assert.Throws<OperationCanceledException>(() => store.PersistContent(input, requested, cancellation.Token));
+            Assert.True(cancellation.IsCancellationRequested);
+        }
+        else
+        {
+            var rejection = Assert.Throws<IOException>(() => store.PersistContent(input, requested, cancellation.Token));
+            Assert.Equal(fault == "io" ? "injected_stream_failure" : "blob_source_changed", rejection.Message);
+        }
+        var directory = Path.Combine(root, "blobs", "content");
+        if (Directory.Exists(directory)) Assert.Empty(Directory.EnumerateFileSystemEntries(directory));
         using var retry = new MemoryStream(bytes, writable: false);
         store.PersistContent(retry, expected, CancellationToken.None);
-        using var published = store.OpenVerified(expected);
-        Assert.Equal(bytes.Length, published.Length);
+        var published = Assert.Single(Directory.EnumerateFileSystemEntries(directory));
+        Assert.Equal(Path.GetFullPath(Path.Combine(root, expected.RelativePath)), published);
+        Assert.Equal(bytes, File.ReadAllBytes(published));
     }
 
     [Fact]
@@ -46,8 +54,9 @@ public sealed class AtomicBlobTests
             using var input = new FaultReadStream(bytes, "none", () => Assert.True(barrier.SignalAndWait(TimeSpan.FromSeconds(10))));
             store.PersistContent(input, expected, CancellationToken.None);
         })));
-        Assert.Single(Directory.GetFiles(Path.Combine(root, "blobs/content")));
-        store.Verify(expected);
+        var published = Assert.Single(Directory.EnumerateFileSystemEntries(Path.Combine(root, "blobs", "content")));
+        Assert.Equal(Path.GetFullPath(Path.Combine(root, expected.RelativePath)), published);
+        Assert.Equal(bytes, File.ReadAllBytes(published));
     }
 
     private static (string Root, ImmutableBlobStore Store) Create()
@@ -60,13 +69,13 @@ public sealed class AtomicBlobTests
 
     private sealed class FaultReadStream(byte[] bytes, string fault, Action firstRead) : MemoryStream(bytes, writable: false)
     {
-        internal int Reads { get; private set; }
+        private int _reads;
         public override int Read(byte[] buffer, int offset, int count)
         {
-            Reads++;
-            if (Reads == 2 && fault == "io") throw new IOException("injected_stream_failure");
+            _reads++;
+            if (_reads == 2 && fault == "io") throw new IOException("injected_stream_failure");
             var read = base.Read(buffer, offset, Math.Min(count, 65536));
-            if (Reads == 1) firstRead();
+            if (_reads == 1) firstRead();
             return read;
         }
     }

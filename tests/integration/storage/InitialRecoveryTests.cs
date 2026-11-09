@@ -18,19 +18,30 @@ public sealed class InitialRecoveryTests
     public void ProvesUnenteredAcceptance()
     {
         var fixture = Create();
+        var identity = PhysicalObjectIdentity.Read(fixture.Target);
         var before = Fingerprints(fixture.Instance.RuntimeRoot);
-        var evidence = new JournalRecoveryEvidence(fixture.Instance, new(fixture.Instance, fixture.Contracts));
-        evidence.VerifyRecognizedAll(fixture.Registry.ReadSnapshot().Journals);
+        var evidence = new JournalRecoveryEvidence(fixture.Instance, fixture.Journals);
+        evidence.VerifyRecognizedAll([fixture.Registered]);
         var work = fixture.Handler.Prepare(fixture.Registered);
         Assert.Equal(before, Fingerprints(fixture.Instance.RuntimeRoot));
         Assert.Equal(JournalRecoveryResult.NotExecuted, work.Execute());
-        var current = Assert.Single(fixture.Registry.ReadSnapshot().Journals);
-        Assert.Equal(JournalPhase.Committed, current.Phase);
+        var current = AssertRegistration(fixture.Registry, fixture.Registered, JournalPhase.Committed);
+        evidence.VerifyAll([current]);
         Assert.Empty(fixture.Registry.ReadSnapshot().Isolations);
+        var effect = Assert.Single(fixture.Outbox.Read(current.JournalId));
+        Assert.Equal(current.JournalId, effect.JournalId);
+        Assert.Equal(FileEffectAction.InstallCandidate, effect.Action);
+        Assert.Equal(FileEffectState.NotExecuted, effect.State);
+        Assert.NotNull(effect.ReceiptDigest);
+        Assert.Equal(identity, PhysicalObjectIdentity.Read(fixture.Target));
         Assert.Equal(new byte[] { 1, 2, 3 }, File.ReadAllBytes(fixture.Target));
-        var committed = Fingerprints(fixture.Instance.RuntimeRoot);
+        var history = fixture.Journals.ReadAllRevisions(current.JournalId).Select(item => item.Export()).ToArray();
         Assert.Equal(JournalRecoveryResult.AlreadyCompleted, fixture.Handler.Prepare(current).Execute());
-        Assert.Equal(committed, Fingerprints(fixture.Instance.RuntimeRoot));
+        Assert.Equal(current.Revision, AssertRegistration(fixture.Registry, current, JournalPhase.Committed).Revision);
+        Assert.Equal(history, fixture.Journals.ReadAllRevisions(current.JournalId).Select(item => item.Export()));
+        Assert.Equal(effect, Assert.Single(fixture.Outbox.Read(current.JournalId)));
+        Assert.Equal(identity, PhysicalObjectIdentity.Read(fixture.Target));
+        Assert.Equal(new byte[] { 1, 2, 3 }, File.ReadAllBytes(fixture.Target));
     }
 
     [Theory(DisplayName = "An Unproven Initial Site Gets A Recognized Isolation Without Moving Or Overwriting Any Configuration")]
@@ -43,11 +54,17 @@ public sealed class InitialRecoveryTests
         if (fault == "changed-target") File.WriteAllText(fixture.Target, "unknown target bytes");
         var workPath = Path.Combine(Path.GetDirectoryName(fixture.Target)!, ".nexus-" + fixture.Registered.JournalId.ToString("D"));
         if (fault == "unknown-workspace") { Directory.CreateDirectory(workPath); File.WriteAllText(Path.Combine(workPath, "foreign.data"), "preserve"); }
+        var targetIdentity = PhysicalObjectIdentity.Read(fixture.Target);
         var beforeTarget = File.ReadAllBytes(fixture.Target);
+        var effects = fixture.Outbox.Read(fixture.Registered.JournalId);
         Assert.Equal(JournalRecoveryResult.Quarantined, fixture.Handler.Prepare(fixture.Registered).Execute());
+        Assert.Equal(targetIdentity, PhysicalObjectIdentity.Read(fixture.Target));
         Assert.Equal(beforeTarget, File.ReadAllBytes(fixture.Target));
-        Assert.Equal(JournalPhase.Quarantined, Assert.Single(fixture.Registry.ReadSnapshot().Journals).Phase);
-        Assert.Single(fixture.Registry.ReadSnapshot().Isolations);
+        var journal = AssertRegistration(fixture.Registry, fixture.Registered, JournalPhase.Quarantined);
+        var isolation = Assert.Single(fixture.Registry.ReadSnapshot().Isolations);
+        Assert.Equal(journal.JournalId, isolation.JournalId);
+        Assert.Equal(Assert.Single(journal.ResourceKeys), isolation.ResourceKey);
+        Assert.Equal(effects, fixture.Outbox.Read(journal.JournalId));
         if (fault == "unknown-workspace") Assert.Equal("preserve", File.ReadAllText(Path.Combine(workPath, "foreign.data")));
     }
 
@@ -59,10 +76,16 @@ public sealed class InitialRecoveryTests
     {
         var fixture = Create(fault: fault);
         var before = Fingerprints(fixture.Instance.RuntimeRoot);
-        Assert.ThrowsAny<Exception>(() => fixture.Handler.Prepare(fixture.Registered));
+        if (fault == "unknown-version")
+            Assert.Equal("unsupported_or_invalid_contract", Assert.Throws<JsonException>(() => fixture.Handler.Prepare(fixture.Registered)).Message);
+        else
+        {
+            var reason = fault == "unbound-operation" ? "missing_configuration_journal_plan_unbound" : "missing_configuration_journal_has_effect_receipts";
+            Assert.Equal(reason, Assert.Throws<IOException>(() => fixture.Handler.Prepare(fixture.Registered)).Message);
+        }
         Assert.Equal(before, Fingerprints(fixture.Instance.RuntimeRoot));
-        Assert.False(Directory.Exists(Path.Combine(fixture.Instance.RuntimeRoot, "journals")));
-        Assert.Equal(JournalPhase.Prepared, Assert.Single(fixture.Registry.ReadSnapshot().Journals).Phase);
+        Assert.ThrowsAny<IOException>(() => fixture.Journals.Read(fixture.Registered.JournalId));
+        Assert.Equal(fixture.Registered.Revision, AssertRegistration(fixture.Registry, fixture.Registered, JournalPhase.Prepared).Revision);
     }
 
     [Fact(DisplayName = "An Existing Empty Initial Directory Is Unrecognized Evidence And Cannot Be Filled In As An Absent Journal")]
@@ -71,10 +94,20 @@ public sealed class InitialRecoveryTests
         var fixture = Create();
         var directory = Path.Combine(fixture.Instance.RuntimeRoot, "journals", fixture.Registered.JournalId.ToString("D"));
         Directory.CreateDirectory(directory);
-        var evidence = new JournalRecoveryEvidence(fixture.Instance, new(fixture.Instance, fixture.Contracts));
-        Assert.Throws<IOException>(() => evidence.VerifyRecognizedAll(fixture.Registry.ReadSnapshot().Journals));
-        Assert.Throws<IOException>(() => fixture.Handler.Prepare(fixture.Registered));
+        var identity = PhysicalObjectIdentity.Read(directory);
+        var evidence = new JournalRecoveryEvidence(fixture.Instance, fixture.Journals);
+        Assert.Equal("journal_history_limit_or_missing", Assert.Throws<IOException>(() => evidence.VerifyRecognizedAll([fixture.Registered])).Message);
+        Assert.Equal("journal_history_limit_or_missing", Assert.Throws<IOException>(() => fixture.Handler.Prepare(fixture.Registered)).Message);
+        Assert.Equal(identity, PhysicalObjectIdentity.Read(directory));
         Assert.Empty(Directory.EnumerateFileSystemEntries(directory));
+    }
+
+    internal static RegisteredJournal AssertRegistration(RecoveryJournalRegistry registry, RegisteredJournal expected, JournalPhase phase)
+    {
+        var actual = registry.ReadOperationJournal(expected.OperationId);
+        Assert.Equal(expected.ResourceKeys.Order(StringComparer.Ordinal), actual.ResourceKeys.Order(StringComparer.Ordinal));
+        Assert.Equal(expected with { Phase = phase, Revision = actual.Revision, ResourceKeys = actual.ResourceKeys }, actual);
+        return actual;
     }
 
     private static Fixture Create(string? fault = null, bool unknownWriters = false)
@@ -109,7 +142,7 @@ public sealed class InitialRecoveryTests
         if (fault == "started-effect") new FileEffectOutbox(database).Record(plan.JournalId, "install-candidate", FileEffectState.Pending, FileEffectState.Started, new string('d', 64));
         var handler = new ConfigurationRecoveryHandler(instance, contracts, database, plan.Kind,
             id => new(instance.InstanceId, id, !unknownWriters, unknownWriters ? WriterState.Unknown : WriterState.Stopped));
-        return new(instance, contracts, registered, registry, handler, target);
+        return new(instance, registered, registry, new(instance, contracts), new(database), handler, target);
     }
 
     private static string[] Fingerprints(string root)
@@ -122,6 +155,6 @@ public sealed class InitialRecoveryTests
             .Order(StringComparer.Ordinal)
             .Select(path => Path.GetRelativePath(root, path) + ":" + Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(path)))).ToArray();
     }
-    private sealed record Fixture(RuntimeInstance Instance, ContractReader Contracts, RegisteredJournal Registered,
-        RecoveryJournalRegistry Registry, ConfigurationRecoveryHandler Handler, string Target);
+    private sealed record Fixture(RuntimeInstance Instance, RegisteredJournal Registered, RecoveryJournalRegistry Registry,
+        JournalStore Journals, FileEffectOutbox Outbox, ConfigurationRecoveryHandler Handler, string Target);
 }

@@ -19,49 +19,60 @@ public sealed class JournalReadTests
         var (store, id, plan) = Fixture();
         var directory = Path.Combine(store.Instance.RuntimeRoot, "journals", id.ToString("D"));
         var reader = new JournalStore(store.Instance, store.Contracts);
+        var original = store.Read(id).Export();
         using var scope = JournalReadScope.Hold(store, id);
-        Assert.Equal(1, reader.Read(id).Revision);
-        using (JournalReadScope.Hold(reader, id)) Assert.Single(reader.ReadAllRevisions(id));
+        Assert.Equal(original, reader.Read(id).Export());
+        using (JournalReadScope.Hold(reader, id))
+            Assert.Equal(new[] { original }, reader.ReadAllRevisions(id).Select(item => item.Export()));
         if (fault == "unknown-entry")
         {
             var unknown = Path.Combine(directory, "unknown.bin");
             File.WriteAllText(unknown, "preserve");
-            Assert.Throws<IOException>(() => reader.Read(id));
+            Assert.Equal("journal_protected_history_changed", Assert.Throws<IOException>(() => reader.Read(id)).Message);
             Assert.Equal("preserve", File.ReadAllText(unknown));
             File.Delete(unknown);
-            Assert.Single(reader.ReadAllRevisions(id));
+            Assert.Equal(new[] { original }, reader.ReadAllRevisions(id).Select(item => item.Export()));
             return;
         }
-        var path = fault == "plan" ? plan : Path.Combine(directory, "0000000001.json");
+        var path = fault == "plan" ? plan : HistoryPath(store, id);
         var bytes = File.ReadAllBytes(path);
         Assert.Throws<IOException>(() => File.WriteAllText(path, "changed"));
         Assert.Throws<IOException>(() => File.Move(path, path + ".replaced"));
         Assert.Equal(bytes, File.ReadAllBytes(path));
+        Assert.Equal(original, reader.Read(id).Export());
         scope.Dispose();
         File.WriteAllText(path, "changed");
-        Assert.ThrowsAny<Exception>(() => reader.Read(id));
+        AssertTampering(fault, () => reader.Read(id));
         Assert.Equal("changed", File.ReadAllText(path));
-        Assert.ThrowsAny<Exception>(() => { using var rejected = JournalReadScope.Hold(reader, id); });
+        AssertTampering(fault, () => { using var rejected = JournalReadScope.Hold(reader, id); });
         File.WriteAllBytes(path, bytes);
         using var restored = JournalReadScope.Hold(reader, id);
-        Assert.Equal(id, reader.Read(id).JournalId);
+        Assert.Equal(original, reader.Read(id).Export());
     }
 
     [Fact(DisplayName = "Journal Read Scopes Keep Separate Instances And Restore Their Outer Owner")]
     public void RestoresOuterOwner()
     {
         var (first, firstId, _) = Fixture(); var (second, secondId, _) = Fixture();
+        var firstReader = new JournalStore(first.Instance, first.Contracts);
+        var secondReader = new JournalStore(second.Instance, second.Contracts);
+        var firstBytes = first.Read(firstId).Export(); var secondBytes = second.Read(secondId).Export();
+        var firstPath = HistoryPath(first, firstId); var secondPath = HistoryPath(second, secondId);
         using var outer = JournalReadScope.Hold(first, firstId);
         using var inner = JournalReadScope.Hold(second, secondId);
-        Assert.Equal(firstId, new JournalStore(first.Instance, first.Contracts).Read(firstId).JournalId);
-        Assert.Equal(secondId, new JournalStore(second.Instance, second.Contracts).Read(secondId).JournalId);
-        Assert.Throws<InvalidOperationException>(() => outer.Dispose());
+        Assert.Equal(firstBytes, firstReader.Read(firstId).Export());
+        Assert.Equal(secondBytes, secondReader.Read(secondId).Export());
+        Assert.Equal("journal_read_scope_order", Assert.Throws<InvalidOperationException>(() => outer.Dispose()).Message);
+        Assert.Throws<IOException>(() => File.WriteAllText(firstPath, "changed"));
+        Assert.Throws<IOException>(() => File.WriteAllText(secondPath, "changed"));
         inner.Dispose();
-        var path = Path.Combine(first.Instance.RuntimeRoot, "journals", firstId.ToString("D"), "0000000001.json");
-        Assert.Throws<IOException>(() => File.WriteAllText(path, "changed"));
-        Assert.Equal(firstId, new JournalStore(first.Instance, first.Contracts).Read(firstId).JournalId);
+        using (File.Open(secondPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None)) { }
+        Assert.Throws<IOException>(() => File.WriteAllText(firstPath, "changed"));
+        Assert.Equal(firstBytes, firstReader.Read(firstId).Export());
         outer.Dispose();
-        File.WriteAllText(path, "changed");
+        File.WriteAllText(firstPath, "changed");
+        AssertTampering("history", () => firstReader.Read(firstId));
+        Assert.Equal(secondBytes, secondReader.Read(secondId).Export());
     }
 
     private static (JournalStore Store, Guid Id, string Plan) Fixture()
@@ -85,26 +96,38 @@ public sealed class JournalReadTests
     public void SwitchesParents()
     {
         var (store, first, _) = Fixture();
-        var next = System.Text.Json.Nodes.JsonNode.Parse(store.Read(first).Export())!.AsObject();
+        var original = store.Read(first).Export();
+        var next = System.Text.Json.Nodes.JsonNode.Parse(original)!.AsObject();
         var second = Guid.NewGuid(); next["journalId"] = second.ToString("D"); next["operationId"] = Guid.NewGuid().ToString("D");
-        store.Create(JsonSerializer.SerializeToUtf8Bytes(next));
+        var secondBytes = store.Create(JsonSerializer.SerializeToUtf8Bytes(next)).Export();
+        var reader = new JournalStore(store.Instance, store.Contracts);
         using var parents = JournalReadScope.HoldParents(store.Instance, store.Contracts);
         JournalReadScope.SelectParent(store.Instance, store.Contracts, first);
-        var firstPath = Path.Combine(store.Instance.RuntimeRoot, "journals", first.ToString("D"), "0000000001.json");
+        var firstPath = HistoryPath(store, first); var secondPath = HistoryPath(store, second);
+        using (File.Open(secondPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None)) { }
         using (JournalReadScope.HoldParents(store.Instance, store.Contracts))
         {
             JournalReadScope.SelectParent(store.Instance, store.Contracts, first);
-            Assert.Equal(first, new JournalStore(store.Instance, store.Contracts).Read(first).JournalId);
+            Assert.Equal(original, reader.Read(first).Export());
         }
         Assert.Throws<IOException>(() => File.WriteAllText(firstPath, "changed"));
-        using (JournalReadScope.Hold(new JournalStore(store.Instance, store.Contracts), first))
-            Assert.Equal(first, new JournalStore(store.Instance, store.Contracts).Read(first).JournalId);
+        using (JournalReadScope.Hold(reader, first)) Assert.Equal(original, reader.Read(first).Export());
         JournalReadScope.SelectParent(store.Instance, store.Contracts, second);
-        Assert.Equal(second, new JournalStore(store.Instance, store.Contracts).Read(second).JournalId);
+        Assert.Equal(secondBytes, reader.Read(second).Export());
+        Assert.Throws<IOException>(() => File.WriteAllText(secondPath, "changed"));
         File.WriteAllText(firstPath, "changed");
-        Assert.ThrowsAny<Exception>(() => JournalReadScope.SelectParent(store.Instance, store.Contracts, first));
+        AssertTampering("history", () => JournalReadScope.SelectParent(store.Instance, store.Contracts, first));
         Assert.Equal("changed", File.ReadAllText(firstPath));
         JournalReadScope.SelectParent(store.Instance, store.Contracts, second);
-        Assert.Equal(second, new JournalStore(store.Instance, store.Contracts).Read(second).JournalId);
+        Assert.Equal(secondBytes, reader.Read(second).Export());
+    }
+
+    private static string HistoryPath(JournalStore store, Guid journal) =>
+        Path.Combine(store.Instance.RuntimeRoot, "journals", journal.ToString("D"), "0000000001.json");
+
+    private static void AssertTampering(string fault, Action read)
+    {
+        if (fault == "plan") Assert.Equal("journal_plan_digest_mismatch", Assert.Throws<IOException>(read).Message);
+        else Assert.Equal("invalid_json", Assert.Throws<JsonException>(read).Message);
     }
 }

@@ -33,7 +33,7 @@ public sealed class NativePortTests
             var actual = result.RootElement.EnumerateArray().Single(row => row.GetProperty("Title").GetString() == window.Title);
             Assert.Equal(Environment.ProcessId, actual.GetProperty("ProcessId").GetInt32());
             Assert.Equal(Environment.ProcessPath, actual.GetProperty("Executable").GetString());
-            Assert.True(actual.GetProperty("Handle").GetInt64() > 0);
+            Assert.Equal(window.Handle.ToInt64(), actual.GetProperty("Handle").GetInt64());
             Assert.Equal(TimeSpan.Zero, actual.GetProperty("StartedAtUtc").GetDateTimeOffset().Offset);
             nativeLifetime.Cancel();
             var denied = await Record.ExceptionAsync(() => Read(client));

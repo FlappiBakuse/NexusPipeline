@@ -13,9 +13,9 @@ export async function loaderContract(check: (value: unknown, name: string) => vo
     capabilities: ['ui.contribute'], permissions: {}, managed: { entryAssembly: 'Fixture.dll', entryType: 'Fixture.Entry' },
     frontend: { entry: 'web/main.js', styles: [], sdkVersion }
   } }));
-  let release!: () => void;
+  let release!: (surface: string) => void;
   const transports = new Map<string, FrontendTransport>();
-  const state = { wait: new Promise<void>(resolve => { release = resolve; }),
+  const state = { wait: new Promise<string>(resolve => { release = resolve; }),
     capture(id: string, transport: FrontendTransport) { transports.set(id, transport); } };
   const global = globalThis as typeof globalThis & { loaderFixture?: typeof state };
   global.loaderFixture = state;
@@ -28,8 +28,8 @@ export async function loaderContract(check: (value: unknown, name: string) => vo
         extensionId: ${JSON.stringify(id)}, sdkVersion: ${JSON.stringify(sdkVersion)}, contractFingerprint: ${JSON.stringify(contractFingerprint)},
         async activate(context) {
           globalThis.loaderFixture.capture(${JSON.stringify(id)}, transport);
-          if (${JSON.stringify(id)} === 'slow-fixture') await globalThis.loaderFixture.wait;
-          context.registerSurface({id:'card',target:'overview.cards',mount(){}});
+          const surface = ${JSON.stringify(id)} === 'slow-fixture' ? await globalThis.loaderFixture.wait : 'card';
+          context.registerSurface({id:surface,target:'overview.cards',mount(){}});
         }
       }; }`;
       return Response.json({ entry: btoa(source), styles: [] });
@@ -38,27 +38,29 @@ export async function loaderContract(check: (value: unknown, name: string) => vo
   } as unknown as ControlClient;
   const errors: unknown[] = [];
   const loader = new FrontendLoader(client, {} as MediaPool, registry, error => errors.push(error));
+  const surfaces = () => registry.listSurfaces('overview.cards').map(item => item.extensionId + ':' + item.id).sort().join(',');
+  const current = 'fast-fixture:card,slow-fixture:current-card';
   const flush = () => new Promise(resolve => setTimeout(resolve, 0));
   try {
     const first = loader.synchronize();
     for (let attempt = 0; attempt < 100 && (!transports.has('slow-fixture') || !registry.listSurfaces('overview.cards').length); attempt++) await flush();
-    check(registry.listSurfaces('overview.cards').length === 1, 'fast plugin activates while unrelated plugin is pending');
+    check(surfaces() === 'fast-fixture:card', 'fast plugin activates while unrelated plugin is pending');
     loader.cancelPending();
-    state.wait = Promise.resolve();
+    state.wait = Promise.resolve('current-card');
     const retry = loader.synchronize();
     await Promise.all([first, retry]);
-    check(registry.listSurfaces('overview.cards').length === 2, 'retry during cancellation waits for the replacement activation batch');
+    check(surfaces() === current, 'retry during cancellation waits for the replacement activation batch');
     const result = await transports.get('fast-fixture')!.invoke('read-state', {}, new AbortController().signal) as { available: boolean };
     check(result.available, 'cancelling pending plugins preserves the completed plugin transport');
-    release(); await flush();
-    check(registry.listSurfaces('overview.cards').length === 2 && !errors.length, 'late cancelled activation cannot replace the current registrations');
+    release('cancelled-card'); await flush();
+    check(surfaces() === current && !errors.length, 'late cancelled activation cannot replace the current registrations');
     const downloaded = downloads.length;
     await loader.synchronize();
-    check(downloads.length === downloaded && registry.listSurfaces('overview.cards').length === 2,
+    check(downloads.length === downloaded && surfaces() === current,
       'reconciliation reuses active frontend modules and contributions');
     loader.disconnect();
     let revoked = false;
     try { await transports.get('fast-fixture')!.invoke('read-state', {}, new AbortController().signal); } catch { revoked = true; }
     check(revoked, 'disconnect still revokes completed plugin transport');
-  } finally { release(); await loader.dispose(); delete global.loaderFixture; }
+  } finally { release('cancelled-card'); await loader.dispose(); delete global.loaderFixture; }
 }

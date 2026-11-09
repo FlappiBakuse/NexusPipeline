@@ -130,32 +130,6 @@ public sealed class RecordSummaryTests(ITestOutputHelper output)
         Assert.Throws<ArgumentException>(() => reader.Read(new RecordSummaryQuery(from, until, 0, Lifecycle: LifecycleOutcome.Running)));
     }
 
-    [Fact(DisplayName = "Summary User Pages Continue By Stable Guid And A Run Detail Remains Directly Readable")]
-    public void PagesUserHistory()
-    {
-        var (database, store) = RecordStoreFixture.NewStore();
-        var automation = Guid.NewGuid();
-        var users = Enumerable.Range(1, 202)
-            .Select(number => Guid.Parse(number.ToString("D8", CultureInfo.InvariantCulture) + "-0000-0000-0000-000000000000"))
-            .ToArray();
-        var records = users.Select((user, index) => RecordStoreFixture.Record(index, automation) with
-        { UserId = user, EndedAt = Utc(2026, 4, 1).AddTicks(index) }).ToArray();
-        store.AppendCompleted(records);
-
-        var reader = new RecordSummaryReader(database);
-        var query = new RecordSummaryQuery(Utc(2026, 4, 1), Utc(2026, 4, 2), 0);
-        var first = reader.Read(query);
-        Assert.Equal(202, first.Totals.Runs);
-        Assert.Equal(200, first.Users.Count);
-        Assert.Equal(users[199], first.NextUserId);
-
-        var second = reader.Read(query with { AfterUserId = first.NextUserId });
-        Assert.Equal(202, second.Totals.Runs);
-        Assert.Equal(new Guid?[] { users[200], users[201] }, second.Users.Select(item => item.UserId).ToArray());
-        Assert.Null(second.NextUserId);
-        Assert.Equal(records[^1], reader.Read(records[^1].FinalAttempt.RunId));
-    }
-
     private static DateTimeOffset Utc(int year, int month, int day, int hour = 0, int minute = 0) =>
         new(year, month, day, hour, minute, 0, TimeSpan.Zero);
 

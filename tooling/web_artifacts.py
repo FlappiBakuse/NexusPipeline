@@ -30,7 +30,7 @@ def reuse_web(output, component):
     if not original.is_file() or digest(original.read_bytes()) != previous.get("originalReceiptSha256"):
         raise ValueError("Original browser build evidence changed")
     compiled = json.loads(original.read_bytes())
-    if any(previous.get(key) != compiled.get(key) for key in ("status", "componentInputs", "artifacts", "output")):
+    if any(previous.get(key) != compiled.get(key) for key in ("status", "componentInputs", "artifacts", "output", "responsibilities")):
         raise ValueError("Browser reuse metadata differs from its original compiler evidence")
     if artifact_records(previous["output"]) != previous["artifacts"]:
         raise ValueError("Reusable browser artifact set or bytes changed")

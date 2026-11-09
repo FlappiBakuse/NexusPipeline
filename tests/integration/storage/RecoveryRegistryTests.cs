@@ -3,12 +3,14 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.Data.Sqlite;
 using NexusPipeline.Core.Configuration;
+using NexusPipeline.Core.Maintenance;
 using NexusPipeline.Core.Operations;
 using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Journals;
 using NexusPipeline.Platform.Storage.Sqlite;
 using Xunit;
+using static NexusPipeline.StorageTests.InitialRecoveryTests;
 
 namespace NexusPipeline.StorageTests;
 
@@ -26,9 +28,9 @@ public sealed class RecoveryRegistryTests
         var before = Fingerprints(root);
         var registry = new RecoveryJournalRegistry(database);
         var evidence = new JournalRecoveryEvidence(instance, new(instance, contracts));
-        Assert.Throws<IOException>(() => evidence.VerifyRecognizedAll(registry.ReadSnapshot().Journals));
+        Assert.Equal("journal_root_shape_unrecognized", Assert.Throws<IOException>(() => evidence.VerifyRecognizedAll(registry.ReadSnapshot().Journals)).Message);
         var index = new RecoveryIndex();
-        Assert.Throws<IOException>(() => new RecoveryCoordinator(registry, evidence, index).VerifyAndPublish());
+        Assert.Equal("journal_root_shape_unrecognized", Assert.Throws<IOException>(() => new RecoveryCoordinator(registry, evidence, index).VerifyAndPublish()).Message);
         Assert.False(index.Current.IsReady);
         Assert.Equal(before, Fingerprints(root));
     }
@@ -39,13 +41,13 @@ public sealed class RecoveryRegistryTests
         var fixture = Create();
         fixture.Document["revision"] = 2;
         fixture.Document["phase"] = "applying";
-        fixture.Store.Append(fixture.Registered.JournalId, 1, JsonSerializer.SerializeToUtf8Bytes(fixture.Document));
-        using var observation = new DatabaseObservation(fixture.Database);
-        var before = Fingerprints(fixture.Instance.RuntimeRoot);
+        var ahead = fixture.Store.Append(fixture.Registered.JournalId, 1, JsonSerializer.SerializeToUtf8Bytes(fixture.Document));
         var evidence = new JournalRecoveryEvidence(fixture.Instance, fixture.Store);
-        evidence.VerifyRecognizedAll(fixture.Registry.ReadSnapshot().Journals);
-        Assert.Throws<IOException>(() => evidence.VerifyAll(fixture.Registry.ReadSnapshot().Journals));
-        Assert.Equal(before, Fingerprints(fixture.Instance.RuntimeRoot));
+        var before = AssertRegistration(fixture.Registry, fixture.Registered, JournalPhase.Prepared);
+        evidence.VerifyRecognizedAll([before]);
+        Assert.Equal("journal_registry_reconciliation_required", Assert.Throws<IOException>(() => evidence.VerifyAll([before])).Message);
+        Assert.Equal(before.Revision, AssertRegistration(fixture.Registry, before, JournalPhase.Prepared).Revision);
+        Assert.Equal(ahead.Export(), fixture.Store.Read(before.JournalId).Export());
         Assert.False(fixture.Registry.ReadSnapshot().IsReady);
     }
 
@@ -62,7 +64,13 @@ public sealed class RecoveryRegistryTests
         using var observation = new DatabaseObservation(fixture.Database);
         var before = Fingerprints(fixture.Instance.RuntimeRoot);
         var evidence = new JournalRecoveryEvidence(fixture.Instance, fixture.Store);
-        Assert.ThrowsAny<Exception>(() => evidence.VerifyRecognizedAll(fixture.Registry.ReadSnapshot().Journals));
+        void Verify() => evidence.VerifyRecognizedAll(fixture.Registry.ReadSnapshot().Journals);
+        if (fault == "torn-revision") Assert.Equal("invalid_json", Assert.Throws<JsonException>(Verify).Message);
+        else
+        {
+            var reason = fault == "sql-ahead" ? "registered_journal_revision_missing" : "journal_plan_digest_mismatch";
+            Assert.Equal(reason, Assert.Throws<IOException>(Verify).Message);
+        }
         Assert.Equal(before, Fingerprints(fixture.Instance.RuntimeRoot));
         Assert.False(fixture.Registry.ReadSnapshot().IsReady);
     }
@@ -71,43 +79,50 @@ public sealed class RecoveryRegistryTests
     public void CommitsJournalIsolation()
     {
         var fixture = Create();
-        var snapshot = new RecoveryJournalRegistry(fixture.Database).ReadSnapshot();
+        var reopened = new RecoveryJournalRegistry(fixture.Database);
+        var snapshot = reopened.ReadSnapshot();
         Assert.False(snapshot.IsReady);
-        Assert.Equal(2, snapshot.Revision);
-        var journal = Assert.Single(snapshot.Journals);
-        Assert.Equal(fixture.Registered.JournalId, journal.JournalId);
-        Assert.Equal("configuration:fixture", Assert.Single(snapshot.Isolations).ResourceKey);
-        Assert.Equal(fixture.Registered.PlanDigest, journal.PlanDigest);
-        Assert.Throws<SqliteException>(() => fixture.Registry.RegisterPrepared(fixture.Registered with { JournalId = Guid.NewGuid(), OperationId = Guid.NewGuid() }));
-        Assert.Single(fixture.Registry.ReadSnapshot().Journals);
-        Assert.Equal(2, fixture.Registry.ReadSnapshot().Revision);
+        var journal = AssertRegistration(reopened, fixture.Registered, JournalPhase.Prepared);
+        AssertIsolation(journal, Assert.Single(snapshot.Isolations));
+        var unowned = journal with { JournalId = Guid.NewGuid(), OperationId = Guid.NewGuid() };
+        Assert.Throws<SqliteException>(() => fixture.Registry.RegisterPrepared(unowned));
+        Assert.Null(reopened.FindJournal(unowned.JournalId));
+        var after = reopened.ReadSnapshot();
+        Assert.Equal(snapshot.Revision, after.Revision);
+        Assert.Equal(snapshot.Isolations, after.Isolations);
+        Assert.Equal(journal.Revision, AssertRegistration(reopened, journal, JournalPhase.Prepared).Revision);
     }
 
     [Fact(DisplayName = "Stale Revisions Cannot Publish Readiness Or Release An Unfinished Isolation")]
     public void RejectsStaleReadiness()
     {
         var fixture = Create();
-        Assert.Throws<IOException>(() => fixture.Registry.PublishVerified(1));
+        var observed = fixture.Registry.ReadSnapshot();
         var updated = fixture.Registered with { Revision = 2, Phase = JournalPhase.Applying };
         fixture.Registry.Advance(updated, 1);
-        Assert.Throws<IOException>(() => fixture.Registry.Advance(updated with { Revision = 3 }, 1));
-        Assert.Throws<IOException>(() => fixture.Registry.Advance(updated with { Phase = JournalPhase.Committed, Revision = 3 }, 2));
+        Assert.Equal("recovery_index_revision_conflict", Assert.Throws<IOException>(() => fixture.Registry.PublishVerified(observed.Revision)).Message);
+        Assert.Equal("journal_revision_conflict", Assert.Throws<IOException>(() => fixture.Registry.Advance(updated with { Revision = 3 }, 1)).Message);
+        Assert.Equal("journal_transition_rejected", Assert.Throws<IOException>(() =>
+            fixture.Registry.Advance(updated with { Phase = JournalPhase.Committed, Revision = 3 }, 2)).Message);
         var snapshot = fixture.Registry.ReadSnapshot();
         Assert.False(snapshot.IsReady);
-        Assert.Single(snapshot.Isolations);
-        Assert.Equal(JournalPhase.Applying, Assert.Single(snapshot.Journals).Phase);
+        AssertIsolation(updated, Assert.Single(snapshot.Isolations));
+        Assert.Equal(updated.Revision, AssertRegistration(fixture.Registry, updated, JournalPhase.Applying).Revision);
     }
 
     [Fact(DisplayName = "A Verified Terminal Commit Releases Only Its Registered Resources")]
     public void ReleasesRegisteredResources()
     {
         var fixture = Create();
+        var other = fixture.Registered with { JournalId = Guid.NewGuid(), OperationId = Guid.NewGuid(), ResourceKeys = ["configuration:other"] };
+        var operation = new OperationIdentity(other.OperationId, "fixture-subject", other.PlanDigest, "configuration.exchange");
+        fixture.Registry.AcceptPrepared(operation, other, [], DateTimeOffset.UtcNow);
         var evidence = new NoEffectEvidence(true, false, false, false);
         fixture.Registry.Advance(fixture.Registered with { Revision = 2, Phase = JournalPhase.Committed }, 1, evidence);
         var snapshot = fixture.Registry.ReadSnapshot();
-        Assert.Empty(snapshot.Isolations);
-        Assert.Equal(JournalPhase.Committed, Assert.Single(snapshot.Journals).Phase);
-        Assert.Single(Assert.Single(snapshot.Journals).ResourceKeys);
+        AssertRegistration(fixture.Registry, fixture.Registered, JournalPhase.Committed);
+        Assert.Equal(other.Revision, AssertRegistration(fixture.Registry, other, JournalPhase.Prepared).Revision);
+        AssertIsolation(other, Assert.Single(snapshot.Isolations));
         Assert.False(snapshot.IsReady);
     }
 
@@ -119,11 +134,20 @@ public sealed class RecoveryRegistryTests
         var coordinator = new RecoveryCoordinator(fixture.Registry, new JournalRecoveryEvidence(fixture.Instance, fixture.Store), index);
         var result = coordinator.VerifyAndPublish();
         Assert.True(result.IsReady);
-        Assert.True(index.IsBlocked(new HashSet<string> { "configuration:fixture" }, out _));
-        Assert.False(index.IsBlocked(new HashSet<string> { "configuration:other" }, out _));
-        for (var count = 0; count < 5; count++) index.BlockUnknown("fixture_invalidation");
+        var resources = new ResourceLeaseManager(new HostLifecycle(index, TimeProvider.System));
+        ResourceClaim[] isolated = [new(Assert.Single(fixture.Registered.ResourceKeys), ResourceClaimMode.Mutation)];
+        ResourceClaim[] independent = [new("configuration:other", ResourceClaimMode.Mutation)];
+        Assert.Equal(ResourceLeaseDenial.HostUnavailable, resources.TryAcquire(Guid.NewGuid(), isolated).Denial);
+        using (var available = resources.TryAcquire(Guid.NewGuid(), independent).Lease) Assert.NotNull(available);
+        index.BlockUnknown("fixture_invalidation");
+        Assert.Equal(ResourceLeaseDenial.HostUnavailable, resources.TryAcquire(Guid.NewGuid(), independent).Denial);
+        Assert.True(result.IsReady);
+        AssertIsolation(fixture.Registered, Assert.Single(result.Isolations));
         var republished = coordinator.VerifyAndPublish();
         Assert.True(republished.Revision > result.Revision);
+        Assert.Equal(result.Isolations, republished.Isolations);
+        using var availableAgain = resources.TryAcquire(Guid.NewGuid(), independent).Lease;
+        Assert.NotNull(availableAgain);
         Assert.True(fixture.Registry.ReadSnapshot().IsReady);
     }
 
@@ -135,6 +159,9 @@ public sealed class RecoveryRegistryTests
     public void BlocksUnverifiedAdmission(string fault)
     {
         var fixture = Create();
+        var index = new RecoveryIndex();
+        var coordinator = new RecoveryCoordinator(fixture.Registry, new JournalRecoveryEvidence(fixture.Instance, fixture.Store), index);
+        Assert.True(coordinator.VerifyAndPublish().IsReady);
         if (fault == "unknown-entry") File.WriteAllText(Path.Combine(fixture.Instance.RuntimeRoot, "journals", "foreign.data"), "preserve");
         else if (fault == "changed-plan") File.WriteAllText(fixture.PlanPath, "unrecognized");
         else
@@ -143,15 +170,24 @@ public sealed class RecoveryRegistryTests
             fixture.Document["phase"] = fault == "unknown-phase" ? "oldPhase" : "applying";
             File.WriteAllBytes(Path.Combine(fixture.JournalDirectory, "0000000002.json"), JsonSerializer.SerializeToUtf8Bytes(fixture.Document));
         }
-        var index = new RecoveryIndex();
         using var observation = new DatabaseObservation(fixture.Database);
         var before = Fingerprints(fixture.Instance.RuntimeRoot);
-        var coordinator = new RecoveryCoordinator(fixture.Registry, new JournalRecoveryEvidence(fixture.Instance, fixture.Store), index);
-        Assert.ThrowsAny<Exception>(() => coordinator.VerifyAndPublish());
+        if (fault == "unknown-phase")
+            Assert.Equal("unsupported_or_invalid_contract", Assert.Throws<JsonException>(() => coordinator.VerifyAndPublish()).Message);
+        else
+        {
+            var reason = fault switch
+            {
+                "unknown-entry" => "journal_directory_unknown_entry",
+                "changed-plan" => "journal_plan_digest_mismatch",
+                _ => "journal_registry_reconciliation_required"
+            };
+            Assert.Equal(reason, Assert.Throws<IOException>(() => coordinator.VerifyAndPublish()).Message);
+        }
         Assert.False(index.Current.IsReady);
-        Assert.True(index.IsBlocked(new HashSet<string>(), out _));
+        Assert.True(index.IsBlocked(new HashSet<string> { "configuration:other" }, out _));
+        Assert.Equal("recovery_evidence_unverified", index.Current.GlobalBlockReason);
         Assert.Equal(before, Fingerprints(fixture.Instance.RuntimeRoot));
-        Assert.False(fixture.Registry.ReadSnapshot().IsReady);
     }
 
     [Theory(DisplayName = "Incoherent Persisted Recovery Facts Cannot Publish Admission Or Be Repaired During Identification")]
@@ -182,20 +218,24 @@ public sealed class RecoveryRegistryTests
                 command.CommandText = "UPDATE recovery_capacity_reservations SET effect_limit=1,remaining_effects=1 WHERE owner_journal_id=$id;" + command.CommandText;
             command.ExecuteNonQuery();
         }
-        using var observed = DatabaseConnections.Open(fixture.Database.DatabasePath, readOnly: true);
-        using var observation = observed.BeginTransaction(deferred: true);
-        using (var probe = observed.CreateCommand())
-        {
-            probe.Transaction = observation; probe.CommandText = "SELECT count(*) FROM operation_journals;";
-            _ = probe.ExecuteScalar();
-        }
+        using var observation = new DatabaseObservation(fixture.Database);
         var before = Fingerprints(fixture.Instance.RuntimeRoot);
         var index = new RecoveryIndex();
         var coordinator = new RecoveryCoordinator(fixture.Registry, new JournalRecoveryEvidence(fixture.Instance, fixture.Store), index);
         if (fault == "terminal-unclosed-effect") Assert.Throws<IOException>(() => coordinator.VerifyAndPublish());
-        else Assert.Throws<InvalidOperationException>(() => coordinator.VerifyAndPublish());
+        else
+        {
+            var reason = fault == "unknown-effect-digest" ? "recovery_registry_effect_invalid" : "recovery_registry_isolation_incoherent";
+            Assert.Equal(reason, Assert.Throws<InvalidOperationException>(() => coordinator.VerifyAndPublish()).Message);
+        }
         Assert.True(index.IsBlocked(new HashSet<string>(), out _));
         Assert.Equal(before, Fingerprints(fixture.Instance.RuntimeRoot));
+    }
+
+    private static void AssertIsolation(RegisteredJournal journal, ResourceIsolation isolation)
+    {
+        Assert.Equal(journal.JournalId, isolation.JournalId);
+        Assert.Equal(Assert.Single(journal.ResourceKeys), isolation.ResourceKey);
     }
 
     private static Fixture Create()

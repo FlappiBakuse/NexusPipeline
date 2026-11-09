@@ -24,9 +24,7 @@ public sealed class SelectorTaskTests
         Assert.Equal(Encoding.UTF8.GetBytes(expected), selected);
         using var changed = new ConfigurationDocumentFixture(selected, syntax);
         Assert.Equal(original.Source, changed.Document.Apply(TaskSelectionPolicy.Restore(changed.Document, initial)));
-        Assert.Equal(new[] { "plugin:leaf", "plugin:root" }, initial.Declaration.AuthorizedIds.ToArray());
-        var source = Assert.IsType<ConfigurationSelectorTasks>(initial.Declaration.Source);
-        Assert.Equal(initial.Declaration.AuthorizedIds.ToArray(), source.Targets.Select(target => target.TaskId).ToArray());
+        Assert.Equal(new[] { "plugin:leaf", "plugin:root" }, initial.Declaration.AuthorizedIds.Order(StringComparer.Ordinal));
     }
 
     [Theory(DisplayName = "Explicit Task Maps Reject Missing Duplicate Foreign Root And Aliased Targets")]

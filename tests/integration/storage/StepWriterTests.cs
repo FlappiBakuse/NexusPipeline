@@ -46,7 +46,9 @@ public sealed class StepWriterTests
         Assert.Empty(stopped.Closure.Family); Assert.Null(stopped.Closure.Root); Assert.Equal(0, stopped.Closure.RunElapsedMilliseconds);
         Assert.False(File.Exists(fixture.Marker)); Assert.Equal(EffectGateState.Unentered, fixture.Scope.VerifyReadOnly().Gate.State);
         Assert.Throws<IOException>(() => fixture.Writer.Start()); Assert.Throws<IOException>(() => fixture.Scope.EnterApplying());
-        Assert.Same(stopped, await fixture.Writer.StopAsync(TimeSpan.FromSeconds(10)));
+        var repeated = await fixture.Writer.StopAsync(TimeSpan.FromSeconds(10));
+        fixture.AssertClosed(repeated, stopped.WasExecuted);
+        Assert.Equal(stopped.Reference, repeated.Reference);
     }
 
     [Theory(DisplayName = "A Second Scope Or The Unscoped Job Api Cannot Register Another Job For The Same Frozen Step")]
@@ -56,10 +58,13 @@ public sealed class StepWriterTests
     {
         using var fixture = new StepWriterFixture(); var source = fixture.Base.Source;
         if (entered) fixture.Scope.EnterApplying();
+        var original = Assert.Single(fixture.Scope.VerifyReadOnly().Steps);
         Assert.Throws<IOException>(() => new StepWriterScope(source.Instance, source.Database, new(), source.Lease, fixture.JournalId, fixture.StepId));
         using var extra = new OwnedWorkerJob();
         Assert.Throws<IOException>(() => new JournalWriterStore(source.Database).RegisterJob(fixture.JournalId, extra));
-        Assert.Equal(1, fixture.Base.Count("journal_writer_jobs"));
+        var state = fixture.Scope.VerifyReadOnly();
+        Assert.Equal(original, Assert.Single(state.Steps));
+        AttemptWriterState.VerifySql(source.Database, state.Journal, state.Latest, state.Total, state.Attempt.ExecutionPlan.Sha256, state.Gate);
         var stopped = await fixture.Writer.StopAsync(TimeSpan.FromSeconds(10)); fixture.AssertClosed(stopped, executed: false);
         Assert.Equal(entered ? EffectGateState.Entered : EffectGateState.Unentered, fixture.Scope.VerifyReadOnly().Gate.State);
         Assert.Equal(entered ? JournalPhase.Applying : JournalPhase.Prepared, fixture.Scope.VerifyReadOnly().Journal.Phase);
@@ -87,19 +92,28 @@ public sealed class StepWriterTests
     [Fact(DisplayName = "A Closure Insert Failure Reuses The Same Real Stopped Facts On Retry")]
     public async Task ReusesStoppedFacts()
     {
-        using var fixture = new StepWriterFixture(); await fixture.StartAsync();
-        fixture.Base.Execute("CREATE TRIGGER fail_step_closure BEFORE INSERT ON journal_writer_job_closures BEGIN SELECT RAISE(ABORT,'fixture_failure'); END;");
+        using var fixture = new StepWriterFixture(); var root = await fixture.StartAsync();
+        fixture.Base.Execute("CREATE TRIGGER fail_step_closure BEFORE INSERT ON journal_writer_job_closures " +
+            "BEGIN SELECT RAISE(ABORT,'fixture_step_digest:' || NEW.plan_digest); END;");
         long revision; long? elapsed;
+        SqliteException failure;
         try
         {
-            await Assert.ThrowsAsync<SqliteException>(() => fixture.Writer.StopAsync(TimeSpan.FromSeconds(10)));
-            var state = fixture.Scope.VerifyReadOnly(); revision = state.Journal.Revision; elapsed = Assert.Single(state.Steps).ClosedElapsedMilliseconds;
-            Assert.Equal(0, fixture.Base.Count("journal_writer_job_closures"));
+            failure = await Assert.ThrowsAsync<SqliteException>(() => fixture.Writer.StopAsync(TimeSpan.FromSeconds(10)));
+            var state = fixture.Scope.VerifyReadOnly(); var step = Assert.Single(state.Steps);
+            revision = state.Journal.Revision; elapsed = step.ClosedElapsedMilliseconds;
+            var source = fixture.Base.Source;
+            Assert.Null(new JobClosureStore(source.Instance, source.Database, new())
+                .Read(fixture.JournalId, step.WriterId, step.JobName, step.SessionId));
         }
         finally { fixture.Base.Execute("DROP TRIGGER fail_step_closure;"); }
         var stopped = await fixture.Writer.StopAsync(TimeSpan.FromSeconds(10)); fixture.AssertClosed(stopped, executed: true);
+        Assert.Contains("fixture_step_digest:" + stopped.Reference.Sha256, failure.Message, StringComparison.Ordinal);
+        Assert.Equal(root.ProcessId, stopped.Closure.Root!.ProcessId); Assert.Equal(root.CreatedAtUtc, stopped.Closure.Root.CreatedAtUtc);
         Assert.Equal(revision, fixture.Scope.VerifyReadOnly().Journal.Revision); Assert.Equal(elapsed, stopped.Closure.RunElapsedMilliseconds);
-        Assert.Same(stopped, await fixture.Writer.StopAsync(TimeSpan.FromSeconds(10)));
+        var repeated = await fixture.Writer.StopAsync(TimeSpan.FromSeconds(10));
+        fixture.AssertClosed(repeated, stopped.WasExecuted);
+        Assert.Equal(stopped.Reference, repeated.Reference);
     }
 
     [Theory(DisplayName = "Damaged Typed Step Metadata Is Rejected Without Repairing The Original Journal Or Database")]

@@ -21,15 +21,14 @@ public sealed class AutomationExchangeTests
         "users":[],"bindings":[],"queues":[],"schedules":[],"attachments":[]}
         """;
 
-    [Fact(DisplayName = "Portable Template Round Trips With Unicode And No Instance Absolute Paths")]
-    public void RoundTripsTemplate()
+    [Fact(DisplayName = "Portable Template Preserves Unicode Relative Paths And Arguments")]
+    public void ReadsPortableTemplate()
     {
         var reader = new AutomationBundleReader(new ContractReader());
         var parsed = reader.Read(Encoding.UTF8.GetBytes(Template));
-        var roundTrip = reader.Read(JsonSerializer.SerializeToUtf8Bytes(parsed));
-        Assert.Equal("程序/测试.exe", roundTrip.Scripts.Single().Executable.Relative);
-        Assert.Equal("--read-only", roundTrip.Scripts.Single().Arguments.Single());
-        Assert.Empty(roundTrip.Users);
+        Assert.Equal("程序/测试.exe", parsed.Scripts.Single().Executable.Relative);
+        Assert.Equal("--read-only", parsed.Scripts.Single().Arguments.Single());
+        Assert.Empty(parsed.Users);
     }
 
     [Theory(DisplayName = "Invalid Exchange Is Rejected With Its Original Bytes Unchanged")]

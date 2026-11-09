@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using Microsoft.Data.Sqlite;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Records;
@@ -29,12 +28,8 @@ public sealed class AssetStoreTests
         var final = fixture.Store.ReadForRun(image.RunId, page.Next, 1);
         Assert.Equal(RecordAssetKind.Attachment, Assert.Single(final.Items).Kind);
         Assert.Null(final.Next);
-        Assert.Single(fixture.Store.ReadForRun(second.FinalAttempt.RunId).Items);
-        using var connection = new SqliteConnection($"Data Source={fixture.Database.DatabasePath};Pooling=False");
-        connection.Open();
-        using var query = connection.CreateCommand();
-        query.CommandText = "SELECT count(*) FROM blobs;";
-        Assert.Equal(1L, query.ExecuteScalar());
+        Assert.Equal(image with { RunId = second.FinalAttempt.RunId },
+            Assert.Single(fixture.Store.ReadForRun(second.FinalAttempt.RunId).Items));
     }
 
     [Theory(DisplayName = "Unverified Assets Cannot Publish Dangling Or Cross Instance Relations")]

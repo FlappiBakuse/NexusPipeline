@@ -80,7 +80,6 @@ export async function run(): Promise<string[]> {
   check(owner.state.pending?.apply?.command.candidate && first.store.dirty.size === 1,
     'The complete extension command and catalog identity are owned before transport');
   const reopened = new PluginOwner(first.store);
-  check(reopened.state === owner.state, 'Navigation remount shares the original instance-owned extension command');
   first.release(); await work;
   check(!!owner.state.pending && !owner.state.busy, 'Malformed acceptance retains its original operation without replay');
   await reopened.apply(candidate, 'upgrade', first.installed, catalog);

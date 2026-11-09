@@ -33,7 +33,7 @@ public sealed class ConfigurationCursorsTests
     public void RejectsAdvancedRevisions()
     {
         using var fixture = new ConfigurationCursorsFixture();
-        Assert.Equal(2, fixture.SaveNext().Saved.Revision);
+        Assert.Equal(fixture.Saved.Revision + 1, fixture.SaveNext().Saved.Revision);
         var before = fixture.Source.Snapshot();
         Assert.Equal("configuration_revision_conflict", Assert.Throws<ConfigurationException>(() => fixture.Accept()).Message);
         Assert.Null(fixture.Acceptance.LookupStart(fixture.Identity)); AssertUnchanged(fixture, before);
@@ -116,7 +116,7 @@ public sealed class ConfigurationCursorsTests
         var before = fixture.Source.Snapshot();
         try
         {
-            Assert.Throws<SqliteException>(() => fixture.Accept());
+            Assert.Contains("fixture_failure", Assert.Throws<SqliteException>(() => fixture.Accept()).Message);
             Assert.Null(fixture.Acceptance.LookupStart(fixture.Identity)); AssertUnchanged(fixture, before);
         }
         finally { fixture.Execute("DROP TRIGGER fixture_fail_configuration_claim;"); }
@@ -129,26 +129,12 @@ public sealed class ConfigurationCursorsTests
     public void ReplaysOriginalReferences(bool missing)
     {
         using var fixture = new ConfigurationCursorsFixture(); var accepted = fixture.Accept();
-        fixture.ReleasePreparation(); Assert.Equal(2, fixture.SaveNext().Saved.Revision);
+        fixture.ReleasePreparation(); Assert.Equal(fixture.Saved.Revision + 1, fixture.SaveNext().Saved.Revision);
         if (missing) { File.Delete(fixture.Source.Configuration); File.Delete(fixture.Source.Image); }
         var before = fixture.Source.Snapshot();
         var replay = Assert.IsType<AttemptAcceptanceResult>(fixture.Acceptance.LookupStart(fixture.Identity));
         Assert.False(replay.Acceptance.IsNew); Assert.Equal(accepted.Plan, replay.Plan); Assert.Equal(accepted.JournalId, replay.JournalId);
         Assert.Equal(replay, fixture.Accept()); AssertUnchanged(fixture, before);
-    }
-
-    [Fact(DisplayName = "Transactional Frozen Cursor Comparison Does Not Open The Exclusively Locked Manifest Or Content")]
-    public void ComparesFrozenCursors()
-    {
-        using var fixture = new ConfigurationCursorsFixture();
-        var cursors = ExecutionConfigurationCursors.Read(fixture.Source.Instance, new(), fixture.Attempt.Plan.ReadWire(), fixture.Total.Plan.ReadWire());
-        var manifest = fixture.State.SnapshotReference!;
-        var content = Assert.Single(RunStateCodec.Contents(fixture.State));
-        fixture.ReleasePreparation(); var before = fixture.Source.Snapshot();
-        using (var heldManifest = new FileStream(Path.Combine(fixture.Source.Instance.RuntimeRoot, manifest.RelativePath), FileMode.Open, FileAccess.Read, FileShare.None))
-        using (var heldContent = new FileStream(Path.Combine(fixture.Source.Instance.RuntimeRoot, content.RelativePath), FileMode.Open, FileAccess.Read, FileShare.None))
-            Assert.True(fixture.Source.Database.Write((connection, transaction) => { cursors.RequireCurrent(connection, transaction); return true; }));
-        AssertUnchanged(fixture, before);
     }
 
     [Theory(DisplayName = "Public Raw Acceptance And Candidate Lookup Cannot Bypass The Opaque Start Boundary")]

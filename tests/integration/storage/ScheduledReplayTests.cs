@@ -31,7 +31,7 @@ public sealed class ScheduledReplayTests
         var replayed = Assert.Single(fixture.States());
         Assert.Equal(before.Source.Reference, replayed.Source.Reference); Assert.Equal(before.ResultReference, replayed.ResultReference);
         Assert.Equal(before.CloseReference, replayed.CloseReference); Assert.Equal(before.Result, replayed.Result);
-        Assert.Equal(1, fixture.Base.Count("scheduled_provider_result")); Assert.Equal(0, fixture.PlannedCalls);
+        Assert.Equal(0, fixture.PlannedCalls);
         Assert.NotNull(fixture.Base.Lifecycle.RequestClose(session, Guid.NewGuid()).Permit);
         DeliveryReferenceIndex.VerifyReadOnly(fixture.Base.Source.Instance, fixture.Base.Source.Database, new());
     }

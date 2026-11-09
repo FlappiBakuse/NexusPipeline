@@ -12,7 +12,8 @@ public sealed class AssetRecoveryTests
     {
         var session = new Session();
         Assert.Equal(JournalRecoveryResult.NotExecuted, new AutomationAssetRecovery(session).Recover());
-        Assert.Equal(new[] { "seal", "no-effects" }, session.Events);
+        Assert.Equal(new[] { "no-effects" }, session.Events.Where(item => item != "seal"));
+        Assert.Equal(EffectGateState.Sealed, session.State.Gate);
         Assert.Equal(JournalPhase.Committed, session.State.Phase);
     }
 
@@ -90,7 +91,11 @@ public sealed class AssetRecoveryTests
         internal List<string> Events { get; } = [];
         public AssetRecoveryInspection Inspect() => State;
         public void SealEffectEntry() { Events.Add("seal"); State = State with { Gate = EffectGateState.Sealed }; }
-        public void CommitNoEffects() { Events.Add("no-effects"); State = State with { Phase = JournalPhase.Committed }; }
+        public void CommitNoEffects()
+        {
+            Assert.Equal(EffectGateState.Sealed, State.Gate);
+            Events.Add("no-effects"); State = State with { Phase = JournalPhase.Committed };
+        }
         public void PublishCompleteDefinitions() { Events.Add("publish-complete-definitions"); State = State with { Phase = JournalPhase.Committed }; }
         public void ReconcileRecordedCommit() { Events.Add("reconcile"); State = State with { DatabaseAgrees = true }; }
         public void Quarantine(string code) { Events.Add("quarantine:" + code); State = State with { Phase = JournalPhase.Quarantined }; }

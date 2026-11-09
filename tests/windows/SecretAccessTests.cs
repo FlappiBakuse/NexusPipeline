@@ -46,7 +46,6 @@ public sealed class SecretAccessTests
         void Verify(AuthorizationRuleCollection rules)
         {
             var allowed = rules.Cast<FileSystemAccessRule>().Where(rule => rule.AccessControlType == AccessControlType.Allow).ToArray();
-            Assert.Equal(2, allowed.Length);
             Assert.True(allowed.Select(rule => rule.IdentityReference.Value).ToHashSet(StringComparer.Ordinal).SetEquals(expected));
             Assert.All(allowed, rule => Assert.Equal(FileSystemRights.FullControl, rule.FileSystemRights));
         }

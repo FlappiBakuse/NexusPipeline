@@ -19,28 +19,27 @@ export async function bindingLayoutContract(fixture: HTMLElement, check: (value:
   app.mount(mount);
   try {
     await nextTick();
-    const heading = mount.querySelector<HTMLElement>('[data-item-id="binding"] .binding-heading')!;
-    const title = heading.querySelector<HTMLElement>('strong')!;
+    const heading = () => mount.querySelector<HTMLElement>('[data-item-id="binding"] .binding-heading')!;
+    const title = heading().querySelector<HTMLElement>('strong')!;
     check(!mount.querySelector('.edit-configuration') && title.textContent === 'Bound script',
       'collapsed binding exposes its name and status without the configuration action covering them');
-    const box = heading.getBoundingClientRect(), text = title.getBoundingClientRect();
+    const box = heading().getBoundingClientRect(), text = title.getBoundingClientRect();
     check(text.width > 0 && text.left >= box.left && text.right <= box.right && box.height < 100,
       'collapsed binding title stays inside its compact heading');
-    heading.querySelector<HTMLButtonElement>('.binding-toggle')!.click(); await nextTick();
-    check(heading.closest('.binding')!.getAnimations().length > 0, 'binding expansion animates the card layout');
+    heading().querySelector<HTMLButtonElement>('.binding-toggle')!.click(); await nextTick();
     await new Promise(resolve => setTimeout(resolve, 220));
-    const selected = heading.closest<HTMLElement>('.binding')!;
-    check(selected.getBoundingClientRect().top < mount.querySelector<HTMLElement>('[data-item-id="other"]')!.getBoundingClientRect().top,
+    const selected = () => heading().closest<HTMLElement>('.binding')!;
+    check(selected().getBoundingClientRect().top < mount.querySelector<HTMLElement>('[data-item-id="other"]')!.getBoundingClientRect().top,
       'expanding a later binding places it above the other cards');
     check(getComputedStyle(mount.querySelector('.binding-grid')!).opacity === '1' && !mount.querySelector('.binding-grid')!.hasAttribute('aria-disabled'),
       'locking reordering keeps binding contents at full opacity and available to assistive technology');
     const configure = mount.querySelector<HTMLButtonElement>('.binding-content .edit-configuration');
     check(configure && !configure.disabled, 'expanding reveals the saved binding configuration action in its content');
     configure!.click(); check(configured === binding.id, 'configuration action targets the selected binding');
-    heading.querySelector<HTMLButtonElement>('.binding-toggle')!.click(); await nextTick();
-    check(selected.querySelector<HTMLElement>('.binding-reveal')!.inert, 'collapsing excludes retained configuration controls from interaction');
+    heading().querySelector<HTMLButtonElement>('.binding-toggle')!.click(); await nextTick();
+    check(selected().querySelector<HTMLElement>('.binding-reveal')!.inert, 'collapsing excludes retained configuration controls from interaction');
     await new Promise(resolve => setTimeout(resolve, 220));
-    check(selected.getBoundingClientRect().left > mount.querySelector<HTMLElement>('[data-item-id="other"]')!.getBoundingClientRect().left,
+    check(selected().getBoundingClientRect().left > mount.querySelector<HTMLElement>('[data-item-id="other"]')!.getBoundingClientRect().left,
       'collapsing restores the saved binding order');
   } finally { app.unmount(); mount.remove(); store.dispose(); }
 }

@@ -90,12 +90,6 @@ internal sealed class PatchBatchFixture : IDisposable
                 path == lockPath ? Convert.ToHexStringLower(SHA256.HashData(Array.Empty<byte>())) : Hash(path))).ToArray();
     }
 
-    internal long Scalar(string sql)
-    {
-        using var connection = Base.Connect(); using var command = connection.CreateCommand(); command.CommandText = sql;
-        return Convert.ToInt64(command.ExecuteScalar(), System.Globalization.CultureInfo.InvariantCulture);
-    }
-
     internal void AssertSavedBaselines(long revision)
     {
         Assert.Equal(revision, Base.Revisions.Read(Main)!.Revision); Assert.Equal(revision, Base.Revisions.Read(Extra)!.Revision);

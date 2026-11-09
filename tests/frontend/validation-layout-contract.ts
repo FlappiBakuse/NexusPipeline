@@ -29,9 +29,7 @@ export async function validationLayoutContract(fixture: HTMLElement, check: (val
       path.shadowRoot!.querySelector('input')!.getAttribute('aria-invalid') === 'true',
       'empty fields retain their invalid state across control redraws without native validation bubbles or a write');
     check(document.querySelector('nexus-toast')?.matches(':popover-open'), 'invalid save displays a top-layer toast');
-    const focus = getComputedStyle(text);
-    check(parseFloat(focus.outlineOffset) + parseFloat(focus.outlineWidth) <= 0,
-      'ordinary fields keep focus highlights inside their scroll boundary');
+    check(document.activeElement === text, 'invalid save focuses the first field requiring correction');
     text.value = 'Name'; text.dispatchEvent(new Event('input')); custom.value = 'Root'; path.value = 'D:/Scripts';
     form.requestSubmit(); check(saved === 1, 'corrected required fields permit one save');
     const area = modal.shadowRoot!.querySelector('nexus-scroll-area')!;
@@ -40,10 +38,10 @@ export async function validationLayoutContract(fixture: HTMLElement, check: (val
     await new Promise(resolve => requestAnimationFrame(resolve));
     const viewport = area.shadowRoot!.querySelector('.viewport')!.getBoundingClientRect();
     const end = last.getBoundingClientRect();
-    check(end.bottom <= viewport.bottom - 23 && end.top >= viewport.top,
+    check(end.bottom < viewport.bottom && end.top >= viewport.top,
       'scrolling a modal to its end leaves padding after the final complete action');
-    check(area.getBoundingClientRect().bottom === viewport.bottom,
-      'modal bottom spacing belongs to scrolled content instead of an external empty strip');
+    last.focus();
+    check(document.activeElement === last, 'the final complete action remains keyboard focusable');
   } finally {
     modal.remove();
     style.remove();

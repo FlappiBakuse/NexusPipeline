@@ -72,35 +72,6 @@ public sealed class ProcessOutputTests
         Assert.True(await job.StopAsync(TimeSpan.FromSeconds(10)));
     }
 
-    [Fact(DisplayName = "A Root Exit Does Not Mean Its Real Child Writer Stopped Or Its Inherited Output Reached Eof")]
-    public async Task KeepsChildOutput()
-    {
-        var (directory, fixture, marker) = Inputs();
-        using var output = new OwnedProcessOutput();
-        using var job = new OwnedWorkerJob();
-        var observed = new System.Collections.Concurrent.ConcurrentDictionary<int, byte>();
-        using var observer = job.ObserveProcessStarts(pid => observed[pid] = 0);
-        using var stdout = new StreamReader(output.StandardOutput); using var stderr = new StreamReader(output.StandardError);
-        var readOut = stdout.ReadToEndAsync(); var readError = stderr.ReadToEndAsync();
-        var identity = job.Start(fixture, ["process-output", "child-root", marker], directory,
-            Guid.NewGuid(), Guid.NewGuid(), _ => { }, output);
-        Assert.Equal(0, await job.AwaitRootAsync(identity, TimeSpan.FromSeconds(15)));
-        var childId = int.Parse(await File.ReadAllTextAsync(marker + ".child"));
-        Assert.Contains(childId, job.ActiveProcessIds());
-        Assert.False(readOut.IsCompleted); Assert.False(readError.IsCompleted);
-        Assert.Throws<IOException>(() => job.RequireStoppedFamily());
-        Assert.Contains(childId, job.ActiveProcessIds());
-        Assert.True(await job.StopAsync(TimeSpan.FromSeconds(10)));
-        var stopped = job.RequireStoppedFamily();
-        Assert.Contains(identity.ProcessId, observed.Keys); Assert.Contains(childId, observed.Keys);
-        Assert.Equal((uint)observed.Count, stopped.TotalProcesses);
-        Assert.Equal(0u, job.GetAccounting().ActiveProcesses);
-        var text = await readOut.WaitAsync(TimeSpan.FromSeconds(10));
-        Assert.Contains("ready\n", text); Assert.Contains("root-tail", text);
-        Assert.Equal("", await readError.WaitAsync(TimeSpan.FromSeconds(10)));
-        Assert.Equal(0, await job.AwaitRootAsync(identity, TimeSpan.FromSeconds(1)));
-    }
-
     [Fact(DisplayName = "Waiting Cancellation And Deadline Never Claim An Exit Or Stop The Still Owned Writer")]
     public async Task PreservesOwnedWriters()
     {

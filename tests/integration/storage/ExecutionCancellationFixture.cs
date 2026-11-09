@@ -24,6 +24,7 @@ internal sealed class CancellationRootPause(StepWriterScope inner, Func<StepWrit
 {
     internal ManualResetEventSlim Reached { get; } = new();
     internal ManualResetEventSlim Release { get; } = new();
+    internal ProcessIdentity? SuspendedRoot { get; private set; }
     public Guid OperationId => inner.OperationId;
     public Guid ProcessScopeId => inner.ProcessScopeId;
     public ImmutableArray<Guid> JournalIds => inner.JournalIds;
@@ -35,6 +36,7 @@ internal sealed class CancellationRootPause(StepWriterScope inner, Func<StepWrit
     {
         var cached = inner.VerifyReadOnly();
         if (rootWins) inner.RecordRoot(jobName, root);
+        SuspendedRoot = root;
         Reached.Set();
         if (!Release.Wait(TimeSpan.FromSeconds(10))) throw new IOException("fixture_root_boundary_timeout");
         if (!rootWins)

@@ -4,6 +4,11 @@ import { historyRow, historyDate, outcomeName } from '../../apps/web/src/pages/h
 import '../../apps/web/src/pages/history-messages';
 import { historyDuration, historyTime, historyReason, startedInvocations } from '../../apps/web/src/pages/history-detail';
 
+const record = {
+  finalAttempt: { runId: '', attemptId: '', ordinal: 1, engine: 'succeeded', business: 'succeeded', lifecycle: 'completed', recovery: 'restored', reasonCode: 'execution_completed' },
+  endedAt: '2026-11-02T00:00:00Z'
+} satisfies Parameters<typeof historyRow>[0];
+
 export function run(): string[] {
   const cases: string[] = [];
   for (const language of ['zh-CN', 'en-US'] as const) {
@@ -11,12 +16,12 @@ export function run(): string[] {
     const samples = language === 'zh-CN' ?
       [[0, '0 毫秒'], [999, '999 毫秒'], [999.6, '1 秒'], [1500, '1.5 秒'], [34200, '34.2 秒'], [60000, '1 分钟'], [90000, '1.5 分钟'], [3600000, '1 小时']] as const :
       [[0, '0 ms'], [999, '999 ms'], [999.6, '1 s'], [1500, '1.5 s'], [34200, '34.2 s'], [60000, '1 min'], [90000, '1.5 min'], [3600000, '1 h']] as const;
-    for (const [value, duration] of samples) {
-      assert.equal(historyDuration(value), duration);
-      assert.equal(historyDuration(value, 'checkpointLowerBound'), t('至少') + ' ' + duration);
-      const row = historyRow({ finalAttempt: { runId: '', attemptId: '', ordinal: 1, engine: 'succeeded', business: 'succeeded', lifecycle: 'completed', recovery: 'restored', reasonCode: 'execution_completed' }, endedAt: '2026-11-02T00:00:00Z', durationMilliseconds: value });
-      assert.ok(row.description.endsWith(duration));
-    }
+    for (const [value, duration] of samples) assert.equal(historyDuration(value), duration);
+    const [label, exact, lower] = language === 'zh-CN' ? ['耗时', '1 分钟', '至少 1 分钟'] : ['Duration', '1 min', 'At least 1 min'];
+    const row = { ...record, durationMilliseconds: 60000 };
+    assert.equal(historyDuration(row.durationMilliseconds, 'checkpointLowerBound'), lower);
+    assert.ok(historyRow({ ...row, durationKind: 'measured' }).description.endsWith(` · ${label} ${exact}`));
+    assert.ok(historyRow({ ...row, durationKind: 'checkpointLowerBound' }).description.endsWith(` · ${label} ${lower}`));
     assert.equal(historyTime(null), t('未知'));
     assert.equal(historyDuration(-1), t('未知'));
     assert.equal(outcomeName('unknown'), language === 'zh-CN' ? '待核实' : 'Unverified');
@@ -57,7 +62,7 @@ export function benchmark(iterations: number): number {
   let characters = 0;
   for (let index = 0; index < iterations; index++) {
     characters += historyDuration(index * 101).length;
-    characters += historyRow({ finalAttempt: { runId: '', attemptId: '', ordinal: 1, engine: 'succeeded', business: 'succeeded', lifecycle: 'completed', recovery: 'restored', reasonCode: 'execution_completed' }, endedAt: '2026-11-02T00:00:00Z', durationMilliseconds: index * 101 }).description.length;
+    characters += historyRow({ ...record, durationMilliseconds: index * 101 }).description.length;
   }
   return characters;
 }

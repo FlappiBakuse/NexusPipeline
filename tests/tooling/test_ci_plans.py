@@ -12,18 +12,15 @@ class CiPlanTests(GitFixture):
         head = self.commit()
         with production_tools(HOST) as owner:
             real_git = owner.ci_plan.git
-            resolutions = []
 
             def fixed(repository, *arguments):
                 if arguments[0] == "ls-remote":
-                    resolutions.append(arguments)
                     return (head + "\trefs/heads/develop\n").encode()
                 return real_git(repository, *arguments)
 
             with patch.object(owner.ci_plan, "git", side_effect=fixed):
                 plan = owner.ci_plan.make_plan(self.repo, "host", self.base_commit, head, head)
                 owner.ci_plan.verify_plan(self.repo, plan)
-            self.assertEqual(1, len(resolutions))
             self.assertEqual(head, plan["partner"]["commit"])
             self.assertFalse(plan["publishable"])
             for field, value in (("repository", "other/repository"), ("ref", "refs/heads/main"), ("commit", "short")):
@@ -75,7 +72,8 @@ class CiPlanTests(GitFixture):
                                      ("emulator-support", "managed", False), ("maa-framework", "managed", True),
                                      ("maaend", "specialized", False), ("maas", "specialized", False)):
             self.write(f"plugins/{kind}/{name}/extension.json", json.dumps({
-                "extensionId": name, "frontend": {} if frontend else None}).encode())
+                "extensionId": name, "frontend": {} if frontend else None,
+                "specialized": {} if name in {"maa-framework", "maaend", "maas"} else None}).encode())
 
     def test_selects_host(self):
         cases = [("docs/developer/a.md", [], False, False, []),
@@ -87,9 +85,9 @@ class CiPlanTests(GitFixture):
                  ("apps/maintenance/InstallerEntry.cs", ["NexusPipeline.Host", "NexusPipeline.Installer", "NexusPipeline.Launcher", "NexusPipeline.Maintenance"], True, False, []),
                  ("src/core/a.cs", ["NexusPipeline.Host", "NexusPipeline.Installer", "NexusPipeline.Launcher", "NexusPipeline.Maintenance"], True, False, []),
                  ("sdk/frontend/a.ts", ["NexusPipeline.Host", "NexusPipeline.Installer", "NexusPipeline.Launcher", "NexusPipeline.Maintenance"], True, False,
-                  ["emulator-support", "live-screenshot"]),
+                  ["@bundled"]),
                  ("unknown.props", ["NexusPipeline.Host", "NexusPipeline.Installer", "NexusPipeline.Launcher", "NexusPipeline.Maintenance"], True, True,
-                  ["emulator-support", "live-screenshot"])]
+                  ["@bundled"])]
         for root in (HOST,):
             with production_tools(root) as owner:
                 for path, projects, web, desktop, extensions in cases:
@@ -108,7 +106,8 @@ class CiPlanTests(GitFixture):
                 self.assertEqual(["game-checkin", "live-screenshot", "maa-framework"],
                                  scope("plugins/managed/frontend-ui/src/a.ts"))
                 self.assertEqual(["maa-framework", "maaend", "maas"], scope("adapter-runtime/core/a.js"))
-                self.assertEqual(6, len(scope("unknown.json")))
+                self.assertEqual(["emulator-support", "game-checkin", "live-screenshot", "maa-framework", "maaend", "maas"],
+                                 scope("unknown.json"))
 
     def test_reads_difference(self):
         self.write("apps/web/first.ts", b"first\n")

@@ -43,22 +43,23 @@ public sealed class JudgementConsumerTests
         var receipt = Assert.IsType<AttemptReceipt>(await fixture.Consumer.RunNextAsync());
         Assert.Equal(LifecycleOutcome.Completed, receipt.Facts.Lifecycle); Assert.Equal(BusinessOutcome.Succeeded, receipt.Facts.Business);
         var state = fixture.State;
-        Assert.Equal(configured!.SecretId?.ToString("D"), state.Total.JudgementNetwork!.PasswordSecretId);
-        Assert.Equal(configured.Revision, state.Total.JudgementNetwork.PasswordRevision);
+        Assert.Equal(new SecretFieldReference(configured!.Revision, configured.SecretId),
+            JudgementNetworkBinding.Reference(state.Total.JudgementNetwork!));
         Assert.Contains(proxy.Requests, request => request.Headers.GetValueOrDefault("Proxy-Authorization") == expected);
+        var requestCount = proxy.Requests.Count;
         var cleared = await Secrets(fixture.Base).ApplyAsync(Guid.NewGuid(), SecretFieldKey.HostProxyPassword(fixture.Source.Instance.InstanceId),
             configured.Revision, SecretDisposition.Clear, null, default);
         Assert.False(cleared.IsConfigured);
         var result = Assert.Single(StepResultCodec.Read(state.Latest.Root, state.Total));
         Assert.Equal(BusinessOutcome.Succeeded, new StepEvidenceReader(fixture.Source.Instance, fixture.Source.Database, new())
             .Read(result.Binding, result.Latest.Artifact, true).Business);
+        Assert.Equal(requestCount, proxy.Requests.Count);
+        var credentialForms = new[] { Encoding.UTF8.GetBytes(canary), Encoding.Unicode.GetBytes(canary), Encoding.ASCII.GetBytes(expected) };
         foreach (var path in Directory.EnumerateFiles(fixture.Source.Instance.RuntimeRoot, "*", SearchOption.AllDirectories)
             .Where(path => Path.GetFileName(path) != "instance.lock" && !path.EndsWith("-shm", StringComparison.Ordinal)))
         {
             var bytes = File.ReadAllBytes(path);
-            Assert.True(bytes.AsSpan().IndexOf(Encoding.UTF8.GetBytes(canary)) < 0);
-            Assert.True(bytes.AsSpan().IndexOf(Encoding.Unicode.GetBytes(canary)) < 0);
-            Assert.True(bytes.AsSpan().IndexOf(Encoding.ASCII.GetBytes(expected)) < 0);
+            Assert.All(credentialForms, form => Assert.True(bytes.AsSpan().IndexOf(form) < 0));
         }
     }
 
@@ -90,12 +91,7 @@ public sealed class JudgementConsumerTests
     [InlineData(AutomationJudgementLanguage.Python)]
     public async Task ReplaysFrozenNetwork(AutomationJudgementLanguage language)
     {
-        var requests = 0;
-        await using var server = new NativeHttpFixture(_ =>
-        {
-            Interlocked.Increment(ref requests);
-            return new(200, Enumerable.Repeat((byte)'<', 2 * 1024 * 1024).ToArray());
-        });
+        await using var server = new NativeHttpFixture(_ => new(200, Enumerable.Repeat((byte)'<', 2 * 1024 * 1024).ToArray()));
         var url = server.Address.ToString();
         var script = language == AutomationJudgementLanguage.JavaScript ? $$"""
 function nexusJudge(input) {
@@ -120,15 +116,15 @@ def nexus_judge(input):
         var state = fixture.State;
         var result = Assert.Single(StepResultCodec.Read(state.Latest.Root, state.Total));
         var reader = new StepEvidenceReader(fixture.Source.Instance, fixture.Source.Database, new());
-        Assert.Equal(BusinessOutcome.Succeeded, reader.Read(result.Binding, result.Latest.Artifact, true).Business);
         var blobs = new ImmutableBlobStore(fixture.Source.Instance, new());
         var evidence = StepEvidenceCodec.Read(blobs, result.Binding, result.Latest.Artifact);
         Assert.Equal(37, evidence.ExitCode);
         var judgement = JudgementEvidenceCodec.Read(blobs, result.Binding, evidence.Judgement!);
         var probe = Assert.Single(judgement.Exchanges.SelectMany(exchange => exchange.ProbeObservations));
-        var archive = JudgementProbeArchive.Read(blobs, probe);
-        Assert.True(archive.SizeBytes > 2 * 1024 * 1024); Assert.True(archive.Parts.Length > 1);
+        var body = JudgementProbeArchive.Decode(blobs, probe).Reply.Result!.Value.GetProperty("body").GetString()!;
+        Assert.Equal(2 * 1024 * 1024, body.Length);
+        Assert.True(body.AsSpan().IndexOfAnyExcept('<') < 0);
         Assert.Equal(BusinessOutcome.Succeeded, reader.Read(result.Binding, result.Latest.Artifact, true).Business);
-        Assert.Equal(1, Volatile.Read(ref requests));
+        Assert.Single(server.Requests);
     }
 }

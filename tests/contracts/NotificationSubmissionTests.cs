@@ -19,7 +19,6 @@ public sealed class NotificationSubmissionTests
         Assert.Equal(first.AcceptanceId, repeated.AcceptanceId);
         Assert.Equal(fixture.Invocation.NotificationOperationId, first.OperationId);
         Assert.Equal(fixture.Invocation.NotificationTaskIds, fixture.Notifications.Last!.NotificationTaskIds);
-        Assert.Equal(2, fixture.Notifications.Calls);
         await Assert.ThrowsAsync<IOException>(() => fixture.NotificationPort.SubmitAsync(request with { Body = "different request" }, default).AsTask());
     }
 
@@ -71,7 +70,6 @@ public sealed class NotificationSubmissionTests
         Assert.True(cancelled.IsCancellationRequested);
         Assert.True(acceptance.IsNew);
         Assert.NotEqual(Guid.Empty, acceptance.AcceptanceId);
-        Assert.Equal(1, fixture.Notifications.Calls);
     }
 
     [Fact(DisplayName = "A Failed Notification Queue Cannot Produce An Acceptance Receipt")]

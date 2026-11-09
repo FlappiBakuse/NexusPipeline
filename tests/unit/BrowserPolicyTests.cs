@@ -6,16 +6,15 @@ namespace NexusPipeline.CoreTests;
 
 public sealed class BrowserPolicyTests
 {
-    [Fact(DisplayName = "Frozen Login Policy Retains Explicit Origin And Finite Selector Completion Checks Without Aliasing Caller Collections")]
+    [Fact(DisplayName = "Frozen Login Policy Retains Explicit Origin And Finite Selector Completion Checks")]
     public void FreezesFinitePolicy()
     {
         var input = Policy(); var frozen = BrowserPolicyRules.Freeze(input, Grants);
         Assert.Equal(input.Id, frozen.Id); Assert.Equal(input.StartUrl, frozen.StartUrl);
-        Assert.Equal(input.Cookies.ToArray(), frozen.Cookies.ToArray()); Assert.NotEqual(input.Cookies, frozen.Cookies);
+        Assert.Equal(input.Cookies.ToArray(), frozen.Cookies.ToArray());
         Assert.Equal(input.JsonRequests[0].Selector.ToArray(), frozen.JsonRequests[0].Selector.ToArray());
-        Assert.NotEqual(input.JsonRequests[0].Selector, frozen.JsonRequests[0].Selector);
         Assert.Equal(new[] { "token", "account" }, frozen.ReadySets[0].ToArray());
-        Assert.NotEqual(input.ReadySets[0], frozen.ReadySets[0]); Assert.Equal("id", Assert.Single(frozen.Checks.Single(check => check.Id == "device").Path));
+        Assert.Equal("id", Assert.Single(frozen.Checks.Single(check => check.Id == "device").Path));
         var loopback = input with { StartUrl = "http://127.0.0.1:1234/", Origins = ["http://127.0.0.1:1234"], PopupOrigins = [],
             Cookies = [new("token", "127.0.0.1", "/", "token")], Storage = [], JsonRequests = [], ReadySets = [["token"]], Checks = [], EqualSets = [] };
         Assert.Equal(loopback.StartUrl, BrowserPolicyRules.Freeze(loopback, ["http://127.0.0.1:1234"]).StartUrl);

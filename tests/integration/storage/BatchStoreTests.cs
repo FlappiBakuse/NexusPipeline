@@ -25,13 +25,11 @@ public sealed class BatchStoreTests
         Assert.True(result.IsNew);
         Assert.All(result.Items, item => Assert.True(item.IsNew));
         Assert.Equal(new[] { "extra", "main" }, result.Items.Select(item => item.Saved.Address.ResourceId));
-        Assert.Equal(main.Tree.Entries, fixture.Revisions.Read(main.Address)!.Tree.Entries);
-        Assert.Equal(extra.Tree.Entries, fixture.Revisions.Read(extra.Address)!.Tree.Entries);
-        Assert.Null(fixture.Revisions.Read(new(fixture.OtherBinding, "main")));
         var reopened = StateDatabase.OpenExisting(fixture.Instance, Path.Combine(fixture.Root, "diagnostics"), new JournalStartupAdmission(fixture.Instance, new()));
         var store = new ConfigurationRevisionStore(fixture.Instance, reopened, new());
-        Assert.Equal(1, store.Read(main.Address)!.Revision);
-        Assert.Equal(1, store.Read(extra.Address)!.Revision);
+        AssertSaved(store.Read(main.Address), main, 1);
+        AssertSaved(store.Read(extra.Address), extra, 1);
+        Assert.Null(store.Read(new(fixture.OtherBinding, "main")));
     }
 
     [Theory(DisplayName = "Failure After The First Resource Publication Rolls Back Every Pointer Asset Result And Operation")]
@@ -48,15 +46,15 @@ public sealed class BatchStoreTests
         using var prepared = fixture.Batches.Prepare(next);
         fixture.Execute($"CREATE TRIGGER fixture_fail BEFORE INSERT ON {table} WHEN {when} BEGIN SELECT RAISE(ABORT,'fixture_failure'); END;");
         Assert.Throws<SqliteException>(() => fixture.Batches.Commit(identity, prepared, DateTimeOffset.UtcNow));
-        foreach (var old in initial.Changes) Assert.Equal(old.Tree.Entries, fixture.Revisions.Read(old.Address)!.Tree.Entries);
-        Assert.Equal(2, fixture.Count("configuration_revisions"));
-        Assert.Equal(2, fixture.Count("configuration_revision_assets"));
-        Assert.Equal(2, fixture.Count("configuration_batch_items"));
-        Assert.Equal(2, fixture.Count("operations"));
+        AssertCurrentBatch(fixture, initial, 1);
+        var previous = initial.Changes.Select(ContentReference).ToArray();
+        var candidates = previous.Concat(next.Changes.Select(ContentReference)).ToHashSet();
+        var references = new BlobReferenceIndex(fixture.Instance, new(), fixture.Database, new(fixture.Instance, new()));
+        Assert.Equal(previous.OrderBy(item => item.RelativePath), references.ReadReferenced(candidates).OrderBy(item => item.RelativePath));
         Assert.Null(fixture.Batches.Lookup(identity, next));
         fixture.Execute("DROP TRIGGER fixture_fail;");
         Assert.True(fixture.Batches.Commit(identity, prepared, DateTimeOffset.UtcNow).IsNew);
-        Assert.All(next.Changes, change => Assert.Equal(2, fixture.Revisions.Read(change.Address)!.Revision));
+        AssertCurrentBatch(fixture, next, 2);
     }
 
     [Fact(DisplayName = "A Stale Second Resource Or Binding Rejects The Whole Batch And Preserves Unrelated Binding Fields")]
@@ -77,8 +75,9 @@ public sealed class BatchStoreTests
         var corrected = new ConfigurationRevisionBatch([stale.Changes[0], stale.Changes[1] with { ExpectedRevision = 1 }]);
         Assert.Equal("configuration_binding_revision_conflict", Assert.Throws<ConfigurationException>(() => fixture.Save(corrected)).Message);
         Assert.Null(fixture.Revisions.Read(stale.Changes[0].Address));
-        Assert.True(definitions.Read().Bindings.Single(item => item.Id == fixture.Binding).IsEnabled);
-        Assert.Equal(2, definitions.Read().Bindings.Single(item => item.Id == fixture.Binding).Revision);
+        var current = definitions.Read().Bindings.Single(item => item.Id == fixture.Binding);
+        Assert.True(current.IsEnabled);
+        Assert.Equal(2, current.Revision);
     }
 
     [Fact(DisplayName = "Batch Replay After Recreation Returns Every Original Revision Without Rewinding Current Or Requiring Original Content")]
@@ -88,18 +87,21 @@ public sealed class BatchStoreTests
         ConfigurationRevisionBatch batch = new([fixture.Capture("main", "old-main"), fixture.Capture("extra", "old-extra")]);
         var identity = ConfigurationBatchStore.Identity(Guid.NewGuid(), "fixture", batch);
         fixture.Save(identity, batch);
-        fixture.Save(new([fixture.Capture("main", "new-main", 1), fixture.Capture("extra", "new-extra", 1)]));
+        ConfigurationRevisionBatch newer = new([fixture.Capture("main", "new-main", 1), fixture.Capture("extra", "new-extra", 1)]);
+        fixture.Save(newer);
         foreach (var item in batch.Changes)
-            File.Delete(Path.Combine(fixture.Instance.RuntimeRoot, $"blobs/content/{item.Tree.Entries[0].Sha256}.bin"));
+            File.Delete(Path.Combine(fixture.Instance.RuntimeRoot, ContentReference(item).RelativePath));
         var reopened = new ConfigurationBatchStore(fixture.Instance, fixture.Database, new());
-        var replay = reopened.Lookup(identity, batch)!;
-        Assert.False(replay.IsNew);
-        Assert.All(replay.Items, item => { Assert.False(item.IsNew); Assert.Equal(1, item.Saved.Revision); });
-        Assert.All(batch.Changes, item => Assert.Equal(2, fixture.Revisions.Read(item.Address)!.Revision));
         var reversed = new ConfigurationRevisionBatch([batch.Changes[1], batch.Changes[0]]);
-        Assert.NotNull(reopened.Lookup(ConfigurationBatchStore.Identity(identity.OperationId, "fixture", reversed), reversed));
+        var replay = Assert.IsType<ConfigurationBatchResult>(
+            reopened.Lookup(ConfigurationBatchStore.Identity(identity.OperationId, "fixture", reversed), reversed));
+        Assert.False(replay.IsNew);
+        AssertBatchResult(replay, identity.OperationId, batch, 1);
+        Assert.All(replay.Items, item => Assert.False(item.IsNew));
         Assert.Throws<OperationConflictException>(() => reopened.Lookup(ConfigurationBatchStore.Identity(identity.OperationId, "other", batch), batch));
-        Assert.Throws<OperationConflictException>(() => reopened.Lookup(identity, new([batch.Changes[0]])));
+        var subset = new ConfigurationRevisionBatch([batch.Changes[0]]);
+        Assert.Throws<OperationConflictException>(() => reopened.Lookup(ConfigurationBatchStore.Identity(identity.OperationId, "fixture", subset), subset));
+        AssertCurrentBatch(fixture, newer, 2);
     }
 
     [Fact(DisplayName = "A No Change Repair In A Batch Keeps Its Version While An Independent Resource Advances")]
@@ -109,12 +111,14 @@ public sealed class BatchStoreTests
         var main = fixture.Capture("main", "unchanged");
         var extra = fixture.Capture("extra", "old-extra");
         fixture.Save(new([main, extra]));
-        var result = fixture.Save(new([main with { ExpectedRevision = 1, Kind = ConfigurationUpdateKind.Repair }, fixture.Capture("extra", "new-extra", 1)]));
+        var changed = fixture.Capture("extra", "new-extra", 1);
+        var result = fixture.Save(new([main with { ExpectedRevision = 1, Kind = ConfigurationUpdateKind.Repair }, changed]));
         var noChange = result.Items.Single(item => item.Saved.Address == main.Address);
         Assert.False(noChange.HasChanges); Assert.Empty(noChange.Delta.Changes);
         Assert.Equal(1, noChange.Saved.Revision);
         Assert.Equal(2, result.Items.Single(item => item.Saved.Address == extra.Address).Saved.Revision);
-        Assert.Equal(3, fixture.Count("configuration_revisions"));
+        AssertSaved(fixture.Revisions.Read(main.Address), main, 1);
+        AssertSaved(fixture.Revisions.Read(extra.Address), changed, 2);
     }
 
     [Fact(DisplayName = "Duplicate Cross Account Or Differently Revised Bindings Are Rejected Before Preparation")]
@@ -127,7 +131,9 @@ public sealed class BatchStoreTests
         Assert.Throws<ConfigurationException>(() => fixture.Batches.Prepare(new([main, extra with { Address = new(fixture.OtherBinding, "extra") }])));
         Assert.Throws<ConfigurationException>(() => fixture.Batches.Prepare(new([main, extra with { ExpectedBindingRevision = 2 }])));
         Assert.Throws<ConfigurationException>(() => fixture.Batches.Prepare(new([])));
-        Assert.Equal(0, fixture.Count("configuration_revisions"));
+        Assert.Null(fixture.Revisions.Read(main.Address));
+        Assert.Null(fixture.Revisions.Read(extra.Address));
+        Assert.Null(fixture.Revisions.Read(new(fixture.OtherBinding, "extra")));
     }
 
     [Fact(DisplayName = "Batch Preparation Holds All Payloads And Releases Them On Failure Or Disposal")]
@@ -168,13 +174,15 @@ public sealed class BatchStoreTests
         Assert.Single(errors, error => error is null);
         var winner = Array.FindIndex(errors, error => error is null);
         var loser = 1 - winner;
-        Assert.IsType<ConfigurationException>(errors[loser]);
-        foreach (var change in batches[winner].Changes) Assert.Equal(change.Tree.Entries, fixture.Revisions.Read(change.Address)!.Tree.Entries);
+        Assert.Equal("configuration_revision_conflict", Assert.IsType<ConfigurationException>(errors[loser]).Message);
+        AssertCurrentBatch(fixture, batches[winner], 1);
+        var won = fixture.Batches.Lookup(operations[winner], batches[winner]);
+        Assert.NotNull(won);
+        AssertBatchResult(won, operations[winner].OperationId, batches[winner], 1);
         Assert.Null(fixture.Batches.Lookup(operations[loser], batches[loser]));
-        Assert.Equal(2, fixture.Count("configuration_revisions"));
-        Assert.Equal(2, fixture.Count("configuration_batch_items"));
         var retry = new ConfigurationRevisionBatch(batches[loser].Changes.Select(change => change with { ExpectedRevision = 1 }).ToImmutableArray());
         Assert.True(fixture.Save(ConfigurationBatchStore.Identity(operations[loser].OperationId, "fixture", retry), retry).IsNew);
+        AssertCurrentBatch(fixture, retry, 2);
     }
 
     [Fact(DisplayName = "Incomplete Persisted Batch Results Are Rejected Rather Than Returning Partial Success")]
@@ -196,9 +204,12 @@ public sealed class BatchStoreTests
         ConfigurationRevisionBatch batch = new([fixture.Capture("main", "candidate")]);
         using var prepared = fixture.Batches.Prepare(batch);
         var other = new ConfigurationBatchFixture();
+        var identity = ConfigurationBatchStore.Identity(Guid.NewGuid(), "fixture", batch);
         Assert.Equal("configuration_preparation_instance_unbound", Assert.Throws<IOException>(() => other.Batches.Commit(
-            ConfigurationBatchStore.Identity(Guid.NewGuid(), "fixture", batch), prepared, DateTimeOffset.UtcNow)).Message);
-        Assert.Equal(0, fixture.Count("configuration_revisions")); Assert.Equal(0, other.Count("configuration_revisions"));
+            identity, prepared, DateTimeOffset.UtcNow)).Message);
+        Assert.Null(fixture.Revisions.Read(batch.Changes[0].Address));
+        Assert.Null(other.Revisions.Read(new(other.Binding, "main")));
+        Assert.Null(fixture.Batches.Lookup(identity, batch)); Assert.Null(other.Batches.Lookup(identity, batch));
     }
 
     [Fact(DisplayName = "An Accepted Batch Can Be Replayed During Host Closure Without Mutation Admission")]
@@ -214,8 +225,10 @@ public sealed class BatchStoreTests
         var service = new ConfigurationBatchService(fixture.Instance, fixture.Database, new(), instanceLease, new(lifecycle));
         Assert.True(service.Save(operation, batch, DateTimeOffset.UtcNow).IsNew);
         Assert.NotNull(lifecycle.RequestClose(Guid.NewGuid(), Guid.NewGuid()).Permit);
-        Assert.False(service.Save(operation, batch, DateTimeOffset.UtcNow).IsNew);
-        Assert.Equal(2, fixture.Count("configuration_revisions"));
+        var replay = service.Save(operation, batch, DateTimeOffset.UtcNow);
+        Assert.False(replay.IsNew);
+        AssertBatchResult(replay, operation.OperationId, batch, 1);
+        AssertCurrentBatch(fixture, batch, 1);
     }
 
     [Theory(DisplayName = "Batch Service Uses All Shared Resource Claims And Rejects Closure Or Recovery Before Any Publication")]
@@ -240,8 +253,39 @@ public sealed class BatchStoreTests
         if (held == "recovery") index.BlockUnknown("fixture_unknown");
         if (held == "closing") lifecycle.RequestClose(Guid.NewGuid(), Guid.NewGuid());
         var service = new ConfigurationBatchService(fixture.Instance, fixture.Database, new(), instanceLease, resources);
-        Assert.Throws<ConfigurationException>(() => service.Save(ConfigurationBatchStore.Identity(Guid.NewGuid(), "fixture", batch), batch, DateTimeOffset.UtcNow));
-        Assert.Equal(0, fixture.Count("configuration_revisions"));
-        Assert.Equal(0, fixture.Count("configuration_batch_items"));
+        var identity = ConfigurationBatchStore.Identity(Guid.NewGuid(), "fixture", batch);
+        Assert.Throws<ConfigurationException>(() => service.Save(identity, batch, DateTimeOffset.UtcNow));
+        Assert.All(batch.Changes, change => Assert.Null(fixture.Revisions.Read(change.Address)));
+        Assert.Null(fixture.Batches.Lookup(identity, batch));
+    }
+
+    private static BlobReference ContentReference(ConfigurationRevisionChange change)
+    {
+        var entry = Assert.Single(change.Tree.Entries);
+        return new($"blobs/content/{entry.Sha256}.bin", entry.SizeBytes, entry.Sha256!);
+    }
+
+    private static void AssertCurrentBatch(ConfigurationBatchFixture fixture, ConfigurationRevisionBatch batch, long revision)
+    {
+        foreach (var change in batch.Changes) AssertSaved(fixture.Revisions.Read(change.Address), change, revision);
+    }
+
+    private static void AssertBatchResult(ConfigurationBatchResult result, Guid operationId, ConfigurationRevisionBatch batch, long revision)
+    {
+        Assert.Equal(operationId, result.OperationId);
+        Assert.Equal(batch.Changes.Select(change => change.Address.ResourceId).Order(StringComparer.Ordinal),
+            result.Items.Select(item => item.Saved.Address.ResourceId));
+        foreach (var change in batch.Changes)
+        {
+            var item = Assert.Single(result.Items, item => item.Saved.Address == change.Address);
+            AssertSaved(item.Saved, change, revision);
+        }
+    }
+
+    private static void AssertSaved(ConfigurationRevision? saved, ConfigurationRevisionChange change, long revision)
+    {
+        Assert.NotNull(saved);
+        Assert.Equal(change.Address, saved.Address); Assert.Equal(revision, saved.Revision);
+        Assert.Equal(change.Contract, saved.Contract); Assert.Equal(change.Tree.Entries, saved.Tree.Entries);
     }
 }

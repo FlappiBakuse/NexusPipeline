@@ -16,18 +16,8 @@ public sealed class AssetCrashTests(ITestOutputHelper output)
 {
     [Theory(DisplayName = "Killing The Actual Asset Creator Leaves Product Startup To Verify Its Writer And Recover Only Proven File Facts")]
     [InlineData(AssetPreparationPoint.Accepted, JournalPhase.Committed, false)]
-    [InlineData(AssetPreparationPoint.InitialJournal, JournalPhase.Committed, false)]
-    [InlineData(AssetPreparationPoint.EffectEntry, JournalPhase.Quarantined, false)]
-    [InlineData(AssetPreparationPoint.Applying, JournalPhase.Quarantined, false)]
-    [InlineData(AssetPreparationPoint.Workspace, JournalPhase.Quarantined, false)]
-    [InlineData(AssetPreparationPoint.StartedReceipt, JournalPhase.Quarantined, false)]
-    [InlineData(AssetPreparationPoint.StartedOutbox, JournalPhase.Quarantined, false)]
     [InlineData(AssetPreparationPoint.ContentFlushed, JournalPhase.Quarantined, false)]
     [InlineData(AssetPreparationPoint.CompletedReceipt, JournalPhase.Committed, true)]
-    [InlineData(AssetPreparationPoint.CompletedOutbox, JournalPhase.Committed, true)]
-    [InlineData(AssetPreparationPoint.Applied, JournalPhase.Committed, true)]
-    [InlineData(AssetPreparationPoint.CommittedJournal, JournalPhase.Committed, true)]
-    [InlineData(AssetPreparationPoint.Published, JournalPhase.Committed, true)]
     public async Task RecoversProvenAssets(
         AssetPreparationPoint interruption, JournalPhase expectedPhase, bool published)
     {

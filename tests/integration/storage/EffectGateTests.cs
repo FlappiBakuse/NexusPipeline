@@ -18,23 +18,14 @@ public sealed class EffectGateTests
         var (database, journal, _) = Create(kind);
         var gate = new PersistentEffectGate(database);
         var initial = gate.Read(journal.JournalId);
-        Assert.Equal(database.InstanceId, initial.InstanceId);
-        Assert.Equal(journal.OperationId, initial.OperationId);
-        Assert.Equal(journal.PlanDigest, initial.PlanDigest);
-        Assert.Equal(EffectGateState.Unentered, initial.State);
-        var before = new RecoveryJournalRegistry(database).ReadSnapshot();
-        var sealedGate = gate.SealUnentered(journal, 1);
+        AssertGate(initial, database, journal, EffectGateState.Unentered);
+        var sealedGate = gate.SealUnentered(journal, initial.Revision);
         Assert.Equal(EffectGateState.Sealed, sealedGate.State);
-        Assert.Equal(2, sealedGate.Revision);
+        Assert.Equal(sealedGate, gate.SealUnentered(journal, sealedGate.Revision));
+        Assert.Equal("effect_gate_already_decided", Assert.Throws<IOException>(() => gate.Enter(journal, sealedGate.Revision)).Message);
+        Assert.Equal("effect_gate_revision_conflict", Assert.Throws<IOException>(() => gate.Enter(journal, initial.Revision)).Message);
         Assert.Equal(sealedGate, new PersistentEffectGate(database).Read(journal.JournalId));
-        Assert.Equal(sealedGate, gate.SealUnentered(journal, 2));
-        Assert.Throws<IOException>(() => gate.Enter(journal, 2));
-        Assert.Throws<IOException>(() => gate.Enter(journal, 1));
-        var after = new RecoveryJournalRegistry(database).ReadSnapshot();
-        Assert.Equal(before.Revision + 1, after.Revision);
-        Assert.False(after.IsReady);
-        Assert.Equal(JournalPhase.Prepared, Assert.Single(after.Journals).Phase);
-        Assert.Equal(before.Isolations, after.Isolations);
+        AssertPending(database, journal);
     }
 
     [Theory(DisplayName = "Entered Gate Cannot Be Resealed Or Grant A Second Executor")]
@@ -45,11 +36,13 @@ public sealed class EffectGateTests
     {
         var (database, journal, _) = Create(kind);
         var gate = new PersistentEffectGate(database);
-        Assert.Equal(EffectGateState.Entered, gate.Enter(journal, 1).State);
-        Assert.Throws<IOException>(() => gate.SealUnentered(journal, 2));
-        Assert.Throws<IOException>(() => gate.Enter(journal, 2));
-        Assert.Equal(EffectGateState.Entered, new PersistentEffectGate(database).Read(journal.JournalId).State);
-        Assert.Single(new RecoveryJournalRegistry(database).ReadSnapshot().Isolations);
+        var initial = gate.Read(journal.JournalId);
+        var entered = gate.Enter(journal, initial.Revision);
+        AssertGate(entered, database, journal, EffectGateState.Entered);
+        Assert.Equal("effect_gate_already_decided", Assert.Throws<IOException>(() => gate.SealUnentered(journal, entered.Revision)).Message);
+        Assert.Equal("effect_gate_already_decided", Assert.Throws<IOException>(() => gate.Enter(journal, entered.Revision)).Message);
+        Assert.Equal(entered, new PersistentEffectGate(database).Read(journal.JournalId));
+        AssertPending(database, journal);
     }
 
     [Theory(DisplayName = "Concurrent Entry And Sealing Have Exactly One Durable Winner")]
@@ -59,17 +52,19 @@ public sealed class EffectGateTests
     public async Task SerializesGateDecision(JournalKind kind)
     {
         var (database, journal, _) = Create(kind);
+        var initial = new PersistentEffectGate(database).Read(journal.JournalId);
         using var ready = new Barrier(2);
         var attempts = new[] { EffectGateState.Entered, EffectGateState.Sealed }.Select(next => Task.Run(() =>
         {
             Assert.True(ready.SignalAndWait(TimeSpan.FromSeconds(10)));
             var gate = new PersistentEffectGate(database);
-            try { return next == EffectGateState.Entered ? gate.Enter(journal, 1) : gate.SealUnentered(journal, 1); }
-            catch (IOException) { return null; }
+            try { return next == EffectGateState.Entered ? gate.Enter(journal, initial.Revision) : gate.SealUnentered(journal, initial.Revision); }
+            catch (IOException error) when (error.Message == "effect_gate_revision_conflict") { return null; }
         })).ToArray();
         var winner = Assert.Single((await Task.WhenAll(attempts)).OfType<EffectGateSnapshot>());
         Assert.Equal(winner, new PersistentEffectGate(database).Read(journal.JournalId));
-        Assert.Equal(2, winner.Revision);
+        Assert.Contains(winner.State, new[] { EffectGateState.Entered, EffectGateState.Sealed });
+        AssertPending(database, journal);
     }
 
     [Theory(DisplayName = "Unbound Or Stale Journal Cannot Seal Or Enter Another Operation")]
@@ -96,9 +91,10 @@ public sealed class EffectGateTests
         };
         var gate = new PersistentEffectGate(database);
         var before = gate.Read(journal.JournalId);
-        Assert.Throws<IOException>(() => gate.SealUnentered(altered, 1));
-        Assert.Throws<IOException>(() => gate.Enter(altered, 1));
+        Assert.Equal("effect_gate_journal_binding_changed", Assert.Throws<IOException>(() => gate.SealUnentered(altered, before.Revision)).Message);
+        Assert.Equal("effect_gate_journal_binding_changed", Assert.Throws<IOException>(() => gate.Enter(altered, before.Revision)).Message);
         Assert.Equal(before, gate.Read(journal.JournalId));
+        AssertPending(database, journal);
     }
 
     [Fact(DisplayName = "Repeated Acceptance Retains The Original Gate And Does Not Reopen It")]
@@ -106,11 +102,16 @@ public sealed class EffectGateTests
     {
         var (database, journal, operation) = Create(JournalKind.UpdateApply);
         var gate = new PersistentEffectGate(database);
-        var sealedGate = gate.SealUnentered(journal, 1);
-        var replay = new RecoveryJournalRegistry(database).AcceptPrepared(operation, journal with { JournalId = Guid.NewGuid() }, [], DateTimeOffset.UtcNow);
+        var sealedGate = gate.SealUnentered(journal, gate.Read(journal.JournalId).Revision);
+        var registry = new RecoveryJournalRegistry(database);
+        var substitute = journal with { JournalId = Guid.NewGuid() };
+        var replay = registry.AcceptPrepared(operation, substitute, [], DateTimeOffset.UtcNow);
         Assert.False(replay.Acceptance.IsNew);
+        Assert.Equal(operation.OperationId, replay.Acceptance.OperationId);
         Assert.Equal(journal.JournalId, replay.JournalId);
+        Assert.Null(registry.FindJournal(substitute.JournalId));
         Assert.Equal(sealedGate, gate.Read(replay.JournalId));
+        AssertPending(database, journal);
     }
 
     [Fact(DisplayName = "Failed Compound Acceptance Does Not Leave A Gate Or Accepted Operation")]
@@ -124,10 +125,14 @@ public sealed class EffectGateTests
         var registry = new RecoveryJournalRegistry(database);
         Assert.Throws<ArgumentException>(() => registry.AcceptPrepared(operation, journal,
             [new(journal.JournalId, "invalid step", FileEffectAction.InstallCandidate, FileEffectState.Pending, digest, null)], DateTimeOffset.UtcNow));
-        Assert.Empty(registry.ReadSnapshot().Journals);
-        Assert.Throws<IOException>(() => new PersistentEffectGate(database).Read(journal.JournalId));
-        Assert.True(registry.AcceptPrepared(operation, journal, [], DateTimeOffset.UtcNow).Acceptance.IsNew);
-        Assert.Equal(EffectGateState.Unentered, new PersistentEffectGate(database).Read(journal.JournalId).State);
+        Assert.Null(registry.FindJournal(journal.JournalId));
+        var gate = new PersistentEffectGate(database);
+        Assert.Equal("effect_gate_missing", Assert.Throws<IOException>(() => gate.Read(journal.JournalId)).Message);
+        Assert.Empty(new FileEffectOutbox(database).Read(journal.JournalId));
+        var accepted = registry.AcceptPrepared(operation, journal, [], DateTimeOffset.UtcNow);
+        Assert.True(accepted.Acceptance.IsNew);
+        Assert.Equal(journal.JournalId, accepted.JournalId);
+        AssertGate(gate.Read(journal.JournalId), database, journal, EffectGateState.Unentered);
     }
 
     [Fact(DisplayName = "Advancing The Journal Prevents Late Entry And Late No Effect Sealing")]
@@ -135,12 +140,13 @@ public sealed class EffectGateTests
     {
         var (database, journal, _) = Create(JournalKind.ExtensionApply);
         var gate = new PersistentEffectGate(database);
-        gate.Enter(journal, 1);
-        new RecoveryJournalRegistry(database).Advance(journal with { Phase = JournalPhase.Applying, Revision = 2 }, 1);
-        Assert.Throws<IOException>(() => gate.Enter(journal, 1));
-        Assert.Throws<IOException>(() => gate.SealUnentered(journal, 1));
-        Assert.Equal(EffectGateState.Entered, gate.Read(journal.JournalId).State);
-        Assert.Single(new RecoveryJournalRegistry(database).ReadSnapshot().Isolations);
+        var entered = gate.Enter(journal, gate.Read(journal.JournalId).Revision);
+        var applying = journal with { Phase = JournalPhase.Applying, Revision = journal.Revision + 1 };
+        new RecoveryJournalRegistry(database).Advance(applying, journal.Revision);
+        Assert.Equal("effect_gate_journal_binding_changed", Assert.Throws<IOException>(() => gate.Enter(journal, entered.Revision)).Message);
+        Assert.Equal("effect_gate_journal_binding_changed", Assert.Throws<IOException>(() => gate.SealUnentered(applying, entered.Revision)).Message);
+        Assert.Equal(entered, gate.Read(journal.JournalId));
+        AssertPending(database, applying);
     }
 
     [Theory(DisplayName = "Journal Cannot Begin Applying Or Commit No Effects Without Its Durable Gate Decision")]
@@ -154,12 +160,18 @@ public sealed class EffectGateTests
         var applying = journal with { Phase = JournalPhase.Applying, Revision = 2 };
         var committed = journal with { Phase = JournalPhase.Committed, Revision = 2 };
         var evidence = new NoEffectEvidence(true, false, false, false);
-        Assert.Throws<IOException>(() => registry.Advance(applying, 1));
-        Assert.Throws<IOException>(() => registry.Advance(committed, 1, evidence));
-        new PersistentEffectGate(database).SealUnentered(journal, 1);
-        Assert.Throws<IOException>(() => registry.Advance(applying, 1));
+        var outbox = new FileEffectOutbox(database);
+        Assert.Empty(outbox.Read(journal.JournalId));
+        Assert.Equal("effect_gate_decision_required", Assert.Throws<IOException>(() => registry.Advance(applying, 1)).Message);
+        Assert.Equal("effect_gate_decision_required", Assert.Throws<IOException>(() => registry.Advance(committed, 1, evidence)).Message);
+        AssertPending(database, journal);
+        var gate = new PersistentEffectGate(database);
+        gate.SealUnentered(journal, gate.Read(journal.JournalId).Revision);
+        Assert.Equal("effect_gate_decision_required", Assert.Throws<IOException>(() => registry.Advance(applying, 1)).Message);
         registry.Advance(committed, 1, evidence);
+        AssertRegistration(registry, committed);
         Assert.Empty(registry.ReadSnapshot().Isolations);
+        Assert.Empty(outbox.Read(journal.JournalId));
     }
 
     [Fact(DisplayName = "A File Effect Cannot Start Before Both Entry And Applying Are Durable")]
@@ -170,15 +182,21 @@ public sealed class EffectGateTests
         var digest = new string('c', 64);
         var journal = new RegisteredJournal(Guid.NewGuid(), operation.OperationId, JournalKind.UpdateApply, JournalPhase.Prepared, 1,
             $"blobs/plans/{digest}.json", digest, ["fixture:effect-start"]);
-        new RecoveryJournalRegistry(database).AcceptPrepared(operation, journal,
-            [new(journal.JournalId, "install", FileEffectAction.InstallCandidate, FileEffectState.Pending, digest, null)], DateTimeOffset.UtcNow);
+        var effect = new FileEffect(journal.JournalId, "install", FileEffectAction.InstallCandidate, FileEffectState.Pending, digest, null);
+        var registry = new RecoveryJournalRegistry(database);
+        registry.AcceptPrepared(operation, journal, [effect], DateTimeOffset.UtcNow);
         var outbox = new FileEffectOutbox(database);
-        Assert.Throws<IOException>(() => outbox.Record(journal.JournalId, "install", FileEffectState.Pending, FileEffectState.Started, digest));
-        new PersistentEffectGate(database).Enter(journal, 1);
-        Assert.Throws<IOException>(() => outbox.Record(journal.JournalId, "install", FileEffectState.Pending, FileEffectState.Started, digest));
-        new RecoveryJournalRegistry(database).Advance(journal with { Phase = JournalPhase.Applying, Revision = 2 }, 1);
-        outbox.Record(journal.JournalId, "install", FileEffectState.Pending, FileEffectState.Started, digest);
-        Assert.Equal(FileEffectState.Started, Assert.Single(outbox.Read(journal.JournalId)).State);
+        var receipt = new string('d', 64);
+        void Start() => outbox.Record(journal.JournalId, effect.StepId, FileEffectState.Pending, FileEffectState.Started, receipt);
+        Assert.Equal("effect_gate_decision_required", Assert.Throws<IOException>(Start).Message);
+        Assert.Equal(effect, Assert.Single(outbox.Read(journal.JournalId)));
+        var gate = new PersistentEffectGate(database);
+        gate.Enter(journal, gate.Read(journal.JournalId).Revision);
+        Assert.Equal("effect_gate_decision_required", Assert.Throws<IOException>(Start).Message);
+        Assert.Equal(effect, Assert.Single(outbox.Read(journal.JournalId)));
+        registry.Advance(journal with { Phase = JournalPhase.Applying, Revision = 2 }, 1);
+        Start();
+        Assert.Equal(effect with { State = FileEffectState.Started, ReceiptDigest = receipt }, Assert.Single(outbox.Read(journal.JournalId)));
     }
 
     [Theory(DisplayName = "Contradictory Gate State And Revision Cannot Authorize No Effect Evidence")]
@@ -198,13 +216,35 @@ public sealed class EffectGateTests
             command.Parameters.AddWithValue("$id", journal.JournalId.ToString("D"));
             Assert.Equal(1, command.ExecuteNonQuery());
         }
-        var before = new RecoveryJournalRegistry(database).ReadSnapshot();
-        Assert.Throws<IOException>(() => new PersistentEffectGate(database).Read(journal.JournalId));
+        Assert.Equal("effect_gate_state_revision_unbound", Assert.Throws<IOException>(() => new PersistentEffectGate(database).Read(journal.JournalId)).Message);
         var registry = new RecoveryJournalRegistry(database);
         Assert.Throws<IOException>(() => registry.Advance(journal with { Phase = JournalPhase.Applying, Revision = 2 }, 1));
         Assert.Throws<IOException>(() => registry.Advance(journal with { Phase = JournalPhase.Committed, Revision = 2 }, 1, new(true, false, false, false)));
-        Assert.Equal(before.Revision, new RecoveryJournalRegistry(database).ReadSnapshot().Revision);
-        Assert.Single(new RecoveryJournalRegistry(database).ReadSnapshot().Isolations);
+        AssertPending(database, journal);
+    }
+
+    private static void AssertGate(EffectGateSnapshot gate, StateDatabase database, RegisteredJournal journal, EffectGateState state)
+    {
+        Assert.Equal(database.InstanceId, gate.InstanceId);
+        Assert.Equal(journal.JournalId, gate.JournalId); Assert.Equal(journal.OperationId, gate.OperationId);
+        Assert.Equal(journal.Kind, gate.Kind); Assert.Equal(journal.PlanDigest, gate.PlanDigest);
+        Assert.Equal(state, gate.State);
+    }
+
+    private static void AssertPending(StateDatabase database, RegisteredJournal journal)
+    {
+        var registry = new RecoveryJournalRegistry(database);
+        AssertRegistration(registry, journal);
+        var isolation = Assert.Single(registry.ReadSnapshot().Isolations);
+        Assert.Equal(journal.JournalId, isolation.JournalId);
+        Assert.Equal(Assert.Single(journal.ResourceKeys), isolation.ResourceKey);
+    }
+
+    private static void AssertRegistration(RecoveryJournalRegistry registry, RegisteredJournal journal)
+    {
+        var actual = registry.ReadOperationJournal(journal.OperationId);
+        Assert.Equal(journal.ResourceKeys, actual.ResourceKeys);
+        Assert.Equal(journal with { ResourceKeys = actual.ResourceKeys }, actual);
     }
 
     private static (StateDatabase Database, RegisteredJournal Journal, OperationIdentity Operation) Create(JournalKind kind)

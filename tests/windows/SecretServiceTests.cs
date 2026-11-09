@@ -12,12 +12,15 @@ public sealed class SecretServiceTests
     public async Task SharesConcurrentReplays()
     {
         using var fixture = SecretTestRuntime.Create();
-        using var value = new SecretValue("secret-service-replay-fixture");
+        const string plaintext = "secret-service-replay-fixture";
+        using var value = new SecretValue(plaintext);
         var operation = Guid.NewGuid();
         var results = await Task.WhenAll(Enumerable.Range(0, 6).Select(_ => Task.Run(async () =>
             await fixture.Service.ApplyAsync(operation, fixture.Key, 0, SecretDisposition.Set, value, default))));
         Assert.All(results, result => Assert.Equal(results[0], result));
         Assert.Equal(1, results[0].Revision);
+        using var recovered = await fixture.Service.ReadAsync(fixture.Key, default);
+        recovered.Use(chars => Assert.True(chars.SequenceEqual(plaintext)));
         Assert.Single(Directory.GetFiles(Path.Combine(fixture.Instance.RuntimeRoot, "secrets/payloads")));
         Assert.Equal(JournalPhase.Committed, Assert.Single(new RecoveryJournalRegistry(fixture.Database).ReadSnapshot().Journals).Phase);
         Assert.True(fixture.Index.Current.IsReady);

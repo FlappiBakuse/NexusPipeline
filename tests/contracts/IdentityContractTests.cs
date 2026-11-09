@@ -28,7 +28,8 @@ public sealed class IdentityContractTests
     [Fact(DisplayName = "Registered Identity Projection Owns Only Bounded Secret Memory And Cannot Outlive Its Exact Activation")]
     public async Task ProjectsOwnedMaterial()
     {
-        var fixture = new ScheduledContractFixture(); var handler = new Handler(); fixture.HandlerOverride = handler;
+        var fixture = new ScheduledContractFixture();
+        var handler = new Handler { ExpectedMaterial = "synthetic-auth-with-display-metadata" }; fixture.HandlerOverride = handler;
         var scope = await fixture.ActivateAsync();
         var entry = fixture.Registry.RequireManualEntry("fixture", "daily");
         Assert.Equal("v1", entry.RequireIdentity());
@@ -38,9 +39,10 @@ public sealed class IdentityContractTests
         Assert.Throws<ObjectDisposedException>(() => handler.Input!.Use(_ => { }));
         Assert.Throws<ObjectDisposedException>(() => handler.Output!.Use(_ => { }));
         material.Use(value => Assert.True(value.SequenceEqual("synthetic-auth-with-display-metadata")));
+        var calls = handler.Calls;
         await scope.DisposeAsync();
         Assert.Throws<InvalidOperationException>(() => entry.ProjectIdentity("account", material));
-        Assert.Equal(1, handler.Calls);
+        Assert.Equal(calls, handler.Calls);
     }
 
     [Theory(DisplayName = "Unavailable Or Oversized Identity Projections Cannot Become A Durable Credential Family")]
@@ -65,12 +67,19 @@ public sealed class IdentityContractTests
         internal SecretDraft? Input, Output;
         internal SecretDraft? RotationBefore, RotationAfter;
         internal bool RotationAllowed;
+        internal string ExpectedMaterial = "synthetic-auth";
         public bool CanRotateIdentity(string field, SecretDraft before, SecretDraft after)
-        { Assert.Equal("account", field); RotationBefore = before; RotationAfter = after; return RotationAllowed; }
+        {
+            Assert.Equal("account", field);
+            before.Use(value => Assert.True(value.SequenceEqual("synthetic-before")));
+            after.Use(value => Assert.True(value.SequenceEqual("synthetic-after")));
+            RotationBefore = before; RotationAfter = after; return RotationAllowed;
+        }
         public string? IdentityVersion => Fault == "unavailable" ? null : Fault == "version" ? "V 1" : "v1";
         public SecretDraft ProjectIdentity(string field, SecretDraft actualStoredMaterial)
         {
             Assert.Equal("account", field); Calls++; Input = actualStoredMaterial;
+            actualStoredMaterial.Use(value => Assert.True(value.SequenceEqual(ExpectedMaterial)));
             return Output = new(Fault == "oversized" ? new string('a', 16385) : Fault == "blank" ? "  " : "canonical-auth-only");
         }
         public ValueTask<ManualWorkTask?> ReadTaskAsync(Guid taskId, CancellationToken cancellationToken) => ValueTask.FromResult<ManualWorkTask?>(null);

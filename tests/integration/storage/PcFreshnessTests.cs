@@ -19,8 +19,6 @@ public sealed class PcFreshnessTests
             using var scope = new ExecutionSqlScope(source.Database);
             var targets = new TargetJobEvidence(source.Instance, source.Database, new(), scope);
             var stages = new PcStageEvidence(source.Instance, source.Database, new(), scope);
-            var first = scope.Read(source.Database, connection => connection);
-            Assert.Same(first, scope.Read(source.Database, connection => connection));
             void Verify()
             {
                 Assert.NotEmpty(targets.RequireAll(state.Latest.Root, state.Total, state.Attempt.ExecutionPlan.Sha256));

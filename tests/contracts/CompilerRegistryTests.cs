@@ -17,13 +17,18 @@ public sealed class CompilerRegistryTests
         var compiler = new Compiler(); var registration = registry.Register(scope, "project", compiler);
         await scope.OwnAsync(registration);
         await Assert.ThrowsAsync<IOException>(() => registry.UseAsync("fixture-compiler", "project", Accept, default).AsTask());
-        scope.Publish(); Assert.Equal(7, await registry.UseAsync("fixture-compiler", "project", Accept, default));
+        scope.Publish(); Assert.Equal("registered-project", await registry.UseAsync("fixture-compiler", "project", Accept, default));
         Assert.Throws<InvalidOperationException>(() => registry.Register(scope, "project", compiler));
         await Assert.ThrowsAsync<IOException>(() => registry.UseAsync("another", "project", Accept, default).AsTask());
         await registration.DisposeAsync();
         await Assert.ThrowsAsync<IOException>(() => registry.UseAsync("fixture-compiler", "project", Accept, default).AsTask());
         await scope.DisposeAsync();
-        ValueTask<int> Accept(IProjectCompiler actual, Action check) { Assert.Same(compiler, actual); check(); return ValueTask.FromResult(7); }
+        async ValueTask<string?> Accept(IProjectCompiler actual, Action check)
+        {
+            check();
+            var result = await actual.DiscoverAsync(new Source(), JsonSerializer.SerializeToElement(new { }), default);
+            return result.GetString();
+        }
     }
 
     [Fact(DisplayName = "Compiler Retirement Cancels But Still Drains The Actual Inflight Callback Before Releasing Registration")]
@@ -85,9 +90,19 @@ public sealed class CompilerRegistryTests
         ["managed"] = new JsonObject { ["entryAssembly"] = "Fixture.dll", ["entryType"] = "Fixture.Extension", ["compilers"] = new JsonArray("project") }
     };
 
+    private sealed class Source : ISelectedSource
+    {
+        public IReadOnlyList<SourceConfiguration> Configurations => [];
+        public ValueTask<SourceDirectory> ListAsync(string relativeDirectory, CancellationToken cancellationToken) =>
+            ValueTask.FromResult(new SourceDirectory(true, []));
+        public ValueTask<SourceFile?> ReadAsync(string relativePath, CancellationToken cancellationToken) =>
+            ValueTask.FromResult<SourceFile?>(null);
+    }
+
     private sealed class Compiler : IProjectCompiler
     {
-        public ValueTask<JsonElement> DiscoverAsync(ISelectedSource source, JsonElement selection, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public ValueTask<JsonElement> DiscoverAsync(ISelectedSource source, JsonElement selection, CancellationToken cancellationToken) =>
+            ValueTask.FromResult(JsonSerializer.SerializeToElement("registered-project"));
         public ValueTask<CompilationResult> CompileAsync(ISelectedSource source, JsonElement selection, CancellationToken cancellationToken) => throw new NotSupportedException();
     }
 }

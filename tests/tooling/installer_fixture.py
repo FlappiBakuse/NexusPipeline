@@ -1,11 +1,48 @@
 import io
 import json
+import os
 from pathlib import Path
 import struct
 import subprocess
 
+from binary_inputs import hash_file
 from dotnet_bundle import MARKER
-from installer_runtime import FRAMEWORKS, render_runtime
+from installer_runtime import FRAMEWORKS, read_dependencies, render_runtime
+from product_assets import COMPILER_SHA256
+from source_snapshot import ordinary_path
+
+
+def input_path(name):
+    value = os.environ.get(name)
+    if not value:
+        raise FileNotFoundError(f'{name} is required for the selected installer test')
+    return ordinary_path(value)
+
+
+def verify_input(path, digest, size=None):
+    actual_size = path.stat().st_size
+    if (size is not None and actual_size != size) or hash_file(path) != digest:
+        raise ValueError(f'Installer fixture differs from its pinned input: {path}')
+    return dict(path=str(path), sha256=digest, sizeBytes=actual_size)
+
+
+def compiler_inputs(_root):
+    return dict(compiler=verify_input(input_path('NEXUS_INSTALLER_COMPILER'), COMPILER_SHA256))
+
+
+def native_inputs(root):
+    inputs = compiler_inputs(root)
+    receipt = json.loads(input_path('NEXUS_INSTALLER_RUNTIME_RECEIPT').read_bytes())
+    expected = {item['sha256']: item['sizeBytes'] for item in read_dependencies(root).values()}
+    records = receipt.get('dependencies') if isinstance(receipt, dict) else None
+    if (not isinstance(records, list) or receipt.get('status') != 'PASS_OFFICIAL_RUNTIME_HASHES' or
+            len(records) != len(expected) or any(not isinstance(item, dict) or
+                not isinstance(item.get('sha256'), str) or not isinstance(item.get('path'), str) for item in records) or
+            {item['sha256'] for item in records} != expected.keys()):
+        raise ValueError('Installer runtime receipt must bind both pinned Microsoft packages')
+    inputs['dependencies'] = [verify_input(ordinary_path(item['path']), item['sha256'], expected[item['sha256']])
+                              for item in records]
+    return inputs
 
 
 def bundle(project, frameworks):
@@ -77,7 +114,7 @@ begin
   if (Error = '') or Restart then RaiseException('silent_missing_not_rejected');
 @@SIGNATURES@@
   if VerifyMicrosoftSignature(ExpandConstant('{srcexe}')) then RaiseException('unsigned_package_accepted');
-  if not SaveStringToFile('@@RESULT@@', '[runtime]' + #13#10 + 'detected=2' + #13#10 + 'missingSilent=rejected' + #13#10 + 'officialSignatures=2' + #13#10, False) then RaiseException('report_failed');
+  if not SaveStringToFile('@@RESULT@@', '[runtime]' + #13#10 + 'probe=complete' + #13#10, False) then RaiseException('report_failed');
   Result := True;
 end;
 """.replace('@@SIGNATURES@@', '\n'.join(calls)).replace('@@RESULT@@', str(report).replace("'", "''"))
@@ -96,4 +133,3 @@ end;
     (work / 'command.json').write_text(json.dumps(dict(command=command, exitCode=result.returncode), indent=2) + '\n', encoding='utf-8')
     if result.returncode or not report.is_file():
         raise ValueError('Native prerequisite probe failed')
-    return report.read_text(encoding='ascii')

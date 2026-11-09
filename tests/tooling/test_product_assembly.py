@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 import zipfile
 
@@ -10,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'tooling'))
 from binary_inputs import hash_file
 from product_assembly import assemble_product
 from product_publish import inventory
-from product_assets import write_archive, prepare_output
+from product_assets import build_assets, prepare_output, write_archive
 from artifact_lock import artifact_lock
 from source_snapshot import write_json
 
@@ -49,12 +50,13 @@ class ProductAssemblyTests(unittest.TestCase):
         self.scope.cleanup()
 
     def test_excludes_producers(self):
+        args = SimpleNamespace(output=self.output, assembly_root=self.root / 'unprepared')
         with artifact_lock(self.output):
             with self.assertRaisesRegex(ValueError, 'Another producer'):
-                with artifact_lock(self.output):
-                    self.fail('Concurrent producer admitted')
-        with artifact_lock(self.output):
-            self.assertFalse(self.output.exists())
+                build_assets(args)
+        with self.assertRaises(FileNotFoundError):
+            build_assets(args)
+        self.assertFalse(self.output.exists())
 
     def test_writes_zip(self):
         original = self.root / 'original.bin'
@@ -62,7 +64,8 @@ class ProductAssemblyTests(unittest.TestCase):
         path = self.root / 'payload.zip'
         write_archive(path, {'application/original.bin': original, 'manifest.json': b'{}'})
         with zipfile.ZipFile(path) as archive:
-            self.assertTrue(all(item.extract_version <= 20 and item.extra == b'' for item in archive.infolist()))
+            self.assertCountEqual(['application/original.bin', 'manifest.json'], archive.namelist())
+            self.assertTrue(all(item.extract_version <= 20 for item in archive.infolist()))
             self.assertEqual(original.read_bytes(), archive.read('application/original.bin'))
             self.assertEqual(b'{}', archive.read('manifest.json'))
         second = self.root / 'repeated.zip'

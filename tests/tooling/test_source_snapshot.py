@@ -139,7 +139,6 @@ class SourceSnapshotTests(unittest.TestCase):
         data = Path(receipt["sourceManifestPath"]).read_bytes()
         self.assertEqual(hashlib.sha256(data).hexdigest(), receipt["sourceSnapshotHash"])
         manifest = json.loads(data)
-        self.assertNotIn("sourceSnapshotHash", manifest)
         self.assertEqual(hashlib.sha256(self.payload).hexdigest(), manifest["files"][0]["sha256"])
 
 

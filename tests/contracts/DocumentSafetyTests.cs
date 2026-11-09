@@ -97,7 +97,7 @@ public sealed class DocumentSafetyTests
         using var fixture = new ConfigurationDocumentFixture("{\"flag\":true,\"secret\":\"fixture-private\"}", ConfigurationSyntax.Json,
             new([], [new(ConfigurationDocumentFixture.Selector(), true)], [secret]));
         Assert.Equal("configuration_access_denied", Assert.Throws<ConfigurationException>(() => fixture.Document.Read(flag)).Message);
-        Assert.NotEmpty(fixture.Document.Apply(fixture.Patch(["flag"], true, false)));
+        Assert.Equal("{\"flag\":false,\"secret\":\"fixture-private\"}"u8.ToArray(), fixture.Document.Apply(fixture.Patch(["flag"], true, false)));
         Assert.Equal("configuration_access_denied", Assert.Throws<ConfigurationException>(() => fixture.Document.Apply(
             fixture.Patch(["secret"], "fixture-private", "changed"))).Message);
         Assert.DoesNotContain("fixture-private", JsonSerializer.Serialize(fixture.Document));
@@ -145,7 +145,7 @@ public sealed class DocumentSafetyTests
         using var fixture = new ConfigurationDocumentFixture("{\"flag\":true}");
         var patch = fixture.Patch(["flag"], true, false);
         Array.Fill(fixture.Source, (byte)'x');
-        Assert.NotEmpty(fixture.Document.Apply(patch));
+        Assert.Equal("{\"flag\":false}"u8.ToArray(), fixture.Document.Apply(patch));
         fixture.Document.Dispose();
         Assert.Throws<ObjectDisposedException>(() => fixture.Document.Read(ConfigurationDocumentFixture.Selector()));
     }

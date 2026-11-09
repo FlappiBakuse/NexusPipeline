@@ -41,7 +41,6 @@ public sealed class TargetLifecycleTests
             facts, ExecutionStopReason.Completed, ExecutionRunContinuation.Final);
         Assert.Equal(TargetCleanupAction.PreserveExternal, cleanup.Application);
         Assert.Equal(TargetCleanupAction.None, cleanup.Device);
-        Assert.Equal(BusinessOutcome.Failed, facts.Business);
     }
 
     [Theory(DisplayName = "Pc Cleanup Uses Actual Facts And The Frozen Force Close Preference")]
@@ -56,18 +55,17 @@ public sealed class TargetLifecycleTests
         var facts = PrimaryFacts(engine, business);
         var cleanup = TargetLifecyclePolicy.Cleanup(new(ExecutionTargetKind.Pc, true, forceClose),
             ExecutionTargetAuthority.OwnedPcProcess, facts, ExecutionStopReason.Completed, ExecutionRunContinuation.Final);
-        Assert.Equal(expected, cleanup.Application); Assert.Equal(business, facts.Business);
+        Assert.Equal(expected, cleanup.Application);
     }
 
-    [Theory(DisplayName = "Cancellation Controls Cleanup But Preserves An Earlier Failed Business Fact")]
+    [Theory(DisplayName = "Cancellation Uses The Frozen Force Close Preference")]
     [InlineData(false, TargetCleanupAction.RetainOwned)]
     [InlineData(true, TargetCleanupAction.CloseOwnedPc)]
-    public void PreservesCancelledBusiness(bool forceClose, TargetCleanupAction expected)
+    public void UsesCancelledCleanup(bool forceClose, TargetCleanupAction expected)
     {
         var facts = PrimaryFacts(EngineOutcome.Succeeded, BusinessOutcome.Failed);
         Assert.Equal(expected, TargetLifecyclePolicy.Cleanup(new(ExecutionTargetKind.Pc, true, forceClose),
             ExecutionTargetAuthority.OwnedPcProcess, facts, ExecutionStopReason.Cancelled, ExecutionRunContinuation.Final).Application);
-        Assert.Equal(BusinessOutcome.Failed, facts.Business);
     }
 
     [Theory(DisplayName = "Android Shutdown Uses Actual Run Finality Rather Than Maximum Attempt Number")]
@@ -97,7 +95,7 @@ public sealed class TargetLifecycleTests
         Assert.Equal(application, cleanup.Application); Assert.Equal(TargetCleanupAction.None, cleanup.Device);
     }
 
-    [Theory(DisplayName = "A Proved Local Limit Closes The Owned Target Without Inventing Business Failure")]
+    [Theory(DisplayName = "A Proved Local Limit Closes The Owned Target")]
     [InlineData(StepStopCause.StallTimeout)]
     [InlineData(StepStopCause.StepTotalTimeout)]
     public void ClosesLimitedTargets(StepStopCause cause)
@@ -106,7 +104,6 @@ public sealed class TargetLifecycleTests
         var cleanup = TargetLifecyclePolicy.Cleanup(new(ExecutionTargetKind.Pc, true, false),
             ExecutionTargetAuthority.OwnedPcProcess, facts, ExecutionStopReason.Completed, ExecutionRunContinuation.Final, cause);
         Assert.Equal(TargetCleanupAction.CloseOwnedPc, cleanup.Application);
-        Assert.Equal(BusinessOutcome.Unverified, facts.Business);
     }
 
     [Fact(DisplayName = "Unproved Ownership Unknown Enums And Cross Kind Authority Cannot Authorize Cleanup")]

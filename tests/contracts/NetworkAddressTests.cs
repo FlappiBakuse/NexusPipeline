@@ -34,6 +34,6 @@ public sealed class NetworkAddressTests
     public void ClassifiesPublicAddresses(string address, bool expected)
     {
         var projected = NetworkAccessAddresses.Project([IPAddress.Parse(address)], 5000);
-        Assert.Equal(expected, projected.Public.Count == 1);
+        Assert.Equal(expected ? new[] { $"http://{address}:5000" } : Array.Empty<string>(), projected.Public);
     }
 }

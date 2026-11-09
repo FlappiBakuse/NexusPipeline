@@ -43,8 +43,8 @@ public sealed class AuthorizationContextTests
     {
         var first = Intent(); var second = Intent(); var group = CompletionActionPolicy.Combine([second, first]);
         var context = CompletionAuthorizationContext.Create(group, [new(first, "local:user"), new(second, "host:scheduler")]);
-        Assert.Equal(2, context.Sources.Length);
-        Assert.Contains(context.Sources, item => item.Intent == second && item.SubjectId == "host:scheduler");
+        Assert.Equal(new[] { new CompletionAuthorizationSource(second, "host:scheduler"), new(first, "local:user") },
+            context.Sources.OrderBy(item => item.SubjectId));
         Assert.Throws<ArgumentException>(() => CompletionAuthorizationContext.Create(group, [new(first, "local:user")]));
     }
 

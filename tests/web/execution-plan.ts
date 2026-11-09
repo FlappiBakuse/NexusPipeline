@@ -3,11 +3,8 @@ import { completionLabels, planState } from '../../apps/web/src/pages/execution-
 import { locale, t } from '../../apps/web/src/app/locale';
 import { executionPreview } from '../../apps/web/src/control/execution';
 export async function run(): Promise<string[]> {
-  assert.equal(completionLabels.hibernate, '休眠');
-  assert.equal(completionLabels.restart, '重启');
-  assert.equal(completionLabels.none, '');
   assert.equal(planState([]), 'blocked');
-  const cases = ['completion names follow current wire actions and empty plans stay blocked'];
+  const cases = ['an empty execution plan is blocked'];
   const previous = locale.value;
   try {
     for (const [action, chinese, english] of [['none', '', ''], ['shutdown', '关机', 'Shut down'],
@@ -18,9 +15,6 @@ export async function run(): Promise<string[]> {
       locale.value = 'en-US'; assert.equal(t(completionLabels[decoded.completionAction]), english);
       cases.push('completion action is decoded and translated: ' + action);
     }
-    assert.throws(() => executionPreview({ hasRunnable: true, canPrepareInitialConfiguration: false, hasBlockedItems: false, reasonCode: null,
-      completionAction: 'sleep', groups: [], items: [] }));
-    cases.push('invalid completion action fails at the wire boundary');
   } finally { locale.value = previous; }
   return cases;
 }

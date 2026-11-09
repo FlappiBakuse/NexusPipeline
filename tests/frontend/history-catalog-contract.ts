@@ -30,7 +30,8 @@ export async function historyCatalogContract(fixture: HTMLElement, check: (value
     items.value = [...items.value, ...Array.from({ length: 200 }, (_, index) => ({ id: String(index + 10000) }))];
     await settle();
     check(viewport.scrollTop === position && selected.value === '9999', 'appending a page preserves position and selection');
-    viewport.scrollTop = 5000 * 44; viewport.dispatchEvent(new Event('scroll')); await settle();
+    const catalogHeight = mount.querySelector<HTMLElement>('[role=list]')!.getBoundingClientRect().height;
+    viewport.scrollTop = catalogHeight * 5000 / items.value.length; viewport.dispatchEvent(new Event('scroll')); await settle();
     check([...mount.querySelectorAll('button')].some(item => item.textContent === 'Log 5000'), 'scrolling reaches a middle catalog entry');
     bounded();
     visible.value = false; await settle();

@@ -6,6 +6,11 @@
   "journalId": "af8868dd-c9c8-4ba5-88ed-099f079fa5ec",
   "operationKind": "updateApply",
   "action": "remove",
+  "maintenanceSource": {
+    "relativePath": "blobs/plans/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.json",
+    "sizeBytes": 1,
+    "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
   "targetPath": "D:\\Fixture\\host-payload",
   "parentIdentity": {"volumeSerial": "0000000000000001", "fileId": "00000000000000000000000000000001"},
   "before": {"shape": "directory", "entries": [{"relativePath": "", "kind": "directory", "sizeBytes": 0}]},

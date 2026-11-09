@@ -81,8 +81,8 @@ public sealed class AutomationTargetTests
         Assert.Contains(selected.Roots, value => value.Id == game.Id && value.Revision == 7);
         Assert.Contains(selection.SourceRevisions, value => value.Kind == AutomationDefinitionKind.Root && value.EntityId == game.Id && value.Revision == 7);
         Assert.Equal(target.Pc!.Arguments.ToArray(), selected.Script.Target!.Pc!.Arguments.ToArray());
-        Assert.NotSame(target, selected.Script.Target);
-        Assert.NotSame(target.Pc, selected.Script.Target.Pc);
+        Assert.Equal(new AutomationPath(game.Id, "launch.cmd"), selected.Script.Target.Pc.LaunchExecutable);
+        Assert.Equal(new AutomationPath(game.Id, "game.exe"), selected.Script.Target.Pc.ReadyExecutable);
     }
 
     private static AutomationTarget Pc(Guid root) => new(AutomationTargetKind.Pc, true, 30, false,

@@ -1,5 +1,4 @@
 using System.Security.Cryptography;
-using System.Text;
 using NexusPipeline.Core.Maintenance;
 using NexusPipeline.Tests.Fixtures;
 using Xunit;
@@ -42,6 +41,5 @@ public sealed class FeedSignatureTests
         var owned = valid.FeedBytes(); owned.AsSpan().Fill(0);
         Assert.Equal(expected, valid.FeedBytes());
         Assert.Equal(valid.Feed.Identity, verifier.Verify(valid.FeedBytes(), valid.SignatureBytes(), HostUpdateChannel.Stable).Feed.Identity);
-        Assert.Contains("nexus.update.feed", Encoding.UTF8.GetString(expected), StringComparison.Ordinal);
     }
 }

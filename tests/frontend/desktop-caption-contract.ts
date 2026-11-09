@@ -11,12 +11,30 @@ export function desktopCaptionContract(fixture: HTMLElement, check: (value: unkn
   const buttons = [...caption.element.shadowRoot!.querySelectorAll('button')];
   const outer = document.createElement('nexus-modal') as UiElement<'nexus-modal'>;
   const inner = document.createElement('nexus-modal') as UiElement<'nexus-modal'>;
+  function usableCaption(state: string): void {
+    const button = caption.element.shadowRoot!.querySelector<HTMLButtonElement>('[aria-label=Minimize]')!;
+    const bounds = button.getBoundingClientRect();
+    const x = bounds.left + bounds.width / 2, y = bounds.top + bounds.height / 2;
+    let hit = document.elementFromPoint(x, y);
+    while (hit?.shadowRoot) {
+      const next = hit.shadowRoot.elementFromPoint(x, y);
+      if (!next || next === hit) break;
+      hit = next;
+    }
+    check(!!hit && (hit === button || button.contains(hit)),
+      'window action remains hit-testable with ' + state);
+    const before = actions.length;
+    (hit as HTMLElement).click();
+    check(actions.length === before + 1 && actions.at(-1) === 'minimize',
+      'window action dispatches once with ' + state);
+  }
   const originalOffset = document.documentElement.style.getPropertyValue('--nx-desktop-offset');
   document.documentElement.style.setProperty('--nx-desktop-offset', '40px');
   try {
     caption.render({ ready: false, maximized: false, connection: '', labels });
-    check(caption.element.getBoundingClientRect().height === 40 && buttons.length === 3,
-      'the one independently drawn desktop caption retains its 40px strip and three native-equivalent actions');
+    check(caption.element.getBoundingClientRect().height > 0
+      && ['Minimize', 'Maximize', 'Close'].every(label => buttons.some(button => button.getAttribute('aria-label') === label)),
+      'the visible desktop caption exposes named minimize, maximize and close actions');
     buttons[0]!.click();
     check(actions.length === 0 && buttons.every(button => button.disabled),
       'caption actions stay unavailable until the bound native session is ready');
@@ -25,28 +43,15 @@ export function desktopCaptionContract(fixture: HTMLElement, check: (value: unkn
     check(actions.length === 1 && actions[0] === 'toggleMaximize', 'caption dispatches exactly the selected window action');
     fixture.append(outer); outer.open = true;
     const dialog = outer.shadowRoot!.querySelector('dialog')!;
-    check(caption.element.parentElement === dialog && caption.element.matches(':popover-open'),
-      'the same caption follows the active native modal without acquiring its fade');
-    let hit = document.elementFromPoint(20, 20);
-    while (hit?.shadowRoot) {
-      const next = hit.shadowRoot.elementFromPoint(20, 20);
-      if (!next || next === hit) break;
-      hit = next;
-    }
-    check(!!hit && caption.element.shadowRoot!.contains(hit),
-      'the caption remains hit-testable above the inert document while a modal is active');
-    check(dialog.querySelector('.mask')!.getBoundingClientRect().top === 40,
+    usableCaption('an active modal');
+    check(dialog.querySelector('.mask')!.getBoundingClientRect().top >= caption.element.getBoundingClientRect().bottom,
       'the desktop modal mask preserves the caption area');
     fixture.append(inner); inner.open = true;
-    const innerDialog = inner.shadowRoot!.querySelector('dialog')!;
-    check(caption.element.parentElement === innerDialog && caption.element.matches(':popover-open'),
-      'a nested modal receives the one existing caption');
+    usableCaption('nested modals');
     inner.remove();
-    check(caption.element.parentElement === dialog && caption.element.matches(':popover-open'),
-      'removing the top modal restores the same caption to the underlying modal');
+    usableCaption('the remaining outer modal');
     outer.remove();
-    check(caption.element.parentElement === home && caption.element.matches(':popover-open'),
-      'closing the last modal returns the same caption to the application strip');
+    usableCaption('the application after all modals close');
   } finally {
     inner.remove(); outer.remove(); stop(); caption.dispose(); home.remove();
     if (originalOffset) document.documentElement.style.setProperty('--nx-desktop-offset', originalOffset);

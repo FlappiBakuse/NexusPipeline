@@ -1,51 +1,41 @@
-using System.Collections.Immutable;
 using System.Security.Cryptography;
-using System.Text;
-using System.Text.Json;
-using NexusPipeline.Core.Automation;
+using System.Text.Json.Nodes;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Maintenance;
-using NexusPipeline.Platform.Storage;
-using NexusPipeline.Platform.Storage.Automation;
 using NexusPipeline.Platform.Storage.Configuration;
-using NexusPipeline.Platform.Storage.Execution;
-using NexusPipeline.Platform.Storage.Journals;
+using NexusPipeline.Platform.Storage.Sqlite;
 using Xunit;
 
 namespace NexusPipeline.StorageTests;
 
 public sealed class RunPreparationTests
 {
-    [Theory(DisplayName = "Actual Run Preparation Freezes Selected Copies And Keeps Generic Auto Sync Choice Without Writing The Live Target")]
+    [Theory(DisplayName = "Run Preparation Applies Task Selection To Its Copy With Either Sync Choice And Releases Its Files")]
     [InlineData(false)]
     [InlineData(true)]
     public void FreezesSelectedCopies(bool autoSync)
     {
         using var fixture = new ConfigurationRunFixture();
         var request = fixture.Request with { AutoSyncEnabled = autoSync, SyncInitially = autoSync, SyncAtFinish = autoSync };
+        var original = fixture.Read(fixture.Saved.Tree);
         using var root = fixture.Acquire(request);
         using var prepared = fixture.Preparation.Prepare(root, fixture.Owner, fixture.Execution.Plan, fixture.StepId, request);
-        prepared.Use(resources =>
+        var candidate = prepared.Use(resources => Assert.Single(resources).Plan.Candidate.Snapshot);
+        Assert.True(JsonNode.DeepEquals(JsonNode.Parse("""{"tasks":{"one":true},"count":17}"""), JsonNode.Parse(fixture.Read(candidate))));
+        var paths = new[] { Content(fixture.Saved.Tree), Content(candidate) };
+        foreach (var path in paths)
+            Assert.Throws<IOException>(() => File.Delete(Path.Combine(fixture.Source.Instance.RuntimeRoot, path)));
+        prepared.Dispose();
+        foreach (var path in paths)
         {
-            var resource = Assert.Single(resources);
-            Assert.Equal(fixture.Request.Resources[0].Target.Address, resource.Address);
-            Assert.NotEqual(fixture.Owner, resource.Plan.OperationId);
-            Assert.Equal(request.Resources[0].OperationId, resource.Plan.OperationId);
-            Assert.Equal(request.Resources[0].JournalId, resource.Plan.JournalId);
-            var state = new RunStateCodec(fixture.Source.Instance, new(), fixture.Source.Blobs).Read(resource.Plan.RunState!);
-            Assert.Equal(fixture.Owner, state.OwnerOperationId);
-            Assert.Equal(autoSync, state.AutoSyncEnabled);
-            Assert.False(state.Tasks[0].Initial.Values["one"]);
-            Assert.Equal(fixture.Saved.Tree.Entries, state.Source.Tree.Entries);
-            Assert.Contains("\"one\":true", fixture.Read(resource.Plan.Candidate.Snapshot));
-            Assert.Contains("\"one\":false", fixture.Read(state.Source.Tree));
-            foreach (var path in new[] { resource.Reference.RelativePath, resource.Plan.RunState!.RelativePath,
-                Content(fixture.Saved.Tree), Content(resource.Plan.Candidate.Snapshot) })
-                Assert.Throws<IOException>(() => File.Delete(Path.Combine(fixture.Source.Instance.RuntimeRoot, path)));
-            return 0;
-        });
+            using var writer = File.Open(Path.Combine(fixture.Source.Instance.RuntimeRoot, path), FileMode.Open, FileAccess.Write, FileShare.None);
+        }
+        var revisions = new ConfigurationRevisionStore(fixture.Source.Instance, fixture.Source.Database, new());
+        var saved = Assert.IsType<ConfigurationRevision>(revisions.Read(fixture.Saved.Address));
+        Assert.Equal(fixture.Saved.Revision, saved.Revision);
+        Assert.Equal(original, fixture.Read(saved.Tree));
         fixture.VerifyOriginal();
-        Assert.Empty(new NexusPipeline.Platform.Storage.Sqlite.RecoveryJournalRegistry(fixture.Source.Database).ReadSnapshot().Journals);
+        Assert.Empty(new RecoveryJournalRegistry(fixture.Source.Database).ReadSnapshot().Journals);
     }
 
     [Fact(DisplayName = "A Prepared Run Retains The Borrowed Root Claims And Host Write After Its Caller Disposes The Root")]
@@ -53,20 +43,13 @@ public sealed class RunPreparationTests
     {
         using var fixture = new ConfigurationRunFixture();
         using var root = fixture.Acquire(fixture.Request);
-        var prepared = fixture.Preparation.Prepare(root, fixture.Owner, fixture.Execution.Plan, fixture.StepId, fixture.Request);
-        try
-        {
-            root.Dispose();
-            Assert.False(root.IsActive);
-            Assert.Equal(ResourceLeaseDenial.Conflict, fixture.Resources.TryAcquire(Guid.NewGuid(), fixture.Claims(fixture.Request)).Denial);
-            var session = Guid.NewGuid();
-            Assert.Equal("accepted_writes_pending", fixture.Lifecycle.RequestClose(session, Guid.NewGuid()).ReasonCode);
-            Assert.Single(prepared.Use(resources => resources.ToArray()));
-            prepared.Dispose(); prepared.Dispose();
-            Assert.Throws<ObjectDisposedException>(() => prepared.Use(resources => resources.Count));
-            Assert.NotNull(fixture.Lifecycle.RequestClose(session, Guid.NewGuid()).Permit);
-        }
-        finally { prepared.Dispose(); }
+        using var prepared = fixture.Preparation.Prepare(root, fixture.Owner, fixture.Execution.Plan, fixture.StepId, fixture.Request);
+        root.Dispose();
+        Assert.Equal(ResourceLeaseDenial.Conflict, fixture.Resources.TryAcquire(Guid.NewGuid(), fixture.Claims(fixture.Request)).Denial);
+        var session = Guid.NewGuid();
+        Assert.Equal("accepted_writes_pending", fixture.Lifecycle.RequestClose(session, Guid.NewGuid()).ReasonCode);
+        prepared.Dispose();
+        Assert.NotNull(fixture.Lifecycle.RequestClose(session, Guid.NewGuid()).Permit);
         fixture.VerifyOriginal();
     }
 

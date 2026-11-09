@@ -6,7 +6,7 @@ namespace NexusPipeline.CoreTests;
 
 public sealed class HostKeyTests
 {
-    [Fact(DisplayName = "A Host Proxy Field Has An Explicit Owner And Round Trips Without An Extension Identity")]
+    [Fact(DisplayName = "A Host Proxy Field Binds Its Instance And Host Owner Without An Extension Identity")]
     public void BindsHostOwner()
     {
         var instance = Guid.NewGuid();
@@ -15,7 +15,6 @@ public sealed class HostKeyTests
         Assert.Null(key.ExtensionId);
         Assert.Equal(instance, key.SubjectId);
         Assert.Equal("proxy-password", key.Field);
-        Assert.Equal(key, JsonSerializer.Deserialize<SecretFieldKey>(JsonSerializer.Serialize(key)));
     }
 
     [Fact(DisplayName = "An Extension Named Host Cannot Alias The Fixed Host Proxy Field Or Authorize It")]

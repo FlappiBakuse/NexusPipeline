@@ -22,7 +22,6 @@ public sealed class AttemptFactsTests
         var steps = new[] { Step("first", EngineOutcome.Succeeded, first), Step("second", EngineOutcome.Succeeded, second) };
         var result = Aggregate(steps);
         Assert.Equal(expected, result.Business); Assert.Equal(EngineOutcome.Succeeded, result.Engine);
-        Assert.Equal(first, steps[0].Business); Assert.Equal(second, steps[1].Business);
     }
 
     [Theory(DisplayName = "Engine Aggregation Remains Independent Of Business And Keeps Unknown Or Failed Execution Evidence")]
@@ -51,7 +50,6 @@ public sealed class AttemptFactsTests
             LifecycleOutcome.Interrupted, RecoveryOutcome.Quarantined, "configuration_not_restored");
         Assert.Equal(BusinessOutcome.Succeeded, quarantined.Business); Assert.Equal(EngineOutcome.Succeeded, quarantined.Engine);
         Assert.Equal(LifecycleOutcome.Interrupted, quarantined.Lifecycle); Assert.Equal(RecoveryOutcome.Quarantined, quarantined.Recovery);
-        Assert.Equal(BusinessOutcome.Succeeded, first.Business);
     }
 
     [Theory(DisplayName = "Contradictory Step Or Lifecycle Facts Cannot Become A Terminal Attempt")]

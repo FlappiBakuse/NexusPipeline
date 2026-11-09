@@ -15,7 +15,7 @@ public sealed class ControlCapabilityTests
     {
         var current = new ControlPermissionSnapshot(enabled, writes);
         var capabilities = Enum.GetValues<ControlCapability>();
-        Assert.Equal(capabilities.Length, ControlCapabilityPolicy.Visible(ControlOrigin.Local, current).Count);
+        Assert.Equal(capabilities.Order(), ControlCapabilityPolicy.Visible(ControlOrigin.Local, current).Select(value => value.Id).Order());
         foreach (var capability in capabilities)
             Assert.True(ControlCapabilityPolicy.IsAllowed(ControlOrigin.Local, capability, current));
     }

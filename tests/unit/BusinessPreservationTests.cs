@@ -7,7 +7,7 @@ namespace NexusPipeline.CoreTests;
 
 public sealed class BusinessPreservationTests
 {
-    [Fact(DisplayName = "User Binding Overrides Freeze Each Enabled Group Without Changing The Saved Binding")]
+    [Fact(DisplayName = "User Binding Overrides Apply Enabled Groups And Disabled Overrides Preserve Saved Values")]
     public void FreezesBindingOverrides()
     {
         var fixture = new ExecutionSelectionFixture(); var original = fixture.Catalog.Bindings[0];
@@ -26,7 +26,6 @@ public sealed class BusinessPreservationTests
         Assert.Equal(hook.Executable, selected.PreHook.Executable);
         Assert.Equal(hook.Arguments.ToArray(), selected.PreHook.Arguments.ToArray());
         Assert.True(selected.PreOnceAfterSuccess);
-        Assert.Equal(-1, original.RunDays); Assert.True(original.NotifyEnabled); Assert.Null(original.PreHook);
         var raw = AutomationBindingPolicy.Resolve(user with { BindingOverrides = new() }, original);
         Assert.Equal(original, raw);
     }

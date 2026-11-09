@@ -62,10 +62,12 @@ public sealed class ApplyWorkflowTests
         using var disconnected = new CancellationTokenSource(); disconnected.Cancel();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => first.WaitAcceptedAsync(disconnected.Token));
         Assert.False(first.Acceptance.Task.IsCompleted);
-        Assert.Same(first, fixture.Coordinator.Start(id, "local", fixture.Request));
+        var second = fixture.Coordinator.Start(id, "local", fixture.Request);
         Assert.Throws<OperationConflictException>(() => fixture.Coordinator.Start(id, "another-subject", fixture.Request));
         fixture.Handler.Release.SetResult();
         var complete = await first.Completion.Task.WaitAsync(TimeSpan.FromSeconds(20));
+        var replay = await second.Completion.Task.WaitAsync(TimeSpan.FromSeconds(20));
+        Assert.Equal(complete.Acceptance.JournalId, replay.Acceptance.JournalId);
         Assert.NotNull(complete.Result); Assert.True(complete.Result.IsInstalled); Assert.Equal(1, fixture.Handler.Requests);
     }
 

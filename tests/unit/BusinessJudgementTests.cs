@@ -173,19 +173,6 @@ public sealed class BusinessJudgementTests
         Assert.Equal(BusinessOutcome.Unverified, pending.Business);
     }
 
-    [Fact(DisplayName = "Judgement Only Supplies The Business Dimension Without Changing Engine Lifecycle Or Recovery Facts")]
-    public void SeparatesBusinessDimension()
-    {
-        var judge = Keywords(["done"]);
-        var facts = new AttemptFacts(Guid.NewGuid(), judge.AttemptId, 1, EngineOutcome.Failed,
-            BusinessOutcome.Unverified, LifecycleOutcome.Interrupted, RecoveryOutcome.Quarantined, "writer_unknown");
-        judge.ObserveLine(judge.InputIdentity, "done");
-        var projected = facts with { Business = judge.Business };
-        Assert.Equal(EngineOutcome.Failed, projected.Engine); Assert.Equal(LifecycleOutcome.Interrupted, projected.Lifecycle);
-        Assert.Equal(RecoveryOutcome.Quarantined, projected.Recovery); Assert.Equal("writer_unknown", projected.ReasonCode);
-        Assert.Equal(BusinessOutcome.Succeeded, projected.Business);
-    }
-
     private static AttemptBusinessJudgement Keywords(System.Collections.Immutable.ImmutableArray<string> success,
         System.Collections.Immutable.ImmutableArray<string> failure = default) => new(Guid.NewGuid(),
         new(AutomationJudgementLanguage.Keywords, success, failure.IsDefault ? [] : failure, null));

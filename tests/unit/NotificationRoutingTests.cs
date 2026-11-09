@@ -34,7 +34,7 @@ public sealed class NotificationRoutingTests
     {
         var deleted = Guid.NewGuid(); var known = new HashSet<Guid>();
         var selection = new NotificationTaskSelection([deleted]);
-        Assert.Same(selection, NotificationTaskPolicy.ValidateSelectionIds(known, selection, selection));
+        Assert.Equal(new[] { deleted }, NotificationTaskPolicy.ValidateSelectionIds(known, selection, selection).TaskIds);
         Assert.Equal("notification_target_not_found", Assert.Throws<NotificationTaskException>(() =>
             NotificationTaskPolicy.ValidateSelectionIds(known, selection)).Message);
     }
@@ -52,12 +52,11 @@ public sealed class NotificationRoutingTests
         Assert.Throws<NotificationTaskException>(() => NotificationRoutingPolicy.Select(null, [binding]));
     }
 
-    [Fact(DisplayName = "Disabling A Binding Preserves Its Selected References Without Dispatching It")]
-    public void PreservesDisabledSelections()
+    [Fact(DisplayName = "A Disabled Binding Does Not Dispatch Its Selected Notifications")]
+    public void SkipsDisabledBindings()
     {
         var task = Guid.NewGuid(); var binding = Binding() with { NotifyEnabled = false, NotificationTaskIds = [task] };
         Assert.Empty(NotificationRoutingPolicy.Select(null, [binding]));
-        Assert.Equal(new[] { task }, binding.NotificationTaskIds);
     }
 
     [Fact(DisplayName = "Binding And Queue Defaults Match Their Distinct Notification Policies")]

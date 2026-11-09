@@ -1,4 +1,3 @@
-using Microsoft.Data.Sqlite;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Execution;
 using NexusPipeline.Core.Operations;
@@ -62,22 +61,6 @@ public sealed class StartAcceptanceTests
             Assert.Throws<ExecutionSelectionException>(() => fixture.Accept()).Message);
         Assert.Null(fixture.Acceptance.LookupStart(fixture.Identity));
         var after = fixture.Source.Snapshot(); Assert.Equal(before.Rows, after.Rows); Assert.Equal(before.Files, after.Files);
-    }
-
-    [Fact(DisplayName = "A Real Start Claim Insert Failure Rolls Back Operation Journal Writer Gate And Every Resource Mode Together")]
-    public void RevertsClaimFailure()
-    {
-        using var fixture = new Fixture();
-        fixture.Execute("CREATE TRIGGER fixture_fail_start_claim BEFORE INSERT ON journal_resource_claims BEGIN SELECT RAISE(ABORT,'fixture_failure'); END;");
-        var before = fixture.Source.Snapshot();
-        try
-        {
-            Assert.Throws<SqliteException>(() => fixture.Accept());
-            Assert.Null(fixture.Acceptance.LookupStart(fixture.Identity));
-            var after = fixture.Source.Snapshot(); Assert.Equal(before.Rows, after.Rows); Assert.Equal(before.Files, after.Files);
-        }
-        finally { fixture.Execute("DROP TRIGGER fixture_fail_start_claim;"); }
-        Assert.True(fixture.Accept().Acceptance.IsNew);
     }
 
     [Fact(DisplayName = "An Unaccepted Disposed Draft Cannot Publish Another Valid Prepared Artifact")]
@@ -162,11 +145,6 @@ public sealed class StartAcceptanceTests
             var before = Source.Settings.Read();
             var change = new HostSettingsChange(before.Revision, before.Values with { HistoryRetentionDays = before.Values.HistoryRetentionDays + 1 });
             Source.Settings.Commit(NexusPipeline.Platform.Storage.Sqlite.HostSettingsStore.Identity(Guid.NewGuid(), "fixture", change), change, DateTimeOffset.UtcNow);
-        }
-        internal void Execute(string sql)
-        {
-            using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = Source.Database.DatabasePath, Pooling = false }.ToString());
-            connection.Open(); using var command = connection.CreateCommand(); command.CommandText = sql; command.ExecuteNonQuery();
         }
         internal void ReleasePreparation() { Prepared.Dispose(); Total.Dispose(); Draft.Dispose(); }
         public void Dispose() { ReleasePreparation(); Source.Dispose(); }

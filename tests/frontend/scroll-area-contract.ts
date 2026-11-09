@@ -25,7 +25,7 @@ export async function scrollAreaContract(fixture: HTMLElement, check: (value: un
     area.focus();
     check(document.activeElement === area, 'the scroll area accepts explicit keyboard focus');
     area.hidden = true; await frame(); area.hidden = false; await frame();
-    check(area.scrollTop > 0 && last.textContent === 'Last record', 'hiding and returning preserves the current content position');
+    check(area.scrollTop > 0 && area.scrollLeft > 0, 'hiding and returning preserves the current content position');
   } finally { area.remove(); }
   const text = document.createElement('nexus-text-area') as UiElement<'nexus-text-area'>;
   text.rows = 3; text.value = Array.from({ length: 80 }, (_, index) => 'Line ' + index).join('\n');

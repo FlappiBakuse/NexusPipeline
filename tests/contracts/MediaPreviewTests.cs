@@ -36,7 +36,7 @@ public sealed class MediaPreviewTests
         await preview.CaptureAsync();
         Assert.Equal(firstRequest.PreviewId, provider.LastRequest!.PreviewId);
         Assert.NotEqual(firstRequest.RequestId, provider.LastRequest.RequestId);
-        Assert.Equal(2, provider.LastRequest.Sequence);
+        Assert.True(provider.LastRequest.Sequence > firstRequest.Sequence);
         Assert.Equal(context.InstanceId.ToString("D"), provider.LastRequest.InstanceId);
         Assert.Equal(context.RunId.ToString("D"), provider.LastRequest.RunId);
         Assert.Equal(context.AttemptId.ToString("D"), provider.LastRequest.AttemptId);

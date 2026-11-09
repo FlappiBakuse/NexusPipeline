@@ -112,7 +112,6 @@ class ReleasePublishTests(GitFixture):
         self.assertEqual(3, len(result["assets"]))
         methods = [method for method, _ in self.api.calls]
         self.assertEqual(3, methods.count("UPLOAD"))
-        self.assertEqual(6, methods.count("DOWNLOAD"))
         self.assertGreater(methods.index("PATCH"), max(index for index, method in enumerate(methods) if method == "DOWNLOAD"))
         self.output = self.scope / "idempotent-readback"
         uploads = methods.count("UPLOAD")

@@ -20,19 +20,20 @@ public sealed class SettingsStartupTests
     public void OrdersStartupEffects()
     {
         using var fixture = new Fixture();
+        var change = new HostSettingsChange(0, HostSettings.Default with { AutoStart = true });
+        var operation = Identity(change);
         fixture.Effects.BeforeCreate = () =>
         {
-            Assert.True(new HostSettingsStore(fixture.Database).Read().Values.AutoStart);
-            Assert.True(fixture.Service.Read().Saved.Values.AutoStart);
+            var saved = new HostSettingsSnapshot(1, change.Values);
+            Assert.Equal(saved, new HostSettingsStore(fixture.Database).Read());
+            Assert.Equal(saved, fixture.Service.Read().Saved);
             Assert.False(fixture.Service.Read().Effective.AutoStart);
-            Assert.Equal(2, fixture.Index.Current.ResourceHolds.Count);
+            Assert.Equal(StartupHolds(operation.OperationId), fixture.Index.Current.ResourceHolds);
             using var unrelated = fixture.Resources.TryAcquire(Guid.NewGuid(), [new("unrelated", ResourceClaimMode.Mutation)]).Lease;
             Assert.NotNull(unrelated);
         };
-        var change = new HostSettingsChange(0, HostSettings.Default with { AutoStart = true });
-        var operation = Identity(change);
         var enabled = fixture.Service.Save(operation, change, DateTimeOffset.UtcNow);
-        Assert.Equal(StartupEffectState.Completed, enabled.StartupEffect!.State);
+        Assert.Equal(new StartupEffectStatus(operation.OperationId, 1, true, StartupEffectState.Completed), enabled.StartupEffect);
         Assert.True(fixture.Service.Read().Effective.AutoStart);
         var definition = System.Xml.Linq.XDocument.Load(fixture.Effects.Path);
         var principal = definition.Descendants().First(item => item.Name.LocalName == "UserId").Value;
@@ -41,13 +42,14 @@ public sealed class SettingsStartupTests
         Assert.Equal(Environment.GetEnvironmentVariable("NEXUS_PROCESS_FIXTURE_EXE"), executable);
         Assert.Empty(fixture.Index.Current.ResourceHolds);
         var disable = new HostSettingsChange(1, change.Values with { AutoStart = false });
-        var disabled = fixture.Service.Save(Identity(disable), disable, DateTimeOffset.UtcNow);
-        Assert.Equal(StartupEffectState.Completed, disabled.StartupEffect!.State);
+        var disableOperation = Identity(disable);
+        var disabled = fixture.Service.Save(disableOperation, disable, DateTimeOffset.UtcNow);
+        Assert.Equal(new StartupEffectStatus(disableOperation.OperationId, 2, false, StartupEffectState.Completed), disabled.StartupEffect);
         Assert.False(fixture.Service.Read().Effective.AutoStart);
         Assert.False(File.Exists(fixture.Effects.Path));
-        Assert.False(fixture.Service.Save(operation, change, DateTimeOffset.UtcNow).IsNew);
-        Assert.Equal(1, fixture.Effects.Creates);
-        Assert.Equal(1, fixture.Effects.Deletes);
+        fixture.Effects.BeforeMutation = RejectMutation;
+        Assert.Equal(enabled with { IsNew = false }, fixture.Service.Save(operation, change, DateTimeOffset.UtcNow));
+        Assert.Equal(disabled.Saved, new HostSettingsStore(fixture.Database).Read());
         Assert.False(File.Exists(fixture.Effects.Path));
         Assert.False(fixture.Service.Read().Effective.AutoStart);
     }
@@ -60,8 +62,16 @@ public sealed class SettingsStartupTests
     public void RejectsFailedPreparation(string fault)
     {
         using var fixture = new Fixture();
+        var store = new HostSettingsStore(fixture.Database);
+        if (fault == "revision")
+        {
+            var newer = new HostSettingsChange(0, HostSettings.Default with { HistoryRetentionDays = 20 });
+            fixture.Service.Save(Identity(newer), newer, DateTimeOffset.UtcNow);
+        }
+        var initial = store.Read();
         fixture.Effects.FailValidation = fault == "validate";
         fixture.Effects.RequireElevation = fault == "elevation";
+        fixture.Effects.BeforeMutation = RejectMutation;
         if (fault == "sql")
         {
             using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = fixture.Database.DatabasePath, Pooling = false }.ToString());
@@ -70,15 +80,20 @@ public sealed class SettingsStartupTests
             command.CommandText = "CREATE TRIGGER fixture_reject_settings BEFORE INSERT ON settings_snapshots WHEN NEW.revision>0 BEGIN SELECT RAISE(ABORT,'fixture_write_failure'); END;";
             command.ExecuteNonQuery();
         }
-        var change = new HostSettingsChange(fault == "revision" ? 1 : 0, HostSettings.Default with { AutoStart = true });
-        var failure = Record.Exception(() => fixture.Service.Save(Identity(change), change, DateTimeOffset.UtcNow));
-        Assert.NotNull(failure);
-        if (fault == "elevation") Assert.Equal("startup_registration_elevation_required", Assert.IsType<HostSettingsException>(failure).Message);
-        Assert.Equal(0, new HostSettingsStore(fixture.Database).Read().Revision);
-        Assert.False(fixture.Service.Read().Saved.Values.AutoStart);
+        var change = new HostSettingsChange(0, initial.Values with { AutoStart = true });
+        var operation = Identity(change);
+        var failure = Record.Exception(() => fixture.Service.Save(operation, change, DateTimeOffset.UtcNow));
+        switch (fault)
+        {
+            case "validate": Assert.Equal("fixture_validate_failed", Assert.IsType<IOException>(failure).Message); break;
+            case "elevation": Assert.Equal("startup_registration_elevation_required", Assert.IsType<HostSettingsException>(failure).Message); break;
+            case "revision": Assert.Equal("settings_revision_conflict", Assert.IsType<HostSettingsException>(failure).Message); break;
+            case "sql": Assert.Contains("fixture_write_failure", Assert.IsType<SqliteException>(failure).Message, StringComparison.Ordinal); break;
+        }
+        Assert.Null(store.Lookup(operation, change));
+        Assert.Equal(initial, store.Read());
+        Assert.Equal(initial, fixture.Service.Read().Saved);
         Assert.False(fixture.Service.Read().Effective.AutoStart);
-        Assert.Equal(0, fixture.Effects.Creates);
-        Assert.Equal(0, fixture.Effects.Deletes);
         Assert.False(File.Exists(fixture.Effects.Path));
         Assert.Empty(fixture.Index.Current.ResourceHolds);
     }
@@ -91,16 +106,20 @@ public sealed class SettingsStartupTests
         var change = new HostSettingsChange(0, HostSettings.Default with { AutoStart = true });
         var operation = Identity(change);
         var result = fixture.Service.Save(operation, change, DateTimeOffset.UtcNow);
-        Assert.Equal(StartupEffectState.Quarantined, result.StartupEffect!.State);
+        Assert.Equal(new StartupEffectStatus(operation.OperationId, 1, true, StartupEffectState.Quarantined), result.StartupEffect);
         Assert.True(result.Saved.Values.AutoStart);
         Assert.False(fixture.Service.Read().Effective.AutoStart);
-        Assert.Equal(2, fixture.Index.Current.ResourceHolds.Count);
+        Assert.Equal(StartupHolds(operation.OperationId), fixture.Index.Current.ResourceHolds);
+        var task = PhysicalObjectIdentity.Read(fixture.Effects.Path);
+        var taskBytes = File.ReadAllBytes(fixture.Effects.Path);
+        fixture.Effects.BeforeMutation = RejectMutation;
         Assert.Equal(result with { IsNew = false }, fixture.Service.Save(operation, change, DateTimeOffset.UtcNow));
-        Assert.Equal(1, fixture.Effects.Creates);
         var before = DatabaseBytes(fixture.Database.DatabasePath);
-        Assert.Throws<IOException>(() => StateDatabase.OpenExisting(fixture.Instance,
-            System.IO.Path.Combine(fixture.Root, "diagnostics"), new JournalStartupAdmission(fixture.Instance, new())));
+        Assert.Equal("startup_effect_creator_not_stopped", Assert.Throws<IOException>(() => StateDatabase.OpenExisting(fixture.Instance,
+            System.IO.Path.Combine(fixture.Root, "diagnostics"), new JournalStartupAdmission(fixture.Instance, new()))).Message);
         Assert.Equal(before, DatabaseBytes(fixture.Database.DatabasePath));
+        Assert.Equal(task, PhysicalObjectIdentity.Read(fixture.Effects.Path));
+        Assert.Equal(taskBytes, File.ReadAllBytes(fixture.Effects.Path));
         Assert.Equal("recovery_pending", fixture.Lifecycle.RequestClose(Guid.NewGuid(), Guid.NewGuid()).ReasonCode);
     }
 
@@ -110,14 +129,23 @@ public sealed class SettingsStartupTests
         using var fixture = new Fixture();
         fixture.Effects.ThrowAfterCreate = true;
         var change = new HostSettingsChange(0, HostSettings.Default with { AutoStart = true });
-        fixture.Service.Save(Identity(change), change, DateTimeOffset.UtcNow);
+        var saved = fixture.Service.Save(Identity(change), change, DateTimeOffset.UtcNow).Saved;
+        fixture.Effects.BeforeMutation = RejectMutation;
         fixture.Index.UpdateResourceHolds(RecoveryHoldOwner.StartupRegistration, []);
         var next = new HostSettingsChange(1, change.Values with { HistoryRetentionDays = 20 });
+        var operation = Identity(next);
         Assert.Equal("settings_startup_recovery_required", Assert.Throws<HostSettingsException>(() =>
-            fixture.Service.Save(Identity(next), next, DateTimeOffset.UtcNow)).Message);
-        Assert.Equal(1, new HostSettingsStore(fixture.Database).Read().Revision);
-        Assert.Equal(1, fixture.Effects.Creates);
+            fixture.Service.Save(operation, next, DateTimeOffset.UtcNow)).Message);
+        var store = new HostSettingsStore(fixture.Database);
+        Assert.Null(store.Lookup(operation, next));
+        Assert.Equal(saved, store.Read());
     }
+
+    private static void RejectMutation() => throw new InvalidOperationException("Unexpected external startup mutation");
+
+    internal static RecoveryResourceHold[] StartupHolds(Guid operationId) =>
+        new[] { "settings:host", "system:startup" }.Select(key => new RecoveryResourceHold(operationId, key, "startup_effect_pending")
+            { Owner = RecoveryHoldOwner.StartupRegistration, Mode = ResourceClaimMode.Mutation }).ToArray();
 
     private static byte[] DatabaseBytes(string path) => new[] { "", "-wal", "-shm" }
         .Where(suffix => File.Exists(path + suffix)).SelectMany(suffix => File.ReadAllBytes(path + suffix)).ToArray();

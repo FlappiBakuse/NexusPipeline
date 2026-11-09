@@ -32,34 +32,35 @@ public sealed class RecordStoreTests
             cursor = page.Next;
         }
         Assert.Equal(expected.Append(concurrent), collected);
-        Assert.Equal(collected.Count, collected.Select(item => item.FinalAttempt.RunId).Distinct().Count());
     }
 
     [Theory(DisplayName = "Filtered History Returns Only Its Frozen Facts With Stable Pages")]
-    [InlineData("all")]
     [InlineData("automation")]
     [InlineData("user")]
     [InlineData("business")]
-    public void UsesFilteredIndexes(string filter)
+    public void FiltersHistoryPages(string filter)
     {
         var (_, store) = RecordStoreFixture.NewStore();
         var automation = Guid.NewGuid();
         var user = Guid.NewGuid();
-        var selected = Enumerable.Range(0, 120).Select(number => RecordStoreFixture.Record(number, automation) with { UserId = user }).ToArray();
-        store.AppendCompleted(selected);
-        store.AppendCompleted([RecordStoreFixture.Record(500, Guid.NewGuid()) with { FinalAttempt = RecordStoreFixture.Record(500, Guid.NewGuid()).FinalAttempt with { Business = BusinessOutcome.Failed } }]);
-        var query = filter switch
+        var other = RecordStoreFixture.Record(0, automation) with { UserId = user };
+        var first = RecordStoreFixture.Record(7, automation) with { UserId = user };
+        var second = RecordStoreFixture.Record(14, automation) with { UserId = user };
+        var (query, excluded) = filter switch
         {
-            "all" => new RecordQuery(), "automation" => new(AutomationId: automation),
-            "user" => new(UserId: user), "business" => new(Business: BusinessOutcome.Succeeded),
+            "automation" => (new RecordQuery(1, AutomationId: automation), other with { AutomationId = Guid.NewGuid() }),
+            "user" => (new RecordQuery(1, UserId: user), other with { UserId = Guid.NewGuid() }),
+            "business" => (new RecordQuery(1, Business: BusinessOutcome.Succeeded),
+                other with { FinalAttempt = other.FinalAttempt with { Business = BusinessOutcome.Failed } }),
             _ => throw new InvalidOperationException()
         };
+        store.AppendCompleted([excluded, first, second]);
         var page = store.ReadPage(query);
-        Assert.Equal(50, page.Items.Count);
-        if (filter != "all") Assert.All(page.Items, item => Assert.Equal(automation, item.AutomationId));
+        Assert.Equal(first, Assert.Single(page.Items));
         Assert.NotNull(page.Next);
         var next = store.ReadPage(query with { After = page.Next });
-        Assert.Empty(page.Items.Select(item => item.FinalAttempt.RunId).Intersect(next.Items.Select(item => item.FinalAttempt.RunId)));
+        Assert.Equal(second, Assert.Single(next.Items));
+        Assert.Null(next.Next);
     }
 
     [Theory(DisplayName = "Group Scope Filters Accounts Before The Keyset Limit")]

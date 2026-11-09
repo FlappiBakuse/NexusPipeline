@@ -242,13 +242,38 @@ public sealed class EditStoreTests
         var request = new ConfigurationEditRequest(1, [Target("main"), Target("extra")]);
         var operation = ConfigurationEditStore.BeginIdentity(Guid.NewGuid(), "fixture", request);
         using var prepared = store.Prepare(operation.OperationId, request);
+        var expected = prepared.Use((_, resources) => resources);
+        var journals = expected.Select(resource => resource.JournalId).ToHashSet();
+        var registry = new RecoveryJournalRegistry(fixture.Database);
         fixture.Execute("CREATE TRIGGER fixture_fail_begin BEFORE INSERT ON configuration_edit_resources WHEN NEW.resource_id='main' BEGIN SELECT RAISE(ABORT,'fixture_failure'); END;");
         Assert.Throws<SqliteException>(() => store.Begin(operation, prepared, DateTimeOffset.UtcNow));
-        foreach (var table in new[] { "configuration_edit_sessions", "configuration_edit_resources", "operation_journals", "file_effects", "resource_isolations" }) Assert.Equal(0, fixture.Count(table));
-        Assert.Null(store.LookupBegin(operation, request)); Assert.Equal(1, fixture.Count("operations"));
+        Assert.Null(store.Read(operation.OperationId, operation.SubjectId));
+        Assert.Null(store.LookupBegin(operation, request));
+        var failed = registry.ReadSnapshot();
+        Assert.DoesNotContain(failed.Journals, journal => journals.Contains(journal.JournalId) || journal.OperationId == operation.OperationId);
+        Assert.DoesNotContain(failed.FileEffects, effect => journals.Contains(effect.JournalId));
+        Assert.DoesNotContain(failed.Isolations, isolation => journals.Contains(isolation.JournalId));
         fixture.Execute("DROP TRIGGER fixture_fail_begin;");
-        Assert.True(store.Begin(operation, prepared, DateTimeOffset.UtcNow).IsNew);
-        Assert.Equal(2, fixture.Count("operation_journals")); Assert.Equal(8, fixture.Count("file_effects"));
+        var accepted = store.Begin(operation, prepared, DateTimeOffset.UtcNow);
+        Assert.True(accepted.IsNew);
+        Assert.Equal(operation.OperationId, accepted.SessionId);
+        Assert.Equal(ConfigurationEditPhase.Prepared, accepted.Phase);
+        Assert.Equal(expected.ToArray(), accepted.Resources.ToArray());
+        var snapshot = registry.ReadSnapshot();
+        foreach (var resource in expected)
+        {
+            var journal = Assert.Single(snapshot.Journals, item => item.JournalId == resource.JournalId);
+            Assert.Equal(operation.OperationId, journal.OperationId);
+            Assert.Equal(JournalKind.ConfigEdit, journal.Kind); Assert.Equal(JournalPhase.Prepared, journal.Phase);
+            Assert.Equal(resource.PlanPath, journal.PlanPath); Assert.Equal(resource.PlanDigest, journal.PlanDigest);
+            Assert.Contains(ConfigurationRevisionService.ResourceKey(resource.Address), journal.ResourceKeys);
+            Assert.Equal(journal.ResourceKeys.Order(StringComparer.Ordinal), snapshot.Isolations.Where(item => item.JournalId == resource.JournalId)
+                .Select(item => item.ResourceKey).Order(StringComparer.Ordinal));
+            foreach (var action in new[] { FileEffectAction.PreserveOriginal, FileEffectAction.InstallCandidate,
+                FileEffectAction.RetireCandidate, FileEffectAction.RestoreOriginal })
+                Assert.Contains(snapshot.FileEffects, item => item.JournalId == resource.JournalId && item.Action == action &&
+                    item.State == FileEffectState.Pending && item.IntentDigest == resource.PlanDigest && item.ReceiptDigest is null);
+        }
         foreach (var target in request.Targets) Assert.Equal("original-" + target.Address.ResourceId, File.ReadAllText(target.TargetPath));
         ConfigurationEditInventory.VerifyReadOnly(fixture.Database);
     }

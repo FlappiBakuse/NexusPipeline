@@ -3,6 +3,7 @@ using System.Runtime.Versioning;
 using System.Security.Cryptography;
 using System.Text.Json;
 using NexusPipeline.Core.Configuration;
+using NexusPipeline.Platform.Processes;
 using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Configuration;
 
@@ -15,6 +16,7 @@ internal sealed class EditorOutputFixture : IDisposable
     internal InstanceLease Lease { get; }
     internal ConfigurationEditorProcess Editor { get; }
     internal EditOutputRecorder Recorder { get; }
+    private string ReadyReport => Path.Combine(Edit.Base.Root, "editor-ready.json");
     internal string Executable => Environment.GetEnvironmentVariable("NEXUS_PROCESS_FIXTURE_EXE")!;
     internal string ExecutableSha256 => Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(Executable)));
 
@@ -29,10 +31,22 @@ internal sealed class EditorOutputFixture : IDisposable
 
     internal async Task WriteAsync(object[] operations, bool child = false)
     {
-        var input = Path.Combine(Edit.Base.Root, "editor-input.json"); var report = Path.Combine(Edit.Base.Root, "editor-ready.json");
+        var input = Path.Combine(Edit.Base.Root, "editor-input.json"); var report = ReadyReport;
         File.WriteAllBytes(input, JsonSerializer.SerializeToUtf8Bytes(new { operations, child }));
         Editor.Start(Executable, ExecutableSha256, ["configuration-editor-writer", input, report], Edit.Base.Root);
         Xunit.Assert.Equal("edited", (await OwnedCrashProcess.ReadReportAsync(report)).GetProperty("status").GetString());
+    }
+
+    internal async Task<ProcessIdentity[]> ReadWritersAsync(bool child = false)
+    {
+        var root = await ReadWriterAsync(ReadyReport);
+        return child ? [root, await ReadWriterAsync(ReadyReport + ".child")] : [root];
+    }
+
+    private static async Task<ProcessIdentity> ReadWriterAsync(string path)
+    {
+        var report = await OwnedCrashProcess.ReadReportAsync(path);
+        return ProcessIdentityReader.Read(report.GetProperty("processId").GetInt32());
     }
 
     internal ConfigurationEditCompletion Seal(StoppedConfigurationEditor stopped)

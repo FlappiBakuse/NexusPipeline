@@ -17,7 +17,7 @@ public sealed class ProjectConfigTests
         using var fixture = new ProjectSourceFixture(configuration: true, file: file); using var source = fixture.Open(); using var mounts = Open(fixture, source);
         using var port = new SelectedSourcePort(source, () => { }, default, mounts);
         var metadata = Assert.Single(port.Configurations);
-        Assert.Equal("account", metadata.ResourceId); Assert.Equal(1, metadata.Revision); Assert.Equal(64, metadata.SnapshotSha256.Length);
+        Assert.Equal("account", metadata.ResourceId); Assert.Equal(1, metadata.Revision);
         Assert.Equal(mounts.Mounts[0].Manifest.Sha256, metadata.SnapshotSha256);
         File.Delete(fixture.ConfigurationFile!);
         if (!file) File.WriteAllText(Path.Combine(fixture.Path, "config", "other.json"), "{\"account\":\"other\"}");

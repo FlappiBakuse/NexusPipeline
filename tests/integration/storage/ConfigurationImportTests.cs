@@ -36,11 +36,11 @@ public sealed class ConfigurationImportTests
         var mcp = new AuthenticatedControlRequest(ControlOrigin.Mcp, "fixture", null, () => new(true, true));
         Assert.DoesNotContain(tools.List(mcp), tool => tool.Name == "configuration_import");
         Assert.Throws<UnauthorizedAccessException>(() => tools.Call(mcp, parameters));
-        Assert.Equal(0, fixture.Base.Count("configuration_batch_items"));
+        AssertNoImport(fixture);
         var local = new AuthenticatedControlRequest(ControlOrigin.Local, "fixture", null, () => new(true, true));
         Assert.Contains(tools.List(local), tool => tool.Name == "configuration_import");
         _ = tools.Call(local, parameters);
-        Assert.Equal(2, fixture.Base.Count("configuration_batch_items"));
+        AssertImported(fixture);
     }
 
     [Theory]
@@ -57,17 +57,9 @@ public sealed class ConfigurationImportTests
             Assert.Throws<IOException>(() => File.WriteAllText(fixture.Second, "changed"));
         });
         var result = fixture.Service(observer).Import("fixture", fixture.Request, DateTimeOffset.UtcNow);
-        Assert.True(result.IsNew); Assert.Equal(2, result.Items.Length);
-        Assert.All(result.Items, item => Assert.Equal(1, item.Saved.Revision));
+        Assert.True(result.IsNew);
         Assert.Equal(before, fixture.Fingerprint());
-        var files = result.Items.SelectMany(item => item.Saved.Tree.Entries).Where(entry => entry.Kind == FileObjectKind.File).ToArray();
-        Assert.Equal(2, files.Length);
-        foreach (var entry in files)
-        {
-            using var stream = new ImmutableBlobStore(fixture.Base.Instance, new()).OpenVerified(new(
-                $"blobs/content/{entry.Sha256}.bin", entry.SizeBytes, entry.Sha256!));
-            using var reader = new StreamReader(stream); Assert.Contains("fixture-private", reader.ReadToEnd());
-        }
+        AssertImported(fixture, result);
         ConfigurationBatchInventory.VerifyReadOnly(fixture.Base.Instance, fixture.Base.Database, new());
     }
 
@@ -79,6 +71,7 @@ public sealed class ConfigurationImportTests
         using var fixture = new Fixture(specialized);
         var service = fixture.Service();
         var saved = service.Import("fixture", fixture.Request, DateTimeOffset.UtcNow);
+        Assert.True(saved.IsNew);
         File.Delete(fixture.First); File.Delete(fixture.Second);
         var definitions = new AutomationDefinitionStore(fixture.Base.Database); var catalog = definitions.Read();
         var binding = catalog.Bindings.Single(item => item.Id == fixture.Request.BindingId);
@@ -86,11 +79,11 @@ public sealed class ConfigurationImportTests
         definitions.Commit(AutomationDefinitionStore.Identity(Guid.NewGuid(), "fixture", change), change, DateTimeOffset.UtcNow);
         var replay = service.Import("fixture", fixture.Request, DateTimeOffset.UtcNow);
         Assert.False(replay.IsNew);
-        Assert.Equal(saved.Items.Select(item => item.Saved.Tree.Entries.ToArray()), replay.Items.Select(item => item.Saved.Tree.Entries.ToArray()));
+        AssertImported(fixture, replay);
         Assert.Throws<OperationConflictException>(() => service.Import("foreign", fixture.Request, DateTimeOffset.UtcNow));
         Assert.Throws<OperationConflictException>(() => service.Import("fixture", fixture.Request with { ExpectedScriptRevision = 3 }, DateTimeOffset.UtcNow));
         Assert.Throws<ConfigurationException>(() => service.Import("fixture", fixture.Request with { OperationId = Guid.NewGuid() }, DateTimeOffset.UtcNow));
-        Assert.Equal(2, fixture.Base.Count("configuration_batch_items"));
+        AssertImported(fixture);
     }
 
     [Theory]
@@ -115,10 +108,11 @@ public sealed class ConfigurationImportTests
         using var held = reason == "logical" ? fixture.Resources.TryAcquire(Guid.NewGuid(),
             [new("automation:definitions", ResourceClaimMode.Mutation)]).Lease : reason == "physical" ?
             fixture.Resources.TryAcquire(Guid.NewGuid(), PhysicalResourceAdmission.Read(fixture.First)).Lease : null;
+        if (reason is "logical" or "physical") Assert.NotNull(held);
         var cancellation = reason == "cancelled" ? new CancellationToken(true) : default;
         if (reason == "cancelled") Assert.Throws<OperationCanceledException>(() => fixture.Service().Import("fixture", request, DateTimeOffset.UtcNow, cancellation));
         else Assert.Throws<ConfigurationException>(() => fixture.Service().Import("fixture", request, DateTimeOffset.UtcNow));
-        Assert.Equal(before, fixture.Fingerprint()); Assert.Equal(0, fixture.Base.Count("configuration_batch_items"));
+        Assert.Equal(before, fixture.Fingerprint()); AssertNoImport(fixture);
     }
 
     [Fact]
@@ -127,11 +121,13 @@ public sealed class ConfigurationImportTests
         using var fixture = new Fixture(false); var before = fixture.Fingerprint();
         var observer = new Observer((point, index) =>
         { if (point == BatchPersistencePoint.ItemPublished && index == 0) throw new IOException("injected_import_failure"); });
-        Assert.Throws<IOException>(() => fixture.Service(observer).Import("fixture", fixture.Request, DateTimeOffset.UtcNow));
-        Assert.Equal(0, fixture.Base.Count("configuration_batch_items"));
-        foreach (var resource in fixture.Request.Resources) Assert.Null(fixture.Base.Revisions.Read(new(fixture.Request.BindingId, resource.ResourceId)));
+        Assert.Equal("injected_import_failure", Assert.Throws<IOException>(() =>
+            fixture.Service(observer).Import("fixture", fixture.Request, DateTimeOffset.UtcNow)).Message);
+        AssertNoImport(fixture);
         Assert.Equal(before, fixture.Fingerprint());
-        Assert.True(fixture.Service().Import("fixture", fixture.Request, DateTimeOffset.UtcNow).IsNew);
+        var saved = fixture.Service().Import("fixture", fixture.Request, DateTimeOffset.UtcNow);
+        Assert.True(saved.IsNew);
+        AssertImported(fixture, saved);
         Assert.Throws<ConfigurationException>(() => fixture.Service().Import("fixture",
             fixture.Request with { OperationId = Guid.NewGuid() }, DateTimeOffset.UtcNow));
     }
@@ -154,12 +150,49 @@ public sealed class ConfigurationImportTests
             if (broken) { File.Delete(original); Directory.Delete(outside); }
             var error = Assert.Throws<IOException>(() => fixture.Service().Import("fixture", fixture.Request, DateTimeOffset.UtcNow));
             Assert.Equal("filesystem_reparse_point_rejected", error.Message);
-            Assert.Equal(0, fixture.Base.Count("configuration_batch_items"));
-            if (!broken) Assert.Equal("{\"fixture-private\":2}", File.ReadAllText(original));
-            foreach (var resource in fixture.Request.Resources)
-                Assert.Null(fixture.Base.Revisions.Read(new(fixture.Request.BindingId, resource.ResourceId)));
+            if (!broken) Assert.Equal(Fixture.SecondContent, File.ReadAllText(original));
+            AssertNoImport(fixture);
         }
         finally { Directory.Delete(selected); }
+    }
+
+    private static void AssertNoImport(Fixture fixture)
+    {
+        Assert.Null(fixture.Service().ReadAccepted("fixture", fixture.Request));
+        foreach (var resource in fixture.Request.Resources)
+            Assert.Null(fixture.Base.Revisions.Read(new(fixture.Request.BindingId, resource.ResourceId)));
+    }
+
+    private static void AssertImported(Fixture fixture, ConfigurationBatchResult? result = null)
+    {
+        var request = fixture.Request;
+        result ??= fixture.Service().ReadAccepted("fixture", request);
+        Assert.NotNull(result);
+        Assert.Equal(request.OperationId, result.OperationId);
+        Assert.Equal(request.Resources.Select(item => item.ResourceId).Order(StringComparer.Ordinal),
+            result.Items.Select(item => item.Saved.Address.ResourceId));
+        var binding = new AutomationDefinitionStore(fixture.Base.Database).Read().Bindings.Single(item => item.Id == request.BindingId);
+        var blobs = new ImmutableBlobStore(fixture.Base.Instance, new());
+        for (var index = 0; index < request.Resources.Length; index++)
+        {
+            var resource = request.Resources[index];
+            var address = new ConfigurationAddress(request.BindingId, resource.ResourceId);
+            var item = Assert.Single(result.Items, item => item.Saved.Address == address);
+            var saved = fixture.Base.Revisions.Read(address);
+            Assert.NotNull(saved);
+            Assert.Equal(request.OperationId, item.OperationId);
+            Assert.Equal(resource.ExpectedRevision + 1, item.Saved.Revision);
+            Assert.Equal(item.Saved.Revision, saved.Revision);
+            Assert.Equal(binding.UserId, saved.UserId); Assert.Equal(binding.ScriptId, saved.ScriptId);
+            Assert.Equal(item.Saved.Tree.Entries, saved.Tree.Entries);
+            var file = Assert.Single(saved.Tree.Entries, entry => entry.Kind == FileObjectKind.File);
+            Assert.Equal(index == 0 ? "" : "second.json", file.RelativePath);
+            using var stream = blobs.OpenVerified(new($"blobs/content/{file.Sha256}.bin", file.SizeBytes, file.Sha256!));
+            using var bytes = new MemoryStream();
+            stream.CopyTo(bytes);
+            var expected = index == 0 ? Fixture.FirstContent : Fixture.SecondContent;
+            Assert.Equal(System.Text.Encoding.UTF8.GetBytes(expected), bytes.ToArray());
+        }
     }
 
     private sealed class Observer(Action<BatchPersistencePoint, int> action) : IBatchPersistenceObserver
@@ -167,6 +200,8 @@ public sealed class ConfigurationImportTests
 
     private sealed class Fixture : IDisposable
     {
+        internal const string FirstContent = "{\"fixture-private\":1}";
+        internal const string SecondContent = "{\"fixture-private\":2}";
         internal ConfigurationBatchFixture Base { get; } = new();
         internal InstanceLease Lease { get; }
         internal ResourceLeaseManager Resources { get; }
@@ -180,7 +215,7 @@ public sealed class ConfigurationImportTests
             var root = catalog.Roots[0];
             First = Path.Combine(root.Path, "first.json"); Second = Path.Combine(root.Path, "profile/second.json");
             Directory.CreateDirectory(Path.GetDirectoryName(Second)!);
-            File.WriteAllText(First, "{\"fixture-private\":1}"); File.WriteAllText(Second, "{\"fixture-private\":2}");
+            File.WriteAllText(First, FirstContent); File.WriteAllText(Second, SecondContent);
             var paths = ImmutableArray.Create(new AutomationPath(root.Id, "first.json"), new AutomationPath(root.Id, "profile"));
             var script = catalog.Scripts[0] with { ConfigurationPaths = paths };
             var bindingId = Base.Binding;

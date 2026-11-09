@@ -1,4 +1,3 @@
-import json
 import os
 from pathlib import Path
 import shutil
@@ -25,15 +24,6 @@ class SdkWorkspaceTests(unittest.TestCase):
             raise ValueError("SDK fixture cleanup ownership mismatch")
         shutil.rmtree(self.scope)
 
-    def test_reuses_bytes(self):
-        synchronize(self.source, self.target, self.ownership)
-        (self.source / "consumer.cs").unlink()
-        (self.source / "replacement.cs").write_bytes(b"replacement-source")
-        result = synchronize(self.source, self.target, self.ownership)
-        self.assertFalse((self.target / "consumer.cs").exists())
-        self.assertEqual(b"replacement-source", (self.target / "replacement.cs").read_bytes())
-        self.assertEqual(result, json.loads(self.ownership.read_bytes())["records"])
-
     def test_preserves_changes(self):
         synchronize(self.source, self.target, self.ownership)
         (self.target / "consumer.cs").write_bytes(b"unknown-local-edit")
@@ -55,9 +45,14 @@ class SdkWorkspaceTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             synchronize(self.source, self.target, self.ownership)
         self.assertFalse(self.ownership.exists())
+        self.assertEqual(b"changed", (self.target / "consumer.cs").read_bytes())
         (self.target / "consumer.cs").write_bytes(b"first-source")
         synchronize(self.source, self.target, self.ownership)
-        self.assertEqual(str(self.target), json.loads(self.ownership.read_bytes())["target"])
+        (self.source / "consumer.cs").unlink()
+        (self.source / "replacement.cs").write_bytes(b"replacement-source")
+        synchronize(self.source, self.target, self.ownership)
+        self.assertFalse((self.target / "consumer.cs").exists())
+        self.assertEqual(b"replacement-source", (self.target / "replacement.cs").read_bytes())
 
     def test_rejects_overlap(self):
         with self.assertRaises(ValueError):

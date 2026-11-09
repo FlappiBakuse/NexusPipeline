@@ -29,18 +29,16 @@ public sealed class RetirementGuardTests
         await using var fixture = await ProviderRuntimeFixture.CreateAsync("retry-interrupted",
             retrySafe: true, retryApproved: true, maximumAttempts: 2);
         var receipt = await fixture.RunInterruptedAsync(); var source = fixture.Source;
-        Assert.False(new ExecutionRunFinality(source.Instance, source.Database, new()).IsFinal(receipt));
         var observed = new JournalWriterStore(source.Database).ObserveForCurrentExecutor(receipt.JournalId);
         Assert.True(observed.IsComplete); Assert.Equal(NexusPipeline.Core.Execution.WriterState.Stopped, observed.State);
-        Assert.Equal(0, fixture.Base.Count("run_records"));
-        Assert.Equal(1, fixture.Base.Count("execution_retry_intents"));
-        Assert.Equal(0, fixture.Base.Count("execution_retry_outcomes"));
-        var counts = fixture.Base.Counts();
+        var commits = source.Database.CommitSequence;
         var service = new ContentRetirementService(source.Instance, source.Database, new(), source.Lease, fixture.Base.Resources, fixture.Base.Index);
         var rejected = Assert.Throws<IOException>(() => service.RetireLogsPage(Guid.NewGuid(), "retirement-fixture", receipt.Facts.RunId));
         Assert.Equal("record_retirement_run_pending", rejected.Message);
-        Assert.Equal(counts, fixture.Base.Counts());
-        Assert.Equal(0, fixture.Base.Count("record_content_retirements"));
+        Assert.Equal(commits, source.Database.CommitSequence);
+        var retries = new ExecutionRetryService(source.Instance, source.Database, new(), source.Lease, fixture.Service);
+        using var waiting = Assert.IsType<PreparedExecutionRetry>(retries.ReadWaiting(receipt.Facts.RunId));
+        Assert.Equal(receipt.Facts.AttemptId, waiting.Frozen.PreviousAttemptId);
         Assert.Equal(receipt, new AttemptReceiptStore(source.Database).Read(receipt.Facts.AttemptId));
     }
 
@@ -50,12 +48,15 @@ public sealed class RetirementGuardTests
     public async Task PreservesNotificationSources(bool expand)
     {
         using var fixture = new NotificationReceiptFixture(); await fixture.Execute();
-        if (expand) Assert.Equal(1, fixture.Delivery.MaterializePending());
-        Assert.False(fixture.Delivery.IsSettledForRun(fixture.Receipt.Facts.RunId));
-        var source = fixture.Source;
+        if (expand) fixture.Delivery.MaterializePending();
+        var run = fixture.Receipt.Facts.RunId;
+        var pending = fixture.Delivery.ReadPendingForRun(run);
+        Assert.False(pending.IsSettled); Assert.Equal(expand, pending.IsExpanded);
+        var source = fixture.Source; var commits = source.Database.CommitSequence;
         var service = new ContentRetirementService(source.Instance, source.Database, new(), source.Lease, fixture.Base.Resources, fixture.Base.Index);
-        Assert.ThrowsAny<IOException>(() => service.RetireLogsPage(Guid.NewGuid(), "retirement-fixture", fixture.Receipt.Facts.RunId));
-        Assert.Equal(0, fixture.Base.Count("record_content_retirements"));
+        Assert.ThrowsAny<IOException>(() => service.RetireLogsPage(Guid.NewGuid(), "retirement-fixture", run));
+        Assert.Equal(commits, source.Database.CommitSequence);
+        Assert.Equal(pending, fixture.Delivery.ReadPendingForRun(run));
         Assert.Equal(fixture.Receipt, new AttemptReceiptStore(source.Database).Read(fixture.Receipt.Facts.AttemptId));
     }
 
@@ -73,8 +74,6 @@ public sealed class RetirementGuardTests
         using var input = assets.OpenVerified(asset);
         Assert.Equal(asset.SizeBytes, input.Length);
         Assert.Contains(fixture.Plan(page).Items, item => item.Blob.Sha256 == asset.Sha256);
-        Assert.True(new BlobReferenceIndex(fixture.Source.Instance, new(), fixture.Source.Database, blobs)
-            .IsReferenced(new($"blobs/content/{asset.Sha256}.bin", asset.SizeBytes, asset.Sha256)));
         Assert.Equal(fixture.Receipt, new AttemptReceiptStore(fixture.Source.Database).Read(fixture.Receipt.Facts.AttemptId));
     }
 

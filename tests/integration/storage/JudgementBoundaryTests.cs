@@ -114,41 +114,39 @@ public sealed class JudgementBoundaryTests
         using var fixture = new JudgementIntegrationFixture(AutomationJudgementLanguage.JavaScript, FinalOnly, "judgement-capacity");
         await using var step = new JudgementOwnedStep(fixture);
         step.Prepare(); step.Start(); await fixture.Ready();
-        var blobs = new ImmutableBlobStore(fixture.Source.Instance, new()); ExecutionJudgementEvidence? pending = null;
+        const long evidenceLimit = 64L * 1024 * 1024;
+        var blobs = new ImmutableBlobStore(fixture.Source.Instance, new()); ExecutionJudgementEvidence? exhausted = null;
         var total = fixture.Source.Lease.PublishExecution(() => fixture.State.Total);
         var inputBuilder = new JudgementInputBuilder(fixture.Source.Instance, fixture.Source.Database, new());
-        long nextInputBytes = 0;
         var timer = Stopwatch.StartNew();
         while (timer.Elapsed < TimeSpan.FromSeconds(30))
         {
             step.Collector.TryRequestStop(); await Task.Delay(100);
-            if (step.Owner.IsBusy) continue;
-            pending = JudgementEvidenceCodec.Read(blobs, step.Binding, step.Worker!.Snapshot()!);
+            if (step.Owner.IsBusy || step.Worker!.Snapshot() is not { } snapshot) continue;
+            var pending = JudgementEvidenceCodec.Read(blobs, step.Binding, snapshot);
             if (pending.Exchanges.IsEmpty) continue;
-            var archives = pending.Exchanges.Select(item => JudgementInvocationArchive.Read(blobs, item.Invocation)).ToArray();
-            var used = archives.Sum(item => item.SizeBytes) + pending.Exchanges.Sum(item => (item.Response?.SizeBytes ?? 0) + item.ProbeObservations.Sum(probe => JudgementProbeArchive.Read(blobs, probe).SizeBytes));
             var raw = await step.Collector.SnapshotOutputAsync();
-            nextInputBytes = inputBuilder.Prepare(total, pending.Identity, raw).MaximumEncodedBytes;
-            if (nextInputBytes > JudgementEvidenceBudget.MaximumInputBytes(64L * 1024 * 1024, used, final: false)) break;
+            var next = inputBuilder.Prepare(total, pending.Identity, raw).MaximumEncodedBytes;
+            if (next > JudgementEvidenceBudget.MaximumInputBytes(evidenceLimit, EvidenceBytes(pending), final: false))
+            { exhausted = pending; break; }
         }
-        Assert.NotNull(pending); Assert.NotEmpty(pending.Exchanges);
-        var prior = pending.Exchanges.Select(item => JudgementInvocationArchive.Read(blobs, item.Invocation)).ToArray();
-        var periodicBytes = prior.Sum(item => item.SizeBytes) + pending.Exchanges.Sum(item => (item.Response?.SizeBytes ?? 0) + item.ProbeObservations.Sum(probe => JudgementProbeArchive.Read(blobs, probe).SizeBytes));
-        File.WriteAllText(Path.Combine(fixture.Source.Root, "judgement-capacity-observation.json"), System.Text.Json.JsonSerializer.Serialize(new
-            { generations = prior.Length, periodicBytes, nextInputBytes }));
-        Assert.True(nextInputBytes > JudgementEvidenceBudget.MaximumInputBytes(64L * 1024 * 1024, periodicBytes, final: false));
-        Assert.All(prior, item => Assert.False(item.IsFinal));
+        Assert.NotNull(exhausted);
+        var prior = exhausted.Exchanges;
+        Assert.All(prior, item => Assert.False(JudgementInvocationArchive.Read(blobs, item.Invocation).IsFinal));
         await step.Collect(); await step.Complete();
         var state = fixture.State; var result = Assert.Single(StepResultCodec.Read(state.Latest.Root, state.Total));
         var evidence = StepEvidenceCodec.Read(blobs, result.Binding, result.Latest.Artifact);
         var final = JudgementEvidenceCodec.Read(blobs, result.Binding, evidence.Judgement!);
         Assert.Equal(prior.Length + 1, final.Exchanges.Length);
+        Assert.Equal(prior.Select(item => item.Invocation), final.Exchanges.Take(prior.Length).Select(item => item.Invocation));
         var last = JudgementInvocationArchive.Decode(blobs, final.Exchanges[^1].Invocation);
-        Assert.True(last.IsFinal); Assert.Equal(prior.Length + 1L, last.Generation); Assert.True(step.Owner.FinalCompleted);
+        Assert.True(last.IsFinal); Assert.Equal(prior.Length + 1L, last.Generation);
         Assert.Equal(BusinessOutcome.Succeeded, evidence.Business);
-        Assert.True(final.Exchanges.Sum(item => JudgementInvocationArchive.Read(blobs, item.Invocation).SizeBytes +
-            (item.Response?.SizeBytes ?? 0) + item.ProbeObservations.Sum(probe => JudgementProbeArchive.Read(blobs, probe).SizeBytes)) <= 64L * 1024 * 1024);
-        Assert.True(JudgementInvocationArchive.Read(blobs, final.Exchanges[^1].Invocation).Parts.Length > 1);
+        Assert.True(EvidenceBytes(final) <= evidenceLimit);
+
+        long EvidenceBytes(ExecutionJudgementEvidence transcript) => transcript.Exchanges.Sum(item =>
+            JudgementInvocationArchive.Read(blobs, item.Invocation).SizeBytes + (item.Response?.SizeBytes ?? 0) +
+            item.ProbeObservations.Sum(probe => JudgementProbeArchive.Read(blobs, probe).SizeBytes));
     }
 
     private static void AssertEmptyClosure(JudgementIntegrationFixture fixture, StepWriterState job)

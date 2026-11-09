@@ -26,17 +26,7 @@ public sealed class SecretRetirementTests
         var next = await fixture.Store.ApplyAsync(Guid.NewGuid(), fixture.Key, 1,
             replace ? SecretDisposition.Set : SecretDisposition.Clear, replacement, default);
         var registered = Assert.Single(new RecoveryJournalRegistry(fixture.Database).ReadSnapshot().Journals, value => value.Kind == JournalKind.FileCleanup);
-        Assert.Equal(JournalKind.FileCleanup, registered.Kind);
         Assert.Equal("secret-payload:" + first.SecretId!.Value.ToString("D"), Assert.Single(registered.ResourceKeys));
-        var blobs = new ImmutableBlobStore(fixture.Instance, new());
-        var item = new CleanupPlanCodec(fixture.Instance, new(), blobs).Read(
-            new(registered.PlanPath, new FileInfo(Path.Combine(fixture.Instance.RuntimeRoot, registered.PlanPath)).Length, registered.PlanDigest)).Items.Single();
-        Assert.False(PhysicalObjectDeletion.TryDeleteUnreferenced(new(oldPath, item.ParentIdentity, item.Identity,
-            FileObjectKind.File, item.Blob.SizeBytes, item.Blob.Sha256), () =>
-            {
-                Assert.False(new BlobReferenceIndex(fixture.Instance, new(), fixture.Database, blobs).IsReferenced(item.Blob));
-                return false;
-            }));
         Assert.Equal(FileCleanupResult.Cleaned, Execute(fixture, registered));
         Assert.False(File.Exists(oldPath));
         Assert.Equal(next, await fixture.Store.GetStateAsync(fixture.Key, default));

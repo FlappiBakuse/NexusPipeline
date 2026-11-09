@@ -51,15 +51,14 @@ public sealed class RecordRetirementTests
     {
         using var fixture = await RecordRetirementFixture.CreateAsync();
         var original = new JournalStore(fixture.Source.Instance, new()).Read(fixture.Receipt.JournalId).Export();
-        var before = fixture.Items.ToArray(); var counts = fixture.Hooks.Base.Counts();
+        var before = fixture.Items; var commits = fixture.Source.Database.CommitSequence;
         var operation = Guid.NewGuid();
         fixture.Hooks.Base.Execute("CREATE TRIGGER fail_retirement BEFORE INSERT ON record_retired_contents BEGIN SELECT RAISE(ABORT,'fixture'); END;");
         try
         {
             Assert.Throws<SqliteException>(() => fixture.Retirement.RetireLogsPage(operation, "retirement-fixture", fixture.Receipt.Facts.RunId));
-            Assert.Equal(0, fixture.Hooks.Base.Count("record_content_retirements"));
-            Assert.Equal(0, fixture.Hooks.Base.Count("record_retired_contents"));
-            Assert.Equal(counts, fixture.Hooks.Base.Counts());
+            Assert.Equal(commits, fixture.Source.Database.CommitSequence);
+            Assert.DoesNotContain(new RecoveryJournalRegistry(fixture.Source.Database).ReadHistory(), item => item.OperationId == operation);
             foreach (var item in before)
                 using (var originalBytes = fixture.Logs.OpenOriginal(item.Key, item.SnapshotSha256))
                     Assert.Equal(item.RecordedBytes, originalBytes.Length);
@@ -80,7 +79,7 @@ public sealed class RecordRetirementTests
         if (fault == "missing") File.Delete(path); else File.WriteAllText(path, "preserve-unknown");
         var original = new JournalStore(fixture.Source.Instance, new()).Read(fixture.Receipt.JournalId).Export();
         Assert.ThrowsAny<IOException>(() => fixture.Retirement.RetireLogsPage(Guid.NewGuid(), "retirement-fixture", fixture.Receipt.Facts.RunId));
-        Assert.Equal(0, fixture.Hooks.Base.Count("record_content_retirements"));
+        Assert.Contains(fixture.Items, current => current.Key == item.Key && current.ContentAvailability == RecordContentAvailability.Available);
         Assert.ThrowsAny<IOException>(() => fixture.Logs.OpenOriginal(item.Key, item.SnapshotSha256));
         if (fault == "tamper") Assert.Equal("preserve-unknown", File.ReadAllText(path));
         fixture.RequireOriginalMetadata(original);

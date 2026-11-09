@@ -33,7 +33,8 @@ public sealed class RuntimeLifecycleTests
             resources, index, new ExecutionProviderRegistry(), trust);
         runtime.ConfigurePorts(new(null, null, null, null, null, null));
         Assert.Equal(trustState != "unprovisioned", runtime.HasReleaseTrust);
-        var starting = runtime.StartAsync(default); Assert.Same(starting, runtime.StartAsync(default)); await starting;
+        var starting = runtime.StartAsync(default); var concurrent = runtime.StartAsync(default);
+        await Task.WhenAll(starting, concurrent).WaitAsync(TimeSpan.FromSeconds(30));
         var state = Assert.Single(runtime.ReadStates());
         Assert.Equal("fixture-plugin", state.ExtensionId); Assert.Equal(1, state.InstalledRevision);
         Assert.True(state.IsInstalled); Assert.True(state.DesiredEnabled);

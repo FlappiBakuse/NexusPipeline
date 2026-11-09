@@ -5,7 +5,6 @@ from test_expectations import suite_classes
 PYTHON_GROUPS = {'tooling', 'host-boundary'}
 DATA_CLASSES = {'DateFilterTests', 'RecordStoreTests', 'RecordSummaryTests', 'RecordTimingTests'}
 DATA_ASSEMBLY = 'NexusPipeline.StorageDataTests'
-DESKTOP_METHOD = 'NexusPipeline.StorageTests.MaintenanceBinaryTests.RestartsOwnedDesktop'
 
 def assembly_for(identity):
     owner = identity.split('.')

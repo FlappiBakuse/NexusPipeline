@@ -23,7 +23,8 @@ public sealed class ManualContractTests
         Assert.Equal(planning ? 1 : 0, fixture.Registry.PublishedPlanningEntries().Count);
         var entry = fixture.Registry.RequireManualEntry("fixture", "daily");
         var observed = await entry.ReadManualAsync(fixture.Invocation.SubjectId);
-        Assert.NotNull(observed); Assert.Equal(7, observed.Task.Revision); Assert.Equal(planning ? 1 : 0, observed.Task.ScheduledTaskIds.Length);
+        Assert.NotNull(observed); Assert.Equal(7, observed.Task.Revision);
+        Assert.Equal(handler.Saved.ScheduledTaskIds.Select(Guid.Parse), observed.Task.ScheduledTaskIds);
         Assert.Null(await entry.ReadManualAsync(Guid.NewGuid()));
         var result = await entry.DispatchManualAsync(new(fixture.Invocation, 7));
         Assert.Equal(BusinessOutcome.NotApplicable, result.Business);

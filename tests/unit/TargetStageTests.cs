@@ -5,7 +5,7 @@ namespace NexusPipeline.CoreTests;
 
 public sealed class TargetStageTests
 {
-    [Theory(DisplayName = "A Failed Target Stage Closes Owned Pc Without Inventing Main Facts")]
+    [Theory(DisplayName = "A Failed Target Stage Closes Owned Pc Before Main Dispatch")]
     [InlineData(TargetStageOutcome.LaunchFailed)]
     [InlineData(TargetStageOutcome.ReadinessTimedOut)]
     public void ClosesFailedLaunches(TargetStageOutcome stage)
@@ -15,7 +15,6 @@ public sealed class TargetStageTests
             ExecutionTargetAuthority.OwnedPcProcess, primary, ExecutionStopReason.Completed, ExecutionRunContinuation.Final,
             targetStage: stage);
         Assert.Equal(TargetCleanupAction.CloseOwnedPc, cleanup.Application);
-        Assert.Equal(EngineOutcome.NotStarted, primary.Engine); Assert.Equal(BusinessOutcome.Unverified, primary.Business);
     }
 
     [Theory(DisplayName = "Target Stage Failure Cannot Grant Ownership Over An External Ready Pc")]
@@ -42,7 +41,7 @@ public sealed class TargetStageTests
             targetStage: TargetStageOutcome.ReadinessTimedOut).Application);
     }
 
-    [Fact(DisplayName = "A Target Stage Failure Closes The Explicit Android Application Without Changing Main Business")]
+    [Fact(DisplayName = "A Target Stage Failure Stops The Explicit Android Application And Keeps Its Device Running")]
     public void ClosesAndroidFailure()
     {
         var primary = new ExecutionStepFact("binding", EngineOutcome.NotStarted, BusinessOutcome.Unverified, "execution_not_dispatched");
@@ -50,7 +49,7 @@ public sealed class TargetStageTests
             ExecutionTargetAuthority.ExplicitAndroidControl, primary, ExecutionStopReason.Completed, ExecutionRunContinuation.Final,
             targetStage: TargetStageOutcome.LaunchFailed);
         Assert.Equal(TargetCleanupAction.StopAndroidApplication, cleanup.Application);
-        Assert.Equal(TargetCleanupAction.None, cleanup.Device); Assert.Equal(BusinessOutcome.Unverified, primary.Business);
+        Assert.Equal(TargetCleanupAction.None, cleanup.Device);
     }
 
     [Theory(DisplayName = "Target Failure Cannot Reclassify Already Started Or Verified Main Facts")]

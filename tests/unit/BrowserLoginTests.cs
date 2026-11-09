@@ -10,20 +10,25 @@ public sealed class BrowserLoginTests
     public async Task ContinuesRejectedLogin()
     {
         using var fixture = new Fixture(); await using var service = new BrowserLoginSessions(); service.Poll(fixture.Native);
-        var validations = 0;
         var pending = service.CaptureAsync(fixture.Access, "fixture", Guid.NewGuid(), Guid.NewGuid(), Policy(), () => { },
-            fixture.Callback.Token, default, (_, _) => ValueTask.FromResult(++validations > 1)).AsTask();
+            fixture.Callback.Token, default, (candidate, _) =>
+            {
+                var accepted = false; candidate.Values["token"].Use(value => accepted = value.SequenceEqual("accepted"));
+                return ValueTask.FromResult(accepted);
+            }).AsTask();
         var offer = Assert.Single(service.Poll(fixture.Native));
         using var secret = new SecretValue("synthetic");
         var values = new Dictionary<string, SecretValue> { ["token"] = secret };
         Assert.False(await service.ValidateAsync(fixture.Native, offer.CaptureId, offer.Nonce, values));
         Assert.False(pending.IsCompleted);
         Assert.Equal(offer.CaptureId, Assert.Single(service.Poll(fixture.Native)).CaptureId);
+        using var accepted = new SecretValue("accepted"); values["token"] = accepted;
         Assert.True(await service.ValidateAsync(fixture.Native, offer.CaptureId, offer.Nonce, values));
         Assert.False(pending.IsCompleted);
         service.Complete(fixture.Native, offer.CaptureId, offer.Nonce, "completed", values);
         using var material = await pending;
-        Assert.Equal(2, validations); Assert.Empty(service.Poll(fixture.Native));
+        var matches = false; material.Values["token"].Use(value => matches = value.SequenceEqual("accepted"));
+        Assert.True(matches); Assert.Empty(service.Poll(fixture.Native));
     }
 
     [Fact(DisplayName = "Native Capture Copies Confirmed Secret Material Only After Its Exact Peer Cleanup Acknowledgment")]

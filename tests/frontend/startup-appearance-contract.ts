@@ -10,23 +10,22 @@ export async function startupAppearanceContract(fixture: HTMLElement, check: (va
   app.mount(mount);
   try {
     await nextTick();
-    const surface = mount.querySelector<HTMLElement>('.startup-surface')!;
     const icon = mount.querySelector<HTMLImageElement>('img')!;
     await icon.decode();
-    check(icon.naturalWidth > 0 && icon.getBoundingClientRect().width === 64,
-      'Web preparation displays the shared native startup brand at its original size');
-    check(getComputedStyle(surface).backgroundColor === 'rgb(19, 31, 51)' &&
-      getComputedStyle(surface.querySelector('h1')!).fontSize === '24px',
-      'Web preparation uses the native startup background and heading');
-    const progress = mount.querySelector('progress')!;
-    check(!progress.hasAttribute('value'), 'unknown preparation count uses indeterminate progress');
+    check(icon.naturalWidth > 0 && icon.getBoundingClientRect().width > 0 &&
+      mount.querySelector('h1')?.textContent === 'NexusPipeline',
+      'Web preparation displays a decoded brand image and the product name');
+    const progress = () => mount.querySelector('progress')!;
+    check(!progress().hasAttribute('value'), 'unknown preparation count uses indeterminate progress');
     total.value = 5; count.value = 2; await nextTick();
-    check(progress.max === 5 && progress.value === 2 && mount.querySelector('[role="status"]')!.textContent!.includes('2/5'),
+    check(progress().max === 5 && progress().value === 2 && mount.querySelector('[role="status"]')!.textContent!.includes('2/5'),
       'preparation has one live stage label and accurate bounded progress');
-    const elapsed = mount.querySelector('.startup-elapsed')!;
+    const elapsed = () => Number(mount.querySelector('.startup-elapsed')!.textContent!.match(/\d+/)?.[0]);
+    const started = elapsed();
     await new Promise(resolve => setTimeout(resolve, 1100));
-    check(/1/.test(elapsed.textContent!), 'Web preparation elapsed time advances independently of progress messages');
+    const advanced = elapsed();
+    check(advanced > started, 'Web preparation elapsed time advances independently of progress messages');
     count.value = 4; await nextTick();
-    check(/1/.test(elapsed.textContent!), 'stage updates retain the elapsed preparation time');
+    check(elapsed() >= advanced, 'stage updates retain the elapsed preparation time');
   } finally { app.unmount(); mount.remove(); }
 }

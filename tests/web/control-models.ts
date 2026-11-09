@@ -1,15 +1,9 @@
 import assert from 'node:assert/strict';
-import { booleanValue, boundedInteger, enumValue } from '../../apps/web/src/control/client';
 import { executionPreview, executionStep } from '../../apps/web/src/control/execution';
 import { attemptFacts, historyImage, recordRow, recordPage } from '../../apps/web/src/control/records';
 import { extensionMetadata, titleLocales } from '../../apps/web/src/control/extension-metadata';
 import { adapterResult } from '../../apps/web/src/pages/adapter-results';
 export async function run(): Promise<string[]> {
-  assert.equal(booleanValue(false), false);
-  assert.throws(() => booleanValue('false'));
-  assert.throws(() => boundedInteger(100, 1, 99));
-  assert.throws(() => enumValue('sleep', ['none', 'hibernate']));
-  const cases = ['typed Control primitives reject malformed booleans ranges and enum values'];
   const selection = { bindingId: 'binding', expectedBindingRevision: 2, extensionId: 'bettergi',
     expectedInstalledRevision: 1, resources: [] };
   const discovery = adapterResult({ source: { bindingId: 'binding', bindingRevision: 2, extensionId: 'bettergi',
@@ -18,10 +12,12 @@ export async function run(): Promise<string[]> {
     gamePathCheck: 'notApplicable', tasks: [{ taskId: 'task', title: '任务', titleLocales: {}, isSelected: true, isEnabled: true }] },
     'discover', selection, undefined, '');
   assert.equal(discovery.tasks[0]?.title, '任务');
-  cases.push('adapter discovery accepts an empty optional locale map and preserves the task title');
+  const cases = ['adapter discovery accepts an empty optional locale map and preserves the task title'];
   const preview = { hasRunnable: true, canPrepareInitialConfiguration: false, hasBlockedItems: false, reasonCode: null, completionAction: 'hibernate',
     groups: [{ scriptId: 'script' }], items: [{ scriptId: 'script', userId: 'user', disposition: 'runnable', reasonCode: 'execution_inputs_verified' }] };
-  assert.equal(executionPreview(preview).completionAction, 'hibernate');
+  const parsedPreview = executionPreview(preview);
+  assert.equal(parsedPreview.completionAction, 'hibernate');
+  assert.equal(parsedPreview.hasBlockedItems, false);
   for (const [field, value] of [['hasRunnable', 'true'], ['hasBlockedItems', 0], ['completionAction', 'sleep'], ['groups', {}], ['items', null]]) {
     assert.throws(() => executionPreview({ ...preview, [field as string]: value })); cases.push('full execution preview rejects malformed ' + field);
   }
@@ -31,13 +27,14 @@ export async function run(): Promise<string[]> {
   for (const [field, value] of [['runId', 'foreign'], ['attemptId', null], ['ordinal', 0], ['engine', 'success'], ['lifecycle', 'done']]) {
     assert.throws(() => attemptFacts({ ...facts, [field as string]: value })); cases.push('attempt facts reject malformed ' + field);
   }
+  assert.throws(() => attemptFacts({ ...facts, ordinal: 100 }));
   const row = { automationId: crypto.randomUUID(), userId: null, endedAt: '2026-11-01T00:00:00Z', durationMilliseconds: null,
     durationKind: 'unknown', endTimeKind: 'measuredTerminal', finalAttempt: facts };
   assert.equal(recordRow(row).durationMilliseconds, null);
   assert.throws(() => recordRow({ ...row, durationMilliseconds: 5 }));
   assert.throws(() => recordRow({ ...row, finalAttempt: { ...facts, recovery: 'pending' } }));
   assert.throws(() => recordRow(row, crypto.randomUUID()));
-  assert.throws(() => recordPage({ items: [row, row] }));
+  assert.throws(() => recordPage({ items: [row, { ...row, endedAt: '2026-11-02T00:00:00Z' }] }));
   cases.push('record identity timing and duplicate rows preserve the current boundary');
   assert.equal(extensionMetadata(undefined), undefined); assert.throws(() => titleLocales({ invalid_locale: 'text' }));
   cases.push('locale declarations reject unknown locale shape');

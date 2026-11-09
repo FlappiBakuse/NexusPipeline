@@ -51,7 +51,7 @@ public sealed class SynchronizationTriggerTests
         {
             "missing" => new FileTreeSnapshot(FileObjectKind.Missing, []), "empty-file" => Single(0),
             "empty-directory" => DirectoryFiles(0, 0), "reshaped" => DirectoryFiles(1, 100),
-            "shrinking-bytes" => Single(49), "shrinking-files" => DirectoryFiles(1, 100), _ => Single(100, 'b')
+            "shrinking-files" => DirectoryFiles(1, 100), _ => Single(100, 'b')
         };
         var result = ConfigurationSynchronizationPolicy.Evaluate(saved, candidate, TimeSpan.Zero, scenario != "unvalidated",
             ConfigurationSyncTrigger.Finalization);
@@ -96,12 +96,7 @@ public sealed class SynchronizationTriggerTests
                 ExtensionId = specialized ? "fixture-extension" : null, UpdateConfigurationAtFinish = updateAtFinish } : script).ToImmutableArray() };
         if (specialized && !updateAtFinish)
             Assert.Equal("automation_specialized_finish_sync_required", Assert.Throws<AutomationDefinitionException>(() => AutomationCatalogPolicy.Validate(catalog)).Message);
-        else
-        {
-            AutomationCatalogPolicy.Validate(catalog);
-            Assert.Equal(updateAtFinish, catalog.Scripts.Single(script => script.Id == fixture.ScriptId).UpdateConfigurationAtFinish);
-        }
-        Assert.True(fixture.Catalog.Scripts.Single(script => script.Id == fixture.ScriptId).UpdateConfigurationAtFinish);
+        else AutomationCatalogPolicy.Validate(catalog);
     }
 
     [Theory(DisplayName = "Run Requests Default Both Trigger Choices From Their Actual Master Permission")]
@@ -124,9 +119,7 @@ public sealed class SynchronizationTriggerTests
     {
         var request = Request(enabled) with { SyncInitially = initially, SyncAtFinish = atFinish };
         var frozen = RunRequestPolicy.Freeze(request);
-        var changed = request with { SyncInitially = !initially, SyncAtFinish = !atFinish };
         Assert.Equal(enabled, frozen.AutoSyncEnabled); Assert.Equal(initially, frozen.SyncInitially); Assert.Equal(atFinish, frozen.SyncAtFinish);
-        Assert.Equal(!initially, changed.SyncInitially); Assert.Equal(!atFinish, changed.SyncAtFinish);
         var repeated = RunRequestPolicy.Freeze(frozen);
         Assert.Equal(frozen.SyncInitially, repeated.SyncInitially); Assert.Equal(frozen.SyncAtFinish, repeated.SyncAtFinish);
     }
@@ -139,18 +132,15 @@ public sealed class SynchronizationTriggerTests
     {
         var request = Request(false) with { SyncInitially = initially, SyncAtFinish = atFinish };
         Assert.Equal("configuration_run_synchronization_invalid", Assert.Throws<ConfigurationException>(() => RunRequestPolicy.Freeze(request)).Message);
-        Assert.Equal(initially, request.SyncInitially); Assert.Equal(atFinish, request.SyncAtFinish);
     }
 
     [Fact(DisplayName = "Turning Off The Master Permission Does Not Silently Rewrite Existing Trigger Choices")]
     public void KeepsExplicitChoices()
     {
         var request = Request(true); var changed = request with { AutoSyncEnabled = false };
-        Assert.True(changed.SyncInitially); Assert.True(changed.SyncAtFinish);
         Assert.Equal("configuration_run_synchronization_invalid", Assert.Throws<ConfigurationException>(() => RunRequestPolicy.Freeze(changed)).Message);
         var closed = RunRequestPolicy.Freeze(changed with { SyncInitially = false, SyncAtFinish = false });
         Assert.False(closed.AutoSyncEnabled); Assert.False(closed.SyncInitially); Assert.False(closed.SyncAtFinish);
-        Assert.True(request.AutoSyncEnabled); Assert.True(request.SyncInitially); Assert.True(request.SyncAtFinish);
     }
 
     private static ConfigurationRunRequest Request(bool enabled) => new(1, enabled,

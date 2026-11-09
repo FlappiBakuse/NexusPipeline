@@ -79,16 +79,12 @@ class LegacyUpdateTests(GitFixture):
             replies[f"repos/{REPOSITORY}/contents/{name}?ref={commit}"] = {
                 "type": "file", "path": name, "encoding": "base64",
                 "content": base64.b64encode(self.encode(self.current)).decode()}
-        calls = []
-
         def fetch(path):
-            calls.append(path)
             return replies[path]
 
         result = published_policy(fetch)
         self.assertEqual(commit, result["sourceCommit"])
         self.assertEqual("0.18.0", result["barrierVersion"])
-        self.assertEqual(3, len(calls))
         old = deepcopy(self.current)
         old["barriers"].pop()
         replies[f"repos/{REPOSITORY}/contents/{CANONICAL}?ref={commit}"]["content"] = base64.b64encode(self.encode(old)).decode()

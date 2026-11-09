@@ -12,26 +12,25 @@ namespace NexusPipeline.StorageTests;
 [SupportedOSPlatform("windows")]
 public sealed class JudgementArchiveTests
 {
-    [Fact(DisplayName = "Invocation And Probe Archives Share Bounded Content Parts And Bind The Exact Parent Allowance")]
-    public void SharesBoundedParts()
+    [Fact(DisplayName = "Large Judgement Inputs And Probe Results Restore With The Parent Allowance")]
+    public void RestoresArchivedEvidence()
     {
         using var source = new PlanBuilderFixture();
         var blobs = new ImmutableBlobStore(source.Instance, new());
-        var invocation = Invocation(source.Instance.InstanceId);
+        var log = JsonSerializer.SerializeToElement(new { log = new string('x', 2 * 1024 * 1024) });
+        var invocation = Invocation(source.Instance.InstanceId) with { Input = log, InputSha256 = JudgementWorkerProtocol.InputHash(log) };
         var held = new List<IDisposable>();
         try
         {
-            var input = JudgementInvocationArchive.Write(blobs, invocation, Hold);
-            var probe = JudgementProbeArchive.Write(blobs, Exchange(invocation), Hold);
-            Assert.Equal(invocation.ProbeEvidenceAllowance, JudgementInvocationArchive.Read(blobs, input).ProbeEvidenceAllowance);
-            Assert.Equal(invocation.ProbeEvidenceAllowance, JudgementInvocationArchive.Decode(blobs, input).ProbeEvidenceAllowance);
-            var archive = JudgementProbeArchive.Read(blobs, probe);
-            Assert.True(archive.SizeBytes > 2 * 1024 * 1024);
-            Assert.InRange(probe.SizeBytes, 1, 2 * 1024 * 1024);
-            Assert.All(archive.Parts, part => Assert.InRange(part.SizeBytes, 1, 1024 * 1024));
+            var restored = JudgementInvocationArchive.Decode(blobs, JudgementInvocationArchive.Write(blobs, invocation, Hold));
+            var exchange = Exchange(invocation);
+            var probe = JudgementProbeArchive.Write(blobs, exchange, Hold);
             var decoded = JudgementProbeArchive.Decode(blobs, probe);
-            JudgementProbeProtocol.RequireExchanges([decoded], invocation);
-            Assert.Equal(JudgementProbeProtocol.Hash([Exchange(invocation)]), JudgementProbeProtocol.Hash([decoded]));
+            Assert.True(JsonElement.DeepEquals(invocation.Input, restored.Input));
+            Assert.Equal(invocation.ProbeEvidenceAllowance, restored.ProbeEvidenceAllowance);
+            JudgementProbeProtocol.RequireExchanges([decoded], restored);
+            Assert.True(JsonElement.DeepEquals(exchange.Request.Options, decoded.Request.Options));
+            Assert.True(JsonElement.DeepEquals(exchange.Reply.Result!.Value, decoded.Reply.Result!.Value));
         }
         finally { foreach (var lease in held) lease.Dispose(); }
         void Hold(BlobReference reference) => held.Add(blobs.OpenVerified(reference));
@@ -63,8 +62,8 @@ public sealed class JudgementArchiveTests
                 case "hash": node["sha256"] = new string('b', 64); break;
                 case "part-order":
                     var parts = node["parts"]!.AsArray();
-                    var first = parts[0]!.DeepClone(); var last = parts[parts.Count - 1]!.DeepClone();
-                    parts[0] = last; parts[parts.Count - 1] = first; break;
+                    var first = parts[0]!.DeepClone();
+                    parts[0] = parts[1]!.DeepClone(); parts[1] = first; break;
                 case "missing-part": node["parts"]!.AsArray().RemoveAt(0); break;
                 case "allowance-mismatch": node["probeEvidenceAllowance"] = 15 * 1024 * 1024; break;
             }
@@ -75,8 +74,9 @@ public sealed class JudgementArchiveTests
                 if (isInput) _ = JudgementInvocationArchive.Decode(blobs, damaged);
                 else _ = JudgementProbeArchive.Decode(blobs, damaged);
             });
-            Assert.Equal(before.Rows, source.Snapshot().Rows);
-            Assert.Equal(before.Files, source.Snapshot().Files);
+            var after = source.Snapshot();
+            Assert.Equal(before.Rows, after.Rows);
+            Assert.Equal(before.Files, after.Files);
         }
         finally { foreach (var lease in held) lease.Dispose(); }
         void Hold(BlobReference reference) => held.Add(blobs.OpenVerified(reference));
@@ -105,21 +105,17 @@ public sealed class JudgementArchiveTests
         var invocation = Invocation(Guid.NewGuid()) with { ProbeEvidenceAllowance = JudgementProbeProtocol.FaultReserveBytes };
         const string prefix = "https://controlled.invalid/";
         var url = prefix + new string('界', 2048 - prefix.Length);
+        var options = JsonSerializer.SerializeToElement(new { url, maxBytes = HttpGetProbe.MaximumBodyBytes });
+        Assert.Equal(url, HttpGetProbe.Read(options).Destination.OriginalString);
+        Assert.Throws<JsonException>(() => HttpGetProbe.Read(JsonSerializer.SerializeToElement(new { url = url + "界" })));
         var exchanges = Enumerable.Range(1, JudgementProbeProtocol.MaximumCalls).Select(ordinal =>
         {
             var request = new JudgementProbeRequest(JudgementProbeProtocol.RequestFormat, 1, invocation.Identity, invocation.Generation,
-                invocation.InputSha256, ordinal, "httpGet", JsonSerializer.SerializeToElement(new { url, maxBytes = 2097152 }));
-            JudgementProbeProtocol.Require(request, invocation, ordinal);
-            Assert.Equal(url, request.Options.GetProperty("url").GetString());
-            Assert.InRange(JudgementWorkerProtocol.Encode(request).Length, JudgementProbeProtocol.MaximumRequestBytes + 1,
-                JudgementProbeProtocol.MaximumHttpRequestBytes);
-            _ = HttpGetProbe.Read(request.Options);
-            var exchange = new JudgementProbeExchange(request, JudgementProbeProtocol.Fault(request, "judgement_probe_budget_exceeded"));
-            Assert.True(JudgementWorkerProtocol.Encode(exchange).Length <= JudgementProbeProtocol.FaultExchangeBytes);
-            return exchange;
+                invocation.InputSha256, ordinal, "httpGet", options);
+            return new JudgementProbeExchange(request, JudgementProbeProtocol.Fault(request, "judgement_probe_budget_exceeded"));
         }).ToArray();
         JudgementProbeProtocol.RequireExchanges(exchanges, invocation);
-        Assert.True(exchanges.Sum(exchange => (long)JudgementWorkerProtocol.Encode(exchange).Length) <= invocation.ProbeEvidenceAllowance);
+        Assert.All(exchanges, exchange => Assert.True(JudgementWorkerProtocol.Encode(exchange).Length <= JudgementProbeProtocol.FaultExchangeBytes));
     }
 
     private static JudgementWorkerInvocation Invocation(Guid instanceId)

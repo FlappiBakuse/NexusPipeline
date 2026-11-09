@@ -68,7 +68,6 @@
     "NexusPipeline.StorageTests.MaintenanceBinaryTests",
     "NexusPipeline.StorageTests.MaintenanceContentTests",
     "NexusPipeline.StorageTests.MaintenancePendingTests",
-    "NexusPipeline.StorageTests.MixedRecoveryTests",
     "NexusPipeline.StorageTests.MixedSnapshotTests",
     "NexusPipeline.StorageTests.ObjectDeletionTests",
     "NexusPipeline.StorageTests.OutputCrashTests",

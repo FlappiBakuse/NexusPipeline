@@ -47,12 +47,12 @@ export async function frontendLoadingContract(check: (value: unknown, name: stri
     check(registry.listSurfaces('overview.cards').some(item => item.extensionId === 'overview-panel'),
       'overview content becomes available while an unrelated extension remains loading');
     release(); await work;
-    check(registry.listSurfaces('overview.cards').length === entries.length && !failures.length,
+    const published = registry.listSurfaces('overview.cards').map(item => item.extensionId).sort();
+    check(JSON.stringify(published) === JSON.stringify(entries.map(item => item.manifest.extensionId).sort()) && !failures.length,
       'all independently loaded extensions publish their validated contributions');
     check(maximum <= 6, 'frontend resource reads retain a bounded concurrency ceiling');
     check(registry.listSurfaces('overview.cards').every(item => item.dashboard?.key === item.extensionId),
       'arbitrary extension identities supply their own persistent dashboard keys');
-    await loader.dispose();
-    check(registry.listSurfaces('overview.cards').length === 0, 'disposing concurrent extensions retires all contributions');
   } finally { clearTimeout(deadline); release(); unsubscribe(); await work; await loader.dispose(); }
+  check(registry.listSurfaces('overview.cards').length === 0, 'disposing concurrent extensions retires all contributions');
 }

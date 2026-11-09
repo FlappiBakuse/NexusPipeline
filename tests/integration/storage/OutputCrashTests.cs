@@ -2,6 +2,7 @@ using System.Collections.Immutable;
 using System.Runtime.Versioning;
 using System.Text.Json;
 using NexusPipeline.Core.Configuration;
+using NexusPipeline.Core.Maintenance;
 using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Configuration;
 using NexusPipeline.Platform.Storage.Journals;
@@ -49,23 +50,52 @@ public sealed class OutputCrashTests(ITestOutputHelper output)
         using var lease = InstanceLease.Acquire(fixture.Instance, new());
         var database = StateDatabase.OpenExisting(fixture.Instance, Path.Combine(fixture.Root, "recovery-diagnostics"), new JournalStartupAdmission(fixture.Instance, new()));
         var recovery = new StartupJournalRecovery(fixture.Instance, new(), database, new(fixture.Root, Path.Combine(fixture.Instance.RuntimeRoot, "extensions")));
-        var index = recovery.Recover(lease); var session = new ConfigurationEditStore(fixture.Instance, database, new()).Read(operation.OperationId, "fixture")!;
+        var index = recovery.Recover(lease);
+        var recovered = index.Current;
+        var session = new ConfigurationEditStore(fixture.Instance, database, new()).LookupBegin(operation, request);
+        Assert.NotNull(session);
+        Assert.Equal(operation.OperationId, session.SessionId);
+        Assert.Equal(ConfigurationEditPhase.Editing, session.Phase);
+        Assert.Null(session.CompletionOperationId);
+        Assert.Equal(request.Targets.Select(target => target.Address.ResourceId).Order(StringComparer.Ordinal),
+            session.Resources.Select(resource => resource.Address.ResourceId).Order(StringComparer.Ordinal));
+        Assert.Equal(point == "stopped" ? session.SessionId : session.Resources[ordinal].JournalId, fault.GetProperty("id").GetGuid());
         var frozenAtFault = point is "JournalFlushed" or "SqlProjected";
+        var registry = new RecoveryJournalRegistry(database);
+        var isolated = new HashSet<Guid>();
         for (var position = 0; position < session.Resources.Length; position++)
         {
             var resource = session.Resources[position];
             var restored = point != "stopped" && (position < ordinal || position == ordinal && frozenAtFault);
-            var journal = new RecoveryJournalRegistry(database).ReadSnapshot().Journals.Single(item => item.JournalId == resource.JournalId);
+            var journal = registry.ReadJournal(resource.JournalId);
+            Assert.Equal(session.SessionId, journal.OperationId);
             Assert.Equal(restored ? JournalPhase.Committed : JournalPhase.Quarantined, journal.Phase);
             var target = request.Targets.Single(item => item.Address == resource.Address).TargetPath;
             var originalAt = restored ? target : Path.Combine(Path.GetDirectoryName(target)!, ".nexus-" + resource.JournalId.ToString("D"), "before");
             var actual = new FileTreeScanner(SnapshotBudget.Default).Capture(originalAt, default);
+            Assert.Equal(originals[target].Tree.Shape, actual.Shape);
             Assert.Equal(originals[target].Tree.Entries, actual.Entries); Assert.Equal(originals[target].Objects, PhysicalTreeIdentity.Capture(originalAt, actual));
-            if (!restored) Assert.Equal("editor-output-" + resource.Address.ResourceId, File.ReadAllText(target));
+            var key = ConfigurationRevisionService.ResourceKey(resource.Address);
+            Assert.Contains(recovered.ResourceHolds, hold => hold.OperationId == session.SessionId && hold.ResourceKey == key &&
+                hold.Owner == RecoveryHoldOwner.ConfigurationOperations && hold.Mode == ResourceClaimMode.Mutation);
+            if (!restored)
+            {
+                isolated.Add(resource.JournalId);
+                Assert.Contains(recovered.Isolations, item => item.JournalId == resource.JournalId && item.ResourceKey == key);
+                Assert.Equal("editor-output-" + resource.Address.ResourceId, File.ReadAllText(target));
+            }
         }
-        Assert.Equal(ConfigurationEditPhase.Editing, session.Phase); Assert.NotEmpty(index.Current.ResourceHolds);
-        Assert.All(initial.Changes, change => Assert.Equal(1, fixture.Revisions.Read(change.Address)!.Revision));
-        var repeated = recovery.Recover(lease); Assert.Equal(index.Current.Isolations.Count, repeated.Current.Isolations.Count);
+        Assert.Equal(isolated.Order(), recovered.Isolations.Select(item => item.JournalId).Distinct().Order());
+        var revisions = new ConfigurationRevisionStore(fixture.Instance, database, new());
+        foreach (var change in initial.Changes)
+        {
+            var saved = revisions.Read(change.Address)!;
+            Assert.Equal(1, saved.Revision); Assert.Equal(change.Contract, saved.Contract);
+            Assert.Equal(change.Tree.Shape, saved.Tree.Shape); Assert.Equal(change.Tree.Entries, saved.Tree.Entries);
+        }
+        var repeated = recovery.Recover(lease);
+        Assert.Equal(recovered.Isolations, repeated.Current.Isolations);
+        Assert.Equal(recovered.ResourceHolds, repeated.Current.ResourceHolds);
         output.WriteLine(JsonSerializer.Serialize(new { point, ordinal, stopped, sourceSession = session.SessionId,
             isolation = repeated.Current.Isolations, holds = repeated.Current.ResourceHolds,
             scope = "Actual stopped editor family and owner process loss; only durably frozen edited scenes restore, remaining bytes and original objects stay isolated" }));

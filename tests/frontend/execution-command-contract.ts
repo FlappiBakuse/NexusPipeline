@@ -9,7 +9,7 @@ function requireValue(value: unknown, message: string, checks: string[]): void {
   checks.push(message);
 }
 
-export async function executionCommandContract(): Promise<{ checks: string[]; checkCount: number }> {
+export async function executionCommandContract(): Promise<string[]> {
   const checks: string[] = [];
   const item = { scriptId: 'script-a', userId: 'user-a', disposition: 'runnable',
     reasonCode: 'execution_inputs_verified', successfulRunsToday: 0, maximumSuccessfulRunsPerDay: -1 };
@@ -34,10 +34,9 @@ export async function executionCommandContract(): Promise<{ checks: string[]; ch
     if (body && loseResponse) throw new TypeError('transport_lost');
     return new Response(JSON.stringify(answer), { headers: { 'Content-Type': 'application/json' } });
   });
-  const errors: unknown[] = [];
   const store = { client, drafts: new Map(), dirty: new Set(), can: () => true,
     state: { capabilities: { instanceId: 'instance-a' }, uncertainOperation: '' },
-    report: (error: unknown) => errors.push(error) } as unknown as ExecutionCommandContext;
+    report: () => {} } as unknown as ExecutionCommandContext;
   const first = new ExecutionCommands(store);
   const selection = { format: 'nexus.control.execution-selection', version: 1,
     expectedCatalogRevision: 7, expectedSettingsRevision: 3, target: { kind: 'script', scriptId: 'script-a' } };
@@ -63,11 +62,14 @@ export async function executionCommandContract(): Promise<{ checks: string[]; ch
   requireValue(await remounted.inspect() && !remounted.state.pending && !store.dirty.size,
     'the exact accepted original operation resolves without replaying its write', checks);
   const run = { operationId: crypto.randomUUID(), runId: crypto.randomUUID(), attemptId: crypto.randomUUID() } as ActiveRun;
+  const originalRun = { ...run };
   requireValue(!await remounted.cancel(run), 'a lost cancellation response retains its command', checks);
   const cancellation = remounted.state.pending!;
   run.attemptId = crypto.randomUUID();
-  requireValue(cancellation.target?.attemptId !== run.attemptId &&
-    requests.at(-1)?.path.includes(cancellation.target!.operationId),
+  requireValue(cancellation.target?.attemptId === originalRun.attemptId &&
+    cancellation.target.runId === originalRun.runId && cancellation.target.operationId === originalRun.operationId &&
+    requests.at(-1)?.body?.runId === originalRun.runId && requests.at(-1)?.body?.attemptId === originalRun.attemptId &&
+    requests.at(-1)?.path === '/control/v1/execution/' + originalRun.operationId + '/cancel/' + cancellation.id,
     'cancellation binds the original start, run and attempt before transport', checks);
   answer = { operationId: cancellation.id, kind: 'execution.start', status: 'completed' };
   requireValue(!await remounted.inspect(), 'a start receipt cannot prove cancellation', checks);
@@ -82,7 +84,7 @@ export async function executionCommandContract(): Promise<{ checks: string[]; ch
   store.state.capabilities!.instanceId = 'instance-b';
   requireValue(!await remounted.inspect() && requests.length === reads,
     'an owner from a replaced Host instance cannot query or release the old command', checks);
-  requireValue(requests.filter(item => item.body).length === 3 && errors.length >= 6,
+  requireValue(requests.filter(item => item.body).length === 3,
     'only the three explicit commands were transported through failure and reconciliation cases', checks);
-  return { checks, checkCount: checks.length };
+  return checks;
 }

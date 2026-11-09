@@ -23,28 +23,30 @@ public sealed class StartupInspectorTests
         else Assert.Equal("startup_registration_elevation_required",
             Assert.Throws<HostSettingsException>(() => native.ValidateOnly(definition)).Message);
         Assert.Equal(StartupRegistrationState.Missing, native.Inspect(definition).State);
-        var document = StartupTaskXml.Read(StartupTaskXml.Encode(definition));
-        XNamespace ns = "http://schemas.microsoft.com/windows/2004/02/mit/task";
-        Assert.Equal("HighestAvailable", document.Descendants(ns + "RunLevel").Single().Value);
-        Assert.Equal("InteractiveToken", document.Descendants(ns + "LogonType").Single().Value);
-        Assert.Single(document.Descendants(ns + "LogonTrigger"));
-        Assert.Equal($"nexus.startup/1/{definition.InstanceId:D}/{definition.RegistrationId:D}", document.Descendants(ns + "Source").Single().Value);
-        Assert.Equal("true", document.Descendants(ns + "UseUnifiedSchedulingEngine").Single().Value);
-        Assert.Equal(StartupTaskXml.SecurityDescriptor(definition.UserSid), document.Descendants(ns + "SecurityDescriptor").Single().Value);
+        var xml = StartupTaskXml.Encode(definition);
         using var scheduler = new WindowsTaskScheduler();
-        var wanted = StartupTaskXml.Read(scheduler.Normalize(StartupTaskXml.Encode(definition)));
-        Assert.Equal(StartupTaskXml.SecurityDescriptor(definition.UserSid), wanted.Descendants(ns + "SecurityDescriptor").Single().Value);
-        document.Descendants(ns + "LogonTrigger").Single().Element(ns + "UserId")!.Value =
-            ((NTAccount)new SecurityIdentifier(definition.UserSid).Translate(typeof(NTAccount))).Value;
+        var wanted = StartupTaskXml.Read(scheduler.Normalize(xml));
+        XNamespace ns = "http://schemas.microsoft.com/windows/2004/02/mit/task";
+        var expectedDescriptor = $"D:P(A;;GA;;;SY)(A;;GA;;;{definition.UserSid})";
+        Assert.Equal("HighestAvailable", wanted.Descendants(ns + "RunLevel").Single().Value);
+        Assert.Equal("InteractiveToken", wanted.Descendants(ns + "LogonType").Single().Value);
+        Assert.Single(wanted.Descendants(ns + "LogonTrigger"));
+        Assert.Equal($"nexus.startup/1/{definition.InstanceId:D}/{definition.RegistrationId:D}", wanted.Descendants(ns + "Source").Single().Value);
+        Assert.Equal("true", wanted.Descendants(ns + "UseUnifiedSchedulingEngine").Single().Value);
+        Assert.Equal(expectedDescriptor, wanted.Descendants(ns + "SecurityDescriptor").Single().Value);
+        var document = StartupTaskXml.Read(xml);
+        var logonUser = document.Descendants(ns + "LogonTrigger").Single().Element(ns + "UserId")!;
+        logonUser.Value = ((NTAccount)new SecurityIdentifier(definition.UserSid).Translate(typeof(NTAccount))).Value;
         Assert.True(XNode.DeepEquals(wanted, StartupTaskXml.Read(scheduler.Normalize(document.ToString()))));
-        document.Descendants(ns + "LogonTrigger").Single().Element(ns + "UserId")!.Value = "S-1-5-18";
+        logonUser.Value = "S-1-5-18";
         Assert.False(XNode.DeepEquals(wanted, StartupTaskXml.Read(scheduler.Normalize(document.ToString()))));
-        var changed = StartupTaskXml.Read(StartupTaskXml.Encode(definition));
-        changed.Descendants(ns + "SecurityDescriptor").Single().Value += "(A;;GA;;;WD)";
-        Assert.False(XNode.DeepEquals(wanted, StartupTaskXml.Read(scheduler.Normalize(changed.ToString()))));
-        changed.Descendants(ns + "SecurityDescriptor").Single().Value = StartupTaskXml.SecurityDescriptor(definition.UserSid);
-        changed.Descendants(ns + "UseUnifiedSchedulingEngine").Single().Value = "false";
-        Assert.False(XNode.DeepEquals(wanted, StartupTaskXml.Read(scheduler.Normalize(changed.ToString()))));
+        logonUser.Value = definition.UserSid;
+        var descriptor = document.Descendants(ns + "SecurityDescriptor").Single();
+        descriptor.Value += "(A;;GA;;;WD)";
+        Assert.False(XNode.DeepEquals(wanted, StartupTaskXml.Read(scheduler.Normalize(document.ToString()))));
+        descriptor.Value = expectedDescriptor;
+        document.Descendants(ns + "UseUnifiedSchedulingEngine").Single().Value = "false";
+        Assert.False(XNode.DeepEquals(wanted, StartupTaskXml.Read(scheduler.Normalize(document.ToString()))));
     }
 
     [Theory(DisplayName = "Startup Xml Arguments Round Trip Through The Actual Windows Parser Without Launching A Process")]

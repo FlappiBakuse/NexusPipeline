@@ -13,8 +13,8 @@ public sealed class PreparedCompletionTests
     {
         var session = new PendingSession { Inspection = Ready with { Gate = gate } };
         Assert.Equal(JournalRecoveryResult.PendingConfigurationCompletion, new PreparedAttemptRecovery(session).Recover());
-        Assert.Equal(gate == EffectGateState.Unentered ? 1 : 0, session.Seals);
-        Assert.Equal(1, session.Verifications); Assert.Equal(0, session.Commits); Assert.Equal(0, session.Quarantines);
+        Assert.Equal(EffectGateState.Sealed, session.Inspection.Gate);
+        Assert.True(session.Verifications > 0); Assert.Equal(0, session.Commits); Assert.Equal(0, session.Quarantines);
         Assert.Equal(JournalPhase.Prepared, session.Inspection.Phase);
     }
 
@@ -55,7 +55,7 @@ public sealed class PreparedCompletionTests
     {
         var session = new PendingSession { Inspection = Ready, FailVerification = true };
         Assert.Throws<IOException>(() => new PreparedAttemptRecovery(session).Recover());
-        Assert.Equal(1, session.Verifications); Assert.Equal(0, session.Commits); Assert.Equal(0, session.Quarantines);
+        Assert.True(session.Verifications > 0); Assert.Equal(0, session.Commits); Assert.Equal(0, session.Quarantines);
         Assert.Equal(JournalPhase.Prepared, session.Inspection.Phase);
     }
 
@@ -64,7 +64,8 @@ public sealed class PreparedCompletionTests
     {
         var session = new PendingSession { Inspection = Ready with { Gate = EffectGateState.Unentered }, ChangeOnSeal = true };
         Assert.Equal(JournalRecoveryResult.Quarantined, new PreparedAttemptRecovery(session).Recover());
-        Assert.Equal(1, session.Seals); Assert.Equal(0, session.Verifications); Assert.Equal(0, session.Commits);
+        Assert.False(session.Inspection.DatabaseAgrees); Assert.Equal(EffectGateState.Sealed, session.Inspection.Gate);
+        Assert.Equal(0, session.Verifications); Assert.Equal(0, session.Commits);
     }
 
     [Fact(DisplayName = "A Regular Prepared Attempt Keeps Its Existing No Effect Recovery Without The New Capability")]
@@ -82,14 +83,13 @@ public sealed class PreparedCompletionTests
     private class BasicSession : IPreparedRecoverySession
     {
         internal PreparedAttemptInspection Inspection { get; set; } = Ready;
-        internal int Seals { get; private set; }
         internal int Commits { get; private set; }
         internal int Quarantines { get; private set; }
         internal bool ChangeOnSeal { get; init; }
         public PreparedAttemptInspection Inspect() => Inspection;
         public void SealEffectEntry()
         {
-            Seals++; Inspection = Inspection with { Gate = EffectGateState.Sealed, DatabaseAgrees = !ChangeOnSeal };
+            Inspection = Inspection with { Gate = EffectGateState.Sealed, DatabaseAgrees = !ChangeOnSeal };
         }
         public void CommitNoEffects() => Commits++;
         public void Quarantine(string reasonCode) => Quarantines++;

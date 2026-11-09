@@ -11,7 +11,11 @@ function load(name, dependencies = {}, extra = {}) {
   const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2023 } });
   const sandbox = { exports: {}, Blob, URL, Headers, Response, TextDecoder, Uint8Array, DataView,
     AbortController, AbortSignal, ...extra,
-    require(key) { if (!(key in dependencies)) throw Error('unexpected_dependency:' + key); return dependencies[key]; } };
+    require(key) {
+      if (key in dependencies) return dependencies[key];
+      if (key.startsWith('./')) return load(key.slice(2), {}, extra);
+      throw Error('unexpected_dependency:' + key);
+    } };
   vm.runInNewContext(code.outputText, sandbox); return sandbox.exports;
 }
 function fixture(send) {
@@ -41,13 +45,17 @@ function empty(f) {
   assert.equal(f.pool.metrics.encodedBytes, 0); assert.equal(f.pool.metrics.downloadBytes, 0);
   assert.equal(f.pool.metrics.active, 0); assert.equal(f.pool.metrics.queued, 0); assert.equal(f.urls.size, 0);
 }
-test('shared downloads retain one Blob without registering an object URL', async () => {
+test('shared downloads preserve image content until the last lease is released', async () => {
   let calls = 0;
   const f = fixture(async () => { calls++; return response(png()); });
   const a = new AbortController(), b = new AbortController();
   const [first, second] = await Promise.all([f.pool.acquire('/same', a.signal), f.pool.acquire('/same', b.signal)]);
-  assert.equal(calls, 1); assert.equal(first.blob, second.blob); assert.equal(f.pool.metrics.encodedBytes, 33); assert.equal(f.urls.size, 0);
-  a.abort(); assert.equal(f.pool.metrics.encodedBytes, 33); assert.equal(f.urls.size, 0); second.release(); first.release(); empty(f);
+  assert.equal(calls, 1);
+  assert.deepEqual(Buffer.from(await first.blob.arrayBuffer()), png());
+  assert.deepEqual(Buffer.from(await second.blob.arrayBuffer()), png()); assert.equal(f.pool.metrics.encodedBytes, 33); assert.equal(f.urls.size, 0);
+  a.abort(); assert.equal(f.pool.metrics.encodedBytes, 33); assert.equal(f.urls.size, 0);
+  assert.deepEqual(Buffer.from(await second.blob.arrayBuffer()), png());
+  second.release(); first.release(); empty(f);
 });
 test('encoded budget waits for actual lease release and canceled waiters retain no buffers or URLs', async () => {
   const size = 20 * 1024 * 1024;

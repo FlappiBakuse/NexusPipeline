@@ -25,17 +25,17 @@ public sealed class NativeClientTests
     {
         var instance = Guid.NewGuid(); using var sessions = new NativeClientSessions(instance);
         using var frontend = new CancellationTokenSource(); using var native = new CancellationTokenSource();
-        var desktop = new DesktopSession(instance, Guid.NewGuid()); var client = Guid.NewGuid(); var reads = 0;
-        sessions.Bind(client, desktop.Identity, () => reads++, frontend.Token, () => desktop.RequireCurrent(desktop.Identity), native.Token);
+        var desktop = new DesktopSession(instance, Guid.NewGuid()); var client = Guid.NewGuid();
+        sessions.Bind(client, desktop.Identity, () => { }, frontend.Token, () => desktop.RequireCurrent(desktop.Identity), native.Token);
         var access = sessions.Require(client); Assert.Equal(client, access.ClientId); Assert.Equal(desktop.Identity, access.Desktop);
         Assert.Throws<UnauthorizedAccessException>(() => sessions.Require(Guid.NewGuid()));
-        sessions.Bind(client, desktop.Identity, () => reads++, frontend.Token, () => desktop.RequireCurrent(desktop.Identity), native.Token);
+        sessions.Bind(client, desktop.Identity, () => { }, frontend.Token, () => desktop.RequireCurrent(desktop.Identity), native.Token);
         Assert.Throws<UnauthorizedAccessException>(() => sessions.Bind(client, new(instance, Guid.NewGuid(), Guid.NewGuid()),
             () => { }, frontend.Token, () => { }, native.Token));
         if (nativeEnds) native.Cancel(); else frontend.Cancel();
         Assert.True(access.Lifetime.IsCancellationRequested);
         Assert.Throws<UnauthorizedAccessException>(() => access.RequireCurrent());
-        Assert.Throws<UnauthorizedAccessException>(() => sessions.Require(client)); Assert.True(reads >= 3);
+        Assert.Throws<UnauthorizedAccessException>(() => sessions.Require(client));
     }
 
     [Theory(DisplayName = "Captured Native Access Rechecks Original Frontend Authority And The Live Original Desktop Session")]

@@ -34,9 +34,12 @@ public sealed class PatchBatchTests
         for (var index = 0; index < request.Length; index++)
             Assert.Equal(originals[index].Replace("true", "false", StringComparison.Ordinal), fixture.SavedText(request[index].Address, request[index].RelativePath));
         fixture.AssertSavedBaselines(2);
-        Assert.Equal(1, fixture.Scalar("SELECT count(*) FROM configuration_batch_results WHERE source_request_digest IS NOT NULL;"));
-        Assert.Equal(2, fixture.Scalar("SELECT resource_count FROM configuration_batch_results WHERE source_request_digest IS NOT NULL;"));
-        _ = StateDatabase.OpenExisting(fixture.Base.Instance, Path.Combine(fixture.Base.Root, "diagnostics"), new JournalStartupAdmission(fixture.Base.Instance, new()));
+        Assert.Equal(preview.OperationId, result.OperationId);
+        var reopened = StateDatabase.OpenExisting(fixture.Base.Instance, Path.Combine(fixture.Base.Root, "diagnostics"),
+            new JournalStartupAdmission(fixture.Base.Instance, new()));
+        var replay = new PatchBatchService(fixture.Base.Instance, reopened, new(), fixture.Lease, fixture.Resources)
+            .Apply("fixture", request, DateTimeOffset.UtcNow);
+        AssertReplay(result, replay);
     }
 
     [Theory(DisplayName = "Any Invalid Document Rejects The Whole Patch Batch Before Persistent Preparation")]
@@ -145,15 +148,18 @@ public sealed class PatchBatchTests
         using var fixture = new PatchBatchFixture();
         var request = fixture.Request(Guid.NewGuid());
         var old = fixture.Base.Revisions.Read(fixture.Main)!.Tree;
-        fixture.Service.Apply("fixture", request, DateTimeOffset.UtcNow);
-        fixture.Base.Save(new([fixture.Base.Capture("main", "newer-main", 2), fixture.Base.Capture("extra", "newer-extra", 2)]));
+        var result = fixture.Service.Apply("fixture", request, DateTimeOffset.UtcNow);
+        ConfigurationRevisionBatch newer = new([fixture.Base.Capture("main", "newer-main", 2), fixture.Base.Capture("extra", "newer-extra", 2)]);
+        fixture.Base.Save(newer);
         foreach (var entry in old.Entries.Where(entry => entry.Kind == FileObjectKind.File && entry.RelativePath != "opaque.bin"))
             File.Delete(Path.Combine(fixture.Content, entry.Sha256 + ".bin"));
         fixture.Lifecycle.RequestClose(Guid.NewGuid(), Guid.NewGuid());
         var replay = new PatchBatchService(fixture.Base.Instance, fixture.Base.Database, new(), fixture.Lease, fixture.Resources)
             .Apply("fixture", request, DateTimeOffset.UtcNow);
-        Assert.False(replay.IsNew); Assert.All(replay.Items, item => Assert.Equal(2, item.Saved.Revision));
+        AssertReplay(result, replay);
         fixture.AssertSavedBaselines(3);
+        foreach (var change in newer.Changes)
+            Assert.Equal(change.Tree.Entries, fixture.Base.Revisions.Read(change.Address)!.Tree.Entries);
     }
 
     [Theory(DisplayName = "Historical Patch Batch Results Survive Actual Definition Deletion And Replay Without The Retired Source")]
@@ -179,22 +185,15 @@ public sealed class PatchBatchTests
         var changes = new AutomationChanges(catalog.Revision, [], [], [], [], [], [], [deletion]);
         definitions.Commit(AutomationDefinitionStore.Identity(Guid.NewGuid(), "fixture", changes), changes, DateTimeOffset.UtcNow);
         Assert.DoesNotContain(definitions.Read().Bindings, item => item.Id == fixture.Base.Binding);
-        Assert.Equal(0, fixture.Scalar($"SELECT count(*) FROM configuration_current WHERE binding_id='{fixture.Base.Binding:D}';"));
+        Assert.Null(fixture.Base.Revisions.ReadCurrentRevision(fixture.Main));
+        Assert.Null(fixture.Base.Revisions.ReadCurrentRevision(fixture.Extra));
         File.Delete(Path.Combine(fixture.Content, old.Sha256 + ".bin"));
         var before = fixture.Fingerprints();
         var database = StateDatabase.OpenExisting(fixture.Base.Instance, Path.Combine(fixture.Base.Root, "diagnostics"),
             new JournalStartupAdmission(fixture.Base.Instance, new()));
         var replay = new PatchBatchService(fixture.Base.Instance, database, new(), fixture.Lease, fixture.Resources)
             .Apply("fixture", request, DateTimeOffset.UtcNow);
-        Assert.False(replay.IsNew);
-        for (var index = 0; index < result.Items.Length; index++)
-        {
-            Assert.Equal(result.Items[index].Saved.Revision, replay.Items[index].Saved.Revision);
-            Assert.Equal(result.Items[index].Saved.UserId, replay.Items[index].Saved.UserId);
-            Assert.Equal(result.Items[index].Saved.ScriptId, replay.Items[index].Saved.ScriptId);
-            Assert.Equal(result.Items[index].Saved.Contract, replay.Items[index].Saved.Contract);
-            Assert.Equal(result.Items[index].Saved.Tree.Entries, replay.Items[index].Saved.Tree.Entries);
-        }
+        AssertReplay(result, replay);
         Assert.Equal(before, fixture.Fingerprints()); fixture.VerifyOriginal();
     }
 
@@ -206,16 +205,29 @@ public sealed class PatchBatchTests
     {
         using var fixture = new PatchBatchFixture();
         using var prepared = fixture.Service.Preview("fixture", fixture.Request(Guid.NewGuid()));
-        var operations = fixture.Base.Count("operations"); var blobs = fixture.Base.Count("blobs");
+        var (batch, operation) = prepared.Use((frozen, identity, _) => (frozen, identity));
+        var initial = batch.Changes.Select(change => fixture.Base.Revisions.Read(change.Address)!).ToArray();
+        var previous = initial.SelectMany(saved => ContentReferences(saved.Tree)).ToHashSet();
+        var candidates = batch.Changes.SelectMany(change => ContentReferences(change.Tree)).Concat(previous).ToHashSet();
         fixture.Base.Execute($"CREATE TRIGGER fixture_patch_fail BEFORE INSERT ON {table} WHEN {when} BEGIN SELECT RAISE(ABORT,'fixture_failure'); END;");
-        Assert.Throws<SqliteException>(() => fixture.Service.Commit(prepared, DateTimeOffset.UtcNow));
+        try { Assert.Throws<SqliteException>(() => fixture.Service.Commit(prepared, DateTimeOffset.UtcNow)); }
+        finally { fixture.Base.Execute("DROP TRIGGER fixture_patch_fail;"); }
         fixture.AssertSavedBaselines(1);
-        Assert.Equal(operations, fixture.Base.Count("operations")); Assert.Equal(blobs, fixture.Base.Count("blobs"));
-        Assert.Equal(1, fixture.Base.Count("configuration_batch_results")); Assert.Equal(2, fixture.Base.Count("configuration_batch_items"));
-        Assert.Equal(2, fixture.Base.Count("configuration_revisions"));
-        fixture.Base.Execute("DROP TRIGGER fixture_patch_fail;");
-        Assert.True(fixture.Service.Commit(prepared, DateTimeOffset.UtcNow).IsNew); fixture.AssertSavedBaselines(2);
-        Assert.False(fixture.Service.Commit(prepared, DateTimeOffset.UtcNow).IsNew);
+        foreach (var saved in initial) AssertSnapshot(saved, fixture.Base.Revisions.Read(saved.Address)!);
+        var index = new BlobReferenceIndex(fixture.Base.Instance, new(), fixture.Base.Database, new(fixture.Base.Instance, new()));
+        Assert.Equal(previous.OrderBy(item => item.Sha256, StringComparer.Ordinal),
+            index.ReadReferenced(candidates).OrderBy(item => item.Sha256, StringComparer.Ordinal));
+        Assert.Null(fixture.Base.Batches.Lookup(operation, batch));
+        var result = fixture.Service.Commit(prepared, DateTimeOffset.UtcNow);
+        Assert.True(result.IsNew); Assert.Equal(operation.OperationId, result.OperationId);
+        foreach (var change in batch.Changes)
+        {
+            var item = Assert.Single(result.Items, item => item.Saved.Address == change.Address);
+            Assert.Equal(change.Tree.Entries, item.Saved.Tree.Entries);
+            AssertSnapshot(item.Saved, fixture.Base.Revisions.Read(change.Address)!);
+        }
+        fixture.AssertSavedBaselines(2);
+        AssertReplay(result, fixture.Service.Commit(prepared, DateTimeOffset.UtcNow));
     }
 
     [Theory(DisplayName = "Damaged Patch Batch Result Metadata Is Rejected On An Isolated Startup Diagnostic Copy")]
@@ -293,12 +305,12 @@ public sealed class PatchBatchTests
             var changes = new AutomationChanges(catalog.Revision, [], [], [], [binding with { IsEnabled = true }], [], [], []);
             store.Commit(AutomationDefinitionStore.Identity(Guid.NewGuid(), "fixture", changes), changes, DateTimeOffset.UtcNow);
         }
-        var operations = fixture.Base.Count("operations"); var headers = fixture.Base.Count("configuration_batch_results");
-        Assert.Throws<ConfigurationException>(() => fixture.Service.Commit(preview, DateTimeOffset.UtcNow));
-        Assert.Equal(operations, fixture.Base.Count("operations")); Assert.Equal(headers, fixture.Base.Count("configuration_batch_results"));
-        Assert.Equal(0, fixture.Scalar($"SELECT count(*) FROM operations WHERE operation_id='{preview.OperationId:D}';"));
-        Assert.Equal(1, fixture.Base.Revisions.Read(fixture.Main)!.Revision);
-        Assert.Equal(changed == "snapshot" ? 2 : 1, fixture.Base.Revisions.Read(fixture.Extra)!.Revision);
+        var (batch, operation) = preview.Use((frozen, identity, _) => (frozen, identity));
+        var before = batch.Changes.Select(change => fixture.Base.Revisions.Read(change.Address)!).ToArray();
+        Assert.Equal(changed == "snapshot" ? "configuration_revision_conflict" : "configuration_binding_revision_conflict",
+            Assert.Throws<ConfigurationException>(() => fixture.Service.Commit(preview, DateTimeOffset.UtcNow)).Message);
+        Assert.Null(fixture.Base.Batches.Lookup(operation, batch));
+        foreach (var saved in before) AssertSnapshot(saved, fixture.Base.Revisions.Read(saved.Address)!);
         fixture.VerifyOriginal();
     }
 
@@ -316,5 +328,29 @@ public sealed class PatchBatchTests
         service.Save(ConfigurationRevisionStore.Identity(Guid.NewGuid(), "fixture", raw), raw, DateTimeOffset.UtcNow);
         Assert.Equal("{\"flag\":true,\"arbitrary\":\"raw\"}", fixture.SavedText(fixture.Main, ""));
         Assert.Equal(1, fixture.Base.Revisions.Read(fixture.Extra)!.Revision); fixture.VerifyOriginal();
+    }
+
+    private static IEnumerable<BlobReference> ContentReferences(FileTreeSnapshot tree) => tree.Entries
+        .Where(entry => entry.Kind == FileObjectKind.File)
+        .Select(entry => new BlobReference($"blobs/content/{entry.Sha256}.bin", entry.SizeBytes, entry.Sha256!));
+
+    private static void AssertReplay(ConfigurationBatchResult original, ConfigurationBatchResult replay)
+    {
+        Assert.False(replay.IsNew);
+        Assert.Equal(original.OperationId, replay.OperationId);
+        Assert.Equal(original.Items.Select(item => item.Saved.Address), replay.Items.Select(item => item.Saved.Address));
+        foreach (var item in original.Items)
+        {
+            var repeated = Assert.Single(replay.Items, value => value.Saved.Address == item.Saved.Address);
+            AssertSnapshot(item.Saved, repeated.Saved);
+        }
+    }
+
+    private static void AssertSnapshot(ConfigurationRevision expected, ConfigurationRevision actual)
+    {
+        Assert.Equal(expected.Address, actual.Address); Assert.Equal(expected.Revision, actual.Revision);
+        Assert.Equal(expected.UserId, actual.UserId); Assert.Equal(expected.ScriptId, actual.ScriptId);
+        Assert.Equal(expected.Contract, actual.Contract); Assert.Equal(expected.Tree.Shape, actual.Tree.Shape);
+        Assert.Equal(expected.Tree.Entries, actual.Tree.Entries);
     }
 }

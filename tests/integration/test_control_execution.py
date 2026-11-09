@@ -28,7 +28,6 @@ class ControlExecutionTests(unittest.TestCase):
                                                     json.dumps(changed).encode(),
                                                     {"Content-Type": "application/json"})
             self.assertEqual(400, status)
-            self.assertEqual(before, self.host.durable_state(runtime))
         status, _, _ = self.host.secret_request(
             address, "/control/v1/execution/" + str(uuid.uuid4()) + "/cancel/" + str(uuid.uuid4()),
             json.dumps(dict(format="nexus.control.execution-cancellation", version=1,

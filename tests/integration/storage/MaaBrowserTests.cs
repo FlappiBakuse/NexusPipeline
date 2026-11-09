@@ -18,7 +18,7 @@ public sealed class MaaBrowserTests
         using var driver = new BuiltExtensionInputs("maa-framework", "NEXUS_PACKAGED_MAA_RECEIPT");
         using var consumer = new BuiltExtensionInputs("maas", "NEXUS_PACKAGED_MAAS_RECEIPT");
         ProjectSourceFixture? source = null; object? context = null; byte[]? original = null;
-        await FrontendBrowserTests.RunAsync(driver, "NEXUS_MAA_INITIALIZATION_BROWSER_SCRIPT", 3, denyNetwork: true, remoteAccess: true,
+        await FrontendBrowserTests.RunAsync(driver, "NEXUS_MAA_INITIALIZATION_BROWSER_SCRIPT", denyNetwork: true, remoteAccess: true,
             additional: [consumer], seed: catalog =>
             {
                 source = new(configuration: true, file: true, enabled: true, catalog: catalog, configurationName: "mxu.json");
@@ -47,7 +47,7 @@ public sealed class MaaBrowserTests
         byte[]? original = null;
         // The case opens, previews and saves three times, and every preview recompiles the project through the Host,
         // so its five compile rounds do not fit the shared 90 s script budget.
-        await FrontendBrowserTests.RunAsync(driver, "NEXUS_MAA_BROWSER_SCRIPT", 8, denyNetwork: true, remoteAccess: true, additional: [consumer], seed: catalog =>
+        await FrontendBrowserTests.RunAsync(driver, "NEXUS_MAA_BROWSER_SCRIPT", denyNetwork: true, remoteAccess: true, additional: [consumer], seed: catalog =>
         {
             source = new(configuration: true, file: true, catalog: catalog, configurationName: "mxu.json");
             Seed(source);
@@ -67,7 +67,7 @@ public sealed class MaaBrowserTests
         using var driver = new BuiltExtensionInputs("maa-framework", "NEXUS_PACKAGED_MAA_RECEIPT");
         using var consumer = new BuiltExtensionInputs("maas", "NEXUS_PACKAGED_MAAS_RECEIPT");
         ProjectSourceFixture? source = null; object? context = null; byte[]? original = null;
-        await FrontendBrowserTests.RunAsync(driver, "NEXUS_MAA_SCRIPT_BROWSER_SCRIPT", 4, denyNetwork: true, remoteAccess: true,
+        await FrontendBrowserTests.RunAsync(driver, "NEXUS_MAA_SCRIPT_BROWSER_SCRIPT", denyNetwork: true, remoteAccess: true,
             additional: [consumer], seed: catalog =>
             {
                 source = new(configuration: true, file: true, catalog: catalog, configurationName: "mxu.json");

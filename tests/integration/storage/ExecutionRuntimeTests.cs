@@ -23,11 +23,14 @@ public sealed class ExecutionRuntimeTests
         var receipt = Assert.IsType<AttemptReceipt>(await fixture.Consumer.RunNextAsync());
         Assert.Equal(LifecycleOutcome.Completed, receipt.Facts.Lifecycle); Assert.Equal(EngineOutcome.Failed, receipt.Facts.Engine);
         Assert.Equal(BusinessOutcome.Unverified, receipt.Facts.Business); Assert.Equal(RecoveryOutcome.Restored, receipt.Facts.Recovery);
-        Assert.Equal(JournalPhase.Committed, fixture.State.Journal.Phase);
-        Assert.Equal(configuration ? 6 : 3, fixture.Base.Count("journal_writer_job_roots")); Assert.Equal(3, fixture.State.Coverage.Length);
-        Assert.All(fixture.State.Coverage, item => Assert.Equal(StepCompletionKind.Collected, item.Kind));
+        var state = fixture.State;
+        Assert.Equal(JournalPhase.Committed, state.Journal.Phase);
+        Assert.All(state.Coverage, item => Assert.Equal(StepCompletionKind.Collected, item.Kind));
+        var results = StepResultCodec.Read(state.Latest.Root, state.Total);
+        Assert.Equal(state.Total.Steps.Select(step => step.StepId).Order(StringComparer.Ordinal),
+            results.Select(result => result.Binding.StepId).Order(StringComparer.Ordinal));
         var reader = new StepEvidenceReader(source.Instance, source.Database, new());
-        foreach (var result in StepResultCodec.Read(fixture.State.Latest.Root, fixture.State.Total))
+        foreach (var result in results)
         {
             _ = reader.Read(result.Binding, result.Latest.Artifact, collected: true);
             var evidence = StepEvidenceCodec.Read(new ImmutableBlobStore(source.Instance, new()), result.Binding, result.Latest.Artifact);
@@ -36,10 +39,13 @@ public sealed class ExecutionRuntimeTests
             Assert.NotNull(manifest.StandardOutputEofOffset); Assert.NotNull(manifest.StandardErrorEofOffset); Assert.True(manifest.IsComplete);
         }
         Assert.Equal(bytes, File.ReadAllBytes(source.Configuration)); Assert.Equal(original, PhysicalObjectIdentity.Read(source.Configuration));
-        Assert.Equal(1, fixture.Base.Count("attempt_receipts")); Assert.Equal(0, fixture.Base.Count("resource_isolations"));
+        Assert.Equal(fixture.Accepted.JournalId, receipt.JournalId);
+        Assert.Equal(fixture.Accepted.Acceptance.OperationId, receipt.OperationId);
+        Assert.Equal(receipt, Assert.Single(new AttemptHistoryReader(source.Database).ReadPage(new(receipt.Facts.RunId)).Items));
+        Assert.Empty(fixture.Base.Index.Current.Isolations);
         Assert.True(fixture.Base.Index.Current.IsReady); Assert.Equal(0, fixture.Base.Inbox.PendingCount);
         Assert.Null(await fixture.Consumer.RunNextAsync()); Assert.Null(fixture.Consumer.FailureCode);
-        var capacity = JournalCapacityPolicy.Measure(fixture.State.Total);
+        var capacity = JournalCapacityPolicy.Measure(state.Total);
         var history = new JournalStore(source.Instance, new()).ReadAllRevisions(fixture.Accepted.JournalId);
         Assert.True(history.Count <= capacity.Revisions); Assert.True(history.Sum(item => item.Export().LongLength) <= capacity.HistoryBytes);
         Assert.All(history, item => Assert.True(item.Export().LongLength <= capacity.MaximumDocumentBytes));
@@ -88,14 +94,15 @@ public sealed class ExecutionRuntimeTests
         Assert.Equal(fixture.Source.Definitions.Read().Queues.Single().Name, display.TargetName);
         Assert.Equal("manual", display.Mode); Assert.Equal(fixture.State.Total.RetryPolicy.MaximumAttempts, display.MaximumAttempts);
         Assert.Equal(LifecycleOutcome.Cancelled, receipt.Facts.Lifecycle);
-        Assert.Single(StepResultCodec.Read(fixture.State.Latest.Root, fixture.State.Total));
-        Assert.Equal(configuration ? 2 : 1, fixture.Base.Count("journal_writer_job_roots"));
-        var writer = Assert.Single(fixture.State.Steps);
+        var state = fixture.State;
+        var result = Assert.Single(StepResultCodec.Read(state.Latest.Root, state.Total));
+        Assert.Equal(state.Total.Steps[0].StepId, result.Binding.StepId);
         var closure = new JobClosureStore(fixture.Source.Instance, fixture.Source.Database, new())
-            .ReadForExecutionEvidence(fixture.Accepted.JournalId, writer.WriterId, writer.JobName, writer.SessionId);
+            .ReadForExecutionEvidence(fixture.Accepted.JournalId, result.Binding.WriterId, result.Binding.JobName, result.Binding.SessionId);
         Assert.NotNull(closure); Assert.True(closure.Family.Length >= 2);
         Assert.All(closure.Family, process => Assert.Equal(WriterState.Stopped, WriterStopEvidence.ObserveProcess(process)));
-        Assert.All(fixture.State.Coverage.Skip(1), item => Assert.Equal(StepCompletionKind.NotDispatched, item.Kind));
+        Assert.All(state.Coverage.Where(item => item.StepId != result.Binding.StepId),
+            item => Assert.Equal(StepCompletionKind.NotDispatched, item.Kind));
         Assert.True(fixture.Base.Index.Current.IsReady); Assert.Equal(0, fixture.Consumer.PendingReconciliationCount);
     }
 
@@ -179,14 +186,24 @@ public sealed class ExecutionRuntimeTests
     public async Task OwnsSingleConsumer()
     {
         using var fixture = new ExecutionRuntimeFixture(mode: "wait");
-        fixture.Cancel(); _ = await fixture.Consumer.RunNextAsync();
+        fixture.Cancel();
+        var first = Assert.IsType<AttemptReceipt>(await fixture.Consumer.RunNextAsync());
         using var stopping = new CancellationTokenSource(); var running = fixture.Consumer.RunAsync(stopping.Token);
         var rejected = await Assert.ThrowsAsync<IOException>(() => fixture.Consumer.RunNextAsync());
         Assert.Equal("execution_runtime_consumer_already_active", rejected.Message);
-        _ = fixture.Base.Service.Start(Guid.NewGuid(), ExecutionSequentialFixture.Subject,
+        var accepted = fixture.Base.Service.Start(Guid.NewGuid(), ExecutionSequentialFixture.Subject,
             fixture.Source.Request(new BindingTarget(fixture.Source.OtherBinding)), DateTimeOffset.UtcNow);
-        await fixture.Ready(".output-ready"); stopping.Cancel(); await running;
-        Assert.Equal(2, fixture.Base.Count("attempt_receipts")); Assert.Equal(0, fixture.Consumer.PendingReconciliationCount);
+        await fixture.Ready(".output-ready");
+        var active = Assert.Single(fixture.Consumer.ReadActive(ExecutionSequentialFixture.Subject));
+        Assert.Equal(accepted.Acceptance.OperationId, active.OperationId);
+        Assert.NotEqual(first.Facts.RunId, active.RunId);
+        stopping.Cancel(); await running;
+        var history = new AttemptHistoryReader(fixture.Source.Database);
+        Assert.Equal(first, Assert.Single(history.ReadPage(new(first.Facts.RunId)).Items));
+        var second = Assert.Single(history.ReadPage(new(active.RunId)).Items);
+        Assert.Equal(active.AttemptId, second.Facts.AttemptId);
+        Assert.Equal(accepted.Acceptance.OperationId, second.OperationId); Assert.Equal(accepted.JournalId, second.JournalId);
+        Assert.Equal(0, fixture.Consumer.PendingReconciliationCount);
         Assert.Null(await fixture.Consumer.RunNextAsync()); Assert.True(fixture.Base.Index.Current.IsReady);
     }
 }

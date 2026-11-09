@@ -34,10 +34,12 @@ export async function adapterFormContract(fixture: HTMLElement, check: (value: u
     const query = [...mount.querySelectorAll('button')].find(button => button.textContent?.trim() === '查询操作状态');
     check(query && !query.disabled, 'the actual adapter editor exposes its pending-operation query inside a form');
     query!.click();
-    for (let attempt = 0; attempt < 50 && reads === 0; attempt++) await new Promise(resolve => setTimeout(resolve, 10));
+    for (let attempt = 0; attempt < 50 && !mount.textContent?.includes('修复已应用。'); attempt++) await new Promise(resolve => setTimeout(resolve, 10));
     await nextTick();
-    check(reads === 1 && saves === 0, 'querying an adapter operation makes one read and zero parent saves');
+    check(reads > 0 && mount.textContent?.includes('修复已应用。') && saves === 0,
+      'querying the completed adapter operation shows its result without submitting the parent form');
+    const queried = reads;
     mount.querySelector<HTMLButtonElement>('button[type=submit]')!.click();
-    check(saves === 1 && reads === 1, 'the explicit parent save submits exactly once after the query');
-  } finally { app.unmount(); mount.remove(); }
+    check(saves === 1 && reads === queried, 'the explicit parent save submits exactly once after the query');
+  } finally { app.unmount(); mount.remove(); store.dispose(); }
 }

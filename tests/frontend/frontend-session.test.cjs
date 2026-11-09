@@ -12,7 +12,7 @@ const sandbox = { exports: {}, Uint8Array, TextDecoder, Headers, URL, AbortContr
 vm.runInNewContext(script.outputText, sandbox);
 const { FrontendSession } = sandbox.exports;
 const route = '/control/v1/extensions/fixture/frontend/activation/invoke/read-state';
-const receipt = character => new Response(JSON.stringify({ clientId: '70000000-0000-4000-8000-000000000001',
+const receipt = (character, clientId = '70000000-0000-4000-8000-000000000001') => new Response(JSON.stringify({ clientId,
   token: character.repeat(64), expiresAt: new Date(Date.now() + 60000).toISOString() }));
 const authorization = () => new Headers({ Authorization: 'Bearer synthetic' });
 
@@ -65,25 +65,48 @@ test('a late native bind is retired under original authorization after an authen
   const native = { bindFrontend: () => new Promise(resolve => { release = resolve; }), retireFrontend: async id => { nativeRetired.push(id); } };
   let auth = 'original';
   const session = new FrontendSession('http://fixture', async (url, init) => {
-    requests.push({ url: String(url), authorization: init.headers.get('Authorization') });
+    requests.push({ url: String(url), authorization: init.headers.get('Authorization'),
+      token: init.headers.get('X-Nexus-Frontend-Client') });
     return String(url).endsWith('/retire') ? new Response(null, { status: 204 }) : receipt('a');
   }, () => new Headers({ Authorization: 'Bearer ' + auth }), native);
   const pending = session.headers(route); const rejected = assert.rejects(pending, /frontend_client_changed/);
   while (!release) await new Promise(resolve => setImmediate(resolve));
   session.reset(); auth = 'replacement'; release(); await rejected;
   assert.deepEqual(nativeRetired, ['70000000-0000-4000-8000-000000000001']);
-  assert.equal(requests[1].authorization, 'Bearer original'); assert.ok(requests[1].url.endsWith('/retire'));
+  const retirements = requests.filter(request => request.url === 'http://fixture/control/v1/extensions/clients/retire');
+  assert.ok(retirements.length > 0);
+  for (const request of retirements) {
+    assert.equal(request.authorization, 'Bearer original'); assert.equal(request.token, 'a'.repeat(64));
+  }
 });
 
 test('a failed native bind cannot cache an unbound grant and retires the actual server grant', async () => {
-  const requests = [], retired = [];
-  const native = { bindFrontend: async () => { throw new Error('native_binding_failed'); }, retireFrontend: async id => { retired.push(id); } };
-  const session = new FrontendSession('http://fixture', async url => {
-    requests.push(String(url)); return String(url).endsWith('/retire') ? new Response(null, { status: 204 }) : receipt('a');
+  const grants = [
+    { id: '70000000-0000-4000-8000-000000000001', character: 'a' },
+    { id: '70000000-0000-4000-8000-000000000002', character: 'b' }
+  ];
+  const retired = [], serverRetired = [];
+  let issued = 0;
+  const native = { bindFrontend: async () => { throw new Error('native_binding_failed'); },
+    retireFrontend: async id => { retired.push(id); } };
+  const session = new FrontendSession('http://fixture', async (url, init) => {
+    if (String(url).endsWith('/retire')) {
+      serverRetired.push({ token: init.headers.get('X-Nexus-Frontend-Client'),
+        authorization: init.headers.get('Authorization') });
+      return new Response(null, { status: 204 });
+    }
+    const grant = grants[issued++];
+    assert.ok(grant, 'unexpected grant allocation');
+    return receipt(grant.character, grant.id);
   }, authorization, native);
-  await assert.rejects(session.headers(route), /native_binding_failed/);
-  await assert.rejects(session.headers(route), /native_binding_failed/);
-  assert.equal(retired.length, 2); assert.equal(requests.filter(url => url.endsWith('/retire')).length, 2);
+  for (const grant of grants) {
+    await assert.rejects(session.headers(route), /native_binding_failed/);
+    assert.ok(retired.includes(grant.id), 'failed native binding releases its own client');
+    const retirements = serverRetired.filter(request => request.token === grant.character.repeat(64));
+    assert.ok(retirements.length > 0, 'failed binding retires its own server token');
+    assert.ok(retirements.every(request => request.authorization === 'Bearer synthetic'));
+  }
+
 });
 
 test('canceling one waiter leaves the shared host grant available to another waiter', async () => {
@@ -100,12 +123,17 @@ test('authentication reset retires the old grant with its original authorization
   const requests = []; let token = 'original';
   const session = new FrontendSession('http://fixture', async (url, init) => {
     requests.push({ url: String(url), headers: init.headers });
-    return requests.length === 1 ? receipt('a') : new Response(null, { status: 204 });
+    return String(url).endsWith('/retire') ? new Response(null, { status: 204 }) : receipt('a');
   }, () => new Headers({ Authorization: 'Bearer ' + token }));
   await session.headers(route); session.reset(); token = 'replacement';
-  assert.equal(requests[1].headers.get('Authorization'), 'Bearer original');
-  assert.equal(requests[1].headers.get('X-Nexus-Frontend-Client'), 'a'.repeat(64));
-  assert.equal(requests[1].url, 'http://fixture/control/v1/extensions/clients/retire');
+  const retirements = requests.filter(request => request.url === 'http://fixture/control/v1/extensions/clients/retire');
+  assert.ok(retirements.length > 0);
+  for (const request of retirements) {
+    assert.equal(request.headers.get('Authorization'), 'Bearer original');
+    assert.equal(request.headers.get('X-Nexus-Frontend-Client'), 'a'.repeat(64));
+  }
+  assert.ok(requests.every(request => !request.url.includes('a'.repeat(64)) && !request.url.includes('original')));
+
 });
 
 test('oversized and malformed grant responses cannot become a browser client identity', async () => {

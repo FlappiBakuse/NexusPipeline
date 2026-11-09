@@ -1,4 +1,3 @@
-using Microsoft.Data.Sqlite;
 using NexusPipeline.Core.Automation;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Execution;
@@ -29,7 +28,6 @@ public sealed class AssetPreparationTests
         var item = new NexusPipeline.Platform.Storage.Journals.FrozenCleanupItem("asset-gc", reference,
             PhysicalObjectIdentity.Read(Path.GetDirectoryName(path)!), PhysicalObjectIdentity.Read(path));
         var cleanup = new BlobCleanup(fixture.Instance, blobs, new(fixture.Instance, new(), fixture.Database, blobs));
-        Assert.Equal(CleanupItemState.Referenced, cleanup.Inspect(item));
         Assert.Equal(CleanupStepResult.SkippedReferenced, cleanup.RemoveVerified(item));
         blobs.Verify(reference);
     }
@@ -44,8 +42,13 @@ public sealed class AssetPreparationTests
         Assert.Throws<AutomationConflictException>(() => fixture.Execute());
         Assert.True(fixture.Index.Current.IsReady);
         Assert.Empty(new RecoveryJournalRegistry(fixture.Database).ReadSnapshot().Journals);
-        Assert.Equal(1, Count(fixture.Database, "operations"));
-        Assert.All(fixture.Prepared.Plan.ReadWire().Assets, asset => Assert.False(File.Exists(Path.Combine(fixture.Instance.RuntimeRoot, asset.Content.RelativePath))));
+        var plan = fixture.Prepared.Plan.ReadWire();
+        var input = File.ReadAllBytes(Path.Combine(fixture.Instance.RuntimeRoot, plan.Input.RelativePath));
+        var roots = plan.Roots.ToDictionary(root => Guid.Parse(root.SourceRootId), root => root.Path);
+        var imports = new AutomationImportService(fixture.Instance, new(), fixture.Database, fixture.InstanceLease, fixture.ResourceManager, fixture.Index);
+        Assert.Null(imports.ReadAccepted(fixture.Operation.OperationId, fixture.Operation.SubjectId, input, roots,
+            plan.ExpectedCatalogRevision, plan.PreviewDigest));
+        Assert.All(plan.Assets, asset => Assert.False(File.Exists(Path.Combine(fixture.Instance.RuntimeRoot, asset.Content.RelativePath))));
     }
 
     [Theory(DisplayName = "Unknown Asset Sidecar Evidence Rejects Copied Startup Inspection Before Changing Original Bytes")]
@@ -122,23 +125,26 @@ public sealed class AssetPreparationTests
     public void PublishesCompleteAssets()
     {
         using var fixture = AssetPreparationFixture.Create(2);
-        var observed = new List<AssetPreparationPoint>();
+        var observed = false;
         var result = fixture.Execute(new Observer((point, _, _) =>
         {
-            observed.Add(point);
             if (point != AssetPreparationPoint.Published)
-            {
                 Assert.Empty(new AutomationDefinitionStore(fixture.Database).Read().Scripts);
-                Assert.Equal(0, Count(fixture.Database, "automation_assets"));
-            }
+            if (point == AssetPreparationPoint.CompletedOutbox) observed = true;
         }));
+        Assert.True(observed);
         Assert.Equal(AutomationImportState.Published, result.State);
         Assert.True(result.IsNew);
         Assert.Equal(1, result.CatalogRevision);
-        Assert.Equal(2, Count(fixture.Database, "automation_assets"));
-        Assert.Equal(2, Count(fixture.Database, "automation_asset_owners"));
-        Assert.Equal(2, observed.Count(value => value == AssetPreparationPoint.CompletedOutbox));
         var reopened = StateDatabase.OpenExisting(fixture.Instance, Path.Combine(fixture.Root, "reopen"));
+        var blobs = new ImmutableBlobStore(fixture.Instance, new());
+        var references = new BlobReferenceIndex(fixture.Instance, new(), reopened, blobs);
+        foreach (var asset in fixture.Prepared.Plan.ReadWire().Assets)
+        {
+            var content = new BlobReference(asset.Content.RelativePath, asset.Content.SizeBytes, asset.Content.Sha256);
+            blobs.Verify(content);
+            Assert.True(references.IsReferenced(content));
+        }
         var catalog = new AutomationDefinitionStore(reopened).Read();
         Assert.Single(catalog.Scripts);
         Assert.Equal(2, catalog.Users.Length);
@@ -191,7 +197,6 @@ public sealed class AssetPreparationTests
         {
             Assert.Equal(JournalPhase.Quarantined, recovered.Phase);
             Assert.Empty(new AutomationDefinitionStore(fixture.Database).Read().Scripts);
-            Assert.Equal(0, Count(fixture.Database, "automation_assets"));
             Assert.NotEmpty(new RecoveryJournalRegistry(fixture.Database).ReadSnapshot().Isolations);
         }
         else
@@ -199,15 +204,6 @@ public sealed class AssetPreparationTests
             Assert.Equal(JournalPhase.Committed, recovered.Phase);
             Assert.Equal(expected == JournalRecoveryResult.NotExecuted ? 0 : 1, new AutomationDefinitionStore(fixture.Database).Read().Scripts.Length);
         }
-    }
-
-    private static long Count(StateDatabase database, string table)
-    {
-        using var connection = new SqliteConnection($"Data Source={database.DatabasePath};Pooling=False;Mode=ReadOnly");
-        connection.Open();
-        using var command = connection.CreateCommand();
-        command.CommandText = "SELECT count(*) FROM " + table;
-        return (long)command.ExecuteScalar()!;
     }
 
     private static string[] Fingerprints(string root) => RuntimeFingerprint.Capture(root);

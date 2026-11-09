@@ -5,10 +5,11 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'tooling'))
-from build_inputs import solution_inputs, web_inputs
-from frozen_build import capture_build, compile_receipt, reuse_build
+from build_inputs import project_inputs, solution_inputs, web_inputs
+from frozen_build import reuse_build, save_build
 from source_snapshot import digest, write_json, export_source
 from build_product import build_environment, update_export
 from web_artifacts import artifact_records, reuse_web
@@ -32,6 +33,7 @@ class BuildInputTests(unittest.TestCase):
             'tooling/frontend-exceptions.json': '[]',
             'tooling/generated_sources.json': '{}', 'apps/web/package.json': '{}',
             'apps/web/package-lock.json': '{}', 'apps/web/src/main.ts': 'export {};',
+            'apps/desktop/startup-content.css': 'html {}', 'apps/desktop/nexuspipeline.ico': 'icon fixture bytes',
             'sdk/frontend/src/index.ts': 'export {};'}
         for name, text in values.items():
             self.write(name, text)
@@ -48,102 +50,54 @@ class BuildInputTests(unittest.TestCase):
     def inputs(self):
         return solution_inputs(self.root, 'test', self.environment)
 
-    def test_ignores_document(self):
-        before = self.inputs()
-        self.write('README.md', 'Changed project documentation')
-        self.write('docs/guide.md', 'Changed guide')
-        self.assertEqual(before, self.inputs())
-
-    def test_tracks_transitive(self):
-        current = self.inputs()
-        for name in ['lib/Lib.cs', 'shared/New.cs', 'assets/input.json', 'lib/packages.lock.json']:
-            self.write(name, '// changed')
-            following = self.inputs()
-            self.assertNotEqual(current['sha256'], following['sha256'], name)
-            current = following
-
     def test_scopes_projects(self):
         self.write('other/Other.csproj', '<Project Sdk="Microsoft.NET.Sdk" />')
         self.write('other/Other.cs', 'class Other {}')
         self.write('NexusPipeline.slnx', '<Solution><Project Path="app/App.csproj" /><Project Path="other/Other.csproj" /></Solution>')
-        before = solution_inputs(self.root, 'test', self.environment, ['App'])
-        aggregate = self.inputs()
+        output = self.root.parent / 'slot'
+        selected = ['App']
+        self.seed_build(output, selected)
+        self.assertTrue(reuse_build(self.root, output))
         self.write('other/Other.cs', 'class Other { int changed; }')
-        self.assertNotEqual(aggregate, self.inputs())
-        self.assertEqual(before, solution_inputs(self.root, 'test', self.environment, ['App']))
-        self.write('lib/Lib.cs', 'class Lib { int changed; }')
-        self.assertNotEqual(before, solution_inputs(self.root, 'test', self.environment, ['App']))
-
-    def test_tracks_environment(self):
-        before = self.inputs()
-        self.environment['MSBuildSDKsPath'] = 'changed-sdk-root'
-        self.assertNotEqual(before['sha256'], self.inputs()['sha256'])
-
-    def test_tracks_properties(self):
-        before = self.inputs()
-        self.write('.editorconfig', 'root = true\n[*.cs]\ndotnet_diagnostic.CS0168.severity = error\n')
-        self.assertNotEqual(before['sha256'], self.inputs()['sha256'])
-        self.write('Directory.Packages.props', '<Project><ItemGroup><PackageVersion Include="Example" Version="1" /></ItemGroup></Project>')
-        self.assertTrue(self.inputs()['conservativeReasons'])
+        self.assertFalse(reuse_build(self.root, output))
+        self.assertTrue(reuse_build(self.root, output, projects=selected))
+        with patch.dict(os.environ, {'MSBuildSDKsPath': 'changed-sdk-root'}):
+            self.assertFalse(reuse_build(self.root, output, projects=selected))
+        changes = {
+            'lib/Lib.cs': 'class Lib { int changed; }',
+            'shared/New.cs': 'class New {}',
+            'assets/input.json': '{"changed": true}',
+            'lib/packages.lock.json': '{"version": 1}',
+            '.editorconfig': 'root = true\n[*.cs]\ndotnet_diagnostic.CS0168.severity = error\n',
+            'Directory.Packages.props': '<Project><ItemGroup><PackageVersion Include="Example" Version="1" /></ItemGroup></Project>',
+        }
+        for name, content in changes.items():
+            path = self.root / name
+            before = path.read_bytes() if path.exists() else None
+            self.write(name, content)
+            self.assertFalse(reuse_build(self.root, output, projects=selected), name)
+            if before is None:
+                path.unlink()
+            else:
+                path.write_bytes(before)
+        self.assertTrue(reuse_build(self.root, output, projects=selected))
 
     def test_refuses_unknown(self):
         self.write('app/App.csproj', '<Project><Import Project="unknown.props" /></Project>')
+        output = self.root.parent / 'slot'
+        exported, _, _ = self.seed_build(output)
+        self.assertFalse(reuse_build(self.root, output))
         value = self.inputs()
-        self.assertTrue(value['conservativeReasons'])
-        self.assertIsNone(compile_receipt(Path(self.scope.name), value, 'test'))
-        exported = export_source(self.root, self.root.parent / 'exported')
         frozen = Path(exported['exportRoot'])
         records = json.loads(Path(exported['sourceManifestPath']).read_bytes())['files']
         actual = solution_inputs(frozen, 'test', self.environment, source_records=records)
-        self.assertEqual(value['files'], actual['files'])
-        self.assertEqual(value['conservativeReasons'], actual['conservativeReasons'])
+        self.assertEqual(value['sha256'], actual['sha256'])
         (frozen / 'shared/Shared.cs').write_bytes(b'changed')
         with self.assertRaisesRegex(ValueError, 'Frozen build source bytes changed'):
             solution_inputs(frozen, 'test', self.environment, source_records=records)
         (frozen / 'extra.cs').write_bytes(b'unowned')
         with self.assertRaisesRegex(ValueError, 'Frozen build source file set changed'):
             solution_inputs(frozen, 'test', self.environment, source_records=records)
-
-    def test_tracks_browser(self):
-        before = web_inputs(self.root, self.environment)
-        self.write('apps/web/README.md', 'No browser input')
-        self.assertEqual(before, web_inputs(self.root, self.environment))
-        for name in ['apps/web/package-lock.json', 'apps/web/src/asset.svg', 'sdk/frontend/src/index.ts']:
-            self.write(name, '// changed')
-            following = web_inputs(self.root, self.environment)
-            self.assertNotEqual(before['sha256'], following['sha256'])
-            before = following
-
-    def test_scopes_environment(self):
-        before = web_inputs(self.root, self.environment)
-        self.environment.update(DOTNET_CLI_HOME='other-home', MSBuildSDKsPath='other-sdk', NUGET_PACKAGES='other-cache')
-        self.assertEqual(before, web_inputs(self.root, self.environment))
-        for name in ('NODE_OPTIONS', 'VITE_API_URL', 'BROWSERSLIST_ENV'):
-            self.environment[name] = 'changed'
-            after = web_inputs(self.root, self.environment)
-            self.assertNotEqual(before, after)
-            before = after
-
-    def test_checks_binaries(self):
-        output = Path(self.scope.name) / 'build'
-        binary = output / 'build/bin/App/release/App.dll'
-        binary.parent.mkdir(parents=True)
-        binary.write_bytes(b'compiled-output')
-        original = output / 'runs/original/build-receipt.json'
-        manifest = original.parent / 'build-binaries.json'
-        write_json(manifest, capture_build(output))
-        component = self.inputs()
-        receipt = {'status': 'PASS', 'profile': 'test', 'runId': 'original', 'componentInputs': component,
-            'binaryManifest': {'path': str(manifest), 'sha256': digest(manifest.read_bytes())}}
-        write_json(original, receipt)
-        write_json(output / 'build-receipt.json', receipt)
-        reference = compile_receipt(output, component, 'test')
-        self.assertEqual(digest(original.read_bytes()), reference['sha256'])
-        preserved = original.read_bytes()
-        binary.write_bytes(b'tampered-output')
-        with self.assertRaises(ValueError):
-            compile_receipt(output, component, 'test')
-        self.assertEqual(preserved, original.read_bytes())
 
     def test_checks_browser(self):
         output = Path(self.scope.name) / 'web'
@@ -156,13 +110,31 @@ class BuildInputTests(unittest.TestCase):
         write_json(original, receipt)
         receipt.update(originalReceipt=str(original), originalReceiptSha256=digest(original.read_bytes()))
         write_json(output / 'web-receipt.json', receipt)
-        self.assertIsNotNone(reuse_web(output, component))
-        (dist / 'extra.js').write_bytes(b'unowned-output')
-        with self.assertRaises(ValueError):
-            reuse_web(output, component)
 
-    def test_reuses_current(self):
-        output = Path(self.scope.name) / 'slot'
+        def cached():
+            return reuse_web(output, web_inputs(self.root, self.environment))
+
+        self.write('apps/web/README.md', 'No browser input')
+        self.environment.update(DOTNET_CLI_HOME='other-home', MSBuildSDKsPath='other-sdk', NUGET_PACKAGES='other-cache')
+        self.assertIsNotNone(cached())
+        for name in ('apps/web/package-lock.json', 'apps/web/src/asset.svg', 'sdk/frontend/src/index.ts',
+                     'apps/desktop/startup-content.css', 'apps/desktop/nexuspipeline.ico'):
+            path = self.root / name
+            before = path.read_bytes() if path.exists() else None
+            self.write(name, '// changed')
+            self.assertIsNone(cached(), name)
+            if before is None:
+                path.unlink()
+            else:
+                path.write_bytes(before)
+        for name in ('NODE_OPTIONS', 'VITE_API_URL', 'BROWSERSLIST_ENV'):
+            with patch.dict(self.environment, {name: 'changed'}):
+                self.assertIsNone(cached(), name)
+        (dist / 'extra.js').write_bytes(b'unowned-output')
+        with self.assertRaisesRegex(ValueError, 'artifact set or bytes changed'):
+            cached()
+
+    def seed_build(self, output, projects=None):
         source = export_source(self.root, output)
         binary = output / 'build/bin/App/release/App.dll'
         binary.parent.mkdir(parents=True)
@@ -171,12 +143,17 @@ class BuildInputTests(unittest.TestCase):
         component = solution_inputs(self.root, 'test', env)
         component.update(webInputs=web_inputs(self.root, env)['sha256'], webArtifacts=[])
         original = output / 'runs/original/build-receipt.json'
-        manifest = original.parent / 'build-binaries.json'
-        write_json(manifest, capture_build(output))
         receipt = {'status': 'PASS', 'profile': 'test', 'runId': 'original', 'source': source,
-            'componentInputs': component, 'binaryManifest': {'path': str(manifest), 'sha256': digest(manifest.read_bytes())}}
+            'componentInputs': component, 'binaryManifest': save_build(output, original.parent)}
+        if projects:
+            receipt['projectInputs'] = project_inputs(self.root, 'test', env, projects, component['webInputs'], [])
         write_json(original, receipt)
         write_json(output / 'build-receipt.json', receipt)
+        return source, original, binary
+
+    def test_reuses_current(self):
+        output = self.root.parent / 'slot'
+        source, original, binary = self.seed_build(output)
         evidence = original.read_bytes()
         self.assertTrue(reuse_build(self.root, output))
         self.write('README.md', 'Unrelated documentation update')
@@ -184,10 +161,15 @@ class BuildInputTests(unittest.TestCase):
         current = update_export(self.root, output)
         self.assertNotEqual(source['sourceSnapshotHash'], current['sourceSnapshotHash'])
         self.assertTrue(reuse_build(self.root, output))
-        self.assertEqual(evidence, original.read_bytes())
-        (Path(current['exportRoot']) / 'app/App.cs').write_bytes(b'unowned-source-change')
-        with self.assertRaises(ValueError):
+        binary_bytes = binary.read_bytes()
+        binary.write_bytes(b'tampered-output')
+        with self.assertRaisesRegex(ValueError, 'Frozen build artifacts changed'):
             reuse_build(self.root, output)
+        binary.write_bytes(binary_bytes)
+        (Path(current['exportRoot']) / 'app/App.cs').write_bytes(b'unowned-source-change')
+        with self.assertRaisesRegex(ValueError, 'Frozen source export changed'):
+            reuse_build(self.root, output)
+        self.assertEqual(evidence, original.read_bytes())
 
 
 if __name__ == '__main__':

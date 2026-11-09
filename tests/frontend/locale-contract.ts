@@ -31,11 +31,11 @@ export async function localeContract(fixture: HTMLElement, check: (condition: un
       document.documentElement.lang = language;
       await new Promise(resolve => setTimeout(resolve, 0));
       date.set({ value: '2030-01-01', kind: 'date', label: language === 'en-US' ? 'Date' : '日期' });
-      check(numeric.value === '9' && number.value === 20 && number.getAttribute('aria-invalid') === 'true',
+      check(number.shadowRoot!.querySelector('input')!.value === '9' && number.value === 20 && number.getAttribute('aria-invalid') === 'true',
         language + ': invalid number text survives a locale refresh');
       check(date.field.value === '2030-02-31' && date.field.getAttribute('aria-invalid') === 'true',
         language + ': blurred invalid date text survives a translated label');
-      check(hex.value === '#nothex' && color.value === '#334455',
+      check(color.shadowRoot!.querySelector<HTMLInputElement>('.value-input')!.value === '#nothex' && color.value === '#334455',
         language + ': invalid color text survives a locale refresh');
       check(number.shadowRoot!.querySelector('button')!.getAttribute('aria-label') ===
         (language === 'en-US' ? 'Decrease' : '减少'), language + ': existing control chrome translates');

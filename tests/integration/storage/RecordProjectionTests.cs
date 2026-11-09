@@ -96,16 +96,23 @@ public sealed class RecordProjectionTests
         var consumer = new ExecutionRuntimeConsumer(source.Instance, source.Database, new(), source.Lease,
             fixture.Base.Resources, fixture.Base.Index, fixture.Base.Inbox, projection);
         await Assert.ThrowsAsync<SqliteException>(() => consumer.RunNextAsync());
-        var receipt = Assert.IsType<AttemptReceipt>(new AttemptReceiptStore(source.Database)
-            .Read(Guid.Parse(fixture.State.Attempt.AttemptId)));
-        Assert.Equal(1, fixture.Base.Count("attempt_receipts")); Assert.Equal(0, fixture.Base.Count("run_records"));
+        var state = fixture.State;
+        var receipt = Assert.IsType<AttemptReceipt>(new AttemptReceiptStore(source.Database).Read(Guid.Parse(state.Attempt.AttemptId)));
+        var history = new AttemptHistoryReader(source.Database);
+        var records = new RunRecordStore(source.Database);
+        Assert.Equal(receipt, Assert.Single(history.ReadPage(new(receipt.Facts.RunId)).Items));
+        Assert.Empty(records.ReadPage(new()).Items);
         Assert.Equal(0, fixture.Base.Inbox.PendingCount); Assert.False(fixture.Base.Index.Current.IsReady);
-        var jobs = fixture.Base.Count("journal_writer_job_roots");
+        var worker = File.ReadAllText(fixture.Marker);
+        var journal = state.Latest.Export();
         fixture.Base.Execute("DROP TRIGGER reject_record;");
         projection.OnCommitted(receipt);
-        var row = Assert.Single(new RunRecordStore(source.Database).ReadPage(new()).Items);
+        var row = Assert.Single(records.ReadPage(new()).Items);
+        Assert.Equal(source.QueueId, row.AutomationId);
         Assert.Equal(receipt.Facts, row.FinalAttempt);
-        Assert.Equal(jobs, fixture.Base.Count("journal_writer_job_roots"));
-        Assert.Equal(receipt, new AttemptReceiptStore(source.Database).Read(receipt.Facts.AttemptId));
+        Assert.Equal(worker, File.ReadAllText(fixture.Marker));
+        Assert.Equal(journal, fixture.State.Latest.Export());
+        Assert.Equal(receipt, Assert.Single(history.ReadPage(new(receipt.Facts.RunId)).Items));
+        Assert.Equal(0, fixture.Base.Inbox.PendingCount);
     }
 }

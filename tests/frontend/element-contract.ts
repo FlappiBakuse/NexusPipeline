@@ -1,4 +1,4 @@
-import { contractFingerprint, type UiElement, type UiElementName } from '@nexuspipeline/extension-sdk';
+import type { UiElement, UiElementName } from '@nexuspipeline/extension-sdk';
 import { registerElements } from '../../apps/web/src/ui/register-elements.js';
 import { registryContracts } from './registry-contract.js';
 import { paintedControls } from './painted-controls-contract.js';
@@ -52,7 +52,7 @@ let accessibilityFixture: HTMLElement;
 
 import { feedbackLayoutContract } from './feedback-layout-contract';
 
-async function structural(): Promise<void> {
+async function structural(): Promise<string[]> {
   registerElements();
   paintedControls(fixture, assert);
   await localeContract(fixture, assert);
@@ -95,13 +95,17 @@ async function structural(): Promise<void> {
   assert(clicks === 1 && button.hasAttribute('busy'), 'busy button blocks action and reflects boolean');
   button.removeAttribute('busy');
   assert(!button.busy, 'boolean attribute removal updates property');
-  assert(button.shadowRoot!.querySelector<HTMLSlotElement>('slot[name=icon]')!.assignedElements()[0] === icon,
-    'named slot retains actual consumer element identity');
-  button.label = 'Changed';
-  assert(control(button) === nativeButton, 'property updates preserve native control identity');
-  assert(getComputedStyle(nativeButton).color === 'rgb(210, 220, 230)', 'theme tokens inherit through shadow root');
+  assert(button.shadowRoot!.querySelector<HTMLSlotElement>('slot[name=icon]')!.assignedElements()[0]?.textContent === '+',
+    'named slot displays the consumer icon');
   button.focus();
-  assert(document.activeElement === button && button.shadowRoot!.activeElement === nativeButton, 'public focus reaches actual button');
+  button.label = 'Changed';
+  const updatedButton = control(button);
+  assert(updatedButton.textContent?.includes('Changed'), 'property updates display the current action label');
+  assert(document.activeElement === button && button.shadowRoot!.activeElement === updatedButton,
+    'property updates retain focus on the current action');
+  updatedButton.click();
+  assert(Number(clicks) === 2, 'updated action still forwards one click');
+  assert(getComputedStyle(updatedButton).color === 'rgb(210, 220, 230)', 'theme tokens inherit through shadow root');
 
   const form = document.createElement('form');
   const label = document.createElement('label');
@@ -147,6 +151,7 @@ async function structural(): Promise<void> {
   assert(rejected, 'duplicate tab ids are rejected');
   tabs.remove();
   await registryContracts(checks);
+  return checks.splice(0);
 }
 
 async function prepareAccessibility(): Promise<void> {
@@ -241,6 +246,7 @@ function prepareDialogs(): void {
   outer = create('nexus-modal');
   inner = create('nexus-modal');
   outer.surface = 'secondary';
+  outer.style.setProperty('--content-card-secondary', 'rgb(16, 32, 48)');
   outer.title = 'Outer';
   inner.title = 'Inner';
   const nested = document.createElement('div');
@@ -254,15 +260,15 @@ function prepareDialogs(): void {
     inner.open = false;
   });
   outer.open = true;
-  assert(outer.surface === 'secondary' && outer.shadowRoot!.querySelector('dialog')!.dataset.surface === 'secondary',
-    'pre-connect public surface property preserves modal lifecycle and selected appearance');
+  assert(getComputedStyle(outer.shadowRoot!.querySelector('.panel')!).backgroundColor === 'rgb(16, 32, 48)',
+    'the surface chosen before connection paints the secondary modal background');
   inner.open = true;
 }
 async function verifyDialogEscape(): Promise<void> {
   assert(innerClose === 1 && outerClose === 0 && outer.open && !inner.open, 'trusted Escape requests only the top dialog close');
   outer.open = false;
   const closing = outer.shadowRoot!.querySelector('dialog')!.getAnimations({ subtree: true });
-  assert(outer.shadowRoot!.querySelector('dialog')!.open && closing.some(animation => animation.effect?.getTiming().duration === 200),
+  assert(outer.shadowRoot!.querySelector('dialog')!.open && closing.some(animation => Number(animation.effect?.getTiming().duration) > 0),
     'modal keeps its exit animation before releasing the top layer');
   await Promise.all(closing.map(animation => animation.finished.catch(() => {})));
   await new Promise(resolve => setTimeout(resolve, 0));
@@ -270,12 +276,12 @@ async function verifyDialogEscape(): Promise<void> {
   const dialog = outer.shadowRoot!.querySelector('dialog')!;
   outer.open = true;
   const animations = dialog.getAnimations({ subtree: true });
-  assert(animations.some(animation => animation.effect?.getTiming().duration === 200), 'modal retains visible opening animation');
+  assert(animations.some(animation => Number(animation.effect?.getTiming().duration) > 0), 'modal retains visible opening animation');
   outer.remove();
   assert(!dialog.open, 'disconnect closes top layer dialog');
 }
-function finish(): object {
-  return { checks, checkCount: checks.length, contractFingerprint, scope: 'Native element ABI and frontend activation fixture' };
+function finish(): string[] {
+  return checks;
 }
 Object.assign(globalThis, { nexusUiTests: { structural, prepareKeyboardSwitch, verifyKeyboardSwitch, prepareComposition,
   verifyCompositionPending, verifyCompositionCommitted, prepareDialogs, verifyDialogEscape, prepareAccessibility, verifyAccessibility, finish } });

@@ -26,19 +26,19 @@ export function colorContract(fixture: HTMLElement, check: Check): void {
   color.value = '#112233';
   fixture.append(color);
   const root = color.shadowRoot!,
-    hex = root.querySelector<HTMLInputElement>('.hex')!;
+    hex = () => root.querySelector<HTMLInputElement>('.hex')!;
   let changes = 0;
   color.addEventListener('nexus-change', () => changes++);
   root.querySelector<HTMLButtonElement>('.trigger')!.click();
-  hex.value = '#ff8800';
-  hex.dispatchEvent(new Event('change', { bubbles: true }));
+  hex().value = '#ff8800';
+  hex().dispatchEvent(new Event('change', { bubbles: true }));
   check(color.value === '#ff8800' && changes === 1, 'custom color editor commits a valid HEX value once');
   const channel = root.querySelector<HTMLInputElement>('[data-channel="0"]')!;
   channel.value = '17';
   channel.dispatchEvent(new Event('input', { bubbles: true }));
   check(color.value === '#118800' && changes === 2, 'RGB channel edits retain the other two color channels');
-  hex.value = 'invalid';
-  hex.dispatchEvent(new Event('change', { bubbles: true }));
+  hex().value = 'invalid';
+  hex().dispatchEvent(new Event('change', { bubbles: true }));
   check(color.value === '#118800' && changes === 2, 'invalid color text does not replace a committed color');
   color.remove();
   check(

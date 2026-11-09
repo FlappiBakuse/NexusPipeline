@@ -62,7 +62,7 @@ public sealed class HostSettingsTests
             HostSettingsPolicy.Compare(before, saved.Values).RestartReasons);
     }
 
-    [Theory(DisplayName = "Invalid Settings Cannot Create A New Revision Or Change The Prior Snapshot")]
+    [Theory(DisplayName = "Invalid Settings Cannot Create A New Revision")]
     [InlineData("web-port")]
     [InlineData("mcp-port")]
     [InlineData("port-collision")]
@@ -87,8 +87,6 @@ public sealed class HostSettingsTests
         };
         var before = new HostSettingsSnapshot(3, value);
         Assert.Throws<HostSettingsException>(() => HostSettingsPolicy.Next(before, 3, candidate));
-        Assert.Equal(3, before.Revision);
-        Assert.Same(value, before.Values);
     }
 
     [Fact(DisplayName = "Saved Settings Keep Restart Requirements Separate From Live And System Registration Changes")]
@@ -103,7 +101,6 @@ public sealed class HostSettingsTests
             Service = startup.Service with { WebPort = 60000, McpEnabled = true }, Updates = startup.Updates with { PluginSource = PluginSourceChannel.Develop } };
         Assert.Equal(new[] { SettingsRestartReason.WebListener, SettingsRestartReason.DesktopMode, SettingsRestartReason.Mcp, SettingsRestartReason.PluginSource },
             HostSettingsPolicy.Compare(startup, restart).RestartReasons.ToArray());
-        Assert.Equal(58731, before.Service.WebPort);
     }
 
     [Fact(DisplayName = "A Stale Settings Revision Cannot Overwrite The Latest Saved Choices")]

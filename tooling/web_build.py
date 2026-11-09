@@ -38,7 +38,7 @@ def build_web(root, output, update_lock=False, source=None, prepare_only=False):
     component = web_inputs(frozen, env)
     reusable = None if update_lock or prepare_only else reuse_web(output, component)
     if reusable is not None:
-        receipt = {**reusable, "source": source, "commands": [], "reused": True,
+        receipt = {**reusable, "source": source, "commands": [], "reused": True, "preparation": "NOT_RUN",
                    "scope": "Browser assets reused after current component and artifact verification"}
         write_json(run / "receipt.json", receipt)
         write_json(output / "web-receipt.json", receipt)
@@ -82,22 +82,24 @@ def build_web(root, output, update_lock=False, source=None, prepare_only=False):
     lock = project / "package-lock.json"
     commands = []
     if update_lock:
-        commands.append([npm, "install", "--package-lock-only", "--ignore-scripts", "--no-audit", "--no-fund"])
+        commands.append(("preparation", [npm, "install", "--package-lock-only", "--ignore-scripts", "--no-audit", "--no-fund"]))
     else:
         if not lock.is_file():
             raise ValueError("Resolve the pinned Web lock with --update-lock first")
         marker = project / "node_modules/.nexus-lock"
         if not marker.exists() or marker.read_text() != digest(lock.read_bytes()):
-            commands.append([npm, "ci", "--ignore-scripts", "--no-audit", "--no-fund"])
+            commands.append(("preparation", [npm, "ci", "--ignore-scripts", "--no-audit", "--no-fund"]))
         node = shutil.which("node")
         if not prepare_only:
-            commands.extend([[node, str(frozen / "tooling/frontend_names.mjs"), "--root", str(frozen), "--modules", str(project / "node_modules")],
-                         [node, str(frozen / "tooling/frontend_boundaries.mjs"), "--root", str(frozen), "--modules", str(project / "node_modules"), "--output", str(run / 'boundaries.json')],
-                         [node, str(project / "node_modules/vue-tsc/bin/vue-tsc.js"), "--noEmit"],
-                         [node, str(project / "node_modules/vite/bin/vite.js"), "build"]])
+            commands.extend([
+                ("lint", [node, str(frozen / "tooling/frontend_names.mjs"), "--root", str(frozen), "--modules", str(project / "node_modules")]),
+                ("lint", [node, str(frozen / "tooling/frontend_boundaries.mjs"), "--root", str(frozen), "--modules", str(project / "node_modules"), "--output", str(run / 'boundaries.json')]),
+                ("typecheck", [node, str(project / "node_modules/vue-tsc/bin/vue-tsc.js"), "--noEmit"]),
+                ("build", [node, str(project / "node_modules/vite/bin/vite.js"), "build"])])
     results = []
+    stages = dict.fromkeys(("preparation", "lint", "typecheck", "build"), "NOT_RUN")
     code = 0
-    for index, command in enumerate(commands):
+    for index, (responsibility, command) in enumerate(commands):
         started = time.monotonic()
         log_path = run / f"{index}.log"
         print("web: " + " ".join(command), flush=True)
@@ -108,8 +110,8 @@ def build_web(root, output, update_lock=False, source=None, prepare_only=False):
                 print(line, end="", flush=True)
                 log.write(line)
             code = process.wait()
-        responsibility = "lint" if any("frontend_names" in part or "frontend_boundaries" in part for part in command) else "typecheck" if any("vue-tsc" in part for part in command) else "build" if command[-1] == "build" else "preparation"
         results.append({"responsibility": responsibility, "command": command, "exitCode": code, "elapsedSeconds": time.monotonic() - started, "log": str(log_path)})
+        stages[responsibility] = "FAIL" if code else "PASS"
         if code:
             break
         if len(command) > 1 and command[1] == "ci":
@@ -119,10 +121,8 @@ def build_web(root, output, update_lock=False, source=None, prepare_only=False):
             raise ValueError("Web pins changed during lock resolution")
         (root / "apps/web/package-lock.json").write_bytes(lock.read_bytes().replace(b"\r\n", b"\n"))
     receipt = {"status": "PASS" if code == 0 else "FAIL", "source": source, "commands": results,
-               "responsibilities": {"preparation": prepare_only or update_lock,
-                   **{kind: "NOT_RUN" if not any(item["responsibility"] == kind for item in results) else
-                       "PASS" if all(item["exitCode"] == 0 for item in results if item["responsibility"] == kind) else "FAIL"
-                       for kind in ("lint", "typecheck", "build")}, "test": "NOT_RUN"},
+               "preparation": stages.pop("preparation"),
+               "responsibilities": {**stages, "test": "NOT_RUN"},
                "componentInputs": component, "reused": False,
                "output": str(project if prepare_only else project / "dist"),
                "scope": "dependency-preparation-only" if prepare_only else "lock-resolution" if update_lock else "Web typecheck and production assets"}

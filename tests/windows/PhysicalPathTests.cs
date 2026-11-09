@@ -15,11 +15,11 @@ public sealed class PhysicalPathTests
         var root = Path.Combine(Environment.GetEnvironmentVariable("NEXUS_TEST_ROOT")!, "entry-name-" + Guid.NewGuid().ToString("N"));
         var parent = longPath ? Path.Combine(root, new string('a', 200), new string('b', 200), new string('c', 200)) : root;
         Directory.CreateDirectory(parent);
-        var path = Path.Combine(parent, "Owned-文件.bin");
-        File.WriteAllBytes(path, [1]);
+        File.WriteAllBytes(Path.Combine(parent, "Owned-文件.bin"), [1]);
+        var path = Path.Combine(parent, "owned-文件.BIN");
         Assert.Equal("Owned-文件.bin", PhysicalObjectIdentity.EntryName(path));
         var before = GC.GetAllocatedBytesForCurrentThread();
-        for (var index = 0; index < 64; index++) Assert.Equal("Owned-文件.bin", PhysicalObjectIdentity.EntryName(path));
+        for (var index = 0; index < 64; index++) _ = PhysicalObjectIdentity.EntryName(path);
         var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
         Assert.True(allocated < 4 * 1024 * 1024, $"Entry name reads allocated {allocated} bytes");
     }

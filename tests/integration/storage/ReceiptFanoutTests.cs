@@ -17,19 +17,16 @@ public sealed class ReceiptFanoutTests
         using var fixture = new NotificationReceiptFixture();
         await fixture.Execute(taskCount: 2, queueNotifications: queueNotifications);
         Assert.Equal(expectedRoutes, fixture.Snapshot.Document.RouteCount);
-        Assert.Equal(2, fixture.Snapshot.Document.Tasks.Length);
-        var materialized = 0;
-        while (true)
+        var runId = fixture.Receipt.Facts.RunId;
+        for (var ordinal = 1; ordinal <= expectedRoutes; ordinal++)
         {
-            var count = fixture.Delivery.MaterializePending(2);
-            if (count == 0) break;
-            materialized += count;
-            Assert.InRange(materialized, 1, expectedRoutes);
+            Assert.Equal(1, fixture.Delivery.MaterializePending(1));
+            var status = fixture.Delivery.ReadPendingForRun(runId);
+            Assert.Equal(ordinal * 2, status.Queued);
+            Assert.Equal(ordinal == expectedRoutes, status.IsExpanded);
+            Assert.False(status.IsSettled);
         }
-        Assert.Equal(expectedRoutes, materialized);
-        var status = fixture.Delivery.ReadPendingForRun(fixture.Receipt.Facts.RunId);
-        Assert.True(status.IsExpanded); Assert.False(status.IsSettled);
-        Assert.Equal(expectedDeliveries, status.Queued);
+        Assert.Equal(0, fixture.Delivery.MaterializePending(1));
         using var connection = DatabaseConnections.Open(fixture.Source.Database.DatabasePath, readOnly: true);
         using var transaction = connection.BeginTransaction(deferred: true);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
@@ -54,6 +51,6 @@ public sealed class ReceiptFanoutTests
         transaction.Commit();
         fixture.Registration.OnCommitted(fixture.Receipt);
         Assert.Equal(0, fixture.Delivery.MaterializePending(2));
-        Assert.Equal(expectedDeliveries, fixture.Count("notification_deliveries"));
+        Assert.Equal(expectedDeliveries, fixture.Delivery.ReadPendingForRun(runId).Queued);
     }
 }

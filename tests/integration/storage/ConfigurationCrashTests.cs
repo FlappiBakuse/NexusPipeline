@@ -33,7 +33,9 @@ public sealed class ConfigurationCrashTests(ITestOutputHelper output)
         Assert.Equal(identity.ProcessId, fault.GetProperty("processId").GetInt32());
         var family = ObserveFamily(accepting);
         Assert.True(await accepting.StopAsync(TimeSpan.FromSeconds(5)));
-        Assert.False(Directory.Exists(Path.Combine(fixture.Root, "runtime/journals")));
+        AssertJournal(fixture, JournalPhase.Prepared);
+        Assert.ThrowsAny<IOException>(() => fixture.Journals.Read(fixture.Plan.JournalId));
+        AssertOriginal(fixture);
         var faultFiles = CaptureFiles(fixture);
         fixture.Input["stoppedWriter"] = JsonSerializer.SerializeToNode(new
             { completeJobStopped = true, identity, family, accounting = accepting.GetAccounting() });
@@ -45,30 +47,30 @@ public sealed class ConfigurationCrashTests(ITestOutputHelper output)
         var result = await ReadReport(report);
         Assert.True(await recovering.StopAsync(TimeSpan.FromSeconds(5)));
         Assert.Equal("notExecuted", result.GetProperty("status").GetString());
-        var journal = Assert.Single(fixture.Registry.ReadSnapshot().Journals);
-        Assert.Equal(fixture.Plan.OperationId, journal.OperationId);
-        Assert.Equal(fixture.Plan.JournalId, journal.JournalId);
-        Assert.Equal(JournalPhase.Committed, journal.Phase);
+        var journal = AssertJournal(fixture, JournalPhase.Committed);
         Assert.Empty(fixture.Registry.ReadSnapshot().Isolations);
-        var restored = fixture.Scanner.Capture(fixture.Plan.TargetPath, CancellationToken.None);
-        Assert.Equal(fixture.Plan.Before.Snapshot.Entries, restored.Entries);
-        Assert.Equal(fixture.Plan.Before.OriginalObjects, PhysicalTreeIdentity.Capture(fixture.Plan.TargetPath, restored));
+        var effects = fixture.Outbox.Read(fixture.Plan.JournalId);
+        Assert.NotEmpty(effects);
+        Assert.All(effects, effect => Assert.Equal(FileEffectState.NotExecuted, effect.State));
+        AssertOriginal(fixture);
         output.WriteLine(JsonSerializer.Serialize(new { faultPoint = "accepted-before-initial-journal", shape,
             acceptingProcess = identity, ownedFamily = family, faultFiles, finalFiles = CaptureFiles(fixture), finalJournal = journal }));
     }
 
     public static IEnumerable<object[]> PhysicalFaultCases()
     {
-        string[] shapes = ["missing", "file", "directory"];
         string[] points = ["before-prepare", "prepared-before-workspace-receipt", "after-workspace-receipt", "before-preserve-original",
             "preserved-before-receipt", "after-preserve-receipt", "before-install-candidate", "installed-before-receipt", "after-install-receipt"];
-        foreach (var shape in shapes)
-            foreach (var point in points) yield return [shape, point];
+        foreach (var point in points)
+            yield return ["file", point, point is "before-prepare" or "after-workspace-receipt"
+                or "after-install-receipt" or "prepared-before-workspace-receipt"];
+        yield return ["missing", "installed-before-receipt", false];
+        yield return ["directory", "installed-before-receipt", false];
     }
 
     [Theory(DisplayName = "Owned Process Kill And New Process Recovery Preserve Original Bytes Or Explicitly Quarantine The Unproven Workspace")]
     [MemberData(nameof(PhysicalFaultCases))]
-    public async Task PreservesKilledWriters(string shape, string point)
+    public async Task PreservesKilledWriters(string shape, string point, bool repeat)
     {
         var fixture = Create(shape);
         var executeReport = Path.Combine(fixture.Root, "execute-report.json");
@@ -97,19 +99,27 @@ public sealed class ConfigurationCrashTests(ITestOutputHelper output)
         Assert.NotEqual((old.ProcessId, old.CreatedAtUtc), (recovery.ProcessId, recovery.CreatedAtUtc));
         var expectedStatus = point == "before-prepare" ? "notExecuted" : point == "prepared-before-workspace-receipt" ? "quarantined" : "restored";
         Assert.Equal(expectedStatus, result.GetProperty("status").GetString());
-        var actual = fixture.Scanner.Capture(fixture.Plan.TargetPath, CancellationToken.None);
-        Assert.Equal(fixture.Plan.Before.Snapshot.Shape, actual.Shape);
-        Assert.Equal(fixture.Plan.Before.Snapshot.Entries, actual.Entries);
-        Assert.Equal(fixture.Plan.Before.OriginalObjects, PhysicalTreeIdentity.Capture(fixture.Plan.TargetPath, actual));
+        var actual = AssertOriginal(fixture);
         var snapshot = fixture.Registry.ReadSnapshot();
         var outbox = fixture.Outbox.Read(fixture.Plan.JournalId);
-        var journal = Assert.Single(snapshot.Journals);
-        Assert.Equal(expectedStatus == "quarantined" ? JournalPhase.Quarantined : JournalPhase.Committed, journal.Phase);
-        if (expectedStatus == "quarantined") Assert.Single(snapshot.Isolations);
+        var journal = AssertJournal(fixture, expectedStatus == "quarantined" ? JournalPhase.Quarantined : JournalPhase.Committed);
+        if (expectedStatus == "quarantined") AssertIsolation(fixture, snapshot);
         else
         {
             Assert.Empty(snapshot.Isolations);
+            Assert.NotEmpty(outbox);
             Assert.All(outbox, effect => Assert.Contains(effect.State, new[] { FileEffectState.Completed, FileEffectState.NotExecuted }));
+        }
+        if (repeat)
+        {
+            var history = fixture.Journals.ReadAllRevisions(journal.JournalId).Select(item => item.Export()).ToArray();
+            var repeated = await RecoverAgain(fixture, recoveryInput);
+            Assert.Equal(expectedStatus == "quarantined" ? "quarantined" : "alreadyCompleted", repeated.GetProperty("status").GetString());
+            Assert.Equal(journal.Revision, AssertJournal(fixture, journal.Phase).Revision);
+            Assert.Equal(history, fixture.Journals.ReadAllRevisions(journal.JournalId).Select(item => item.Export()));
+            Assert.Equal(outbox, fixture.Outbox.Read(journal.JournalId));
+            Assert.Equal(snapshot.Isolations, fixture.Registry.ReadSnapshot().Isolations);
+            AssertOriginal(fixture);
         }
         output.WriteLine(JsonSerializer.Serialize(new { faultPoint = point, shape, processKilled = old, ownedFamily = family, recoveryProcess = recovery,
             original = fixture.Plan.Before, faultFiles, finalFiles = CaptureFiles(fixture), recovered = actual, journal, fileEffects = outbox, isolation = snapshot.Isolations, result = expectedStatus,
@@ -154,7 +164,7 @@ public sealed class ConfigurationCrashTests(ITestOutputHelper output)
         Assert.Equal(fixture.Plan.Candidate.Snapshot.Entries, fixture.Scanner.Capture(fixture.Plan.TargetPath, CancellationToken.None).Entries);
         Assert.True(await recoveryJob.StopAsync(TimeSpan.FromSeconds(5)));
         Assert.True(await oldJob.StopAsync(TimeSpan.FromSeconds(5)));
-        Assert.Single(fixture.Registry.ReadSnapshot().Isolations);
+        AssertIsolation(fixture, fixture.Registry.ReadSnapshot());
     }
 
     [Fact(DisplayName = "Exited Primary Process Does Not Authorize Restoration While Another Registered Writer Is Alive")]
@@ -191,7 +201,7 @@ public sealed class ConfigurationCrashTests(ITestOutputHelper output)
         Assert.Equal("refused", (await ReadReport(report)).GetProperty("status").GetString());
         Assert.Contains(writer.ProcessId, job.ActiveProcessIds());
         Assert.Equal(fixture.Plan.Candidate.Snapshot.Entries, fixture.Scanner.Capture(fixture.Plan.TargetPath, CancellationToken.None).Entries);
-        Assert.Single(fixture.Registry.ReadSnapshot().Isolations);
+        AssertIsolation(fixture, fixture.Registry.ReadSnapshot());
         Assert.True(await recovery.StopAsync(TimeSpan.FromSeconds(5)));
         Assert.True(await job.StopAsync(TimeSpan.FromSeconds(5)));
     }
@@ -203,43 +213,11 @@ public sealed class ConfigurationCrashTests(ITestOutputHelper output)
             identity => PersistIdentity(Path.Combine(fixture.Root, identityFile), identity));
     }
 
-    [Theory(DisplayName = "Repeated New Process Recovery Does Not Replay Effects Or Rewrite Completed Or Quarantined Evidence")]
-    [InlineData("before-prepare")]
-    [InlineData("after-workspace-receipt")]
-    [InlineData("after-install-receipt")]
-    [InlineData("prepared-before-workspace-receipt")]
-    public async Task PreservesTerminalRecovery(string point)
+    private static async Task<JsonElement> RecoverAgain(Fixture fixture, string input)
     {
-        var fixture = Create("file");
-        var executeReport = Path.Combine(fixture.Root, "execute-report.json");
+        var report = Path.Combine(fixture.Root, "recovery-report-2.json");
         using var job = new OwnedWorkerJob();
-        var identity = Start(job, fixture, "execute", fixture.InputPath, point, executeReport, "execute-identity.json");
-        Assert.Equal("faultReady", (await ReadReport(executeReport)).GetProperty("status").GetString());
-        var family = ObserveFamily(job);
-        Assert.True(await job.StopAsync(TimeSpan.FromSeconds(5)));
-        fixture.Input["stoppedWriter"] = JsonSerializer.SerializeToNode(new { completeJobStopped = true, identity, family, accounting = job.GetAccounting() });
-        var input = Path.Combine(fixture.Root, "recovery-input.json");
-        File.WriteAllBytes(input, JsonSerializer.SerializeToUtf8Bytes(fixture.Input));
-        var first = await RecoverOnce(fixture, input, 1);
-        var expected = point == "before-prepare" ? "notExecuted" : point == "prepared-before-workspace-receipt" ? "quarantined" : "restored";
-        Assert.Equal(expected, first.GetProperty("status").GetString());
-        var runtime = Path.Combine(fixture.Root, "runtime");
-        using (var observation = new DatabaseObservation(fixture.Database)) { }
-        var before = Fingerprints(runtime);
-        var second = await RecoverOnce(fixture, input, 2);
-        Assert.Equal(expected == "quarantined" ? "quarantined" : "alreadyCompleted", second.GetProperty("status").GetString());
-        using (var observation = new DatabaseObservation(fixture.Database)) { }
-        Assert.Equal(before, Fingerprints(runtime));
-        var actual = fixture.Scanner.Capture(fixture.Plan.TargetPath, CancellationToken.None);
-        Assert.Equal(fixture.Plan.Before.Snapshot.Entries, actual.Entries);
-        Assert.Equal(fixture.Plan.Before.OriginalObjects, PhysicalTreeIdentity.Capture(fixture.Plan.TargetPath, actual));
-    }
-
-    private static async Task<JsonElement> RecoverOnce(Fixture fixture, string input, int ordinal)
-    {
-        var report = Path.Combine(fixture.Root, $"recovery-report-{ordinal}.json");
-        using var job = new OwnedWorkerJob();
-        Start(job, fixture, "recover", input, "none", report, $"recovery-identity-{ordinal}.json");
+        Start(job, fixture, "recover", input, "none", report, "recovery-identity-2.json");
         var result = await ReadReport(report);
         var exit = Stopwatch.StartNew();
         while (job.ActiveProcessIds().Count != 0 && exit.Elapsed < TimeSpan.FromSeconds(5)) await Task.Delay(20);
@@ -250,10 +228,11 @@ public sealed class ConfigurationCrashTests(ITestOutputHelper output)
 
     public static IEnumerable<object[]> RecoveryFaultCases()
     {
-        foreach (var shape in new[] { "missing", "file", "directory" })
-            foreach (var point in new[] { "recover-reverted-journal-flushed", "recover-reverted-sql-projected",
-                "recover-committed-journal-flushed", "recover-committed-sql-projected" })
-                yield return [shape, point, "after-install-receipt"];
+        foreach (var point in new[] { "recover-reverted-journal-flushed", "recover-reverted-sql-projected",
+            "recover-committed-journal-flushed", "recover-committed-sql-projected" })
+            yield return ["file", point, "after-install-receipt"];
+        yield return ["missing", "recover-reverted-journal-flushed", "after-install-receipt"];
+        yield return ["directory", "recover-reverted-journal-flushed", "after-install-receipt"];
         yield return ["file", "recover-committed-journal-flushed", "before-prepare"];
         yield return ["file", "recover-committed-sql-projected", "before-prepare"];
     }
@@ -289,17 +268,18 @@ public sealed class ConfigurationCrashTests(ITestOutputHelper output)
             { completeJobStopped = true, identity = recoveryIdentity, family = recoveringFamily, accounting = firstRecovery.GetAccounting() });
         var secondInput = Path.Combine(fixture.Root, "recovery-input-second.json");
         File.WriteAllBytes(secondInput, JsonSerializer.SerializeToUtf8Bytes(fixture.Input));
-        var result = await RecoverOnce(fixture, secondInput, 2);
+        var result = await RecoverAgain(fixture, secondInput);
         Assert.Equal(point.StartsWith("recover-committed", StringComparison.Ordinal) ? "alreadyCompleted" : "restored", result.GetProperty("status").GetString());
-        var actual = fixture.Scanner.Capture(fixture.Plan.TargetPath, CancellationToken.None);
-        Assert.Equal(fixture.Plan.Before.Snapshot.Entries, actual.Entries);
+        var actual = AssertOriginal(fixture);
         Assert.Equal(identitiesBeforeRestart, PhysicalTreeIdentity.Capture(fixture.Plan.TargetPath, actual));
         var snapshot = fixture.Registry.ReadSnapshot();
-        Assert.Equal(JournalPhase.Committed, Assert.Single(snapshot.Journals).Phase);
+        var journal = AssertJournal(fixture, JournalPhase.Committed);
         Assert.Empty(snapshot.Isolations);
-        Assert.All(fixture.Outbox.Read(fixture.Plan.JournalId), effect => Assert.Contains(effect.State, new[] { FileEffectState.Completed, FileEffectState.NotExecuted }));
+        var outbox = fixture.Outbox.Read(fixture.Plan.JournalId);
+        Assert.NotEmpty(outbox);
+        Assert.All(outbox, effect => Assert.Contains(effect.State, new[] { FileEffectState.Completed, FileEffectState.NotExecuted }));
         output.WriteLine(JsonSerializer.Serialize(new { faultPoint = point, shape, initialPoint, recoveryKilled = recoveryIdentity, ownedFamily = recoveringFamily,
-            faultFiles, finalFiles = CaptureFiles(fixture), finalJournal = Assert.Single(snapshot.Journals), original = fixture.Plan.Before,
+            faultFiles, finalFiles = CaptureFiles(fixture), finalJournal = journal, original = fixture.Plan.Before,
             restored = actual, result = result.GetProperty("status").GetString() }));
     }
 
@@ -313,12 +293,31 @@ public sealed class ConfigurationCrashTests(ITestOutputHelper output)
             configuration, configurationObjects = PhysicalTreeIdentity.Capture(configurationPath, configuration) };
     }
 
-    private static string[] Fingerprints(string root) => Directory.GetFiles(root, "*", SearchOption.AllDirectories).Order(StringComparer.Ordinal)
-        .Select(path =>
-        {
-            using var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-            return Path.GetRelativePath(root, path) + ":" + Convert.ToHexStringLower(SHA256.HashData(input));
-        }).ToArray();
+    private static FileTreeSnapshot AssertOriginal(Fixture fixture)
+    {
+        var actual = fixture.Scanner.Capture(fixture.Plan.TargetPath, CancellationToken.None);
+        Assert.Equal(fixture.Plan.Before.Snapshot.Shape, actual.Shape);
+        Assert.Equal(fixture.Plan.Before.Snapshot.Entries, actual.Entries);
+        Assert.Equal(fixture.Plan.Before.OriginalObjects, PhysicalTreeIdentity.Capture(fixture.Plan.TargetPath, actual));
+        return actual;
+    }
+
+    private static RegisteredJournal AssertJournal(Fixture fixture, JournalPhase phase)
+    {
+        var journal = fixture.Registry.ReadOperationJournal(fixture.Plan.OperationId);
+        Assert.Equal(fixture.Plan.JournalId, journal.JournalId);
+        Assert.Equal(fixture.Plan.Kind, journal.Kind);
+        Assert.Equal(fixture.PlanReference.Sha256, journal.PlanDigest);
+        Assert.Equal(phase, journal.Phase);
+        return journal;
+    }
+
+    private static void AssertIsolation(Fixture fixture, RecoveryRegistrySnapshot snapshot)
+    {
+        var isolation = Assert.Single(snapshot.Isolations);
+        Assert.Equal(fixture.Plan.JournalId, isolation.JournalId);
+        Assert.Equal("configuration:fixture", isolation.ResourceKey);
+    }
 
     private static void PersistIdentity(string path, OwnedWorkerIdentity identity)
     {
@@ -387,13 +386,14 @@ public sealed class ConfigurationCrashTests(ITestOutputHelper output)
             operationKind = "configExchange", phase = "prepared", revision = 1, updatedAt = "2026-10-19T00:00:00Z",
             planPath = reference.RelativePath, planDigest = reference.Sha256, resourceKeys = new[] { "configuration:fixture" }, participants = Array.Empty<object>(), receipts = Array.Empty<object>()
         };
-        if (initializeJournal) new JournalStore(instance, contracts).Create(JsonSerializer.SerializeToUtf8Bytes(journal));
+        var journals = new JournalStore(instance, contracts);
+        if (initializeJournal) journals.Create(JsonSerializer.SerializeToUtf8Bytes(journal));
         var input = new JsonObject { ["runtimeRoot"] = instance.RuntimeRoot, ["plan"] = JsonSerializer.SerializeToNode(reference) };
         var inputPath = Path.Combine(root, "execute-input.json");
         File.WriteAllBytes(inputPath, JsonSerializer.SerializeToUtf8Bytes(input));
-        return new(root, inputPath, input, plan, scanner, registry, new(database), database);
+        return new(root, inputPath, input, plan, reference, scanner, registry, new(database), journals);
     }
 
     private sealed record Fixture(string Root, string InputPath, JsonObject Input, FrozenConfigurationExchange Plan,
-        FileTreeScanner Scanner, RecoveryJournalRegistry Registry, FileEffectOutbox Outbox, StateDatabase Database);
+        BlobReference PlanReference, FileTreeScanner Scanner, RecoveryJournalRegistry Registry, FileEffectOutbox Outbox, JournalStore Journals);
 }

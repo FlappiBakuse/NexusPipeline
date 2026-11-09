@@ -64,7 +64,8 @@ public sealed class RetainedReferencesTests
         retained.VerifyHeld(manager, operation);
         Assert.NotNull(lifecycle.RequestClose(session, Guid.NewGuid()).Permit);
         Assert.Equal(ResourceLeaseDenial.HostUnavailable, manager.TryAcquire(Guid.NewGuid(), [Script]).Denial);
-        Assert.Equal(2, retained.Use(() => retained.Claims.Count));
+        Assert.Equal(new[] { Extension, Image }.OrderBy(claim => claim.ResourceKey),
+            retained.Use(() => retained.Claims.OrderBy(claim => claim.ResourceKey).ToArray()));
     }
 
     [Fact(DisplayName = "Disposal During An Accepted Use Keeps The Reference Until That Actual Use Returns")]

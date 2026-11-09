@@ -99,7 +99,8 @@ public sealed class ScheduleMinuteTests
         var secondQueue = catalog.Queues[0] with { Id = Guid.NewGuid(), Name = "Independent", Order = 1 };
         catalog = catalog with { Queues = catalog.Queues.Add(secondQueue),
             Schedules = catalog.Schedules.Add(first with { Id = Guid.NewGuid(), QueueId = secondQueue.Id }) };
-        Assert.Equal(2, ScheduleMinutePolicy.Scan(Instance, catalog, new(0, null), Now).Occurrences.Length);
+        Assert.Equal(new[] { first.QueueId, secondQueue.Id }.Order(),
+            ScheduleMinutePolicy.Scan(Instance, catalog, new(0, null), Now).Occurrences.Select(item => item.QueueId).Order());
         Assert.Empty(ScheduleMinutePolicy.Scan(Instance, catalog, new(1, one.TriggerUtcMinute), Now).Occurrences);
     }
 
@@ -110,7 +111,6 @@ public sealed class ScheduleMinuteTests
         var catalog = Catalog();
         var frozen = Assert.Single(ScheduleMinutePolicy.Scan(Instance, catalog, new(0, null), Now).Occurrences);
         var paused = catalog with { Revision = 2, Queues = [catalog.Queues[0] with { Revision = 2, ScheduleEnabled = false }] };
-        Assert.True(paused.Schedules[0].IsEnabled);
         Assert.Empty(ScheduleMinutePolicy.Scan(Instance, paused, new(0, null), Now).Occurrences);
         Assert.Null(ScheduleMinutePolicy.Upcoming(paused, Now, TimeSpan.FromMinutes(5)));
         Assert.Equal("execution_schedule_cancelled", Assert.Throws<NexusPipeline.Core.Execution.ExecutionSelectionException>(

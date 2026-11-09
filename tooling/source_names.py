@@ -6,35 +6,34 @@ import re
 import subprocess
 
 
-def word_count(name):
+PREPOSITIONS = frozenset("as like per since than towards unlike versus about above across after against along among around at before behind below beneath beside between beyond by despite down during except for from in inside into near of off on onto out outside over past through throughout to toward under underneath until up upon via with within without".split())
+
+
+def name_words(name):
     name = re.sub(r"^I(?=[A-Z][a-z])", "", name)
     name = name.replace("MuMu", "Mumu")
-    return len(re.findall(r"[A-Z]+(?=[A-Z][a-z]|[0-9]|$)|[A-Z]?[a-z]+[0-9]*|[0-9]+", name))
+    return re.findall(r"[A-Z]+(?=[A-Z][a-z]|[0-9]|$)|[A-Z]?[a-z]+[0-9]*|[0-9]+", name)
+
+
+def exceeds_limit(name):
+    words = name_words(name)
+    return len(words) > (5 if any(word.lower() in PREPOSITIONS for word in words) else 4)
 
 
 def check_names(root, records, generated):
     errors = []
-    fixed_files = {
-        "sdk/dotnet/Media/IMediaPreviewRegistrationPort.cs",
-        "sdk/dotnet/Scheduling/IScheduledWorkPlanningHandler.cs",
-    }
-    observed = set()
     for record in records:
         relative = record["path"]
         path = Path(relative)
         if relative in generated:
             continue
         if path.suffix in {".cs", ".py", ".mjs", ".cjs", ".ts", ".js", ".vue", ".css"}:
-            if word_count(path.stem) > 3:
-                if relative not in fixed_files:
-                    errors.append(f"{relative}: long handwritten filename")
-                observed.add(relative)
+            if exceeds_limit(path.stem):
+                errors.append(f"{relative}: long handwritten filename")
         if path.suffix == ".py":
             for node in ast.walk(ast.parse((root / path).read_text(encoding="utf-8"))):
-                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and word_count(node.name) > 3:
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and exceeds_limit(node.name):
                     errors.append(f"{relative}:{node.lineno}: long declaration {node.name}")
-    if observed != fixed_files:
-        errors.append("Frozen SDK filename exception set changed")
     return errors
 
 

@@ -23,11 +23,11 @@ test('signed candidate decisions preserve acceptance and rejection for the curre
 
 test('candidate replies reject another session, capture, nonce, or decision shape', () => {
   for (const name of ['instanceId', 'nativeClientId', 'sessionId', 'correlationId', 'captureId', 'nonce'])
-    assert.throws(() => readLogin(signed({ ...reply(true), [name]: crypto.randomUUID() }), trusted, request));
+    assert.throws(() => readLogin(signed({ ...reply(true), [name]: crypto.randomUUID() }), trusted, request), /desktop_login_reply_invalid/);
   for (const accepted of [null, 'true', 1, undefined])
-    assert.throws(() => readLogin(signed(reply(accepted)), trusted, request));
+    assert.throws(() => readLogin(signed(reply(accepted)), trusted, request), /desktop_login_reply_invalid/);
   for (const patch of [{ type: 'completed' }, { type: 'offers' }, { offers: [] }])
-    assert.throws(() => readLogin(signed({ ...reply(true), ...patch }), trusted, request));
+    assert.throws(() => readLogin(signed({ ...reply(true), ...patch }), trusted, request), /desktop_login_reply_invalid/);
   const envelope = JSON.parse(signed(reply(false)));
   envelope.payloadBase64 = Buffer.from(JSON.stringify(reply(true))).toString('base64');
   assert.throws(() => readLogin(JSON.stringify(envelope), trusted, request), /desktop_proof_invalid/);
@@ -38,6 +38,6 @@ test('poll and completion remain separate signed login transitions', () => {
   assert.deepEqual(readLogin(signed({ ...poll, type: 'offers', offers: [] }), trusted, poll).offers, []);
   const complete = { ...request, type: 'complete' };
   assert.equal(readLogin(signed({ ...complete, type: 'completed' }), trusted, complete).captureId, captureId);
-  assert.throws(() => readLogin(signed(reply(true)), trusted, complete));
-  assert.throws(() => readLogin(signed({ ...complete, type: 'completed', nonce: crypto.randomUUID() }), trusted, complete));
+  assert.throws(() => readLogin(signed(reply(true)), trusted, complete), /desktop_login_reply_invalid/);
+  assert.throws(() => readLogin(signed({ ...complete, type: 'completed', nonce: crypto.randomUUID() }), trusted, complete), /desktop_login_reply_invalid/);
 });

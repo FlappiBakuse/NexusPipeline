@@ -1,4 +1,3 @@
-using System.Collections.Immutable;
 using NexusPipeline.Core.Execution;
 using Xunit;
 
@@ -6,13 +5,11 @@ namespace NexusPipeline.CoreTests;
 
 public sealed class ProviderPolicyTests
 {
-    [Fact(DisplayName = "Frozen Provider Arguments Cannot Follow Later Caller Array Changes")]
-    public void FreezesArgumentArrays()
+    [Fact(DisplayName = "Frozen Provider Arguments Preserve Order Spaces And Empty Values")]
+    public void PreservesArguments()
     {
-        var arguments = new[] { "original" };
-        var frozen = ExecutionProviderPolicy.Freeze(new("main", "worker/Provider.exe", arguments.ToImmutableArray(), null));
-        arguments[0] = "changed";
-        Assert.Equal("original", Assert.Single(frozen.Arguments));
+        var frozen = ExecutionProviderPolicy.Freeze(new("main", "worker/Provider.exe", ["--profile", "two words", ""], null));
+        Assert.Equal(new[] { "--profile", "two words", "" }, frozen.Arguments.ToArray());
     }
 
     [Theory(DisplayName = "Worker Entry Must Be A Portable Native Package Entry")]

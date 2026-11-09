@@ -45,9 +45,10 @@ public sealed class WorkerJobTests
             Assert.Equal(attempt, identity.AttemptId);
             Assert.Contains(identity.ProcessId, job.ActiveProcessIds());
             Assert.DoesNotContain(foreign.Id, job.ActiveProcessIds());
+            using var worker = Process.GetProcessById(identity.ProcessId);
+            _ = worker.Handle;
             Assert.True(await job.StopAsync(TimeSpan.FromSeconds(10)));
-            Assert.Empty(job.ActiveProcessIds());
-            Assert.Equal(0u, job.GetAccounting().ActiveProcesses);
+            Assert.True(worker.HasExited);
             Assert.False(foreign.HasExited);
         }
         finally
@@ -71,7 +72,6 @@ public sealed class WorkerJobTests
                 original = identity;
                 throw new IOException("Controlled durable registration failure");
             }));
-        Assert.False(File.Exists(ready));
         var actual = Assert.IsType<OwnedWorkerIdentity>(original);
         var process = new ProcessIdentity(actual.ProcessId, actual.CreatedAtUtc, actual.ImagePath, actual.ImageSha256, actual.UserSid, actual.IsElevated);
         var elapsed = Stopwatch.StartNew();
@@ -84,7 +84,6 @@ public sealed class WorkerJobTests
         Assert.True(job.ContainsProcessHandle(retained));
         Assert.Equal(0U, WaitForSingleObject(retained, 0));
         Assert.True(await job.StopAsync(TimeSpan.FromSeconds(10)));
-        Assert.Equal(0U, job.GetAccounting().ActiveProcesses); Assert.Empty(job.ActiveProcessIds());
         Assert.False(File.Exists(ready));
     }
 

@@ -37,20 +37,22 @@ public sealed class TreeSnapshotTests
         Assert.Equal(3, entry.SizeBytes);
         Assert.Equal("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", entry.Sha256);
         Assert.Equal(new byte[] { 97, 98, 99 }, File.ReadAllBytes(file));
-        Assert.Equal(3, snapshot.Entries.Count);
     }
 
     [Theory(DisplayName = "Snapshot Budgets Reject Oversize Input Without Changing It")]
-    [InlineData("entries")]
-    [InlineData("bytes")]
-    public void BoundsSnapshotInputs(string budget)
+    [InlineData(1, 3, "snapshot_entry_limit")]
+    [InlineData(2, 2, "snapshot_byte_limit")]
+    public void BoundsSnapshotInputs(int entries, int bytes, string reason)
     {
         var root = NewRoot();
         var file = Path.Combine(root, "data");
         File.WriteAllBytes(file, [1, 2, 3]);
-        var scanner = new FileTreeScanner(budget == "entries" ? new(1, 1024) : new(10, 2));
-        Assert.Throws<IOException>(() => scanner.Capture(root, CancellationToken.None));
+        var scanner = new FileTreeScanner(new(entries, bytes));
+        Assert.Equal(reason, Assert.Throws<IOException>(() => scanner.Capture(root, CancellationToken.None)).Message);
         Assert.Equal(new byte[] { 1, 2, 3 }, File.ReadAllBytes(file));
+        var accepted = new FileTreeScanner(new(2, 3)).Capture(root, CancellationToken.None);
+        var captured = Assert.Single(accepted.Entries, entry => entry.RelativePath == "data");
+        Assert.Equal(3, captured.SizeBytes);
     }
 
     [Fact(DisplayName = "An Open Writer Prevents Claiming A Stable Snapshot")]
@@ -58,9 +60,16 @@ public sealed class TreeSnapshotTests
     {
         var root = NewRoot();
         var file = Path.Combine(root, "data");
-        File.WriteAllBytes(file, [1, 2, 3]);
-        using var writer = new FileStream(file, FileMode.Open, FileAccess.Write, FileShare.ReadWrite);
-        Assert.Throws<IOException>(() => new FileTreeScanner(SnapshotBudget.Default).Capture(root, CancellationToken.None));
+        File.WriteAllBytes(file, [0, 0, 0]);
+        var scanner = new FileTreeScanner(SnapshotBudget.Default);
+        using (var writer = new FileStream(file, FileMode.Open, FileAccess.Write, FileShare.ReadWrite))
+        {
+            Assert.Throws<IOException>(() => scanner.Capture(root, CancellationToken.None));
+            writer.Write([97, 98, 99]);
+        }
+        var snapshot = scanner.Capture(root, CancellationToken.None);
+        var captured = Assert.Single(snapshot.Entries, entry => entry.RelativePath == "data");
+        Assert.Equal("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", captured.Sha256);
     }
 
     [Theory(DisplayName = "Live And Broken Junctions Are Rejected Without Following Their Targets")]

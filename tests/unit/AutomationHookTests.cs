@@ -17,7 +17,7 @@ public sealed class AutomationHookTests
         var next = AutomationEdits.Apply(catalog, new(catalog.Revision, [], [], [], [changed], [], [], []));
         var saved = Assert.Single(next.Bindings);
         Assert.Equal(2, saved.Revision); Assert.True(saved.PreOnceAfterSuccess); Assert.True(saved.PostFinalOnly);
-        Assert.Equal(hook.Arguments, saved.PreHook!.Arguments); Assert.Equal("after.ps1", saved.PostHook!.Executable.RelativePath);
+        Assert.Equal(hook.Arguments.ToArray(), saved.PreHook!.Arguments.ToArray()); Assert.Equal("after.ps1", saved.PostHook!.Executable.RelativePath);
     }
 
     [Theory(DisplayName = "Hook Policy Rejects Missing Roots Escapes Unsupported Extensions And Default Arguments")]

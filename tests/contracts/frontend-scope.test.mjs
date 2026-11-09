@@ -5,15 +5,23 @@ import { pathToFileURL } from 'node:url';
 if (!process.env.NEXUS_SDK_ENTRY) throw new Error('NEXUS_SDK_ENTRY must identify the actual built SDK');
 const { ExtensionScope } = await import(pathToFileURL(process.env.NEXUS_SDK_ENTRY).href);
 
-test('cancels before reverse cleanup and shares one disposal completion', async () => {
+test('cancels before reverse cleanup and all disposal callers wait for cleanup', async () => {
   const scope = new ExtensionScope();
   const events = [];
   scope.signal.addEventListener('abort', () => events.push('cancel'));
   await scope.own(() => events.push('first'));
-  await scope.own(() => events.push('second'));
-  const completion = scope.dispose();
-  assert.equal(scope.dispose(), completion);
-  await completion;
+  let release;
+  const held = new Promise(resolve => { release = resolve; });
+  await scope.own(async () => { events.push('second'); await held; });
+  let firstDone = false, secondDone = false;
+  const first = scope.dispose().then(() => { firstDone = true; });
+  const second = scope.dispose().then(() => { secondDone = true; });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(firstDone, false);
+  assert.equal(secondDone, false);
+  assert.deepEqual(events, ['cancel', 'second']);
+  release();
+  await Promise.all([first, second]);
   assert.deepEqual(events, ['cancel', 'second', 'first']);
 });
 

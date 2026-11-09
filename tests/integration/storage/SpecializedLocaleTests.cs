@@ -33,7 +33,7 @@ public sealed class SpecializedLocaleTests
             }
             Assert.Equal(8, inputs.Count); Assert.Equal(8, inputs.Select(input => input.Manifest["extensionId"]!.GetValue<string>()).Distinct().Count());
             object? context = null;
-            await FrontendBrowserTests.RunAsync(inputs[0], "NEXUS_SPECIALIZED_LOCALE_BROWSER_SCRIPT", 25,
+            await FrontendBrowserTests.RunAsync(inputs[0], "NEXUS_SPECIALIZED_LOCALE_BROWSER_SCRIPT",
                 additional: inputs.Skip(1).ToArray(), seed: catalog => context = SpecializedLocaleFixture.Seed(catalog, fixtures.RootElement),
                 browserContext: () => context, application: Required("NEXUS_ACCEPTANCE_APPLICATION"), timeoutSeconds: 300);
         }

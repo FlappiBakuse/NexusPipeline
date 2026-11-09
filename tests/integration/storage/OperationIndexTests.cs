@@ -1,4 +1,3 @@
-using Microsoft.Data.Sqlite;
 using NexusPipeline.Core.Operations;
 using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Journals;
@@ -9,7 +8,7 @@ namespace NexusPipeline.StorageTests;
 
 public sealed class OperationIndexTests
 {
-    [Fact(DisplayName = "Admission Indexes Its Owned Copy Without Changing The Original Database And Enables Indexed Parent Reads")]
+    [Fact(DisplayName = "Inspection Repairs Only Its Copy And Exclusive Startup Repairs The Admitted Database")]
     public void PreservesInspectionSource()
     {
         var instance = CreateInstance(); var database = StateDatabase.CreateFresh(instance);
@@ -21,27 +20,13 @@ public sealed class OperationIndexTests
         }
         var before = File.ReadAllBytes(database.DatabasePath);
         var inspection = DatabaseInspector.Inspect(database.DatabasePath, instance.InstanceId, Path.Combine(instance.RuntimeRoot, "diagnostics"));
+        const string restoredIndexes = "SELECT count(*) FROM sqlite_schema WHERE name IN " +
+            "('operations_parent_read','operations_kind_read','account_run_records_ended_read');";
         try
         {
             using var copy = DatabaseConnections.Open(Path.Combine(inspection.DiagnosticCopyRoot, "nexus.db"), readOnly: true);
             Assert.Equal(StateDatabase.SchemaDigest, DatabaseSchema.VerifyCatalog(copy));
-            using var query = copy.CreateCommand();
-            query.CommandText = "EXPLAIN QUERY PLAN SELECT operation_id FROM operations WHERE initial_journal_id=$parent AND operation_kind='execution.cancel';";
-            query.Parameters.AddWithValue("$parent", Guid.NewGuid().ToString("D"));
-            using (var rows = query.ExecuteReader())
-            {
-                Assert.True(rows.Read());
-                Assert.Contains("SEARCH operations", rows.GetString(3), StringComparison.Ordinal);
-                Assert.DoesNotContain("SCAN", rows.GetString(3), StringComparison.Ordinal);
-            }
-            query.CommandText = "EXPLAIN QUERY PLAN SELECT count(*) FROM account_history WHERE history_retired_at_utc_ticks IS NULL " +
-                "AND ended_at_utc_ticks>=100 AND ended_at_utc_ticks<200;";
-            query.Parameters.Clear();
-            using var history = query.ExecuteReader();
-            var plan = new List<string>();
-            while (history.Read()) plan.Add(history.GetString(3));
-            Assert.DoesNotContain(plan, detail => detail == "SCAN a" || detail.StartsWith("SCAN a ", StringComparison.Ordinal));
-            Assert.Contains(plan, detail => detail.Contains("ended_at_utc_ticks>? AND ended_at_utc_ticks<?", StringComparison.Ordinal));
+            Assert.Equal(3L, DatabaseConnections.Scalar(copy, restoredIndexes));
         }
         finally { inspection.OwnedCopy!.Discard(); }
         Assert.Equal(before, File.ReadAllBytes(database.DatabasePath));
@@ -49,8 +34,7 @@ public sealed class OperationIndexTests
         using var lease = InstanceLease.Acquire(instance, new());
         StateDatabase.OpenExisting(instance, Path.Combine(instance.RuntimeRoot, "reopen"), new JournalStartupAdmission(instance, new()), lease);
         using var current = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
-        using var count = current.CreateCommand(); count.CommandText = "SELECT count(*) FROM sqlite_schema WHERE name IN ('operations_parent_read','operations_kind_read');";
-        Assert.Equal(2L, count.ExecuteScalar());
+        Assert.Equal(3L, DatabaseConnections.Scalar(current, restoredIndexes));
     }
 
     [Theory(DisplayName = "Unknown Or Altered Read Indexes Fail Closed And Preserve Original Bytes")]

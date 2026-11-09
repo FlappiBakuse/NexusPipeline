@@ -42,9 +42,6 @@ class WebSchemaTests(unittest.TestCase):
         self.assertEqual({"item", "choice"}, set(selected["shared.schema.json"]["$defs"]))
         self.assertEqual(self.schemas["shared.schema.json"]["$defs"]["item"],
                          resolve(selected, "shared.schema.json#/$defs/item")[2])
-        generated = self.outputs()
-        self.assertIn("readonly shared?: SharedItem", generated["apps/web/src/control/wire.generated.ts"])
-        self.assertNotIn("SharedUnused", generated["apps/web/src/control/wire.generated.ts"])
 
     def test_ignores_internal(self):
         before = self.outputs()

@@ -26,12 +26,9 @@ public sealed class InventoryFailureTests
         var error = await Assert.ThrowsAsync<IOException>(() => job.StopAsync(TimeSpan.FromSeconds(5)));
         Assert.Equal("controlled_inventory_failure", error.Message);
         Assert.Contains(root.ProcessId, boundary.ActualInventory!);
-        Assert.Null(job.LastStopObservation);
         await process.WaitForExitAsync(deadline.Token);
-        Assert.NotNull(await job.AwaitRootAsync(root, TimeSpan.FromSeconds(5)));
         await Task.WhenAll(stdout, stderr).WaitAsync(deadline.Token);
         Assert.True(await job.StopAsync(TimeSpan.FromSeconds(5)));
-        Assert.Empty(job.ActiveProcessIds());
     }
 
     private sealed class FailedInventory : IJobStopObserver

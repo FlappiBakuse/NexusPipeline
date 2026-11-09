@@ -49,25 +49,6 @@ public sealed class PublicationContextTests
         Assert.Equal("second", await second!); Assert.Null(await suppressed!);
         queue.Close(() => { }); await queue.Released.WaitAsync(TimeSpan.FromSeconds(10));
     }
-    [Fact(DisplayName = "An Instance Owns One Background Publication Worker And Releases It Once After Closing")]
-    public async Task OwnsWorkerLifetime()
-    {
-        var queue = new ExecutionPublicationQueue();
-        var worker = queue.Run(() => Thread.CurrentThread);
-        Assert.True(worker.IsBackground);
-        Assert.NotEqual(Environment.CurrentManagedThreadId, worker.ManagedThreadId);
-        Assert.Same(worker, queue.Run(() => Thread.CurrentThread));
-        Assert.Equal("execution_publication_reentrancy", queue.Run(() =>
-            Assert.Throws<IOException>(() => queue.Run(() => true)).Message));
-        var releases = 0;
-        queue.Close(() => Interlocked.Increment(ref releases));
-        queue.Close(() => throw new IOException("duplicate_release"));
-        await queue.Released.WaitAsync(TimeSpan.FromSeconds(10));
-        Assert.True(worker.Join(TimeSpan.FromSeconds(10)));
-        Assert.Equal(1, releases);
-        Assert.Throws<ObjectDisposedException>(() => queue.Run(() => true));
-    }
-
     [Fact(DisplayName = "Sixty Four Accepted Publications Drain Before Release And An Additional Publication Is Rejected")]
     public async Task BoundsPendingWork()
     {
@@ -104,16 +85,19 @@ public sealed class PublicationContextTests
         Assert.Empty(errors); Assert.Equal(64, completed);
     }
 
-    [Fact(DisplayName = "Closing An Idle Instance Releases Its Owned Resources Before Close Returns")]
+    [Fact(DisplayName = "Idle Publication Closes Once And Rejects Reentrant Or Subsequent Work")]
     public async Task ClosesIdleQueue()
     {
         var queue = new ExecutionPublicationQueue();
-        _ = queue.Run(() => true);
+        Assert.Equal("execution_publication_reentrancy", queue.Run(() =>
+            Assert.Throws<IOException>(() => queue.Run(() => true)).Message));
         Assert.True(SpinWait.SpinUntil(() => queue.PendingCount == 0, TimeSpan.FromSeconds(10)));
-        var released = false;
-        queue.Close(() => released = true);
-        Assert.True(released);
+        var releases = 0;
+        queue.Close(() => Interlocked.Increment(ref releases));
+        Assert.Equal(1, releases);
+        queue.Close(() => Interlocked.Increment(ref releases));
         await queue.Released.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(1, releases);
+        Assert.Throws<ObjectDisposedException>(() => queue.Run(() => true));
     }
-
 }

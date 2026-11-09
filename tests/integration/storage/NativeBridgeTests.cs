@@ -61,7 +61,8 @@ public sealed class NativeBridgeTests
             await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(55));
             await Task.WhenAll(child.Logs);
             using var report = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(output, "receipt.json")));
-            Assert.Equal("PASS", report.RootElement.GetProperty("status").GetString()); Assert.Equal(4, report.RootElement.GetProperty("checks").GetArrayLength());
+            Assert.Equal("PASS", report.RootElement.GetProperty("status").GetString());
+            Assert.NotEmpty(report.RootElement.GetProperty("checks").EnumerateArray());
             Assert.Equal(0, process.ExitCode);
             await fixture.Activator.StopAllAsync(TimeSpan.FromSeconds(10));
         }

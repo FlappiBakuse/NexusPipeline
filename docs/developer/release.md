@@ -11,7 +11,7 @@ Host 编译隐含当前 Web 资源，桌面使用锁定 Electron 装配器；不
 
 需要预装插件时，一次解析官方 Plugins develop 完整 SHA，后续只消费该 checkout。
 SDK 从本次 Host 源码构建；独立 SDK 消费者只编译，不执行测试。
-PR 调用 `sdk-packages --compile-only`，回执将运行消费者及 lifecycle 标为 NOT_RUN；默认 SDK 验证入口保持原行为。
+PR 调用 `sdk-packages --compile-only`，回执将运行消费者及 lifecycle 标为 NOT_RUN；默认 SDK 入口额外运行前端生命周期行为测试，消费者仅作类型检查。
 插件在仓外隔离 checkout 中导入这一 SDK，再调用现役前后端构建和打包入口。
 两个原始 checkout 保持干净；派生镜像、构建、依赖与回执位于显式仓外输出根。
 PR 包及生产编译不具备正式候选或发布资格。

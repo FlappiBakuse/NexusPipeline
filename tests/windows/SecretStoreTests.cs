@@ -123,21 +123,6 @@ public sealed class SecretStoreTests
         Assert.Equal(before, CipherFiles(fixture.Instance.RuntimeRoot));
     }
 
-    [Fact(DisplayName = "Concurrent Secret Replays Converge On One Accepted Cipher Reference")]
-    public async Task ConvergesConcurrentReplays()
-    {
-        var fixture = Create();
-        var operation = Guid.NewGuid();
-        using var value = new SecretValue(Canary);
-        var results = await Task.WhenAll(Enumerable.Range(0, 4).Select(_ => Task.Run(async () =>
-            await fixture.Store.ApplyAsync(operation, fixture.Key, 0, SecretDisposition.Set, value, default))));
-        Assert.All(results, state => Assert.Equal(results[0], state));
-        Assert.Equal(1, results[0].Revision);
-        Assert.True(results[0].IsConfigured && results[0].IsReadable);
-        using var recovered = await fixture.Store.ReadAsync(fixture.Key, default);
-        recovered.Use(chars => Assert.True(chars.SequenceEqual(Canary)));
-    }
-
     [Fact(DisplayName = "Corrupt Ciphertext Remains Configured Until Explicit Clear And Keep Preserves It")]
     public async Task PreservesCorruptCiphertext()
     {

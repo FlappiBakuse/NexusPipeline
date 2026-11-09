@@ -85,15 +85,11 @@ class ReleaseProvenanceTests(unittest.TestCase):
         replies = {prefix + "/commits/" + self.commit: {"sha": self.commit, "commit": {"tree": {"sha": "b" * 40}}},
             prefix + "/commits/main": {"sha": "d" * 40}, prefix + f"/compare/{self.commit}..." + "d" * 40:
             {"status": "ahead", "base_commit": {"sha": self.commit}, "merge_base_commit": {"sha": self.commit}}}
-        calls = []
-
         def fetch(path):
-            calls.append(path)
             return replies[path]
 
         result = verify_source(fetch, self.policy["repository"], identity)
         self.assertEqual("d" * 40, result["protectedCommit"])
-        self.assertEqual(1, calls.count(prefix + "/commits/main"))
         for field in ("sourceMode", "sourceTree", "sourceSnapshotHash"):
             altered = {**identity, field: "invalid"}
             with self.subTest(field=field), self.assertRaises(ValueError):
@@ -106,7 +102,7 @@ class ReleaseProvenanceTests(unittest.TestCase):
         provenance = self.resolve()
         producer = {name: provenance[name] for name in ("repository", "workflow", "workflowCommit", "runId", "runAttempt")}
         candidate = {"format": "nexus.release.candidate", "version": 1, "profile": "production", "producer": producer}
-        self.assertIs(candidate, bind_producer(candidate, provenance))
+        self.assertEqual(candidate, bind_producer(candidate, provenance))
         for field, value in (("profile", "test"), ("version", True), ("producer", {**producer, "runAttempt": 1})):
             with self.subTest(field=field), self.assertRaises(ValueError):
                 bind_producer({**candidate, field: value}, provenance)

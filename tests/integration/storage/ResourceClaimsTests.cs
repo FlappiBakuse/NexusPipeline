@@ -90,11 +90,12 @@ public sealed class ResourceClaimsTests
         var selected = ExecutionPlanResources.Claims(fixture.Source.Plan).Last(claim => claim.Mode == ResourceClaimMode.Mutation);
         Execute(fixture.Database, "CREATE TRIGGER fixture_fail_claim BEFORE INSERT ON journal_resource_claims WHEN NEW.resource_key=" +
             Literal(selected.ResourceKey) + " BEGIN SELECT RAISE(ABORT,'fixture_mode_insert_failure'); END;");
-        var before = AcceptanceCounts(fixture.Database); var target = TreeBytes(fixture.Configuration.TargetPath);
+        var commits = fixture.Database.CommitSequence; var target = TreeBytes(fixture.Configuration.TargetPath);
         try
         {
             Assert.Throws<SqliteException>(() => fixture.Accept());
-            Assert.Equal(before, AcceptanceCounts(fixture.Database));
+            Assert.Equal(commits, fixture.Database.CommitSequence);
+            Assert.Null(new RecoveryJournalRegistry(fixture.Database).FindJournal(fixture.JournalId));
             Assert.False(Directory.Exists(Path.Combine(fixture.Instance.RuntimeRoot, "journals", fixture.JournalId.ToString("D"))));
             Assert.Equal(target, TreeBytes(fixture.Configuration.TargetPath));
         }
@@ -191,11 +192,9 @@ public sealed class ResourceClaimsTests
         var fixture = AttemptTestFixture.Create(); var accepted = fixture.Accept();
         if (change == "missing-image") File.Move(fixture.Source.Image, Path.Combine(fixture.Root, "retained-image"));
         else Directory.Move(fixture.Configuration.TargetPath, Path.Combine(fixture.Root, "retained-configuration"));
-        var modes = ReadClaims(fixture.Database, fixture.JournalId); var before = RuntimeBytes(fixture.Instance.RuntimeRoot);
-        var replay = fixture.Accept();
-        Assert.False(replay.Acceptance.IsNew); Assert.Equal(accepted.JournalId, replay.JournalId); Assert.Equal(accepted.Plan, replay.Plan);
-        Assert.Equal(modes, ReadClaims(fixture.Database, fixture.JournalId)); Assert.Equal(before, RuntimeBytes(fixture.Instance.RuntimeRoot));
-        Assert.IsAssignableFrom<IOException>(Record.Exception(() => new AttemptPlanCodec(fixture.Instance, new(), fixture.Source.Blobs).Freeze(fixture.Plan)));
+        var before = RuntimeBytes(fixture.Instance.RuntimeRoot);
+        Assert.Equal(accepted with { Acceptance = accepted.Acceptance with { IsNew = false } }, fixture.Accept());
+        Assert.Equal(before, RuntimeBytes(fixture.Instance.RuntimeRoot));
     }
 
     [Theory(DisplayName = "Accepted Replay Rejects Changed Candidate Or Operation Identity Before Writing Anything")]
@@ -205,7 +204,7 @@ public sealed class ResourceClaimsTests
     [InlineData("digest")]
     public void RejectsChangedReplay(string change)
     {
-        var fixture = AttemptTestFixture.Create(); fixture.Accept();
+        var fixture = AttemptTestFixture.Create(); var accepted = fixture.Accept();
         var operation = new OperationIdentity(Guid.Parse(fixture.Plan.OperationId), "fixture-attempt", new('b', 64), "fixture.attempt");
         operation = change switch
         {
@@ -214,12 +213,11 @@ public sealed class ResourceClaimsTests
             "digest" => new(operation.OperationId, operation.SubjectId, new('c', 64), operation.Kind), _ => operation
         };
         var candidate = change == "candidate" ? fixture.Plan with { AttemptOrdinal = 2 } : fixture.Plan;
-        var before = RuntimeBytes(fixture.Instance.RuntimeRoot); var counts = AcceptanceCounts(fixture.Database);
-        var modes = ReadClaims(fixture.Database, fixture.JournalId);
+        var before = RuntimeBytes(fixture.Instance.RuntimeRoot); var commits = fixture.Database.CommitSequence;
         Assert.Throws<OperationConflictException>(() => new RunAttemptAcceptance(fixture.Instance, new(), fixture.Database)
             .Accept(operation, candidate, DateTimeOffset.UtcNow));
-        Assert.Equal(before, RuntimeBytes(fixture.Instance.RuntimeRoot)); Assert.Equal(counts, AcceptanceCounts(fixture.Database));
-        Assert.Equal(modes, ReadClaims(fixture.Database, fixture.JournalId));
+        Assert.Equal(before, RuntimeBytes(fixture.Instance.RuntimeRoot)); Assert.Equal(commits, fixture.Database.CommitSequence);
+        Assert.Equal(accepted with { Acceptance = accepted.Acceptance with { IsNew = false } }, fixture.Accept());
     }
 
     [Fact(DisplayName = "Native Deletion Guard Still Protects Parent Definition Content After Its Image And Target Have Moved")]
@@ -266,21 +264,6 @@ public sealed class ResourceClaimsTests
     private static string ClaimText(ResourceClaim claim) => claim.ResourceKey + ":" + (int)claim.Mode;
     private static string[] ReadClaims(StateDatabase database, Guid journal) => JournalResourceClaims.Read(database, journal)
         .OrderBy(item => item.Key, StringComparer.Ordinal).Select(item => ClaimText(new(item.Key, item.Value))).ToArray();
-
-    private static long[] AcceptanceCounts(StateDatabase database)
-    {
-        var tables = new[] { "operations", "operation_journals", "journal_resources", "journal_resource_claims", "resource_isolations",
-            "journal_effect_gates", "journal_writers", "file_effects" };
-        using var connection = Connect(database); using var command = connection.CreateCommand();
-        return tables.Select(table => { command.CommandText = "SELECT count(*) FROM " + table + ";";
-                return (long)command.ExecuteScalar()!; })
-            .Append(Scalar(connection, "SELECT revision FROM recovery_index_state WHERE singleton=1;")).ToArray();
-    }
-
-    private static long Scalar(SqliteConnection connection, string sql)
-    {
-        using var command = connection.CreateCommand(); command.CommandText = sql; return (long)command.ExecuteScalar()!;
-    }
 
     private static void Execute(StateDatabase database, string sql)
     {

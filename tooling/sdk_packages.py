@@ -1,4 +1,4 @@
-"""Build source-bound SDK packages and run independent consumers from explicit inputs."""
+"""Build source-bound SDK packages, compile consumers and optionally test lifecycle behavior."""
 from datetime import datetime, timezone
 import json
 import os
@@ -59,6 +59,9 @@ def build_sdk(root, build, consumers, output, cache, compile_only=False):
         [str(Path(sys.executable).parent), str(Path(os.environ["SystemRoot"]) / "System32"), os.environ["SystemRoot"]]))
     env.update(TEMP=str(temporary), TMP=str(temporary), npm_config_cache=str(cache / "npm"))
     commands = []
+    responsibilities = dict(lint="NOT_RUN", typecheck="NOT_RUN", test="NOT_RUN", build="NOT_RUN")
+    validation_mode = "compile-only" if compile_only else "lifecycle"
+    stage = None
 
     def run(command, cwd, label, additions=None):
         if command[0] == "npm":
@@ -80,6 +83,7 @@ def build_sdk(root, build, consumers, output, cache, compile_only=False):
 
     try:
         consumer_records = {kind: records(consumers / kind) for kind in ("dotnet", "frontend")}
+        stage = "build"
         run(["dotnet", "pack", str(frozen / "sdk/dotnet/NexusPipeline.Extensibility.csproj"), "--no-build", "--no-restore",
              "--configuration", "Release", "--output", str(packages), f"-p:NexusArtifactsRoot={build / 'build'}",
              f"-p:NexusPackagesRoot={build.parent / 'cache/nuget'}"], frozen, "dotnet-pack")
@@ -94,6 +98,7 @@ def build_sdk(root, build, consumers, output, cache, compile_only=False):
             if public != expected:
                 raise ValueError("Packed public SDK contracts differ from the exact producer closure")
         dotnet = output / "dotnet/source"
+        stage = "typecheck"
         synchronize(consumers / "dotnet", dotnet, output / "workspace-locks/dotnet.json")
         run(["dotnet", "build", str(dotnet / "ProtocolConsumer.csproj"), "-m:1", "--disable-build-servers",
              "-p:UseArtifactsOutput=true", f"-p:ArtifactsPath={output / 'dotnet/build'}",
@@ -101,8 +106,8 @@ def build_sdk(root, build, consumers, output, cache, compile_only=False):
         binary = output / "dotnet/build/bin/ProtocolConsumer/debug"
         if (binary / "NexusPipeline.Extensibility.dll").read_bytes() != assembly:
             raise ValueError("Independent consumer loaded a stale same-version SDK")
-        dotnet_result = None if compile_only else run([str(binary / "ProtocolConsumer.exe")], dotnet, "dotnet-consumer-run")
         frontend = output / "frontend-sdk"
+        stage = "build"
         synchronize(frozen / "sdk/frontend", frontend, output / "workspace-locks/sdk-frontend.json")
         if not (frontend / "node_modules/typescript/lib/typescript.js").is_file():
             run(["npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund"], frontend, "frontend-dependencies")
@@ -110,33 +115,36 @@ def build_sdk(root, build, consumers, output, cache, compile_only=False):
         if json.loads((frontend / "node_modules/typescript/package.json").read_bytes())["version"] != "5.9.3":
             raise ValueError("SDK TypeScript compiler differs from its explicit pin")
         run(["npm", "run", "build"], frontend, "frontend-build", {"NEXUS_SDK_SOURCE_ROOT": str(frozen)})
-        if not compile_only:
-            lifecycle = run(["node", "--test", "--test-reporter=tap", str(frozen / "tests/contracts/frontend-scope.test.mjs")], frozen,
-                            "frontend-lifecycle", {"NEXUS_SDK_ENTRY": str(frontend / "dist/index.js")})
-            if not re.search(r"^# tests [1-9][0-9]*$", lifecycle, re.MULTILINE) or not re.search(r"^# fail 0$", lifecycle, re.MULTILINE):
-                raise ValueError("SDK lifecycle test report is missing or empty")
         run(["npm", "pack", "--ignore-scripts", "--pack-destination", str(packages)], frontend, "frontend-pack")
         tar = packages / "nexuspipeline-extension-sdk-0.1.0.tgz"
         immutable = tar.with_name("nexuspipeline-extension-sdk-0.1.0-" + digest(tar.read_bytes()) + ".tgz")
         tar.rename(immutable)
+        responsibilities["build"] = "PASS"
         web = output / "frontend-consumer"
+        stage = "typecheck"
         synchronize(consumers / "frontend", web, output / "workspace-locks/frontend-consumer.json")
         run(["npm", "install", "--no-save", "--package-lock=false", "--ignore-scripts", "--no-audit", "--no-fund", str(immutable)], web, "frontend-consumer-package")
         run(["node", str(frontend / "node_modules/typescript/bin/tsc"), "--strict", "--module", "NodeNext", "--moduleResolution", "NodeNext",
              "--target", "ES2023", "--outDir", "dist", "consumer.ts"], web, "frontend-consumer-build")
-        web_result = None if compile_only else run(["node", str(web / "dist/consumer.js")], web, "frontend-consumer-run")
-        for result in (() if compile_only else (dotnet_result, web_result)):
-            if json.loads(result)["handshake"]["contractFingerprint"] != fingerprint:
-                raise ValueError("Independent consumer fingerprint differs from the producer")
         emitted = {path.relative_to(frontend / "dist").as_posix(): digest(path.read_bytes()) for path in (frontend / "dist").rglob("*") if path.is_file()}
         installed = web / "node_modules/@nexuspipeline/extension-sdk/dist"
         if emitted != {path.relative_to(installed).as_posix(): digest(path.read_bytes()) for path in installed.rglob("*") if path.is_file()}:
             raise ValueError("Installed frontend SDK differs from the built artifact")
+        responsibilities["typecheck"] = "PASS"
+        if not compile_only:
+            stage = "test"
+            lifecycle = run(["node", "--test", "--test-reporter=tap", str(frozen / "tests/contracts/frontend-scope.test.mjs")], frozen,
+                            "frontend-lifecycle", {"NEXUS_SDK_ENTRY": str(frontend / "dist/index.js")})
+            totals = dict(re.findall(r"^# (tests|pass|fail) (\d+)$", lifecycle, re.MULTILINE))
+            if totals.get("tests", "0") == "0" or totals.get("pass") != totals["tests"] or totals.get("fail") != "0":
+                raise ValueError("SDK lifecycle tests are missing, incomplete or failed")
+            responsibilities["test"] = "PASS"
+        stage = None
         if source_files(root) != host_records or any(records(consumers / kind) != consumer_records[kind] for kind in consumer_records):
             raise ValueError("SDK producer or consumer source inputs changed during packaging")
         result = {"status": "PASS", "scope": "Current packaged SDK and independent compiled consumers; no plugin business qualification",
-                  "validationMode": "compile-only" if compile_only else "runtime-consumers",
-                  "runtimeConsumers": "NOT_RUN" if compile_only else "PASS", "lifecycle": "NOT_RUN" if compile_only else "PASS",
+                  "validationMode": validation_mode, "runtimeConsumers": "NOT_RUN",
+                  "lifecycle": responsibilities["test"], "responsibilities": responsibilities,
                   "contractFingerprint": fingerprint, "hostSource": receipt["source"], "hostBuildReceiptSha256": digest((build / "build-receipt.json").read_bytes()),
                   "commands": commands, "consumerInputs": consumer_records, "consumerRoot": str(consumers), "frontendSourceRoot": str(frozen),
                   "frontendApiDescriptorSha256": digest((frozen / "contracts/sdk-frontend-api.json").read_bytes()), "frontendCompilerSha256": digest(compiler.read_bytes()),
@@ -145,5 +153,9 @@ def build_sdk(root, build, consumers, output, cache, compile_only=False):
         write_json(output / "sdk-consumers-current.json", {"receipt": str(run_root / "sdk-consumer-receipt.json"), **result})
         return {"status": "PASS", "contractFingerprint": fingerprint, "receipt": str(run_root / "sdk-consumer-receipt.json")}
     except Exception as failure:
-        write_json(run_root / "sdk-consumer-receipt.json", {"status": "FAIL", "error": str(failure), "hostSource": receipt["source"], "commands": commands})
+        if stage is not None:
+            responsibilities[stage] = "FAIL"
+        write_json(run_root / "sdk-consumer-receipt.json", {"status": "FAIL", "error": str(failure), "hostSource": receipt["source"],
+            "commands": commands, "validationMode": validation_mode, "runtimeConsumers": "NOT_RUN",
+            "lifecycle": responsibilities["test"], "responsibilities": responsibilities})
         raise

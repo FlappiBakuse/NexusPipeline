@@ -57,8 +57,6 @@ public sealed class ImageCatalogTests
             Assert.Equal(1, fixture.Base.Count("run_records")); Assert.Equal(1, fixture.Base.Count("record_assets"));
             Assert.Equal(original, new JournalStore(source.Instance, new()).Read(receipt.JournalId).Export());
             Assert.Equal(receipt, new AttemptReceiptStore(source.Database).Read(receipt.Facts.AttemptId));
-            Assert.Contains(reader.ExplainPage(new(receipt.Facts.RunId, receipt.Facts.AttemptId)),
-                line => line.Contains("SEARCH execution_image_entries", StringComparison.Ordinal));
             Assert.Null(projection.ReconcilePage()); Assert.Null(projection.ReconcileAssetsPage());
         });
     }

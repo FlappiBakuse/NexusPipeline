@@ -21,7 +21,9 @@ public sealed class AcceptedQueueTests
         run.Dispose(); Assert.False(drain.TryReserve());
         Assert.Null(resources.TryAcquire(Guid.NewGuid(), [new("notifications:catalog", ResourceClaimMode.Reference)]).Lease);
         using var sender = resources.TryContinueQueue(queue, Guid.NewGuid()).Lease;
-        Assert.NotNull(sender); Assert.Equal(4, sender.Claims.Count);
+        Assert.NotNull(sender);
+        foreach (var resource in new[] { "notifications:catalog", "secrets:fields", "settings:host", "blobs:content" })
+            Assert.Contains(sender.Claims, claim => claim.ResourceKey == resource);
         Assert.All(sender.Claims, claim => Assert.Equal(ResourceClaimMode.Reference, claim.Mode));
         queue.Dispose(); Assert.False(drain.TryReserve());
         sender.Dispose(); Assert.True(drain.TryReserve());

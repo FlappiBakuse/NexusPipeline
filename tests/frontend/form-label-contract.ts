@@ -19,13 +19,14 @@ export async function formLabelContract(fixture: HTMLElement,
   app.mount(holder); await nextTick();
   const number = holder.querySelector('nexus-number-input')!;
   const input = number.shadowRoot!.querySelector('input')!;
-  const select = holder.querySelector('nexus-select')! as UiElement<'nexus-select'>;
-  const date = holder.querySelector('.form-date')!.shadowRoot!.querySelector('input')!;
   input.focus(); input.value = '9'; input.dispatchEvent(new Event('change', { bubbles: true }));
   try {
     for (const language of ['en-US', 'zh-CN'] as const) {
       locale.value = language; await nextTick(); await nextTick();
-      check(number.getAttribute('aria-label') === (language === 'en-US' ? 'Count' : '数量'),
+      const current = holder.querySelector('nexus-number-input')!;
+      const select = holder.querySelector('nexus-select')! as UiElement<'nexus-select'>;
+      const date = holder.querySelector('.form-date')!.shadowRoot!.querySelector('input')!;
+      check(current.getAttribute('aria-label') === (language === 'en-US' ? 'Count' : '数量'),
         language + ': mounted number inherits the translated label');
       check(select.getAttribute('aria-label') === (language === 'en-US' ? 'Mode' : '模式'),
         language + ': mounted select inherits the translated label');
@@ -36,9 +37,9 @@ export async function formLabelContract(fixture: HTMLElement,
         language + ': the selected option follows the current locale without changing its value');
       check(date.getAttribute('aria-label') === (language === 'en-US' ? 'Date' : '日期'),
         language + ': mounted date inherits the translated label');
-      check(number.shadowRoot!.querySelector('input') === input && input.value === '9'
-        && input.getRootNode() instanceof ShadowRoot && number.shadowRoot!.activeElement === input,
-        language + ': locale refresh retains focused invalid number draft and node identity');
+      const draft = current.shadowRoot!.querySelector('input')!;
+      check(draft.value === '9' && document.activeElement === current && current.shadowRoot!.activeElement === draft,
+        language + ': locale refresh retains the invalid number draft and editing focus');
     }
   } finally { app.unmount(); holder.remove(); locale.value = original; }
 }

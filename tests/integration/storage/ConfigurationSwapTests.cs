@@ -11,7 +11,7 @@ namespace NexusPipeline.StorageTests;
 
 public sealed class ConfigurationSwapTests
 {
-    [Theory(DisplayName = "Real Same Volume Swap And Restoration Preserve Original Bytes And Physical Objects")]
+    [Theory(DisplayName = "A Reopened Plan Drives Real Same Volume Swap And Restores Original Bytes And Physical Objects")]
     [InlineData("missing", "missing")]
     [InlineData("missing", "file")]
     [InlineData("missing", "directory")]
@@ -24,7 +24,8 @@ public sealed class ConfigurationSwapTests
     public void RestoresPhysicalObjects(string before, string candidate)
     {
         var fixture = Create(before, candidate);
-        var prepared = fixture.Swap.Prepare(fixture.Plan, fixture.Stopped, CancellationToken.None);
+        var plan = fixture.Plans.Read(fixture.PersistPlan());
+        var prepared = fixture.Swap.Prepare(plan, fixture.Stopped, CancellationToken.None);
         fixture.Swap.PreserveOriginal(prepared, fixture.Stopped);
         fixture.Swap.PreserveOriginal(prepared, fixture.Stopped);
         Assert.Equal(FileObjectKind.Missing, fixture.Scanner.Capture(fixture.Plan.TargetPath, CancellationToken.None).Shape);
@@ -38,13 +39,10 @@ public sealed class ConfigurationSwapTests
         fixture.Swap.RestoreOriginal(prepared, fixture.Stopped);
         fixture.Swap.RestoreOriginal(prepared, fixture.Stopped);
         fixture.Swap.VerifyRestored(prepared, fixture.Stopped);
-        var restored = fixture.Scanner.Capture(fixture.Plan.TargetPath, CancellationToken.None);
-        Assert.Equal(fixture.Plan.Before.Snapshot.Shape, restored.Shape);
-        Assert.Equal(fixture.Plan.Before.Snapshot.Entries, restored.Entries);
-        Assert.Equal(fixture.Plan.Before.OriginalObjects, PhysicalTreeIdentity.Capture(fixture.Plan.TargetPath, restored));
+        AssertOriginal(fixture);
     }
 
-    [Theory(DisplayName = "A New Effect Adapter Can Restore At Every Completed Physical Boundary")]
+    [Theory(DisplayName = "A New Effect Adapter Can Restore From The Persisted Plan At Every Completed Physical Boundary")]
     [InlineData("before-preserve")]
     [InlineData("after-preserve")]
     [InlineData("after-install")]
@@ -52,18 +50,19 @@ public sealed class ConfigurationSwapTests
     public void ResumesCompletedEffects(string boundary)
     {
         var fixture = Create("directory", "file");
+        var reference = fixture.PersistPlan();
         var prepared = fixture.Swap.Prepare(fixture.Plan, fixture.Stopped, CancellationToken.None);
         if (boundary != "before-preserve") fixture.Swap.PreserveOriginal(prepared, fixture.Stopped);
         if (boundary is "after-install" or "after-retire") fixture.Swap.InstallCandidate(prepared, fixture.Stopped);
         if (boundary == "after-retire") fixture.Swap.RetireCandidate(prepared, fixture.Stopped);
         var restarted = new ConfigurationSwap(fixture.Scanner, fixture.Archive);
         var codec = new ConfigurationWorkspaceCodec(new ContractReader());
-        var identity = codec.Encode(prepared, new string('a', 64));
-        prepared = new ConfigurationWorkspaceCodec(new ContractReader()).Decode(identity, fixture.Plan, new string('a', 64));
+        var identity = codec.Encode(prepared, reference.Sha256);
+        prepared = codec.Decode(identity, fixture.Plans.Read(reference), reference.Sha256);
         restarted.RetireCandidate(prepared, fixture.Stopped);
         restarted.RestoreOriginal(prepared, fixture.Stopped);
         restarted.VerifyRestored(prepared, fixture.Stopped);
-        Assert.Equal(fixture.Plan.Before.Snapshot.Entries, fixture.Scanner.Capture(fixture.Plan.TargetPath, CancellationToken.None).Entries);
+        AssertOriginal(fixture);
     }
 
     [Theory(DisplayName = "Missing Or Unbound Writer Stop Evidence Prevents Preparation And Every Physical Mutation")]
@@ -95,26 +94,30 @@ public sealed class ConfigurationSwapTests
     [Theory(DisplayName = "Unexpected Bytes Or Physical Identity Changes Are Preserved Instead Of Moved Or Overwritten")]
     [InlineData("target-bytes")]
     [InlineData("target-identity")]
+    [InlineData("child-identity")]
     [InlineData("unknown-work-entry")]
     [InlineData("wrong-parent-identity")]
     public void PreservesUnknownChanges(string fault)
     {
-        var fixture = Create("file", "directory");
+        var fixture = Create(fault == "child-identity" ? "directory" : "file", "directory");
+        var targetPath = fixture.Plan.TargetPath;
+        var checkedPath = fault == "child-identity" ? Path.Combine(targetPath, "nested", "配置") : targetPath;
         var prepared = fixture.Swap.Prepare(fixture.Plan, fixture.Stopped, CancellationToken.None);
-        if (fault == "target-bytes") File.WriteAllText(fixture.Plan.TargetPath, "foreign bytes");
-        if (fault == "target-identity")
+        if (fault == "target-bytes") File.WriteAllText(targetPath, "foreign bytes");
+        if (fault is "target-identity" or "child-identity")
         {
-            var bytes = File.ReadAllBytes(fixture.Plan.TargetPath);
-            File.Move(fixture.Plan.TargetPath, Path.Combine(fixture.Root, "preserved-original"));
-            File.WriteAllBytes(fixture.Plan.TargetPath, bytes);
+            var original = Path.Combine(fixture.Root, "preserved-original");
+            File.Move(checkedPath, original);
+            File.Copy(original, checkedPath);
         }
         if (fault == "unknown-work-entry") File.WriteAllText(Path.Combine(prepared.WorkPath, "unknown"), "preserve");
         if (fault == "wrong-parent-identity") prepared = prepared with { Plan = prepared.Plan with { ParentIdentity = PhysicalObjectIdentity.Read(fixture.RuntimeRoot) } };
-        var target = fixture.Scanner.Capture(fixture.Plan.TargetPath, CancellationToken.None);
+        var target = fixture.Scanner.Capture(targetPath, CancellationToken.None);
+        var identity = PhysicalObjectIdentity.Read(checkedPath);
         Assert.Throws<IOException>(() => fixture.Swap.PreserveOriginal(prepared, fixture.Stopped));
-        Assert.Equal(target.Entries, fixture.Scanner.Capture(fixture.Plan.TargetPath, CancellationToken.None).Entries);
-        Assert.False(File.Exists(Path.Combine(prepared.WorkPath, "before")));
-        Assert.False(Directory.Exists(Path.Combine(prepared.WorkPath, "before")));
+        Assert.Equal(target.Entries, fixture.Scanner.Capture(targetPath, CancellationToken.None).Entries);
+        Assert.Equal(identity, PhysicalObjectIdentity.Read(checkedPath));
+        Assert.False(Path.Exists(Path.Combine(prepared.WorkPath, "before")));
         if (fault == "unknown-work-entry") Assert.Equal("preserve", File.ReadAllText(Path.Combine(prepared.WorkPath, "unknown")));
     }
 
@@ -167,6 +170,14 @@ public sealed class ConfigurationSwapTests
         Assert.Equal(fixture.Plan.Before.Snapshot.Entries, fixture.Scanner.Capture(fixture.Plan.TargetPath, CancellationToken.None).Entries);
     }
 
+    private static void AssertOriginal(Fixture fixture)
+    {
+        var restored = fixture.Scanner.Capture(fixture.Plan.TargetPath, CancellationToken.None);
+        Assert.Equal(fixture.Plan.Before.Snapshot.Shape, restored.Shape);
+        Assert.Equal(fixture.Plan.Before.Snapshot.Entries, restored.Entries);
+        Assert.Equal(fixture.Plan.Before.OriginalObjects, PhysicalTreeIdentity.Capture(fixture.Plan.TargetPath, restored));
+    }
+
     private static Fixture Create(string before, string candidate)
     {
         var root = Path.Combine(Environment.GetEnvironmentVariable("NEXUS_TEST_ROOT") ?? throw new InvalidOperationException(), Guid.NewGuid().ToString("N"));
@@ -176,23 +187,32 @@ public sealed class ConfigurationSwapTests
         Directory.CreateDirectory(parent);
         var target = Path.Combine(parent, "target");
         var input = Path.Combine(root, "input");
-        Prepare(target, before, "original");
-        Prepare(input, candidate, "candidate");
+        Prepare(target, before, [0, 1, 255]);
+        Prepare(input, candidate, [255, 1, 0]);
         var scanner = new FileTreeScanner(SnapshotBudget.Default);
-        var archive = new FileTreeArchive(scanner, new ImmutableBlobStore(instance, contracts));
+        var blobs = new ImmutableBlobStore(instance, contracts);
+        var archive = new FileTreeArchive(scanner, blobs);
         var plan = new FrozenConfigurationExchange(instance.InstanceId, Guid.NewGuid(), Guid.NewGuid(), JournalKind.ConfigExchange,
             target, PhysicalObjectIdentity.Read(parent), archive.Capture(target, CancellationToken.None), archive.Capture(input, CancellationToken.None));
-        return new(root, instance.RuntimeRoot, plan, new(instance.InstanceId, plan.JournalId, true, WriterState.Stopped), scanner, archive, new(scanner, archive));
+        return new(root, instance.RuntimeRoot, plan, new(instance.InstanceId, plan.JournalId, true, WriterState.Stopped),
+            scanner, archive, new(scanner, archive), new(instance, contracts, blobs));
     }
 
-    private static void Prepare(string path, string shape, string bytes)
+    private static void Prepare(string path, string shape, byte[] bytes)
     {
-        if (shape == "file") File.WriteAllText(path, bytes);
+        if (shape == "file") File.WriteAllBytes(path, bytes);
         if (shape != "directory") return;
         Directory.CreateDirectory(Path.Combine(path, "nested", "empty"));
-        File.WriteAllText(Path.Combine(path, "nested", "config"), bytes);
+        File.WriteAllBytes(Path.Combine(path, "nested", "配置"), bytes);
     }
 
     private sealed record Fixture(string Root, string RuntimeRoot, FrozenConfigurationExchange Plan, ConfigurationWriterObservation Stopped,
-        FileTreeScanner Scanner, FileTreeArchive Archive, ConfigurationSwap Swap);
+        FileTreeScanner Scanner, FileTreeArchive Archive, ConfigurationSwap Swap, ConfigurationPlanCodec Plans)
+    {
+        internal BlobReference PersistPlan()
+        {
+            using var frozen = Plans.Freeze(Plan);
+            return frozen.Reference;
+        }
+    }
 }

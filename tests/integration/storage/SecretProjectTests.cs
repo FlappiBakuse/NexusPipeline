@@ -10,6 +10,7 @@ using NexusPipeline.Platform.Storage.Extensions;
 using NexusPipeline.Platform.Storage.Secrets;
 using NexusPipeline.Platform.Storage.Sqlite;
 using Xunit;
+using static NexusPipeline.StorageTests.SecretDocumentTests;
 
 namespace NexusPipeline.StorageTests;
 
@@ -25,24 +26,32 @@ public sealed class SecretProjectTests
         using var project = new ProjectSourceFixture(); var fixture = project.Catalog;
         var fields = new SecretFieldStore(fixture.Instance, fixture.Database);
         var key = new SecretFieldKey("fixture-plugin", project.Binding, Field);
-        var observations = 0;
-        var service = Service(fixture, new Observe(() =>
+        var name = ProjectChoicePublication.Name(project.Binding);
+        var operation = Guid.NewGuid();
+        var observed = false;
+        var service = Service(fixture, new ObservePreparedSecret(() =>
         {
+            observed = true;
             Assert.Null(project.Revisions.Read(ProjectChoiceStore.Address(project.Binding)));
-            Assert.Equal(0, fields.GetStateAsync(key, default).Result.Revision); observations++;
+            Assert.Null(ReadDocument(fixture, name));
+            Assert.Equal(new SecretFieldStatus(0, null, false, false), fields.GetStateAsync(key, default).GetAwaiter().GetResult());
         }));
         using var choice = Choice(project, 0); using var material = new SecretValue(PrivateValue);
-        var operation = Guid.NewGuid();
         var changes = new[] { new SecretDocumentEdit(project.Binding, Field, 0, SecretDisposition.Set, material) };
-        await service.WriteAsync(operation, "editor", "fixture-plugin", ProjectChoicePublication.Name(project.Binding), 0,
+        var committed = await service.WriteAsync(operation, "editor", "fixture-plugin", name, 0,
             choice.Bytes, changes, () => { }, default, projectChoice: choice.Publication);
-        Assert.True(observations > 0);
-        Assert.Equal(1, project.Revisions.Read(ProjectChoiceStore.Address(project.Binding))!.Revision);
-        var state = await fields.GetStateAsync(key, default); Assert.True(state.IsReadable);
+        Assert.Equal(ExpectedCommit(operation, 1, choice.Bytes), committed);
+        AssertChoice(project, choice);
+        AssertDocument(fixture, name, 1, choice.Bytes);
+        Assert.True(observed);
+        var state = await fields.GetStateAsync(key, default);
+        Assert.Equal(1, state.Revision);
         var frozen = new SecretFieldReference(state.Revision, state.SecretId);
         using (var value = fields.ReadProjectInput(key, frozen)) value.Use(text => Assert.True(text.SequenceEqual(PrivateValue)));
-        Assert.Throws<InvalidOperationException>(() => fields.ReadProjectInput(new("fixture-plugin", Guid.NewGuid(), Field), frozen));
-        Assert.Throws<InvalidOperationException>(() => fields.ReadProjectInput(new("other-plugin", project.Binding, Field), frozen));
+        Assert.Equal("secret_revision_conflict", Assert.Throws<InvalidOperationException>(() =>
+            fields.ReadProjectInput(new("fixture-plugin", Guid.NewGuid(), Field), frozen)).Message);
+        Assert.Equal("secret_revision_conflict", Assert.Throws<InvalidOperationException>(() =>
+            fields.ReadProjectInput(new("other-plugin", project.Binding, Field), frozen)).Message);
         var status = Assert.Single(ProjectInputStates.Read(fixture.Instance, fixture.Database, fixture.Contracts, "fixture-plugin", project.Binding));
         Assert.Equal(Field, status.Key); Assert.Equal(1, status.Revision); Assert.True(status.IsConfigured);
         service = Service(fixture);
@@ -52,15 +61,20 @@ public sealed class SecretProjectTests
         await Assert.ThrowsAsync<OperationConflictException>(() => new ProjectChoiceStore(fixture.Instance, fixture.Database, fixture.Contracts)
             .VerifyReplayAsync(service, operation, [new(new(Field, 0, SecretDisposition.Set), wrong)], () => { }, default).AsTask());
         using var second = Choice(project, 1);
-        await service.WriteAsync(Guid.NewGuid(), "editor", "fixture-plugin", ProjectChoicePublication.Name(project.Binding), 1,
+        await service.WriteAsync(Guid.NewGuid(), "editor", "fixture-plugin", name, 1,
             second.Bytes, [new(project.Binding, Field, 1, SecretDisposition.Keep, null)], () => { }, default, projectChoice: second.Publication);
-        Assert.Equal(frozen, new SecretFieldReference((await fields.GetStateAsync(key, default)).Revision, state.SecretId));
+        AssertChoice(project, second);
+        AssertDocument(fixture, name, 2, second.Bytes);
+        Assert.Equal(state, await fields.GetStateAsync(key, default));
+        using (var kept = fields.ReadProjectInput(key, frozen)) kept.Use(text => Assert.True(text.SequenceEqual(PrivateValue)));
         using var third = Choice(project, 2);
-        await service.WriteAsync(Guid.NewGuid(), "editor", "fixture-plugin", ProjectChoicePublication.Name(project.Binding), 2,
+        await service.WriteAsync(Guid.NewGuid(), "editor", "fixture-plugin", name, 2,
             third.Bytes, [new(project.Binding, Field, 1, SecretDisposition.Clear, null)], () => { }, default, projectChoice: third.Publication);
-        Assert.Equal(3, project.Revisions.Read(ProjectChoiceStore.Address(project.Binding))!.Revision);
-        Assert.False((await fields.GetStateAsync(key, default)).IsConfigured);
-        Assert.Throws<InvalidOperationException>(() => fields.ReadProjectInput(key, frozen));
+        Assert.Equal(committed with { IsNew = false }, service.ReadCommit(operation, "fixture-plugin", "editor"));
+        AssertChoice(project, third);
+        AssertDocument(fixture, name, 3, third.Bytes);
+        Assert.Equal(new SecretFieldStatus(2, null, false, false), await fields.GetStateAsync(key, default));
+        Assert.Equal("secret_revision_conflict", Assert.Throws<InvalidOperationException>(() => fields.ReadProjectInput(key, frozen)).Message);
         new SecretDocumentInventory(fixture.Instance, fixture.Database, fixture.Contracts).Verify();
         foreach (var path in Directory.EnumerateFiles(Path.Combine(fixture.Instance.RuntimeRoot, "blobs"), "*", SearchOption.AllDirectories))
             Assert.False(File.ReadAllBytes(path).AsSpan().IndexOf(Encoding.UTF8.GetBytes(PrivateValue)) >= 0);
@@ -74,37 +88,68 @@ public sealed class SecretProjectTests
         project.Revisions.Commit(ConfigurationRevisionStore.Identity(Guid.NewGuid(), "prior", existing.Publication.Change),
             existing.Prepared, DateTimeOffset.UtcNow);
         using var material = new SecretValue(PrivateValue); var operation = Guid.NewGuid();
-        await Assert.ThrowsAsync<ConfigurationException>(() => Service(fixture).WriteAsync(operation, "editor", "fixture-plugin",
-            ProjectChoicePublication.Name(project.Binding), 0, existing.Bytes,
-            [new(project.Binding, Field, 0, SecretDisposition.Set, material)], () => { }, default, projectChoice: existing.Publication).AsTask());
-        using var connection = DatabaseConnections.Open(fixture.Database.DatabasePath, readOnly: true);
-        Assert.Null(SecretDocumentRows.Find(connection, null, operation));
-        Assert.Equal(0, (await new SecretFieldStore(fixture.Instance, fixture.Database).GetStateAsync(new("fixture-plugin", project.Binding, Field), default)).Revision);
-        Assert.Equal(1, project.Revisions.Read(ProjectChoiceStore.Address(project.Binding))!.Revision);
+        var name = ProjectChoicePublication.Name(project.Binding);
+        var conflict = await Assert.ThrowsAsync<ConfigurationException>(() => Service(fixture).WriteAsync(operation, "editor", "fixture-plugin", name,
+            0, existing.Bytes, [new(project.Binding, Field, 0, SecretDisposition.Set, material)], () => { }, default, projectChoice: existing.Publication).AsTask());
+        Assert.Equal("configuration_revision_conflict", conflict.Message);
+        Assert.Null(ReadPublication(fixture, operation));
+        Assert.Null(ReadDocument(fixture, name));
+        var fields = new SecretFieldStore(fixture.Instance, fixture.Database);
+        Assert.Equal(new SecretFieldStatus(0, null, false, false), await fields.GetStateAsync(new("fixture-plugin", project.Binding, Field), default));
+        AssertChoice(project, existing);
     }
 
     [Fact(DisplayName = "Revocation After Accepted Preparation Leaves Both Publications Unchanged And Never Replays A New Protected Write")]
     public async Task PreservesUnknownChoice()
     {
-        using var project = new ProjectSourceFixture(); var fixture = project.Catalog; var valid = true;
-        var service = Service(fixture, new Observe(() => valid = false));
+        using var project = new ProjectSourceFixture(); var fixture = project.Catalog;
+        var revoked = false;
+        var retrying = false;
+        var service = Service(fixture, new ObservePreparedSecret(() =>
+        {
+            Assert.False(retrying);
+            revoked = true;
+        }));
         using var choice = Choice(project, 0); using var material = new SecretValue(PrivateValue); var operation = Guid.NewGuid();
+        var name = ProjectChoicePublication.Name(project.Binding);
         var changes = new[] { new SecretDocumentEdit(project.Binding, Field, 0, SecretDisposition.Set, material) };
-        void Current() { if (!valid) throw new UnauthorizedAccessException("fixture_revoked"); }
-        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => service.WriteAsync(operation, "editor", "fixture-plugin",
-            ProjectChoicePublication.Name(project.Binding), 0, choice.Bytes, changes, Current, default, projectChoice: choice.Publication).AsTask());
+        void Current() { if (revoked && !retrying) throw new UnauthorizedAccessException("fixture_revoked"); }
+        Assert.Equal("fixture_revoked", (await Assert.ThrowsAsync<UnauthorizedAccessException>(() => service.WriteAsync(operation, "editor", "fixture-plugin",
+            name, 0, choice.Bytes, changes, Current, default, projectChoice: choice.Publication).AsTask())).Message);
         Assert.Null(project.Revisions.Read(ProjectChoiceStore.Address(project.Binding)));
+        Assert.Null(ReadDocument(fixture, name));
         Assert.Null(service.ReadCommit(operation, "fixture-plugin", "editor"));
         var fields = new SecretFieldStore(fixture.Instance, fixture.Database);
-        Assert.Equal(0, (await fields.GetStateAsync(new("fixture-plugin", project.Binding, Field), default)).Revision);
-        var payloads = Directory.EnumerateFiles(Path.Combine(fixture.Instance.RuntimeRoot, "secrets/payloads")).Order(StringComparer.Ordinal).ToArray();
-        valid = true;
+        var key = new SecretFieldKey("fixture-plugin", project.Binding, Field);
+        var unpublished = new SecretFieldStatus(0, null, false, false);
+        Assert.Equal(unpublished, await fields.GetStateAsync(key, default));
+        var pending = ReadPublication(fixture, operation);
+        Assert.NotNull(pending);
+        retrying = true;
         var error = await Assert.ThrowsAsync<IOException>(() => service.WriteAsync(operation, "editor", "fixture-plugin",
-            ProjectChoicePublication.Name(project.Binding), 0, choice.Bytes, changes, Current, default, projectChoice: choice.Publication).AsTask());
+            name, 0, choice.Bytes, changes, Current, default, projectChoice: choice.Publication).AsTask());
         Assert.Equal("secret_document_publication_pending", error.Message);
-        Assert.Equal(payloads, Directory.EnumerateFiles(Path.Combine(fixture.Instance.RuntimeRoot, "secrets/payloads")).Order(StringComparer.Ordinal).ToArray());
+        Assert.Equal(pending.Reference, ReadPublication(fixture, operation)!.Reference);
+        Assert.Equal(unpublished, await fields.GetStateAsync(key, default));
         Assert.Null(project.Revisions.Read(ProjectChoiceStore.Address(project.Binding)));
-        Assert.Null(service.ReadCommit(operation, "fixture-plugin", "another-editor"));
+        Assert.Null(ReadDocument(fixture, name));
+        Assert.Null(service.ReadCommit(operation, "fixture-plugin", "editor"));
+    }
+
+    private static void AssertChoice(ProjectSourceFixture project, PreparedChoice choice)
+    {
+        var expected = choice.Publication.Change;
+        var actual = project.Revisions.Read(ProjectChoiceStore.Address(project.Binding));
+        Assert.NotNull(actual);
+        Assert.Equal(expected.Address, actual.Address); Assert.Equal(expected.ExpectedRevision + 1, actual.Revision);
+        Assert.Equal(expected.Contract, actual.Contract); Assert.Equal(expected.Tree.Shape, actual.Tree.Shape);
+        Assert.Equal(expected.Tree.Entries, actual.Tree.Entries);
+        var file = Assert.Single(actual.Tree.Entries);
+        var fixture = project.Catalog;
+        using var stream = new ImmutableBlobStore(fixture.Instance, fixture.Contracts).OpenVerified(new($"blobs/content/{file.Sha256}.bin", file.SizeBytes, file.Sha256!));
+        using var bytes = new MemoryStream();
+        stream.CopyTo(bytes);
+        Assert.Equal(choice.Bytes, bytes.ToArray());
     }
 
     private static SecretDocumentService Service(ExtensionCatalogFixture fixture, ISecretPreparationObserver? observer = null) =>
@@ -122,6 +167,4 @@ public sealed class SecretProjectTests
     }
     private sealed record PreparedChoice(byte[] Bytes, PreparedConfigurationRevision Prepared, ProjectChoicePublication Publication) : IDisposable
     { public void Dispose() => Prepared.Dispose(); }
-    private sealed class Observe(Action action) : ISecretPreparationObserver
-    { public void Reached(SecretPreparationPoint point, Guid journalId) => action(); }
 }

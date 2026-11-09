@@ -34,7 +34,8 @@ public sealed class RunProgressTests
         using (var due = capture.Read(Current(fixture), fixture.Writer, sealedOutput: false))
         {
             Assert.True(due.ElapsedMilliseconds >= 15000);
-            Assert.Equal(2, due.Items.Length);
+            Assert.Equal(fixture.Session.Resources.Select(resource => resource.Address).OrderBy(address => address.ResourceId),
+                due.Items.Select(item => item.Resource.Address).OrderBy(address => address.ResourceId));
             Assert.All(due.Items, item =>
             {
                 Assert.Equal(autoSync ? "configuration_sync_allowed" : "configuration_sync_disabled", item.ReasonCode);
@@ -77,23 +78,18 @@ public sealed class RunProgressTests
     {
         await using var fixture = new RunWriterFixture();
         await fixture.StartAsync();
-        var stopped = await fixture.StopAsync(); fixture.Seal(stopped);
-        var frozen = fixture.Writer.ElapsedSinceStart;
-        Assert.True(frozen < TimeSpan.FromSeconds(15));
-        var capture = Capture(fixture); long elapsed;
-        using (var sample = capture.Read(Current(fixture), fixture.Writer, sealedOutput: true))
-        {
-            elapsed = sample.ElapsedMilliseconds;
-            Assert.All(sample.Items, item => { Assert.Equal("configuration_sync_allowed", item.ReasonCode);
-                Assert.Equal(Normalized, fixture.Base.Read(Assert.IsType<FileTreeSnapshot>(item.Candidate))); });
-        }
+        var stopped = await fixture.StopAsync();
+        fixture.Seal(stopped);
+        var elapsed = Assert.IsType<long>(stopped.Closure.RunElapsedMilliseconds);
+        Assert.InRange(elapsed, 0, 14999);
         await Task.Delay(TimeSpan.FromSeconds(15));
-        Assert.Equal(frozen, fixture.Writer.ElapsedSinceStart);
-        using (var sample = capture.Read(Current(fixture), fixture.Writer, sealedOutput: true))
+        using var sample = Capture(fixture).Read(Current(fixture), fixture.Writer, sealedOutput: true);
+        Assert.Equal(elapsed, sample.ElapsedMilliseconds);
+        foreach (var resource in fixture.Session.Resources)
         {
-            Assert.Equal(elapsed, sample.ElapsedMilliseconds);
-            Assert.All(sample.Items, item => { Assert.Equal("configuration_sync_allowed", item.ReasonCode);
-                Assert.Equal(Normalized, fixture.Base.Read(Assert.IsType<FileTreeSnapshot>(item.Candidate))); });
+            var item = Assert.Single(sample.Items, item => item.Resource.Address == resource.Address);
+            Assert.Equal("configuration_sync_allowed", item.ReasonCode);
+            Assert.Equal(Normalized, fixture.Base.Read(Assert.IsType<FileTreeSnapshot>(item.Candidate)));
         }
         AssertSavedOutput(fixture);
     }

@@ -8,15 +8,19 @@ const source = fs.readFileSync(path.join(__dirname, '../../apps/web/src/control/
 const script = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS } });
 function fixture(options = {}) {
   const counts = { frames: 0, codecs: 0, draws: 0, fallback: 0 };
-  const frame = { close() { counts.frames++; } };
+  const frame = { pixels: 'decoded-image', close() { counts.frames++; } };
   class Codec {
     static async isTypeSupported() { return options.supported !== false; }
-    constructor(init) { assert.equal(init.preferAnimation, false); assert.equal(init.transfer[0], init.data); }
+    constructor(init) {
+      assert.equal(init.preferAnimation, false);
+      assert.equal(init.type, 'image/png');
+      assert.equal(Buffer.from(init.data).toString(), 'encoded');
+    }
     async decode() { if (options.decode) return options.decode(frame); return { image: frame }; }
     close() { counts.codecs++; }
   }
   const context = { drawImage(image, x, y, width, height) {
-    assert.equal(image, frame); assert.deepEqual([x, y, width, height], [0, 0, 160, 90]); counts.draws++;
+    assert.equal(image.pixels, 'decoded-image'); assert.deepEqual([x, y, width, height], [0, 0, 160, 90]); counts.draws++;
     if (options.drawFailure) throw Error('paint_failed');
   } };
   const surface = { width: 0, height: 0, getContext() { return context; } };

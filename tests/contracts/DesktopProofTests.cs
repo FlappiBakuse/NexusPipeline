@@ -54,7 +54,9 @@ public sealed class DesktopProofTests
         Assert.Throws<JsonException>(() => reader.Read(wire, signer.VerificationKeyBase64, "desktop-session.schema.json"));
         using var otherCurve = ECDsa.Create(ECCurve.NamedCurves.nistP384);
         var key = Convert.ToBase64String(otherCurve.ExportSubjectPublicKeyInfo());
-        Assert.Throws<JsonException>(() => reader.Read(wire, key, "desktop-session.schema.json"));
+        var validWire = JsonSerializer.SerializeToUtf8Bytes(signer.Sign(Payload()));
+        Assert.Equal("desktop_verification_key_invalid", Assert.Throws<JsonException>(() =>
+            reader.Read(validWire, key, "desktop-session.schema.json")).Message);
     }
 
     private static byte[] Payload(int version = 1) => JsonSerializer.SerializeToUtf8Bytes(new

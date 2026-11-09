@@ -15,7 +15,7 @@ public sealed class UnknownBrowserTests
         if (!Path.IsPathFullyQualified(application) || !File.Exists(Path.Combine(application, "NexusPipeline.exe")))
             throw new IOException("explicit_acceptance_application_required");
         object? context = null;
-        await FrontendBrowserTests.RunAsync(inputs, "NEXUS_UNKNOWN_TASK_BROWSER_SCRIPT", 9,
+        await FrontendBrowserTests.RunAsync(inputs, "NEXUS_UNKNOWN_TASK_BROWSER_SCRIPT",
             seed: catalog => context = UnknownBrowserFixture.Seed(catalog), browserContext: () => context,
             application: application, timeoutSeconds: 240);
     }

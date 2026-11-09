@@ -38,6 +38,7 @@ internal sealed class PlanBuilderFixture : IDisposable
     internal RuntimeInstance Instance { get; }
     internal StateDatabase Database { get; }
     internal InstanceLease Lease { get; }
+    internal ResourceLeaseManager Resources { get; }
     internal ExecutionPlanBuilder Builder { get; }
     internal AutomationDefinitionStore Definitions => new(Database);
     internal HostSettingsStore Settings => new(Database);
@@ -60,8 +61,8 @@ internal sealed class PlanBuilderFixture : IDisposable
         {
             var index = new StartupJournalRecovery(Instance, new(), Database,
                 new(Path.Combine(Root, "host"), Path.Combine(Instance.RuntimeRoot, "extensions"))).Recover(Lease);
-            var resources = new ResourceLeaseManager(new(index, TimeProvider.System));
-            var service = new AutomationImportService(Instance, new(), Database, Lease, resources, index);
+            Resources = new(new(index, TimeProvider.System));
+            var service = new AutomationImportService(Instance, new(), Database, Lease, Resources, index);
             var catalog = Seed(main, other, external, specialized, otherExtensionId);
             var roots = catalog.Roots.ToDictionary(item => item.Id, item => item.Path);
             var bundle = new AutomationBundleCodec(new()).Encode(catalog, CreatedAt);

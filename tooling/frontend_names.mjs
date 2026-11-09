@@ -9,8 +9,14 @@ const modules = path.resolve(option('--modules'));
 const require = createRequire(path.join(modules, 'package.json'));
 const ts = require('typescript');
 const vue = require('@vue/compiler-sfc');
-const words = name => (name.replace(/^I(?=[A-Z][a-z])/, '').replaceAll('MuMu', 'Mumu')
-  .match(/[A-Z]+(?=[A-Z][a-z]|[0-9]|$)|[A-Z]?[a-z]+[0-9]*|[0-9]+/g) || []).length;
+const nameWords = name => (name.replace(/^I(?=[A-Z][a-z])/, '').replaceAll('MuMu', 'Mumu')
+  .match(/[A-Z]+(?=[A-Z][a-z]|[0-9]|$)|[A-Z]?[a-z]+[0-9]*|[0-9]+/g) || []);
+
+const prepositions = new Set('as like per since than towards unlike versus about above across after against along among around at before behind below beneath beside between beyond by despite down during except for from in inside into near of off on onto out outside over past through throughout to toward under underneath until up upon via with within without'.split(' '));
+const exceedsLimit = name => {
+  const words = nameWords(name);
+  return words.length > (words.some(word => prepositions.has(word.toLowerCase())) ? 5 : 4);
+};
 
 function declarations(source, filename) {
   const sections = filename.endsWith('.vue')
@@ -39,11 +45,14 @@ function declarations(source, filename) {
 }
 
 function selfTest() {
-  const sample = declarations('class ClearName { fourWordMemberMethod() {} }\nfunction clearName() { function fourWordLocalFunction() {} }\nconst fourWordArrowFunction = () => {};', 'sample.ts');
-  const failures = sample.filter(item => words(item.name) > 3).map(item => item.name);
-  if (JSON.stringify(failures) !== JSON.stringify(['fourWordMemberMethod', 'fourWordLocalFunction', 'fourWordArrowFunction'])) throw new Error('Declaration coverage failed');
+  if (exceedsLimit('fourWordMethodName') || exceedsLimit('readValueFromCurrentAccount')
+      || !exceedsLimit('fiveWordMethodNameLimit') || !exceedsLimit('readValueFromCurrentAccountStore'))
+    throw Error('Four-word and preposition naming boundaries failed');
+  const sample = declarations('class ClearName { fiveWordMemberMethodName() {} }\nfunction clearName() { function fiveWordLocalFunctionName() {} }\nconst fiveWordArrowFunctionName = () => {};', 'sample.ts');
+  const failures = sample.filter(item => exceedsLimit(item.name)).map(item => item.name);
+  if (JSON.stringify(failures) !== JSON.stringify(['fiveWordMemberMethodName', 'fiveWordLocalFunctionName', 'fiveWordArrowFunctionName'])) throw new Error('Declaration coverage failed');
   const component = declarations('<template><div /></template>\n<script setup lang="ts">\nclass FourWordVueType {}\n</script>', 'sample.vue');
-  if (component[0]?.name !== 'FourWordVueType' || component[0].line !== 3 || words(component[0].name) !== 4) throw new Error('Vue declaration coverage failed');
+  if (component[0]?.name !== 'FourWordVueType' || component[0].line !== 3 || nameWords(component[0].name).length !== 4) throw new Error('Vue declaration coverage failed');
 }
 
 selfTest();
@@ -64,9 +73,9 @@ function walk(folder) {
       const items = declarations(fs.readFileSync(full, 'utf8'), relative);
       files.push({ file: relative, declarations: items.length });
       for (const item of items) {
-        if (words(item.name) <= 3) continue;
+        if (!exceedsLimit(item.name)) continue;
         const index = exceptions.findIndex(value => value.file === relative && value.name === item.name && value.kind === item.kind && value.reason);
-        if (index < 0) errors.push({ file: relative, ...item, words: words(item.name) });
+        if (index < 0) errors.push({ file: relative, ...item, words: nameWords(item.name).length });
         else counts.set(index, counts.get(index) + 1);
       }
     }

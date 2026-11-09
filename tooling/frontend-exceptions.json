@@ -1,16 +1,1 @@
-[
-  {
-    "file": "tests/frontend/tray-lifecycle.test.cjs",
-    "name": "popUpContextMenu",
-    "kind": "method",
-    "count": 1,
-    "reason": "Electron Tray.popUpContextMenu is the fixed native API implemented by the injected fixture."
-  },
-  {
-    "file": "apps/web/src/ui/text-input-element.ts",
-    "kind": "method",
-    "name": "formStateRestoreCallback",
-    "count": 1,
-    "reason": "HTML form-associated custom element lifecycle callback fixed by the browser platform."
-  }
-]
+[]

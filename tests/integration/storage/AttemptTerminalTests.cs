@@ -7,6 +7,7 @@ using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Execution;
 using NexusPipeline.Platform.Storage.Journals;
+using NexusPipeline.Platform.Storage.Operations;
 using NexusPipeline.Platform.Storage.Sqlite;
 using Xunit;
 
@@ -33,7 +34,7 @@ public sealed class AttemptTerminalTests
         var receipt = terminal.Commit(fixture.JournalId, LifecycleOutcome.Completed, "execution_completed");
         Assert.Equal(EngineOutcome.Failed, receipt.Facts.Engine); Assert.Equal(BusinessOutcome.Unverified, receipt.Facts.Business);
         Assert.Equal(LifecycleOutcome.Completed, receipt.Facts.Lifecycle); Assert.Equal(RecoveryOutcome.Restored, receipt.Facts.Recovery);
-        Assert.Equal(1, fixture.Base.Count("attempt_receipts")); Assert.Equal(0, fixture.Base.Count("resource_isolations"));
+        AssertTerminalProjection(fixture, state, receipt);
         var before = source.Snapshot(); Assert.Equal(receipt, terminal.Commit(fixture.JournalId, LifecycleOutcome.Completed, "execution_completed"));
         AssertSame(before, fixture);
         Assert.Throws<OperationConflictException>(() => terminal.Commit(fixture.JournalId, LifecycleOutcome.Interrupted, "host_interrupted"));
@@ -55,8 +56,9 @@ public sealed class AttemptTerminalTests
         Assert.Equal("execution_cancel_requested", receipt.Facts.ReasonCode);
         var completed = fixture.Scope.VerifyReadOnly(); Assert.Equal(JournalPhase.Committed, completed.Journal.Phase);
         Assert.Equal(EffectGateState.Sealed, completed.Gate.State); Assert.Equal(completed.Journal.Revision, completed.Latest.Revision);
-        Assert.Equal(1, fixture.Base.Count("attempt_receipts")); Assert.Equal(0, fixture.Base.Count("resource_isolations"));
-        Assert.Equal(0, fixture.Base.Count("journal_writer_job_roots")); Assert.Empty(stopped.Closure.Family);
+        AssertTerminalProjection(fixture, state, receipt);
+        Assert.Null(fixture.ReadRoot(completed)); Assert.Empty(stopped.Closure.Family);
+        Assert.False(File.Exists(fixture.Marker));
         Assert.Equal(original, PhysicalObjectIdentity.Read(source.Configuration)); Assert.Equal(bytes, File.ReadAllBytes(source.Configuration));
         var before = source.Snapshot(); Assert.Equal(receipt, Store(fixture).CommitPreparedCancellation(fixture.JournalId)); AssertSame(before, fixture);
         Assert.Throws<OperationConflictException>(() => Store(fixture).Commit(fixture.JournalId, LifecycleOutcome.Completed, "execution_completed"));
@@ -74,6 +76,10 @@ public sealed class AttemptTerminalTests
             state.Journal.OperationId, Guid.Parse(state.Attempt.RunId), Guid.Parse(state.Attempt.AttemptId));
         new ExecutionCancellationStore(source.Instance, source.Database, new(), source.Lease).Cancel(cancel, fixture.JournalId, PlanBuilderFixture.CreatedAt);
         fixture.AssertClosed(await fixture.Writer.StopAsync(TimeSpan.FromSeconds(10)), executed: false);
+        var registry = new RecoveryJournalRegistry(source.Database);
+        var held = registry.ReadSnapshot().Isolations.Where(item => item.JournalId == fixture.JournalId)
+            .OrderBy(item => item.ResourceKey, StringComparer.Ordinal).ToArray();
+        Assert.Equal(state.Attempt.ResourceKeys.Order(StringComparer.Ordinal), held.Select(item => item.ResourceKey));
         var trigger = boundary switch
         {
             "receipt" => "BEFORE INSERT ON attempt_receipts",
@@ -81,23 +87,25 @@ public sealed class AttemptTerminalTests
             _ => "BEFORE UPDATE OF phase ON operation_journals WHEN NEW.journal_id='" + fixture.JournalId.ToString("D") + "' AND NEW.phase='committed'"
         };
         fixture.Base.Execute("CREATE TRIGGER fail_attempt_terminal " + trigger + " BEGIN SELECT RAISE(ABORT,'fixture_failure'); END;");
-        long revision; Guid resultId;
+        byte[] committedBytes;
         try
         {
             Assert.Throws<SqliteException>(() => Store(fixture).CommitPreparedCancellation(fixture.JournalId));
             var pending = fixture.Scope.VerifyReadOnly(); Assert.Equal(JournalPhase.Prepared, pending.Journal.Phase);
-            Assert.Equal(JournalPhase.Committed, pending.Latest.Phase); revision = pending.Latest.Revision;
-            resultId = AttemptResultCodec.Read(pending.Latest.Root, pending.Attempt)!.ResultId;
-            Assert.Equal(0, fixture.Base.Count("attempt_receipts")); Assert.True(fixture.Base.Count("resource_isolations") > 0);
-            Assert.Equal("accepted", OperationStatus(fixture, state.Journal.OperationId));
-            Assert.False(File.Exists(fixture.Marker + ".output-ready"));
+            Assert.Equal(JournalPhase.Committed, pending.Latest.Phase); committedBytes = pending.Latest.Export();
+            Assert.Null(new AttemptReceiptStore(source.Database).Read(Guid.Parse(state.Attempt.AttemptId)));
+            Assert.Equal(held, registry.ReadSnapshot().Isolations.Where(item => item.JournalId == fixture.JournalId)
+                .OrderBy(item => item.ResourceKey, StringComparer.Ordinal));
+            AssertOperation(fixture, "accepted");
+            Assert.False(File.Exists(fixture.Marker));
         }
         finally { fixture.Base.Execute("DROP TRIGGER fail_attempt_terminal;"); }
         var result = Store(fixture).CommitPreparedCancellation(fixture.JournalId);
-        var completed = fixture.Scope.VerifyReadOnly(); Assert.Equal(revision, completed.Journal.Revision);
-        Assert.Equal(resultId, AttemptResultCodec.Read(completed.Latest.Root, completed.Attempt)!.ResultId);
-        Assert.Equal(LifecycleOutcome.Cancelled, result.Facts.Lifecycle); Assert.Equal("completed", OperationStatus(fixture, state.Journal.OperationId));
-        Assert.Equal(1, fixture.Base.Count("attempt_receipts")); Assert.Equal(0, fixture.Base.Count("resource_isolations"));
+        var completed = fixture.Scope.VerifyReadOnly(); Assert.Equal(JournalPhase.Committed, completed.Journal.Phase);
+        Assert.Equal(completed.Latest.Revision, completed.Journal.Revision);
+        Assert.Equal(committedBytes, completed.Latest.Export());
+        Assert.Equal(LifecycleOutcome.Cancelled, result.Facts.Lifecycle);
+        AssertTerminalProjection(fixture, state, result);
     }
 
     [Fact(DisplayName = "Entered Even Without Resume Cannot Use The Prepared Cancellation Shortcut")]
@@ -109,7 +117,8 @@ public sealed class AttemptTerminalTests
         new ExecutionCancellationStore(source.Instance, source.Database, new(), source.Lease).Cancel(cancel, fixture.JournalId, PlanBuilderFixture.CreatedAt);
         fixture.AssertClosed(await fixture.Writer.StopAsync(TimeSpan.FromSeconds(10)), executed: false);
         var before = source.Snapshot(); Assert.Throws<IOException>(() => Store(fixture).CommitPreparedCancellation(fixture.JournalId)); AssertSame(before, fixture);
-        Assert.Equal(EffectGateState.Entered, fixture.Scope.VerifyReadOnly().Gate.State); Assert.Equal(0, fixture.Base.Count("attempt_receipts"));
+        Assert.Equal(EffectGateState.Entered, fixture.Scope.VerifyReadOnly().Gate.State);
+        Assert.Null(new AttemptReceiptStore(source.Database).Read(Guid.Parse(state.Attempt.AttemptId)));
     }
 
     private static AttemptTerminalStore Store(StepWriterFixture fixture) =>
@@ -118,10 +127,24 @@ public sealed class AttemptTerminalTests
     {
         var after = fixture.Base.Source.Snapshot(); Assert.Equal(before.Rows, after.Rows); Assert.Equal(before.Files, after.Files);
     }
-    private static string OperationStatus(StepWriterFixture fixture, Guid operation)
+    private static void AssertTerminalProjection(StepWriterFixture fixture, AttemptWriterState state, AttemptReceipt receipt)
     {
-        using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = fixture.Base.Source.Database.DatabasePath, Pooling = false }.ToString());
-        connection.Open(); using var command = connection.CreateCommand(); command.CommandText = "SELECT status FROM operations WHERE operation_id=$operation;";
-        command.Parameters.AddWithValue("$operation", operation.ToString("D")); return (string)command.ExecuteScalar()!;
+        var database = fixture.Base.Source.Database;
+        Assert.Equal(fixture.JournalId, receipt.JournalId);
+        Assert.Equal(fixture.Accepted.Identity.OperationId, receipt.OperationId);
+        Assert.Equal(Guid.Parse(state.Attempt.AttemptId), receipt.Facts.AttemptId);
+        var history = new AttemptHistoryReader(database).ReadPage(new(Guid.Parse(state.Attempt.RunId)));
+        Assert.Equal(receipt, Assert.Single(history.Items));
+        AssertOperation(fixture, "completed");
+        Assert.DoesNotContain(new RecoveryJournalRegistry(database).ReadSnapshot().Isolations, item => item.JournalId == fixture.JournalId);
+    }
+
+    private static void AssertOperation(StepWriterFixture fixture, string status)
+    {
+        var source = fixture.Base.Source;
+        var identity = fixture.Accepted.Identity;
+        var operations = new OperationQueryService(source.Instance, source.Lease, source.Database);
+        Assert.Equal(new OperationSnapshot(identity.OperationId, identity.Kind, status, fixture.JournalId),
+            operations.Read(identity.OperationId, identity.SubjectId));
     }
 }

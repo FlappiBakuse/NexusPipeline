@@ -6,10 +6,10 @@ const test = require('node:test');
 const vm = require('node:vm');
 
 test('drawn window actions require the bound current main-frame session and retain native close handling', async () => {
-  const handlers = new Map(), events = new Map(), publications = [], actions = [];
+  const handlers = new Map(), events = new Map(), publications = [], actions = [], requests = [];
   const identity = { instanceId: 'instance', clientId: 'client', sessionId: 'session' };
   const page = 'http://127.0.0.1:1234/';
-  let maximized = false, requests = 0, quit = false;
+  let maximized = false, quit = false;
   const window = {
     isDestroyed: () => false, isMaximized: () => maximized,
     minimize: () => actions.push('minimize'), close: () => actions.push('native-close'),
@@ -31,7 +31,7 @@ test('drawn window actions require the bound current main-frame session and reta
       if (name === './proof-reader.cjs') return { readSession: () => identity, responseText: async () => '{}' };
       return require(name);
     },
-    async fetch() { requests++; return {}; },
+    async fetch(url) { requests.push(url.pathname); return {}; },
   };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../../apps/desktop/native-bridge.cjs'), 'utf8'), sandbox);
   const bridge = sandbox.module.exports.installNativeBridge(window, { address: page }, page, () => { quit = true; });
@@ -46,11 +46,13 @@ test('drawn window actions require the bound current main-frame session and reta
   assert.equal((await action('window.state')).maximized, false);
   await action('window.minimize');
   await action('window.maximize'); assert.equal((await action('window.state')).maximized, true);
+  assert.deepEqual(publications.at(-1), { name: 'desktop.window-state', maximized: true });
   await action('window.maximize'); assert.equal((await action('window.state')).maximized, false);
+  assert.deepEqual(publications.at(-1), { name: 'desktop.window-state', maximized: false });
   await action('window.close');
   assert.deepEqual(actions, ['minimize', 'native-close']);
-  assert.deepEqual(publications, [{ name: 'desktop.window-state', maximized: true }, { name: 'desktop.window-state', maximized: false }]);
-  assert.equal(quit, false); assert.equal(requests, 1);
+  assert.equal(quit, false);
+  assert(requests.every(path => path === '/control/v1/desktop/session'));
   events.get('did-start-navigation')({}, page, false, true);
   await assert.rejects(action('window.minimize'), /desktop_request_rejected/);
   events.get('closed')();

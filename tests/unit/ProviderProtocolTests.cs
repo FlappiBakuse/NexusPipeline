@@ -55,7 +55,6 @@ public sealed class ProviderProtocolTests
         var original = new ExecutionStepFact("main", native, BusinessOutcome.Unverified, "native_fact");
         var combined = ProviderFactsPolicy.Compose(original, new(provider, "provider_fact", 2), true);
         Assert.Equal(expected, combined.Engine); Assert.Equal(original.Business, combined.Business);
-        Assert.Equal(native, original.Engine);
         if (expected == native) Assert.Equal(original.ReasonCode, combined.ReasonCode);
     }
 

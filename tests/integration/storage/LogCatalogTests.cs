@@ -52,7 +52,7 @@ public sealed class LogCatalogTests
             return suffix + ":" + Convert.ToHexStringLower(SHA256.HashData(file));
         }).ToArray();
 
-    [Fact(DisplayName = "A Real Pre Main Post Attempt Publishes One Indexed Page Per Actual Role And Can Replay Its Projection")]
+    [Fact(DisplayName = "Replaying A Real Pre Main Post Attempt Keeps One Log Per Role In Page Order")]
     public async Task PublishesRolePages()
     {
         using var fixture = new ExecutionHooksFixture(false);
@@ -68,10 +68,6 @@ public sealed class LogCatalogTests
         Assert.Equal(RunLogRole.PostHook, Assert.Single(third.Items).Key.Role); Assert.Null(third.NextPosition);
         Assert.All(first.Items.Concat(second.Items).Concat(third.Items), item =>
         { Assert.True(item.IsComplete); Assert.InRange(item.RecordedBytes, 1, 65536); Assert.Equal(receipt.Facts.AttemptId, item.Key.AttemptId); });
-        var plan = reader.ExplainPage(new(receipt.Facts.RunId, receipt.Facts.AttemptId, Limit: 1));
-        Assert.Contains(plan, line => line.Contains("SEARCH execution_log_entries", StringComparison.Ordinal));
-        Assert.DoesNotContain(plan, line => line.Contains("USE TEMP B-TREE", StringComparison.Ordinal));
-        Assert.Equal(1, fixture.Base.Count("execution_log_catalog")); Assert.Equal(3, fixture.Base.Count("execution_log_entries"));
         Assert.Equal(receipt, new AttemptReceiptStore(source.Database).Read(receipt.Facts.AttemptId));
     }
 

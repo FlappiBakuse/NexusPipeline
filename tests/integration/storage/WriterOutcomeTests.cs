@@ -76,7 +76,10 @@ public sealed class WriterOutcomeTests
         var elapsed = fixture.Writer.ElapsedSinceStart;
         Assert.Equal(fixture.Scope.ClosedElapsedMilliseconds, elapsed.Ticks / TimeSpan.TicksPerMillisecond);
         fixture.AssertStoppedFamily(family);
-        Assert.Same(stopped, await fixture.Writer.StopAsync(TimeSpan.FromSeconds(10)));
+        var repeated = await fixture.Writer.StopAsync(TimeSpan.FromSeconds(10));
+        Assert.True(repeated.WasExecuted); Assert.Equal(stopped.Reference, repeated.Reference);
+        Assert.Equal(stopped.Closure.Root, repeated.Closure.Root);
+        Assert.Equal(stopped.Closure.Family.ToArray(), repeated.Closure.Family.ToArray());
         Assert.Equal(elapsed, fixture.Writer.ElapsedSinceStart);
         Assert.Equal("configuration_editor_start_closed", Assert.Throws<IOException>(() => fixture.Writer.Start()).Message);
         Assert.Equal(1, fixture.Scope.ClosedCalls);

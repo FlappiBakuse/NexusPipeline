@@ -1,6 +1,9 @@
 using System.Runtime.Versioning;
 using System.Text.Json;
+using Microsoft.Data.Sqlite;
 using NexusPipeline.Core.Configuration;
+using NexusPipeline.Core.Execution;
+using NexusPipeline.Platform.Processes;
 using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Configuration;
 using NexusPipeline.Platform.Storage.Sqlite;
@@ -51,11 +54,12 @@ public sealed class EditorOutputTests
         using var fixture = new EditorOutputFixture(); var edit = fixture.Edit;
         var before = edit.Request.Targets.ToDictionary(target => target.TargetPath, target => PhysicalObjectIdentity.Read(target.TargetPath));
         await fixture.WriteAsync(edit.Request.Targets.Select(target => (object)new { target = target.TargetPath, kind = "file", atomic = true, value = "atomic-edited" }).ToArray(), child);
+        var writers = await fixture.ReadWritersAsync(child);
         var stopped = await fixture.Editor.StopAsync(TimeSpan.FromSeconds(5));
         foreach (var target in edit.Request.Targets) Assert.NotEqual(before[target.TargetPath], PhysicalObjectIdentity.Read(target.TargetPath));
         var completion = fixture.Seal(stopped); edit.RestoreAll(); edit.VerifyOriginals();
         Assert.True(edit.Store.Save(ConfigurationEditStore.SaveIdentity(Guid.NewGuid(), "fixture", completion), completion, DateTimeOffset.UtcNow).IsNew);
-        Assert.Equal(2, edit.Base.Count("journal_writer_job_roots")); Assert.Equal(2, edit.Base.Count("journal_writer_job_closures"));
+        AssertStoredClosure(edit, stopped, writers);
     }
 
     [Fact(DisplayName = "A Proved Unexecuted Editor Cannot Adopt Changed Bytes And Its Late Start Is Rejected")]
@@ -122,14 +126,21 @@ public sealed class EditorOutputTests
     {
         using var fixture = new EditorOutputFixture();
         await fixture.WriteAsync(fixture.Edit.Request.Targets.Select(target => (object)new { target = target.TargetPath, kind = "file", value = "retry-stopped" }).ToArray());
-        fixture.Edit.Base.Execute("CREATE TRIGGER fixture_fail_closure BEFORE INSERT ON journal_writer_job_closures BEGIN SELECT RAISE(ABORT,'fixture_failure'); END;");
-        await Assert.ThrowsAsync<Microsoft.Data.Sqlite.SqliteException>(() => fixture.Editor.StopAsync(TimeSpan.FromSeconds(5)));
-        Assert.Equal(0, fixture.Edit.Base.Count("journal_writer_job_closures"));
-        fixture.Edit.Base.Execute("DROP TRIGGER fixture_fail_closure;");
-        var stopped = await fixture.Editor.StopAsync(TimeSpan.FromSeconds(5)); Assert.True(stopped.WasExecuted);
+        var writers = await fixture.ReadWritersAsync();
+        fixture.Edit.Base.Execute("CREATE TRIGGER fixture_fail_closure BEFORE INSERT ON journal_writer_job_closures " +
+            "BEGIN SELECT RAISE(ABORT,'fixture_editor_digest:' || NEW.plan_digest); END;");
+        SqliteException failure;
+        try
+        {
+            failure = await Assert.ThrowsAsync<SqliteException>(() => fixture.Editor.StopAsync(TimeSpan.FromSeconds(5)));
+            Assert.All(writers, writer => Assert.Equal(WriterState.Stopped, WriterStopEvidence.ObserveProcess(writer)));
+        }
+        finally { fixture.Edit.Base.Execute("DROP TRIGGER fixture_fail_closure;"); }
+        var stopped = await fixture.Editor.StopAsync(TimeSpan.FromSeconds(5));
+        Assert.Contains("fixture_editor_digest:" + stopped.Reference.Sha256, failure.Message, StringComparison.Ordinal);
         fixture.Editor.Dispose(); var completion = fixture.Seal(stopped); fixture.Edit.RestoreAll(); fixture.Edit.VerifyOriginals();
         fixture.Edit.Store.Save(ConfigurationEditStore.SaveIdentity(Guid.NewGuid(), "fixture", completion), completion, DateTimeOffset.UtcNow);
-        Assert.Equal(2, fixture.Edit.Base.Count("journal_writer_job_roots"));
+        AssertStoredClosure(fixture.Edit, stopped, writers);
     }
 
     [Fact(DisplayName = "A Stopped Token From Another Runtime Cannot Seal Any Other Accounts Scene")]
@@ -165,11 +176,8 @@ public sealed class EditorOutputTests
     {
         using var fixture = new EditorOutputFixture();
         await fixture.WriteAsync(fixture.Edit.Request.Targets.Select(target => (object)new { target = target.TargetPath, kind = "file", value = "edited-unrestored" }).ToArray());
-        await fixture.Editor.StopAsync(TimeSpan.FromSeconds(5)); fixture.Editor.Dispose();
-        string path;
-        using (var connection = fixture.Edit.Base.Connect())
-        using (var command = connection.CreateCommand()) { command.CommandText = "SELECT plan_path FROM journal_writer_job_closures LIMIT 1;"; path = (string)command.ExecuteScalar()!; }
-        File.WriteAllText(Path.Combine(fixture.Edit.Base.Instance.RuntimeRoot, path), "{\"unknown\":true}");
+        var stopped = await fixture.Editor.StopAsync(TimeSpan.FromSeconds(5)); fixture.Editor.Dispose();
+        File.WriteAllText(Path.Combine(fixture.Edit.Base.Instance.RuntimeRoot, stopped.Reference.RelativePath), "{\"unknown\":true}");
         Assert.ThrowsAny<IOException>(() => fixture.Edit.Exchange.Restore(fixture.Edit.Session.Resources[0].JournalId));
         Assert.All(fixture.Edit.Request.Targets, target => Assert.Equal("edited-unrestored", File.ReadAllText(target.TargetPath)));
         Assert.All(fixture.Edit.Initial.Changes, change => Assert.Equal(1, fixture.Edit.Base.Revisions.Read(change.Address)!.Revision));
@@ -181,7 +189,14 @@ public sealed class EditorOutputTests
         var fixture = new ConfigurationEditFixture(); using var lease = InstanceLease.Acquire(fixture.Base.Instance, new());
         Assert.Equal("configuration_editor_write_policy_required", Assert.Throws<IOException>(() =>
             new ConfigurationEditorProcess(fixture.Base.Instance, fixture.Base.Database, new(), lease, fixture.SessionId, "fixture")).Message);
-        Assert.Equal(0, fixture.Base.Count("journal_writer_jobs")); fixture.VerifyOriginals();
+        var writers = new JournalWriterStore(fixture.Base.Database);
+        foreach (var resource in fixture.Session.Resources)
+        {
+            var observed = writers.ObserveForCurrentExecutor(resource.JournalId);
+            Assert.True(observed.IsComplete); Assert.Equal(WriterState.Stopped, observed.State);
+        }
+        Assert.Equal(ConfigurationEditPhase.Prepared, fixture.Store.Read(fixture.SessionId, "fixture")!.Phase);
+        fixture.VerifyOriginals();
     }
 
     [Fact(DisplayName = "Only One Editor Job Can Register And Its Closed Admission Prevents Any Later Start")]
@@ -190,18 +205,28 @@ public sealed class EditorOutputTests
         var edit = new ConfigurationEditFixture(writePolicy: new([""], [FileObjectKind.File]));
         using var lease = InstanceLease.Acquire(edit.Base.Instance, new());
         using var first = new ConfigurationEditorProcess(edit.Base.Instance, edit.Base.Database, new(), lease, edit.SessionId, "fixture");
-        var jobs = edit.Base.Count("journal_writer_jobs");
-        Assert.Equal(edit.Session.Resources.Length, jobs);
         Assert.Equal("writer_job_registration_unbound", Assert.Throws<IOException>(() =>
             new ConfigurationEditorProcess(edit.Base.Instance, edit.Base.Database, new(), lease, edit.SessionId, "fixture")).Message);
-        Assert.Equal(jobs, edit.Base.Count("journal_writer_jobs"));
         edit.InstallAll(); var stopped = await first.StopAsync(TimeSpan.FromSeconds(5));
         var image = Environment.GetEnvironmentVariable("NEXUS_PROCESS_FIXTURE_EXE")!;
         var hash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(image)));
         Assert.Equal("configuration_editor_start_closed", Assert.Throws<IOException>(() => first.Start(image, hash, [], edit.Base.Root)).Message);
-        Assert.False(stopped.WasExecuted);
         var recorder = new EditOutputRecorder(edit.Base.Instance, edit.Base.Database, new(), lease);
         foreach (var resource in edit.Session.Resources) recorder.Seal(resource.JournalId, stopped);
-        edit.RestoreAll(); edit.VerifyOriginals(); Assert.Equal(0, edit.Base.Count("journal_writer_job_roots"));
+        edit.RestoreAll(); edit.VerifyOriginals();
+        AssertStoredClosure(edit, stopped, []);
+    }
+
+    private static void AssertStoredClosure(ConfigurationEditFixture edit, StoppedConfigurationEditor stopped, ProcessIdentity[] writers)
+    {
+        Assert.Equal(writers.Length != 0, stopped.WasExecuted);
+        Assert.Equal(edit.SessionId, stopped.Closure.OperationId);
+        Assert.Equal(writers.FirstOrDefault(), stopped.Closure.Root);
+        if (writers.Length == 0) Assert.Empty(stopped.Closure.Family);
+        foreach (var writer in writers) Assert.Contains(writer, stopped.Closure.Family);
+        Assert.All(stopped.Closure.Family, writer => Assert.Equal(WriterState.Stopped, WriterStopEvidence.ObserveProcess(writer)));
+        var closures = new JobClosureStore(edit.Base.Instance, edit.Base.Database, new());
+        foreach (var resource in edit.Session.Resources)
+            Assert.Equal(stopped.Reference, closures.RequireStoredReference(resource.JournalId, stopped.Closure));
     }
 }

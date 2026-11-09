@@ -38,7 +38,13 @@ public sealed class RuntimeDoctorTests
         var exported = JsonSerializer.Serialize(report);
         Assert.DoesNotContain(canary, exported); Assert.DoesNotContain(fixture.Instance.RuntimeRoot, exported);
         Assert.DoesNotContain(record.AutomationId.ToString("D"), exported); Assert.InRange(exported.Length, 1, 2048);
-        Assert.Same(original, recovery.Current); Assert.Equal(before, records.ReadPage(new()).Items);
+        var current = recovery.Current;
+        Assert.Equal(original.IsReady, current.IsReady); Assert.Equal(original.Revision, current.Revision);
+        Assert.Equal(original.GlobalBlockReason, current.GlobalBlockReason);
+        Assert.Equal(original.Isolations.ToArray(), current.Isolations.ToArray());
+        Assert.Equal(original.ResourceHolds.ToArray(), current.ResourceHolds.ToArray());
+        Assert.Equal(original.SnapshotCompletions.ToArray(), current.SnapshotCompletions.ToArray());
+        Assert.Equal(before, records.ReadPage(new()).Items);
     }
 
     [Theory(DisplayName = "Unknown Or Concurrently Changed Recovery Never Produces A Ready Diagnostic")]

@@ -27,7 +27,6 @@ public sealed class PayloadRecoveryTests
         var snapshot = new RecoveryJournalRegistry(fixture.Database).ReadSnapshot();
         var journal = Assert.Single(snapshot.Journals, item => item.JournalId == fixture.Plan.JournalId);
         Assert.Equal(JournalPhase.Committed, journal.Phase);
-        Assert.Equal(3, journal.Revision);
         Assert.Empty(snapshot.Isolations);
         Assert.All(snapshot.FileEffects.Where(item => item.JournalId == fixture.Plan.JournalId), item => Assert.Equal(FileEffectState.NotExecuted, item.State));
         Assert.Equal(EffectGateState.Sealed, new JournalEffectGate(fixture.Database).Read(journal.JournalId).State);

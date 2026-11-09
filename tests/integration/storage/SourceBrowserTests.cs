@@ -9,7 +9,7 @@ public sealed class SourceBrowserTests
     {
         using var inputs = new BuiltExtensionInputs("baah", "NEXUS_FORMAL_BAAH_PACKAGE_RECEIPT");
         var directory = "";
-        await FrontendBrowserTests.RunAsync(inputs, "NEXUS_SOURCE_BROWSER_SCRIPT", 4, remoteAccess: true,
+        await FrontendBrowserTests.RunAsync(inputs, "NEXUS_SOURCE_BROWSER_SCRIPT", remoteAccess: true,
             seed: catalog =>
             {
                 directory = Path.Combine(Path.GetDirectoryName(catalog.Instance.RuntimeRoot)!, "script-source");

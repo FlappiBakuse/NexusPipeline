@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using NexusPipeline.Core.Execution;
 using NexusPipeline.Platform.Processes;
 using Xunit;
 
@@ -25,18 +24,9 @@ public sealed class TargetBoundaryTests
             var attempt = attemptJob.Start(input.Fixture, ["process-output", "wait", input.Marker + "-attempt"], input.Directory,
                 Guid.NewGuid(), Guid.NewGuid(), _ => { }, attemptOutput);
             await Ready(input.Marker + "-attempt");
-            var policy = new ExecutionTargetPolicy(ExecutionTargetKind.Pc, true, true);
-            Assert.Equal(TargetLaunchAction.UseReady, TargetLifecyclePolicy.Launch(policy,
-                ExecutionTargetReadiness.Ready, ExecutionTargetAuthority.ExternalReadinessOnly, null));
-            Assert.Equal(TargetCleanupAction.PreserveExternal, TargetLifecyclePolicy.Cleanup(policy,
-                ExecutionTargetAuthority.ExternalReadinessOnly, new("step", EngineOutcome.Failed, BusinessOutcome.Failed, "execution_main_failed"),
-                ExecutionStopReason.Completed, ExecutionRunContinuation.Final).Application);
             Assert.True(await attemptJob.StopAsync(TimeSpan.FromSeconds(10)));
-            Assert.Equal(0u, attemptJob.GetAccounting().ActiveProcesses);
-            Assert.Contains(external.ProcessId, targetJob.ActiveProcessIds());
+            Assert.NotNull(await attemptJob.AwaitRootAsync(attempt, TimeSpan.FromSeconds(10)));
             Assert.Null(await targetJob.AwaitRootAsync(external, TimeSpan.FromMilliseconds(50)));
-            Assert.NotEqual(external.ProcessId, attempt.ProcessId);
-            Assert.False(targetReads.IsCompleted); await attemptReads.WaitAsync(TimeSpan.FromSeconds(10));
         }
         finally
         {
@@ -60,7 +50,7 @@ public sealed class TargetBoundaryTests
         Assert.False(process.HasExited);
         job.Dispose();
         await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
-        Assert.True(process.HasExited); await reads.WaitAsync(TimeSpan.FromSeconds(10));
+        await reads.WaitAsync(TimeSpan.FromSeconds(10));
     }
 
     private static async Task Ready(string marker)

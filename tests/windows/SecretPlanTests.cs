@@ -63,16 +63,14 @@ public sealed class SecretPlanTests
         using var fixture = SecretTestRuntime.Create();
         using var value = new SecretValue(Canary);
         var prior = await fixture.Store.ApplyAsync(Guid.NewGuid(), fixture.Key, 0, SecretDisposition.Set, value, default);
-        var beforeJournals = System.Text.Json.JsonSerializer.Serialize(new RecoveryJournalRegistry(fixture.Database).ReadSnapshot());
+        var commits = fixture.Database.CommitSequence;
         var codec = new PreparationPlanCodec(fixture.Instance, new(), fixture.Database);
         using var draft = codec.Freeze(SecretStoreIdentity(fixture, 1), Guid.NewGuid(), fixture.Key, 1, value);
-        var wire = draft.Plan.ReadWire();
+        var wire = codec.Read(draft.Reference).ReadWire();
         Assert.Equal(prior.SecretId!.Value.ToString("D"), wire.BeforeSecretId);
         Assert.Equal("planned", wire.Retirement.State);
-        Assert.NotNull(wire.Retirement.Plan);
-        Assert.NotEqual(wire.JournalId, wire.Retirement.JournalId);
         Assert.Equal(prior, await fixture.Store.GetStateAsync(fixture.Key, default));
-        Assert.Equal(beforeJournals, System.Text.Json.JsonSerializer.Serialize(new RecoveryJournalRegistry(fixture.Database).ReadSnapshot()));
+        Assert.Equal(commits, fixture.Database.CommitSequence);
         Assert.False(File.Exists(Path.Combine(fixture.Instance.RuntimeRoot, wire.Candidate.RelativePath)));
     }
 

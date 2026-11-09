@@ -10,13 +10,13 @@ namespace NexusPipeline.ContractTests;
 public sealed class PatchWireTests
 {
     [Theory(DisplayName = "Public Patch Wire Preserves Missing Versus Existing Null Through The Actual Document Owner")]
-    [InlineData(ConfigurationSyntax.Json, "{}", false)]
-    [InlineData(ConfigurationSyntax.Json, "{\"next\":null}", true)]
-    [InlineData(ConfigurationSyntax.JsonWithComments, "{/* kept */}", false)]
-    [InlineData(ConfigurationSyntax.JsonWithComments, "{\"next\":null/* kept */}", true)]
-    [InlineData(ConfigurationSyntax.Yaml, "value: 7\n", false)]
-    [InlineData(ConfigurationSyntax.Yaml, "next: null\nvalue: 7\n", true)]
-    public void RoundtripsExistence(ConfigurationSyntax syntax, string source, bool exists)
+    [InlineData(ConfigurationSyntax.Json, "{}", false, "{\"next\":true}")]
+    [InlineData(ConfigurationSyntax.Json, "{\"next\":null}", true, "{\"next\":true}")]
+    [InlineData(ConfigurationSyntax.JsonWithComments, "{/* kept */}", false, "{\"next\":true/* kept */}")]
+    [InlineData(ConfigurationSyntax.JsonWithComments, "{\"next\":null/* kept */}", true, "{\"next\":true/* kept */}")]
+    [InlineData(ConfigurationSyntax.Yaml, "value: 7\n", false, "value: 7\n\"next\": true\n")]
+    [InlineData(ConfigurationSyntax.Yaml, "next: null\nvalue: 7\n", true, "next: true\nvalue: 7\n")]
+    public void AppliesExistenceConditions(ConfigurationSyntax syntax, string source, bool exists, string expected)
     {
         using var fixture = new ConfigurationDocumentFixture(source, syntax);
         var request = fixture.Patch(["next"], null, true);
@@ -26,7 +26,7 @@ public sealed class PatchWireTests
         Assert.Equal(exists, wire.RootElement.GetProperty("edits")[0].GetProperty("expectedExists").GetBoolean());
         var actual = new ConfigurationPatchReader(new()).Read(bytes);
         Assert.Equal(request.Binding, actual.Binding); Assert.Equal(exists, actual.Edits[0].ExpectedExists);
-        Assert.Contains("true", Encoding.UTF8.GetString(fixture.Document.Apply(actual)), StringComparison.Ordinal);
+        Assert.Equal(Encoding.UTF8.GetBytes(expected), fixture.Document.Apply(actual));
         var inverted = actual with { Edits = [actual.Edits[0] with { ExpectedExists = !exists }] };
         Assert.Throws<ConfigurationException>(() => fixture.Document.Apply(inverted));
     }

@@ -29,15 +29,4 @@ public sealed class LogCatalogReader(RuntimeInstance instance, StateDatabase dat
         return new(selected.Select(entry => entry.Item with { ContentAvailability = expected.ContentAvailability[entry.Item.Position] }).ToArray(), more ? selected[^1].Item.Position : null);
     }
 
-    public IReadOnlyList<string> ExplainPage(LogCatalogQuery query)
-    {
-        LogCatalogPolicy.Validate(query);
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
-        using var transaction = connection.BeginTransaction(deferred: true);
-        using var command = LogCatalogRows.PageCommand(connection, transaction, query);
-        command.CommandText = "EXPLAIN QUERY PLAN " + command.CommandText;
-        var result = new List<string>();
-        using var rows = command.ExecuteReader(); while (rows.Read()) result.Add(rows.GetString(3));
-        return result.AsReadOnly();
-    }
 }

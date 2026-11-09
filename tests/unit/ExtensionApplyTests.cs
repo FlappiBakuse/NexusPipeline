@@ -19,7 +19,6 @@ public sealed class ExtensionApplyTests
         var error = Assert.Throws<ExtensionApplyException>(() => ExtensionApplyPolicy.Freeze(
             new(ExtensionApplyAction.Upgrade, "fixture-plugin", 7, candidate), current, false, ExtensionObservedActivity.None));
         Assert.Equal("extension_same_version_content_changed", error.ReasonCode);
-        Assert.Equal(new string('a', 64), current.Package.ArchiveSha256);
     }
 
     [Theory(DisplayName = "Disabled Installation And Upgrade Commit Installed Without Requesting Activation")]

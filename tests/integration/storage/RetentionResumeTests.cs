@@ -50,8 +50,11 @@ public sealed class RetentionResumeTests
         var index = new StartupJournalRecovery(source.Instance, new(), database, roots).Recover(lease);
         Assert.True(index.Current.IsReady);
         Assert.Empty(index.Current.Isolations);
-        Assert.Equal(JournalPhase.Committed, new RecoveryJournalRegistry(database).ReadJournal(journalId).Phase);
-        Assert.All(new FileEffectOutbox(database).Read(journalId), item => Assert.Equal(FileEffectState.NotExecuted, item.State));
+        var registry = new RecoveryJournalRegistry(database);
+        var retries = registry.ReadHistory().Where(item => item.Kind == JournalKind.FileCleanup && item.JournalId != journalId);
+        var outbox = new FileEffectOutbox(database);
+        Assert.Equal(JournalPhase.Committed, registry.ReadJournal(journalId).Phase);
+        Assert.All(outbox.Read(journalId), item => Assert.Equal(FileEffectState.NotExecuted, item.State));
         var service = new ContentRetirementService(source.Instance, database, new(), lease,
             new ResourceLeaseManager(new(index, TimeProvider.System)), index);
         var retention = new RecordHistoryRetention(database, service, new Clock());
@@ -64,6 +67,7 @@ public sealed class RetentionResumeTests
             store.Commit(HostSettingsStore.Identity(Guid.NewGuid(), "retention-settings", extended), extended, DateTimeOffset.UtcNow);
             retention.Tick();
             Assert.All(plan.Items, item => blobs.Verify(item.Blob));
+            Assert.Empty(retries);
             var restored = new NexusPipeline.Core.Settings.HostSettingsChange(store.Read().Revision, saved.Values);
             store.Commit(HostSettingsStore.Identity(Guid.NewGuid(), "retention-settings", restored), restored, DateTimeOffset.UtcNow);
         }
@@ -72,22 +76,15 @@ public sealed class RetentionResumeTests
         if (manual)
         {
             Assert.All(plan.Items, item => blobs.Verify(item.Blob));
-            using var check = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
-            using var count = check.CreateCommand();
-            count.CommandText = "SELECT count(*) FROM operations WHERE operation_kind='records.retention.cleanup';";
-            Assert.Equal(0L, count.ExecuteScalar());
+            Assert.Empty(retries);
             return;
         }
         Assert.All(plan.Items, item => Assert.False(File.Exists(Path.Combine(source.Instance.RuntimeRoot, item.Blob.RelativePath))));
-        Assert.Equal(1, fixture.Base.Count("record_content_retirements"));
-        Assert.All(new FileEffectOutbox(database).Read(journalId), item => Assert.Equal(FileEffectState.NotExecuted, item.State));
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
-        using var query = connection.CreateCommand();
-        query.CommandText = "SELECT count(*) FROM operations WHERE operation_kind='records.retention.cleanup';";
-        Assert.Equal(1L, query.ExecuteScalar());
+        Assert.All(outbox.Read(journalId), item => Assert.Equal(FileEffectState.NotExecuted, item.State));
+        var retry = Assert.Single(retries);
+        Assert.Equal(JournalPhase.Committed, retry.Phase);
         retention.Tick();
-        Assert.Equal(1L, query.ExecuteScalar());
-        Console.WriteLine($"phase={phase}; startup=NotExecuted; nextTick=reauthorizedCleanup; operation={operation:D}");
+        Assert.Equal(retry.JournalId, Assert.Single(retries).JournalId);
     }
 
     private sealed class Clock : TimeProvider

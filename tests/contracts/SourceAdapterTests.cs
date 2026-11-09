@@ -19,11 +19,9 @@ public sealed class SourceAdapterTests
     {
         await using var fixture = new TaskScriptFixture(); Enable(fixture);
         await fixture.ActivateAsync();
-        var calls = new List<string>();
         var result = fixture.Executor(Script).DiscoverSource(Guid.Parse(fixture.Request.OperationId), "sample-adapter",
-            path => { calls.Add(path); return "[{\"name\":\"account.json\",\"kind\":\"file\"}]"; },
-            path => { calls.Add(path); return "{\"name\":\"Selected account\"}"; }, default);
-        Assert.Equal(new[] { "config", "config/account.json" }, calls);
+            path => { Assert.Equal("config", path); return "[{\"name\":\"account.json\",\"kind\":\"file\"}]"; },
+            path => { Assert.Equal("config/account.json", path); return "{\"name\":\"Selected account\"}"; }, default);
         Assert.Equal("Selected account", Assert.Single(result.Candidates!).Title);
     }
 
@@ -47,7 +45,11 @@ public sealed class SourceAdapterTests
         const string wrong = "globalThis.nexusDiscoverScript = input => ({...input, direction:'response',extensionId:'foreign-adapter',candidates:[],diagnostics:[]});";
         Assert.Throws<JsonException>(() => fixture.Executor(wrong).DiscoverSource(Guid.NewGuid(), "sample-adapter", _ => "[]", _ => "{}", default));
         await fixture.Scope.DisposeAsync();
-        Assert.ThrowsAny<Exception>(() => fixture.Executor(Script).DiscoverSource(Guid.NewGuid(), "sample-adapter", _ => "[]", _ => "{}", default));
+        var read = false;
+        Assert.ThrowsAny<OperationCanceledException>(() => fixture.Executor(Script).DiscoverSource(Guid.NewGuid(), "sample-adapter",
+            _ => { read = true; return "[{\"name\":\"account.json\",\"kind\":\"file\"}]"; },
+            _ => { read = true; return "{\"name\":\"Selected account\"}"; }, default));
+        Assert.False(read);
     }
 
     private static void Enable(TaskScriptFixture fixture) => fixture.Manifest = fixture.Manifest with

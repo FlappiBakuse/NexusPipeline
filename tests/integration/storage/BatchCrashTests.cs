@@ -44,21 +44,55 @@ public sealed class BatchCrashTests(ITestOutputHelper output)
         File.WriteAllBytes(Path.Combine(fixture.Root, "stopped-processes.json"), JsonSerializer.SerializeToUtf8Bytes(stopped));
         var database = StateDatabase.OpenExisting(fixture.Instance, Path.Combine(fixture.Root, "recovery-diagnostics"), new JournalStartupAdmission(fixture.Instance, new()));
         var store = new ConfigurationRevisionStore(fixture.Instance, database, new());
-        foreach (var change in committed ? next.Changes : initial.Changes)
-        {
-            var current = store.Read(change.Address)!;
-            Assert.Equal(committed ? 2 : 1, current.Revision);
-            Assert.Equal(change.Tree.Entries, current.Tree.Entries);
-        }
+        AssertCurrent(store, committed ? next : initial, committed ? 2 : 1);
+        var oldContent = ContentReferences(initial).ToHashSet();
+        var candidates = oldContent.Concat(ContentReferences(next)).ToHashSet();
+        var references = new BlobReferenceIndex(fixture.Instance, new(), database, new(fixture.Instance, new()));
+        Assert.Equal((committed ? candidates : oldContent).OrderBy(reference => reference.Sha256, StringComparer.Ordinal),
+            references.ReadReferenced(candidates).OrderBy(reference => reference.Sha256, StringComparer.Ordinal));
         var batches = new ConfigurationBatchStore(fixture.Instance, database, new());
-        Assert.Equal(committed, batches.Lookup(operation, next) is not null);
-        using (var prepared = batches.Prepare(next)) Assert.Equal(!committed, batches.Commit(operation, prepared, DateTimeOffset.UtcNow).IsNew);
-        var replay = batches.Lookup(operation, next)!;
-        Assert.False(replay.IsNew);
-        Assert.All(replay.Items, item => Assert.Equal(2, item.Saved.Revision));
-        Assert.All(next.Changes, change => Assert.Equal(2, store.Read(change.Address)!.Revision));
+        var recovered = batches.Lookup(operation, next);
+        if (committed) AssertReplay(recovered, operation.OperationId, next);
+        else Assert.Null(recovered);
+        using var prepared = batches.Prepare(next);
+        var saved = batches.Commit(operation, prepared, DateTimeOffset.UtcNow);
+        Assert.Equal(!committed, saved.IsNew);
+        var replay = batches.Lookup(operation, next);
+        AssertReplay(replay, operation.OperationId, next);
+        AssertCurrent(store, next, 2);
         output.WriteLine(JsonSerializer.Serialize(new { point, ordinal, committed, stopped, operationId = operation.OperationId,
-            finalRevisions = replay.Items.Select(item => new { item.Saved.Address, item.Saved.Revision }),
+            finalRevisions = saved.Items.Select(item => new { item.Saved.Address, item.Saved.Revision }),
             scope = "Actual owned process interruption at immutable preparation and SQL transaction publication boundaries; not physical power loss or external editor restoration" }));
+    }
+
+    private static IEnumerable<BlobReference> ContentReferences(ConfigurationRevisionBatch batch) => batch.Changes
+        .SelectMany(change => change.Tree.Entries).Where(entry => entry.Kind == FileObjectKind.File)
+        .Select(entry => new BlobReference($"blobs/content/{entry.Sha256}.bin", entry.SizeBytes, entry.Sha256!));
+
+    private static void AssertCurrent(ConfigurationRevisionStore store, ConfigurationRevisionBatch batch, long revision)
+    {
+        foreach (var change in batch.Changes) AssertSaved(store.Read(change.Address), change, revision);
+    }
+
+    private static void AssertReplay(ConfigurationBatchResult? replay, Guid operationId, ConfigurationRevisionBatch batch)
+    {
+        Assert.NotNull(replay);
+        Assert.False(replay.IsNew); Assert.Equal(operationId, replay.OperationId);
+        Assert.Equal(batch.Changes.Select(change => change.Address.ResourceId).Order(StringComparer.Ordinal),
+            replay.Items.Select(item => item.Saved.Address.ResourceId).Order(StringComparer.Ordinal));
+        foreach (var change in batch.Changes)
+        {
+            var item = Assert.Single(replay.Items, value => value.Saved.Address == change.Address);
+            Assert.False(item.IsNew); Assert.Equal(operationId, item.OperationId);
+            AssertSaved(item.Saved, change, change.ExpectedRevision + 1);
+        }
+    }
+
+    private static void AssertSaved(ConfigurationRevision? saved, ConfigurationRevisionChange change, long revision)
+    {
+        Assert.NotNull(saved);
+        Assert.Equal(change.Address, saved.Address); Assert.Equal(revision, saved.Revision);
+        Assert.Equal(change.Contract, saved.Contract); Assert.Equal(change.Tree.Shape, saved.Tree.Shape);
+        Assert.Equal(change.Tree.Entries, saved.Tree.Entries);
     }
 }

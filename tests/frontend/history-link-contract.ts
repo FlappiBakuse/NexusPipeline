@@ -23,11 +23,13 @@ export async function historyLinkContract(check: (value: unknown, name: string) 
       'the account deep link loads the failed account result within the shared run');
     link.dispose(); link = new HistoryLink(store, () => true, async () => {}, () => {});
     await link.restore();
-    check(reads.length === 2 && reads.every(user => user === id(4)) && location.hash.includes('&user=' + id(4)),
+    check(link.selected.value?.userId === id(4) && link.selected.value.finalAttempt?.business === 'failed' &&
+      reads.every(user => user === id(4)) && location.hash.includes('&user=' + id(4)),
       'reopening the copied route preserves its account query and result');
+    const beforeInvalid = reads.length;
     history.replaceState(null, '', '#/history?run=' + id(1) + '&user=invalid');
     await link.restore();
-    check(!link.selected.value && !!link.deepLinkError.value && reads.length === 2,
+    check(!link.selected.value && !!link.deepLinkError.value && reads.length === beforeInvalid,
       'an invalid account link gives an unavailable result without loading the entire run');
   } finally { link.dispose(); history.replaceState(null, '', original); }
 }

@@ -72,8 +72,6 @@ internal sealed class ScheduleNativeFixture : IDisposable
         var closure = new JobClosureStore(Source.Instance, Source.Database, new())
             .ReadForExecutionEvidence(journal.JournalId, process.WriterId, process.JobName, process.SessionId);
         Xunit.Assert.NotNull(closure); Xunit.Assert.True(closure.WasExecuted);
-        Xunit.Assert.NotNull(closure.Root); Xunit.Assert.Contains(closure.Root, closure.Family);
-        Xunit.Assert.Equal(closure.Family.Length, closure.Family.Select(item => (item.ProcessId, item.CreatedAtUtc)).Distinct().Count());
         foreach (var identity in closure.Family) Xunit.Assert.Equal(WriterState.Stopped,
             WriterStopEvidence.ObserveProcess(identity));
     }

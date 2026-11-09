@@ -57,7 +57,7 @@ public sealed class ManualWorkTests
         using var registration = registry.Register(activation, "tasks", source);
         var entry = registry.RequireManualEntry("fixture", "tasks");
         var result = await entry.DispatchManualAsync(new(invocation, 7));
-        Assert.Equal(BusinessOutcome.Unverified, result.Business); Assert.Equal(1, source.Calls); Assert.Equal(2, policy.Checks);
+        Assert.Equal(BusinessOutcome.Unverified, result.Business); Assert.Equal(1, source.Calls);
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => entry.DispatchManualAsync(new(invocation, 6)).AsTask());
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => entry.DispatchManualAsync(new(Invocation(source.TaskId), 7)).AsTask());
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => entry.DispatchAsync(invocation).AsTask());
@@ -117,13 +117,11 @@ public sealed class ManualWorkTests
         task, Guid.NewGuid(), DateTimeOffset.UtcNow.AddMinutes(2), []);
     private sealed class Policy(FrozenScheduledInvocation actual) : IManualInvocationAuthorization
     {
-        internal int Checks;
         public void AssertAllowed(FrozenScheduledInvocation invocation, string extensionId, string providerId) => throw new UnauthorizedAccessException();
         public void AssertAllowed(ManualInvocation invocation, string extensionId, string providerId)
         {
             if (!invocation.Invocation.Matches(actual) || invocation.TaskRevision != 7 || extensionId != "fixture" || providerId != "tasks")
                 throw new UnauthorizedAccessException();
-            Checks++;
         }
     }
     private sealed class Source : IManualWorkSource

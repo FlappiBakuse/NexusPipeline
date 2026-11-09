@@ -14,8 +14,13 @@ export function calendarLocaleContract(fixture: HTMLElement, check: (condition: 
         root.querySelector<HTMLButtonElement>('.trigger')!.click();
         check(picker.value.from === '2024-02-28' && picker.value.to === '2024-02-29',
           `opening and closing preserves the selected leap-day range for locale ${locale || 'default'}`);
-        root.querySelector<HTMLElement>('[role=dialog]')!.dispatchEvent(
+        const dialog = root.querySelector<HTMLElement>('[role=dialog]')!;
+        check(dialog.getClientRects().length > 0, `the calendar opens for locale ${locale || 'default'}`);
+        dialog.dispatchEvent(
           new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        check(!root.querySelector<HTMLElement>('[role=dialog]')!.getClientRects().length &&
+          picker.value.from === '2024-02-28' && picker.value.to === '2024-02-29',
+          `Escape closes the calendar without changing the leap-day range for locale ${locale || 'default'}`);
       }
       picker.remove();
     }

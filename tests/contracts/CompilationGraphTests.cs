@@ -39,7 +39,7 @@ public sealed class CompilationGraphTests
         if (mode is not ("valid" or "absent")) { Assert.Throws<IOException>(() => CompilationGraph.Freeze(input)); return; }
         var frozen = CompilationGraph.Freeze(input); Assert.Equal(preview, frozen.PreviewIndex);
         var names = CompilationGraph.RequirePreview(frozen.PreviewIndex, frozen.Assets.Select(item => (item.Name, item.Kind, item.References)));
-        Assert.Equal(mode == "valid" ? 2 : 0, names.Count); Assert.DoesNotContain("private", names); Assert.DoesNotContain("root", names);
+        Assert.Equal(mode == "valid" ? new[] { "page", "public" } : Array.Empty<string>(), names.Order(StringComparer.Ordinal));
     }
 
     [Theory(DisplayName = "Readonly Compilations Retain The Same Complete Graph And An Independent Host Execution Gate")]
@@ -50,7 +50,10 @@ public sealed class CompilationGraphTests
         var input = new CompilationResult("index", [new("index", CompiledAssetKind.Index, "{}"u8.ToArray(), [])],
             JsonSerializer.SerializeToElement(new { canExecute = !executable })) { CanExecute = executable };
         var frozen = CompilationGraph.Freeze(input);
-        Assert.Equal(executable, frozen.CanExecute); Assert.Single(frozen.Assets);
+        Assert.Equal(executable, frozen.CanExecute);
+        var asset = Assert.Single(frozen.Assets);
+        Assert.Equal("index", asset.Name); Assert.Equal(CompiledAssetKind.Index, asset.Kind);
+        Assert.Equal("{}"u8.ToArray(), asset.Content); Assert.Empty(asset.References);
         Assert.Equal(!executable, frozen.ExecutionView.GetProperty("canExecute").GetBoolean());
     }
 
@@ -84,7 +87,8 @@ public sealed class CompilationGraphTests
         var frozen = CompilationGraph.Freeze(new("index", assets, json.RootElement));
         Array.Fill(content, (byte)0); references[0] = "foreign"; json.Dispose();
         Assert.Equal("one", frozen.ExecutionView.GetProperty("task").GetString());
-        Assert.Equal("artifact", frozen.Assets[0].References[0]); Assert.Equal("{\"body\":7}"u8.ToArray(), frozen.Assets[1].Content);
+        Assert.Equal(new[] { "artifact" }, frozen.Assets.Single(asset => asset.Name == "index").References);
+        Assert.Equal("{\"body\":7}"u8.ToArray(), frozen.Assets.Single(asset => asset.Name == "artifact").Content);
     }
 
     [Theory(DisplayName = "Compiled Content Must Form One Complete Closed Acyclic Graph With Exact Case Sensitive Names")]

@@ -8,7 +8,7 @@ namespace NexusPipeline.Testing;
 internal sealed class ControlledStartupRegistration : IStartupRegistrationEffects
 {
     internal string Path { get; }
-    internal int Creates, Deletes;
+    internal int Deletes;
     internal Action? BeforeCreate { get; set; }
     internal Action? BeforeMutation { get; set; }
     internal bool FailValidation { get; set; }
@@ -51,7 +51,6 @@ internal sealed class ControlledStartupRegistration : IStartupRegistrationEffect
             writer.Flush();
             file.Flush(flushToDisk: true);
         }
-        Creates++;
         if (ThrowAfterCreate) throw new IOException("fixture_native_outcome_unknown");
         return StartupRegistrationEffect.Created;
     }

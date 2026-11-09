@@ -28,27 +28,36 @@ public sealed class EditCompletionTests
         using var lease = InstanceLease.Acquire(edit.Base.Instance, new());
         var reopened = StateDatabase.OpenExisting(edit.Base.Instance, Path.Combine(edit.Base.Root, "reopen"), new JournalStartupAdmission(edit.Base.Instance, new()));
         var (index, lifecycle, resources, service) = Ready(edit, lease, reopened);
-        Assert.All(index.Current.ResourceHolds, hold => Assert.Equal(RecoveryHoldOwner.ConfigurationOperations, hold.Owner));
-        Assert.NotEmpty(index.Current.ResourceHolds);
+        AssertSessionHolds(index, edit.Session);
         Assert.Equal(ResourceLeaseDenial.HostUnavailable, resources.TryAcquire(Guid.NewGuid(),
             [new(ConfigurationRevisionService.ResourceKey(edit.Session.Resources[0].Address), ResourceClaimMode.Mutation)]).Denial);
         var closing = Guid.NewGuid(); Assert.Equal("recovery_pending", lifecycle.RequestClose(closing, Guid.NewGuid()).ReasonCode);
         if (save)
         {
             var completion = edit.Completion(); var operation = ConfigurationEditStore.SaveIdentity(Guid.NewGuid(), "fixture", completion);
-            Assert.True(service.Save(operation, completion, DateTimeOffset.UtcNow).IsNew);
+            var saved = service.Save(operation, completion, DateTimeOffset.UtcNow);
+            Assert.True(saved.IsNew);
             Assert.NotNull(lifecycle.RequestClose(closing, Guid.NewGuid()).Permit);
-            Assert.False(service.Save(operation, completion, DateTimeOffset.UtcNow).IsNew);
+            var replay = service.Save(operation, completion, DateTimeOffset.UtcNow);
+            Assert.False(replay.IsNew);
+            AssertSavedBatch(edit, operation.OperationId, completion.Batch, replay);
         }
         else
         {
             var cancel = new ConfigurationEditCancel(edit.SessionId, 2); var operation = ConfigurationEditStore.CancelIdentity(Guid.NewGuid(), "fixture", cancel);
-            Assert.True(service.Cancel(operation, cancel, DateTimeOffset.UtcNow).IsNew);
+            var cancelled = service.Cancel(operation, cancel, DateTimeOffset.UtcNow);
+            Assert.True(cancelled.IsNew);
+            Assert.Equal(ConfigurationEditPhase.Cancelled, cancelled.Phase);
+            Assert.Equal(edit.SessionId, cancelled.SessionId); Assert.Equal(operation.OperationId, cancelled.CompletionOperationId);
             Assert.NotNull(lifecycle.RequestClose(closing, Guid.NewGuid()).Permit);
-            Assert.False(service.Cancel(operation, cancel, DateTimeOffset.UtcNow).IsNew);
+            var replay = service.Cancel(operation, cancel, DateTimeOffset.UtcNow);
+            Assert.False(replay.IsNew);
+            Assert.Equal(cancelled.SessionId, replay.SessionId); Assert.Equal(cancelled.Phase, replay.Phase);
+            Assert.Equal(cancelled.Revision, replay.Revision); Assert.Equal(cancelled.CompletionOperationId, replay.CompletionOperationId);
+            Assert.Equal(cancelled.Resources.ToArray(), replay.Resources.ToArray());
+            AssertOriginalSnapshots(edit, edit.Initial.Changes);
         }
         Assert.Empty(index.Current.ResourceHolds); Assert.True(lifecycle.CanFinalizeAfterExit(closing));
-        Assert.All(edit.Initial.Changes, change => Assert.Equal(save ? 2 : 1, edit.Base.Revisions.Read(change.Address)!.Revision));
         edit.VerifyOriginals(); ConfigurationEditInventory.VerifyReadOnly(reopened);
     }
 
@@ -82,6 +91,7 @@ public sealed class EditCompletionTests
         var key = ConfigurationRevisionService.ResourceKey(edit.Session.Resources[0].Address);
         var proof = index.AuthorizeContinuation(RecoveryHoldOwner.ConfigurationOperations, edit.SessionId, new HashSet<string> { key })!;
         using var held = fault == "conflict" ? resources.TryContinue(proof, [new(key, ResourceClaimMode.Mutation)]).Lease : null;
+        if (fault == "conflict") Assert.NotNull(held);
         if (fault == "unknown") index.BlockUnknown("fixture_unknown");
         if (fault == "isolation") index.PublishVerified(index.Current.Revision, index.Current.Revision + 1, [new(key, Guid.NewGuid(), "writer_unknown")]);
         if (fault == "foreign") index.UpdateResourceHolds(RecoveryHoldOwner.StartupRegistration, [new(Guid.NewGuid(), key, "pending")]);
@@ -91,7 +101,7 @@ public sealed class EditCompletionTests
             Assert.Throws<ConfigurationException>(() => service.Save(operation, completion, DateTimeOffset.UtcNow)).Message);
         Assert.Null(edit.Store.LookupSave(operation, completion));
         Assert.Equal(ConfigurationEditPhase.Editing, edit.Store.Read(edit.SessionId, "fixture")!.Phase);
-        Assert.All(edit.Initial.Changes, change => Assert.Equal(1, edit.Base.Revisions.Read(change.Address)!.Revision)); edit.VerifyOriginals();
+        AssertOriginalSnapshots(edit, edit.Initial.Changes); edit.VerifyOriginals();
     }
 
     [Fact(DisplayName = "Failed Session Publication Retains All Recovery Holds And Can Explicitly Retry The Same Unaccepted Save")]
@@ -100,13 +110,18 @@ public sealed class EditCompletionTests
         var edit = new ConfigurationEditFixture(); edit.InstallAll(); edit.RestoreAll();
         using var lease = InstanceLease.Acquire(edit.Base.Instance, new()); var (index, lifecycle, _, service) = Ready(edit, lease);
         var completion = edit.Completion(); var operation = ConfigurationEditStore.SaveIdentity(Guid.NewGuid(), "fixture", completion);
+        AssertSessionHolds(index, edit.Session);
+        var before = index.Current.ResourceHolds.OrderBy(hold => hold.ResourceKey, StringComparer.Ordinal).ToArray();
         edit.Base.Execute("CREATE TRIGGER fixture_fail_completion BEFORE UPDATE ON configuration_edit_sessions WHEN NEW.phase=2 BEGIN SELECT RAISE(ABORT,'fixture_failure'); END;");
-        Assert.Throws<SqliteException>(() => service.Save(operation, completion, DateTimeOffset.UtcNow));
-        Assert.Null(edit.Store.LookupSave(operation, completion)); Assert.NotEmpty(index.Current.ResourceHolds);
-        Assert.All(edit.Initial.Changes, change => Assert.Equal(1, edit.Base.Revisions.Read(change.Address)!.Revision));
+        try { Assert.Throws<SqliteException>(() => service.Save(operation, completion, DateTimeOffset.UtcNow)); }
+        finally { edit.Base.Execute("DROP TRIGGER fixture_fail_completion;"); }
+        Assert.Null(edit.Store.LookupSave(operation, completion));
+        Assert.Equal(before, index.Current.ResourceHolds.OrderBy(hold => hold.ResourceKey, StringComparer.Ordinal));
+        AssertOriginalSnapshots(edit, edit.Initial.Changes);
         var closing = Guid.NewGuid(); Assert.Equal("recovery_pending", lifecycle.RequestClose(closing, Guid.NewGuid()).ReasonCode);
-        edit.Base.Execute("DROP TRIGGER fixture_fail_completion;");
-        Assert.True(service.Save(operation, completion, DateTimeOffset.UtcNow).IsNew);
+        var saved = service.Save(operation, completion, DateTimeOffset.UtcNow);
+        Assert.True(saved.IsNew);
+        AssertSavedBatch(edit, operation.OperationId, completion.Batch, saved);
         Assert.Empty(index.Current.ResourceHolds); Assert.NotNull(lifecycle.RequestClose(closing, Guid.NewGuid()).Permit); edit.VerifyOriginals();
     }
 
@@ -140,11 +155,13 @@ public sealed class EditCompletionTests
         using var lease = InstanceLease.Acquire(first.Base.Instance, new()); var (index, lifecycle, _, service) = Ready(first, lease);
         var closing = Guid.NewGuid(); Assert.Equal("recovery_pending", lifecycle.RequestClose(closing, Guid.NewGuid()).ReasonCode);
         var completion = first.Completion(); service.Save(ConfigurationEditStore.SaveIdentity(Guid.NewGuid(), "fixture", completion), completion, DateTimeOffset.UtcNow);
-        Assert.All(index.Current.ResourceHolds, hold => Assert.Equal(secondId, hold.OperationId)); Assert.NotEmpty(index.Current.ResourceHolds);
+        Assert.All(index.Current.ResourceHolds, hold => Assert.Equal(secondId, hold.OperationId));
+        AssertSessionHolds(index, second);
         Assert.Equal("recovery_pending", lifecycle.RequestClose(closing, Guid.NewGuid()).ReasonCode);
         var cancel = new ConfigurationEditCancel(secondId, 2); service.Cancel(ConfigurationEditStore.CancelIdentity(Guid.NewGuid(), "fixture", cancel), cancel, DateTimeOffset.UtcNow);
         Assert.Empty(index.Current.ResourceHolds); Assert.NotNull(lifecycle.RequestClose(closing, Guid.NewGuid()).Permit);
-        Assert.All(initial, change => Assert.Equal(1, first.Base.Revisions.Read(change.Address)!.Revision)); first.VerifyOriginals();
+        AssertOriginalSnapshots(first, initial);
+        first.VerifyOriginals();
     }
 
     [Fact(DisplayName = "Actual Edited Output Remains The Saved Candidate After Reopening And Completing Through Shared Admission")]
@@ -156,9 +173,51 @@ public sealed class EditCompletionTests
         var completion = fixture.Seal(stopped); edit.RestoreAll(); edit.VerifyOriginals();
         var reopened = StateDatabase.OpenExisting(edit.Base.Instance, Path.Combine(edit.Base.Root, "reopen"), new JournalStartupAdmission(edit.Base.Instance, new()));
         var (index, _, _, service) = Ready(edit, fixture.Lease, reopened);
-        Assert.True(service.Save(ConfigurationEditStore.SaveIdentity(Guid.NewGuid(), "fixture", completion), completion, DateTimeOffset.UtcNow).IsNew);
-        foreach (var change in completion.Batch.Changes) Assert.Equal(change.Tree.Entries, edit.Base.Revisions.Read(change.Address)!.Tree.Entries);
+        var operation = ConfigurationEditStore.SaveIdentity(Guid.NewGuid(), "fixture", completion);
+        var saved = service.Save(operation, completion, DateTimeOffset.UtcNow);
+        Assert.True(saved.IsNew);
+        AssertSavedBatch(edit, operation.OperationId, completion.Batch, saved);
+        var blobs = new ImmutableBlobStore(edit.Base.Instance, new());
+        foreach (var item in saved.Items)
+        {
+            var entry = Assert.Single(item.Saved.Tree.Entries);
+            using var stream = blobs.OpenVerified(new($"blobs/content/{entry.Sha256}.bin", entry.SizeBytes, entry.Sha256!));
+            using var reader = new StreamReader(stream);
+            Assert.Equal("continued-" + item.Saved.Address.ResourceId, reader.ReadToEnd());
+        }
         Assert.Empty(index.Current.ResourceHolds); edit.VerifyOriginals(); ConfigurationEditInventory.VerifyReadOnly(reopened);
+    }
+
+    private static void AssertSessionHolds(RecoveryIndex index, ConfigurationEditStatus session)
+    {
+        var holds = index.Current.ResourceHolds;
+        foreach (var resource in session.Resources)
+            Assert.Contains(holds, hold => hold.OperationId == session.SessionId && hold.Owner == RecoveryHoldOwner.ConfigurationOperations &&
+                hold.ResourceKey == ConfigurationRevisionService.ResourceKey(resource.Address) && hold.Mode == ResourceClaimMode.Mutation);
+    }
+
+    private static void AssertSavedBatch(ConfigurationEditFixture edit, Guid operationId, ConfigurationRevisionBatch batch, ConfigurationBatchResult result)
+    {
+        Assert.Equal(operationId, result.OperationId);
+        Assert.Equal(batch.Changes.Length, result.Items.Length);
+        foreach (var change in batch.Changes)
+        {
+            var item = Assert.Single(result.Items, item => item.Saved.Address == change.Address);
+            var current = edit.Base.Revisions.Read(change.Address)!;
+            Assert.Equal(change.ExpectedRevision + 1, item.Saved.Revision);
+            Assert.Equal(item.Saved.Revision, current.Revision);
+            Assert.Equal(change.Tree.Shape, current.Tree.Shape); Assert.Equal(change.Tree.Entries, current.Tree.Entries);
+            Assert.Equal(change.Tree.Shape, item.Saved.Tree.Shape); Assert.Equal(change.Tree.Entries, item.Saved.Tree.Entries);
+        }
+    }
+
+    private static void AssertOriginalSnapshots(ConfigurationEditFixture edit, IEnumerable<ConfigurationRevisionChange> changes)
+    {
+        foreach (var change in changes)
+        {
+            var current = edit.Base.Revisions.Read(change.Address)!;
+            Assert.Equal(1, current.Revision); Assert.Equal(change.Tree.Entries, current.Tree.Entries);
+        }
     }
 
     private static (RecoveryIndex Index, HostLifecycle Lifecycle, ResourceLeaseManager Resources, EditCompletionService Service)

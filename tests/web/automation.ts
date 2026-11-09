@@ -5,6 +5,7 @@ import { automationSession } from '../../apps/web/src/pages/automation-session';
 import { fixture } from './automation-fixture';
 import { sessionCases } from './app-session';
 import { snapshotCases } from './session-snapshots';
+import { sourceCases } from './automation-source';
 export async function run(): Promise<string[]> {
   const previous = Object.getOwnPropertyDescriptor(globalThis, 'document');
   Object.defineProperty(globalThis, 'document', { configurable: true, value: Object.assign(new EventTarget(), { hidden: false }) });
@@ -39,22 +40,23 @@ export async function run(): Promise<string[]> {
         const key = item.editor.draftKey.value;
         item.editor.draft.value = { ...item.editor.draft.value, name: 'First edit' };
         if (mode === 'new') {
-          const id = item.editor.selected.value;
           item.editor.editing.value = false;
-          assert(item.editor.resumeNew()); assert.equal(item.editor.selected.value, id);
+          assert(item.editor.resumeNew());
+          assert.equal(item.editor.draft.value.name, 'First edit');
         }
         if (mode === 'conflict' || mode === 'unknown' || mode === 'instance') item.fail(mode);
         await item.save.save();
         if (mode === 'saved' || mode === 'new') {
           assert(!item.store.drafts.has(key)); assert(!item.store.drafts.has(key + '/schedules'));
-          assert.equal(item.session.pending, null);
-          item.editor.edit(item.store.state.automation!.bundle.queues[0]);
+          const saved = item.store.state.automation!.bundle;
+          assert.equal(saved.queues[0]!.name, 'First edit');
+          item.editor.edit(saved.queues[0]);
           item.editor.draft.value = { ...item.editor.draft.value, name: 'Second edit' };
           await item.save.save();
           assert.equal(item.requests.length, 2);
-          assert.equal(item.requests[1].expectedCatalogRevision, 2);
-          assert.equal(item.requests[1].queues[0].expectedRevision, mode === 'new' ? 1 : 2);
-          assert.equal(item.requests[1].schedules[0].expectedRevision, mode === 'new' ? 1 : 2);
+          const updated = item.store.state.automation!.bundle;
+          assert.equal(updated.queues[0]!.name, 'Second edit');
+          assert.equal(updated.schedules[0]!.id, saved.schedules[0]!.id);
         } else {
           assert(item.store.drafts.has(key));
           if (mode === 'conflict') {
@@ -72,7 +74,7 @@ export async function run(): Promise<string[]> {
         cases.push('queue real editor save/reopen and owned draft policy: ' + mode);
       } finally { item.store.dispose(); }
     }
-    return [...cases, ...await sessionCases(), ...await snapshotCases()];
+    return [...cases, ...await sessionCases(), ...await snapshotCases(), ...await sourceCases()];
   } finally {
     store.dispose();
     if (previous) Object.defineProperty(globalThis, 'document', previous);

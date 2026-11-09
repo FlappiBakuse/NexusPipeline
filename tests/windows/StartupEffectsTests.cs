@@ -13,7 +13,7 @@ public sealed class StartupEffectsTests
     [Fact(DisplayName = "The Typed Startup Port Creates Only A New Owned Definition And Removes Only Its Matching Registration")]
     public void RegistersOwnedTasks()
     {
-        using var fixture = new Fixture();
+        var fixture = new Fixture();
         var command = fixture.Command;
         Assert.Equal(StartupRegistrationEffect.Created, fixture.Effects.CreateIfMissing(command));
         var original = File.ReadAllBytes(fixture.Path);
@@ -33,7 +33,7 @@ public sealed class StartupEffectsTests
     [InlineData("user")]
     public void PreservesForeignTasks(string difference)
     {
-        using var fixture = new Fixture();
+        var fixture = new Fixture();
         var definition = fixture.Command.Definition;
         var foreign = difference switch
         {
@@ -53,7 +53,7 @@ public sealed class StartupEffectsTests
     [Fact(DisplayName = "Changes Observed Immediately Before The Startup Effect Preserve The Foreign Registration")]
     public void RechecksChangedTasks()
     {
-        using var fixture = new Fixture();
+        var fixture = new Fixture();
         var definition = fixture.Command.Definition;
         var foreignXml = StartupTaskXml.Encode(definition with { RegistrationId = Guid.NewGuid() });
         fixture.BeforeValidation = () => File.WriteAllText(fixture.Path, foreignXml);
@@ -62,8 +62,7 @@ public sealed class StartupEffectsTests
         Assert.Equal(0, fixture.Creates);
         fixture.BeforeValidation = null;
         File.WriteAllText(fixture.Path, StartupTaskXml.Encode(definition));
-        fixture.Reads = 0;
-        fixture.BeforeRead = () => { if (fixture.Reads == 2) File.WriteAllText(fixture.Path, foreignXml); };
+        fixture.AfterRead = () => File.WriteAllText(fixture.Path, foreignXml);
         Assert.Throws<IOException>(() => fixture.Effects.RemoveIfMatching(definition));
         Assert.Equal(foreignXml, File.ReadAllText(fixture.Path));
         Assert.Equal(0, fixture.Deletes);
@@ -76,7 +75,7 @@ public sealed class StartupEffectsTests
     [InlineData("delete-unknown")]
     public void RejectsFailureCompensation(string fault)
     {
-        using var fixture = new Fixture();
+        var fixture = new Fixture();
         fixture.Fault = fault;
         if (fault == "delete-unknown") File.WriteAllText(fixture.Path, StartupTaskXml.Encode(fixture.Command.Definition));
         if (fault == "delete-unknown") Assert.Throws<IOException>(() => fixture.Effects.RemoveIfMatching(fixture.Command.Definition));
@@ -91,7 +90,7 @@ public sealed class StartupEffectsTests
     [InlineData("user")]
     public void VerifiesExecutableIdentity(string fault)
     {
-        using var fixture = new Fixture();
+        var fixture = new Fixture();
         var command = fault == "hash" ? fixture.Command with { ExecutableSha256 = new('0', 64) }
             : fixture.Command with { Definition = fixture.Command.Definition with { UserSid = "S-1-5-18" } };
         Assert.Throws<IOException>(() => fixture.Effects.CreateIfMissing(command));
@@ -102,7 +101,7 @@ public sealed class StartupEffectsTests
     [Fact(DisplayName = "Startup Creation Retains The Verified Executable And Directory Until The Native Effect Returns")]
     public void HoldsExecutableInputs()
     {
-        using var fixture = new Fixture(copyExecutable: true);
+        var fixture = new Fixture(copyExecutable: true);
         var executable = fixture.Command.Definition.ExecutablePath;
         fixture.BeforeCreate = () =>
         {
@@ -115,13 +114,13 @@ public sealed class StartupEffectsTests
         Assert.Equal("released", File.ReadAllText(executable));
     }
 
-    private sealed class Fixture : IDisposable
+    private sealed class Fixture
     {
         internal string Path { get; }
         internal StartupRegistrationCommand Command { get; }
         internal StartupRegistrationEffects Effects { get; }
-        internal int Creates, Deletes, Opens, Reads;
-        internal Action? BeforeValidation, BeforeRead, BeforeCreate;
+        internal int Creates, Deletes, Opens;
+        internal Action? BeforeValidation, AfterRead, BeforeCreate;
         internal string? Fault;
 
         internal Fixture(bool copyExecutable = false)
@@ -145,17 +144,17 @@ public sealed class StartupEffectsTests
             Effects = new(() => { Opens++; return new Session(this); });
         }
 
-        public void Dispose() { }
-
         private sealed class Session(Fixture owner) : IStartupTaskScheduler
         {
             public string? Read(string name)
             {
-                owner.Reads++;
-                owner.BeforeRead?.Invoke();
                 if (owner.Fault == "query") throw new IOException("fixture_query_failure");
                 Assert.Equal(StartupTaskXml.TaskName(owner.Command.Definition), name);
-                return File.Exists(owner.Path) ? File.ReadAllText(owner.Path) : null;
+                var xml = File.Exists(owner.Path) ? File.ReadAllText(owner.Path) : null;
+                var afterRead = owner.AfterRead;
+                owner.AfterRead = null;
+                afterRead?.Invoke();
+                return xml;
             }
             public string Normalize(string xml) => StartupTaskXml.Read(xml).ToString(SaveOptions.DisableFormatting);
             public void Validate(string name, string xml, string userSid)

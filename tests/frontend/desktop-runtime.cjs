@@ -6,7 +6,7 @@ const http = require('node:http');
 const net = require('node:net');
 const crypto = require('node:crypto');
 const electron = require('electron');
-const { app, BrowserWindow, Menu, shell, dialog } = electron;
+const { app, BrowserWindow, shell, dialog } = electron;
 const args = process.argv.slice(2);
 if (args.length !== 4 || args[0] !== '--output' || !path.isAbsolute(args[1]) || args[2] !== '--mode' ||
     !['desktop', 'browser', 'failed'].includes(args[3])) throw new Error('explicit_output_and_mode_required');
@@ -61,12 +61,11 @@ function sign(value) {
 }
 const page = `<!doctype html><html><head><meta charset="utf-8"></head><body><input id="draft"><script>
 window.acceptExit=true;
-(async()=>{await nexusDesktopChannel.connect();nexusDesktopChannel.prepareExit(async()=>window.acceptExit);
+(async()=>{window.session=await nexusDesktopChannel.connect();nexusDesktopChannel.prepareExit(async()=>window.acceptExit);
 await nexusDesktopChannel.preparation({stage:'准备页面数据',done:2,total:5});window.ready=true;
 if(HOLD_PREPARATION)await new Promise(resolve=>window.releaseStartup=resolve);await nexusDesktopChannel.presented();})();
 </script></body></html>`;
 let holdPage = mode === 'desktop';
-let sessionRequests = 0;
 let releaseLocale;
 const localeReady = mode === 'desktop' ? new Promise(resolve => { releaseLocale = resolve; }) : Promise.resolve();
 const server = http.createServer(async (request, response) => {
@@ -81,7 +80,6 @@ const server = http.createServer(async (request, response) => {
       response.end(page.replace('HOLD_PREPARATION', String(holdPage))); holdPage = false; return;
     }
     if (url.pathname.endsWith('/desktop/session')) {
-      sessionRequests++;
       value = sign({ format: 'nexus.desktop.session', version: 1,
         ...identity, correlationId: url.searchParams.get('correlationId'), capabilities: ['close.request', 'file.select', 'folder.select', 'external.open'] });
     }
@@ -173,8 +171,9 @@ async function run() {
   peer.write(JSON.stringify({ kind: 'complete' }) + '\n');
   if (mode === 'desktop') {
     const preparingWindow = await renderer();
-    assert.equal(sessionRequests, 1);
-    cases.push('initial-document-reuses-its-verified-session-without-pre-navigation-session');
+    const connected = await preparingWindow.webContents.executeJavaScript('window.session');
+    for (const name of ['instanceId', 'clientId', 'sessionId']) assert.equal(connected[name], identity[name]);
+    cases.push('initial-document-connects-to-the-signed-host-session');
     const view = preparingWindow.contentView.children[0].webContents;
     await waitFor(() => view.executeJavaScript('document.querySelector("#stage").textContent.includes("2/5")'));
     assert.equal(presentations.includes('console'), false);
@@ -194,15 +193,14 @@ async function run() {
   }
   await waitFor(() => presentations.includes(mode === 'desktop' ? 'console' : 'tray'));
   if (mode === 'desktop') {
-    assert.equal(progressWindow.contentView.children.length, 0);
     releaseLocale(); cases.push('console-presentation-does-not-wait-for-tray-locale');
   }
   await click(0); assert.equal(lastMenu.busy, false);
   if (mode === 'desktop') {
-    assert.equal(BrowserWindow.getAllWindows()[0], progressWindow);
-    assert.equal(progressWindow.isVisible(), false);
-    assert.equal(progressWindow.contentView.children.length, 0);
-    cases.push('same-window-ready-keeps-user-hidden-intent');
+    const currentWindow = await renderer();
+    assert.equal(currentWindow.isVisible(), false);
+    assert.equal(currentWindow.contentView.children.length, 0);
+    cases.push('ready-console-keeps-user-hidden-intent-and-releases-startup-view');
     await leftClick();
   } else {
     await leftClick(); assert.deepEqual(opened, [address]);

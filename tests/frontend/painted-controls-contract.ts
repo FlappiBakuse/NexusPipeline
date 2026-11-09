@@ -1,3 +1,4 @@
+import { settingContract } from './setting-controls-contract.js';
 import { calendarLocaleContract } from './calendar-locale-contract.js';
 import { timeContract, colorContract } from './picker-controls-contract.js';
 import type { UiElement, UiElementName } from '@nexuspipeline/extension-sdk';
@@ -83,7 +84,7 @@ function textContract(fixture: HTMLElement, check: Check): void {
   overflow.text = 'Updated task title';
   check(
     overflow.shadowRoot!.querySelector('.fallback')!.textContent === 'Updated task title' &&
-      !overflow.style.cssText.includes('NaN'),
+      Number.isFinite(overflow.getBoundingClientRect().width) && overflow.getBoundingClientRect().width > 0,
     'overflow measurement retains finite geometry after a public text update'
   );
   overflow.remove();
@@ -289,42 +290,22 @@ function selectContract(fixture: HTMLElement, check: Check): void {
   large.remove();
 }
 
-function settingContract(fixture: HTMLElement, check: Check): void {
-  for (const name of ['nexus-collapsible-card', 'nexus-schedule-card'] as const) {
-    const card = create(name);
-    card.expanded = true;
-    fixture.append(card);
-    check(getComputedStyle(card).display === 'block', name + ' keeps heading and content in a vertical card');
-    card.remove();
-  }
-  const setting = create('nexus-switch-setting');
-  setting.title = 'Enabled';
-  fixture.append(setting);
-  const toggle = setting.shadowRoot!.querySelector<UiElement<'nexus-switch'>>('nexus-switch')!;
-  let changes = 0;
-  setting.addEventListener('nexus-change', () => changes++);
-  toggle.shadowRoot!.querySelector<HTMLButtonElement>('button')!.click();
-  check(
-    setting.value && toggle.value && changes === 1,
-    'switch setting uses the shared switch and emits exactly one change'
-  );
-  setting.disabled = true;
-  toggle.shadowRoot!.querySelector<HTMLButtonElement>('button')!.click();
-  check(setting.value && changes === 1, 'disabled switch settings cannot change their shared switch');
-  setting.remove();
-}
-
 function calendarContract(fixture: HTMLElement, check: Check): void {
   calendarLocaleContract(fixture, check);
   const range = create('nexus-date-range-picker');
   range.value = { from: '2024-02-28', to: '2024-02-29' };
   range.min = '2024-02-01';
   range.max = '2024-03-03';
+  const endpoint = 'rgb(30, 60, 90)', middle = 'rgb(40, 70, 100)';
+  range.style.setProperty('--nx-color-accent', endpoint);
+  range.style.setProperty('--accent-soft', middle);
+  range.style.setProperty('--nx-motion-duration-fast', '0ms');
   fixture.append(range);
   const root = range.shadowRoot!;
   const trigger = root.querySelector<HTMLButtonElement>('.trigger')!;
   const panel = root.querySelector<HTMLElement>('[role=dialog]')!;
   const day = (date: string) => root.querySelector<HTMLButtonElement>(`[data-date="${date}"]`)!;
+  const fill = (date: string) => getComputedStyle(day(date)).backgroundColor;
   const apply = root.querySelector<HTMLButtonElement>('.apply')!;
   let changes = 0;
   range.addEventListener('nexus-change', () => changes++);
@@ -347,8 +328,8 @@ function calendarContract(fixture: HTMLElement, check: Check): void {
   day('2024-02-27').click();
   day('2024-03-02').dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
   check(
-    day('2024-03-02').classList.contains('end') &&
-      day('2024-02-28').classList.contains('in-range') &&
+    fill('2024-03-02') === endpoint &&
+      fill('2024-02-28') === middle &&
       range.value.from === '2024-02-28' &&
       changes === 0,
     'range hover previews both endpoints without committing the draft'
@@ -360,7 +341,7 @@ function calendarContract(fixture: HTMLElement, check: Check): void {
   );
   trigger.click();
   check(
-    day('2024-02-28').classList.contains('start'),
+    fill('2024-02-28') === endpoint,
     'reopening restores the authoritative range, not the cancelled preview'
   );
   day('2024-02-29').click();

@@ -1,8 +1,10 @@
 using System.Runtime.Versioning;
+using System.Security.Cryptography;
 using System.Text.Json;
 using NexusPipeline.Core.Operations;
 using NexusPipeline.Core.Secrets;
 using NexusPipeline.Core.Maintenance;
+using NexusPipeline.Extensibility.State;
 using NexusPipeline.Platform.Storage.Scheduling;
 using NexusPipeline.Platform.Storage.Secrets;
 using NexusPipeline.Platform.Storage.Sqlite;
@@ -13,6 +15,9 @@ namespace NexusPipeline.StorageTests;
 [SupportedOSPlatform("windows")]
 public sealed class SecretDocumentTests
 {
+    private const string Extension = "fixture-plugin";
+    private const string Document = "tasks";
+
     [Fact(DisplayName = "A Real Accepted Run Can Complete Its Declared Atomic Credential Rotation During Host Drain While New Unaccepted Writes Remain Blocked")]
     public async Task ContinuesAcceptedRotation()
     {
@@ -23,12 +28,20 @@ public sealed class SecretDocumentTests
         Assert.Null(close.Permit); Assert.Equal(HostLifecyclePhase.Draining, fixture.Lifecycle.Phase);
         var service = new SecretDocumentService(fixture.Instance, fixture.Database, fixture.Lease, fixture.Resources, fixture.Index, new());
         var subject = Guid.NewGuid(); using var changes = new Edits(subject, 0, "synthetic-rotation");
-        await Assert.ThrowsAsync<IOException>(() => service.WriteAsync(Guid.NewGuid(), "extension:fixture-plugin", "fixture-plugin", "tasks", 0,
-            Json(1), changes.Values, () => { }, default).AsTask());
-        var committed = await service.WriteAsync(Guid.NewGuid(), "extension:fixture-plugin", "fixture-plugin", "tasks", 0,
-            Json(1), changes.Values, () => { }, default, activity);
-        Assert.Equal(1, committed.Revision);
-        foreach (var edit in changes.Values) Assert.True(ReadState(fixture, subject, edit.Field).IsConfigured);
+        var write = Guid.NewGuid();
+        var json = Json(1);
+        var rejection = await Assert.ThrowsAsync<IOException>(() => service.WriteAsync(write, "extension:fixture-plugin", Extension, Document, 0,
+            json, changes.Values, () => { }, default).AsTask());
+        Assert.Equal("secret_document_resource_unavailable", rejection.Message);
+        Assert.Null(ReadPublication(fixture, write));
+        Assert.Null(ReadDocument(fixture, Document));
+        var fields = new SecretFieldStore(fixture.Instance, fixture.Database);
+        AssertUnconfigured(fields, changes.Values, 0);
+        var committed = await service.WriteAsync(write, "extension:fixture-plugin", Extension, Document, 0,
+            json, changes.Values, () => { }, default, activity);
+        Assert.Equal(ExpectedCommit(write, 1, json), committed);
+        AssertDocument(fixture, Document, 1, json);
+        AssertSecrets(fields, changes.Values, 1, "synthetic-rotation");
         activity.Dispose();
         Assert.NotNull(fixture.Lifecycle.RequestClose(session, Guid.NewGuid()).Permit);
     }
@@ -38,43 +51,45 @@ public sealed class SecretDocumentTests
     {
         using var fixture = new ExtensionCatalogFixture();
         var subject = Guid.NewGuid();
+        var fields = new SecretFieldStore(fixture.Instance, fixture.Database);
         var service = new SecretDocumentService(fixture.Instance, fixture.Database, fixture.Lease, fixture.Resources, fixture.Index, new());
+        var firstJson = Json(1);
         using var first = new Edits(subject, 0, "first");
-        var initial = await service.WriteAsync(Guid.NewGuid(), "editor:one", "fixture-plugin", "tasks", 0, Json(1), first.Values, () => { }, default);
-        Assert.Equal(1, initial.Revision);
-        var observations = 0;
-        var observer = new Observe(() =>
+        await service.WriteAsync(Guid.NewGuid(), "editor:one", Extension, Document, 0, firstJson, first.Values, () => { }, default);
+        using var second = new Edits(subject, 1, "second"); var operation = Guid.NewGuid();
+        var observed = false;
+        var observer = new ObservePreparedSecret(() =>
         {
-            Assert.Equal(1, ReadDocument(fixture).Revision);
-            foreach (var edit in first.Values)
-            {
-                var status = ReadState(fixture, subject, edit.Field);
-                Assert.Equal(1, status.Revision);
-                using var value = new SecretFieldStore(fixture.Instance, fixture.Database).ReadAsync(new("fixture-plugin", subject, edit.Field), default).GetAwaiter().GetResult();
-                value.Use(text => Assert.StartsWith("first-", text.ToString(), StringComparison.Ordinal));
-            }
-            observations++;
+            observed = true;
+            AssertDocument(fixture, Document, 1, firstJson);
+            AssertSecrets(fields, first.Values, 1, "first");
+            Assert.Null(service.ReadCommit(operation, Extension, "editor:one"));
         });
         service = new(fixture.Instance, fixture.Database, fixture.Lease, fixture.Resources, fixture.Index, new(), observer);
-        using var second = new Edits(subject, 1, "second"); var operation = Guid.NewGuid();
-        var committed = await service.WriteAsync(operation, "editor:one", "fixture-plugin", "tasks", 1, Json(2), second.Values, () => { }, default);
-        Assert.True(observations >= 6); Assert.Equal(2, committed.Revision);
-        Assert.Equal(2, ReadDocument(fixture).Revision);
-        foreach (var edit in second.Values) Assert.Equal(2, ReadState(fixture, subject, edit.Field).Revision);
+        var secondJson = Json(2);
+        var committed = await service.WriteAsync(operation, "editor:one", Extension, Document, 1, secondJson, second.Values, () => { }, default);
+        Assert.True(observed);
+        Assert.Equal(ExpectedCommit(operation, 2, secondJson), committed);
+        AssertDocument(fixture, Document, 2, secondJson);
+        var published = AssertSecrets(fields, second.Values, 2, "second");
         service = new(fixture.Instance, fixture.Database, fixture.Lease, fixture.Resources, fixture.Index, new());
-        var replay = await service.WriteAsync(operation, "editor:one", "fixture-plugin", "tasks", 1, Json(2), second.Values, () => { }, default);
-        Assert.False(replay.IsNew); Assert.Equal(2, replay.Revision);
         using var wrong = new Edits(subject, 1, "different");
-        await Assert.ThrowsAsync<OperationConflictException>(() => service.WriteAsync(operation, "editor:one", "fixture-plugin", "tasks", 1,
-            Json(2), wrong.Values, () => { }, default).AsTask());
-        _ = await service.WriteAsync(Guid.NewGuid(), "editor:one", "fixture-plugin", "tasks", 2, Json(3), [], () => { }, default);
-        replay = await service.WriteAsync(operation, "editor:one", "fixture-plugin", "tasks", 1, Json(2), second.Values, () => { }, default);
-        Assert.Equal(2, replay.Revision); Assert.Equal(3, ReadDocument(fixture).Revision);
-        Assert.Null(service.ReadCommit(operation, "fixture-plugin", "other:editor"));
+        await Assert.ThrowsAsync<OperationConflictException>(() => service.WriteAsync(operation, "editor:one", Extension, Document, 1,
+            secondJson, wrong.Values, () => { }, default).AsTask());
+        var latest = Json(3);
+        _ = await service.WriteAsync(Guid.NewGuid(), "editor:one", Extension, Document, 2, latest, [], () => { }, default);
+        var replay = await service.WriteAsync(operation, "editor:one", Extension, Document, 1, secondJson, second.Values, () => { }, default);
+        Assert.Equal(committed with { IsNew = false }, replay);
+        Assert.Equal(replay, service.ReadCommit(operation, Extension, "editor:one"));
+        Assert.Null(service.ReadCommit(operation, Extension, "other:editor"));
+        AssertDocument(fixture, Document, 3, latest);
+        var afterReplay = AssertSecrets(fields, second.Values, 2, "second");
+        foreach (var field in published.Keys) Assert.Equal(published[field], afterReplay[field]);
         var clears = second.Values.Select(edit => new SecretDocumentEdit(subject, edit.Field, 2, SecretDisposition.Clear, null)).ToArray();
-        _ = await service.WriteAsync(Guid.NewGuid(), "editor:one", "fixture-plugin", "tasks", 3, Json(4), clears, () => { }, default);
-        foreach (var edit in clears)
-        { var state = ReadState(fixture, subject, edit.Field); Assert.Equal(3, state.Revision); Assert.False(state.IsConfigured); }
+        var cleared = Json(4);
+        _ = await service.WriteAsync(Guid.NewGuid(), "editor:one", Extension, Document, 3, cleared, clears, () => { }, default);
+        AssertDocument(fixture, Document, 4, cleared);
+        AssertUnconfigured(fields, clears, 3);
         new SecretDocumentInventory(fixture.Instance, fixture.Database, new()).Verify();
         SecretFieldStore.VerifyInventory(fixture.Database);
     }
@@ -84,26 +99,78 @@ public sealed class SecretDocumentTests
     {
         using var fixture = new ExtensionCatalogFixture(); var subject = Guid.NewGuid();
         var service = new SecretDocumentService(fixture.Instance, fixture.Database, fixture.Lease, fixture.Resources, fixture.Index, new());
-        _ = await service.WriteAsync(Guid.NewGuid(), "editor", "fixture-plugin", "tasks", 0, Json(1), [], () => { }, default);
+        var first = Json(1); var next = Json(2);
+        _ = await service.WriteAsync(Guid.NewGuid(), "editor", Extension, Document, 0, first, [], () => { }, default);
         using var edits = new Edits(subject, 0, "synthetic"); var operation = Guid.NewGuid();
-        await Assert.ThrowsAsync<InvalidOperationException>(() => service.WriteAsync(operation, "editor", "fixture-plugin", "tasks", 0,
-            Json(2), edits.Values, () => { }, default).AsTask());
-        foreach (var edit in edits.Values) Assert.Equal(0, ReadState(fixture, subject, edit.Field).Revision);
-        Assert.Null(service.ReadCommit(operation, "fixture-plugin", "editor"));
-        var accepted = await service.WriteAsync(operation, "editor", "fixture-plugin", "tasks", 1, Json(2), edits.Values, () => { }, default);
-        Assert.Equal(2, accepted.Revision); Assert.True(accepted.IsNew);
+        var conflict = await Assert.ThrowsAsync<InvalidOperationException>(() => service.WriteAsync(operation, "editor", Extension, Document, 0,
+            next, edits.Values, () => { }, default).AsTask());
+        Assert.Equal("extension_document_revision_conflict", conflict.Message);
+        var fields = new SecretFieldStore(fixture.Instance, fixture.Database);
+        AssertUnconfigured(fields, edits.Values, 0);
+        AssertDocument(fixture, Document, 1, first);
+        Assert.Null(ReadPublication(fixture, operation));
+        var accepted = await service.WriteAsync(operation, "editor", Extension, Document, 1, next, edits.Values, () => { }, default);
+        Assert.Equal(ExpectedCommit(operation, 2, next), accepted);
+        AssertDocument(fixture, Document, 2, next);
+        AssertSecrets(fields, edits.Values, 1, "synthetic");
     }
 
     private static byte[] Json(int revision) => JsonSerializer.SerializeToUtf8Bytes(new { formatVersion = 1, revision, tasks = Array.Empty<object>() });
-    private static Extensibility.State.ExtensionDocument ReadDocument(ExtensionCatalogFixture fixture)
+    internal static DocumentCommit ExpectedCommit(Guid operation, long revision, byte[] json) =>
+        new(operation, revision, Convert.ToHexStringLower(SHA256.HashData(json)), true);
+
+    internal static ExtensionDocument? ReadDocument(ExtensionCatalogFixture fixture, string name)
     {
         using var connection = DatabaseConnections.Open(fixture.Database.DatabasePath, readOnly: true);
-        return ExtensionDocumentRows.Read(connection, null, "fixture-plugin", "tasks")!;
+        return ExtensionDocumentRows.Read(connection, null, Extension, name);
     }
-    private static SecretFieldStatus ReadState(ExtensionCatalogFixture fixture, Guid subject, string field) =>
-        new SecretFieldStore(fixture.Instance, fixture.Database).GetStateAsync(new("fixture-plugin", subject, field), default).GetAwaiter().GetResult();
-    private sealed class Observe(Action check) : ISecretPreparationObserver
-    { public void Reached(SecretPreparationPoint point, Guid journalId) => check(); }
+
+    internal static void AssertDocument(ExtensionCatalogFixture fixture, string name, long revision, byte[] json)
+    {
+        var document = ReadDocument(fixture, name);
+        Assert.NotNull(document);
+        Assert.Equal(revision, document.Revision);
+        Assert.Equal(json, document.Json.ToArray());
+    }
+
+    internal static BoundSecretDocument? ReadPublication(ExtensionCatalogFixture fixture, Guid operation)
+    {
+        using var connection = DatabaseConnections.Open(fixture.Database.DatabasePath, readOnly: true);
+        var reference = SecretDocumentRows.Find(connection, null, operation);
+        return reference is null ? null : new SecretDocumentFormat(fixture.Instance, fixture.Contracts).Read(reference);
+    }
+
+    private static Dictionary<string, SecretFieldStatus> AssertSecrets(SecretFieldStore fields, SecretDocumentEdit[] edits, long revision, string prefix)
+    {
+        var states = new Dictionary<string, SecretFieldStatus>(StringComparer.Ordinal);
+        foreach (var edit in edits)
+        {
+            var key = new SecretFieldKey(Extension, edit.SubjectId, edit.Field);
+            var state = fields.GetStateAsync(key, default).GetAwaiter().GetResult();
+            Assert.Equal(revision, state.Revision);
+            Assert.True(state.IsConfigured && state.IsReadable);
+            using var value = fields.ReadAsync(key, default).GetAwaiter().GetResult();
+            var expected = prefix + "-" + edit.Field;
+            value.Use(text => Assert.True(text.SequenceEqual(expected)));
+            states.Add(edit.Field, state);
+        }
+        return states;
+    }
+
+    private static void AssertUnconfigured(SecretFieldStore fields, SecretDocumentEdit[] edits, long revision)
+    {
+        foreach (var edit in edits)
+            Assert.Equal(new SecretFieldStatus(revision, null, false, false),
+                fields.GetStateAsync(new(Extension, edit.SubjectId, edit.Field), default).GetAwaiter().GetResult());
+    }
+
+    internal sealed class ObservePreparedSecret(Action check) : ISecretPreparationObserver
+    {
+        public void Reached(SecretPreparationPoint point, Guid journalId)
+        {
+            if (point == SecretPreparationPoint.CommittedJournal) check();
+        }
+    }
     private sealed class Edits : IDisposable
     {
         internal SecretDocumentEdit[] Values { get; }

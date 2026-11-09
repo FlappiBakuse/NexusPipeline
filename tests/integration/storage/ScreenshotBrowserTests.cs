@@ -24,7 +24,7 @@ public sealed class ScreenshotBrowserTests
     {
         using var inputs = new BuiltExtensionInputs("live-screenshot", "NEXUS_PACKAGED_SCREENSHOT_RECEIPT");
         object? context = null; RuntimeInstance? instance = null; StateDatabase? database = null;
-        await FrontendBrowserTests.RunAsync(inputs, "NEXUS_SCREENSHOT_BROWSER_SCRIPT", 8,
+        await FrontendBrowserTests.RunAsync(inputs, "NEXUS_SCREENSHOT_BROWSER_SCRIPT",
             seed: catalog => { instance = catalog.Instance; database = catalog.Database; context = Seed(catalog, android); },
             browserContext: () => context, timeoutSeconds: 300);
         using var result = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(Path.GetDirectoryName(instance!.RuntimeRoot)!, "browser", "result.json")));

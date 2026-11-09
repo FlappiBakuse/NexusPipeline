@@ -23,8 +23,14 @@ public sealed class ExecutionCancellationTests
         Assert.True(result.Acceptance.IsNew); Assert.Equal("completed", result.Acceptance.Status); Assert.True(result.IsProjected);
         var state = fixture.Scope.VerifyReadOnly(); Assert.True(state.IsDispatchClosed);
         Assert.Equal(JournalPhase.Applying, state.Journal.Phase); Assert.Equal(EffectGateState.Entered, state.Gate.State);
-        Assert.Null(Assert.Single(state.Steps).ClosedElapsedMilliseconds); Assert.Equal(1, fixture.Base.Count("journal_writer_job_roots"));
-        Assert.Equal(0, fixture.Base.Count("journal_writer_job_closures")); Assert.Equal(0, fixture.Base.Count("attempt_receipts"));
+        var step = Assert.Single(state.Steps);
+        Assert.Null(step.ClosedElapsedMilliseconds);
+        var registered = fixture.ReadRoot(state);
+        Assert.NotNull(registered);
+        Assert.Equal(root.ProcessId, registered.ProcessId); Assert.Equal(root.CreatedAtUtc, registered.CreatedAtUtc);
+        var source = fixture.Base.Source;
+        Assert.Null(new JobClosureStore(source.Instance, source.Database, new()).Read(fixture.JournalId, step.WriterId, step.JobName, step.SessionId));
+        Assert.Null(new AttemptReceiptStore(source.Database).Read(Guid.Parse(state.Attempt.AttemptId)));
         Assert.Throws<IOException>(() => fixture.Scope.RequireStart()); Assert.Throws<IOException>(() => fixture.Scope.EnterApplying());
         var before = fixture.Base.Source.Snapshot(); var replay = Store(fixture).Cancel(identity, fixture.JournalId, DateTimeOffset.UtcNow);
         Assert.False(replay.Acceptance.IsNew); AssertSame(before, fixture);
@@ -50,7 +56,7 @@ public sealed class ExecutionCancellationTests
         });
         session.SealEffectEntry(); var before = source.Snapshot();
         Assert.Throws<IOException>(() => session.CommitNoEffects()); AssertSame(before, fixture);
-        Assert.Equal(0, fixture.Base.Count("attempt_receipts"));
+        Assert.Null(new AttemptReceiptStore(source.Database).Read(Guid.Parse(fixture.Scope.VerifyReadOnly().Attempt.AttemptId)));
         Assert.Equal(JournalPhase.Prepared, fixture.Scope.VerifyReadOnly().Journal.Phase);
     }
 
@@ -116,7 +122,7 @@ public sealed class ExecutionCancellationTests
         Assert.Equal("execution_dispatch_closed", Assert.Throws<IOException>(() =>
             new JournalEffectGate(source.Database).Enter(cached.Journal, cached.Gate.Revision)).Message);
         Assert.Throws<IOException>(() => Store(fixture).Cancel(Identity(fixture), fixture.JournalId, PlanBuilderFixture.CreatedAt));
-        AssertSame(before, fixture); Assert.Equal(1, fixture.Base.Count("journal_writer_jobs"));
+        AssertSame(before, fixture);
         Store(fixture).Cancel(identity, fixture.JournalId, PlanBuilderFixture.CreatedAt);
         fixture.AssertClosed(await fixture.Writer.StopAsync(TimeSpan.FromSeconds(10)), executed: false);
     }
@@ -180,23 +186,26 @@ public sealed class ExecutionCancellationTests
         owner = fixture;
         using var heldPause = pause!; fixture.Scope.EnterApplying();
         var start = Task.Run(() => fixture.Writer.Start(fixture.Output));
-        Assert.True(pause!.Reached.Wait(TimeSpan.FromSeconds(10)));
-        var identity = Identity(fixture);
+        ProcessIdentity? suspended = null;
+        OperationIdentity identity;
         try
         {
+            Assert.True(pause!.Reached.Wait(TimeSpan.FromSeconds(10)));
+            suspended = pause.SuspendedRoot;
+            Assert.NotNull(suspended);
+            Assert.Equal(rootWins ? suspended : null, fixture.ReadRoot(fixture.Scope.VerifyReadOnly()));
+            identity = Identity(fixture);
             if (rootWins)
             {
-                Assert.Equal(1, fixture.Base.Count("journal_writer_job_roots"));
                 Store(fixture).Cancel(identity, fixture.JournalId, PlanBuilderFixture.CreatedAt);
             }
             else
             {
-                Assert.Equal(0, fixture.Base.Count("journal_writer_job_roots"));
                 Assert.Throws<IOException>(() => Store(fixture, new CancellationFailure(ExecutionCancellationPoint.IntentAccepted))
                     .Cancel(identity, fixture.JournalId, PlanBuilderFixture.CreatedAt));
             }
         }
-        finally { pause.Release.Set(); }
+        finally { pause!.Release.Set(); }
         if (rootWins)
         {
             var root = await start.WaitAsync(TimeSpan.FromSeconds(10));
@@ -206,10 +215,10 @@ public sealed class ExecutionCancellationTests
         else
         {
             Assert.Equal("execution_dispatch_closed", (await Assert.ThrowsAsync<IOException>(async () => { await start.WaitAsync(TimeSpan.FromSeconds(10)); })).Message);
-            Assert.Equal(0, fixture.Base.Count("journal_writer_job_roots")); Assert.False(File.Exists(fixture.Marker + ".output-ready"));
+            Assert.Null(fixture.ReadRoot(fixture.Scope.VerifyReadOnly())); Assert.False(File.Exists(fixture.Marker));
             Store(fixture).Cancel(identity, fixture.JournalId, PlanBuilderFixture.CreatedAt);
             var stopped = await fixture.Writer.StopAsync(TimeSpan.FromSeconds(10)); fixture.AssertClosed(stopped, executed: false);
-            Assert.NotNull(stopped.Closure.Root); Assert.Contains(stopped.Closure.Family, member => member == stopped.Closure.Root);
+            Assert.Equal(suspended, stopped.Closure.Root); Assert.Contains(stopped.Closure.Family, member => member == suspended);
         }
         Assert.Equal(EffectGateState.Entered, fixture.Scope.VerifyReadOnly().Gate.State);
         Assert.Equal(JournalPhase.Applying, fixture.Scope.VerifyReadOnly().Journal.Phase);
@@ -267,7 +276,7 @@ public sealed class ExecutionCancellationTests
         Assert.Throws<IOException>(() => ExecutionCancellationStore.VerifyInventory(source.Instance, source.Database, new()));
         Assert.Throws<IOException>(() => fixture.Scope.RequireStart());
         Assert.Throws<IOException>(() => new JobClosureStore(source.Instance, source.Database, new()).RequireAttemptStart(cached, Assert.Single(cached.Steps)));
-        Assert.Equal(0, fixture.Base.Count("journal_writer_job_roots"));
+        Assert.False(File.Exists(fixture.Marker));
         AssertSame(before, fixture);
     }
 

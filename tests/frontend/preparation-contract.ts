@@ -8,18 +8,19 @@ import type { FrontendLoader } from '../../apps/web/src/extensions/frontend-load
 import { prepareExtensionIcons, extensionIcon, clearExtensionIcons } from '../../apps/web/src/control/extension-icons';
 
 export async function preparationContract(check: (value: unknown, name: string) => void): Promise<void> {
-  let requests = 0;
-  const client = new ControlClient(location.origin, async () => { requests++; return Response.json({ value: requests }); });
+  let requests = 0, value = 'prepared';
+  const client = new ControlClient(location.origin, async () => { requests++; return Response.json({ value }); });
   const signal = new AbortController().signal;
   await client.prepareRead('/control/v1/notifications', signal);
   const snapshot = await client.read('/control/v1/notifications', objectValue);
-  check(snapshot.value === 1 && requests === 1, 'first page entry consumes its prepared readonly snapshot');
-  await client.read('/control/v1/notifications', objectValue);
-  check(requests === 2, 'later page refresh reads current state');
+  check(snapshot.value === 'prepared' && requests === 1, 'first page entry consumes its prepared readonly snapshot');
+  value = 'refreshed';
+  check((await client.read('/control/v1/notifications', objectValue)).value === 'refreshed',
+    'later page refresh reads current state');
   await client.prepareRead('/control/v1/extensions', signal);
-  client.authenticate('');
-  await client.read('/control/v1/extensions', objectValue);
-  check(requests === 4, 'session changes revoke prepared snapshots');
+  client.authenticate(''); value = 'authenticated';
+  check((await client.read('/control/v1/extensions', objectValue)).value === 'authenticated',
+    'session changes revoke prepared snapshots');
   const store = createStore(client);
   store.start = async () => {};
   store.can = capability => capability === 'execution.read';
@@ -248,16 +249,17 @@ async function preparationCancellation(check: (value: unknown, name: string) => 
 }
 
 async function eventRevision(check: (value: unknown, name: string) => void): Promise<void> {
-  let revision = 0;
-  const client = new ControlClient(location.origin, async () => Response.json({ value: ++revision }));
+  let value = 'before-event';
+  const client = new ControlClient(location.origin, async () => Response.json({ value }));
   const store = createStore(client);
   const snapshots = new HostSnapshots(client, store.state, {} as never);
   const event = { instanceId: 'instance', streamId: 'stream', sequence: 1, state: {} };
   try {
     snapshots.observe(event);
     await client.prepareRead('/control/v1/notifications', new AbortController().signal);
+    value = 'after-event';
     snapshots.observe({ ...event, sequence: 2 });
     const next = await client.read('/control/v1/notifications', objectValue);
-    check(next.value === 2 && revision === 2, 'a new event revision invalidates unconsumed prepared data');
+    check(next.value === 'after-event', 'a new event revision invalidates unconsumed prepared data');
   } finally { store.dispose(); }
 }

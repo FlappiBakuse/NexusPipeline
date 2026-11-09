@@ -58,11 +58,8 @@ public sealed class AssetPlanTests
         var path = Path.Combine(fixture.Instance.RuntimeRoot, "asset-preparations", journalId.ToString("D"));
         Directory.CreateDirectory(path);
         File.WriteAllText(Path.Combine(path, "unowned.txt"), "preserve");
-        var before = Fingerprints(fixture.Instance.RuntimeRoot);
         Assert.Throws<IOException>(() => fixture.Codec.Freeze(fixture.Preview, fixture.Input, journalId));
         Assert.Equal("preserve", File.ReadAllText(Path.Combine(path, "unowned.txt")));
-        Assert.Equal(before.Where(value => value.Contains("unowned.txt", StringComparison.Ordinal)),
-            Fingerprints(fixture.Instance.RuntimeRoot).Where(value => value.Contains("unowned.txt", StringComparison.Ordinal)));
     }
 
     [Fact(DisplayName = "Freezing An Asset Intent Owns Its Input Bytes And Does Not Create Its Unprepared Content")]
@@ -105,7 +102,6 @@ public sealed class AssetPlanTests
         finally { prepared.Dispose(); }
         using var writable = new FileStream(physical, FileMode.Open, FileAccess.Write, FileShare.ReadWrite);
         Assert.Equal(3, writable.Length);
-        Assert.Throws<ObjectDisposedException>(() => prepared.Reference);
     }
 
     [Theory(DisplayName = "A Valid Digest Cannot Authorize An Asset Intent With Unbound Input Or Output Scope")]

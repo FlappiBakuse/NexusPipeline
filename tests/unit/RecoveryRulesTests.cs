@@ -60,7 +60,6 @@ public sealed class RecoveryRulesTests
         Assert.Equal(LifecycleOutcome.Interrupted, restored.Lifecycle);
         Assert.Equal(RecoveryOutcome.Restored, restored.Recovery);
         Assert.Equal(facts.AttemptId, restored.AttemptId);
-        Assert.Equal(LifecycleOutcome.Running, facts.Lifecycle);
         Assert.Throws<InvalidOperationException>(() => restored.AfterInterruption(WriterState.Stopped, true));
     }
 }

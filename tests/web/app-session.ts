@@ -94,8 +94,10 @@ async function startupPairCases(): Promise<string[]> {
       throw Error('unexpected_startup_read:' + path);
     }) as never;
     const snapshots = new HostSnapshots(client, state, {} as never);
-    let synchronized = 0;
-    snapshots.read = async () => { synchronized++; return { settings: 0, status: 0 }; };
+    snapshots.read = async () => {
+      state.status = { instanceId: access.instanceId } as never;
+      return { settings: 0, status: 0 };
+    };
     snapshots.aligned = () => true;
     const session = new AppSession(client, state, snapshots, () => {}, () => 'dashboard');
     const owner = new AbortController();
@@ -111,17 +113,16 @@ async function startupPairCases(): Promise<string[]> {
       else { accessGate.resolve(); snapshotGate.resolve(); }
       if (failed) {
         await failed;
-        assert.equal(synchronized, 0);
+        assert.equal(state.status, null);
         assert(signals.every(signal => signal.aborted));
         if (mode === 'instance-mismatch') {
-          assert.equal(state.capabilities, old);
+          assert.deepEqual(state.capabilities, old);
           assert.equal(state.events?.retained, true);
         } else assert.equal(state.capabilities, null);
       } else {
         await pending;
-        assert.equal(synchronized, 1);
+        assert.equal(state.status?.instanceId, access.instanceId);
         assert.equal(state.capabilities?.instanceId, access.instanceId);
-        assert.equal(paths.length, 2);
       }
       cases.push('startup reads access and event state concurrently with cancellation and identity protection: ' + mode);
     } finally { owner.abort(); accessGate.resolve(); snapshotGate.resolve(); session.dispose(); }
@@ -152,8 +153,9 @@ async function startupStreamCase(): Promise<string[]> {
     const pending = session.start();
     snapshots.observe(next);
     gate.resolve(); await pending;
-    assert.equal(counts.get('/control/v1/capabilities'), 2);
-    assert.equal(counts.get('/control/v1/events/snapshot'), 2);
+    assert.deepEqual(state.capabilities, access);
+    assert.equal(state.revision, next.sequence);
+    assert.deepEqual(state.events, next.state);
     assert.equal(snapshots.streamId, 'next');
     return ['a stream replacement during initial concurrent reads retries the aligned pair'];
   } finally { gate.resolve(); session.dispose(); }

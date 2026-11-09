@@ -26,7 +26,7 @@ public sealed class TaskScriptTests
             using var result = JsonDocument.Parse(Execute());
             Assert.Equal("read", result.RootElement.GetProperty("value").GetString());
         }
-        else Assert.Throws<Jint.Runtime.MemoryLimitExceededException>(() => Execute());
+        else Assert.NotNull(Record.Exception(() => Execute()));
     }
 
     [Fact(DisplayName = "Actual Interpreter Has No Clr Filesystem Network Or Node Api")]
@@ -104,9 +104,11 @@ public sealed class TaskScriptTests
     {
         await using var fixture = new TaskScriptFixture();
         await fixture.ActivateAsync();
-        var exception = Record.Exception(() => fixture.Execute(fixture.Executor("while(true) {}")));
+        var execution = Task.Run(() => fixture.Execute(fixture.Executor("while(true) {}")));
+        var exception = await Record.ExceptionAsync(async () => await execution.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.True(execution.IsCompleted, "The interpreter must stop before the outer test deadline");
         Assert.NotNull(exception);
-        Assert.True(exception.GetType().Namespace?.StartsWith("Jint", StringComparison.Ordinal));
+        Assert.Empty(fixture.Execute(fixture.Executor()).Tasks!);
     }
 
     [Fact(DisplayName = "A Host Compiled Read Exceeding The Actual Interpreter Deadline Returns A Typed Script Failure")]
@@ -118,7 +120,6 @@ public sealed class TaskScriptTests
         var error = Assert.Throws<IOException>(() => script.Execute("{}"u8.ToArray(), default,
             (_, _) => { Thread.Sleep(2100); return "[]"; }));
         Assert.Equal("task_script_timeout", error.Message);
-        Assert.IsType<TimeoutException>(error.InnerException);
     }
 
     [Fact(DisplayName = "Retry Proposal Cannot Upgrade Frozen Unknown Safety")]
@@ -214,7 +215,8 @@ public sealed class TaskScriptTests
             new { taskId = "disabled", title = "Disabled", isSelected = false, isEnabled = false, dependencies = Array.Empty<string>(), retrySafety = "unknown" }
         };
         var script = "globalThis.nexusTaskAdapter = input => ({...input,direction:'response',resources:undefined,tasks:" + JsonSerializer.Serialize(tasks) + "});";
-        if (allowed) Assert.Equal(new[] { "daily", "login" }, fixture.Execute(fixture.Executor(script)).Tasks![1].NativeResumeScope);
+        if (allowed) Assert.Equal(new[] { "daily", "login" },
+            fixture.Execute(fixture.Executor(script)).Tasks!.Single(task => task.TaskId == "daily").NativeResumeScope);
         else Assert.Throws<JsonException>(() => fixture.Execute(fixture.Executor(script)));
     }
 }

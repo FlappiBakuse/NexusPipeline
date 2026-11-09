@@ -1,7 +1,9 @@
+using System.Globalization;
 using System.Runtime.Versioning;
 using System.Text.Json;
 using NexusPipeline.Core.Execution;
 using NexusPipeline.Platform.Execution.Judgement;
+using NexusPipeline.Platform.Storage.Execution;
 using Xunit;
 
 namespace NexusPipeline.StorageTests;
@@ -56,25 +58,37 @@ def nexus_judge(input):
         await fixture.StartAsync();
         var exchange = await fixture.InvokeAsync(1, true, JsonSerializer.Serialize(new { pid = Environment.ProcessId, title = window.Title }));
         await fixture.AssertExitedAsync();
-        Assert.Null(exchange.Response.FaultCode); Assert.Equal(BusinessOutcome.Succeeded, exchange.Response.Result!.Outcome);
-        Assert.Equal(2, exchange.Probes.Count); Assert.Equal(2, exchange.Response.ProbeCount);
-        Assert.Equal(JudgementProbeProtocol.Hash(exchange.Probes), exchange.Response.ProbeTranscriptSha256);
-        JudgementProbeProtocol.RequireExchanges(exchange.Probes, exchange.Invocation);
-        var request = exchange.Probes[0].Request;
+        Assert.Equal(BusinessOutcome.Succeeded, Assert.IsType<BusinessJudgementResult>(exchange.Response.Result).Outcome);
+        Assert.Equal(2, exchange.Probes.Count);
+        var observed = Assert.Single(exchange.Probes[0].Reply.Result!.Value.GetProperty("processes").EnumerateArray());
+        Assert.Equal(Environment.ProcessId, observed.GetProperty("pid").GetInt32());
+        Assert.True(observed.EnumerateObject().Select(value => value.Name).ToHashSet(StringComparer.Ordinal)
+            .SetEquals(["pid", "ppid", "name", "startTimeUtc"]));
+        var visible = Assert.Single(exchange.Probes[1].Reply.Result!.Value.GetProperty("windows").EnumerateArray());
+        Assert.Equal(window.Title, visible.GetProperty("title").GetString());
+        Assert.Equal(window.Handle.ToInt64().ToString(CultureInfo.InvariantCulture), visible.GetProperty("hwnd").GetString());
+    }
+
+    [Fact(DisplayName = "Probe Requests And Replies Cannot Cross Their Invocation Or Ordinal")]
+    public void RejectsUnboundProbeFrames()
+    {
+        var binding = new StepEvidenceBinding(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
+            "binding", "Local\\NexusWorker-" + Guid.NewGuid().ToString("N"), Guid.NewGuid(), 1, new string('a', 64));
+        var identity = new JudgementWorkerIdentity(binding, "Local\\NexusWorker-" + Guid.NewGuid().ToString("N"), Guid.NewGuid());
+        var request = new JudgementProbeRequest(JudgementProbeProtocol.RequestFormat, 1, identity, 1, new string('a', 64), 1,
+            "processes", JsonSerializer.SerializeToElement(new { }));
+        JudgementProbeProtocol.Require(request, identity, 1, request.InputSha256, 1);
         foreach (var unbound in new[]
         {
             request with { Identity = request.Identity with { OwnerId = Guid.NewGuid() } },
             request with { Generation = request.Generation + 1 },
             request with { InputSha256 = new string('b', 64) },
             request with { Ordinal = 2 }
-        }) Assert.Throws<IOException>(() => JudgementProbeProtocol.Require(unbound, exchange.Invocation, 1));
-        Assert.Throws<IOException>(() => JudgementProbeProtocol.Require(exchange.Probes[1].Reply, request));
-        var observed = Assert.Single(exchange.Probes[0].Reply.Result!.Value.GetProperty("processes").EnumerateArray());
-        Assert.Equal(Environment.ProcessId, observed.GetProperty("pid").GetInt32());
-        Assert.Equal(new[] { "pid", "ppid", "name", "startTimeUtc" }, observed.EnumerateObject().Select(value => value.Name));
-        var visible = Assert.Single(exchange.Probes[1].Reply.Result!.Value.GetProperty("windows").EnumerateArray());
-        Assert.Equal(window.Title, visible.GetProperty("title").GetString());
-        Assert.True(long.TryParse(visible.GetProperty("hwnd").GetString(), out _));
+        }) Assert.Throws<IOException>(() => JudgementProbeProtocol.Require(unbound, identity, 1, request.InputSha256, 1));
+        var next = request with { Ordinal = 2 };
+        var reply = JudgementProbeProtocol.Fault(next, "judgement_probe_unavailable");
+        JudgementProbeProtocol.Require(reply, next);
+        Assert.Throws<IOException>(() => JudgementProbeProtocol.Require(reply, request));
     }
 
     [Theory(DisplayName = "Real Probe Faults Cannot Become Success And The Next Invocation Has Fresh Observation Limits")]
@@ -105,8 +119,8 @@ def nexus_judge(input):
         Assert.Null(rejected.Response.Result); Assert.Equal("judgement_worker_execution_failed", rejected.Response.FaultCode);
         Assert.Equal(fault == "calls" ? 16 : 1, rejected.Probes.Count);
         if (fault == "options") Assert.Equal("judgement_probe_options_invalid", rejected.Probes[0].Reply.FaultCode);
-        Assert.Null(final.Response.FaultCode); Assert.Equal(BusinessOutcome.Succeeded, final.Response.Result!.Outcome);
-        Assert.Single(final.Probes); Assert.Equal(1, final.Probes[0].Request.Ordinal);
-        Assert.Equal(2, final.Probes[0].Request.Generation);
+        Assert.Equal(BusinessOutcome.Succeeded, Assert.IsType<BusinessJudgementResult>(final.Response.Result).Outcome);
+        var observation = Assert.Single(final.Probes);
+        Assert.Equal((2L, 1), (observation.Request.Generation, observation.Request.Ordinal));
     }
 }

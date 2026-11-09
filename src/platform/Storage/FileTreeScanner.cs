@@ -12,8 +12,6 @@ public sealed record SnapshotBudget(int MaximumEntries, long MaximumTotalBytes)
 
 public sealed class FileTreeScanner(SnapshotBudget budget)
 {
-    internal Action<long>? HashBytes { get; init; }
-
     public FileTreeSnapshot Capture(string selectedRoot, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -92,7 +90,6 @@ public sealed class FileTreeScanner(SnapshotBudget budget)
                 var count = source.Read(buffer, 0, buffer.Length);
                 if (count == 0) break;
                 hasher.AppendData(buffer.AsSpan(0, count));
-                HashBytes?.Invoke(count);
             }
         }
         finally { ArrayPool<byte>.Shared.Return(buffer, clearArray: true); }

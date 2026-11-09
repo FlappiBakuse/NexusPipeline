@@ -42,7 +42,14 @@ public sealed class SecretCrashTests(ITestOutputHelper output)
         }
         using var lease = InstanceLease.Acquire(instance, new());
         var before = RuntimeFingerprints(instance.RuntimeRoot);
-        Assert.Throws<IOException>(() => StateDatabase.OpenExisting(instance, Path.Combine(root, "refused-startup"), new JournalStartupAdmission(instance, new())));
+        var reason = fault switch
+        {
+            "writer" => "secret_receipt_writer_unbound",
+            "digest" => "secret_preparation_receipt_unbound",
+            _ => "secret_receipt_inventory_unrecognized"
+        };
+        Assert.Equal(reason, Assert.Throws<IOException>(() => StateDatabase.OpenExisting(instance,
+            Path.Combine(root, "refused-startup"), new JournalStartupAdmission(instance, new()))).Message);
         Assert.Equal(before, RuntimeFingerprints(instance.RuntimeRoot));
     }
 
@@ -69,55 +76,88 @@ public sealed class SecretCrashTests(ITestOutputHelper output)
         var report = await OwnedCrashProcess.ReadReportAsync(reportPath);
         Assert.Equal("faultReady", report.GetProperty("status").GetString());
         Assert.Equal(identity.ProcessId, report.GetProperty("processId").GetInt32());
+        Assert.Equal(point.ToString(), report.GetProperty("point").GetString());
         var instance = report.GetProperty("instance").Deserialize<RuntimeInstance>()!;
         var key = report.GetProperty("key").Deserialize<SecretFieldKey>()!;
         var database = StateDatabase.OpenExisting(instance, Path.Combine(root, "before-stop"));
         var id = report.GetProperty("journalId").GetGuid();
         Assert.Equal(new WriterStopObservation(true, WriterState.Running), new JournalWriterStore(database).Observe(id));
-        var plan = new PreparationPlanCodec(instance, new(), database).Read(report.GetProperty("plan").Deserialize<BlobReference>()!).ReadWire();
+        var reference = report.GetProperty("plan").Deserialize<BlobReference>()!;
+        var plan = new PreparationPlanCodec(instance, new(), database).Read(reference).ReadWire();
+        var operationId = Guid.Parse(plan.OperationId);
+        Assert.Equal(id, Guid.Parse(plan.JournalId));
+        Assert.Equal(key, SecretPreparationRows.Key(plan));
         var path = Path.Combine(instance.RuntimeRoot, plan.Candidate.RelativePath);
         var before = File.Exists(path) ? PhysicalObjectIdentity.Read(path) : null;
+        var ciphertext = before is null ? null : File.ReadAllBytes(path);
         if (point != SecretPreparationPoint.Published)
-        {
-            var frozenDatabase = Fingerprints(database.DatabasePath);
-            var rejection = Record.Exception(() => StateDatabase.OpenExisting(instance, Path.Combine(root, "live-writer-refused"), new JournalStartupAdmission(instance, new())));
-            Assert.NotNull(rejection);
-            Assert.True(rejection is IOException or InvalidOperationException);
-            Assert.Equal(frozenDatabase, Fingerprints(database.DatabasePath));
-        }
+            AssertLiveRefusal(instance, database, Path.Combine(root, "live-writer-refused"), point);
         var stopped = await owner.StopAsync(); Assert.True(stopped.CompleteJobStopped);
-        var exit = await owner.AwaitExitAsync(); Assert.NotEqual(0, exit);
+        Assert.Equal(0u, stopped.Accounting.ActiveProcesses);
+        var exit = await owner.AwaitExitAsync();
         Assert.Equal(new WriterStopObservation(true, WriterState.Stopped), new JournalWriterStore(database).Observe(id));
         using var lease = InstanceLease.Acquire(instance, new());
         var roots = new PayloadApplyRoots(Path.Combine(root, "host"), Path.Combine(instance.RuntimeRoot, "extensions"));
         var reopened = StateDatabase.OpenExisting(instance, Path.Combine(root, "startup-inspection"), new JournalStartupAdmission(instance, new(), roots));
         var index = new StartupJournalRecovery(instance, new(), reopened, roots).Recover(lease);
-        var final = Assert.Single(new RecoveryJournalRegistry(reopened).ReadSnapshot().Journals);
+        var final = new RecoveryJournalRegistry(reopened).ReadOperationJournal(operationId);
+        Assert.Equal(id, final.JournalId);
+        Assert.Equal(JournalKind.SecretPrepare, final.Kind);
+        Assert.Equal(reference.Sha256, final.PlanDigest);
         Assert.Equal(phase, final.Phase);
         var store = new SecretFieldStore(instance, reopened);
-        var state = await store.GetStateAsync(key, default); Assert.Equal(published, state.IsConfigured);
+        var state = published ? new SecretFieldStatus(1, Guid.Parse(plan.Candidate.SecretId), true, true) : new(0, null, false, false);
+        Assert.Equal(state, await store.GetStateAsync(key, default));
         if (published)
         {
             using var value = await store.ReadAsync(key, default);
             value.Use(chars => Assert.True(chars.SequenceEqual("secret-crash-owned-fixture")));
         }
+        else
+            Assert.Equal("secret_not_configured", (await Assert.ThrowsAsync<IOException>(async () => await store.ReadAsync(key, default))).Message);
         Assert.Equal(before, File.Exists(path) ? PhysicalObjectIdentity.Read(path) : null);
-        Assert.True(index.Current.IsReady); Assert.Equal(phase == JournalPhase.Quarantined, index.Current.Isolations.Count != 0);
+        Assert.True(index.Current.IsReady);
+        if (phase == JournalPhase.Quarantined)
+        {
+            var isolation = Assert.Single(index.Current.Isolations);
+            Assert.Equal(id, isolation.JournalId); Assert.Equal("secrets:fields", isolation.ResourceKey);
+        }
+        else Assert.Empty(index.Current.Isolations);
+        var journals = new JournalStore(instance, new());
+        var history = journals.ReadAllRevisions(id).Select(item => item.Export()).ToArray();
+        var outbox = new FileEffectOutbox(reopened);
+        var effects = outbox.Read(id);
         var second = new StartupJournalRecovery(instance, new(), reopened, roots).Recover(lease);
         Assert.True(second.Current.IsReady);
+        Assert.Equal(index.Current.Isolations, second.Current.Isolations);
         using var supplied = new SecretValue("secret-crash-owned-fixture");
         if (published)
-            Assert.Equal(state, await store.ApplyAsync(Guid.Parse(plan.OperationId), key, 0, SecretDisposition.Set, supplied, default));
+            Assert.Equal(state, await store.ApplyAsync(operationId, key, 0, SecretDisposition.Set, supplied, default));
         else
         {
-            var rejection = await Assert.ThrowsAsync<IOException>(async () => await store.ApplyAsync(Guid.Parse(plan.OperationId), key, 0, SecretDisposition.Set, supplied, default));
+            var rejection = await Assert.ThrowsAsync<IOException>(async () => await store.ApplyAsync(operationId, key, 0, SecretDisposition.Set, supplied, default));
             Assert.Equal(phase == JournalPhase.Committed ? "secret_preparation_not_executed" : "secret_preparation_recovery_pending", rejection.Message);
         }
         using var changed = new SecretValue("different-secret-crash-fixture");
         await Assert.ThrowsAsync<NexusPipeline.Core.Operations.OperationConflictException>(async () =>
-            await store.ApplyAsync(Guid.Parse(plan.OperationId), key, 0, SecretDisposition.Set, changed, default));
+            await store.ApplyAsync(operationId, key, 0, SecretDisposition.Set, changed, default));
+        Assert.Equal(state, await store.GetStateAsync(key, default));
+        Assert.Equal(history, journals.ReadAllRevisions(id).Select(item => item.Export()));
+        Assert.Equal(effects, outbox.Read(id));
         Assert.Equal(before, File.Exists(path) ? PhysicalObjectIdentity.Read(path) : null);
+        if (ciphertext is not null) Assert.Equal(ciphertext, File.ReadAllBytes(path));
         output.WriteLine(JsonSerializer.Serialize(new { point, identity, stopped, exit, report, final, published, preservedIdentity = before }));
+    }
+
+    private static void AssertLiveRefusal(RuntimeInstance instance, StateDatabase database, string diagnosticRoot, SecretPreparationPoint point)
+    {
+        var frozen = Fingerprints(database.DatabasePath);
+        StateDatabase Open() => StateDatabase.OpenExisting(instance, diagnosticRoot, new JournalStartupAdmission(instance, new()));
+        if (point == SecretPreparationPoint.CommittedJournal)
+            Assert.Equal("secret_preparation_commit_unverified", Assert.Throws<InvalidOperationException>(Open).Message);
+        else
+            Assert.Equal("startup_journal_writer_stop_unconfirmed", Assert.Throws<IOException>(Open).Message);
+        Assert.Equal(frozen, Fingerprints(database.DatabasePath));
     }
 
     private static string[] Fingerprints(string path) => new[] { "", "-wal", "-shm", "-journal" }.Where(suffix => File.Exists(path + suffix))

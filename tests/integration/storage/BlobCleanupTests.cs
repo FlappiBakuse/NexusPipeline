@@ -20,9 +20,10 @@ public sealed class BlobCleanupTests
         var fixture = Create();
         var unrelated = Path.Combine(fixture.Instance.RuntimeRoot, "unrelated-user-bytes");
         File.WriteAllText(unrelated, "preserve");
-        Assert.Equal(CleanupItemState.VerifiedUnreferenced, fixture.Cleanup.Inspect(fixture.Item));
+        var identity = PhysicalObjectIdentity.Read(unrelated);
         Assert.Equal(CleanupStepResult.Deleted, fixture.Cleanup.RemoveVerified(fixture.Item));
-        Assert.False(File.Exists(fixture.Path));
+        Assert.False(Path.Exists(fixture.Path));
+        Assert.Equal(identity, PhysicalObjectIdentity.Read(unrelated));
         Assert.Equal("preserve", File.ReadAllText(unrelated));
     }
 
@@ -30,11 +31,14 @@ public sealed class BlobCleanupTests
     public void RechecksPublishedReferences()
     {
         var fixture = Create();
+        var bytes = File.ReadAllBytes(fixture.Path);
         Assert.Equal(CleanupItemState.VerifiedUnreferenced, fixture.Cleanup.Inspect(fixture.Item));
-        Attach(fixture);
+        var attached = Attach(fixture);
         Assert.Equal(CleanupStepResult.SkippedReferenced, fixture.Cleanup.RemoveVerified(fixture.Item));
-        Assert.Equal(CleanupItemState.Referenced, fixture.Cleanup.Inspect(fixture.Item));
-        fixture.Blobs.Verify(fixture.Item.Blob);
+        var assets = new RecordAssetStore(fixture.Database, fixture.Blobs);
+        Assert.Equal(attached, Assert.Single(assets.ReadForRun(attached.RunId).Items));
+        Assert.Equal(fixture.Item.Identity, PhysicalObjectIdentity.Read(fixture.Path));
+        Assert.Equal(bytes, File.ReadAllBytes(fixture.Path));
     }
 
     [Fact(DisplayName = "A Deletion Guard Prevents A New Asset Reference From Being Published Before Its File Disappears")]
@@ -44,19 +48,18 @@ public sealed class BlobCleanupTests
         var record = RecordStoreFixture.Record(1, Guid.NewGuid());
         new RunRecordStore(fixture.Database).AppendCompleted([record]);
         var item = fixture.Item;
-        var invoked = false;
+        var assets = new RecordAssetStore(fixture.Database, fixture.Blobs);
         var deleted = PhysicalObjectDeletion.TryDeleteUnreferenced(new(fixture.Path, item.ParentIdentity, item.Identity,
             FileObjectKind.File, item.Blob.SizeBytes, item.Blob.Sha256), () =>
         {
-            invoked = true;
-            Assert.Throws<IOException>(() => new RecordAssetStore(fixture.Database, fixture.Blobs).AttachVerified(
+            var rejection = Assert.Throws<IOException>(() => assets.AttachVerified(
                 new(record.FinalAttempt.RunId, item.Blob.Sha256, item.Blob.SizeBytes, RecordAssetKind.Screenshot)));
+            Assert.Equal("immutable_blob_open_failed", rejection.Message);
             return true;
         });
-        Assert.True(invoked);
         Assert.True(deleted);
-        Assert.Empty(new RecordAssetStore(fixture.Database, fixture.Blobs).ReadForRun(record.FinalAttempt.RunId).Items);
-        Assert.False(File.Exists(fixture.Path));
+        Assert.Empty(assets.ReadForRun(record.FinalAttempt.RunId).Items);
+        Assert.False(Path.Exists(fixture.Path));
     }
 
     [Fact(DisplayName = "Both Prepared And Committed Configuration Plans Protect Their Transitive Contents")]
@@ -65,13 +68,14 @@ public sealed class BlobCleanupTests
         var fixture = Create();
         var contracts = new ContractReader();
         var target = Path.Combine(Path.GetDirectoryName(fixture.Instance.RuntimeRoot)!, "configuration");
-        File.WriteAllBytes(target, File.ReadAllBytes(fixture.Path));
+        var bytes = File.ReadAllBytes(fixture.Path);
+        File.WriteAllBytes(target, bytes);
         var archive = new FileTreeArchive(new(SnapshotBudget.Default), fixture.Blobs);
         var before = archive.Capture(target, default);
         var plan = new FrozenConfigurationExchange(fixture.Instance.InstanceId, Guid.NewGuid(), Guid.NewGuid(), JournalKind.ConfigEdit,
             target, PhysicalObjectIdentity.Read(Path.GetDirectoryName(target)!), before, before);
-        var prepared = new ConfigurationPlanCodec(fixture.Instance, contracts, fixture.Blobs).Freeze(plan);
-        Assert.Throws<IOException>(() => fixture.Cleanup.RemoveVerified(fixture.Item));
+        using var prepared = new ConfigurationPlanCodec(fixture.Instance, contracts, fixture.Blobs).Freeze(plan);
+        Assert.Equal("deletion_open_failed", Assert.Throws<IOException>(() => fixture.Cleanup.RemoveVerified(fixture.Item)).Message);
         var reference = prepared.Reference;
         var registry = new RecoveryJournalRegistry(fixture.Database);
         var registered = new RegisteredJournal(plan.JournalId, plan.OperationId, plan.Kind, JournalPhase.Prepared, 1,
@@ -81,21 +85,23 @@ public sealed class BlobCleanupTests
         Assert.Equal(CleanupStepResult.SkippedReferenced, fixture.Cleanup.RemoveVerified(fixture.Item));
         registry.Advance(registered with { Phase = JournalPhase.Committed, Revision = 2 }, 1, new(true, false, false, false));
         Assert.Equal(CleanupStepResult.SkippedReferenced, fixture.Cleanup.RemoveVerified(fixture.Item));
-        fixture.Blobs.Verify(fixture.Item.Blob);
+        Assert.Equal(fixture.Item.Identity, PhysicalObjectIdentity.Read(fixture.Path));
+        Assert.Equal(bytes, File.ReadAllBytes(fixture.Path));
     }
 
     [Theory(DisplayName = "Unverified Or Cross Instance Cleanup Cannot Remove The Current Object")]
-    [InlineData("changed-bytes")]
-    [InlineData("equal-byte-replacement")]
-    [InlineData("foreign-index")]
-    public void RejectsUnverifiedCleanup(string fault)
+    [InlineData("changed-bytes", "deletion_object_bytes_changed")]
+    [InlineData("equal-byte-replacement", "deletion_object_identity_changed")]
+    [InlineData("foreign-index", "blob_cleanup_instance_or_path_unbound")]
+    public void RejectsUnverifiedCleanup(string fault, string reason)
     {
         var fixture = Create();
-        if (fault == "changed-bytes") File.WriteAllText(fixture.Path, "preserve unknown bytes");
+        var original = fixture.Path + ".preserved";
+        if (fault == "changed-bytes") File.WriteAllBytes(fixture.Path, [0, 1, 255, 3, 9]);
         if (fault == "equal-byte-replacement")
         {
             var bytes = File.ReadAllBytes(fixture.Path);
-            File.Move(fixture.Path, fixture.Path + ".preserved");
+            File.Move(fixture.Path, original);
             File.WriteAllBytes(fixture.Path, bytes);
         }
         var cleanup = fixture.Cleanup;
@@ -105,16 +111,22 @@ public sealed class BlobCleanupTests
             cleanup = new(fixture.Instance, fixture.Blobs, new(other.Instance, new(), other.Database, other.Blobs));
         }
         var preserved = File.ReadAllBytes(fixture.Path);
-        Assert.Equal(CleanupItemState.Unknown, cleanup.Inspect(fixture.Item));
-        Assert.Throws<IOException>(() => cleanup.RemoveVerified(fixture.Item));
+        var identity = PhysicalObjectIdentity.Read(fixture.Path);
+        Assert.Equal(reason, Assert.Throws<IOException>(() => cleanup.RemoveVerified(fixture.Item)).Message);
         Assert.Equal(preserved, File.ReadAllBytes(fixture.Path));
+        Assert.Equal(identity, PhysicalObjectIdentity.Read(fixture.Path));
+        if (fault == "equal-byte-replacement")
+        {
+            Assert.Equal(fixture.Item.Identity, PhysicalObjectIdentity.Read(original));
+            Assert.Equal(preserved, File.ReadAllBytes(original));
+        }
     }
 
     [Theory(DisplayName = "Unrecognized Reference Owners Preserve Content Instead Of Being Ignored")]
-    [InlineData("unknown-kind")]
-    [InlineData("unknown-plan-version")]
-    [InlineData("unbound-plan")]
-    public void KeepsUnknownOwners(string fault)
+    [InlineData("unknown-kind", "blob_reference_evidence_unrecognized")]
+    [InlineData("unknown-plan-version", "blob_reference_evidence_unrecognized")]
+    [InlineData("unbound-plan", "cleanup_plan_registration_unbound")]
+    public void KeepsUnknownOwners(string fault, string reason)
     {
         var fixture = Create();
         var codec = new CleanupPlanCodec(fixture.Instance, new(), fixture.Blobs);
@@ -132,15 +144,16 @@ public sealed class BlobCleanupTests
         new RecoveryJournalRegistry(fixture.Database).AcceptPrepared(new(plan.OperationId, "fixture", reference.Sha256, "file.cleanup"),
             journal, [], DateTimeOffset.UtcNow);
         var bytes = File.ReadAllBytes(fixture.Path);
-        Assert.Equal(CleanupItemState.Unknown, fixture.Cleanup.Inspect(fixture.Item));
-        Assert.ThrowsAny<Exception>(() => fixture.Cleanup.RemoveVerified(fixture.Item));
+        Assert.Equal(reason, Assert.Throws<IOException>(() => fixture.Cleanup.RemoveVerified(fixture.Item)).Message);
+        Assert.Equal(fixture.Item.Identity, PhysicalObjectIdentity.Read(fixture.Path));
         Assert.Equal(bytes, File.ReadAllBytes(fixture.Path));
     }
 
     [Fact(DisplayName = "An Orphaned Actual Asset Row Cannot Disappear From Cleanup Reference Validation")]
     public void RejectsOrphanedAssets()
     {
-        var fixture = Create(); Attach(fixture);
+        var fixture = Create();
+        var asset = Attach(fixture);
         var preserved = File.ReadAllBytes(fixture.Path);
         using (var connection = new Microsoft.Data.Sqlite.SqliteConnection(
             new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder { DataSource = fixture.Database.DatabasePath, Pooling = false }.ToString()))
@@ -149,21 +162,22 @@ public sealed class BlobCleanupTests
             command.CommandText = "PRAGMA foreign_keys=OFF;"; command.ExecuteNonQuery();
             command.CommandText = "DELETE FROM blobs WHERE digest=$digest;";
             command.Parameters.AddWithValue("$digest", fixture.Item.Blob.Sha256);
-            Assert.Equal(1, command.ExecuteNonQuery());
-            command.CommandText = "SELECT count(*) FROM record_assets WHERE digest=$digest;";
-            Assert.Equal(1L, command.ExecuteScalar());
+            command.ExecuteNonQuery();
+            command.CommandText = "SELECT run_id FROM record_assets WHERE digest=$digest;";
+            Assert.Equal(asset.RunId.ToString("D"), command.ExecuteScalar());
         }
-        Assert.Equal(CleanupItemState.Unknown, fixture.Cleanup.Inspect(fixture.Item));
-        Assert.Throws<IOException>(() => fixture.Cleanup.RemoveVerified(fixture.Item));
+        Assert.Equal("record_retirement_unbound", Assert.Throws<IOException>(() => fixture.Cleanup.RemoveVerified(fixture.Item)).Message);
+        Assert.Equal(fixture.Item.Identity, PhysicalObjectIdentity.Read(fixture.Path));
         Assert.Equal(preserved, File.ReadAllBytes(fixture.Path));
     }
 
-    private static void Attach(Fixture fixture)
+    private static RecordAsset Attach(Fixture fixture)
     {
         var record = RecordStoreFixture.Record(1, Guid.NewGuid());
         new RunRecordStore(fixture.Database).AppendCompleted([record]);
-        new RecordAssetStore(fixture.Database, fixture.Blobs).AttachVerified(new(record.FinalAttempt.RunId,
-            fixture.Item.Blob.Sha256, fixture.Item.Blob.SizeBytes, RecordAssetKind.Screenshot));
+        var asset = new RecordAsset(record.FinalAttempt.RunId, fixture.Item.Blob.Sha256, fixture.Item.Blob.SizeBytes, RecordAssetKind.Screenshot);
+        new RecordAssetStore(fixture.Database, fixture.Blobs).AttachVerified(asset);
+        return asset;
     }
 
     private static Fixture Create()

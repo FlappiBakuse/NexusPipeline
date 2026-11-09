@@ -74,29 +74,58 @@ def run_tests(root, build_root, output, group, fixture_volume_root=None, method=
     initial_source = source_files(root)
     build_started = time.monotonic()
     projects = selection['projects']
-    reused = reuse_build(root, build_root, group, projects) if projects else False
-    code = 0 if not projects or reused else build_product(root, build_root, "test", projects)
+    reused = False
+    error = None
+    try:
+        reused = reuse_build(root, build_root, group, projects) if projects else False
+        code = 0 if not projects or reused else build_product(root, build_root, "test", projects)
+    except (OSError, ValueError) as reason:
+        code, error = 1, str(reason)
+        print(f"ERROR: {error}", file=sys.stderr)
     build_seconds = time.monotonic() - build_started
-    if code:
-        return code
-    invocation_source = update_export(root, build_root)
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:8]
     run_root = Path(output).resolve() / run_id
     if root == run_root or root in run_root.parents:
         raise ValueError("Test results must be outside the source tree")
     run_root.mkdir(parents=True)
+    receipt = dict(group=group, runId=run_id, methodFilter=method, selection=selection,
+                   coverage=("selected-method-only" if len(selected) == 1 else "selected-methods-only") if method else "complete-group",
+                   preparation={"status": "FAIL" if code else "PASS" if projects else "NOT_RUN",
+                                "exitCode": code if projects else None, "reusedBuild": reused},
+                   responsibilities=dict(lint="NOT_RUN", typecheck="NOT_RUN", test="NOT_RUN", build="NOT_RUN"))
+    if code:
+        receipt.update(status="FAIL", exitCode=code, reason="test_preparation_failed")
+        if error is not None:
+            receipt["error"] = error
+        else:
+            receipt["source"] = json.loads((build_root / "source-receipt.json").read_bytes())
+        return write_result(run_root, receipt)
+    invocation_source = update_export(root, build_root)
     build_receipt = json.loads((build_root / "build-receipt.json").read_text(encoding="utf-8")) if projects else None
     source_root = build_root / "source"
-    binary_inputs, binary_records = capture_binary_inputs(build_root, run_root, group, projects)
+    receipt.update(source=invocation_source, buildSource=build_receipt["source"] if build_receipt else None,
+                   buildReceipt=str(build_root / "runs" / build_receipt["runId"] / "build-receipt.json") if build_receipt else None)
+    try:
+        binary_inputs, binary_records = capture_binary_inputs(build_root, run_root, group, projects)
+        bundle_inputs = prepare_bundles(source_root, build_root, run_root, selection["methods"]) if not selection["python"] else None
+    except (OSError, ValueError, subprocess.SubprocessError) as error:
+        print(f"ERROR: {error}", file=sys.stderr)
+        receipt["preparation"].update(status="FAIL", exitCode=1)
+        receipt.update(status="FAIL", exitCode=1, reason="test_inputs_failed", error=str(error))
+        return write_result(run_root, receipt)
     interpreter = None
     if group in ("storage", "storage-execution", "storage-android", "storage-provider", "storage-judgement", "storage-file-logs"):
         path = Path(sys.executable).resolve()
         interpreter = {"path": str(path), "sizeBytes": path.stat().st_size, "sha256": hash_file(path)}
     started = time.monotonic()
-    if group in ("contracts", "core", "windows", "windows-secrets", "storage", "storage-checkin", "storage-wal", "storage-startup", "storage-automation", "storage-execution", "storage-android", "storage-provider", "storage-judgement", "storage-file-logs", "storage-settings", "storage-secrets", "storage-config-revisions", "storage-config-output", "storage-config-controller", "storage-config-cross-volume"):
-        result = run_dotnet(source_root, build_root, run_root, group, fixture_volume_root, method, desktop_bundle)
-    else:
+    if selection["python"]:
         result = run_python(source_root, build_root, run_root, group, method, live_root=root)
+        receipt["preparation"].update(result.pop("preparation", {}))
+        if result.get("deferredMethods"):
+            receipt["coverage"] = "default-group"
+    else:
+        result = run_dotnet(source_root, build_root, run_root, group, fixture_volume_root, method, desktop_bundle,
+                            assemblies=selection["assemblies"], bundle_inputs=bundle_inputs)
     test_seconds = time.monotonic() - started
     cleanup_started = time.monotonic()
     verify_binary_inputs(build_root, binary_records)
@@ -110,11 +139,9 @@ def run_tests(root, build_root, output, group, fixture_volume_root=None, method=
         path = Path(interpreter["path"])
         if path.stat().st_size != interpreter["sizeBytes"] or hash_file(path) != interpreter["sha256"]:
             raise ValueError("Judgement fixture interpreter changed during the native suite")
-    result.update(group=group, runId=run_id, elapsedSeconds=time.monotonic() - started,
-                  coverage=("selected-method-only" if len(selected) == 1 else "selected-methods-only") if method else "complete-group", methodFilter=method,
-                  source=invocation_source, buildSource=build_receipt["source"] if build_receipt else None,
-                  buildReceipt=str(build_root / "runs" / build_receipt["runId"] / "build-receipt.json") if build_receipt else None,
-                  selection=selection,
+    if receipt["preparation"]["status"] not in ("FAIL", "BLOCKED"):
+        receipt["responsibilities"]["test"] = result["status"]
+    result.update(receipt, elapsedSeconds=time.monotonic() - started,
                   applicationBinaryInputs={**binary_inputs, "verifiedUnchangedAfterRun": True})
     if interpreter is not None:
         result["judgementFixtureInterpreter"] = {**interpreter, "verifiedUnchangedAfterRun": True}
@@ -122,14 +149,17 @@ def run_tests(root, build_root, output, group, fixture_volume_root=None, method=
                          "setupSeconds": started - build_started - build_seconds,
                          "testSeconds": test_seconds, "verificationSeconds": time.monotonic() - cleanup_started,
                          "wallSeconds": time.monotonic() - wall_started}
-    write_json(run_root / "test-receipt.json", result)
-    print(json.dumps({"group": group, "status": result["status"], "receipt": str(run_root / "test-receipt.json")}))
+    return write_result(run_root, result)
+
+
+def write_result(run_root, result):
+    path = run_root / "test-receipt.json"
+    write_json(path, result)
+    print(json.dumps({"group": result["group"], "status": result["status"], "receipt": str(path)}))
     return result["exitCode"]
 
 
-def run_dotnet(source_root, build_root, run_root, group, fixture_volume_root=None, method=None, desktop_bundle=None):
-    methods = [method] if isinstance(method, str) else list(method or [])
-    assemblies = select_tests(source_root, group, methods)['assemblies']
+def run_dotnet(source_root, build_root, run_root, group, fixture_volume_root, method, desktop_bundle, *, assemblies, bundle_inputs):
     binaries = [str(build_root / f"build/bin/{assembly}/release/{assembly}.dll") for assembly in assemblies]
     report = run_root / (group + ".trx")
     command = native_test_launcher(source_root, group, method) + binaries + [f"/Logger:trx;LogFileName={group}.trx",
@@ -137,7 +167,6 @@ def run_dotnet(source_root, build_root, run_root, group, fixture_volume_root=Non
     selection = suite_filter(source_root, group, method, DESKTOP_MAINTENANCE_METHOD)
     if selection is not None:
         command.append("/TestCaseFilter:" + selection)
-    bundle_inputs = prepare_bundles(source_root, build_root, run_root, select_tests(source_root, group, methods)['methods'])
     env = os.environ.copy()
     env.pop("NEXUS_TEST_BUNDLE_ROOT", None)
     if bundle_inputs is not None:
@@ -271,19 +300,39 @@ def run_python(source_root, build_root, run_root, group, method=None, *, live_ro
     discovered_ids = [item.id() for item in discovered]
     if not discovered_ids or len(discovered_ids) != len(set(discovered_ids)):
         raise ValueError('Python discovery must select unique nonempty tests')
+    preparations = {}
+    for item in discovered:
+        identity = item.id()
+        method_name = identity.rsplit(".", 1)[-1]
+        prepare = getattr(getattr(item, method_name, None), "prepare_inputs", None)
+        if prepare is not None:
+            preparations[identity] = prepare
     if method is not None:
         selected = [item for item in discovered if item.id() == method]
         if len(selected) != 1:
             raise ValueError("A Python method filter must match exactly one discovered test ID")
-        suite = unittest.TestSuite(selected)
-        expected_count = 1
     else:
-        suite = unittest.TestSuite(discovered)
-    selected_ids = [item.id() for item in cases(suite)]
+        selected = [item for item in discovered if item.id() not in preparations]
+    if not selected:
+        raise ValueError("Python selection must include at least one test")
+    selected_ids = [item.id() for item in selected]
+    scope = dict(selectedCaseIds=selected_ids, discoveredMethods=discovered_ids)
+    if method is None and preparations:
+        scope["deferredMethods"] = dict.fromkeys(preparations, "NOT_RUN")
+    if method in preparations:
+        try:
+            inputs = preparations[method](source_root)
+        except (OSError, ValueError) as error:
+            status = "BLOCKED" if isinstance(error, FileNotFoundError) else "FAIL"
+            print(f"ERROR: {error}", file=sys.stderr)
+            return dict(status=status, exitCode=1, reason="test_inputs_failed", error=str(error),
+                        actualCaseCount=0, actualMethods={}, preparation=dict(status=status, exitCode=1), **scope)
+        selected[0].fixture_inputs = inputs
+        scope["preparation"] = dict(status="PASS", exitCode=0, inputs=inputs)
     expected = dict.fromkeys(selected_ids, 1)
     expected_count = len(selected_ids)
     buffer = io.StringIO()
-    result = unittest.TextTestRunner(stream=buffer, verbosity=2, resultclass=PythonResult).run(suite)
+    result = unittest.TextTestRunner(stream=buffer, verbosity=2, resultclass=PythonResult).run(unittest.TestSuite(selected))
     native_output = buffer.getvalue()
     log = run_root / "native.log"
     log.write_bytes(native_output.encode())
@@ -292,7 +341,6 @@ def run_python(source_root, build_root, run_root, group, method=None, *, live_ro
     valid = result.wasSuccessful() and result.testsRun == expected_count and not result.skipped and dict(actual) == expected
     return {"status": "PASS" if valid else "FAIL", "exitCode": 0 if valid else 1,
             "expectedCaseCount": expected_count, "actualCaseCount": result.testsRun,
-            "selectedCaseIds": selected_ids,
-            "discoveredMethods": discovered_ids, "actualMethods": dict(actual),
+            **scope, "actualMethods": dict(actual),
             "skipped": [test.id() for test, _ in result.skipped], "nativeReport": str(log),
             "nativeReportSha256": digest(log.read_bytes())}

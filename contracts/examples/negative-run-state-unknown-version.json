@@ -7,6 +7,7 @@
   "autoSyncEnabled": true,
   "syncInitially": true,
   "syncAtFinish": true,
+  "initialPublicationRevision": 1,
   "source": {
     "bindingId": "44444444-4444-4444-8444-444444444444",
     "resourceId": "main",

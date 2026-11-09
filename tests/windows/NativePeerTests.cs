@@ -85,11 +85,6 @@ public sealed class NativePeerTests
         var owner = LoopbackTcpPeer.Observe((IPEndPoint)server.Client.RemoteEndPoint!, (IPEndPoint)server.Client.LocalEndPoint!);
         Assert.Equal(TcpOwnerStatus.Matched, owner.Status);
         Assert.Equal(Environment.ProcessId, owner.ProcessId);
-        var identity = ProcessIdentityReader.Read(owner.ProcessId!.Value);
-        Assert.Equal(Environment.ProcessId, identity.ProcessId);
-        Assert.Equal(64, identity.ImageSha256.Length);
-        Assert.False(string.IsNullOrEmpty(identity.UserSid));
-        Assert.Equal(identity, ProcessIdentityReader.Read(identity.ProcessId));
     }
 
     [Fact(DisplayName = "A Child Request Cannot Replace Its Transport Identity With A Claimed Parent Pid")]

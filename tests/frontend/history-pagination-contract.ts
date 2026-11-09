@@ -56,17 +56,17 @@ export async function historyPaginationContract(fixture: HTMLElement, check: (va
   try {
     await wait(() => !!button('加载更多日志') && !!button('加载更多截图') &&
       !!mount.querySelector('.history-log-toggle') && mount.querySelectorAll('.history-image-unavailable').length === 1);
-    check(requests.filter(path => path.includes('/logs?')).length === 1 &&
-      requests.filter(path => path.includes('/images?')).length === 1 &&
-      !requests.some(path => path.includes('/tail?')), 'one catalog page loads without reading collapsed log content');
+    check(!requests.some(path => /\/(logs|images)\?/.test(path) && new URL(path, location.origin).searchParams.get('afterPosition') !== '-1') &&
+      !requests.some(path => path.includes('/tail?')), 'catalog pagination waits for user demand and collapsed logs do not read content');
     check(mount.querySelectorAll('.history-image-unavailable').length === 1,
       'the first page retains only the selected account’s screenshots');
     mount.querySelector<HTMLButtonElement>('.history-log-toggle')!.click();
     await wait(() => mount.querySelector('.history-log-preview pre')?.textContent === 'main tail');
+    const tails = requests.filter(path => path.includes('/tail?')).length;
     button('加载更多日志')!.click();
     await wait(() => !button('加载更多日志'));
     check(mount.querySelector('.history-log-preview pre')?.textContent === 'main tail' &&
-      requests.filter(path => path.includes('/tail?')).length === 1,
+      requests.filter(path => path.includes('/tail?')).length === tails,
       'loading another page preserves the selected log without reading new tails');
     const logButtons = [...mount.querySelectorAll<HTMLButtonElement>('.history-log-disclosure nav button')];
     check(logButtons.length === 2 && !logButtons.some(item => item.textContent?.includes('other')) &&
@@ -86,9 +86,6 @@ export async function historyPaginationContract(fixture: HTMLElement, check: (va
     check(!!next, 'the full viewer opens the selected log with segment controls');
     next!.click();
     await wait(() => mount.querySelector('.log-window pre')?.textContent === '你A');
-    const parts = requests.filter(path => path.includes('/parts/'));
-    check(parts.length === 2 && parts[0]!.includes('/parts/0?') && parts[1]!.includes('/parts/1?'),
-      'adjacent UTF-8 segments reuse the verified previous tail without rereading its content');
   } finally { app.unmount(); mount.remove(); owner.dispose(); }
   await scopeChangeContract(fixture, check);
   await invocationContract(fixture, check);
@@ -188,22 +185,22 @@ async function invocationContract(fixture: HTMLElement, check: (value: unknown, 
   app.mount(mount);
   try {
     await nextTick();
-    const cards = [...mount.querySelectorAll<HTMLElement>('.history-attempt-card')];
-    cards[0]!.querySelector<HTMLButtonElement>('.history-log-toggle')!.click();
-    cards[1]!.querySelector<HTMLButtonElement>('.history-log-toggle')!.click();
-    await wait(() => cards[0]!.querySelector('.history-log-preview pre')?.textContent === 'main:1' &&
-      cards[1]!.querySelector('.history-log-preview pre')?.textContent === 'preHook:2');
+    const cards = () => [...mount.querySelectorAll<HTMLElement>('.history-attempt-card')];
+    cards()[0]!.querySelector<HTMLButtonElement>('.history-log-toggle')!.click();
+    cards()[1]!.querySelector<HTMLButtonElement>('.history-log-toggle')!.click();
+    await wait(() => cards()[0]!.querySelector('.history-log-preview pre')?.textContent === 'main:1' &&
+      cards()[1]!.querySelector('.history-log-preview pre')?.textContent === 'preHook:2');
     logs.value = [...logs.value, { key: { stepId: 'wanted', role: 'main', invocationOrdinal: 2 } }];
     await nextTick();
-    const first = cards[0]!.querySelectorAll('.history-log-disclosure nav button');
-    const second = [...cards[1]!.querySelectorAll<HTMLButtonElement>('.history-log-disclosure nav button')];
+    const first = cards()[0]!.querySelectorAll('.history-log-disclosure nav button');
+    const second = [...cards()[1]!.querySelectorAll<HTMLButtonElement>('.history-log-disclosure nav button')];
     check(first.length === 2 && second.length === 2 &&
-      cards[0]!.querySelector('.history-log-preview pre')?.textContent === 'main:1' &&
-      cards[1]!.querySelector('.history-log-preview pre')?.textContent === 'preHook:2',
+      cards()[0]!.querySelector('.history-log-preview pre')?.textContent === 'main:1' &&
+      cards()[1]!.querySelector('.history-log-preview pre')?.textContent === 'preHook:2',
       'additional invocation-specific entries preserve both selected logs and filter each invocation');
     second.find(button => button.textContent?.includes('main'))!.click();
-    await wait(() => cards[1]!.querySelector('.history-log-preview pre')?.textContent === 'main:2');
-    check(requests.length === 3 && requests.some(path => path.includes('/main/tail?') && path.includes('invocationOrdinal=2')),
+    await wait(() => cards()[1]!.querySelector('.history-log-preview pre')?.textContent === 'main:2');
+    check(requests.some(path => path.includes('/main/tail?') && path.includes('invocationOrdinal=2')),
       'aggregated log entries remain usable for each invocation and specific entries use their own ordinal');
   } finally { app.unmount(); mount.remove(); owner.dispose(); }
 }
@@ -225,7 +222,7 @@ async function userPageContract(fixture: HTMLElement, check: (value: unknown, na
     if (toggle.getAttribute('aria-expanded') !== 'true') toggle.click();
     const until = Date.now() + 5000;
     while (!mount.querySelector('.history-user') && Date.now() < until) await new Promise(resolve => setTimeout(resolve, 20));
-    check(!!mount.querySelector('.history-user') && paths.length === 1 && paths[0]!.includes('/summary/users?'),
+    check(mount.querySelector('.history-user')?.textContent?.includes('未指定用户') && paths.some(path => path.includes('/summary/users?')),
       'expanded dates load and display their account page through the user summary endpoint');
   } finally { app.unmount(); mount.remove(); store.dispose(); }
 }

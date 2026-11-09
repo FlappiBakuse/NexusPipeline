@@ -24,6 +24,7 @@ internal sealed class EditControllerFixture : IAsyncDisposable
     internal ConfigurationEditController Controller { get; }
     internal ConfigurationEditRequest Request { get; }
     internal Guid SessionId { get; } = Guid.NewGuid();
+    internal string ReportPath => _reports[SessionId];
     internal Dictionary<string, (FileTreeSnapshot Tree, IReadOnlyList<PhysicalTreeObject> Objects)> Originals { get; } = [];
     private readonly List<Guid> _sessions = [];
     private readonly Dictionary<Guid, string> _reports = [];

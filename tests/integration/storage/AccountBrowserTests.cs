@@ -15,7 +15,7 @@ public sealed class AccountBrowserTests
         if (!Path.IsPathFullyQualified(application) || !File.Exists(Path.Combine(application, "NexusPipeline.exe")))
             throw new IOException("explicit_acceptance_application_required");
         object? context = null;
-        await FrontendBrowserTests.RunAsync(inputs, "NEXUS_ACCOUNT_SUMMARY_BROWSER_SCRIPT", 5,
+        await FrontendBrowserTests.RunAsync(inputs, "NEXUS_ACCOUNT_SUMMARY_BROWSER_SCRIPT",
             seed: catalog => context = AccountBrowserFixture.Seed(catalog), browserContext: () => context,
             controlledPackage: AccountBrowserFixture.Package, application: application, timeoutSeconds: 180);
     }

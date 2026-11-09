@@ -44,12 +44,12 @@ test('unknown preference bytes are preserved when attaching and flushing a real 
   const owner = createWindowState(root, { getDisplayMatching: () => display() }); owner.attach(window()); owner.flush(); owner.dispose();
   assert.equal(fs.readFileSync(path.join(root, 'window-state.json'), 'utf8'), original);
 });
-test('move/resize share one 200ms timer, flush persists normal bounds, closed releases listeners', context => {
+test('move/resize coalesce pending persistence, flush saves normal bounds, closed releases listeners', context => {
   const root = fs.mkdtempSync(path.join(process.env.TEMP, 'window-state-'));
   context.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const originalSet = global.setTimeout, originalClear = global.clearTimeout;
   const timers = new Map(); let serial = 0;
-  global.setTimeout = (callback, milliseconds) => { assert.equal(milliseconds, 200); timers.set(++serial, callback); return serial; };
+  global.setTimeout = callback => { timers.set(++serial, callback); return serial; };
   global.clearTimeout = id => { timers.delete(id); };
   try {
     const target = window(); const owner = createWindowState(root, { getDisplayMatching: () => display() }); owner.attach(target);

@@ -220,7 +220,11 @@ public sealed class PlanBuilderTests
         var draft = fixture.Prepare(new BindingTarget(fixture.BindingA)); var explanation = draft.Explanation;
         draft.Dispose(); draft.Dispose();
         Assert.Throws<ObjectDisposedException>(() => draft.ReadPlan());
-        Assert.Same(explanation, draft.Explanation); Assert.True(explanation.HasRunnable); AssertUnchanged(fixture, before);
+        var retained = draft.Explanation;
+        Assert.True(retained.HasRunnable); Assert.Equal(explanation.ReasonCode, retained.ReasonCode);
+        Assert.Equal(explanation.Items.ToArray(), retained.Items.ToArray());
+        Assert.Equal(explanation.Groups.ToArray(), retained.Groups.ToArray());
+        AssertUnchanged(fixture, before);
     }
 
     [Theory(DisplayName = "Preparation Requires The Callers Exact Current Catalog And Settings Revisions")]

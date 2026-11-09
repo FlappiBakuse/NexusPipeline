@@ -72,6 +72,8 @@ try {
 
 只在本次需要 Web 类型或组件依赖时选择。工作区属于当前冻结源码，不能借用另一个 checkout 的 node_modules 后冒称同源。前端 AST 命令和浏览器参数可查[现有参数参考](frontend-testing.md)；其旧“完整验收”段落不扩大本页选定范围。
 
+Web 回执的 `preparation` 记录本次依赖命令的 `PASS`、`FAIL` 或 `NOT_RUN`。复用浏览器产物时，职责结果沿用 `originalReceipt` 中的编译证据。
+
 C# 可按实际项目名选择闭包，例如纯 Core 改动的编译形状：
 
 ```powershell
@@ -92,11 +94,17 @@ python -B tooling/nexus.py test --group core --method NexusPipeline.CoreTests.Re
 
 原生分组支持重复 `--method`，把同组所选方法一次提交；Python 分组当前接受一个完整方法 ID。以当前命令实现的选择能力为准，不为凑方法数量补无价值用例。登记简化后用实际发现和稳定产品 ID 保证执行范围，不维护第二套全量方法数量权威。
 
+原生测试回执分别记录 `preparation.status` 和 `responsibilities.test`。编译或测试夹具准备失败时，测试记为 `NOT_RUN`。已有的编译与源码检查证据通过 `buildReceipt` 查询。
+
+默认 `tooling` 运行自带夹具的用例，外部夹具用例在 `deferredMethods` 记为 `NOT_RUN`。原生安装器用例通过完整 `--method` 选择，使用 `NEXUS_INSTALLER_COMPILER` 指向锁定的 Inno 编译器。`test_installer_runtime.RuntimeTests.test_native_runtime` 另需 `NEXUS_INSTALLER_RUNTIME_RECEIPT` 指向两个微软安装包的回执（`status=PASS_OFFICIAL_RUNTIME_HASHES`，每个 `dependencies` 条目含绝对 `path` 和 `sha256`）。准备阶段按仓库锁核对原文件。缺少输入时准备记为 `BLOCKED`，字节或回执不匹配时记为 `FAIL`。
+
 Web 当前 suite 可显式选择，例如 `automation`、`account-summary`、`history-formatting`；完整语法在[前端参数参考](frontend-testing.md)。选择真实相关 suite 或必要单场景，不默认运行全部 controls、所有浏览器和所有 Host 场景。没有 `nexus test --group web`，不要虚构该入口。
 
 契约/fixture、真实集成、原生产品与真实上游分别记录。loopback 合成登录页通过不证明官方网页登录可用；adapter 纯函数通过不证明 Host 修复入口已接通。
 
 ### build
+
+Host 构建的 Web 前置步骤失败时，构建回执标记 `FAIL`，保留该次 Web 回执或错误，原生编译状态记为未执行。
 
 需要交付客户端或原生行为验收时，使用同一冻结源码和实际当前输入：
 
@@ -118,3 +126,9 @@ python -B tooling/nexus.py product-assemble --publication-root '<本次实际 pu
 源码快照也包含docs。代码阶段先定稿业务说明，统一验证结果默认写仓外；若随后只改文档，单列docs-only delta并保留实际产物的冻结身份，不把旧回执说成新全树通过。纯文档修订不触发无理由的业务重跑；需要纳入新产物时只准备实际必要的产物闭包，并按真实工具规则复用可用证据。
 
 命令依据：[nexus.py](https://github.com/FlappiBakuse/NexusPipeline/blob/0bb4d144d92805a2d489c65d0be3b7527c7810fd/tooling/nexus.py)、[项目选择](https://github.com/FlappiBakuse/NexusPipeline/blob/0bb4d144d92805a2d489c65d0be3b7527c7810fd/tooling/build_product.py#L99-L132)、[Web 准备与类型检查](https://github.com/FlappiBakuse/NexusPipeline/blob/0bb4d144d92805a2d489c65d0be3b7527c7810fd/tooling/web_build.py#L73-L113)。
+
+## SDK 消费者与命名职责
+
+SDK 独立消费者只编译真实公开类型及调用，归 typecheck；不执行自造 DTO 往返或反射方法存在性断言。SDK 默认打包入口另执行前端生命周期行为测试；`--compile-only` 跳过该行为测试。回执的 `runtimeConsumers` 固定为 NOT_RUN，`lifecycle` 按实际执行记录，`validationMode` 为 compile-only 或 lifecycle。包内容、来源与消费者使用的实际 SDK 身份继续核验。
+
+命名检查属于 lint：最多四个单词，含完整介词词元时允许五个；六词始终超限。接口 I 前缀及现有缩写拆分保持原规则。介词按检查器显式词表匹配，`within` 可匹配，`input` 中的 `in` 不匹配。Python 文件与声明、C# 类型与方法、前端 AST 声明沿用各自现有检查范围。固定平台 API 超限仍保留逐项例外。

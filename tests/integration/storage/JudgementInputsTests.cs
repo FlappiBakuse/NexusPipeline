@@ -1,4 +1,3 @@
-using System.Collections.Immutable;
 using System.Runtime.Versioning;
 using System.Text;
 using System.Text.Json;
@@ -15,35 +14,34 @@ namespace NexusPipeline.StorageTests;
 [SupportedOSPlatform("windows")]
 public sealed class JudgementInputsTests
 {
-    [Fact(DisplayName = "Prepared Input Bounds Every Admitted Generation Without Allocating The Core Call Or Resampling Its Source")]
+    [Fact(DisplayName = "Prepared Input Retains Its Log And Bounds The First And Last Admitted Generations")]
     public void ReservesInputGenerations()
     {
         var primary = new StepEvidenceBinding(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
             "binding-" + Guid.NewGuid().ToString("D"), "Local\\NexusWorker-" + Guid.NewGuid().ToString("N"), Guid.NewGuid(), 1, new string('a', 64));
-        var core = new AttemptBusinessJudgement(primary.AttemptId, new(AutomationJudgementLanguage.JavaScript, [], [], "source"));
-        var identity = new JudgementWorkerIdentity(primary, "Local\\NexusWorker-" + Guid.NewGuid().ToString("N"), core.InputIdentity.OwnerId);
-        using var parsed = JsonDocument.Parse("{\"generation\":4095,\"isFinal\":false,\"log\":\"saved 雪\\n\",\"files\":[\"variable\"],\"locale\":\"zh-CN\",\"screenshots\":[]}");
-        var draft = new JudgementInputDraft(identity, parsed.RootElement);
-        Assert.False(core.IsBusy); var first = Assert.IsType<JudgementInvocation>(core.TryBeginPeriodic());
-        Assert.Equal(1, first.Generation); var firstWire = draft.Bind(first); Assert.Equal("saved 雪\n", firstWire.Input.GetProperty("log").GetString());
-        Assert.True(JudgementWorkerProtocol.Encode(firstWire).LongLength <= draft.MaximumEncodedBytes);
+        var identity = new JudgementWorkerIdentity(primary, "Local\\NexusWorker-" + Guid.NewGuid().ToString("N"), Guid.NewGuid());
+        JudgementInputDraft draft;
+        using (var parsed = JsonDocument.Parse("{\"generation\":4095,\"isFinal\":false,\"log\":\"saved 雪\\n\",\"files\":[\"variable\"],\"locale\":\"zh-CN\",\"screenshots\":[]}"))
+            draft = new(identity, parsed.RootElement);
+        var first = new JudgementInvocation(primary.AttemptId, 1, false, identity.OwnerId);
+        foreach (var call in new[] { first, first with { Generation = 4095 }, first with { Generation = 4095, IsFinal = true } })
+        {
+            var frame = JudgementWorkerProtocol.Encode(draft.Bind(call) with { ProbeEvidenceAllowance = JudgementProbeProtocol.MaximumEvidenceBytes });
+            Assert.True(frame.LongLength <= draft.MaximumEncodedBytes);
+            var saved = JudgementWorkerProtocol.Decode<JudgementWorkerInvocation>(frame);
+            Assert.Equal((call.Generation, call.IsFinal), (saved.Generation, saved.IsFinal));
+            Assert.Equal((call.Generation, call.IsFinal), (saved.Input.GetProperty("generation").GetInt64(), saved.Input.GetProperty("isFinal").GetBoolean()));
+            Assert.Equal("saved 雪\n", saved.Input.GetProperty("log").GetString());
+        }
         var minimumInput = JsonSerializer.SerializeToElement(new { generation = 1, isFinal = false, log = "saved 雪\n",
             files = Array.Empty<object>(), locale = "", screenshots = Array.Empty<object>() });
-        var minimum = firstWire with { Input = minimumInput, InputSha256 = JudgementWorkerProtocol.InputHash(minimumInput),
-            ProbeEvidenceAllowance = JudgementProbeProtocol.FaultReserveBytes };
-        Assert.Equal(JudgementWorkerProtocol.Encode(minimum).LongLength, draft.StableMinimumEncodedBytes);
-        Assert.Equal(JudgementWorkerProtocol.Hash(JsonSerializer.SerializeToUtf8Bytes(firstWire.Input)), firstWire.InputSha256);
-        var decoded = JudgementWorkerProtocol.Decode<JudgementWorkerInvocation>(JudgementWorkerProtocol.Encode(firstWire));
-        Assert.True(JsonElement.DeepEquals(firstWire.Input, decoded.Input));
-        Assert.False(core.Complete(first, new(BusinessOutcome.Unverified, ""))); core.RequestFinal();
-        var final = Assert.IsType<JudgementInvocation>(core.TryBeginFinal()); var finalWire = draft.Bind(final);
-        Assert.Equal(2, final.Generation); Assert.True(finalWire.Input.GetProperty("isFinal").GetBoolean());
-        Assert.True(JudgementWorkerProtocol.Encode(finalWire).LongLength <= draft.MaximumEncodedBytes);
-        Assert.True(JudgementWorkerProtocol.Encode(draft.Bind(final with { Generation = 4095, IsFinal = false })).LongLength <= draft.MaximumEncodedBytes);
-        Assert.Throws<IOException>(() => draft.Bind(final with { OwnerId = Guid.NewGuid() }));
+        var minimum = new JudgementWorkerInvocation(JudgementWorkerProtocol.InvocationFormat, 1, identity, 1, false,
+            minimumInput, JudgementWorkerProtocol.InputHash(minimumInput)) { ProbeEvidenceAllowance = JudgementProbeProtocol.FaultReserveBytes };
+        Assert.True(draft.StableMinimumEncodedBytes <= JudgementWorkerProtocol.Encode(minimum).LongLength);
+        Assert.Throws<IOException>(() => draft.Bind(first with { OwnerId = Guid.NewGuid() }));
     }
 
-    [Fact(DisplayName = "Script Preview Freezes Source And Real Runtime Assets Without Persisting Any Input")]
+    [Fact(DisplayName = "Script Preview Binds Its Source And Broker Without Persisting Inputs")]
     public void FreezesPreviewAssets()
     {
         using var source = new PlanBuilderFixture(); SetScript(source, AutomationJudgementLanguage.JavaScript);
@@ -51,10 +49,9 @@ public sealed class JudgementInputsTests
         using var preview = Builder(source).Prepare(source.Request(new BindingTarget(source.OtherBinding)), PlanBuilderFixture.CreatedAt);
         var plan = Assert.IsType<FrozenExecutionPlan>(preview.ReadPlan()).ReadWire(); var worker = Assert.Single(plan.Steps).JudgementWorker!;
         Assert.NotNull(worker); Assert.Null(worker.Python);
+        Assert.Equal(Environment.GetEnvironmentVariable("NEXUS_TEST_HOST_EXE"), worker.Broker.Path);
         Assert.Equal(JudgementWorkerProtocol.Hash(Encoding.UTF8.GetBytes("globalThis.nexusJudge = () => ({outcome:'unverified',reason:''});")), worker.ScriptSha256);
-        Assert.Contains(worker.Broker.RuntimeFiles, file => file.RelativePath == "Jint.dll");
-        Assert.Contains(worker.Broker.RuntimeFiles, file => file.RelativePath == "NexusPipeline.Host.dll");
-        Assert.Equal(before.Rows, source.Snapshot().Rows); Assert.Equal(before.Files, source.Snapshot().Files);
+        var after = source.Snapshot(); Assert.Equal(before.Rows, after.Rows); Assert.Equal(before.Files, after.Files);
         using var missing = source.Builder.Prepare(source.Request(new BindingTarget(source.OtherBinding)), PlanBuilderFixture.CreatedAt);
         Assert.Null(missing.ReadPlan()); Assert.True(missing.Explanation.HasBlockedItems);
     }
@@ -76,8 +73,8 @@ public sealed class JudgementInputsTests
         }
         else File.WriteAllBytes(dependency, [1, 2, 3]);
         var before = source.Snapshot();
-        Assert.IsAssignableFrom<IOException>(Record.Exception(() => builder.Freeze(preview)));
-        Assert.Equal(before.Rows, source.Snapshot().Rows); Assert.Equal(before.Files, source.Snapshot().Files);
+        Assert.ThrowsAny<IOException>(() => builder.Freeze(preview));
+        var after = source.Snapshot(); Assert.Equal(before.Rows, after.Rows); Assert.Equal(before.Files, after.Files);
     }
 
     [Fact(DisplayName = "Historical Frozen Plans Remain Readable Without Opening Current Interpreter Dependencies")]
@@ -89,21 +86,26 @@ public sealed class JudgementInputsTests
         BlobReference reference;
         using (var frozen = builder.Freeze(preview)) reference = frozen.Reference;
         File.Delete(Path.Combine(Path.GetDirectoryName(broker)!, "Jint.dll"));
-        var historical = new ExecutionPlanCodec(source.Instance, new(), new(source.Instance, new())).Read(reference).ReadWire();
+        var codec = new ExecutionPlanCodec(source.Instance, new(), new(source.Instance, new()));
+        var historical = codec.Read(reference).ReadWire();
         Assert.Equal(broker, Assert.Single(historical.Steps).JudgementWorker!.Broker.Path);
-        Assert.IsAssignableFrom<IOException>(Record.Exception(() => new ExecutionPlanCodec(source.Instance, new(), new(source.Instance, new())).Freeze(historical)));
+        Assert.ThrowsAny<IOException>(() => codec.Freeze(historical));
     }
 
-    [Fact(DisplayName = "Judgement Capacity Includes Both Native Role Closures Without Increasing Existing Limits")]
+    [Fact(DisplayName = "A Queue That Fits For Primary Jobs Alone Can Exceed Capacity With Judgement Jobs")]
     public void BoundsNativeClosures()
     {
         using var source = new PlanBuilderFixture(); SetScript(source, AutomationJudgementLanguage.JavaScript);
         using var preview = Builder(source).Prepare(source.Request(new BindingTarget(source.OtherBinding)), PlanBuilderFixture.CreatedAt);
-        var plan = preview.ReadPlan()!.ReadWire(); var actual = JournalCapacityPolicy.Measure(plan);
-        var primary = JournalCapacityPolicy.Measure(plan with { Steps = plan.Steps.Select(step => step with { JudgementWorker = null }).ToArray() });
-        var invocations = plan.Steps.Sum(step => step.MaximumAttempts ?? 1);
-        Assert.Equal(primary.Jobs + invocations, actual.Jobs); Assert.Equal(primary.Revisions + 2 * invocations, actual.Revisions);
-        Assert.Equal(primary.Participants + 2 * invocations, actual.Participants); Assert.True(actual.Fits); Assert.True(actual.HistoryBytes > primary.HistoryBytes);
+        var plan = preview.ReadPlan()!.ReadWire(); var step = Assert.Single(plan.Steps);
+        var steps = Enumerable.Range(0, 48).Select(index => step with { StepId = $"step-{index:D2}", MaximumAttempts = 1 }).ToArray();
+        var primary = steps.Select(item => item with { JudgementWorker = null }).ToArray();
+        var admitted = Enumerable.Range(1, primary.Length).Reverse().Select(count => plan with { Steps = primary[..count] })
+            .First(candidate => JournalCapacityPolicy.Measure(candidate).Fits);
+        JournalCapacityPolicy.Require(plan);
+        JournalCapacityPolicy.Require(admitted);
+        Assert.Equal(JournalCapacityPolicy.Reason, Assert.Throws<ExecutionSelectionException>(() =>
+            JournalCapacityPolicy.Require(plan with { Steps = steps[..admitted.Steps.Count] })).Message);
     }
 
     [Fact(DisplayName = "Attempt Log Tail Retains Four Mi B And Never Starts Inside A Utf 8 Character")]

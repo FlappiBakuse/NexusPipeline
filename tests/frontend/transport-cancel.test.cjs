@@ -10,8 +10,16 @@ function load(relative, dependencies, deadlines) {
   const source = fs.readFileSync(path.join(__dirname, '../../apps/web/src', relative), 'utf8');
   const compiled = typescript.transpileModule(source, { compilerOptions: { module: typescript.ModuleKind.CommonJS, target: typescript.ScriptTarget.ES2023 } });
   const sandbox = { exports: {}, URL, Headers, TextDecoder, Uint8Array, Date, AbortController,
-    AbortSignal: { any: AbortSignal.any.bind(AbortSignal), timeout(milliseconds) { deadlines.push(milliseconds); return AbortSignal.timeout(milliseconds); } },
-    require(name) { if (!Object.hasOwn(dependencies, name)) throw new Error('unexpected_fixture_dependency'); return dependencies[name]; } };
+    AbortSignal: { any: AbortSignal.any.bind(AbortSignal), timeout(milliseconds) {
+      const controller = new AbortController();
+      deadlines.push({ milliseconds, expire: () => controller.abort(new DOMException('Timed out', 'TimeoutError')) });
+      return controller.signal;
+    } },
+    require(name) {
+      if (Object.hasOwn(dependencies, name)) return dependencies[name];
+      if (name.startsWith('.')) return load(path.join(path.dirname(relative), name) + '.ts', {}, deadlines);
+      throw new Error('unexpected_fixture_dependency');
+    } };
   vm.runInNewContext(compiled.outputText, sandbox); return sandbox.exports;
 }
 
@@ -36,15 +44,26 @@ for (const ending of ['surface', 'request']) test('canceling the original ' + en
   assert.equal(client.pendingWrites, 1); assert.equal(networkSignal.aborted, false);
   (ending === 'surface' ? surface : request).abort();
   await assert.rejects(pending, error => error instanceof clientModule.ControlFailure && error.code === 'write_outcome_unknown' && error.operationId === operation && error.uncertain);
-  assert.equal(networkSignal.aborted, true); assert.equal(client.pendingWrites, 0); assert(deadlines.includes(360000));
+  assert.equal(networkSignal.aborted, true); assert.equal(client.pendingWrites, 0);
 });
 
-test('ordinary control writes retain their short network deadline', async () => {
+test('ordinary control write timeout cancels the network and retains an uncertain operation', { timeout: 5000 }, async () => {
   const deadlines = [];
   const session = load('control/frontend-session.ts', {}, deadlines);
   const { ControlClient } = load('control/client.ts', { './frontend-session': session }, deadlines);
-  const client = new ControlClient('http://fixture', async () => new Response('{}'));
-  await client.write('/control/v1/settings', {}, value => value); assert.deepEqual(deadlines, [30000]);
+  let signal, requests = 0;
+  const client = new ControlClient('http://fixture', async (_url, options) => {
+    requests++; signal = options.signal;
+    return new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason), { once: true }));
+  });
+  const operation = '70000000-0000-4000-8000-000000000003';
+  const pending = client.write('/control/v1/settings', {}, value => value, operation);
+  const rejected = assert.rejects(pending, error => error.code === 'write_outcome_unknown'
+    && error.operationId === operation && error.uncertain);
+  assert.equal(client.pendingWrites, 1);
+  for (const deadline of deadlines) if (deadline.milliseconds <= 30000) deadline.expire();
+  await rejected;
+  assert.equal(signal.aborted, true); assert.equal(client.pendingWrites, 0); assert.equal(requests, 1);
 });
 
 for (const code of ['media_waiting_for_game', 'media_window_not_ready', 'media_emulator_not_ready', 'media_preview_unavailable',

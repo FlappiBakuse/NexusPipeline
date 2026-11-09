@@ -26,16 +26,12 @@ public sealed class DeliveryReferenceTests
         }
         await fixture.Replace();
         var old = Assert.Single(fixture.Snapshot.Document.Secrets.Where(field => field.Payload is not null)).Payload!;
-        Assert.True(DeliveryReferenceIndex.IsSecretReferenced(fixture.Source.Instance, fixture.Source.Database,
-            new(), old.SecretId, old.Digest, old.SizeBytes));
         var blobs = new ImmutableBlobStore(fixture.Source.Instance, new());
         var candidates = Enumerable.Range(0, 31).Select(index => blobs.PersistContent(BitConverter.GetBytes(index), default)).ToHashSet();
         var credential = new BlobReference($"secrets/payloads/{old.SecretId:D}-{old.Digest}.bin", old.SizeBytes, old.Digest);
         candidates.Add(credential);
-        var reads = 0;
-        var index = new BlobReferenceIndex(fixture.Source.Instance, new(), fixture.Source.Database, blobs) { InventoryRead = () => reads++ };
-        Assert.Contains(credential, index.ReadReferenced(candidates));
-        Assert.Equal(1, reads);
+        var index = new BlobReferenceIndex(fixture.Source.Instance, new(), fixture.Source.Database, blobs);
+        Assert.Equal(credential, Assert.Single(index.ReadReferenced(candidates)));
         var read = new NotificationDeliveryEvidence(fixture.Source.Instance, fixture.Source.Database, new()).Read(fixture.Snapshot.Reference);
         Assert.Equal(fixture.Snapshot.Reference, read.Reference);
         Assert.Equal(NotificationCatalogCodec.Encode(fixture.Snapshot.Document), NotificationCatalogCodec.Encode(read.Document));

@@ -39,7 +39,9 @@ public sealed class ClosurePublicationTests
         var stopped = await stopping.WaitAsync(TimeSpan.FromSeconds(10));
         Assert.True(scope.Called); fixture.AssertClosed(stopped, executed: true);
         Assert.Equal(root.ProcessId, stopped.Closure.Root!.ProcessId);
-        Assert.Same(stopped, await fixture.Writer.StopAsync(TimeSpan.FromSeconds(10)));
+        var repeated = await fixture.Writer.StopAsync(TimeSpan.FromSeconds(10));
+        fixture.AssertClosed(repeated, stopped.WasExecuted);
+        Assert.Equal(stopped.Reference, repeated.Reference);
         scope.Dispose();
     }
 

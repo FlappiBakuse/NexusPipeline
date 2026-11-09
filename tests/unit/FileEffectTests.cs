@@ -29,8 +29,8 @@ public sealed class FileEffectTests
         else Assert.Throws<InvalidOperationException>(() => RecoveryRegistryPolicy.Verify(snapshot));
     }
 
-    [Fact(DisplayName = "Completed Forward Facts Remain Completed Beside The Original Incomplete Reverted Fact")]
-    public void PreservesForwardFacts()
+    [Fact(DisplayName = "Completed And Reverted Forward Facts Can Coexist In Committed Extension Inventory")]
+    public void AcceptsMixedForwardFacts()
     {
         var journal = new RegisteredJournal(Guid.NewGuid(), Guid.NewGuid(), JournalKind.ExtensionApply,
             JournalPhase.Committed, 8, "blobs/plans/" + new string('a', 64) + ".json", new string('a', 64), ["extension:fixture"]);
@@ -39,6 +39,5 @@ public sealed class FileEffectTests
         var complete = Effect("preserve-original", FileEffectAction.PreserveOriginal, FileEffectState.Completed);
         var reverted = Effect("install-candidate", FileEffectAction.InstallCandidate, FileEffectState.Reverted);
         RecoveryRegistryPolicy.Verify(new(1, false, [journal], [], [complete, reverted]));
-        Assert.Equal(FileEffectState.Completed, complete.State);
     }
 }

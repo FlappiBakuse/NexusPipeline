@@ -14,18 +14,20 @@ public sealed class BlobScopeTests
     public void RejectsReplacedEntries(string replacement)
     {
         var (instance, store) = Create();
-        var reference = store.PersistContent(new byte[] { 1, 2, 3 }, default);
+        byte[] bytes = [1, 2, 3];
+        var reference = store.PersistContent(bytes, default);
         var path = Path.Combine(instance.RuntimeRoot, reference.RelativePath);
-        var outside = Path.Combine(instance.RuntimeRoot, "outside");
+        if (replacement == "missing")
+        {
+            File.Delete(path);
+            Assert.Throws<IOException>(() => store.OpenVerified(reference));
+            return;
+        }
+        var outside = instance.RuntimeRoot + "-outside";
         Directory.CreateDirectory(outside);
         var target = Path.Combine(outside, Path.GetFileName(path));
         File.Copy(path, target);
         File.Delete(path);
-        if (replacement == "missing")
-        {
-            Assert.Throws<IOException>(() => store.OpenVerified(reference));
-            return;
-        }
         var link = replacement == "parent-link" ? Path.GetDirectoryName(path)! : path;
         if (replacement == "parent-link") Directory.Delete(link);
         ControlledJunction.Create(link, outside);
@@ -33,7 +35,7 @@ public sealed class BlobScopeTests
         {
             if (replacement == "broken-link") { File.Delete(target); Directory.Delete(outside); }
             Assert.Throws<IOException>(() => store.OpenVerified(reference));
-            if (replacement != "broken-link") Assert.Equal(new byte[] { 1, 2, 3 }, File.ReadAllBytes(target));
+            if (replacement != "broken-link") Assert.Equal(bytes, File.ReadAllBytes(target));
         }
         finally { Directory.Delete(link); }
     }
@@ -47,35 +49,46 @@ public sealed class BlobScopeTests
         var path = Path.Combine(instance.RuntimeRoot, reference.RelativePath);
         using (BlobReadScope.Hold(instance))
         {
-            using (var first = store.OpenVerified(reference)) Assert.Equal(bytes[0], first.ReadByte());
+            using (store.OpenVerified(reference)) { }
             Assert.Throws<IOException>(() => File.WriteAllBytes(path, [4, 3, 2, 1]));
             Assert.Throws<IOException>(() => File.Delete(path));
             using var second = store.OpenVerified(reference);
-            Assert.Equal(0, second.Position); Assert.Equal(bytes[0], second.ReadByte());
-            Assert.Throws<IOException>(() => store.OpenVerified(reference with { SizeBytes = 5 }));
+            var actual = new byte[bytes.Length];
+            second.ReadExactly(actual);
+            Assert.Equal(bytes, actual);
         }
         File.WriteAllBytes(path, [4, 3, 2, 1]);
-        Assert.Throws<IOException>(() => store.OpenVerified(reference));
+        Assert.Equal("immutable_blob_mismatch", Assert.Throws<IOException>(() => store.OpenVerified(reference)).Message);
         Assert.Equal(new byte[] { 4, 3, 2, 1 }, File.ReadAllBytes(path));
     }
 
-    [Fact(DisplayName = "The Blob Scope Evicts The Least Recently Opened Protection At Its Fixed Handle Bound")]
+    [Fact(DisplayName = "A Blob Scope Bounds Write Exclusion And Releases Its Protected Files")]
     public void BoundsRetainedFiles()
     {
         var (instance, store) = Create();
         var references = Enumerable.Range(0, BlobReadScope.MaximumReferences + 1)
             .Select(index => store.PersistContent(BitConverter.GetBytes(index), default)).ToArray();
-        string PathFor(int index) => Path.Combine(instance.RuntimeRoot, references[index].RelativePath);
+        var retained = new List<string>();
         using (BlobReadScope.Hold(instance))
         {
-            foreach (var item in references.Take(BlobReadScope.MaximumReferences)) using (store.OpenVerified(item)) { }
-            using (store.OpenVerified(references[0])) { }
-            using (store.OpenVerified(references[^1])) { }
-            File.WriteAllBytes(PathFor(1), [9]);
-            Assert.Throws<IOException>(() => File.WriteAllBytes(PathFor(0), [9]));
-            Assert.Throws<IOException>(() => store.OpenVerified(references[1]));
+            foreach (var item in references) using (store.OpenVerified(item)) { }
+            BlobReference? released = null;
+            foreach (var item in references)
+            {
+                var path = Path.Combine(instance.RuntimeRoot, item.RelativePath);
+                try
+                {
+                    using var writer = File.Open(path, FileMode.Open, FileAccess.Write, FileShare.ReadWrite);
+                    released ??= item;
+                }
+                catch (IOException) { retained.Add(path); }
+            }
+            Assert.InRange(retained.Count, 1, BlobReadScope.MaximumReferences);
+            Assert.NotNull(released);
+            File.WriteAllBytes(Path.Combine(instance.RuntimeRoot, released.RelativePath), [255, 255, 255, 255]);
+            Assert.Equal("immutable_blob_mismatch", Assert.Throws<IOException>(() => store.OpenVerified(released)).Message);
         }
-        File.WriteAllBytes(PathFor(0), [9]);
+        foreach (var path in retained) using (File.Open(path, FileMode.Open, FileAccess.Write, FileShare.ReadWrite)) { }
     }
 
     [Fact(DisplayName = "Nested Blob Scopes Release Only Their Own Protection In Owner Order")]
@@ -84,33 +97,39 @@ public sealed class BlobScopeTests
         var (instance, store) = Create();
         var first = store.PersistContent(new byte[] { 1 }, default);
         var second = store.PersistContent(new byte[] { 2 }, default);
-        var outer = BlobReadScope.Hold(instance);
-        try
+        var firstPath = Path.Combine(instance.RuntimeRoot, first.RelativePath);
+        var secondPath = Path.Combine(instance.RuntimeRoot, second.RelativePath);
+        using var outer = BlobReadScope.Hold(instance);
+        using (store.OpenVerified(first)) { }
+        using (BlobReadScope.Hold(instance))
         {
-            using (store.OpenVerified(first)) { }
-            using (var inner = BlobReadScope.Hold(instance))
-            {
-                using (store.OpenVerified(second)) { }
-                Assert.Throws<InvalidOperationException>(() => outer.Dispose());
-            }
-            File.WriteAllBytes(Path.Combine(instance.RuntimeRoot, second.RelativePath), [9]);
-            Assert.Throws<IOException>(() => File.WriteAllBytes(Path.Combine(instance.RuntimeRoot, first.RelativePath), [9]));
+            using (store.OpenVerified(second)) { }
+            Assert.Throws<InvalidOperationException>(() => outer.Dispose());
+            Assert.Throws<IOException>(() => File.WriteAllBytes(secondPath, [9]));
         }
-        finally { outer.Dispose(); }
-        File.WriteAllBytes(Path.Combine(instance.RuntimeRoot, first.RelativePath), [9]);
+        File.WriteAllBytes(secondPath, [9]);
+        Assert.Throws<IOException>(() => File.WriteAllBytes(firstPath, [9]));
+        outer.Dispose();
+        File.WriteAllBytes(firstPath, [9]);
     }
 
     [Fact(DisplayName = "Blob Protection Never Spills Into A Different Runtime")]
     public void ExcludesForeignRuntime()
     {
-        var (instance, _) = Create();
+        var (instance, local) = Create();
         var (foreign, store) = Create();
-        var reference = store.PersistContent(new byte[] { 1, 2 }, default);
+        byte[] original = [1, 2];
+        var reference = store.PersistContent(original, default);
+        var localReference = local.PersistContent(original, default);
+        var localPath = Path.Combine(instance.RuntimeRoot, localReference.RelativePath);
         var path = Path.Combine(foreign.RuntimeRoot, reference.RelativePath);
         using var scope = BlobReadScope.Hold(instance);
+        using (local.OpenVerified(localReference)) { }
         using (store.OpenVerified(reference)) { }
         File.WriteAllBytes(path, [2, 1]);
-        Assert.Throws<IOException>(() => store.OpenVerified(reference));
+        Assert.Equal("immutable_blob_mismatch", Assert.Throws<IOException>(() => store.OpenVerified(reference)).Message);
+        Assert.Throws<IOException>(() => File.WriteAllBytes(localPath, [2, 1]));
+        Assert.Equal(original, File.ReadAllBytes(localPath));
     }
 
     private static (RuntimeInstance Instance, ImmutableBlobStore Store) Create()

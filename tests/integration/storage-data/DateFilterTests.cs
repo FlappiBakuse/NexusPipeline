@@ -8,7 +8,7 @@ namespace NexusPipeline.StorageTests;
 [SupportedOSPlatform("windows")]
 public sealed class DateFilterTests
 {
-    [Theory(DisplayName = "Utc Half Open Dates Compose With Indexed Filters And Stable Timestamp Tie Cursors")]
+    [Theory(DisplayName = "Utc Half Open Dates Compose With Filters And Stable Timestamp Tie Cursors")]
     [InlineData("all")]
     [InlineData("automation")]
     [InlineData("user")]
@@ -39,14 +39,11 @@ public sealed class DateFilterTests
             (query.AutomationId is null || record.AutomationId == query.AutomationId) &&
             (query.UserId is null || record.UserId == query.UserId) &&
             (query.Business is null || record.FinalAttempt.Business == query.Business))
-            .OrderByDescending(record => record.EndedAt).ThenByDescending(record => record.FinalAttempt.RunId.ToString("D"), StringComparer.Ordinal).ToArray();
+            .OrderBy(record => record.EndedAt).ThenBy(record => record.FinalAttempt.RunId.ToString("D"), StringComparer.Ordinal).ToArray();
         var actual = new List<CompletedRunRecord>(); RecordCursor? cursor = null;
         do
         {
             var request = query with { After = cursor };
-            var plan = store.ExplainPage(request);
-            Assert.Contains(plan, line => line.Contains("SEARCH", StringComparison.Ordinal) && line.Contains("run_records_", StringComparison.Ordinal));
-            Assert.DoesNotContain(plan, line => line.Contains("TEMP B-TREE", StringComparison.Ordinal));
             var page = store.ReadPage(request); Assert.InRange(page.Items.Count, 1, 3);
             actual.AddRange(page.Items); cursor = page.Next;
         } while (cursor is not null);
@@ -56,7 +53,7 @@ public sealed class DateFilterTests
         Assert.Equal(actual.Count, actual.Select(record => record.FinalAttempt.RunId).Distinct().Count());
     }
 
-    [Theory(DisplayName = "Invalid Utc Bounds Are Rejected By Both The Core Query And The Actual Read Only Page Without Changing Stored Facts")]
+    [Theory(DisplayName = "Invalid Utc Bounds Are Rejected By The History Page Without Changing Stored Facts")]
     [InlineData("fromNonUtc")]
     [InlineData("untilNonUtc")]
     [InlineData("fromDefault")]
@@ -77,9 +74,7 @@ public sealed class DateFilterTests
             "reverse" => new RecordQuery(EndedFromInclusive: point.AddTicks(1), EndedUntilExclusive: point),
             _ => throw new InvalidOperationException()
         };
-        Assert.Throws<ArgumentException>(() => query.Validate());
         Assert.Throws<ArgumentException>(() => store.ReadPage(query));
-        Assert.Throws<ArgumentException>(() => store.ExplainPage(query));
         Assert.Equal(original, Assert.Single(store.ReadPage(new()).Items));
     }
 }

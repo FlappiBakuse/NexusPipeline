@@ -1,6 +1,6 @@
 import { adapterResult } from '../../apps/web/src/pages/adapter-results.js';
 
-export function adapterResults(): { checks: string[]; checkCount: number } {
+export function adapterResults(): string[] {
   const checks: string[] = [];
   const request = { operationId: 'operation-a', bindingId: 'binding-a', expectedBindingRevision: 2,
     extensionId: 'extension-a', expectedInstalledRevision: 4,
@@ -17,10 +17,10 @@ export function adapterResults(): { checks: string[]; checkCount: number } {
   const discovery = { source, tasks: [{ taskId: 'task-a', title: 'Daily task', isSelected: true, isEnabled: true,
     titleLocales: { 'zh-CN': '每日任务', 'en-US': 'Daily task' } }], diagnostics: [], gamePathCheck: 'unknown',
     coverage: { selected: 1, projected: 1, retrySafe: 1, isComplete: true, hasBlockingDiagnostics: false } };
-  if (adapterResult(discovery, 'discover', request, undefined, '').tasks[0]?.taskId !== 'task-a')
+  const accepted = adapterResult(discovery, 'discover', request, undefined, '');
+  if (accepted.tasks[0]?.taskId !== 'task-a')
     throw new Error('Bound discovery must remain usable');
   checks.push('a discovery bound to the selected extension, binding and saved resources is accepted');
-  const accepted = adapterResult(discovery, 'discover', request, undefined, '');
   if (accepted.coverage?.selected !== 1 || accepted.gamePathCheck !== 'unknown' || accepted.tasks[0]?.titleLocales?.['en-US'] !== 'Daily task')
     throw new Error('Coverage, unknown game path and frozen task translations were not decoded');
   checks.push('coverage and unknown path remain explicit and frozen task locales survive decoding');
@@ -42,5 +42,5 @@ export function adapterResults(): { checks: string[]; checkCount: number } {
   checks.push('an exact applied operation, binding and resource is accepted');
   for (const change of [{ operationId: 'other' }, { bindingId: 'other' }, { resourceId: 'other' }])
     reject({ ...applied, ...change }, 'applyRepair', 'repair rejects a foreign ' + Object.keys(change)[0]);
-  return { checks, checkCount: checks.length };
+  return checks;
 }

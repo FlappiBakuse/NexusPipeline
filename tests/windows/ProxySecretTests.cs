@@ -86,8 +86,7 @@ public sealed class ProxySecretTests
         var before = PersistentFingerprints(fixture);
         var error = Record.Exception(() => fixture.Service.PrepareProxyCredential(root,
             fault == "wrong-operation" ? Guid.NewGuid() : owner));
-        Assert.NotNull(error);
-        Assert.True(error is ObjectDisposedException or InvalidOperationException or IOException);
+        Assert.True(error is ObjectDisposedException or InvalidOperationException or IOException, error?.ToString());
         Assert.Equal(before, PersistentFingerprints(fixture));
     }
 
@@ -166,8 +165,7 @@ public sealed class ProxySecretTests
         }
         var before = PersistentFingerprints(fixture);
         var error = Record.Exception(() => codec.Decode(Encoding.UTF8.GetBytes(changed.ToJsonString())));
-        Assert.NotNull(error);
-        Assert.True(error is IOException or JsonException);
+        Assert.True(error is IOException or JsonException, error?.ToString());
         Assert.Equal(saved, prepared.Plan.Export());
         Assert.Equal(before, PersistentFingerprints(fixture));
         Assert.Empty(new RecoveryJournalRegistry(fixture.Database).ReadSnapshot().Journals);
@@ -248,21 +246,16 @@ public sealed class ProxySecretTests
             "BEGIN SELECT RAISE(ABORT,'fixture_host_field_rollback'); END;");
         await Assert.ThrowsAsync<SqliteException>(async () =>
             await fixture.Service.ApplyAsync(operation, host, 1, SecretDisposition.Clear, null, default));
+        Assert.DoesNotContain(new RecoveryJournalRegistry(fixture.Database).ReadHistory(), journal => journal.OperationId == operation);
         Assert.Equal(state, await fixture.Service.GetStateAsync(host, default));
         Assert.Equal(ciphertext, File.ReadAllBytes(payload));
-        using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder
-            { DataSource = fixture.Database.DatabasePath, Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString()))
-        {
-            connection.Open();
-            using var command = connection.CreateCommand();
-            command.CommandText = "SELECT count(*) FROM operations WHERE operation_id=$id;";
-            command.Parameters.AddWithValue("$id", operation.ToString("D"));
-            Assert.Equal(0L, (long)command.ExecuteScalar()!);
-        }
         Execute(fixture, "DROP TRIGGER fail_host_publication;");
-        using var root = Root(fixture, out var owner);
-        using var prepared = fixture.Service.PrepareProxyCredential(root, owner);
-        prepared.Use(secret => Assert.True(secret.SequenceEqual(Canary)));
+        using (var root = Root(fixture, out var owner))
+        using (var prepared = fixture.Service.PrepareProxyCredential(root, owner))
+            prepared.Use(secret => Assert.True(secret.SequenceEqual(Canary)));
+        var cleared = await fixture.Service.ApplyAsync(operation, host, 1, SecretDisposition.Clear, null, default);
+        Assert.False(cleared.IsConfigured);
+        Assert.Equal(cleared, await fixture.Service.GetStateAsync(host, default));
     }
 
     private static ResourceOperationLease Root(SecretTestRuntime fixture, out Guid owner)

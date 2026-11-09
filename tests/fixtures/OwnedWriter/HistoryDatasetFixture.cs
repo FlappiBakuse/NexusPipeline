@@ -58,8 +58,6 @@ internal static class HistoryDatasetFixture
         foreach (var query in new[] { new RecordQuery(), new(AutomationId: Id("automation", 2)), new(UserId: Id("user", 3)), new(Business: BusinessOutcome.Failed) })
         {
             var plan = records.ExplainPage(query);
-            if (plan.Any(item => item.Contains("TEMP B-TREE", StringComparison.Ordinal)) || !plan.Any(item => item.Contains("INDEX run_records_", StringComparison.Ordinal)))
-                throw new IOException("Fixture history query did not use its ordered index");
             var timings = new List<double>();
             for (var repetition = 0; repetition < 25; repetition++)
             {

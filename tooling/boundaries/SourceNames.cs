@@ -5,6 +5,8 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 internal static class SourceNames
 {
+    private static readonly HashSet<string> Prepositions = new("as like per since than towards unlike versus about above across after against along among around at before behind below beneath beside between beyond by despite down during except for from in inside into near of off on onto out outside over past through throughout to toward under underneath until up upon via with within without".Split(' '), StringComparer.OrdinalIgnoreCase);
+
     internal static int Verify(string root, string inputs)
     {
         root = Path.GetFullPath(root);
@@ -41,12 +43,12 @@ internal static class SourceNames
                 };
                 if (name is null) continue;
                 declarations++;
-                if (WordCount(name) <= 3) continue;
+                if (!ExceedsLimit(name)) continue;
                 var kind = node is BaseTypeDeclarationSyntax or DelegateDeclarationSyntax ? "type" : "method";
                 var key = Key(relative, kind, name);
                 actual[key] = actual.GetValueOrDefault(key) + 1;
                 if (!exceptions.TryGetValue(key, out var exemption) || string.IsNullOrWhiteSpace(exemption.Reason))
-                    errors.Add(relative + ": " + name + " exceeds three words without a reviewed exception");
+                    errors.Add(relative + ": " + name + " exceeds four words (five with a preposition) without a reviewed exception");
             }
         }
         foreach (var (key, exception) in exceptions)
@@ -58,10 +60,11 @@ internal static class SourceNames
 
     private static string Key(string path, string kind, string name) => path + "|" + kind + "|" + name;
 
-    private static int WordCount(string name)
+    private static bool ExceedsLimit(string name)
     {
         name = Regex.Replace(name, "^I(?=[A-Z][a-z])", "");
         name = name.Replace("MuMu", "Mumu", StringComparison.Ordinal);
-        return Regex.Matches(name, "[A-Z]+(?=[A-Z][a-z]|[0-9]|$)|[A-Z]?[a-z]+[0-9]*|[0-9]+").Count;
+        var words = Regex.Matches(name, "[A-Z]+(?=[A-Z][a-z]|[0-9]|$)|[A-Z]?[a-z]+[0-9]*|[0-9]+");
+        return words.Count > (words.Any(word => Prepositions.Contains(word.Value)) ? 5 : 4);
     }
 }

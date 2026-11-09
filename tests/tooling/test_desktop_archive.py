@@ -1,4 +1,3 @@
-import copy
 import hashlib
 import json
 import struct
@@ -15,60 +14,55 @@ class ArchiveTests(GitFixture):
         self.write('tooling/desktop-tools/package.json', b'{}\n')
         self.write('tooling/desktop-tools/package-lock.json', b'{}\n')
         self.entries = source_entries(self.repo)
-        self.header, self.data = {}, b''
-        for name, data in self.entries.items():
-            digest = hashlib.sha256(data).hexdigest()
-            self.header[name] = dict(size=len(data), offset=str(len(self.data)), integrity=dict(
-                algorithm='SHA256', hash=digest, blockSize=4194304, blocks=[digest]))
-            self.data += data
 
-    def archive(self, header=None, data=None, raw=None):
-        text = json.dumps(dict(files=self.header if header is None else header)).encode() if raw is None else raw
+    def archive(self, entries=None, *, overrides=None, data=None, raw=None):
+        header, payload = {}, b''
+        for name, value in (self.entries if entries is None else entries).items():
+            digest = hashlib.sha256(value).hexdigest()
+            header[name] = dict(size=len(value), offset=str(len(payload)), integrity=dict(
+                algorithm='SHA256', hash=digest, blockSize=4194304, blocks=[digest]))
+            payload += value
+        for name, fields in (overrides or {}).items():
+            header[name].update(fields)
+        text = json.dumps(dict(files=header)).encode() if raw is None else raw
         padded = text + b'\0' * (-len(text) % 4)
         header_size = 8 + len(padded)
         target = self.scope / 'app.asar'
         target.write_bytes(struct.pack('<IIII', 4, header_size, header_size - 4, len(text)) + padded +
-                           (self.data if data is None else data))
+                           (payload if data is None else data))
         return target
 
     def test_binds_source(self):
+        for entries in ({'package.json': self.entries['package.json']}, self.entries | {'extra.cjs': b'extra'}):
+            with self.subTest(members=tuple(entries)), self.assertRaisesRegex(ValueError, 'member bytes differ'):
+                verify_archive(self.repo, self.archive(entries))
         archive = self.archive()
-        self.assertEqual(self.entries, read_archive(archive))
         verify_archive(self.repo, archive)
         self.write('apps/desktop/main.cjs', b'require("changed");\n')
-        with self.assertRaisesRegex(ValueError, 'source'):
+        with self.assertRaisesRegex(ValueError, 'member bytes differ'):
             verify_archive(self.repo, archive)
 
     def test_rejects_members(self):
-        for fault in ('missing', 'extra', 'link', 'path', 'duplicate', 'outside', 'overlap', 'integrity', 'unpacked'):
-            header = copy.deepcopy(self.header)
-            entry = header['main.cjs']
-            if fault == 'missing':
-                del header['main.cjs']
-            elif fault == 'extra':
-                header['extra.cjs'] = copy.deepcopy(entry)
-            elif fault == 'link':
-                header['main.cjs'] = dict(link='package.json')
-            elif fault == 'path':
-                header['../main.cjs'] = header.pop('main.cjs')
-            elif fault == 'duplicate':
-                header['MAIN.CJS'] = copy.deepcopy(entry)
-            elif fault == 'outside':
-                entry['offset'] = str(len(self.data))
-            elif fault == 'overlap':
-                header['package.json']['offset'] = '1'
-            elif fault == 'integrity':
-                entry['integrity']['hash'] = '0' * 64
-            else:
-                entry['unpacked'] = True
-            with self.subTest(fault=fault), self.assertRaises(ValueError):
-                verify_archive(self.repo, self.archive(header))
-        for raw in (b'{"files":{},"files":{}}', b'[]'):
-            with self.subTest(raw=raw), self.assertRaises(ValueError):
-                read_archive(self.archive(raw=raw))
-        for data in (self.data[:-1], self.data + b'extra'):
-            with self.subTest(data=data), self.assertRaises(ValueError):
-                read_archive(self.archive(data=data))
+        data = b''.join(self.entries.values())
+        unsupported = 'unsupported member'
+        unowned = 'unowned or overlapping data'
+        cases = (
+            ('link', dict(overrides={'main.cjs': {'link': 'package.json'}}), unsupported),
+            ('path', dict(entries=self.entries | {'../main.cjs': b'extra'}), unsupported),
+            ('duplicate', dict(entries=self.entries | {'MAIN.CJS': b'extra'}), unsupported),
+            ('outside', dict(overrides={'main.cjs': {'offset': str(len(data))}}), 'exceeds its data bound'),
+            ('overlap', dict(entries={'main.cjs': b'ab', 'package.json': b'bc'},
+                             overrides={'package.json': {'offset': '1'}}, data=b'abc'), unowned),
+            ('integrity', dict(data=b'x' + data[1:]), 'integrity differs from its bytes'),
+            ('unpacked', dict(overrides={'main.cjs': {'unpacked': True}}), unsupported),
+            ('duplicate-header', dict(raw=b'{"files":{},"files":{}}'), 'duplicate fields'),
+            ('invalid-header', dict(raw=b'[]'), 'source header is invalid'),
+            ('truncated', dict(data=data[:-1]), 'exceeds its data bound'),
+            ('trailing', dict(data=data + b'extra'), unowned),
+        )
+        for fault, arguments, error in cases:
+            with self.subTest(fault=fault), self.assertRaisesRegex(ValueError, error):
+                read_archive(self.archive(**arguments))
 
     def test_preserves_work(self):
         work = self.scope / 'work'

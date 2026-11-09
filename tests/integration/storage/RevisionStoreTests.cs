@@ -39,9 +39,10 @@ public sealed class RevisionStoreTests
         if (fault == "recovery") index.BlockUnknown("fixture_unknown");
         if (fault == "closing") lifecycle.RequestClose(Guid.NewGuid(), Guid.NewGuid());
         if (fault == "expired") instanceLease.Dispose();
-        Assert.NotNull(Record.Exception(() => service.Save(Identity(change), change, DateTimeOffset.UtcNow)));
+        var identity = Identity(change);
+        Assert.NotNull(Record.Exception(() => service.Save(identity, change, DateTimeOffset.UtcNow)));
         Assert.Null(fixture.Store.Read(change.Address));
-        Assert.Equal(0L, Scalar(fixture, "SELECT count(*) FROM configuration_revisions;"));
+        Assert.Null(fixture.Store.Lookup(identity, change));
     }
 
     [Fact(DisplayName = "A Configuration Save Checks The Binding Revision And Can Retry Its Unaccepted Identity Against The Current Definition")]
@@ -97,48 +98,39 @@ public sealed class RevisionStoreTests
         Assert.Equal(1, store.Read(extra.Address)!.Revision);
     }
 
-    [Fact(DisplayName = "A Real Two Hundred File Update Reuses Every Existing Blob And Publishes Only The Measured Delta")]
-    public void ReusesUnchangedBlobs()
+    [Fact(DisplayName = "A Configuration Update Reports The Exact Delta And Replays The Original Snapshot Without Rewinding")]
+    public void PreservesSnapshotHistory()
     {
         var fixture = Create();
         var directory = Path.Combine(fixture.Root, "configuration");
         Directory.CreateDirectory(directory);
-        for (var index = 0; index < 200; index++) File.WriteAllText(Path.Combine(directory, $"{index:D3}.json"), $"original-{index:D3}");
+        for (var index = 0; index < 5; index++) File.WriteAllText(Path.Combine(directory, $"{index:D3}.json"), $"original-{index:D3}");
         var first = CaptureTree(fixture, "main", directory);
-        Save(fixture, first);
-        var content = Path.Combine(fixture.Instance.RuntimeRoot, "blobs/content");
-        var identities = Directory.EnumerateFiles(content).ToDictionary(path => path, PhysicalObjectIdentity.Read);
-        File.Delete(Path.Combine(directory, "199.json"));
+        var original = Save(fixture, first);
+        File.Delete(Path.Combine(directory, "004.json"));
         for (var index = 1; index <= 3; index++) File.WriteAllText(Path.Combine(directory, $"{index:D3}.json"), $"modified-{index:D3}");
-        File.WriteAllText(Path.Combine(directory, "200.json"), "added-200");
-        File.WriteAllText(Path.Combine(directory, "201.json"), "added-201");
+        File.WriteAllText(Path.Combine(directory, "005.json"), "added-005");
+        File.WriteAllText(Path.Combine(directory, "006.json"), "added-006");
         var next = CaptureTree(fixture, "main", directory) with { ExpectedRevision = 1, Kind = ConfigurationUpdateKind.Progress };
         var result = Save(fixture, next);
         Assert.Equal((2, 3, 1), (result.Delta.AddedFiles, result.Delta.ModifiedFiles, result.Delta.RemovedFiles));
-        Assert.Equal(6, result.Delta.Changes.Length);
-        Assert.Equal(205, Directory.EnumerateFiles(content).Count());
-        foreach (var pair in identities) Assert.Equal(pair.Value, PhysicalObjectIdentity.Read(pair.Key));
-        Assert.Equal(2, fixture.Store.Read(next.Address)!.Revision);
-        var old = first.Tree.Entries.First(entry => entry.RelativePath == "199.json");
-        Assert.True(new BlobReferenceIndex(fixture.Instance, new(), fixture.Database, new(fixture.Instance, new()))
-            .IsReferenced(new($"blobs/content/{old.Sha256}.bin", old.SizeBytes, old.Sha256!)));
-    }
-
-    [Fact(DisplayName = "Replaying An Older Configuration Save Returns Its Original Revision Without Rewinding The Current Snapshot")]
-    public void KeepsOriginalRevisions()
-    {
-        var fixture = Create();
-        var first = Capture(fixture, "main", "first");
-        var identity = Identity(first);
-        using (var prepared = fixture.Store.Prepare(first)) fixture.Store.Commit(identity, prepared, DateTimeOffset.UtcNow);
-        Save(fixture, Capture(fixture, "main", "second") with { ExpectedRevision = 1 });
-        var result = fixture.Store.Lookup(identity, first)!;
-        Assert.False(result.IsNew);
-        Assert.Equal(1, result.Saved.Revision);
-        Assert.Equal(first.Tree.Entries, result.Saved.Tree.Entries);
-        Assert.Equal(2, fixture.Store.Read(first.Address)!.Revision);
-        Assert.Throws<OperationConflictException>(() => fixture.Store.Lookup(
-            ConfigurationRevisionStore.Identity(identity.OperationId, "different-actor", first), first));
+        Assert.Equal(new[] { ("001.json", TreeChangeKind.Modified), ("002.json", TreeChangeKind.Modified), ("003.json", TreeChangeKind.Modified),
+                ("004.json", TreeChangeKind.Removed), ("005.json", TreeChangeKind.Added), ("006.json", TreeChangeKind.Added) },
+            result.Delta.Changes.OrderBy(change => change.RelativePath, StringComparer.Ordinal).Select(change => (change.RelativePath, change.Kind)));
+        var identity = ConfigurationRevisionStore.Identity(original.OperationId, "fixture", first);
+        var replay = fixture.Store.Commit(identity, first, DateTimeOffset.UtcNow);
+        Assert.False(replay.IsNew);
+        Assert.Equal(1, replay.Saved.Revision); Assert.Equal(first.Tree.Entries, replay.Saved.Tree.Entries);
+        Assert.Throws<OperationConflictException>(() => fixture.Store.Commit(
+            ConfigurationRevisionStore.Identity(original.OperationId, "different-actor", first), first, DateTimeOffset.UtcNow));
+        var current = fixture.Store.Read(next.Address)!;
+        Assert.Equal(2, current.Revision); Assert.Equal(next.Tree.Entries, current.Tree.Entries);
+        var blobs = new ImmutableBlobStore(fixture.Instance, new());
+        var files = replay.Saved.Tree.Entries.Concat(current.Tree.Entries).Where(entry => entry.Kind == FileObjectKind.File);
+        foreach (var reference in files.Select(ContentReference).Distinct())
+            blobs.Verify(reference);
+        var old = replay.Saved.Tree.Entries.Single(entry => entry.RelativePath == "004.json");
+        Assert.True(new BlobReferenceIndex(fixture.Instance, new(), fixture.Database, blobs).IsReferenced(ContentReference(old)));
     }
 
     [Fact(DisplayName = "Concurrent Configuration Cas Has One Winner And Does Not Consume The Losing Operation Identity")]
@@ -154,11 +146,16 @@ public sealed class RevisionStoreTests
             Record.Exception(() => fixture.Store.Commit(operations[index], preparations[index], DateTimeOffset.UtcNow)))));
         Assert.Single(errors, error => error is null);
         var loser = Array.FindIndex(errors, error => error is not null);
-        Assert.IsType<ConfigurationException>(errors[loser]);
+        Assert.Equal("configuration_revision_conflict", Assert.IsType<ConfigurationException>(errors[loser]).Message);
+        var winner = 1 - loser;
+        var current = fixture.Store.Read(changes[winner].Address)!;
+        Assert.Equal(1, current.Revision); Assert.Equal(changes[winner].Tree.Entries, current.Tree.Entries);
+        Assert.Null(fixture.Store.Lookup(operations[loser], changes[loser]));
         var corrected = changes[loser] with { ExpectedRevision = 1 };
         using var retry = fixture.Store.Prepare(corrected);
         Assert.True(fixture.Store.Commit(ConfigurationRevisionStore.Identity(operations[loser].OperationId, "fixture", corrected), retry, DateTimeOffset.UtcNow).IsNew);
-        Assert.Equal(2, fixture.Store.Read(corrected.Address)!.Revision);
+        var next = fixture.Store.Read(corrected.Address)!;
+        Assert.Equal(2, next.Revision); Assert.Equal(corrected.Tree.Entries, next.Tree.Entries);
     }
 
     [Fact(DisplayName = "Failed Configuration Publication Rolls Back The Pointer Assets Revision And Accepted Operation Together")]
@@ -172,12 +169,16 @@ public sealed class RevisionStoreTests
         var identity = Identity(change);
         Execute(fixture, "CREATE TRIGGER fixture_fail_configuration BEFORE INSERT ON configuration_mutations BEGIN SELECT RAISE(ABORT,'fixture_failure'); END;");
         Assert.Throws<SqliteException>(() => fixture.Store.Commit(identity, prepared, DateTimeOffset.UtcNow));
-        Assert.Equal(first.Tree.Entries, fixture.Store.Read(first.Address)!.Tree.Entries);
-        Assert.Equal(1L, Scalar(fixture, "SELECT count(*) FROM configuration_revisions;"));
+        var current = fixture.Store.Read(first.Address)!;
+        Assert.Equal(1, current.Revision); Assert.Equal(first.Tree.Entries, current.Tree.Entries);
+        var references = new BlobReferenceIndex(fixture.Instance, new(), fixture.Database, new(fixture.Instance, new()));
+        Assert.True(references.IsReferenced(ContentReference(Assert.Single(first.Tree.Entries))));
+        Assert.False(references.IsReferenced(ContentReference(Assert.Single(change.Tree.Entries))));
         Assert.Null(fixture.Store.Lookup(identity, change));
         Execute(fixture, "DROP TRIGGER fixture_fail_configuration;");
         Assert.True(fixture.Store.Commit(identity, prepared, DateTimeOffset.UtcNow).IsNew);
-        Assert.Equal(2, fixture.Store.Read(change.Address)!.Revision);
+        var next = fixture.Store.Read(change.Address)!;
+        Assert.Equal(2, next.Revision); Assert.Equal(change.Tree.Entries, next.Tree.Entries);
     }
 
     [Theory(DisplayName = "Missing Or Damaged Prepared Configuration Content Cannot Publish Any Revision")]
@@ -190,9 +191,10 @@ public sealed class RevisionStoreTests
         var entry = change.Tree.Entries.Single();
         var path = Path.Combine(fixture.Instance.RuntimeRoot, $"blobs/content/{entry.Sha256}.bin");
         if (missing) File.Delete(path); else File.WriteAllText(path, "foreign");
-        Assert.ThrowsAny<IOException>(() => fixture.Store.Prepare(change));
+        var identity = Identity(change);
+        Assert.ThrowsAny<IOException>(() => fixture.Store.Commit(identity, change, DateTimeOffset.UtcNow));
         Assert.Null(fixture.Store.Read(change.Address));
-        Assert.Equal(0L, Scalar(fixture, "SELECT count(*) FROM configuration_revisions;"));
+        Assert.Null(fixture.Store.Lookup(identity, change));
     }
 
     [Fact(DisplayName = "Prepared Configuration Holds Its Manifest And Payload And Cannot Be Committed After Disposal")]
@@ -275,11 +277,8 @@ public sealed class RevisionStoreTests
         using var connection = Connection(fixture);
         using var command = connection.CreateCommand(); command.CommandText = sql; command.ExecuteNonQuery();
     }
-    private static object Scalar(Fixture fixture, string sql)
-    {
-        using var connection = Connection(fixture);
-        using var command = connection.CreateCommand(); command.CommandText = sql; return command.ExecuteScalar()!;
-    }
+    private static BlobReference ContentReference(FileTreeEntry entry) =>
+        new($"blobs/content/{entry.Sha256}.bin", entry.SizeBytes, entry.Sha256!);
     private static byte[] DatabaseBytes(string path) => new[] { "", "-wal", "-shm" }
         .Where(suffix => File.Exists(path + suffix)).SelectMany(suffix => File.ReadAllBytes(path + suffix)).ToArray();
     private sealed record Fixture(string Root, RuntimeInstance Instance, StateDatabase Database, ConfigurationRevisionStore Store, Guid Binding, Guid OtherBinding);

@@ -55,9 +55,10 @@ export async function ownerCases(): Promise<string[]> {
           if (scenario === 'hidden') {
             blocked = true; item.store.state.automation = { ...item.store.state.automation!,
               catalogRevision: item.store.state.automation!.catalogRevision + 1 }; await settle();
-            const previous = state!.items;
+            const previous = { ...state!.items.get(users[0]!)! };
             visible.value = false; await settle(); assert(signal!.aborted); assert.equal(timers.size, 0);
-            release!(); await settle(); assert.equal(state!.items, previous);
+            release!(); await settle();
+            assert.deepEqual(state!.items.get(users[0]!), previous);
           }
         }
         cases.push('actual account owner request/clock/error/permission lifecycle: ' + scenario);

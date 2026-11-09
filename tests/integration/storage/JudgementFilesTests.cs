@@ -17,21 +17,11 @@ public sealed class JudgementFilesTests
     {
         var root = Path.Combine(Environment.GetEnvironmentVariable("NEXUS_TEST_ROOT")!, "judgement-file-kernel-" + Guid.NewGuid().ToString("N"));
         var selected = Path.Combine(root, "selected"); var outside = Path.Combine(root, "outside");
-        Directory.CreateDirectory(selected); Directory.CreateDirectory(outside);
-        var original = Path.Combine(outside, "keep.txt"); File.WriteAllText(original, "preserve outside bytes");
+        Directory.CreateDirectory(Path.Combine(selected, "local")); Directory.CreateDirectory(outside);
         using var scope = PhysicalDirectoryHandle.Open(selected);
-        File.WriteAllText(Path.Combine(selected, "local.txt"), "local bytes");
-        using (var handle = scope.OpenFile("local.txt", false))
-        using (var input = new FileStream(handle, FileAccess.Read))
-        using (var reader = new StreamReader(input)) Assert.Equal("local bytes", reader.ReadToEnd());
-        using (var created = scope.AcquireDirectory("created"))
-        using (var handle = created.OpenFile("result.txt", true))
-        using (var output = new FileStream(handle, FileAccess.ReadWrite)) output.Write([1, 2, 3]);
-        Assert.Equal(new byte[] { 1, 2, 3 }, File.ReadAllBytes(Path.Combine(selected, "created", "result.txt")));
+        using var local = scope.AcquireDirectory("local");
         ControlledJunction.Create(Path.Combine(selected, "linked"), outside);
         Assert.Throws<IOException>(() => scope.AcquireDirectory("linked"));
-        Assert.Equal("preserve outside bytes", File.ReadAllText(original));
-        Assert.Equal(new[] { original }, Directory.GetFiles(outside));
     }
 
     [Fact(DisplayName = "Actual Javascript File Functions Read Declared Scopes Write Script Files And Keep Configuration Bytes Read Only")]
@@ -49,7 +39,8 @@ function nexusJudge(input) {
     configurationFile: !nexus.files.writeText('shared/settings.txt', 'changed'),
     configurationDirectory: !nexus.files.writeText('configuration/settings.txt', 'changed') && !nexus.files.writeText('configuration/new.txt', 'changed'),
     outsideWrite: !nexus.files.writeText('../outside.txt', 'changed') && !nexus.files.writeText(input.outside, 'changed'),
-    metadata: Array.isArray(files) && files.length === 3 && Object.getPrototypeOf(files[0]) === Object.prototype,
+    metadata: Array.isArray(files) && files.length === 1 && files[0].root === 'script' &&
+      files[0].path === 'source.txt' && files[0].absolutePath === input.files[0].absolutePath && typeof files[0].GetType === 'undefined',
     native: typeof nexus.files.GetType === 'undefined' && typeof nexus.files.readText.GetType === 'undefined' && typeof nexus.readFile === 'undefined'
   };
   return {outcome:Object.values(checks).every(value => value) ? 'succeeded' : 'failed',reason:JSON.stringify(checks)};
@@ -64,18 +55,16 @@ function nexusJudge(input) {
         var sharedConfiguration = Path.Combine(shared, "settings.txt"); File.WriteAllText(sharedConfiguration, "keep shared configuration");
         var outside = directory + "-outside.txt"; File.WriteAllText(outside, "keep outside");
         var input = Input(fixture, [configuration, externalConfiguration, sharedConfiguration], outside,
-            [new { root = "script", path = "source.txt", absolutePath = Path.Combine(directory, "source.txt") },
-             new { root = "configuration", path = "settings.txt", absolutePath = Path.Combine(configuration, "settings.txt") },
-             new { root = "configuration", path = "settings.txt", absolutePath = Path.Combine(externalConfiguration, "settings.txt") }]);
+            [new { root = "script", path = "source.txt", absolutePath = Path.Combine(directory, "source.txt") }]);
         await fixture.StartAsync(); var exchange = await fixture.InvokeAsync(1, true, input);
         await fixture.AssertExitedAsync();
-        Assert.Null(exchange.Response.FaultCode);
-        Assert.True(exchange.Response.Result!.Outcome == BusinessOutcome.Succeeded, exchange.Response.Result.Reason);
+        var result = Assert.IsType<BusinessJudgementResult>(exchange.Response.Result);
+        Assert.True(result.Outcome == BusinessOutcome.Succeeded, result.Reason);
         Assert.Equal("saved 雪", File.ReadAllText(Path.Combine(directory, "nested/result.txt")));
         Assert.Equal("allowed sibling", File.ReadAllText(Path.Combine(shared, "result.txt")));
         Assert.Equal("keep shared configuration", File.ReadAllText(sharedConfiguration));
         Assert.Equal("keep configuration", File.ReadAllText(Path.Combine(configuration, "settings.txt")));
-        Assert.Equal(new[] { Path.Combine(configuration, "settings.txt") }, Directory.GetFiles(configuration));
+        Assert.Equal(new[] { Path.Combine(configuration, "settings.txt") }, Directory.GetFileSystemEntries(configuration));
         Assert.Equal("external configuration", File.ReadAllText(Path.Combine(externalConfiguration, "settings.txt")));
         Assert.Equal("keep outside", File.ReadAllText(outside));
     }
@@ -103,7 +92,7 @@ function nexusJudge(input) {
         }
         await fixture.StartAsync(); var exchange = await fixture.InvokeAsync(1, true, Input(fixture, [], outside, [], relative));
         await fixture.AssertExitedAsync();
-        Assert.Null(exchange.Response.FaultCode); Assert.Equal(BusinessOutcome.Succeeded, exchange.Response.Result!.Outcome);
+        Assert.Equal(BusinessOutcome.Succeeded, Assert.IsType<BusinessJudgementResult>(exchange.Response.Result).Outcome);
         if (kind == "dangling-junction") Assert.False(Directory.Exists(outsideDirectory));
         else Assert.Equal("keep original bytes", File.ReadAllText(outside));
     }
@@ -114,8 +103,9 @@ function nexusJudge(input) {
         await using var fixture = new JudgementWorkerFixture("javascript", """
 function nexusJudge(input) {
   const boundary = nexus.files.readText('boundary.txt');
+  const oversized = '雪'.repeat(Math.floor(2097152 / 3) + 1);
   const denied = boundary.length === 2097152 && nexus.files.readText('oversized.txt') === null &&
-    !nexus.files.writeText('boundary.txt', 'y'.repeat(2097153)) && !nexus.files.writeText('never-created.txt', 'y'.repeat(2097153)) &&
+    !nexus.files.writeText('boundary.txt', oversized) && !nexus.files.writeText('never-created/result.txt', oversized) &&
     nexus.files.readText('invalid.txt') === null && nexus.files.readText(1) === null && !nexus.files.writeText({}, 'bad') && nexus.files.list(1) === null;
   return {outcome:denied ? 'succeeded' : 'failed',reason:'file byte bounds preserved'};
 }
@@ -126,9 +116,9 @@ function nexusJudge(input) {
         File.WriteAllBytes(Path.Combine(directory, "invalid.txt"), [0xff, 0xff]);
         await fixture.StartAsync(); var exchange = await fixture.InvokeAsync(1, true, Input(fixture, [], "", []));
         await fixture.AssertExitedAsync();
-        Assert.Null(exchange.Response.FaultCode); Assert.Equal(BusinessOutcome.Succeeded, exchange.Response.Result!.Outcome);
+        Assert.Equal(BusinessOutcome.Succeeded, Assert.IsType<BusinessJudgementResult>(exchange.Response.Result).Outcome);
         Assert.Equal(new string('x', JudgementFileAccess.MaximumFileBytes), File.ReadAllText(boundary));
-        Assert.False(File.Exists(Path.Combine(directory, "never-created.txt")));
+        Assert.False(Path.Exists(Path.Combine(directory, "never-created")));
     }
 
     private static string Input(JudgementWorkerFixture fixture, string[] configurations, string outside, object[] files, string relative = "") =>

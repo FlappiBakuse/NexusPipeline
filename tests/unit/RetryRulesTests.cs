@@ -20,7 +20,7 @@ public sealed class RetryRulesTests
         Assert.False(RetryDecision.Evaluate(policy, evidence with { AreFrozenIdentitiesValid = false }, now).IsEligible);
     }
 
-    [Fact(DisplayName = "Persistent Budget And Deadline Cannot Be Reset By Restart Or Repeated Evaluation")]
+    [Fact(DisplayName = "Retry Eligibility Uses The Recorded Attempt Count Original Deadline And Backoff")]
     public void KeepsDurableBudget()
     {
         var now = DateTimeOffset.UtcNow;
@@ -32,7 +32,5 @@ public sealed class RetryRulesTests
         Assert.Equal("attempt_budget_exhausted", RetryDecision.Evaluate(policy, evidence with { CompletedAttempts = 3 }, now).ReasonCode);
         Assert.False(RetryDecision.Evaluate(policy, evidence, now.AddMinutes(5)).IsEligible);
         Assert.False(RetryDecision.Evaluate(policy, evidence with { PreviousOutcome = AttemptOutcome.Succeeded }, now.AddSeconds(30)).IsEligible);
-        Assert.Equal(2, evidence.CompletedAttempts);
-        Assert.Equal("business-1", policy.IdempotencyKey);
     }
 }

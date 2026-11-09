@@ -16,11 +16,11 @@ public sealed class AssetStreamTests
         Assert.False(input.CanWrite); Assert.Equal(fixture.Asset.SizeBytes, input.Length);
         Assert.Throws<IOException>(() => File.Delete(fixture.Path));
         var records = new RunRecordStore(fixture.Database);
-        records.AppendCompleted([RecordStoreFixture.Record(3, Guid.NewGuid())]);
-        Assert.Equal(2, records.ReadPage(new()).Items.Count);
+        var later = RecordStoreFixture.Record(3, Guid.NewGuid());
+        records.AppendCompleted([later]);
+        Assert.Contains(later, records.ReadPage(new()).Items);
         var buffer = new byte[65536]; long read = 0;
         using var digest = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        await Task.Delay(20);
         while (true)
         {
             var count = await input.ReadAsync(buffer);
@@ -45,7 +45,6 @@ public sealed class AssetStreamTests
     public void RejectsUnboundReads(string fault)
     {
         var fixture = Create();
-        var records = new RunRecordStore(fixture.Database).ReadPage(new()).Items.ToArray();
         var request = fault switch
         {
             "run" => fixture.Asset with { RunId = Guid.NewGuid() },
@@ -63,7 +62,6 @@ public sealed class AssetStreamTests
             store = new(fixture.Database, other.Blobs);
         }
         Assert.ThrowsAny<IOException>(() => { using var ignored = store.OpenVerified(request); });
-        Assert.Equal(records, new RunRecordStore(fixture.Database).ReadPage(new()).Items);
         Assert.Equal(fixture.Asset, Assert.Single(fixture.Store.ReadForRun(fixture.Asset.RunId).Items));
         if (fault == "tampered") Assert.Equal("unknown-content-preserve", File.ReadAllText(fixture.Path));
     }

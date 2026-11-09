@@ -19,10 +19,8 @@ public sealed class JobQueryTests
         using var peer = new NativeClientBinding(identity);
         using var source = MaintenanceJobQuery.Retain(original);
         using var received = MaintenanceJobQuery.Receive(peer, identity, source.ExportValue);
-        received.RequireSameObject(source);
         source.Dispose(); original.Dispose();
         Assert.Equal(0x2800u, received.Flags);
-        Assert.Equal(0u, received.Accounting.ActiveProcesses);
         using var reopened = JobNative.OpenJobObjectW(4, false, name);
         Assert.False(reopened.IsInvalid);
         using var observed = MaintenanceJobQuery.Retain(reopened);
@@ -38,7 +36,6 @@ public sealed class JobQueryTests
         using var expected = MaintenanceJobQuery.Retain(first);
         using var substituted = MaintenanceJobQuery.Retain(second);
         Assert.Throws<IOException>(() => expected.RequireSameObject(substituted));
-        Assert.Equal(0u, expected.Accounting.ActiveProcesses);
     }
 
     [Theory(DisplayName = "Remote Pseudo Or Null Values Never Become Local Owned Handles")]

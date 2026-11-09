@@ -1,31 +1,31 @@
-using NexusPipeline.Platform.Processes;
-using System.Text.Json;
+using System.Collections.Concurrent;
 using System.Diagnostics;
+using NexusPipeline.Platform.Processes;
 using Xunit;
 
 namespace NexusPipeline.WindowsTests;
 
 public sealed class StartObserverTests
 {
-    [Fact(DisplayName = "Inactive Job Observer Reports Owned Root And Helpers And Detaches Before Later Starts")]
+    [Fact(DisplayName = "Job Observer Reports Owned Processes And Detaches Before Later Starts")]
     public async Task TracksOwnedStarts()
     {
         var (root, fixture) = Inputs();
         using var job = new OwnedWorkerJob();
-        var observed = new TaskCompletionSource<ProcessIdentity>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var count = 0;
-        using var observer = job.ObserveProcessStarts(pid =>
-        {
-            var identity = ProcessIdentityReader.Read(pid);
-            Interlocked.Increment(ref count);
-            observed.TrySetResult(identity);
-        });
+        var observed = new ConcurrentQueue<ProcessIdentity>();
+        using var observer = job.ObserveProcessStarts(pid => observed.Enqueue(ProcessIdentityReader.Read(pid)));
         Assert.Throws<InvalidOperationException>(() => job.ObserveProcessStarts(_ => { }));
         var firstReady = Path.Combine(root, Guid.NewGuid() + ".json");
         var secondReady = Path.Combine(root, Guid.NewGuid() + ".json");
         var first = job.Start(fixture, [firstReady, "observer"], root,
             Guid.NewGuid(), Guid.NewGuid(), _ => { });
-        var actual = await observed.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await AwaitFileAsync(firstReady);
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        while (!observed.Any(identity => identity.ProcessId == first.ProcessId)) await Task.Delay(10, deadline.Token);
+        Assert.True(observer.Drain(TimeSpan.FromSeconds(5)));
+        var notifications = observed.ToArray();
+        var actual = Assert.Single(notifications, identity => identity.ProcessId == first.ProcessId);
+        Assert.Equal(job.ActiveProcessIds().Order(), notifications.Select(identity => identity.ProcessId).Order());
         Assert.Equal(first.ProcessId, actual.ProcessId);
         Assert.Equal(first.CreatedAtUtc, actual.CreatedAtUtc);
         Assert.Equal(first.ImageSha256, actual.ImageSha256);
@@ -33,25 +33,15 @@ public sealed class StartObserverTests
         using var caller = Process.GetCurrentProcess();
         Assert.True(job.ContainsProcessHandle(retained.SafeHandle));
         Assert.False(job.ContainsProcessHandle(caller.SafeHandle));
-        await AwaitFileAsync(firstReady);
-        Assert.True(observer.Drain(TimeSpan.FromSeconds(5)));
-        var beforeDetach = job.GetAccounting();
         observer.Dispose();
-        var notificationsAtDetach = Volatile.Read(ref count);
         var second = job.Start(fixture, [secondReady, "detached"], root,
             Guid.NewGuid(), Guid.NewGuid(), _ => { });
         await AwaitFileAsync(secondReady);
-        var active = job.ActiveProcessIds().Select(pid => ProcessIdentityReader.Read(pid)).ToArray();
-        File.WriteAllText(Path.Combine(root, "job-observer-boundary.json"), JsonSerializer.Serialize(new
-        {
-            first, second, beforeDetach, afterSecondStart = job.GetAccounting(), active, notifications = Volatile.Read(ref count), observer.Failures
-        }));
+        var active = job.ActiveProcessIds();
+        Assert.Contains(first.ProcessId, active);
+        Assert.Contains(second.ProcessId, active);
         Assert.True(await job.StopAsync(TimeSpan.FromSeconds(10)));
-        Assert.Equal((uint)active.Length, job.GetAccounting().TotalProcesses);
-        Assert.Contains(active, identity => identity.ProcessId == first.ProcessId);
-        Assert.Contains(active, identity => identity.ProcessId == second.ProcessId);
-        Assert.Equal((uint)notificationsAtDetach, beforeDetach.TotalProcesses);
-        Assert.Equal(notificationsAtDetach, Volatile.Read(ref count));
+        Assert.Equal(notifications, observed.ToArray());
         Assert.Empty(observer.Failures);
     }
 
@@ -66,11 +56,13 @@ public sealed class StartObserverTests
             called.SetResult();
             throw new IOException("Controlled observation failure");
         });
-        var started = job.Start(fixture, [Path.Combine(root, Guid.NewGuid() + ".json"), "failed-observer"], root,
+        var ready = Path.Combine(root, Guid.NewGuid() + ".json");
+        var started = job.Start(fixture, [ready, "failed-observer"], root,
             Guid.NewGuid(), Guid.NewGuid(), _ => { });
         await called.Task.WaitAsync(TimeSpan.FromSeconds(10));
         observer.Dispose();
         Assert.Contains(observer.Failures, failure => failure.EndsWith(":IOException", StringComparison.Ordinal));
+        await AwaitFileAsync(ready);
         Assert.Contains(started.ProcessId, job.ActiveProcessIds());
         Assert.Throws<InvalidOperationException>(() => job.ObserveProcessStarts(_ => { }));
         Assert.True(await job.StopAsync(TimeSpan.FromSeconds(10)));

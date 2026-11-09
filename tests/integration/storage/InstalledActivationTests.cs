@@ -100,7 +100,16 @@ public sealed class InstalledActivationTests
         try
         {
             var bound = origin.RequireCurrent();
-            Assert.Same(bound, origin.RequireCurrent());
+            void VerifyCurrent()
+            {
+                var current = origin.RequireCurrent();
+                Assert.Equal(bound.Registered.JournalId, current.Registered.JournalId);
+                Assert.Equal(bound.PlanReference, current.PlanReference);
+                Assert.Equal(bound.Identity, current.Identity);
+                Assert.Equal(bound.Latest.Revision, current.Latest.Revision);
+                Assert.Equal(bound.Latest.Phase, current.Latest.Phase);
+            }
+            VerifyCurrent();
             await RechecksWriterState(context.Database, bound.Registered.JournalId, origin);
             var catalog = bound.Source.Package!.Catalog;
             void SetReady(int ready)
@@ -118,7 +127,7 @@ public sealed class InstalledActivationTests
                 Assert.Throws<IOException>(() => origin.RequireCurrent());
             }
             finally { SetReady(1); }
-            Assert.Same(bound, origin.RequireCurrent());
+            VerifyCurrent();
             foreach (var reference in new[] { catalog.Pointer, catalog.Catalog, catalog.Signature })
                 Assert.Throws<IOException>(() => { using var writer = File.Open(Path.Combine(context.Instance.RuntimeRoot,
                     reference.RelativePath), FileMode.Open, FileAccess.Write, FileShare.Read); });
@@ -139,7 +148,7 @@ public sealed class InstalledActivationTests
                     return command.ExecuteNonQuery();
                 });
             }
-            Assert.Same(bound, origin.RequireCurrent());
+            VerifyCurrent();
             Assert.Throws<IOException>(() => { using var writer = File.Open(revision, FileMode.Open, FileAccess.Write, FileShare.Read); });
             void ChangePhase(string phase)
             {
@@ -157,12 +166,12 @@ public sealed class InstalledActivationTests
                 Assert.Throws<IOException>(() => origin.RequireCurrent());
             }
             finally { ChangePhase("committed"); }
-            Assert.Same(bound, origin.RequireCurrent());
+            VerifyCurrent();
             var unexpected = Path.Combine(directory, "unexpected.bin");
             File.WriteAllBytes(unexpected, [1]);
             try { Assert.Throws<IOException>(() => origin.RequireCurrent()); }
             finally { File.Delete(unexpected); }
-            Assert.Same(bound, origin.RequireCurrent());
+            VerifyCurrent();
         }
         finally { origin.Dispose(); }
         using (var writer = File.Open(revision, FileMode.Open, FileAccess.Write, FileShare.Read)) { }

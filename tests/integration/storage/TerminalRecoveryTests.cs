@@ -67,12 +67,17 @@ public sealed class TerminalRecoveryTests
         Assert.Equal(JournalPhase.Committed, state.Journal.Phase); Assert.Equal(state.Journal.Revision, state.Latest.Revision);
         Assert.Equal(EffectGateState.Entered, state.Gate.State);
         var receipt = Assert.IsType<AttemptReceipt>(new AttemptReceiptStore(database).Read(binding.AttemptId));
+        Assert.Equal(operationId, receipt.OperationId); Assert.Equal(journalId, receipt.JournalId);
+        Assert.Equal(binding.RunId, receipt.Facts.RunId);
+        var attempts = new AttemptHistoryReader(database);
+        Assert.Equal(receipt, Assert.Single(attempts.ReadPage(new(binding.RunId)).Items));
         Assert.Equal(EngineOutcome.Failed, receipt.Facts.Engine); Assert.Equal(BusinessOutcome.Unverified, receipt.Facts.Business);
         Assert.Equal(point == "terminal-ahead" ? LifecycleOutcome.Completed : LifecycleOutcome.Interrupted, receipt.Facts.Lifecycle);
         Assert.Equal(RecoveryOutcome.Restored, receipt.Facts.Recovery);
         var finality = new ExecutionRunFinality(instance, database, new());
         Assert.False(finality.IsFinal(receipt));
         var record = Assert.Single(new RunRecordStore(database).ReadPage(new()).Items);
+        Assert.Equal(source.OtherScriptId, record.AutomationId); Assert.Equal(source.UserB, record.UserId);
         Assert.Equal(receipt.Facts, record.FinalAttempt);
         Assert.Equal(EndTimeKind.ReconciledTerminalObservation, record.EndTimeKind);
         Assert.Equal(record.DurationMilliseconds.HasValue ? RecordDurationKind.CheckpointLowerBound : RecordDurationKind.Unknown, record.DurationKind);
@@ -95,12 +100,16 @@ public sealed class TerminalRecoveryTests
         var persisted = new JobClosureStore(instance, database, new()).ReadForExecutionEvidence(journalId, binding.WriterId, binding.JobName, binding.SessionId);
         Assert.NotNull(persisted); Assert.Equal(closure.Root, persisted.Root); Assert.True(closure.Family.SequenceEqual(persisted.Family));
         Assert.Equal(originalIdentity, PhysicalObjectIdentity.Read(source.Configuration)); Assert.Equal(originalBytes, File.ReadAllBytes(source.Configuration));
-        var before = Directory.GetFiles(Path.Combine(instance.RuntimeRoot, "journals", journalId.ToString("D")))
-            .Order(StringComparer.Ordinal).Select(File.ReadAllBytes).ToArray();
-        new StartupJournalRecovery(instance, new(), database,
+        var journals = new JournalStore(instance, new());
+        var before = journals.ReadAllRevisions(journalId).Select(revision => revision.Export()).ToArray();
+        var reopened = new StartupJournalRecovery(instance, new(), database,
             new(Path.Combine(source.Root, "host"), Path.Combine(instance.RuntimeRoot, "extensions"))).Recover(lease);
-        Assert.Equal(receipt, new AttemptReceiptStore(database).Read(binding.AttemptId));
-        Assert.Equal(before, Directory.GetFiles(Path.Combine(instance.RuntimeRoot, "journals", journalId.ToString("D")))
-            .Order(StringComparer.Ordinal).Select(File.ReadAllBytes).ToArray());
+        Assert.Equal(receipt, Assert.Single(attempts.ReadPage(new(binding.RunId)).Items));
+        Assert.Equal(record, Assert.Single(new RunRecordStore(database).ReadPage(new()).Items));
+        Assert.Equal(before, journals.ReadAllRevisions(journalId).Select(revision => revision.Export()).ToArray());
+        var reopenedResources = new ResourceLeaseManager(new HostLifecycle(reopened, TimeProvider.System));
+        using var acquired = reopenedResources.TryAcquire(Guid.NewGuid(),
+            state.Attempt.ResourceKeys.Select(key => new ResourceClaim(key, ResourceClaimMode.Mutation)).ToArray()).Lease;
+        Assert.NotNull(acquired);
     }
 }

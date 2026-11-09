@@ -22,6 +22,20 @@ node tooling/web_contracts.mjs --root <源码根> --modules <构建槽/web-works
 每次保留命令、suite、case、传递模块摘要和计时；失败不把已登记但未执行的 case 标成通过。
 这些小合同入口还需按改动补充独立行为回归，不能当作完整领域覆盖。
 
+## Node 行为场景
+
+同一 `web_contracts.mjs` 入口按 `tests/frontend/*.test.cjs` 的文件名选择 Node suite，例如：
+
+```text
+node tooling/web_contracts.mjs --root <源码根> --modules <上述modules> --suite frontend-session --suite native-close --output <新空报告目录>
+```
+
+去掉 `.test.cjs` 后的文件名就是 suite；不维护第二份方法数量清单。Node 场景独立进程执行，
+不启动真实 Electron。TypeScript 来自显式 modules；临时文件进入本次报告子目录。
+每个 suite 保留原生事件，统一回执记录实际结果；零测试、skip/todo、取消、超时或失败均拒绝 PASS。
+源码输入包含所选测试、Web/桌面源码范围、入口和依赖锁；此范围用于绑定输入，不表示全部源码均有测试覆盖。
+响应式 TypeScript suite 与 Node suite 可在同一命令中选择，各执行一次。
+
 ## 浏览器
 
 ```text

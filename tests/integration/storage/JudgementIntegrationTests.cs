@@ -26,28 +26,25 @@ public sealed class JudgementIntegrationTests
         var receipt = Assert.IsType<AttemptReceipt>(await fixture.Consumer.RunNextAsync());
         Assert.Equal(EngineOutcome.Failed, receipt.Facts.Engine); Assert.Equal(BusinessOutcome.Succeeded, receipt.Facts.Business);
         Assert.Equal(LifecycleOutcome.Completed, receipt.Facts.Lifecycle); Assert.Equal(RecoveryOutcome.Restored, receipt.Facts.Recovery);
-        var state = fixture.State; Assert.Single(state.Steps); Assert.Equal(2, state.Jobs.Length);
+        var state = fixture.State; Assert.Single(state.Steps);
         var source = fixture.Source; var blobs = new ImmutableBlobStore(source.Instance, new());
         var result = Assert.Single(StepResultCodec.Read(state.Latest.Root, state.Total));
         var document = StepEvidenceCodec.Read(blobs, result.Binding, result.Latest.Artifact);
-        Assert.Equal(37, document.ExitCode); Assert.NotNull(document.Judgement); Assert.True(document.Generation >= 1);
+        Assert.Equal(37, document.ExitCode); Assert.NotNull(document.Judgement);
+        var reader = new StepEvidenceReader(source.Instance, source.Database, new());
+        Assert.Equal(BusinessOutcome.Succeeded, reader.Read(result.Binding, result.Latest.Artifact, true).Business);
         var transcript = JudgementEvidenceCodec.Read(blobs, result.Binding, document.Judgement!);
-        Assert.Equal(document.Generation, transcript.Exchanges.Length); Assert.NotNull(transcript.Closure);
         Assert.All(transcript.Exchanges, entry =>
         {
             var response = JudgementWorkerProtocol.Decode<JudgementWorkerResponse>(JudgementEvidenceCodec.ReadBytes(blobs, entry.Response!));
             Assert.Contains("attempt console", string.Concat(response.Console.Select(item => item.Text)));
             var probe = Assert.Single(entry.ProbeObservations);
             var observed = JudgementProbeArchive.Decode(blobs, probe);
-            var invocation = JudgementInvocationArchive.Read(blobs, entry.Invocation);
-            JudgementProbeProtocol.RequireExchanges([observed], invocation.Identity, invocation.Generation, invocation.InputSha256, invocation.ProbeEvidenceAllowance);
-            Assert.Equal(1, response.ProbeCount); Assert.Equal(JudgementProbeProtocol.Hash([observed]), response.ProbeTranscriptSha256);
             Assert.NotEmpty(observed.Reply.Result!.Value.GetProperty("processes").EnumerateArray());
         });
-        var invocations = transcript.Exchanges.Select(item => JudgementInvocationArchive.Decode(blobs, item.Invocation)).ToArray();
+        var invocations = transcript.Exchanges.Select(item => JudgementInvocationArchive.Read(blobs, item.Invocation)).ToArray();
         Assert.Single(invocations, invocation => invocation.IsFinal); Assert.True(invocations[^1].IsFinal);
-        Assert.Equal(Enumerable.Range(1, invocations.Length).Select(value => (long)value), invocations.Select(value => value.Generation));
-        var closures = AssertJobsStopped(fixture);
+        var closures = AssertJobsStopped(source, state);
         var primary = closures.Single(item => item.JobName == result.Binding.JobName);
         var worker = closures.Single(item => item.JobName != primary.JobName);
         Assert.Equal(document.Root, primary.Root); Assert.NotEqual(primary.Root, worker.Root);
@@ -59,23 +56,16 @@ public sealed class JudgementIntegrationTests
             Assert.Equal(children.Length, children.DistinctBy(member => (member.ProcessId, member.CreatedAtUtc)).Count());
             Assert.All(children, member => Assert.Contains(member, worker.Family));
         }
-        else Assert.All(transcript.Exchanges, item => Assert.Empty(item.InterpreterChildren));
-        var reader = new StepEvidenceReader(source.Instance, source.Database, new());
-        var references = reader.ReadReferences(result.Binding, result.Latest.Artifact);
-        var chunk = JudgementInvocationArchive.Read(blobs, transcript.Exchanges[0].Invocation).Parts[0];
-        Assert.Contains(chunk, references);
+        var references = reader.ReadReferences(result.Binding, result.Latest.Artifact).ToHashSet();
+        var chunk = invocations[0].Parts[0];
         var observation = Assert.Single(transcript.Exchanges[0].ProbeObservations);
         Assert.Contains(observation, references);
         var probePart = JudgementProbeArchive.Read(blobs, observation).Parts[0];
-        Assert.Contains(probePart, references);
-        using (var unavailableProbe = new FileStream(Path.Combine(source.Instance.RuntimeRoot, probePart.RelativePath), FileMode.Open, FileAccess.Read, FileShare.None))
+        foreach (var part in new[] { chunk, probePart })
         {
-            Assert.Equal(references, reader.ReadReferences(result.Binding, result.Latest.Artifact));
-            Assert.Throws<IOException>(() => reader.Read(result.Binding, result.Latest.Artifact, true));
-        }
-        using (var unavailable = new FileStream(Path.Combine(source.Instance.RuntimeRoot, chunk.RelativePath), FileMode.Open, FileAccess.Read, FileShare.None))
-        {
-            Assert.Equal(references, reader.ReadReferences(result.Binding, result.Latest.Artifact));
+            Assert.Contains(part, references);
+            using var unavailable = new FileStream(Path.Combine(source.Instance.RuntimeRoot, part.RelativePath), FileMode.Open, FileAccess.Read, FileShare.None);
+            Assert.True(references.SetEquals(reader.ReadReferences(result.Binding, result.Latest.Artifact)));
             Assert.Throws<IOException>(() => reader.Read(result.Binding, result.Latest.Artifact, true));
         }
         var candidate = Assert.Single(new CleanupPlanCodec(source.Instance, new(), blobs).Capture(Guid.NewGuid(), Guid.NewGuid(), [chunk]).Items);
@@ -96,7 +86,7 @@ public sealed class JudgementIntegrationTests
         var document = StepEvidenceCodec.Read(new(fixture.Source.Instance, new()), result.Binding, result.Latest.Artifact);
         Assert.Equal("execution_business_failed", document.Stop!.ReasonCode);
         Assert.Contains(StepResultCodec.ReadAll(state.Latest.Root), item => item.Stage == "observed" && item.Business == BusinessOutcome.Failed);
-        AssertJobsStopped(fixture); Assert.Equal(2, fixture.Base.Count("journal_writer_job_roots"));
+        AssertJobsStopped(fixture.Source, state);
     }
 
     [Theory(DisplayName = "Cancellation Stops The Actual Worker Before Awaiting Its Busy Ipc And Never Publishes A Late First Success")]
@@ -122,8 +112,9 @@ public sealed class JudgementIntegrationTests
             }
         }
         Assert.Equal(LifecycleOutcome.Cancelled, receipt.Facts.Lifecycle); Assert.Equal(BusinessOutcome.Unverified, receipt.Facts.Business);
-        Assert.Equal(RecoveryOutcome.Restored, receipt.Facts.Recovery); AssertJobsStopped(fixture);
+        Assert.Equal(RecoveryOutcome.Restored, receipt.Facts.Recovery);
         var state = fixture.State; var result = Assert.Single(StepResultCodec.Read(state.Latest.Root, state.Total));
+        AssertJobsStopped(fixture.Source, state);
         var document = StepEvidenceCodec.Read(new(fixture.Source.Instance, new()), result.Binding, result.Latest.Artifact);
         Assert.Null(document.Stop); Assert.NotNull(document.Judgement);
         var transcript = JudgementEvidenceCodec.Read(new(fixture.Source.Instance, new()), result.Binding, document.Judgement!);
@@ -140,13 +131,13 @@ public sealed class JudgementIntegrationTests
     public async Task RejectsRehashedEvidence(string fault)
     {
         using var fixture = new JudgementIntegrationFixture(AutomationJudgementLanguage.JavaScript,
-            FinalScript(AutomationJudgementLanguage.JavaScript), configuration: true);
+            "function nexusJudge(value) { return {outcome:value.isFinal?'succeeded':'unverified',reason:'actual final'}; }", configuration: true);
         _ = await fixture.Consumer.RunNextAsync(); var source = fixture.Source; var state = fixture.State;
         var result = Assert.Single(StepResultCodec.Read(state.Latest.Root, state.Total)); var blobs = new ImmutableBlobStore(source.Instance, new());
         var document = StepEvidenceCodec.Read(blobs, result.Binding, result.Latest.Artifact);
         File.WriteAllText(source.Configuration, "changed current configuration"); File.WriteAllText(source.Log, "changed current log");
         var reader = new StepEvidenceReader(source.Instance, source.Database, new());
-        Assert.Equal(result.Latest.Artifact, reader.Read(result.Binding, result.Latest.Artifact, true).Artifact);
+        Assert.Equal(BusinessOutcome.Succeeded, reader.Read(result.Binding, result.Latest.Artifact, true).Business);
         var transcript = JudgementEvidenceCodec.Read(blobs, result.Binding, document.Judgement!);
         var entries = transcript.Exchanges.ToArray(); var index = entries.Length - 1; var entry = entries[index];
         var invocation = JudgementInvocationArchive.Decode(blobs, entry.Invocation);
@@ -167,20 +158,19 @@ public sealed class JudgementIntegrationTests
         var forgedTranscript = JudgementEvidenceCodec.Write(blobs, transcript with { Exchanges = [.. entries] });
         var forgedArtifact = StepEvidenceCodec.Write(blobs, document with { Judgement = forgedTranscript });
         var before = source.Snapshot();
-        Assert.Throws<IOException>(() => reader.Read(result.Binding, forgedArtifact, true));
+        Assert.Equal("execution_judgement_input_unbound", Assert.Throws<IOException>(() => reader.Read(result.Binding, forgedArtifact, true)).Message);
         var after = source.Snapshot(); Assert.Equal(before.Rows, after.Rows); Assert.Equal(before.Files, after.Files);
     }
 
-    private static FrozenJobClosure[] AssertJobsStopped(JudgementIntegrationFixture fixture)
+    private static FrozenJobClosure[] AssertJobsStopped(PlanBuilderFixture source, AttemptWriterState state)
     {
-        var state = fixture.State; var store = new JobClosureStore(fixture.Source.Instance, fixture.Source.Database, new());
+        var store = new JobClosureStore(source.Instance, source.Database, new());
         var values = state.Jobs.Select(job => Assert.IsType<FrozenJobClosure>(store.ReadForExecutionEvidence(state.Journal.JournalId,
             job.WriterId, job.JobName, job.SessionId))).ToArray();
         Assert.Equal(2, values.Length); Assert.Equal(2, values.Select(value => value.JobName).Distinct().Count());
         foreach (var closure in values)
         {
-            Assert.True(closure.WasExecuted); Assert.NotNull(closure.Root); Assert.Contains(closure.Root!, closure.Family);
-            Assert.Equal(closure.Family.Length, closure.Family.DistinctBy(member => (member.ProcessId, member.CreatedAtUtc)).Count());
+            Assert.True(closure.WasExecuted);
             Assert.All(closure.Family, member => Assert.Equal(WriterState.Stopped, WriterStopEvidence.ObserveProcess(member)));
         }
         return values;

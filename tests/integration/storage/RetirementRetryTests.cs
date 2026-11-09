@@ -25,15 +25,14 @@ public sealed class RetirementRetryTests
             new(source.Instance, source.Database, new()));
         projection.OnCommitted(second);
         new LogCatalogProjection(source.Instance, source.Database, new(), source.Lease).OnCommitted(first);
+        var catalog = new LogCatalogReader(source.Instance, source.Database, new());
+        var queries = new LogCatalogQuery[] { new(first.Facts.RunId, first.Facts.AttemptId), new(second.Facts.RunId, second.Facts.AttemptId) };
+        var original = queries.Select(query => Assert.Single(catalog.ReadPage(query).Items)).ToArray();
         var service = new ContentRetirementService(source.Instance, source.Database, new(), source.Lease, fixture.Base.Resources, fixture.Base.Index);
         Assert.NotNull(service.RetireLogsPage(Guid.NewGuid(), "retirement-fixture", second.Facts.RunId));
-        var catalog = new LogCatalogReader(source.Instance, source.Database, new());
-        Assert.All(catalog.ReadPage(new(first.Facts.RunId, first.Facts.AttemptId)).Items,
-            item => Assert.NotEqual(RecordContentAvailability.Available, item.ContentAvailability));
-        Assert.All(catalog.ReadPage(new(second.Facts.RunId, second.Facts.AttemptId)).Items,
-            item => Assert.NotEqual(RecordContentAvailability.Available, item.ContentAvailability));
-        Assert.Equal(first, new AttemptReceiptStore(source.Database).Read(first.Facts.AttemptId));
-        Assert.Equal(second, new AttemptReceiptStore(source.Database).Read(second.Facts.AttemptId));
-        Assert.Equal(1, fixture.Base.Count("run_records"));
+        Assert.Equal(original.Select(item => item with { ContentAvailability = RecordContentAvailability.Retired }),
+            queries.Select(query => Assert.Single(catalog.ReadPage(query).Items)));
+        Assert.Equal(new[] { first, second }, new AttemptHistoryReader(source.Database).ReadPage(new(second.Facts.RunId)).Items);
+        Assert.Equal(second.Facts, new RecordSummaryReader(source.Database).Read(second.Facts.RunId)?.FinalAttempt);
     }
 }

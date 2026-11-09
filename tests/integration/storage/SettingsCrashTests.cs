@@ -5,6 +5,7 @@ using System.Text.Json.Nodes;
 using Microsoft.Data.Sqlite;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Execution;
+using NexusPipeline.Core.Maintenance;
 using NexusPipeline.Core.Settings;
 using NexusPipeline.Platform.Processes;
 using NexusPipeline.Platform.Storage;
@@ -37,8 +38,8 @@ public sealed class SettingsCrashTests
         if (point != StartupEffectBoundary.Completed)
         {
             var before = Fingerprint(fixture.Instance.RuntimeRoot);
-            Assert.Throws<IOException>(() => StateDatabase.OpenExisting(fixture.Instance,
-                Path.Combine(fixture.Root, "live-diagnostics"), new JournalStartupAdmission(fixture.Instance, new())));
+            Assert.Equal("startup_effect_creator_not_stopped", Assert.Throws<IOException>(() => StateDatabase.OpenExisting(fixture.Instance,
+                Path.Combine(fixture.Root, "live-diagnostics"), new JournalStartupAdmission(fixture.Instance, new()))).Message);
             Assert.Equal(before, Fingerprint(fixture.Instance.RuntimeRoot));
         }
         var stopped = await fixture.Owner.StopAsync();
@@ -47,21 +48,20 @@ public sealed class SettingsCrashTests
         Assert.Equal(WriterState.Stopped, WriterStopEvidence.ObserveProcess(new(stopped.Identity.ProcessId,
             stopped.Identity.CreatedAtUtc, stopped.Identity.ImagePath, stopped.Identity.ImageSha256, stopped.Identity.UserSid, stopped.Identity.IsElevated)));
         var beforeTask = File.Exists(fixture.TaskPath) ? PhysicalObjectIdentity.Read(fixture.TaskPath) : null;
+        Assert.Equal(enable == completes, beforeTask is not null);
+        var beforeBytes = beforeTask is null ? null : File.ReadAllBytes(fixture.TaskPath);
         using var lease = InstanceLease.Acquire(fixture.Instance, new());
         var database = StateDatabase.OpenExisting(fixture.Instance, Path.Combine(fixture.Root, "stopped-diagnostics"), new JournalStartupAdmission(fixture.Instance, new()));
         var index = new StartupJournalRecovery(fixture.Instance, new(), database, new(fixture.Root, Path.Combine(fixture.Instance.RuntimeRoot, "extensions"))).Recover(lease);
         var inspector = new ControlledStartupRegistration(fixture.TaskPath)
             { BeforeMutation = () => throw new InvalidOperationException("Recovery must never call an external mutation") };
+        var state = completes ? StartupEffectState.Completed : StartupEffectState.Quarantined;
         for (var round = 0; round < 2; round++)
         {
             StartupRegistrationCoordinator.ReconcileStopped(fixture.Instance, database, lease, index, inspector);
-            var change = new HostSettingsChange(enable ? 0 : 1, HostSettings.Default with { AutoStart = enable });
-            var result = new HostSettingsStore(database).Commit(HostSettingsStore.Identity(fixture.OperationId, "fixture", change), change, DateTimeOffset.UtcNow);
-            Assert.False(result.IsNew);
-            Assert.Equal(completes ? StartupEffectState.Completed : StartupEffectState.Quarantined, result.StartupEffect!.State);
-            Assert.Equal(enable, new HostSettingsStore(database).Read().Values.AutoStart);
-            Assert.Equal(completes ? 0 : 2, index.Current.ResourceHolds.Count);
+            AssertRecovered(fixture.OperationId, enable, state, database, index);
             Assert.Equal(beforeTask, File.Exists(fixture.TaskPath) ? PhysicalObjectIdentity.Read(fixture.TaskPath) : null);
+            if (beforeBytes is not null) Assert.Equal(beforeBytes, File.ReadAllBytes(fixture.TaskPath));
         }
     }
 
@@ -81,19 +81,36 @@ public sealed class SettingsCrashTests
             using var command = connection.CreateCommand();
             command.CommandText = "SELECT document FROM startup_registration_intents WHERE operation_id=$id;";
             command.Parameters.AddWithValue("$id", fixture.OperationId.ToString("D"));
-            var node = JsonNode.Parse((byte[])command.ExecuteScalar()!)!;
-            if (fault == "version") node["version"] = 2;
-            else if (fault == "creator") node["creator"]!["processId"] = 0;
-            else node["unexpected"] = true;
-            var bytes = JsonSerializer.SerializeToUtf8Bytes(node);
+            var source = (byte[])command.ExecuteScalar()!;
+            var bytes = FaultedIntent(source, fault);
             command.CommandText = "UPDATE startup_registration_intents SET document=$document,document_digest=$digest WHERE operation_id=$id;";
             command.Parameters.AddWithValue("$document", bytes);
             command.Parameters.AddWithValue("$digest", Convert.ToHexStringLower(SHA256.HashData(bytes)));
             command.ExecuteNonQuery();
         }
         var before = Fingerprint(fixture.Instance.RuntimeRoot);
-        Assert.Throws<IOException>(() => StateDatabase.OpenExisting(fixture.Instance, Path.Combine(fixture.Root, "rejected"), new JournalStartupAdmission(fixture.Instance, new())));
+        var reason = fault switch
+        {
+            "version" => "startup_intent_identity_invalid",
+            "creator" => "startup_intent_creator_unbound",
+            _ => "startup_intent_document_unknown"
+        };
+        Assert.Equal(reason, Assert.Throws<IOException>(() => StateDatabase.OpenExisting(fixture.Instance,
+            Path.Combine(fixture.Root, "rejected"), new JournalStartupAdmission(fixture.Instance, new()))).Message);
         Assert.Equal(before, Fingerprint(fixture.Instance.RuntimeRoot));
+    }
+
+    private static byte[] FaultedIntent(byte[] source, string fault)
+    {
+        if (fault == "extra")
+        {
+            var node = JsonNode.Parse(source)!;
+            node["unexpected"] = true;
+            return JsonSerializer.SerializeToUtf8Bytes(node);
+        }
+        var intent = JsonSerializer.Deserialize<StartupIntentDocument>(source, JsonSerializerOptions.Web)!;
+        var changed = fault == "version" ? intent with { Version = 2 } : intent with { Creator = intent.Creator with { ProcessId = 0 } };
+        return JsonSerializer.SerializeToUtf8Bytes(changed, JsonSerializerOptions.Web);
     }
 
     [Fact(DisplayName = "A Changed External Startup Registration Is Quarantined Without Touching Its Bytes")]
@@ -112,7 +129,20 @@ public sealed class SettingsCrashTests
         StartupRegistrationCoordinator.ReconcileStopped(fixture.Instance, database, lease, index, inspector);
         Assert.Equal(original, PhysicalObjectIdentity.Read(fixture.TaskPath));
         Assert.Equal(new byte[] { 91, 0, 8 }, File.ReadAllBytes(fixture.TaskPath));
-        Assert.Equal(2, index.Current.ResourceHolds.Count);
+        AssertRecovered(fixture.OperationId, true, StartupEffectState.Quarantined, database, index);
+    }
+
+    private static void AssertRecovered(Guid operationId, bool enable, StartupEffectState state, StateDatabase database, RecoveryIndex index)
+    {
+        var change = new HostSettingsChange(enable ? 0 : 1, HostSettings.Default with { AutoStart = enable });
+        var store = new HostSettingsStore(database);
+        var identity = HostSettingsStore.Identity(operationId, "fixture", change);
+        var expected = new SettingsSaveResult(operationId, new(change.ExpectedRevision + 1, change.Values), false)
+            { StartupEffect = new(operationId, change.ExpectedRevision + 1, enable, state) };
+        Assert.Equal(expected, store.Commit(identity, change, DateTimeOffset.UtcNow));
+        Assert.Equal(expected.Saved, store.Read());
+        RecoveryResourceHold[] holds = state == StartupEffectState.Completed ? [] : SettingsStartupTests.StartupHolds(operationId);
+        Assert.Equal(holds, index.Current.ResourceHolds);
     }
 
     private static async Task<Fixture> Start(StartupEffectBoundary boundary, bool enable)
@@ -123,9 +153,13 @@ public sealed class SettingsCrashTests
         var owner = new OwnedCrashProcess();
         try
         {
-            owner.Start(["startup-registration", root, boundary.ToString(), enable.ToString(), report], root, Guid.NewGuid(), Guid.NewGuid(), Path.Combine(root, "process.json"));
+            var identity = owner.Start(["startup-registration", root, boundary.ToString(), enable.ToString(), report],
+                root, Guid.NewGuid(), Guid.NewGuid(), Path.Combine(root, "process.json"));
             var ready = await OwnedCrashProcess.ReadReportAsync(report);
             Assert.Equal("faultReady", ready.GetProperty("status").GetString());
+            Assert.Equal(identity.ProcessId, ready.GetProperty("processId").GetInt32());
+            Assert.Equal(boundary.ToString(), ready.GetProperty("boundary").GetString());
+            Assert.Equal(enable, ready.GetProperty("enable").GetBoolean());
             return new(root, ready.GetProperty("instance").Deserialize<RuntimeInstance>()!, ready.GetProperty("operationId").GetGuid(),
                 ready.GetProperty("taskPath").GetString()!, owner);
         }

@@ -9,6 +9,7 @@ using NexusPipeline.Core.Operations;
 using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Configuration;
 using NexusPipeline.Platform.Storage.Journals;
+using NexusPipeline.Platform.Storage.Operations;
 using NexusPipeline.Platform.Storage.Sqlite;
 using Xunit;
 
@@ -88,12 +89,17 @@ public sealed class EditControllerTests
     public async Task RejectsChangedBegins()
     {
         await using var fixture = new EditControllerFixture(); var pid = await fixture.BeginAsync();
+        var original = fixture.Controller.Read(fixture.SessionId, "fixture")!;
         var changed = fixture.Request with { Editor = fixture.Request.Editor! with { Arguments = fixture.Request.Editor.Arguments.Add("different") } };
         await Assert.ThrowsAsync<OperationConflictException>(() => fixture.Controller.BeginAsync(fixture.SessionId, "fixture", changed, DateTimeOffset.UtcNow));
         Assert.Equal(ConfigurationEditPhase.Editing, fixture.Controller.Read(fixture.SessionId, "fixture")!.Phase);
         using var process = Process.GetProcessById(pid); Assert.False(process.HasExited);
-        Assert.False((await fixture.Controller.BeginAsync(fixture.SessionId, "fixture", fixture.Request, DateTimeOffset.UtcNow)).IsNew);
-        Assert.Equal(2, fixture.Base.Count("journal_writer_job_roots"));
+        var replay = await fixture.Controller.BeginAsync(fixture.SessionId, "fixture", fixture.Request, DateTimeOffset.UtcNow);
+        Assert.False(replay.IsNew);
+        Assert.Equal(original.SessionId, replay.SessionId); Assert.Equal(original.Revision, replay.Revision);
+        Assert.Equal(original.Resources.ToArray(), replay.Resources.ToArray());
+        Assert.False(process.HasExited);
+        Assert.Equal(pid, (await OwnedCrashProcess.ReadReportAsync(fixture.ReportPath)).GetProperty("processId").GetInt32());
     }
 
     [Theory(DisplayName = "Invalid Completion Identity Cannot Stop The Editor Or Change Any Accepted Session")]
@@ -151,20 +157,50 @@ public sealed class EditControllerTests
         using var file = new FileStream(fixture.Request.Targets[0].TargetPath, FileMode.Open, FileAccess.Read, FileShare.Read);
         await Assert.ThrowsAsync<IOException>(() => fixture.Controller.BeginAsync(fixture.SessionId, "fixture", fixture.Request, DateTimeOffset.UtcNow));
         Assert.Equal(ConfigurationEditPhase.Cancelled, fixture.Controller.Read(fixture.SessionId, "fixture")!.Phase);
-        Assert.Equal(0, fixture.Base.Count("journal_writer_job_roots")); Assert.Empty(fixture.Index.Current.ResourceHolds); fixture.VerifyOriginals();
+        Assert.False(File.Exists(fixture.ReportPath)); Assert.Empty(fixture.Index.Current.ResourceHolds); fixture.VerifyOriginals();
     }
 
     [Fact(DisplayName = "A Failed Final Save Keeps The Restored Session And Retained Lease And Retries Without Starting Another Writer")]
     public async Task ReplaysFailedSave()
     {
-        await using var fixture = new EditControllerFixture(); await fixture.BeginAsync(); var operation = Guid.NewGuid();
+        await using var fixture = new EditControllerFixture(); var pid = await fixture.BeginAsync(); var operation = Guid.NewGuid();
+        using var process = Process.GetProcessById(pid);
+        var session = fixture.Controller.Read(fixture.SessionId, "fixture")!;
+        var operations = new OperationQueryService(fixture.Base.Instance, fixture.Lease, fixture.Base.Database);
         fixture.Base.Execute("CREATE TRIGGER fixture_fail_controller BEFORE UPDATE ON configuration_edit_sessions WHEN NEW.phase=2 BEGIN SELECT RAISE(ABORT,'fixture_failure'); END;");
-        await Assert.ThrowsAsync<SqliteException>(() => fixture.Controller.SaveAsync(operation, "fixture", fixture.SessionId, 2, DateTimeOffset.UtcNow));
-        fixture.VerifyOriginals(); Assert.NotEmpty(fixture.Index.Current.ResourceHolds);
+        try
+        {
+            await Assert.ThrowsAsync<SqliteException>(() => fixture.Controller.SaveAsync(operation, "fixture", fixture.SessionId, 2, DateTimeOffset.UtcNow));
+        }
+        finally { fixture.Base.Execute("DROP TRIGGER fixture_fail_controller;"); }
+        Assert.True(process.HasExited);
+        Assert.Null(operations.Read(operation, "fixture"));
+        fixture.VerifyOriginals();
+        var holds = fixture.Index.Current.ResourceHolds;
+        Assert.All(holds, hold => Assert.Equal(fixture.SessionId, hold.OperationId));
+        foreach (var target in fixture.Request.Targets)
+            Assert.Contains(holds, hold => hold.ResourceKey == ConfigurationRevisionService.ResourceKey(target.Address));
         Assert.All(fixture.Request.Targets, target => Assert.Equal(1, fixture.Base.Revisions.Read(target.Address)!.Revision));
-        var roots = fixture.Base.Count("journal_writer_job_roots"); fixture.Base.Execute("DROP TRIGGER fixture_fail_controller;");
-        Assert.True((await fixture.Controller.SaveAsync(operation, "fixture", fixture.SessionId, 2, DateTimeOffset.UtcNow)).IsNew);
-        Assert.Equal(roots, fixture.Base.Count("journal_writer_job_roots")); Assert.Empty(fixture.Index.Current.ResourceHolds);
+        var journals = new JournalStore(fixture.Base.Instance, new());
+        var restored = session.Resources.Select(resource => journals.Read(resource.JournalId)).ToArray();
+        Assert.All(restored, journal => Assert.Equal(JournalPhase.Committed, journal.Phase));
+        var saved = await fixture.Controller.SaveAsync(operation, "fixture", fixture.SessionId, 2, DateTimeOffset.UtcNow);
+        Assert.True(saved.IsNew); Assert.Equal(operation, saved.OperationId);
+        var completed = fixture.Controller.Read(fixture.SessionId, "fixture")!;
+        Assert.Equal(ConfigurationEditPhase.Saved, completed.Phase); Assert.Equal(operation, completed.CompletionOperationId);
+        Assert.Equal("completed", operations.Read(operation, "fixture")!.Status);
+        foreach (var target in fixture.Request.Targets)
+        {
+            var item = Assert.Single(saved.Items, item => item.Saved.Address == target.Address);
+            var current = fixture.Base.Revisions.Read(target.Address)!;
+            Assert.Equal(2, current.Revision); Assert.Equal(item.Saved.Tree.Entries, current.Tree.Entries);
+        }
+        foreach (var original in restored) Assert.Equal(original.Export(), journals.Read(original.JournalId).Export());
+        Assert.Equal(pid, (await OwnedCrashProcess.ReadReportAsync(fixture.ReportPath)).GetProperty("processId").GetInt32());
+        Assert.Empty(fixture.Index.Current.ResourceHolds);
+        var claims = fixture.Request.Targets.SelectMany(target => ConfigurationRevisionService.Claims(target.Address)).Distinct().ToArray();
+        using var acquired = fixture.Resources.TryAcquire(Guid.NewGuid(), claims).Lease;
+        Assert.NotNull(acquired);
     }
 
     [Theory(DisplayName = "Multiple Hard Linked Original Files Or Descendants Are Rejected Before Accepting Any Edit Or Starting Its Writer")]
@@ -182,7 +218,7 @@ public sealed class EditControllerTests
         Assert.Equal("configuration_multiple_links_rejected", (await Assert.ThrowsAsync<IOException>(() => fixture.Controller.BeginAsync(
             fixture.SessionId, "fixture", fixture.Request, DateTimeOffset.UtcNow))).Message);
         Assert.Equal(before, File.ReadAllBytes(alias)); Assert.Null(fixture.Controller.Read(fixture.SessionId, "fixture"));
-        Assert.Equal(0, fixture.Base.Count("journal_writer_job_roots")); fixture.VerifyOriginals();
+        Assert.False(File.Exists(fixture.ReportPath)); fixture.VerifyOriginals();
     }
 
     [Fact(DisplayName = "A New Alias To An Already Installed Candidate Cannot Become Another Scripts Editable Original")]

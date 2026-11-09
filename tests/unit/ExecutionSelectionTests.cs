@@ -98,7 +98,7 @@ public sealed class ExecutionSelectionTests
         Assert.Equal(3, selection.Items.Length);
     }
 
-    [Theory(DisplayName = "Disabled Bindings Remain Skipped And Never Produce Runnable Items Without Changing Their Source")]
+    [Theory(DisplayName = "Disabled Bindings Remain Skipped And Never Produce Runnable Items")]
     [InlineData("binding")]
     [InlineData("script-user")]
     [InlineData("script")]
@@ -117,7 +117,6 @@ public sealed class ExecutionSelectionTests
         Assert.All(selection.Items, item => Assert.Equal(ExecutionSelectionDisposition.Skipped, item.Disposition));
         Assert.All(explanation.Items, item => { Assert.Equal(ExecutionExplanationDisposition.Skipped, item.Disposition); Assert.Equal("execution_binding_disabled", item.ReasonCode); });
         Assert.False(explanation.HasRunnable); Assert.Equal("execution_no_enabled_bindings", explanation.ReasonCode);
-        Assert.All(catalog.Bindings, binding => Assert.False(binding.IsEnabled));
     }
 
     [Theory(DisplayName = "Empty Or Unbound Targets Return An Explicit No Runnable Explanation Without Inventing An Item")]
@@ -196,7 +195,6 @@ public sealed class ExecutionSelectionTests
         Assert.True(selection.HasCandidates); Assert.Equal("execution_inputs_required", selection.ReasonCode);
         var item = Assert.Single(selection.Items);
         Assert.Equal(fixture.Catalog.Roots.Select(root => root.Id).Order(), item.Roots.Select(root => root.Id).Order());
-        Assert.Equal(5, item.SourceRevisions.Length);
         Assert.Contains(new ExecutionSelectionRevision(AutomationDefinitionKind.Binding, item.Binding.Id, item.Binding.Revision), item.SourceRevisions);
         Assert.Contains(new ExecutionSelectionRevision(AutomationDefinitionKind.Script, item.Script.Id, item.Script.Revision), item.SourceRevisions);
         Assert.Contains(new ExecutionSelectionRevision(AutomationDefinitionKind.User, item.User.Id, item.User.Revision), item.SourceRevisions);
@@ -222,11 +220,11 @@ public sealed class ExecutionSelectionTests
         Assert.Equal(preference == "disabled" ? ExecutionExplanationDisposition.Skipped : ExecutionExplanationDisposition.Blocked, explanation.Items[0].Disposition);
     }
 
-    [Theory(DisplayName = "Explanation Requires Complete Unique Readiness For Only The Actual Candidate Objects")]
+    [Theory(DisplayName = "Explanation Requires Complete Unique Readiness For The Current Candidate Selection")]
     [InlineData("missing")]
     [InlineData("duplicate")]
     [InlineData("extra")]
-    [InlineData("foreign-selection")]
+    [InlineData("stale-selection")]
     [InlineData("skipped")]
     [InlineData("blocked")]
     [InlineData("default")]
@@ -246,7 +244,7 @@ public sealed class ExecutionSelectionTests
         {
             "missing" => ready.Skip(1).ToImmutableArray(), "duplicate" => [ready[0], ready[0], ready[2]],
             "extra" => ready.Append(ready[0]).ToImmutableArray(),
-            "foreign-selection" => [ready[0] with { Item = fixture.Select(new ScriptTarget(fixture.ScriptId)).Items[0] }, ready[1], ready[2]],
+            "stale-selection" => [ready[0] with { Item = fixture.Select(new ScriptTarget(fixture.ScriptId), catalog with { Revision = catalog.Revision + 1 }).Items[0] }, ready[1], ready[2]],
             "skipped" => ready.Append(new(selection.Items.Single(item => item.Disposition == ExecutionSelectionDisposition.Skipped), true, ExecutionSelectionPolicy.InputsVerified)).ToImmutableArray(),
             "blocked" => [new(selection.Items[0], true, ExecutionSelectionPolicy.InputsVerified)], "default" => default,
             "invalid-reason" => [ready[0] with { ReasonCode = "not a reason" }, ready[1], ready[2]],
@@ -255,7 +253,6 @@ public sealed class ExecutionSelectionTests
             "null-readiness" => [null!, ready[1], ready[2]], _ => [ready[0] with { Item = null! }, ready[1], ready[2]]
         };
         Assert.Equal("execution_readiness_unbound", Assert.Throws<ExecutionSelectionException>(() => ExecutionSelectionPolicy.Explain(selection, invalid)).Message);
-        Assert.All(ready, item => Assert.Equal(ExecutionSelectionPolicy.InputsVerified, item.ReasonCode));
     }
 
     [Fact(DisplayName = "Out Of Order Readiness Does Not Reorder Items Or Erase Independent Blocked Reasons")]

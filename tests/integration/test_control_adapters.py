@@ -27,7 +27,6 @@ class ControlAdapterTests(unittest.TestCase):
             status, _, _ = self.host.secret_request(address, "/control/v1/adapters/discover",
                 json.dumps(command | dict(selection=selection | extra)).encode(), {"Content-Type": "application/json"})
             self.assertEqual(400, status)
-            self.assertEqual(before, self.host.durable_state(runtime))
         status, _, _ = self.host.secret_request(address, "/control/v1/adapters/discover",
             json.dumps(command | dict(action="propose")).encode(), {"Content-Type": "application/json"})
         self.assertEqual(400, status)

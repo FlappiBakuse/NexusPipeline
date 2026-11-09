@@ -1,12 +1,14 @@
 import io
 import json
+import os
 from pathlib import Path
 import struct
 import sys
+import tempfile
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'tooling'))
-from dotnet_bundle import MARKER, read_bundle, read_member, verify_publish
+from dotnet_bundle import MARKER, verify_publish
 
 
 class BundleTests(unittest.TestCase):
@@ -31,7 +33,7 @@ class BundleTests(unittest.TestCase):
             self.assertLess(len(raw), 128)
             stream.write(bytes([len(raw)]) + raw)
         add('NexusPipeline.Host.dll', 1, b'MZ-managed')
-        add('NexusPipeline.Extensibility.dll', 1, b'fixed-sdk')
+        add('NexusPipeline.Extensibility.dll', 2 if fault == 'sdk-kind' else 1, b'fixed-sdk')
         add('NexusPipeline.Host.deps.json', 3, b'{}')
         frameworks = [{'name': name, 'version': '10.0.13'} for name in ('Microsoft.NETCore.App', 'Microsoft.AspNetCore.App')]
         config = {'runtimeOptions': {'frameworks': frameworks}}
@@ -59,27 +61,25 @@ class BundleTests(unittest.TestCase):
             raw[400] = 0
         return bytes(raw[:-2] if fault == 'truncated' else raw)
 
-    def test_reads_members(self):
-        stream = io.BytesIO(self.bundle())
-        files = read_bundle(stream)
-        self.assertEqual(4, len(files))
-        self.assertEqual(b'fixed-sdk', read_member(stream, files, 'NexusPipeline.Extensibility.dll', 1))
-        with self.assertRaises(ValueError):
-            read_member(stream, files, 'NexusPipeline.Extensibility.dll', 4)
+    def inspect_publish(self, fault='', sdk=b'fixed-sdk'):
+        with tempfile.TemporaryDirectory(dir=os.environ['NEXUS_TEST_ROOT']) as directory:
+            path = Path(directory) / 'NexusPipeline.Host.exe'
+            path.write_bytes(self.bundle(fault))
+            return verify_publish(path, 'Host', sdk)
 
     def test_rejects_metadata(self):
-        for fault in ('marker', 'version', 'outside', 'overlap', 'duplicate', 'compressed', 'path', 'config', 'truncated'):
-            with self.subTest(fault=fault), self.assertRaises(ValueError):
-                read_bundle(io.BytesIO(self.bundle(fault)))
+        for fault, reason in (('marker', 'bundle marker'), ('version', 'bundle version/count'), ('outside', 'member identity/range'),
+                ('overlap', 'overlapping members'), ('duplicate', 'member identity/range'), ('compressed', 'member identity/range'),
+                ('path', 'member path'), ('config', 'configuration binding'), ('truncated', 'truncated input')):
+            with self.subTest(fault=fault), self.assertRaisesRegex(ValueError, reason):
+                self.inspect_publish(fault)
 
     def test_binds_publish(self):
-        class Published:
-            def __init__(self, raw):
-                self.raw = raw
-            def open(self, mode):
-                return io.BytesIO(self.raw)
-        result = verify_publish(Published(self.bundle()), 'Host', b'fixed-sdk')
-        self.assertEqual(4, result['memberCount'])
-        for raw, sdk in ((self.bundle(), b'other-sdk'), (self.bundle('self-contained'), b'fixed-sdk')):
-            with self.assertRaises(ValueError):
-                verify_publish(Published(raw), 'Host', sdk)
+        result = self.inspect_publish()
+        self.assertEqual({'Microsoft.NETCore.App': '10.0.13', 'Microsoft.AspNetCore.App': '10.0.13'},
+                         {item['name']: item['version'] for item in result['frameworks']})
+        for fault, sdk, reason in (('', b'other-sdk', 'shared SDK producer bytes'),
+                ('sdk-kind', b'fixed-sdk', r'required member: NexusPipeline\.Extensibility\.dll'),
+                ('self-contained', b'fixed-sdk', 'framework-dependent runtime')):
+            with self.subTest(fault=fault, reason=reason), self.assertRaisesRegex(ValueError, reason):
+                self.inspect_publish(fault, sdk)

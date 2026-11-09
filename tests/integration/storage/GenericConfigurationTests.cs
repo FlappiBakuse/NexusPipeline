@@ -5,6 +5,7 @@ using NexusPipeline.Core.Execution;
 using NexusPipeline.Platform.Storage.Configuration;
 using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Automation;
+using NexusPipeline.Platform.Storage.Execution;
 using Xunit;
 
 namespace NexusPipeline.StorageTests;
@@ -65,7 +66,7 @@ public sealed class GenericConfigurationTests
         var before = fixture.Snapshot();
         using var draft = fixture.Prepare(new BindingTarget(binding.Id));
         Assert.Equal(allowed, draft.Explanation.HasRunnable); Assert.Equal(!allowed, draft.Explanation.HasBlockedItems);
-        if (allowed) Assert.Equal(count, Assert.IsType<NexusPipeline.Platform.Storage.Execution.FrozenExecutionPlan>(draft.ReadPlan()).ReadWire().ConfigurationSlots.Count);
+        if (allowed) Assert.Equal(count, Assert.IsType<FrozenExecutionPlan>(draft.ReadPlan()).ReadWire().ConfigurationSlots.Count);
         else Assert.Equal("execution_configuration_resource_limit", Assert.Single(draft.Explanation.Items).ReasonCode);
         AssertUnchanged(fixture, before);
     }
@@ -90,15 +91,13 @@ public sealed class GenericConfigurationTests
     {
         var root = Guid.Parse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
         var path = new AutomationPath(root, "configs/设置.json");
-        var contract = GenericConfigurationPolicy.Contract(path);
-        Assert.Equal("generic-" + contract.DefinitionSha256, GenericConfigurationPolicy.ResourceId(path));
-        Assert.Equal(GenericConfigurationPolicy.ResourceId(path), GenericConfigurationPolicy.ResourceId(new(root, path.RelativePath)));
-        Assert.NotEqual(GenericConfigurationPolicy.ResourceId(path), GenericConfigurationPolicy.ResourceId(path with { RootId = Guid.NewGuid() }));
-        Assert.NotEqual(GenericConfigurationPolicy.ResourceId(path), GenericConfigurationPolicy.ResourceId(path with { RelativePath = "other/设置.json" }));
-        Assert.Equal(1, contract.Revision); Assert.Null(contract.InstanceKey); Assert.False(contract.RequiresInstance);
+        var resource = GenericConfigurationPolicy.ResourceId(path);
+        Assert.Equal(resource, GenericConfigurationPolicy.ResourceId(new(root, path.RelativePath)));
+        Assert.NotEqual(resource, GenericConfigurationPolicy.ResourceId(path with { RootId = Guid.NewGuid() }));
+        Assert.NotEqual(resource, GenericConfigurationPolicy.ResourceId(path with { RelativePath = "other/设置.json" }));
     }
 
-    [Theory(DisplayName = "Invalid Portable Declarations Cannot Create Generic Resource Or Contract Identities")]
+    [Theory(DisplayName = "Invalid Portable Declarations Cannot Identify A Generic Configuration Resource")]
     [InlineData("empty-root")]
     [InlineData("empty-path")]
     [InlineData("parent")]
@@ -115,26 +114,32 @@ public sealed class GenericConfigurationTests
             { "empty-path" => "", "parent" => "../settings.json", "absolute" => "D:/settings.json", _ => "configs\\settings.json" })
         };
         Assert.Equal("configuration_generic_path_invalid", Assert.Throws<ConfigurationException>(() => GenericConfigurationPolicy.ResourceId(path!)).Message);
-        Assert.Equal("configuration_generic_path_invalid", Assert.Throws<ConfigurationException>(() => GenericConfigurationPolicy.Contract(path!)).Message);
     }
 
-    [Fact(DisplayName = "A Real Saved Generic Configuration Is Read Without Adopting Or Changing The Current External Site")]
+    [Fact(DisplayName = "Preview Is Read Only And Admission Selects The Saved Generic Configuration Bytes")]
     public void ReadsSavedConfiguration()
     {
-        using var fixture = new PlanBuilderFixture();
-        var catalog = fixture.Definitions.Read();
-        var script = catalog.Scripts.Single(script => script.Id == fixture.ScriptId);
-        var binding = catalog.Bindings.Single(binding => binding.Id == fixture.BindingA);
-        var store = new ConfigurationRevisionStore(fixture.Instance, fixture.Database, new());
-        File.WriteAllText(fixture.Configuration, "{\"externalChanged\":true}");
-        var before = fixture.Snapshot();
-        var saved = GenericConfigurationPolicy.RequireSaved(binding, script, script.ConfigurationPaths[0], store);
-        Assert.Equal(1, saved.Revision); Assert.Equal(binding.UserId, saved.UserId); Assert.Equal(script.Id, saved.ScriptId);
-        Assert.Equal(GenericConfigurationPolicy.Contract(script.ConfigurationPaths[0]), saved.Contract);
-        using var draft = fixture.Prepare(new BindingTarget(binding.Id));
-        Assert.True(draft.Explanation.HasRunnable); Assert.False(draft.Explanation.HasBlockedItems);
-        Assert.Equal("{\"externalChanged\":true}", File.ReadAllText(fixture.Configuration));
-        AssertUnchanged(fixture, before);
+        using var fixture = new ExecutionAdmissionFixture();
+        var source = fixture.Source;
+        var original = File.ReadAllBytes(source.Configuration);
+        const string live = "{\"externalChanged\":true}";
+        File.WriteAllText(source.Configuration, live);
+        var before = source.Snapshot();
+        var request = source.Request(new BindingTarget(source.BindingA));
+        using (var draft = fixture.Service.DryRun(request, PlanBuilderFixture.CreatedAt))
+            Assert.Equal(1, Assert.Single(Assert.IsType<FrozenExecutionPlan>(draft.ReadPlan()).ReadWire().ConfigurationSlots).ExpectedRevision);
+        AssertUnchanged(source, before);
+
+        var operation = Guid.NewGuid();
+        fixture.Service.Start(operation, "saved-configuration", request, PlanBuilderFixture.CreatedAt);
+        using var accepted = fixture.Take(operation);
+        var candidate = Assert.Single(accepted.Prepared.Configurations.Values)
+            .Use(items => Assert.Single(Assert.Single(items).Plan.Candidate.Contents));
+        using var saved = new ImmutableBlobStore(source.Instance, new()).OpenVerified(candidate);
+        using var contents = new MemoryStream();
+        saved.CopyTo(contents);
+        Assert.Equal(original, contents.ToArray());
+        Assert.Equal(live, File.ReadAllText(source.Configuration));
     }
 
     [Theory(DisplayName = "Missing Saved Configuration Blocks A Single Binding And Skips Its Queue Items Without Adopting Live Files")]

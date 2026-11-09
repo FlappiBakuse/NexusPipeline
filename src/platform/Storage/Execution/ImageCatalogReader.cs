@@ -59,18 +59,6 @@ public sealed class ImageCatalogReader(RuntimeInstance instance, StateDatabase d
                 expected.ValidatedRead ?? throw ImageCatalogRows.Invalid());
     }
 
-    public IReadOnlyList<string> ExplainPage(ImageCatalogQuery query)
-    {
-        ImageCatalogPolicy.Validate(query);
-        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
-        using var transaction = connection.BeginTransaction(deferred: true);
-        using var command = ImageCatalogRows.PageCommand(connection, transaction, query);
-        command.CommandText = "EXPLAIN QUERY PLAN " + command.CommandText;
-        var lines = new List<string>();
-        using var rows = command.ExecuteReader(); while (rows.Read()) lines.Add(rows.GetString(3));
-        return lines.AsReadOnly();
-    }
-
     private ImageCatalogSnapshot Read(Guid runId, Guid attemptId, bool original = false)
     {
         var receipt = new AttemptReceiptStore(database).Read(attemptId) ?? throw ImageCatalogRows.Invalid();

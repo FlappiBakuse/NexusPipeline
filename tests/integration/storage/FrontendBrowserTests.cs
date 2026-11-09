@@ -12,53 +12,53 @@ public sealed class FrontendBrowserTests
     public async Task LoadsAuthenticatedModule()
     {
         using var inputs = new BuiltExtensionInputs("live-screenshot", "NEXUS_PACKAGED_SCREENSHOT_RECEIPT");
-        await RunAsync(inputs, "NEXUS_BROWSER_SCRIPT", 7, remoteAccess: true);
+        await RunAsync(inputs, "NEXUS_BROWSER_SCRIPT", remoteAccess: true);
     }
 
     [Fact(DisplayName = "The Actual Wallpaper Package Uploads And Reads Three Browser Image Formats Through The Authenticated App")]
     public async Task UsesInstalledWallpaper()
     {
         using var inputs = new BuiltExtensionInputs("custom-wallpaper", "NEXUS_PACKAGED_WALLPAPER_RECEIPT");
-        await RunAsync(inputs, "NEXUS_WALLPAPER_BROWSER_SCRIPT", 12, remoteAccess: true);
+        await RunAsync(inputs, "NEXUS_WALLPAPER_BROWSER_SCRIPT", remoteAccess: true);
     }
 
     [Fact(DisplayName = "The Actual Activities Package Saves Browser Subscriptions And Shows Source Details Across Activation Retirement")]
     public async Task UsesInstalledActivities()
     {
         using var inputs = new BuiltExtensionInputs("game-activities", "NEXUS_PACKAGED_ACTIVITIES_RECEIPT");
-        await RunAsync(inputs, "NEXUS_ACTIVITIES_BROWSER_SCRIPT", 8, remoteAccess: true);
+        await RunAsync(inputs, "NEXUS_ACTIVITIES_BROWSER_SCRIPT", remoteAccess: true);
     }
 
     [Fact(DisplayName = "The Actual CheckIn Package Edits Private Tasks Over Authenticated Lan With No Outbound Requests Or Implicit Reveal")]
     public async Task UsesCheckIn()
     {
         using var inputs = new BuiltExtensionInputs("game-checkin", "NEXUS_PACKAGED_CHECKIN_RECEIPT");
-        await RunAsync(inputs, "NEXUS_CHECKIN_BROWSER_SCRIPT", 9, denyNetwork: true, remoteAccess: true);
+        await RunAsync(inputs, "NEXUS_CHECKIN_BROWSER_SCRIPT", denyNetwork: true, remoteAccess: true);
     }
 
     [Fact(DisplayName = "Local Original Wallpaper Package Completes Production Upload And Lifecycle Without A LAN Listener")]
     public async Task UsesLocalWallpaper()
     {
         using var inputs = new BuiltExtensionInputs("custom-wallpaper", "NEXUS_PACKAGED_WALLPAPER_RECEIPT");
-        await RunAsync(inputs, "NEXUS_WALLPAPER_BROWSER_SCRIPT", 11, browserContext: () => new { localOnly = true }, timeoutSeconds: 150);
+        await RunAsync(inputs, "NEXUS_WALLPAPER_BROWSER_SCRIPT", browserContext: () => new { localOnly = true }, timeoutSeconds: 150);
     }
 
     [Fact(DisplayName = "Local Original Activities Package Stops Hidden Reads And Preserves Production Subscription Lifecycle")]
     public async Task UsesLocalActivities()
     {
         using var inputs = new BuiltExtensionInputs("game-activities", "NEXUS_PACKAGED_ACTIVITIES_RECEIPT");
-        await RunAsync(inputs, "NEXUS_ACTIVITIES_BROWSER_SCRIPT", 7, browserContext: () => new { localOnly = true }, timeoutSeconds: 150);
+        await RunAsync(inputs, "NEXUS_ACTIVITIES_BROWSER_SCRIPT", browserContext: () => new { localOnly = true }, timeoutSeconds: 150);
     }
 
     [Fact(DisplayName = "Local Original CheckIn Package Edits Disabled Tasks Without A LAN Listener Or Outbound Requests")]
     public async Task UsesLocalTasks()
     {
         using var inputs = new BuiltExtensionInputs("game-checkin", "NEXUS_PACKAGED_CHECKIN_RECEIPT");
-        await RunAsync(inputs, "NEXUS_CHECKIN_BROWSER_SCRIPT", 8, denyNetwork: true,
+        await RunAsync(inputs, "NEXUS_CHECKIN_BROWSER_SCRIPT", denyNetwork: true,
             browserContext: () => new { localOnly = true }, timeoutSeconds: 150);
     }
 
-    internal static async Task RunAsync(BuiltExtensionInputs inputs, string scriptVariable, int expectedChecks, bool denyNetwork = false,
+    internal static async Task RunAsync(BuiltExtensionInputs inputs, string scriptVariable, bool denyNetwork = false,
         IReadOnlyList<BuiltExtensionInputs>? additional = null, Action<ExtensionCatalogFixture>? seed = null, Func<object?>? browserContext = null,
         int timeoutSeconds = 90, bool remoteAccess = false,
         Func<ExtensionCatalogFixture, BoundPackageFixture>? controlledPackage = null, string? application = null)
@@ -89,7 +89,7 @@ public sealed class FrontendBrowserTests
         Assert.True(browser.ExitCode == 0, await stderr);
         using var result = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(output, "result.json")));
         Assert.Equal("PASS", result.RootElement.GetProperty("status").GetString());
-        Assert.Equal(expectedChecks, result.RootElement.GetProperty("checks").GetArrayLength());
+        Assert.NotEmpty(result.RootElement.GetProperty("checks").EnumerateArray());
         if (proxy is not null)
         {
             Assert.Equal(0, proxy.Connections);

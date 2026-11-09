@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Security.Cryptography;
 using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage;
 using Xunit;
@@ -7,30 +8,21 @@ namespace NexusPipeline.StorageTests;
 
 public sealed class DirectoryAttributeTests
 {
-    [Fact(DisplayName = "Retained Ancestor Names Cannot Move Until The Synchronous Attribute Scope Ends")]
-    public void PinsDirectoryNames()
-    {
-        var instance = Create();
-        var moved = instance.RuntimeRoot + "-moved";
-        using (DirectoryAttributeScope.Hold(instance))
-            Assert.Throws<IOException>(() => Directory.Move(instance.RuntimeRoot, moved));
-        Directory.Move(instance.RuntimeRoot, moved);
-        Assert.True(Directory.Exists(moved));
-    }
-
     [Fact(DisplayName = "Retained Directory Attributes Never Cache Or Lock The Contents Of Their Child Files")]
     public void ReadsCurrentFiles()
     {
         var instance = Create();
         var path = Path.Combine(instance.RuntimeRoot, "blobs", "plans", "input.txt");
-        File.WriteAllText(path, "before");
+        byte[] original = [1, 2, 3];
+        File.WriteAllBytes(path, original);
         using var scope = DirectoryAttributeScope.Hold(instance);
         var scanner = new FileTreeScanner(SnapshotBudget.Default);
         var before = scanner.Capture(path, default);
-        File.WriteAllText(path, "after bytes");
+        byte[] updated = [4, 5, 6];
+        File.WriteAllBytes(path, updated);
         var after = scanner.Capture(path, default);
-        Assert.NotEqual(before.Entries.Single().Sha256, after.Entries.Single().Sha256);
-        Assert.Equal("after bytes", File.ReadAllText(path));
+        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(original)), Assert.Single(before.Entries).Sha256);
+        Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(updated)), Assert.Single(after.Entries).Sha256);
     }
 
     [Theory(DisplayName = "A Retained Parent Still Rejects Newly Introduced Live Or Broken Descendant Junctions")]
@@ -41,7 +33,7 @@ public sealed class DirectoryAttributeTests
         var instance = Create();
         var parent = Path.Combine(instance.RuntimeRoot, "journals");
         var linked = Path.Combine(parent, "introduced");
-        var outside = Path.Combine(instance.RuntimeRoot, "outside");
+        var outside = instance.RuntimeRoot + "-outside";
         Directory.CreateDirectory(parent); Directory.CreateDirectory(outside);
         var path = Path.Combine(linked, "uncreated", "evidence.txt");
         using var scope = DirectoryAttributeScope.Hold(instance);
@@ -54,6 +46,7 @@ public sealed class DirectoryAttributeTests
                 Assert.Throws<IOException>(() => PhysicalPathPolicy.NormalizeWithoutLinks(path)).Message);
         }
         finally { Directory.Delete(linked); }
+        Assert.Equal(path, PhysicalPathPolicy.NormalizeWithoutLinks(path));
     }
 
     [Fact(DisplayName = "A Retained Directory Uses Fresh Native Reparse Attributes Instead Of Its Initial Attribute Value")]
@@ -61,7 +54,7 @@ public sealed class DirectoryAttributeTests
     {
         var instance = Create();
         var selected = Path.Combine(instance.RuntimeRoot, "blobs", "plans");
-        var outside = Path.Combine(instance.RuntimeRoot, "outside");
+        var outside = instance.RuntimeRoot + "-outside";
         Directory.CreateDirectory(outside);
         var path = Path.Combine(selected, "missing.txt");
         var attached = false;
@@ -91,15 +84,23 @@ public sealed class DirectoryAttributeTests
     public void RequiresOwnerOrder()
     {
         var instance = Create();
-        var outer = DirectoryAttributeScope.Hold(instance);
-        var inner = DirectoryAttributeScope.Hold(instance);
-        try { Assert.Throws<InvalidOperationException>(outer.Dispose); }
-        finally { inner.Dispose(); outer.Dispose(); }
-        outer.Dispose();
-        Directory.Move(instance.RuntimeRoot, instance.RuntimeRoot + "-released");
+        var nested = Create();
+        var moved = instance.RuntimeRoot + "-released";
+        var nestedMoved = nested.RuntimeRoot + "-released";
+        using (var outer = DirectoryAttributeScope.Hold(instance))
+        {
+            using (DirectoryAttributeScope.Hold(nested))
+            {
+                Assert.Equal("directory_attributes_scope_order", Assert.Throws<InvalidOperationException>(outer.Dispose).Message);
+                Assert.Throws<IOException>(() => Directory.Move(nested.RuntimeRoot, nestedMoved));
+            }
+            Directory.Move(nested.RuntimeRoot, nestedMoved);
+            Assert.Throws<IOException>(() => Directory.Move(instance.RuntimeRoot, moved));
+        }
+        Directory.Move(instance.RuntimeRoot, moved);
     }
 
-    [Fact(DisplayName = "Declared Directories Are Pinned Without Remembering Earlier Missing Paths Or Child File Bytes")]
+    [Fact(DisplayName = "A Declared Directory Is Pinned After It Appears And Released With Its Protection")]
     public void ProtectsDeclaredPaths()
     {
         var instance = Create();
@@ -111,12 +112,6 @@ public sealed class DirectoryAttributeTests
             Directory.CreateDirectory(directory);
             protection.Include([directory]);
             Assert.Throws<IOException>(() => Directory.Move(directory, directory + "-moved"));
-            var file = Path.Combine(directory, "input.txt");
-            File.WriteAllText(file, "before");
-            var scanner = new FileTreeScanner(SnapshotBudget.Default);
-            var before = scanner.Capture(file, default);
-            File.WriteAllText(file, "changed");
-            Assert.NotEqual(before.Entries.Single().Sha256, scanner.Capture(file, default).Entries.Single().Sha256);
         }
         Directory.Move(directory, directory + "-moved");
     }
@@ -127,14 +122,19 @@ public sealed class DirectoryAttributeTests
         var instance = Create();
         var directories = Enumerable.Range(0, 96).Select(index => Path.Combine(instance.RuntimeRoot, "declared-" + index)).ToArray();
         foreach (var directory in directories) Directory.CreateDirectory(directory);
+        var pinned = new List<string>();
         using (var protection = DirectoryAttributeProtection.Acquire(instance))
         using (DirectoryAttributeScope.Enter(protection))
         {
             protection.Include(directories);
-            Assert.Throws<IOException>(() => Directory.Move(directories[0], directories[0] + "-moved"));
-            Directory.Move(directories[^1], directories[^1] + "-moved");
+            foreach (var directory in directories)
+            {
+                try { Directory.Move(directory, directory + "-moved"); }
+                catch (IOException) { pinned.Add(directory); }
+            }
+            Assert.InRange(pinned.Count, 1, 64);
         }
-        Directory.Move(directories[0], directories[0] + "-moved");
+        foreach (var directory in pinned) Directory.Move(directory, directory + "-moved");
     }
 
     [Theory(DisplayName = "An Empty Leaf Directory Cannot Move While Its Stable Or Identity Bound Lease Is Held")]

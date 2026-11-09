@@ -37,6 +37,8 @@ internal static class StartupJournalFixture
             OwnedFixtureEvidence.WriteReport(report, new { status = "faultReady", instanceId = seed.Attempt.Instance.InstanceId,
                 runtimeRoot = seed.Attempt.Instance.RuntimeRoot, DatabasePath = seed.Attempt.Database.DatabasePath,
                 journalId = seed.Attempt.JournalId, target = seed.Attempt.Configuration.TargetPath,
+                operationId = Guid.Parse(seed.Attempt.Plan.OperationId), attemptId = Guid.Parse(seed.Attempt.Plan.AttemptId),
+                runId = Guid.Parse(seed.Attempt.Plan.RunId), processId = Environment.ProcessId,
                 hostPayloadRoot = seed.Roots.HostPayloadRoot, extensionPayloadRoot = seed.Roots.ExtensionPayloadRoot });
             await Task.Delay(Timeout.InfiniteTimeSpan);
             return 0;
@@ -66,7 +68,7 @@ internal static class StartupJournalFixture
                 plan.JournalId, identity => OwnedFixtureEvidence.WriteReport(Path.Combine(root, "child.identity.json"), identity));
         }
         OwnedFixtureEvidence.WriteReport(report, new { status = "faultReady", instanceId = instance.InstanceId, runtimeRoot = instance.RuntimeRoot,
-            database.DatabasePath, journalId = plan.JournalId, target, jobName = job?.Name });
+            database.DatabasePath, journalId = plan.JournalId, operationId = plan.OperationId, target, jobName = job?.Name, processId = Environment.ProcessId });
         await Task.Delay(Timeout.InfiniteTimeSpan);
         return 0;
     }

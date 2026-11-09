@@ -18,7 +18,12 @@ public sealed class ConfigurationRevisionTests
         Assert.Equal("", frozen.Entries[0].RelativePath);
         var delta = FileTreeDelta.Compare(frozen, after);
         Assert.Equal((2, 3, 1), (delta.AddedFiles, delta.ModifiedFiles, delta.RemovedFiles));
-        Assert.Equal(6, delta.Changes.Length);
+        Assert.Equal(new[]
+        {
+            ("001.json", TreeChangeKind.Modified), ("002.json", TreeChangeKind.Modified),
+            ("003.json", TreeChangeKind.Modified), ("199.json", TreeChangeKind.Removed),
+            ("200.json", TreeChangeKind.Added), ("201.json", TreeChangeKind.Added)
+        }, delta.Changes.OrderBy(change => change.RelativePath).Select(change => (change.RelativePath, change.Kind)));
     }
 
     [Theory(DisplayName = "An Invalid Tree Cannot Become A Configuration Revision")]

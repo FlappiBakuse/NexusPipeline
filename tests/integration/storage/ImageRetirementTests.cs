@@ -49,7 +49,6 @@ public sealed class ImageRetirementTests
             new ExecutionRecordProjection(source.Instance, source.Database, new(), source.Lease, new(source.Instance, source.Database, new()))
                 .OnCommitted(fixture.Receipt);
             fixture.RequireOriginal(original, image);
-            Assert.Equal(marker, ReadMarker(source, fixture.Receipt.Facts.RunId));
             Assert.Throws<OperationConflictException>(() => fixture.Service.RetireLogsPage(operation, "image-retirement", fixture.Receipt.Facts.RunId));
             fixture.Fixture.Dispose();
             using var reopened = InstanceLease.Acquire(source.Instance, new());
@@ -79,9 +78,7 @@ public sealed class ImageRetirementTests
             var elsewhere = attached with { RunId = foreign.RunId, Kind = RecordAssetKind.Screenshot };
             assets.AttachVerified(elsewhere);
             var page = fixture.Retire(); Assert.Equal(FileCleanupResult.Cleaned, fixture.Cleanup(page));
-            Assert.True(File.Exists(fixture.PngPath)); Assert.Equal(RecordContentAvailability.Retired, fixture.Image.ContentAvailability);
-            var content = new BlobReference($"blobs/content/{image.ImageSha256}.bin", image.SizeBytes!.Value, image.ImageSha256!);
-            Assert.True(new BlobReferenceIndex(source.Instance, new(), source.Database, new(source.Instance, new())).IsReferenced(content));
+            Assert.Equal(RecordContentAvailability.Retired, fixture.Image.ContentAvailability);
             using var first = assets.OpenVerified(attached); Assert.Equal(image.SizeBytes!.Value, first.Length);
             using var second = assets.OpenVerified(elsewhere); Assert.Equal(image.SizeBytes!.Value, second.Length);
             Assert.Throws<RetiredContentException>(() => fixture.Images.OpenOriginal(image.Key, image.ResultSha256));

@@ -67,10 +67,17 @@ internal sealed class StepWriterFixture : IDisposable
         Assert.Equal(step.ClosedElapsedMilliseconds, closure.RunElapsedMilliseconds);
         Assert.All(closure.Family, member => Assert.Equal(NexusPipeline.Core.Execution.WriterState.Stopped, WriterStopEvidence.ObserveProcess(member)));
         Assert.Equal(closure.Family.Length, closure.Family.DistinctBy(member => (member.ProcessId, member.CreatedAtUtc)).Count());
-        var stored = new JobClosureStore(Base.Source.Instance, Base.Source.Database, new()).Read(JournalId, closure.WriterId, closure.JobName, closure.SessionId);
-        Assert.NotNull(stored); Assert.Equal(closure.Root, stored.Root); Assert.True(closure.Family.SequenceEqual(stored.Family));
-        Assert.Equal(1, Base.Count("journal_writer_jobs")); Assert.Equal(executed ? 1 : 0, Base.Count("journal_writer_job_roots"));
-        Assert.Equal(1, Base.Count("journal_writer_job_closures")); Assert.Equal(0, Base.Count("attempt_receipts"));
+        var source = Base.Source;
+        var store = new JobClosureStore(source.Instance, source.Database, new());
+        Assert.Equal(stopped.Reference, store.RequireStoredReference(JournalId, closure));
+        Assert.Null(new AttemptReceiptStore(source.Database).Read(Guid.Parse(state.Attempt.AttemptId)));
+    }
+
+    internal ProcessIdentity? ReadRoot(AttemptWriterState state)
+    {
+        var source = Base.Source;
+        var binding = StepResultCodec.Binding(state.Latest.Root, Assert.Single(state.Steps));
+        return new StepEvidenceReader(source.Instance, source.Database, new()).Context(binding).Root;
     }
 
     public void Dispose()

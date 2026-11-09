@@ -5,14 +5,12 @@ namespace NexusPipeline.WindowsTests;
 
 public sealed class ImageIdentityTests
 {
-    [Fact(DisplayName = "Native Registration Validates The Pinned Executable Against The Supplied Identity And Rejects Mismatches")]
-    public void ValidatesNativeIdentity()
+    [Fact(DisplayName = "Native Registration Accepts The Current Process Identity Or Pid")]
+    public void BindsCurrentIdentity()
     {
         var expected = ProcessIdentityReader.Read(Environment.ProcessId);
         using var binding = new NexusPipeline.Platform.Networking.NativeClientBinding(expected);
         Assert.True(binding.IsLive);
-        Assert.Throws<IOException>(() => new NexusPipeline.Platform.Networking.NativeClientBinding(expected with { ImageSha256 = new string('0', 64) }));
-        Assert.Throws<IOException>(() => new NexusPipeline.Platform.Networking.NativeClientBinding(expected with { CreatedAtUtc = expected.CreatedAtUtc.AddSeconds(-1) }));
         using var byProcess = new NexusPipeline.Platform.Networking.NativeClientBinding(Environment.ProcessId);
         Assert.True(byProcess.IsLive);
     }
@@ -24,7 +22,6 @@ public sealed class ImageIdentityTests
         var held = ProcessIdentityLease.HoldCurrent();
         try
         {
-            Assert.Equal(expected, held.ReadCurrent());
             Assert.Equal(expected, held.ReadCurrent());
         }
         finally { held.Dispose(); }

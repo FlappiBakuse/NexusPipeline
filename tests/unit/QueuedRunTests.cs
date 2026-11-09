@@ -19,14 +19,16 @@ public sealed class QueuedRunTests
         var refreshed = request with { ExpectedCatalogRevision = 2, ExpectedSettingsRevision = 1 };
         var identity = new OperationIdentity(start.OperationId, start.SubjectId, new string('b', 64), start.Kind);
         resources.RefreshQueuedRun(metadata, run, identity, refreshed);
-        Assert.Same(run, resources.FindQueuedRun(run.RunId, identity, refreshed)); Assert.True(run.IsActive);
+        var found = resources.FindQueuedRun(run.RunId, identity, refreshed);
+        Assert.NotNull(found); Assert.Equal(run.RunId, found.RunId); Assert.True(found.IsActive); Assert.True(run.IsActive);
         Assert.Throws<IOException>(() => resources.FindQueuedRun(run.RunId, start, request));
         Assert.Throws<IOException>(() => resources.RefreshQueuedRun(metadata, run, identity, refreshed with { Target = new QueueTarget(Guid.NewGuid()) }));
         Assert.Throws<IOException>(() => resources.RefreshQueuedRun(metadata, run,
             new(identity.OperationId, "foreign", identity.RequestDigest, identity.Kind), refreshed));
         Assert.Throws<IOException>(() => resources.RefreshQueuedRun(metadata, run, start, request));
         using var first = resources.TryContinueRun(run, start.OperationId, [new("script", ResourceClaimMode.Mutation)]).Lease!;
-        Assert.Same(run, first.AcceptRun(resources, start.OperationId, run.RunId));
+        var accepted = first.AcceptRun(resources, start.OperationId, run.RunId);
+        Assert.Equal(run.RunId, accepted.RunId); Assert.True(accepted.IsActive);
         Assert.Throws<IOException>(() => resources.RefreshQueuedRun(metadata, run, identity, refreshed));
     }
 
@@ -53,19 +55,21 @@ public sealed class QueuedRunTests
         var request = new ExecutionSelectionRequest(new QueueTarget(Guid.NewGuid()), 1, 0); var runId = Guid.NewGuid();
         using var metadata = resources.TryAcquire(Guid.NewGuid(), [new("scheduling:state", ResourceClaimMode.Mutation)]).Lease!;
         using var run = resources.RegisterQueuedRun(metadata, runId, start, request);
-        Assert.Same(run, resources.RegisterQueuedRun(metadata, runId, start, request)); metadata.Dispose();
+        var repeated = resources.RegisterQueuedRun(metadata, runId, start, request);
+        Assert.Equal(runId, repeated.RunId); Assert.True(repeated.IsActive); metadata.Dispose();
         using (var editable = resources.TryAcquire(Guid.NewGuid(), [new("script", ResourceClaimMode.Mutation)]).Lease) Assert.NotNull(editable);
         using var drain = lifecycle.BeginCompletionDrain(Guid.NewGuid()); Assert.NotNull(drain); Assert.False(drain.TryReserve());
         Assert.Null(resources.TryAcquire(Guid.NewGuid(), [new("script", ResourceClaimMode.Mutation)]).Lease);
         Assert.Null(resources.TryContinueRun(run, Guid.NewGuid(), [new("script", ResourceClaimMode.Mutation)]).Lease);
         using var first = resources.TryContinueRun(run, start.OperationId,
             [new("script", ResourceClaimMode.Mutation), new("package", ResourceClaimMode.Reference)]).Lease;
-        Assert.NotNull(first); Assert.Same(run, first.AcceptRun(resources, start.OperationId, runId)); first.Dispose();
+        Assert.NotNull(first); var accepted = first.AcceptRun(resources, start.OperationId, runId);
+        Assert.Equal(runId, accepted.RunId); Assert.True(accepted.IsActive); first.Dispose();
         Assert.False(drain.TryReserve());
         Assert.Null(resources.TryContinueRun(run, Guid.NewGuid(), [new("outside", ResourceClaimMode.Mutation)]).Lease);
         Assert.Null(resources.TryContinueRun(run, Guid.NewGuid(), [new("package", ResourceClaimMode.Mutation)]).Lease);
         using (var retry = resources.TryContinueRun(run, Guid.NewGuid(), [new("script", ResourceClaimMode.Mutation)]).Lease) Assert.NotNull(retry);
-        run.Dispose(); Assert.True(drain.TryReserve());
+        run.Dispose(); Assert.False(repeated.IsActive); Assert.False(accepted.IsActive); Assert.True(drain.TryReserve());
     }
 
     [Fact(DisplayName = "A Queued Permit Requires The Actual Scheduling Mutation Root And Cannot Cross Coordinators")]

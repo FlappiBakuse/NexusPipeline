@@ -48,7 +48,6 @@ public sealed class RetryHookTests
         var decision = RetryDecision.EvaluatePostDeferral(Policy, actual, budget, Now);
         Assert.True(decision.ShouldDefer); Assert.True(decision.RequiresConfigurationRestoration);
         Assert.Equal("retry_post_pending_restoration", decision.ReasonCode);
-        Assert.False(actual.IsConfigurationRestored);
         Assert.True(RetryDecision.Evaluate(Policy, actual with { IsConfigurationRestored = true }, budget, Now).IsEligible);
     }
 

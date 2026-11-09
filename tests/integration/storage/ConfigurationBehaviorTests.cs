@@ -1,7 +1,9 @@
 using System.Runtime.Versioning;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Execution;
+using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Configuration;
+using NexusPipeline.Platform.Storage.Execution;
 using Xunit;
 
 namespace NexusPipeline.StorageTests;
@@ -9,32 +11,41 @@ namespace NexusPipeline.StorageTests;
 [SupportedOSPlatform("windows")]
 public sealed class ConfigurationBehaviorTests
 {
-    [Theory(DisplayName = "The First Ordinary Start Archives Valid Existing Configuration And Preserves Rejected Input Bytes")]
-    [InlineData(true)]
-    [InlineData(false)]
-    public void EstablishesInitialSnapshot(bool valid)
+    [Fact(DisplayName = "An Invalid First Start Leaves No Saved Configuration Or Receipt And Can Be Retried With Valid Bytes")]
+    public void EstablishesInitialSnapshot()
     {
         using var fixture = new ExecutionAdmissionFixture(saved: false);
         var source = fixture.Source;
-        if (!valid) File.WriteAllText(source.Configuration, "{invalid");
-        var before = File.ReadAllBytes(source.Configuration);
+        const string subject = "initial-configuration";
         var operation = Guid.NewGuid();
         var request = source.Request(new BindingTarget(source.BindingA));
-        if (valid)
-        {
-            fixture.Service.Start(operation, "initial-configuration", request, DateTimeOffset.UtcNow);
-            using var accepted = fixture.Take(operation);
-            var slot = Assert.Single(accepted.Prepared.Total.Plan.ReadWire().ConfigurationSlots);
-            var saved = new ConfigurationRevisionStore(source.Instance, source.Database, new()).Read(new(source.BindingA, slot.ResourceId));
-            Assert.NotNull(saved); Assert.Equal(1, saved.Revision);
-            Assert.Equal(before.Length, Assert.Single(saved.Tree.Entries).SizeBytes);
-        }
-        else
-        {
-            Assert.ThrowsAny<Exception>(() => fixture.Service.Start(operation, "initial-configuration", request, DateTimeOffset.UtcNow));
-            Assert.Equal(0, fixture.Inbox.PendingCount);
-        }
-        Assert.Equal(before, File.ReadAllBytes(source.Configuration));
+        var overview = new ConfigurationOverviewReader(source.Instance, source.Database, source.Lease, new());
+        var resource = Assert.Single(overview.Read(source.BindingA).Resources);
+        var address = new ConfigurationAddress(source.BindingA, resource.ResourceId);
+        var revisions = new ConfigurationRevisionStore(source.Instance, source.Database, new());
+
+        var invalid = "{invalid"u8.ToArray();
+        File.WriteAllBytes(source.Configuration, invalid);
+        Assert.Throws<ConfigurationException>(() => fixture.Service.Start(operation, subject, request, DateTimeOffset.UtcNow));
+        Assert.Null(revisions.Read(address));
+        var acceptance = new RunAttemptAcceptance(source.Instance, new(), source.Database);
+        Assert.Null(acceptance.LookupStart(ExecutionStartIdentity.Create(operation, subject, request)));
+        Assert.Equal(0, fixture.Inbox.PendingCount);
+        Assert.Equal(invalid, File.ReadAllBytes(source.Configuration));
+
+        var original = "{\n  \"fixture\": true\n}\n"u8.ToArray();
+        File.WriteAllBytes(source.Configuration, original);
+        fixture.Service.Start(operation, subject, request, DateTimeOffset.UtcNow);
+        using var accepted = fixture.Take(operation);
+        var saved = Assert.IsType<ConfigurationRevision>(revisions.Read(address));
+        Assert.Equal(1, saved.Revision);
+        var entry = Assert.Single(saved.Tree.Entries);
+        using var stream = new ImmutableBlobStore(source.Instance, new())
+            .OpenVerified(new($"blobs/content/{entry.Sha256}.bin", entry.SizeBytes, entry.Sha256!));
+        using var bytes = new MemoryStream();
+        stream.CopyTo(bytes);
+        Assert.Equal(original, bytes.ToArray());
+        Assert.Equal(original, File.ReadAllBytes(source.Configuration));
     }
 
     [Theory(DisplayName = "Sealed Ordinary Retry Input Retains Progress Independently Of Long Term Synchronization")]

@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { pathToFileURL } from 'node:url';
+import { checkAmbientMotion, checkImageOwnership } from '../tests/frontend/browser-lifecycle.mjs';
 
 export async function runControls({ root, modules, browser, runtime, output, chromium, scenario }) {
   const { createServer } = await import(pathToFileURL(path.join(modules, 'vite/dist/node/index.js')));
@@ -44,6 +45,10 @@ export async function runControls({ root, modules, browser, runtime, output, chr
     await page.goto('http://127.0.0.1:' + address.port + '/');
     await page.waitForFunction(() => !!globalThis.nexusUiTests);
     const call = name => page.evaluate(async name => await globalThis.nexusUiTests[name](), name);
+    const addChecks = (name, checks) => {
+      if (!Array.isArray(checks) || !checks.length) throw new Error('Missing browser checks: ' + name);
+      cases.push({ name, checks });
+    };
     if (scenario === 'controls-painted') {
       const result = await page.evaluate(async () => {
         const { registerElements } = await import('/apps/web/src/ui/register-elements.ts'); registerElements();
@@ -52,12 +57,11 @@ export async function runControls({ root, modules, browser, runtime, output, chr
         paintedControls(fixture, (condition, name) => { if (!condition) throw new Error(name); checks.push(name); });
         fixture.remove(); return checks;
       });
-      if (!result.length) throw new Error('Zero painted control checks'); cases.push({ name: 'painted-controls', checks: result });
+      addChecks('painted-controls', result);
     } else {
-      await call('structural'); cases.push({ name: 'element-owners-and-painted-controls' });
+      addChecks('element-owners-and-painted-controls', await call('structural'));
       const controls = await page.evaluate(async () => (await import('/tests/frontend/control-contract.ts')).runControlContract());
-      if (!controls.checkCount || controls.checkCount !== controls.checks.length) throw new Error('Control contract report incomplete');
-      cases.push({ name: 'control-transport-owners', checks: controls.checks });
+      addChecks('control-transport-owners', controls);
       await call('prepareAccessibility');
       const session = await page.context().newCDPSession(page);
       const accessible = await session.send('Accessibility.getFullAXTree');
@@ -70,10 +74,10 @@ export async function runControls({ root, modules, browser, runtime, output, chr
       await session.send('Input.imeSetComposition', { text: '测试', selectionStart: 2, selectionEnd: 2 });
       await call('verifyCompositionPending'); await session.send('Input.insertText', { text: '测试' }); await call('verifyCompositionCommitted');
       await call('prepareDialogs'); await page.keyboard.press('Escape'); await call('verifyDialogEscape');
-      const result = await call('finish');
-      if (!result.checkCount || result.checkCount !== result.checks.length) throw new Error('Element report incomplete');
-      cases.push({ name: 'keyboard-ime-accessibility-and-modal-focus', checks: result.checks });
+      addChecks('keyboard-ime-accessibility-and-modal-focus', await call('finish'));
       await session.detach();
+      cases.push({ name: 'ambient-motion-lifecycle', checks: await checkAmbientMotion(page) });
+      cases.push({ name: 'media-image-lifecycle', checks: await checkImageOwnership(page) });
     }
     if (errors.length) throw new Error(errors.join('\n'));
     await page.screenshot({ path: path.join(output, 'controls.png') });

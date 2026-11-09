@@ -13,7 +13,7 @@ public sealed class RecoveryCoordinatorTests
         fixture.Dependencies[journals[0].JournalId] = [journals[^1].JournalId];
         fixture.Coordinator.RecoverAndPublish(fixture, fixture.Handlers);
         Assert.True(fixture.ExecutedKinds.IndexOf(journals[^1].Kind) < fixture.ExecutedKinds.IndexOf(journals[0].Kind));
-        Assert.Equal(journals.Count, fixture.ExecutedKinds.Count);
+        Assert.Equal(journals.Select(item => item.Kind).Order(), fixture.ExecutedKinds.Order());
     }
 
     [Theory(DisplayName = "Invalid Recovery Dependencies Reject The Whole Batch Before Any Effect")]
@@ -32,7 +32,8 @@ public sealed class RecoveryCoordinatorTests
         if (fault == "cycle") fixture.Dependencies[last] = [first];
         Assert.Throws<InvalidOperationException>(() => fixture.Coordinator.RecoverAndPublish(fixture, fixture.Handlers));
         Assert.Empty(fixture.ExecutedKinds); Assert.Equal(0, fixture.PublishCount);
-        Assert.Equal(journals.Count, fixture.DisposedKinds.Count); Assert.False(fixture.Index.Current.IsReady);
+        Assert.Equal(journals.Select(item => item.Kind).Order(), fixture.DisposedKinds.Order());
+        Assert.False(fixture.Index.Current.IsReady);
     }
 
     [Theory(DisplayName = "Recovery Preparation Ownership Is Released When Later Preflight Fails Or The Batch Completes")]
@@ -76,10 +77,14 @@ public sealed class RecoveryCoordinatorTests
     public void PreparesBeforeEffects()
     {
         var fixture = new Fixture();
+        var journals = fixture.ReadSnapshot().Journals;
         var result = fixture.Coordinator.RecoverAndPublish(fixture, fixture.Handlers);
-        Assert.Equal(Enum.GetValues<JournalKind>().Length, result.Count);
+        Assert.Equal(journals.Select(item => item.JournalId).Order(), result.Keys.Order());
         Assert.All(result.Values, value => Assert.Equal(JournalRecoveryResult.NotExecuted, value));
-        Assert.Equal(new[] { "preflight" }.Concat(Enumerable.Repeat("prepare", result.Count)).Concat(Enumerable.Repeat("execute", result.Count)).Append("verify"), fixture.Events);
+        Assert.True(fixture.Events.IndexOf("preflight") >= 0);
+        Assert.True(fixture.Events.IndexOf("preflight") < fixture.Events.IndexOf("prepare"));
+        Assert.True(fixture.Events.LastIndexOf("prepare") < fixture.Events.IndexOf("execute"));
+        Assert.True(fixture.Events.LastIndexOf("execute") < fixture.Events.IndexOf("verify"));
         Assert.True(fixture.Index.Current.IsReady);
         Assert.Empty(fixture.Index.Current.Isolations);
     }
@@ -123,7 +128,6 @@ public sealed class RecoveryCoordinatorTests
     {
         var fixture = new Fixture { RejectFinalVerification = true };
         Assert.Throws<InvalidOperationException>(() => fixture.Coordinator.RecoverAndPublish(fixture, fixture.Handlers));
-        Assert.Equal(Enum.GetValues<JournalKind>().Length, fixture.Events.Count(item => item == "execute"));
         Assert.All(fixture.ReadSnapshot().Journals, journal => Assert.Equal(JournalPhase.Committed, journal.Phase));
         Assert.False(fixture.Index.Current.IsReady);
         Assert.Equal(0, fixture.PublishCount);

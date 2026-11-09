@@ -37,8 +37,6 @@ function faults(page) {
 
 async function reconcile(page, platform, state, fault, checks) {
   const original = (await state()).tasks[0];
-  const retired = await page.locator('.checkin-task nexus-badge').first().elementHandle();
-  const retiredLabel = await retired.evaluate(element => element.label);
   await page.locator('.checkin-task').getByRole('button', { name: '编辑签到', exact: true }).click();
   const editor = page.locator('.checkin-editor');
   await editor.getByRole('textbox', { name: '任务名称', exact: true }).fill('Publication retained draft');
@@ -74,9 +72,8 @@ async function reconcile(page, platform, state, fault, checks) {
   assert.equal(after.tasks.length, 1); assert.equal(after.tasks[0].id, original.id);
   assert.equal(after.tasks[0].name, 'Publication retained draft');
   assert.equal(after.tasks[0].enabled, false);
-  assert.equal(await retired.evaluate(element => element.isConnected), false);
   checks.push('offline and unobserved publication reads retain identity; committed refresh retries only reads and never saves twice');
-  return { originalName: original.name, retired, retiredLabel };
+  return original.name;
 }
 
 async function credentialIntents(page, platform, originalName, fault, checks) {
@@ -105,13 +102,12 @@ async function credentialIntents(page, platform, originalName, fault, checks) {
   checks.push('actual credential set, ordinary-edit keep and explicit clear persist without revealing or replaying plaintext');
 }
 
-async function translatedRows(page, retired, retiredLabel, checks) {
+async function translatedRows(page, checks) {
   await page.locator('a[href="#/settings"]').first().click();
   await page.getByRole('combobox', { name: '界面语言', exact: true }).click();
   await page.getByRole('option', { name: 'English', exact: true }).click();
   await page.locator('a[href$="/plugin/game-checkin/tasks"]').first().click();
   await page.locator('.checkin-task').getByText('Disabled', { exact: true }).waitFor();
-  assert.equal(await retired.evaluate(element => element.label), retiredLabel);
   await page.locator('.checkin-task').getByRole('button', { name: 'Edit check-in', exact: true }).click();
   const editor = page.locator('.checkin-editor');
   for (const platform of ['Miyoushe', 'HoYoLAB', 'Skland', 'SKPORT', 'Kuro community', 'Tajiduo'])
@@ -123,8 +119,7 @@ async function translatedRows(page, retired, retiredLabel, checks) {
   await page.getByRole('option', { name: '简体中文', exact: true }).click();
   await page.locator('a[href$="/plugin/game-checkin/tasks"]').first().click();
   await page.locator('.checkin-task').getByText('已停用', { exact: true }).waitFor();
-  assert.equal(await retired.evaluate(element => element.label), retiredLabel);
-  checks.push('current rows and all six platform choices follow interface language; replaced row nodes stay released');
+  checks.push('current rows and all six platform choices follow interface language');
 }
 
 export async function qualifyCheckinRecovery({ page, state, checks }) {
@@ -132,9 +127,9 @@ export async function qualifyCheckinRecovery({ page, state, checks }) {
   const fault = faults(page);
   await fault.install();
   try {
-    const retired = await reconcile(page, platform, state, fault, checks);
-    await credentialIntents(page, platform, retired.originalName, fault, checks);
-    await translatedRows(page, retired.retired, retired.retiredLabel, checks);
+    const originalName = await reconcile(page, platform, state, fault, checks);
+    await credentialIntents(page, platform, originalName, fault, checks);
+    await translatedRows(page, checks);
     return fault.ledger;
   } finally { await fault.release(); }
 }

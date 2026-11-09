@@ -91,7 +91,7 @@ public sealed class SecretPortTests
         var state = await port.GetStateAsync(policy.Subject, "cookie", default);
         Assert.True(state.IsConfigured);
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => port.ReadAsync(policy.Subject, "cookie", default).AsTask());
-        Assert.Equal(1, store.Calls);
+        Assert.False(store.Entered.Task.IsCompleted);
         policy.ReadAllowed = true;
         store.Unavailable = true;
         var failure = await Assert.ThrowsAsync<IOException>(() => port.ReadAsync(policy.Subject, "cookie", default).AsTask());

@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import time
 import uuid
 import xml.etree.ElementTree as ET
@@ -113,10 +114,22 @@ def build_product(root, output, profile, projects=None):
     web_receipt = None
     if "NexusPipeline.Host" in component["projectNames"]:
         from web_build import build_web
-        web_code = build_web(root, output, source=source)
+        web_error = None
+        try:
+            web_code = build_web(root, output, source=source)
+            web_receipt = json.loads((output / "web-receipt.json").read_bytes())
+        except (OSError, ValueError) as error:
+            web_code, web_error = 1, str(error)
+            print(f"ERROR: {web_error}", file=sys.stderr, flush=True)
         if web_code:
-            return web_code
-        web_receipt = json.loads((output / "web-receipt.json").read_bytes())
+            web_statuses = web_receipt["responsibilities"] if web_receipt is not None else {}
+            return write_build_result(output, run_root, {
+                "status": "FAIL", "reason": "web_build_failed", "error": web_error,
+                "profile": profile, "runId": run_id, "source": source, "requestedProjects": projects,
+                "componentInputs": component, "web": web_receipt, "exitCode": web_code, "compileExitCode": None,
+                "responsibilities": {kind: {"status": web_statuses.get(kind, "NOT_RUN")}
+                                     for kind in ("lint", "typecheck", "test", "build")},
+            })
         source = web_receipt["source"]
         source_root = Path(source["exportRoot"])
         component["webInputs"] = web_receipt["componentInputs"]["sha256"]
@@ -156,11 +169,18 @@ def build_product(root, output, profile, projects=None):
         code = 0
         (run_root / "build.log").write_text("Compilation reused after component and binary verification.\n", encoding="utf-8")
     compile_code = code
+    source_check = None
     names = None
     if code == 0:
-        code = check_source(source_root, json.loads(archived_manifest.read_bytes())["files"])
+        try:
+            code = check_source(source_root, source_records)
+            source_check = {"exitCode": code}
+        except (OSError, ValueError) as error:
+            code = 1
+            source_check = {"exitCode": code, "error": str(error)}
+            print(f"ERROR: {error}", file=sys.stderr, flush=True)
     if code == 0:
-        names = verify_names(source_root, output, run_root, env, json.loads(archived_manifest.read_bytes())["files"])
+        names = verify_names(source_root, output, run_root, env, source_records)
         code = names["exitCode"]
     boundaries = None
     if code == 0:
@@ -179,16 +199,19 @@ def build_product(root, output, profile, projects=None):
             api_code = subprocess.run(api_command, cwd=source_root, env=env, stdout=api_log,
                                       stderr=subprocess.STDOUT).returncode
         code = api_code
+    lint_status = "NOT_RUN" if compile_code else "FAIL" if code else "PASS"
+    sdk_api = {"command": api_command, "exitCode": api_code, "nativeLog": str(run_root / "sdk-api.log")}
     receipt = {
         "responsibilities": {
-            "lint": {"status": "PASS" if boundaries is not None and boundaries["exitCode"] == 0 else "FAIL" if names is not None else "NOT_RUN", "sourceNames": names, "sourceBoundaries": boundaries},
+            "lint": {"status": lint_status, "sourceCheck": source_check, "sourceNames": names,
+                     "sourceBoundaries": boundaries, "sdkApi": sdk_api},
             "typecheck": {"status": "PASS" if compile_code == 0 else "FAIL", "evidence": str(run_root / "build.log")},
             "test": {"status": "NOT_RUN"},
             "build": {"status": "PASS" if compile_code == 0 else "FAIL", "reusedCompilation": reusable},
         },
         "compileExitCode": compile_code,
         "web": web_receipt,
-        "sdkApi": {"command": api_command, "exitCode": api_code, "nativeLog": str(run_root / "sdk-api.log")},
+        "sdkApi": sdk_api,
         "sourceNames": names,
         "sourceBoundaries": boundaries,
         "status": "PASS" if code == 0 else "FAIL", "profile": profile,
@@ -203,6 +226,10 @@ def build_product(root, output, profile, projects=None):
     }
     if code == 0:
         receipt["binaryManifest"] = save_build(output, run_root)
+    return write_build_result(output, run_root, receipt)
+
+
+def write_build_result(output, run_root, receipt):
     write_json(run_root / "build-receipt.json", receipt)
     write_json(output / "build-receipt.json", receipt)
-    return code
+    return receipt["exitCode"]

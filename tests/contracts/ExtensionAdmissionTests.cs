@@ -90,10 +90,12 @@ public sealed class ExtensionAdmissionTests
         Assert.False(activation.IsCompleted);
         release.SetResult();
         var published = await activation.WaitAsync(TimeSpan.FromSeconds(5));
-        Assert.Same(pending, published);
+        Assert.True(pending.IsPublished);
         Assert.True(published.IsPublished);
         await published.DisposeAsync();
         Assert.False(published.IsPublished);
+        Assert.False(pending.IsPublished);
+        Assert.True(pending.Cancellation.IsCancellationRequested);
         Assert.Equal([true, true], revoked);
     }
 
@@ -102,9 +104,8 @@ public sealed class ExtensionAdmissionTests
     {
         public async ValueTask ActivateAsync(IExtensionScope lifetime, CancellationToken cancellationToken)
         {
-            Assert.Same(scope, lifetime);
-            scope.Cancellation.Register(() => revoked.Add(!scope.IsPublished));
-            await scope.OwnAsync(new VisibilityResource(scope, revoked));
+            lifetime.Cancellation.Register(() => revoked.Add(!scope.IsPublished));
+            await lifetime.OwnAsync(new VisibilityResource(scope, revoked));
             entered.SetResult(scope);
             await release.Task.WaitAsync(cancellationToken);
         }

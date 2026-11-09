@@ -26,27 +26,29 @@ public sealed class PathSyntaxTests
             Assert.Equal("filesystem_reparse_point_rejected", rejected.Message);
             if (!broken) Assert.Equal("preserved outside bytes", File.ReadAllText(neighbor));
         }
-        finally
-        {
-            Assert.True((File.GetAttributes(parent) & FileAttributes.ReparsePoint) != 0);
-            Directory.Delete(parent);
-        }
+        finally { Directory.Delete(parent); }
+        Assert.Equal(path, PhysicalPathPolicy.NormalizeWithoutLinks(path));
     }
 
-    [Theory(DisplayName = "Reused Syntax Preserves Literal Case And Still Rejects Reserved Or Stream Components")]
-    [InlineData("CON.txt")]
-    [InlineData("AUX")]
-    [InlineData("LPT1")]
-    [InlineData("nul")]
-    [InlineData("file:stream")]
-    [InlineData("bad*")]
-    public void PreservesLiteralSyntax(string invalid)
+    [Fact(DisplayName = "Path Syntax Preserves Literal Case For Case Sensitive Locations")]
+    public void PreservesLiteralCase()
     {
         var root = Environment.GetEnvironmentVariable("NEXUS_TEST_ROOT")!;
         var upper = Path.Combine(root, "Owner 数据", "FILE.txt"); var lower = Path.Combine(root, "Owner 数据", "file.txt");
         Assert.Equal(upper, PhysicalPathPolicy.NormalizeSyntax(upper));
         Assert.Equal(lower, PhysicalPathPolicy.NormalizeSyntax(lower));
-        Assert.Equal(upper, PhysicalPathPolicy.NormalizeSyntax(upper));
-        Assert.Throws<IOException>(() => PhysicalPathPolicy.NormalizeSyntax(Path.Combine(root, invalid)));
+    }
+
+    [Theory(DisplayName = "Device Names Alternate Streams And Invalid Components Are Rejected")]
+    [InlineData("CON.txt", "unsupported_filesystem_component")]
+    [InlineData("AUX", "unsupported_filesystem_component")]
+    [InlineData("LPT1", "unsupported_filesystem_component")]
+    [InlineData("nul", "filesystem_device_or_stream_path_rejected")]
+    [InlineData("file:stream", "filesystem_device_or_stream_path_rejected")]
+    [InlineData("bad*", "unsupported_filesystem_component")]
+    public void RejectsUnsafeSyntax(string invalid, string reason)
+    {
+        var root = Environment.GetEnvironmentVariable("NEXUS_TEST_ROOT")!;
+        Assert.Equal(reason, Assert.Throws<IOException>(() => PhysicalPathPolicy.NormalizeSyntax(Path.Combine(root, invalid))).Message);
     }
 }

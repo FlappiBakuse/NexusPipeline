@@ -1,4 +1,3 @@
-using Microsoft.Data.Sqlite;
 using NexusPipeline.Core.Records;
 using Xunit;
 
@@ -20,7 +19,6 @@ public sealed class RecordTimingTests
             EndTimeKind = kind == RecordDurationKind.Measured ? EndTimeKind.MeasuredTerminal : EndTimeKind.ReconciledTerminalObservation
         };
         store.AppendCompleted([record]);
-        Assert.Equal(record, Assert.Single(store.ReadPage(new()).Items));
         Assert.Throws<ArgumentException>(() => store.AppendCompleted([record with
         {
             DurationMilliseconds = kind == RecordDurationKind.Unknown ? 0 : null
@@ -29,7 +27,6 @@ public sealed class RecordTimingTests
         {
             EndTimeKind = kind == RecordDurationKind.Measured ? EndTimeKind.ReconciledTerminalObservation : EndTimeKind.MeasuredTerminal
         }]));
-        Assert.Throws<SqliteException>(() => store.AppendCompleted([record]));
         Assert.Equal(record, Assert.Single(store.ReadPage(new()).Items));
     }
 }

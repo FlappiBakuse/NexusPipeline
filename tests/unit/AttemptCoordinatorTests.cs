@@ -43,7 +43,7 @@ public sealed class AttemptCoordinatorTests
     {
         var session = new Session { ExecutionFailure = new IOException("fixture_execution_failed") };
         var error = await Assert.ThrowsAsync<IOException>(() => new ExecutionAttemptCoordinator().RunAsync(session));
-        Assert.Same(session.ExecutionFailure, error); Assert.Equal("quarantine", session.Trace.Last());
+        Assert.Equal("fixture_execution_failed", error.Message); Assert.Equal("quarantine", session.Trace.Last());
         Assert.DoesNotContain("prepare:b", session.Trace); Assert.DoesNotContain(session.Trace, item => item.StartsWith("commit:", StringComparison.Ordinal));
     }
 

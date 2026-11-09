@@ -23,7 +23,6 @@ for (const scenario of [
   let quit = false;
   let authorized = false;
   let enabled = true;
-  const enabledStates = [];
   let clock = 0, navigating;
   const authorizationIds = [];
   const preparations = [];
@@ -31,7 +30,7 @@ for (const scenario of [
   const window = {
     isDestroyed: () => false,
     isEnabled: () => enabled,
-    setEnabled(value) { enabled = value; enabledStates.push(value); },
+    setEnabled(value) { enabled = value; },
     on() {},
     webContents: {
       mainFrame: { url: 'http://127.0.0.1:1234/' },
@@ -85,7 +84,7 @@ for (const scenario of [
   const bridge = sandbox.module.exports.installNativeBridge(window,
     { address: 'http://127.0.0.1:1234/', instanceId: 'instance' }, 'http://127.0.0.1:1234/', () => { quit = true; });
   await bridge.start();
-  const poll = [...timers.values()].find(value => value.delay === 2000).callback();
+  const poll = [...timers.values()][0].callback();
   assert.equal(typeof finishPoll, 'function');
   if (scenario.maintenance) {
     finishPoll({ status: 200, text: async () => '{}' });
@@ -100,10 +99,15 @@ for (const scenario of [
   assert.equal(authorized, !scenario.maintenance && scenario.prepared);
   assert.equal(quit, scenario.prepared && !scenario.invalidPermit && !scenario.conflict && !scenario.expires && !scenario.navigation);
   assert.equal(new Set(authorizationIds).size, authorizationIds.length);
-  assert.deepEqual(enabledStates, scenario.prepared && !scenario.maintenance ? [false, true] : []);
+  if (!quit) assert.equal(enabled, true);
   if (scenario.conflict || scenario.navigation) assert.equal(authorizationIds.length, 1);
-  if (scenario.pending && !scenario.navigation) assert.equal(authorizationIds.length, scenario.expires ? 300 : 2);
+  if (scenario.pending && !scenario.navigation) {
+    if (scenario.expires) { assert(clock >= 30000 && clock < 31000); assert(authorizationIds.length > 1); }
+    else assert.equal(authorizationIds.length, 2);
+  }
   assert.deepEqual(preparations, scenario.invalidPermit ? [] : [scenario.maintenance ? 'maintenance' : 'close']);
+  await bridge.dispose();
+  assert.equal(handlers.size, 0);
 });
 
 test('preload forwards only known native exit reasons to the renderer', async () => {

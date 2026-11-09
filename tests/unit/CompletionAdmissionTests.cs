@@ -91,15 +91,16 @@ public sealed class CompletionAdmissionTests
     public void PreservesConflictAccounting()
     {
         var fixture = new SnapshotCompletionFixture(); fixture.Publish(); var permit = fixture.Permit();
+        var holds = fixture.Index.Current.ResourceHolds.ToArray(); var revision = fixture.Index.Current.Revision;
         using (var accepted = fixture.Manager.TryCompleteSnapshots(permit, fixture.Claims).Lease)
         {
             Assert.NotNull(accepted);
             Assert.Equal(ResourceLeaseDenial.Conflict, fixture.Manager.TryCompleteSnapshots(permit, fixture.Claims).Denial);
         }
-        Assert.Equal(2, fixture.Index.Current.ResourceHolds.Count);
+        Assert.Equal(holds, fixture.Index.Current.ResourceHolds);
         using var retry = fixture.Manager.TryCompleteSnapshots(permit, fixture.Claims).Lease;
         Assert.NotNull(retry); Assert.Equal(permit.Completion.CompletionOperationId, fixture.Permit().Completion.CompletionOperationId);
-        Assert.Equal(1, fixture.PublishCalls);
+        Assert.Equal(revision, fixture.Index.Current.Revision);
     }
 
     [Fact(DisplayName = "Publishing Snapshot Evidence Cannot Bypass An Existing Foreign Mutation Lease")]

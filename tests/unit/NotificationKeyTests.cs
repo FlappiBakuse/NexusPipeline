@@ -1,4 +1,3 @@
-using System.Text.Json;
 using NexusPipeline.Core.Secrets;
 using Xunit;
 
@@ -20,7 +19,6 @@ public sealed class NotificationKeyTests
         Assert.Equal(instance, key.OwnerInstanceId); Assert.Equal(task, key.SubjectId);
         Assert.Null(key.ExtensionId); Assert.Equal(name, key.Field);
         Assert.Equal(field, NotificationSecretFields.Parse(name));
-        Assert.Equal(key, JsonSerializer.Deserialize<SecretFieldKey>(JsonSerializer.Serialize(key)));
     }
 
     [Fact(DisplayName = "An Extension Or Another Instance Cannot Alias Or Authorize A Notification Task Field")]

@@ -5,11 +5,12 @@ const { installFilePermissions } = require('../../apps/desktop/file-permissions.
 const { setLocale } = require('../../apps/desktop/native-text.cjs');
 
 function fixture() {
-  let check, request, navigation;
+  let check, request;
+  const events = new Map();
   const state = { prompts: 0, reply: 0, duringPrompt: undefined };
   const page = 'http://127.0.0.1:1234/';
   const contents = { isDestroyed: () => false, mainFrame: { url: page + '#/history' },
-    on: (name, listener) => { assert.equal(name, 'did-start-navigation'); navigation = listener; },
+    on: (name, listener) => { events.set(name, listener); },
     session: { setPermissionCheckHandler: value => { check = value; },
       setPermissionRequestHandler: value => { request = value; } } };
   const window = { isDestroyed: () => false, webContents: contents };
@@ -25,7 +26,7 @@ function fixture() {
     request: (details = selected, source = contents, permission = 'fileSystem') => {
       let answer; request(source, permission, value => { answer = value; }, details); return answer;
     },
-    navigate: () => navigation({}, page, false, true) };
+    navigate: () => events.get('did-start-navigation')({}, page, false, true) };
 }
 
 test('save-picker status checks with no WebContents require native consent and retain bounded document grants', () => {
@@ -44,10 +45,11 @@ test('save-picker status checks with no WebContents require native consent and r
   assert.equal(check(nativeStatus), false);
   assert.equal(state.prompts, 3);
   navigate(); setLocale('en-US');
-  assert.equal(check(nativeStatus), false);
-  assert.equal(state.options.title, 'Save file');
-  assert.deepEqual(state.options.buttons, ['Cancel', 'Allow save']);
-  setLocale('zh-CN');
+  try {
+    assert.equal(check(nativeStatus), false);
+    assert.equal(state.options.title, 'Save file');
+    assert.deepEqual(state.options.buttons, ['Cancel', 'Allow save']);
+  } finally { setLocale('zh-CN'); }
 });
 
 test('unrelated permissions, origins, documents, directory grants and malformed file checks are denied without prompts', () => {

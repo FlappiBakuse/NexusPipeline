@@ -1,15 +1,13 @@
 using System.Security.Cryptography;
+using System.Security.Principal;
 using System.Text;
-using System.Diagnostics;
-using System.Text.Json;
 using NexusPipeline.Core.Secrets;
 using NexusPipeline.Platform.Security;
 using Xunit;
-using Xunit.Abstractions;
 
 namespace NexusPipeline.WindowsTests;
 
-public sealed class SecretProtectorTests(ITestOutputHelper output)
+public sealed class SecretProtectorTests
 {
     [Theory(DisplayName = "Actual Windows User Protection Round Trips Only Through The Bound Cipher Payload")]
     [InlineData("ascii")]
@@ -29,9 +27,9 @@ public sealed class SecretProtectorTests(ITestOutputHelper output)
         using var input = new SecretValue(text);
         var payload = protector.Protect(instance, secret, input);
         var second = protector.Protect(instance, secret, input);
-        if (kind == "ascii") RecordEnvironment(payload.OwnerSid);
-        Assert.Equal(UserSecretProtector.Scheme, payload.ProtectionScheme);
-        Assert.StartsWith("S-1-", payload.OwnerSid);
+        using var owner = WindowsIdentity.GetCurrent();
+        Assert.Equal("windows-user-dpapi-utf8-v1", payload.ProtectionScheme);
+        Assert.Equal(owner.User!.Value, payload.OwnerSid);
         Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(payload.Ciphertext.Span)), payload.Sha256);
         Assert.False(payload.Ciphertext.Span.SequenceEqual(second.Ciphertext.Span));
         Assert.True(payload.Ciphertext.Span.IndexOf(Encoding.UTF8.GetBytes(text)) < 0);
@@ -82,19 +80,5 @@ public sealed class SecretProtectorTests(ITestOutputHelper output)
         using var input = new SecretValue("fixture-only-token");
         Assert.Throws<ArgumentException>(() => new UserSecretProtector().Protect(
             emptyInstance ? Guid.Empty : Guid.NewGuid(), emptyInstance ? Guid.NewGuid() : Guid.Empty, input));
-    }
-
-    private void RecordEnvironment(string ownerSid)
-    {
-        using var process = Process.GetCurrentProcess();
-        var module = process.Modules.Cast<ProcessModule>().Single(item => string.Equals(item.ModuleName, "crypt32.dll", StringComparison.OrdinalIgnoreCase));
-        var metadata = FileVersionInfo.GetVersionInfo(module.FileName);
-        output.WriteLine(JsonSerializer.Serialize(new
-        {
-            scope = "Actual current-user Windows protection environment only", processId = Environment.ProcessId,
-            operatingSystem = Environment.OSVersion.VersionString, is64BitProcess = Environment.Is64BitProcess, ownerSid,
-            nativeModule = module.FileName, nativeModuleVersion = metadata.FileVersion,
-            nativeModuleSha256 = Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(module.FileName)))
-        }));
     }
 }

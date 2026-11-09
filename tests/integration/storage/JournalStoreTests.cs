@@ -23,23 +23,26 @@ public sealed class JournalStoreTests
         var fixture = NewFixture(kind);
         var borrowedBytes = Bytes(fixture.Document); var borrowedExpected = borrowedBytes.ToArray();
         var borrowed = JournalDocument.ReadBorrowed(borrowedBytes, new());
-        Assert.Equal(borrowedExpected, JournalDocument.ReadBorrowed(borrowedBytes, new()).Export());
         Array.Fill(borrowedBytes, (byte)'x');
         Assert.Throws<JsonException>(() => JournalDocument.ReadBorrowed(borrowedBytes, new()));
         Assert.Equal(borrowedExpected, borrowed.Export());
-        fixture.Store.Create(Bytes(fixture.Document));
+        var history = new List<byte[]> { Bytes(fixture.Document) };
+        fixture.Store.Create(history[0]);
         var phases = kind is "configExchange" or "configEdit"
             ? new[] { "applying", "applied", "reverting", "reverted", "committed" }
             : ["applying", "applied", "committed"];
         foreach (var phase in phases)
         {
             Advance(fixture.Document, phase);
-            fixture.Store.Append(fixture.Id, fixture.Document["revision"]!.GetValue<long>() - 1, Bytes(fixture.Document));
+            var revision = Bytes(fixture.Document);
+            fixture.Store.Append(fixture.Id, fixture.Document["revision"]!.GetValue<long>() - 1, revision);
+            history.Add(revision);
         }
         var reopened = new JournalStore(fixture.Instance, new ContractReader()).Read(fixture.Id);
         Assert.Equal(JournalPhase.Committed, reopened.Phase);
         Assert.Equal(phases.Length + 1, reopened.Revision);
-        Assert.Equal(phases.Length + 1, Directory.GetFiles(fixture.Directory).Length);
+        Assert.Equal(history.ToArray(), new JournalStore(fixture.Instance, new()).ReadAllRevisions(fixture.Id)
+            .Select(revision => revision.Export()).ToArray());
         var previous = Directory.GetFiles(fixture.Directory).Select(File.ReadAllBytes).ToArray();
         Advance(fixture.Document, "quarantined");
         Assert.Throws<IOException>(() => fixture.Store.Append(fixture.Id, reopened.Revision, Bytes(fixture.Document)));
@@ -214,7 +217,6 @@ public sealed class JournalStoreTests
         Advance(fixture.Document, "applied");
         fixture.Store.Append(fixture.Id, 2, Bytes(fixture.Document));
         Assert.Equal(3, new JournalStore(fixture.Instance, new()).Read(fixture.Id).Revision);
-        Assert.Equal(3, new JournalStore(fixture.Instance, new()).Read(fixture.Id).Revision);
         var latestPath = Path.Combine(fixture.Directory, "0000000003.json");
         var originalLatest = File.ReadAllBytes(latestPath);
         if (fault == "plan") File.WriteAllText(fixture.Plan, "{\"fixture\":null}");
@@ -294,23 +296,19 @@ public sealed class JournalStoreTests
         var current = fixture.Store.Create(Bytes(fixture.Document));
         using var held = fixture.Store.ProtectReadHistory(fixture.Id);
         long total = current.Export().Length;
-        var crossed = false;
-        while (!crossed)
+        var first = Path.Combine(fixture.Directory, "0000000001.json");
+        var released = CanWriteRevision(first);
+        while (!released && current.Revision <= 256 && total <= 16777216)
         {
             Advance(fixture.Document, "applying");
             var next = Bytes(fixture.Document);
-            crossed = byteLimit ? total + next.Length > 16777216 : current.Revision == 256;
-            if (!crossed)
-                Assert.Throws<IOException>(() => File.Open(Path.Combine(fixture.Directory, "0000000001.json"),
-                    FileMode.Open, FileAccess.Write, FileShare.ReadWrite).Dispose());
             current = fixture.Store.Append(fixture.Id, current.Revision, next);
             total += next.Length;
-            Assert.True(current.Revision <= 257);
+            released = CanWriteRevision(first);
         }
-        var first = Path.Combine(fixture.Directory, "0000000001.json");
-        using (File.Open(first, FileMode.Open, FileAccess.Write, FileShare.ReadWrite)) { }
-        using var readScope = JournalReadScope.Hold(fixture.Store, fixture.Id);
-        Assert.Equal(current.Revision, fixture.Store.Read(fixture.Id).Revision);
+        Assert.True(released, "Journal protection must release retained handles within its history budget");
+        using (JournalReadScope.Hold(fixture.Store, fixture.Id))
+            Assert.Equal(Bytes(fixture.Document), fixture.Store.Read(fixture.Id).Export());
         File.WriteAllText(first, "changed");
         var before = Fingerprint(fixture.Directory);
         Assert.ThrowsAny<Exception>(() => fixture.Store.Read(fixture.Id));
@@ -318,6 +316,16 @@ public sealed class JournalStoreTests
         Assert.ThrowsAny<Exception>(() => fixture.Store.Append(fixture.Id, current.Revision, Bytes(fixture.Document)));
         Assert.Equal(before, Fingerprint(fixture.Directory));
         Console.WriteLine($"protection fallback: bytes={total}; revisions={current.Revision}; limit={(byteLimit ? "bytes" : "revisions")}");
+    }
+
+    private static bool CanWriteRevision(string path)
+    {
+        try
+        {
+            using var file = File.Open(path, FileMode.Open, FileAccess.Write, FileShare.ReadWrite);
+            return true;
+        }
+        catch (IOException) { return false; }
     }
 
     private sealed class PausedPublication : IJournalPublicationObserver, IDisposable

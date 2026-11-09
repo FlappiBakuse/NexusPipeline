@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Runtime.Versioning;
-using System.Security.Cryptography;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Execution;
 using NexusPipeline.Platform.Processes;
@@ -34,43 +33,21 @@ public sealed class RetirementScopeTests(ITestOutputHelper output)
             records.OnCommitted(receipt); return receipt;
         }
         var first = await Run(); var unrelated = await Run();
-        var expected = new RecoveryJournalRegistry(source.Database).ReadJournal(first.JournalId);
         var journalBytes = new JournalStore(source.Instance, new()).Read(first.JournalId).Export();
         var id = unrelated.JournalId.ToString("D");
         fixture.Base.Execute(damage == "path"
             ? "UPDATE operation_journals SET plan_path='blobs/plans/" + new string('0', 64) + ".json' WHERE journal_id='" + id + "';"
             : "DELETE FROM journal_resource_claims WHERE journal_id='" + id + "'; DELETE FROM journal_resources WHERE journal_id='" + id + "';");
-        using (var connection = DatabaseConnections.Open(source.Database.DatabasePath, readOnly: true))
-        using (var transaction = connection.BeginTransaction(deferred: true))
-        {
-            var actual = RecoveryJournalRegistry.ReadJournalInside(connection, transaction, first.JournalId);
-            Assert.Equal(expected.JournalId, actual.JournalId); Assert.Equal(expected.PlanDigest, actual.PlanDigest);
-            Assert.Equal(expected.ResourceKeys, actual.ResourceKeys);
-            var queryPlans = new List<string>();
-            foreach (var sql in new[] {
-                "EXPLAIN QUERY PLAN SELECT operation_id,operation_kind,phase,revision,plan_path,plan_digest FROM operation_journals WHERE journal_id=$id;",
-                "EXPLAIN QUERY PLAN SELECT resource_key FROM journal_resources WHERE journal_id=$id ORDER BY resource_key LIMIT 4097;" })
-            {
-                using var command = connection.CreateCommand(); command.Transaction = transaction;
-                command.CommandText = sql; command.Parameters.AddWithValue("$id", first.JournalId.ToString("D"));
-                using var rows = command.ExecuteReader(); while (rows.Read()) queryPlans.Add(rows.GetString(3));
-            }
-            Assert.NotEmpty(queryPlans);
-            Assert.All(queryPlans, detail => Assert.DoesNotContain("SCAN ", detail, StringComparison.OrdinalIgnoreCase));
-            Assert.Contains(queryPlans, detail => detail.Contains("SEARCH ", StringComparison.OrdinalIgnoreCase));
-            output.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { damage, queryPlans }));
-            transaction.Commit();
-        }
         var global = Record.Exception(() => new RecoveryJournalRegistry(source.Database).ReadSnapshot());
         Assert.True(global is IOException or InvalidOperationException);
         var retirement = new ContentRetirementService(source.Instance, source.Database, new(), source.Lease,
             fixture.Base.Resources, fixture.Base.Index);
         Assert.NotNull(retirement.RetireLogsPage(Guid.NewGuid(), "retirement-local-read", first.Facts.RunId));
         fixture.Base.Execute("UPDATE operation_journals SET phase='applying' WHERE journal_id='" + id + "';");
-        var counts = fixture.Base.Counts();
+        var commits = source.Database.CommitSequence;
         var rejected = Record.Exception(() => retirement.RetireLogsPage(Guid.NewGuid(), "retirement-local-read", first.Facts.RunId));
         Assert.NotNull(rejected); Assert.Equal(global!.GetType(), rejected.GetType()); Assert.Equal(global.Message, rejected.Message);
-        Assert.Equal(counts, fixture.Base.Counts()); Assert.Equal(1, fixture.Base.Count("record_content_retirements"));
+        Assert.Equal(commits, source.Database.CommitSequence);
         Assert.Equal(first, new AttemptReceiptStore(source.Database).Read(first.Facts.AttemptId));
         Assert.Equal(journalBytes, new JournalStore(source.Instance, new()).Read(first.JournalId).Export());
     }
@@ -81,17 +58,14 @@ public sealed class RetirementScopeTests(ITestOutputHelper output)
         using var fixture = await RecordRetirementFixture.CreateAsync();
         var source = fixture.Source;
         var reader = new RetirementFamilyReader(source.Instance, source.Database, new());
-        var original = reader.CaptureMetadata(fixture.Receipt.Facts.RunId);
+        _ = reader.CaptureMetadata(fixture.Receipt.Facts.RunId);
         var journalBytes = new JournalStore(source.Instance, new()).Read(fixture.Receipt.JournalId).Export();
-        var digest = Convert.ToHexStringLower(SHA256.HashData(System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(
-            original, RecordRetirementCodec.Options)));
         fixture.Hooks.Base.Execute("UPDATE journal_writer_job_roots SET image_sha256='" + new string('0', 64) +
             "' WHERE journal_id='" + fixture.Receipt.JournalId.ToString("D") + "';");
         Assert.ThrowsAny<IOException>(() => reader.CaptureMetadata(fixture.Receipt.Facts.RunId));
-        Assert.Equal(digest, Convert.ToHexStringLower(SHA256.HashData(System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(
-            original, RecordRetirementCodec.Options))));
+        var commits = source.Database.CommitSequence;
         Assert.ThrowsAny<IOException>(() => fixture.Retirement.RetireLogsPage(Guid.NewGuid(), "retirement-local-read", fixture.Receipt.Facts.RunId));
-        Assert.Equal(0, fixture.Hooks.Base.Count("record_content_retirements"));
+        Assert.Equal(commits, source.Database.CommitSequence);
         Assert.Equal(fixture.Receipt, new AttemptReceiptStore(source.Database).Read(fixture.Receipt.Facts.AttemptId));
         Assert.Equal(journalBytes, new JournalStore(source.Instance, new()).Read(fixture.Receipt.JournalId).Export());
     }

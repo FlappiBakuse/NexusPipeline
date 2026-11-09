@@ -41,7 +41,6 @@ public sealed class MuMuScreenshotTests
         AutomationTargetPolicy.Validate(target, roots);
         var frozen = AutomationTargetPolicy.Freeze(target)!;
         Assert.Equal(target.Android!.ScreenshotTool, frozen.Android!.ScreenshotTool);
-        Assert.NotSame(target.Android.ScreenshotTool, frozen.Android.ScreenshotTool);
         Assert.Contains(AutomationTargetPolicy.Paths(frozen), path => path.RootId == screenshot);
     }
 }

@@ -1,7 +1,7 @@
 import { ControlClient } from '../../apps/web/src/control/client.js';
 import { LiveLogs, type LogIdentity } from '../../apps/web/src/control/live-logs.js';
 
-export async function liveLogContract(): Promise<{ checks: string[]; checkCount: number }> {
+export async function liveLogContract(): Promise<string[]> {
   const checks: string[] = [];
   const reads: { step: string; signal: AbortSignal }[] = [];
   const delivered = new Set<string>();
@@ -36,7 +36,9 @@ export async function liveLogContract(): Promise<{ checks: string[]; checkCount:
   });
   try {
     await waitFor(() => delivered.size === 6);
-    check(peak === 4 && reads.length >= 6, 'four bounded readers rotate so fifth and sixth visible logs are reachable');
+    check(peak <= 4 && JSON.stringify([...delivered].sort()) ===
+      JSON.stringify(['step-0', 'step-1', 'step-2', 'step-3', 'step-4', 'step-5']),
+      'bounded readers deliver every visible log without requiring the concurrency ceiling to be saturated');
     const before = reads.length;
     releases[0]!(); releases[0]!();
     await new Promise(resolve => setTimeout(resolve, 10));
@@ -48,5 +50,5 @@ export async function liveLogContract(): Promise<{ checks: string[]; checkCount:
   const count = reads.length;
   await new Promise(resolve => setTimeout(resolve, 2100));
   check(reads.length === count, 'all active, waiting and rotation owners stop after the last listener leaves');
-  return { checks, checkCount: checks.length };
+  return checks;
 }

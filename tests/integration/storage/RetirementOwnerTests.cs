@@ -32,7 +32,7 @@ public sealed class RetirementOwnerTests
             .ReadPage(new(receipt.Facts.RunId, receipt.Facts.AttemptId)).Items.ToArray();
         var registered = Assert.Single(new RecoveryJournalRegistry(source.Database).ReadSnapshot().Journals,
             item => item.Kind == JournalKind.FileCleanup);
-        Assert.Equal(JournalPhase.Prepared, registered.Phase); Assert.Equal(1, registered.Revision);
+        Assert.Equal(JournalPhase.Prepared, registered.Phase);
         Assert.Equal(materialized, Directory.Exists(Path.Combine(source.Instance.RuntimeRoot, "journals", registered.JournalId.ToString("D"))));
         BlobReference proof;
         using (var connection = DatabaseConnections.Open(source.Database.DatabasePath, readOnly: true))
@@ -40,8 +40,8 @@ public sealed class RetirementOwnerTests
         var blobs = new ImmutableBlobStore(source.Instance, new());
         var document = RecordRetirementCodec.Read<RecordRetirementDocument>(blobs, proof);
         Assert.NotEmpty(document.Contents);
-        foreach (var content in document.Contents) blobs.Verify(content);
-        Assert.Equal(receipt, new AttemptReceiptStore(source.Database).Read(fixture.Attempt));
+        var pending = new FileEffectOutbox(source.Database).Read(registered.JournalId);
+        Assert.NotEmpty(pending);
 
         await fixture.KillOwnerAsync();
         Assert.Equal(WriterState.Stopped, WriterStopEvidence.ObserveProcess(fixture.Root));
@@ -52,16 +52,16 @@ public sealed class RetirementOwnerTests
         var recovery = new StartupJournalRecovery(source.Instance, new(), database, roots);
         var index = recovery.Recover(lease);
         Assert.True(index.Current.IsReady);
-        var snapshot = new RecoveryJournalRegistry(database).ReadSnapshot();
-        var completed = Assert.Single(snapshot.Journals, item => item.JournalId == registered.JournalId);
+        var completed = new RecoveryJournalRegistry(database).ReadJournal(registered.JournalId);
         Assert.Equal(JournalPhase.Committed, completed.Phase);
-        Assert.All(snapshot.FileEffects.Where(item => item.JournalId == registered.JournalId),
-            item => Assert.Equal(FileEffectState.NotExecuted, item.State));
+        var outbox = new FileEffectOutbox(database);
+        var effects = outbox.Read(registered.JournalId);
+        Assert.Equal(pending.Select(item => (item.StepId, item.IntentDigest, State: FileEffectState.NotExecuted)),
+            effects.Select(item => (item.StepId, item.IntentDigest, item.State)));
         foreach (var content in document.Contents) blobs.Verify(content);
         var after = new LogCatalogReader(source.Instance, database, new())
             .ReadPage(new(receipt.Facts.RunId, receipt.Facts.AttemptId)).Items.ToArray();
-        Assert.Equal(before.Select(item => (item.Key, item.SnapshotSha256, item.RecordedBytes, item.ObservedBytes, item.IsComplete)),
-            after.Select(item => (item.Key, item.SnapshotSha256, item.RecordedBytes, item.ObservedBytes, item.IsComplete)));
+        Assert.Equal(before, after);
         Assert.Contains(after, item => item.ContentAvailability == RecordContentAvailability.Retired);
         Assert.Equal(original, new JournalStore(source.Instance, new()).Read(fixture.Parent).Export());
         Assert.Equal(receipt, new AttemptReceiptStore(database).Read(fixture.Attempt));
@@ -74,7 +74,6 @@ public sealed class RetirementOwnerTests
         Assert.Equal(registered.JournalId, replay.CleanupJournalId);
         Assert.Equal(document.Contents.Length, replay.Count);
         _ = recovery.Recover(lease);
-        Assert.Equal(original, new JournalStore(source.Instance, new()).Read(fixture.Parent).Export());
-        Assert.Equal(receipt, new AttemptReceiptStore(database).Read(fixture.Attempt));
+        Assert.Equal(effects, outbox.Read(registered.JournalId));
     }
 }

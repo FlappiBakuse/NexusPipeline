@@ -16,10 +16,11 @@ public sealed class HookFactsTests
         EngineOutcome combined, BusinessOutcome business)
     {
         var primary = new ExecutionStepFact("binding", main, business, "execution_primary_fact");
-        var result = HookFactsPolicy.Compose(primary, [new(ExecutionHookRole.Post, hook, "execution_post_hook_fact")]);
+        var hookFact = new HookEngineFact(ExecutionHookRole.Post, hook, "execution_post_hook_fact");
+        var result = HookFactsPolicy.Compose(primary, [hookFact]);
         Assert.Equal(primary, result.Primary); Assert.Equal(combined, result.Combined.Engine);
         Assert.Equal(business, result.Combined.Business); Assert.Equal("binding", result.Combined.StepId);
-        Assert.Single(result.Hooks); Assert.Equal(primary.Engine, result.Primary.Engine);
+        Assert.Equal(hookFact, Assert.Single(result.Hooks));
     }
 
     [Fact(DisplayName = "A Post Hook Failure Uses Engine Failed And Does Not Invent A Failed Lifecycle")]

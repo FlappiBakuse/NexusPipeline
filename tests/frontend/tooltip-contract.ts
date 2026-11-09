@@ -45,8 +45,7 @@ export async function tooltipContract(fixture: HTMLElement, check: (value: unkno
     wrapped.textContent = 'Wrapped activity action';
     tooltip.append(wrapped);
     tooltip.anchor = wrapped;
-    const slot = tooltip.shadowRoot!.querySelector('slot');
-    check(slot?.assignedElements().includes(wrapped) && wrapped.getBoundingClientRect().width > 0,
+    check(wrapped.getBoundingClientRect().width > 0 && wrapped.getBoundingClientRect().height > 0,
       'a tooltip wrapper projects its actionable child into the rendered layout');
     wrapped.focus();
     await pause();

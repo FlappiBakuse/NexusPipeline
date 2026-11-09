@@ -16,6 +16,7 @@ using NexusPipeline.Platform.Storage.Journals;
 using NexusPipeline.Platform.Storage.Sqlite;
 using Xunit;
 using Xunit.Abstractions;
+using static NexusPipeline.StorageTests.InitialRecoveryTests;
 
 namespace NexusPipeline.StorageTests;
 
@@ -30,8 +31,16 @@ public sealed class RecoveryOwnershipTests(ITestOutputHelper output)
         using var fixture = await Fixture.Create("host");
         await fixture.StopRoot();
         if (interruptRecoveryOwner) await fixture.InterruptRecoveryOwner();
-        Assert.Equal(new WriterStopObservation(true, WriterState.Stopped), new JournalWriterStore(fixture.Open()).Observe(fixture.JournalId));
-        Assert.False(Directory.Exists(Path.Combine(fixture.Instance.RuntimeRoot, "journals")));
+        var initialDb = fixture.Open();
+        Assert.Equal(new WriterStopObservation(true, WriterState.Stopped), new JournalWriterStore(initialDb).Observe(fixture.JournalId));
+        var accepted = new RecoveryJournalRegistry(initialDb).ReadOperationJournal(fixture.OperationId);
+        Assert.Equal(fixture.JournalId, accepted.JournalId);
+        Assert.Equal(JournalPhase.Prepared, accepted.Phase);
+        var effects = new FileEffectOutbox(initialDb).Read(accepted.JournalId);
+        Assert.Equal(FileEffectAction.InstallCandidate, Assert.Single(effects).Action);
+        var journals = new JournalStore(fixture.Instance, new());
+        Assert.ThrowsAny<IOException>(() => journals.Read(accepted.JournalId));
+        var original = PhysicalObjectIdentity.Read(fixture.Target);
         using var reservation = new TcpListener(IPAddress.Loopback, 0);
         reservation.Start();
         var port = ((IPEndPoint)reservation.LocalEndpoint).Port;
@@ -60,16 +69,20 @@ public sealed class RecoveryOwnershipTests(ITestOutputHelper output)
         }
         Assert.True(served);
         Assert.True(await host.StopAsync(TimeSpan.FromSeconds(5)));
+        Assert.Equal(0u, host.GetAccounting().ActiveProcesses);
         var database = fixture.Open();
-        var registered = Assert.Single(new RecoveryJournalRegistry(database).ReadSnapshot().Journals);
-        Assert.Equal(JournalPhase.Committed, registered.Phase);
-        Assert.All(new FileEffectOutbox(database).Read(fixture.JournalId), effect => Assert.Equal(FileEffectState.NotExecuted, effect.State));
+        var registered = AssertRegistration(new(database), accepted, JournalPhase.Committed);
+        new JournalRecoveryEvidence(fixture.Instance, journals).VerifyAll([registered]);
+        AssertEffectsClosed(effects, new FileEffectOutbox(database).Read(registered.JournalId));
+        Assert.Equal(original, PhysicalObjectIdentity.Read(fixture.Target));
         Assert.Equal(new byte[] { 1, 2, 3 }, File.ReadAllBytes(fixture.Target));
+        var history = journals.ReadAllRevisions(registered.JournalId).Select(item => item.Export()).ToArray();
         using var lease = InstanceLease.Acquire(fixture.Instance, new());
         var roots = fixture.PayloadRoots;
         var index = new StartupJournalRecovery(fixture.Instance, new(), database, roots).Recover(lease);
         Assert.True(index.Current.IsReady);
         Assert.Empty(index.Current.Isolations);
+        Assert.Equal(history, journals.ReadAllRevisions(registered.JournalId).Select(item => item.Export()));
         output.WriteLine(JsonSerializer.Serialize(new { identity, served, registered.Phase, preservedTarget = fixture.Target,
             repeatedStartup = "ready", interruptRecoveryOwner, evidence = fixture.Report,
             scope = "Actual Host startup with a killed creator and no initial physical journal" }));
@@ -81,10 +94,7 @@ public sealed class RecoveryOwnershipTests(ITestOutputHelper output)
         using var fixture = await Fixture.Create("host");
         var database = fixture.Open();
         Assert.Equal(new WriterStopObservation(true, WriterState.Running), new JournalWriterStore(database).Observe(fixture.JournalId));
-        var before = Fingerprints(fixture.Instance.RuntimeRoot);
-        var error = Assert.Throws<IOException>(() => fixture.Open(admission: true));
-        Assert.Equal("startup_journal_writer_stop_unconfirmed", error.Message);
-        Assert.Equal(before, Fingerprints(fixture.Instance.RuntimeRoot));
+        AssertReadOnlyRefusal(fixture, database);
         await fixture.StopFamily();
     }
 
@@ -92,17 +102,18 @@ public sealed class RecoveryOwnershipTests(ITestOutputHelper output)
     public async Task RejectsLivingJobs()
     {
         using var fixture = await Fixture.Create("job");
-        using var retained = OpenJobObjectW(4, false, fixture.Report.GetProperty("jobName").GetString()!);
+        var name = fixture.Report.GetProperty("jobName").GetString()!;
+        using var retained = OpenJobObjectW(4, false, name);
         Assert.False(retained.IsInvalid);
         using var current = Process.GetCurrentProcess();
-        Assert.Equal(WriterState.Unknown, WriterStopEvidence.ObserveJob(fixture.Report.GetProperty("jobName").GetString()!, current.SessionId + 1));
+        Assert.Equal(WriterState.Unknown, WriterStopEvidence.ObserveJob(name, current.SessionId + 1));
         await fixture.StopRoot();
-        Assert.Equal(new WriterStopObservation(true, WriterState.Running), new JournalWriterStore(fixture.Open()).Observe(fixture.JournalId));
-        var before = Fingerprints(fixture.Instance.RuntimeRoot);
-        var error = Assert.Throws<IOException>(() => fixture.Open(admission: true));
-        Assert.Equal("startup_journal_writer_stop_unconfirmed", error.Message);
-        Assert.Equal(before, Fingerprints(fixture.Instance.RuntimeRoot));
+        Assert.Equal(WriterState.Running, WriterStopEvidence.ObserveJob(name, current.SessionId));
+        var database = fixture.Open();
+        Assert.Equal(new WriterStopObservation(true, WriterState.Running), new JournalWriterStore(database).Observe(fixture.JournalId));
+        AssertReadOnlyRefusal(fixture, database);
         await fixture.StopFamily();
+        Assert.Equal(WriterState.Stopped, WriterStopEvidence.ObserveJob(name, current.SessionId));
         Assert.Equal(new WriterStopObservation(true, WriterState.Stopped), new JournalWriterStore(fixture.Open()).Observe(fixture.JournalId));
         output.WriteLine(JsonSerializer.Serialize(new { creatorExited = true, liveJobBlockedRecovery = true,
             job = fixture.Report.GetProperty("jobName").GetString(), completeFamilyStopped = true }));
@@ -112,13 +123,12 @@ public sealed class RecoveryOwnershipTests(ITestOutputHelper output)
     public async Task RejectsMissingJobs()
     {
         using var fixture = await Fixture.Create("job");
-        await fixture.StopRoot();
+        var database = fixture.Open();
+        Assert.Equal(new WriterStopObservation(true, WriterState.Running), new JournalWriterStore(database).Observe(fixture.JournalId));
         await fixture.StopFamily();
-        var observed = new JournalWriterStore(fixture.Open()).Observe(fixture.JournalId);
+        var observed = new JournalWriterStore(database).Observe(fixture.JournalId);
         Assert.Equal(new WriterStopObservation(false, WriterState.Unknown), observed);
-        var before = Fingerprints(fixture.Instance.RuntimeRoot);
-        Assert.Equal("startup_journal_writer_stop_unconfirmed", Assert.Throws<IOException>(() => fixture.Open(admission: true)).Message);
-        Assert.Equal(before, Fingerprints(fixture.Instance.RuntimeRoot));
+        AssertReadOnlyRefusal(fixture, database);
     }
 
     [Theory(DisplayName = "Missing Writer Evidence Is Rejected Read Only Instead Of Assuming A Stopped Creator")]
@@ -135,21 +145,21 @@ public sealed class RecoveryOwnershipTests(ITestOutputHelper output)
         {
             connection.Open();
             using var command = connection.CreateCommand();
-            command.CommandText = fault switch
+            var change = fault switch
             {
-                "missing" => "DELETE FROM journal_writers;",
-                "hash" => "UPDATE journal_writers SET image_sha256='zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz';",
-                "path" => "UPDATE journal_writers SET image_path='relative.exe';",
-                "sid" => "UPDATE journal_writers SET user_sid='not-a-sid';",
-                _ => "UPDATE journal_writers SET writer_id='00000000-0000-0000-0000-000000000000';"
+                "missing" => "DELETE FROM journal_writers",
+                "hash" => "UPDATE journal_writers SET image_sha256='zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz'",
+                "path" => "UPDATE journal_writers SET image_path='relative.exe'",
+                "sid" => "UPDATE journal_writers SET user_sid='not-a-sid'",
+                _ => "UPDATE journal_writers SET writer_id='00000000-0000-0000-0000-000000000000'"
             };
-            command.ExecuteNonQuery();
+            command.CommandText = change + " WHERE journal_id=$journal;";
+            command.Parameters.AddWithValue("$journal", fixture.JournalId.ToString("D"));
+            Assert.Equal(1, command.ExecuteNonQuery());
         }
-        Assert.Equal(new WriterStopObservation(false, WriterState.Unknown), new JournalWriterStore(fixture.Open()).Observe(fixture.JournalId));
-        var before = Fingerprints(fixture.Instance.RuntimeRoot);
-        Assert.Equal("startup_journal_writer_stop_unconfirmed", Assert.Throws<IOException>(() => fixture.Open(admission: true)).Message);
-        Assert.Equal(before, Fingerprints(fixture.Instance.RuntimeRoot));
-        Assert.Equal(new byte[] { 1, 2, 3 }, File.ReadAllBytes(fixture.Target));
+        var database = fixture.Open();
+        Assert.Equal(new WriterStopObservation(false, WriterState.Unknown), new JournalWriterStore(database).Observe(fixture.JournalId));
+        AssertReadOnlyRefusal(fixture, database);
     }
 
     [Fact(DisplayName = "Recovery Cannot Use An Expired Exclusive Instance Lease")]
@@ -182,19 +192,38 @@ public sealed class RecoveryOwnershipTests(ITestOutputHelper output)
         using var fixture = await Fixture.Create("six");
         await fixture.StopRoot();
         var database = fixture.Open(admission: true);
-        var registered = new RecoveryJournalRegistry(database).ReadSnapshot().Journals;
+        var registry = new RecoveryJournalRegistry(database);
+        var accepted = registry.ReadSnapshot();
         Assert.Equal(new[] { JournalKind.ConfigExchange, JournalKind.ConfigEdit, JournalKind.FileCleanup,
-            JournalKind.RunAttempt, JournalKind.UpdateApply, JournalKind.ExtensionApply }.Order(), registered.Select(item => item.Kind).Order());
+            JournalKind.RunAttempt, JournalKind.UpdateApply, JournalKind.ExtensionApply }.Order(), accepted.Journals.Select(item => item.Kind).Order());
         var writerStore = new JournalWriterStore(database);
-        Assert.All(registered, item => Assert.Equal(new WriterStopObservation(true, WriterState.Stopped), writerStore.Observe(item.JournalId)));
+        Assert.All(accepted.Journals, item => Assert.Equal(new WriterStopObservation(true, WriterState.Stopped), writerStore.Observe(item.JournalId)));
         var before = SiteFingerprints(fixture.Instance.RuntimeRoot);
         using var lease = InstanceLease.Acquire(fixture.Instance, new());
-        var index = new StartupJournalRecovery(fixture.Instance, new(), database, fixture.PayloadRoots).Recover(lease);
+        var recovery = new StartupJournalRecovery(fixture.Instance, new(), database, fixture.PayloadRoots);
+        var index = recovery.Recover(lease);
         Assert.True(index.Current.IsReady);
         Assert.Empty(index.Current.Isolations);
-        var completed = new RecoveryJournalRegistry(database).ReadSnapshot();
-        Assert.All(completed.Journals, item => Assert.Equal(JournalPhase.Committed, item.Phase));
-        Assert.All(completed.FileEffects, item => Assert.Equal(FileEffectState.NotExecuted, item.State));
+        var completed = registry.ReadSnapshot();
+        var bound = accepted.Journals.Select(item => AssertRegistration(registry, item, JournalPhase.Committed)).ToArray();
+        Assert.Equal(bound.Select(item => item.JournalId).Order(), completed.Journals.Select(item => item.JournalId).Order());
+        AssertEffectsClosed(accepted.FileEffects, completed.FileEffects);
+        var receipts = new AttemptReceiptStore(database);
+        var receipt = receipts.Read(fixture.AttemptId);
+        Assert.NotNull(receipt);
+        Assert.Equal(fixture.OperationId, receipt.OperationId); Assert.Equal(fixture.JournalId, receipt.JournalId);
+        Assert.Equal(fixture.RunId, receipt.Facts.RunId); Assert.Equal(fixture.AttemptId, receipt.Facts.AttemptId);
+        Assert.Equal(EngineOutcome.NotStarted, receipt.Facts.Engine);
+        Assert.Equal(RecoveryOutcome.NotRequired, receipt.Facts.Recovery);
+        var journals = new JournalStore(fixture.Instance, new());
+        new JournalRecoveryEvidence(fixture.Instance, journals).VerifyAll(bound);
+        var histories = bound.ToDictionary(item => item.JournalId, item => journals.ReadAllRevisions(item.JournalId).Select(revision => revision.Export()).ToArray());
+        var repeated = recovery.Recover(lease);
+        Assert.True(repeated.Current.IsReady); Assert.Empty(repeated.Current.Isolations);
+        foreach (var journal in bound)
+            Assert.Equal(histories[journal.JournalId], journals.ReadAllRevisions(journal.JournalId).Select(item => item.Export()));
+        Assert.Equal(completed.FileEffects, registry.ReadSnapshot().FileEffects);
+        Assert.Equal(receipt, receipts.Read(fixture.AttemptId));
         Assert.Equal(before, SiteFingerprints(fixture.Instance.RuntimeRoot));
         output.WriteLine(JsonSerializer.Serialize(new { input = fixture.Report, completedKinds = completed.Journals.Select(item => item.Kind.ToString()),
             indexReady = index.Current.IsReady, unknownWriterAssumptions = false, retainedManagedSite = before }));
@@ -207,13 +236,50 @@ public sealed class RecoveryOwnershipTests(ITestOutputHelper output)
         await fixture.StopRoot();
         var database = fixture.Open();
         using var lease = InstanceLease.Acquire(fixture.Instance, new());
-        using var observation = new DatabaseObservation(database);
+        var registry = new RecoveryJournalRegistry(database);
+        var accepted = registry.ReadSnapshot();
+        var plan = Assert.Single(accepted.Journals, item => item.Kind == JournalKind.ExtensionApply);
+        Assert.Equal(plan.JournalId, accepted.Journals[^1].JournalId);
         var before = Fingerprints(fixture.Instance.RuntimeRoot);
-        Assert.ThrowsAny<Exception>(() => fixture.Open(admission: true));
+        Assert.Equal("unsupported_or_invalid_contract", Assert.Throws<JsonException>(() => fixture.Open(admission: true)).Message);
         Assert.Equal(before, Fingerprints(fixture.Instance.RuntimeRoot));
-        Assert.ThrowsAny<Exception>(() => new StartupJournalRecovery(fixture.Instance, new(), database, fixture.PayloadRoots).Recover(lease));
+        using var observation = new DatabaseObservation(database);
+        var beforeRecovery = Fingerprints(fixture.Instance.RuntimeRoot);
+        Assert.Equal("unsupported_or_invalid_contract", Assert.Throws<JsonException>(() =>
+            new StartupJournalRecovery(fixture.Instance, new(), database, fixture.PayloadRoots).Recover(lease)).Message);
+        Assert.Equal(beforeRecovery, Fingerprints(fixture.Instance.RuntimeRoot));
+        foreach (var item in accepted.Journals)
+            Assert.Equal(item.Revision, AssertRegistration(registry, item, JournalPhase.Prepared).Revision);
+        Assert.Equal(accepted.FileEffects, registry.ReadSnapshot().FileEffects);
+        Assert.Null(new AttemptReceiptStore(database).Read(fixture.AttemptId));
+    }
+
+    private static void AssertReadOnlyRefusal(Fixture fixture, StateDatabase database)
+    {
+        var registry = new RecoveryJournalRegistry(database);
+        var accepted = registry.ReadOperationJournal(fixture.OperationId);
+        Assert.Equal(fixture.JournalId, accepted.JournalId);
+        var original = PhysicalObjectIdentity.Read(fixture.Target);
+        var before = Fingerprints(fixture.Instance.RuntimeRoot);
+        Assert.Equal("startup_journal_writer_stop_unconfirmed", Assert.Throws<IOException>(() => fixture.Open(admission: true)).Message);
         Assert.Equal(before, Fingerprints(fixture.Instance.RuntimeRoot));
-        Assert.All(new RecoveryJournalRegistry(database).ReadSnapshot().Journals, item => Assert.Equal(JournalPhase.Prepared, item.Phase));
+        Assert.Equal(accepted.Revision, AssertRegistration(registry, accepted, JournalPhase.Prepared).Revision);
+        var isolation = Assert.Single(registry.ReadSnapshot().Isolations);
+        Assert.Equal(accepted.JournalId, isolation.JournalId);
+        Assert.Equal(Assert.Single(accepted.ResourceKeys), isolation.ResourceKey);
+        Assert.Equal(original, PhysicalObjectIdentity.Read(fixture.Target));
+        Assert.Equal(new byte[] { 1, 2, 3 }, File.ReadAllBytes(fixture.Target));
+    }
+
+    private static void AssertEffectsClosed(IReadOnlyList<FileEffect> accepted, IReadOnlyList<FileEffect> completed)
+    {
+        Assert.Equal(accepted.Count, completed.Count);
+        foreach (var effect in accepted)
+        {
+            var closed = Assert.Single(completed, item => item.JournalId == effect.JournalId && item.StepId == effect.StepId);
+            Assert.NotNull(closed.ReceiptDigest);
+            Assert.Equal(effect with { State = FileEffectState.NotExecuted, ReceiptDigest = closed.ReceiptDigest }, closed);
+        }
     }
 
     private static string[] SiteFingerprints(string runtimeRoot)
@@ -246,6 +312,9 @@ public sealed class RecoveryOwnershipTests(ITestOutputHelper output)
         internal JsonElement Report { get; private set; }
         internal RuntimeInstance Instance => new InstanceRoot(new()).OpenExisting(Report.GetProperty("runtimeRoot").GetString()!);
         internal Guid JournalId => Report.GetProperty("journalId").GetGuid();
+        internal Guid OperationId => Report.GetProperty("operationId").GetGuid();
+        internal Guid AttemptId => Report.GetProperty("attemptId").GetGuid();
+        internal Guid RunId => Report.GetProperty("runId").GetGuid();
         internal string Target => Report.GetProperty("target").GetString()!;
         internal PayloadApplyRoots PayloadRoots => Report.TryGetProperty("hostPayloadRoot", out var host)
             ? new(host.GetString()!, Report.GetProperty("extensionPayloadRoot").GetString()!)
@@ -266,6 +335,9 @@ public sealed class RecoveryOwnershipTests(ITestOutputHelper output)
                     ["startup-journal", fixture.Root, mode, report], fixture.Root, Guid.NewGuid(), Guid.NewGuid(), _ => { });
                 fixture._rootProcess = Process.GetProcessById(identity.ProcessId);
                 fixture.Report = await OwnedCrashProcess.ReadReportAsync(report);
+                Assert.Equal("faultReady", fixture.Report.GetProperty("status").GetString());
+                Assert.Equal(identity.ProcessId, fixture.Report.GetProperty("processId").GetInt32());
+                Assert.Equal(fixture.Instance.InstanceId, fixture.Report.GetProperty("instanceId").GetGuid());
                 return fixture;
             }
             catch { fixture.Dispose(); throw; }
@@ -287,7 +359,9 @@ public sealed class RecoveryOwnershipTests(ITestOutputHelper output)
             var identity = owner.Start(Environment.GetEnvironmentVariable("NEXUS_PROCESS_FIXTURE_EXE")!,
                 ["startup-recovery-owner", Instance.RuntimeRoot, report], Root, Instance.InstanceId, Guid.NewGuid(), _ => { });
             using var process = Process.GetProcessById(identity.ProcessId);
-            _ = await OwnedCrashProcess.ReadReportAsync(report);
+            var ready = await OwnedCrashProcess.ReadReportAsync(report);
+            Assert.Equal("faultReady", ready.GetProperty("status").GetString());
+            Assert.Equal(identity.ProcessId, ready.GetProperty("processId").GetInt32());
             Assert.Equal(new WriterStopObservation(true, WriterState.Running), new JournalWriterStore(Open()).Observe(JournalId));
             process.Kill(entireProcessTree: false);
             using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));

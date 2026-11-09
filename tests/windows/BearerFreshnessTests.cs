@@ -55,11 +55,7 @@ public sealed class BearerFreshnessTests
             using var reopened = new ControlBearerVerifier(fixture.Instance, fixture.Database, fixture.Lease, fixture.Index, fixture.Service);
             Assert.Throws<IOException>(() => reopened.Verify(token));
         }
-        else
-        {
-            Assert.Throws<IOException>(() => proof.RequireCurrent());
-            Assert.Throws<IOException>(() => proof.RequireCurrent());
-        }
+        else Assert.Throws<IOException>(() => proof.RequireCurrent());
         Assert.Equal(before, Fingerprints(fixture.Instance.RuntimeRoot));
     }
 

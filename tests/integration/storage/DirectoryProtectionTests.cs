@@ -23,13 +23,15 @@ public sealed class DirectoryProtectionTests
         ControlledJunction.Create(selected, outside);
         try
         {
+            IOException rejection;
             if (protection is null)
-                Assert.Throws<IOException>(() => DirectoryAttributeProtection.Acquire(instance));
+                rejection = Assert.Throws<IOException>(() => DirectoryAttributeProtection.Acquire(instance));
             else
             {
                 using var scope = DirectoryAttributeScope.Enter(protection);
-                Assert.Throws<IOException>(() => PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(selected, "marker.txt")));
+                rejection = Assert.Throws<IOException>(() => PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(selected, "marker.txt")));
             }
+            Assert.Equal("filesystem_reparse_point_rejected", rejection.Message);
             Assert.Equal("unchanged", File.ReadAllText(marker));
         }
         finally { Directory.Delete(selected); }
@@ -42,52 +44,55 @@ public sealed class DirectoryProtectionTests
         var selected = Path.Combine(root, "inputs"); var moved = selected + "-moved";
         Directory.CreateDirectory(selected);
         var file = Path.Combine(selected, "selected.bin"); File.WriteAllText(file, "original");
+        var identity = PhysicalObjectIdentity.Read(file);
         using (DirectoryAttributeScope.HoldDirectories([selected, selected]))
         {
             Assert.Equal(file, PhysicalPathPolicy.NormalizeWithoutLinks(file));
             Assert.Throws<IOException>(() => Directory.Move(selected, moved));
             File.WriteAllText(file, "changed");
-            Assert.Equal("changed", File.ReadAllText(file));
         }
-        Assert.False(DirectoryAttributeScope.TryReadCurrent(selected, out _));
         Directory.Move(selected, moved);
         ControlledJunction.Create(selected, moved);
         try
         {
-            Assert.Throws<IOException>(() => DirectoryAttributeScope.HoldDirectories([selected]));
-            Assert.False(DirectoryAttributeScope.TryReadCurrent(selected, out _));
+            Assert.Equal("filesystem_reparse_point_rejected",
+                Assert.Throws<IOException>(() => DirectoryAttributeScope.HoldDirectories([selected])).Message);
         }
         finally { Directory.Delete(selected); }
+        var movedFile = Path.Combine(moved, "selected.bin");
+        Assert.Equal(movedFile, PhysicalPathPolicy.NormalizeWithoutLinks(movedFile));
+        Assert.Equal(identity, PhysicalObjectIdentity.Read(movedFile));
+        Assert.Equal("changed", File.ReadAllText(movedFile));
     }
 
-    [Fact(DisplayName = "An Owned Directory Protection Can Serve Separate Synchronous Checks Across Await Without Retaining Thread Local State")]
+    [Fact(DisplayName = "An Owned Directory Stays Pinned Across Synchronous Checks And Is Movable After Release")]
     public async Task SharesOwnedProtection()
     {
         var root = Path.Combine(Environment.GetEnvironmentVariable("NEXUS_TEST_ROOT")!, Guid.NewGuid().ToString("N"));
         var instance = new InstanceRoot(new ContractReader()).OpenOrCreate(root);
         var path = Path.Combine(root, "blobs", "plans");
         Directory.CreateDirectory(path);
+        var file = Path.Combine(path, "marker.json");
+        File.WriteAllText(file, "preserve");
+        var identity = PhysicalObjectIdentity.Read(file);
         var moved = root + "-moved";
         var protection = DirectoryAttributeProtection.Acquire(instance);
         try
         {
-            Assert.False(DirectoryAttributeScope.TryReadCurrent(root, out _));
             await Task.WhenAll(Enumerable.Range(0, 4).Select(_ => Task.Run(() =>
             {
                 using var scope = DirectoryAttributeScope.Enter(protection);
-                Assert.Equal(Path.Combine(path, "missing.json"), PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(path, "missing.json")));
+                Assert.Equal(identity, PhysicalObjectIdentity.Read(file));
                 Assert.Throws<IOException>(() => Directory.Move(root, moved));
             })));
-            Assert.False(DirectoryAttributeScope.TryReadCurrent(root, out _));
-            using (DirectoryAttributeScope.Enter(protection))
-                Assert.True(DirectoryAttributeScope.TryReadCurrent(path, out var attributes) && attributes.HasFlag(FileAttributes.Directory));
             Assert.Throws<IOException>(() => Directory.Move(root, moved));
         }
         finally { protection.Dispose(); }
         using (DirectoryAttributeScope.Enter(protection))
             Assert.Throws<ObjectDisposedException>(() => PhysicalPathPolicy.NormalizeWithoutLinks(path));
-        Assert.False(DirectoryAttributeScope.TryReadCurrent(root, out _));
         Directory.Move(root, moved);
-        Assert.True(Directory.Exists(moved));
+        var movedFile = Path.Combine(moved, "blobs", "plans", "marker.json");
+        Assert.Equal(identity, PhysicalObjectIdentity.Read(movedFile));
+        Assert.Equal("preserve", File.ReadAllText(movedFile));
     }
 }

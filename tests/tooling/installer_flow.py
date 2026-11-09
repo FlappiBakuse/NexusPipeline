@@ -7,81 +7,68 @@ from installer_runtime import render_runtime
 
 ADAPTERS = r'''
 var
-  Scenario, Trace: String;
-  ProbeCount, LaunchCount: Integer;
-  QuietMode, DownloadCancelled: Boolean;
-
-procedure RecordCall(const Name: String);
-begin
-  Trace := Trace + Name + ';';
-end;
+  Scenario: String;
+  LaunchCount: Integer;
+  QuietMode, DownloadCancelled, FrameworkPresent, Confirmed, Downloaded, DownloadVisible, PackageChanged: Boolean;
 
 function ProbeFramework(const Framework, Required: String): Boolean;
 begin
-  RecordCall('probe');
-  ProbeCount := ProbeCount + 1;
-  Result := ((ProbeCount = 1) and (Scenario = 'already')) or
-    ((ProbeCount = 2) and (Scenario <> 'still-missing'));
+  Result := FrameworkPresent;
 end;
 
 function ConfirmRuntime(const Message: String; Kind: TMsgBoxType; Buttons: Integer): Integer;
 begin
-  RecordCall('confirm');
+  Confirmed := True;
   Result := IDYES;
   if Scenario = 'decline' then Result := IDNO;
 end;
 
 procedure DownloadClear;
 begin
-  RecordCall('clear');
 end;
 
 procedure DownloadAdd(const URL, Name, Digest: String);
 begin
-  RecordCall('add');
   if (URL <> 'https://controlled.test/runtime.exe') or (Name <> 'runtime.exe') or (Digest <> 'verified') then
     RaiseException('download_arguments_changed');
 end;
 
 procedure DownloadShow;
 begin
-  RecordCall('show');
+  DownloadVisible := True;
 end;
 
 procedure DownloadHide;
 begin
-  RecordCall('hide');
+  DownloadVisible := False;
 end;
 
 procedure DownloadRuntime;
 begin
-  RecordCall('download');
+  Downloaded := True;
   if (Scenario = 'download') or (Scenario = 'cancel') then RaiseException('controlled download failure');
 end;
 
 function LinkedRuntime(const Path: String): Boolean;
 begin
-  RecordCall('link');
   Result := Scenario = 'link';
 end;
 
 function HashRuntime(const Path: String): String;
 begin
-  RecordCall('hash');
   Result := 'verified';
-  if Scenario = 'digest' then Result := 'changed';
+  if (Scenario = 'digest') or PackageChanged then Result := 'changed';
 end;
 
 function SignedRuntime(const Path: String): Boolean;
 begin
-  RecordCall('signature');
+  PackageChanged := Scenario = 'changed-after-signature';
   Result := Scenario <> 'signature';
 end;
 
 function LaunchRuntime(const Verb, FileName, Params, WorkingDir: String; Show: Integer;
   Wait: TExecWait; var Code: Integer): Boolean;
 begin
-  RecordCall('launch');
   LaunchCount := LaunchCount + 1;
   if (Verb <> 'runas') or (Params <> '/install /quiet /norestart') or (Show <> SW_HIDE) or
     (Wait <> ewWaitUntilTerminated) then RaiseException('launch_arguments_changed');
@@ -90,19 +77,23 @@ begin
   if Scenario = 'exit' then Code := 1603;
   if Scenario = 'launch' then Code := 1223;
   Result := Scenario <> 'launch';
+  FrameworkPresent := (Code = 0) and (Scenario <> 'still-missing');
 end;
 '''
 
 CHECKS = r'''
-procedure VerifyCase(const Name, ExpectedMessage, ExpectedTrace: String; Restarted: Boolean; Launched: Integer);
+procedure VerifyCase(const Name, ExpectedMessage: String; Asked, Fetched, Restarted: Boolean; Launched: Integer);
 var
   Error, Expected: String;
   Restart: Boolean;
 begin
   Scenario := Name;
-  Trace := '';
-  ProbeCount := 0;
   LaunchCount := 0;
+  Confirmed := False;
+  Downloaded := False;
+  DownloadVisible := False;
+  PackageChanged := False;
+  FrameworkPresent := Name = 'already';
   QuietMode := Name = 'quiet';
   DownloadCancelled := Name = 'cancel';
   Restart := False;
@@ -115,15 +106,17 @@ begin
     else if Name = 'exit' then Expected := FmtMessage(CustomMessage(ExpectedMessage), ['component', '1603'])
     else Expected := FmtMessage(CustomMessage(ExpectedMessage), ['component']);
   end;
-  Log('Runtime contract ' + Name + ' trace=' + Trace + ' restart=' + IntToStr(Ord(Restart)) + ' launches=' + IntToStr(LaunchCount));
-  if (Error <> Expected) or (Trace <> ExpectedTrace) or (Restart <> Restarted) or (LaunchCount <> Launched) then
+  Log('Runtime contract ' + Name + ' confirmed=' + IntToStr(Ord(Confirmed)) + ' downloaded=' + IntToStr(Ord(Downloaded)) +
+    ' restart=' + IntToStr(Ord(Restart)) + ' launches=' + IntToStr(LaunchCount));
+  if (Error <> Expected) or (Confirmed <> Asked) or (Downloaded <> Fetched) or DownloadVisible or
+    (Restart <> Restarted) or (LaunchCount <> Launched) then
     RaiseException('runtime_contract_failed_' + Name);
 end;
 
 function InitializeSetup: Boolean;
 begin
 @@CASES@@
-  if not SaveStringToFile('@@RESULT@@', '[runtime]' + #13#10 + 'controlledCases=13' + #13#10, False) then
+  if not SaveStringToFile('@@RESULT@@', '[runtime]' + #13#10 + 'flow=complete' + #13#10, False) then
     RaiseException('report_failed');
   Result := True;
 end;
@@ -131,19 +124,17 @@ end;
 
 
 def case_calls():
-    download = 'probe;confirm;clear;add;show;download;hide;'
-    verified = download + 'link;hash;signature;hash;launch;'
-    cases = [('already', '', 'probe;', False, 0), ('quiet', 'RuntimeSilent', 'probe;', False, 0),
-        ('decline', 'RuntimeCancelled', 'probe;confirm;', False, 0),
-        ('cancel', 'RuntimeCancelled', download, False, 0), ('download', 'RuntimeDownloadFailed', download, False, 0),
-        ('link', 'RuntimeDigestFailed', download + 'link;', False, 0),
-        ('digest', 'RuntimeDigestFailed', download + 'link;hash;', False, 0),
-        ('signature', 'RuntimeSignatureFailed', download + 'link;hash;signature;', False, 0),
-        ('launch', 'RuntimeLaunchFailed', verified, False, 1), ('exit', 'RuntimeExitFailed', verified, False, 1),
-        ('reboot', 'RuntimeRestart', verified, True, 1),
-        ('still-missing', 'RuntimeStillMissing', verified + 'probe;', False, 1), ('success', '', verified + 'probe;', False, 1)]
-    lines = ["  VerifyCase('" + name + "', '" + message + "', '" + trace + "', " + str(restart) + ', ' + str(launches) + ');'
-        for name, message, trace, restart, launches in cases]
+    cases = [('already', '', False, False, False, 0), ('quiet', 'RuntimeSilent', False, False, False, 0),
+        ('decline', 'RuntimeCancelled', True, False, False, 0),
+        ('cancel', 'RuntimeCancelled', True, True, False, 0), ('download', 'RuntimeDownloadFailed', True, True, False, 0),
+        ('link', 'RuntimeDigestFailed', True, True, False, 0), ('digest', 'RuntimeDigestFailed', True, True, False, 0),
+        ('signature', 'RuntimeSignatureFailed', True, True, False, 0),
+        ('changed-after-signature', 'RuntimeSignatureFailed', True, True, False, 0),
+        ('launch', 'RuntimeLaunchFailed', True, True, False, 1), ('exit', 'RuntimeExitFailed', True, True, False, 1),
+        ('reboot', 'RuntimeRestart', True, True, True, 1),
+        ('still-missing', 'RuntimeStillMissing', True, True, False, 1), ('success', '', True, True, False, 1)]
+    lines = [f"  VerifyCase('{name}', '{message}', {asked}, {fetched}, {restart}, {launches});"
+        for name, message, asked, fetched, restart, launches in cases]
     return cases, '\n'.join(lines)
 
 
@@ -184,4 +175,3 @@ def native_flow(root, work, software, compiler):
         indent=2) + '\n', encoding='utf-8')
     if result.returncode or not report.is_file():
         raise ValueError('Native runtime flow contract failed')
-    return report.read_text(encoding='ascii')

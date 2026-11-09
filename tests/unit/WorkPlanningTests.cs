@@ -17,7 +17,6 @@ public sealed class WorkPlanningTests
         using var registration = registry.Register(activation, "daily", source);
         var entry = Assert.Single(registry.PublishedPlanningEntries());
         var observed = await entry.ReadPlansAsync();
-        Assert.Equal(1, source.Reads); Assert.Same(entry, observed.Entry);
         Assert.Equal(1, observed.Plans.Revision); Assert.Equal(source.TaskId, Assert.Single(observed.Plans.Tasks).TaskId);
         var due = Assert.Single(ScheduleMinutePolicy.ProviderOccurrences(Guid.NewGuid(), observed, Now));
         Assert.Equal(source.TaskId, due.Invocation.SubjectId); Assert.Equal(source.TaskId, due.Task.TaskId);
@@ -54,11 +53,11 @@ public sealed class WorkPlanningTests
     private sealed class PlansSource : IWorkPlanSource
     {
         internal Guid TaskId { get; } = Guid.NewGuid();
-        internal int Reads, Executions;
+        internal int Executions;
         internal ScheduledWorkPlans Plans => new(1, [new(TaskId, 1, true, "UTC", [(int)Now.DayOfWeek],
             12 * 60, 120, ImmutableArray<Guid>.Empty)]);
         public ValueTask<ScheduledWorkPlans> ReadPlansAsync(CancellationToken cancellation)
-        { cancellation.ThrowIfCancellationRequested(); Reads++; return ValueTask.FromResult(Plans); }
+        { cancellation.ThrowIfCancellationRequested(); return ValueTask.FromResult(Plans); }
         public ValueTask<ScheduledBusinessResult> ExecutePlannedAsync(PlannedScheduledInvocation invocation, CancellationToken cancellation) =>
             ExecuteAsync(invocation.Invocation, cancellation);
         public ValueTask<ScheduledBusinessResult> ExecuteAsync(FrozenScheduledInvocation invocation, CancellationToken cancellation)

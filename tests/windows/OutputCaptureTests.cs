@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using NexusPipeline.Platform.Processes;
 using Xunit;
 
@@ -75,14 +76,22 @@ public sealed class OutputCaptureTests
     {
         var (directory, fixture, marker) = Inputs();
         using var output = new OwnedProcessOutput(); using var job = new OwnedWorkerJob();
+        var observed = new ConcurrentDictionary<int, byte>();
+        using var observer = job.ObserveProcessStarts(pid => observed[pid] = 0);
         var capture = new ProcessOutputCapture(output, 8, 32);
         var identity = job.Start(fixture, ["process-output", "child-root", marker], directory, Guid.NewGuid(), Guid.NewGuid(), _ => { }, output);
         Assert.Equal(0, await job.AwaitRootAsync(identity, TimeSpan.FromSeconds(10)));
         var pending = await capture.DrainAsync(TimeSpan.FromMilliseconds(100));
         Assert.False(pending.IsComplete); Assert.True(pending.DeadlineExceeded);
         Assert.False(pending.StandardOutputEof); Assert.False(capture.Completion.IsCompleted);
-        Assert.NotEmpty(job.ActiveProcessIds());
+        var childId = int.Parse(await File.ReadAllTextAsync(marker + ".child"));
+        Assert.Throws<IOException>(() => job.RequireStoppedFamily());
+        Assert.Contains(childId, job.ActiveProcessIds());
         Assert.True(await job.StopAsync(TimeSpan.FromSeconds(10)));
+        var stopped = job.RequireStoppedFamily();
+        Assert.Contains(identity.ProcessId, observed.Keys);
+        Assert.Contains(childId, observed.Keys);
+        Assert.Equal((uint)observed.Count, stopped.TotalProcesses);
         Assert.True((await capture.DrainAsync(TimeSpan.FromSeconds(10))).IsComplete);
         Assert.Equal(new[] { "ready", "root-tail" }, (await ReadAsync(capture)).Select(line => line.Text));
     }

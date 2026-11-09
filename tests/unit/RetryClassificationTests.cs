@@ -46,7 +46,6 @@ public sealed class RetryClassificationTests
     {
         var facts = new AttemptFacts(Guid.NewGuid(), Guid.NewGuid(), 1, engine, business, lifecycle, RecoveryOutcome.Restored, "fixture");
         Assert.Equal(expected, RetryDecision.Classify(facts));
-        Assert.Equal(engine, facts.Engine); Assert.Equal(business, facts.Business); Assert.Equal(lifecycle, facts.Lifecycle);
     }
 
     [Theory(DisplayName = "Unfinished Inputs Never Enter Retry Classification")]

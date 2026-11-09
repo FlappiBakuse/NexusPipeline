@@ -7,10 +7,8 @@ import tempfile
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'tooling'))
-from binary_inputs import hash_file
 from installer_runtime import LOCK, FRAMEWORKS, read_dependencies, required_frameworks, render_runtime
-from product_assets import COMPILER_SHA256
-from installer_fixture import application, bundle, native_probe
+from installer_fixture import application, bundle, compiler_inputs, native_inputs, native_probe
 from installer_flow import native_flow
 
 
@@ -29,15 +27,14 @@ class RuntimeTests(unittest.TestCase):
         required = required_frameworks(self.software)
         dependencies = read_dependencies(self.root)
         self.assertEqual({name: '10.0.0' for name in FRAMEWORKS}, required)
-        self.assertEqual(set(FRAMEWORKS), set(dependencies))
-        self.assertTrue(all(item['minimumVersion'] == required[name] for name, item in dependencies.items()))
         rendered = render_runtime(self.root, self.software)
         self.assertNotIn('@@', rendered)
-        self.assertTrue(rendered)
+        for item in dependencies.values():
+            self.assertIn(item['url'], rendered)
+            self.assertIn(item['sha256'], rendered)
         worker = self.work / 'NexusPipeline.Installer.exe'
         worker.write_bytes(bundle('Installer', dict(framework=dict(name=FRAMEWORKS[0], version='10.0.0'))))
-        self.assertEqual(required, required_frameworks(self.software, worker))
-        self.assertTrue(render_runtime(self.root, self.software, worker))
+        self.assertEqual(rendered, render_runtime(self.root, self.software, worker))
 
     def test_rejects_lock(self):
         original = json.loads((self.root / LOCK).read_bytes())
@@ -70,22 +67,15 @@ class RuntimeTests(unittest.TestCase):
                     render_runtime(self.root, self.software, program if project == 'Installer' else None)
 
     def test_native_runtime(self):
-        compiler = Path(os.environ['NEXUS_INSTALLER_COMPILER'])
-        self.assertEqual(COMPILER_SHA256, hash_file(compiler))
-        receipt = json.loads(Path(os.environ['NEXUS_INSTALLER_RUNTIME_RECEIPT']).read_bytes())
-        self.assertEqual('PASS_OFFICIAL_RUNTIME_HASHES', receipt['status'])
-        self.assertEqual(2, len(receipt['dependencies']))
-        for item in receipt['dependencies']:
-            self.assertEqual(item['sha256'], hash_file(Path(item['path'])))
+        compiler = Path(self.fixture_inputs['compiler']['path'])
         retained = Path(tempfile.mkdtemp(prefix='runtime-native-', dir=os.environ['NEXUS_TEST_ROOT']))
-        result = native_probe(self.root, retained, self.software, compiler, receipt['dependencies'])
-        self.assertIn('detected=2', result)
-        self.assertIn('missingSilent=rejected', result)
-        self.assertIn('officialSignatures=2', result)
+        native_probe(self.root, retained, self.software, compiler, self.fixture_inputs['dependencies'])
+
+    test_native_runtime.prepare_inputs = native_inputs
 
     def test_runtime_flow(self):
-        compiler = Path(os.environ['NEXUS_INSTALLER_COMPILER'])
-        self.assertEqual(COMPILER_SHA256, hash_file(compiler))
+        compiler = Path(self.fixture_inputs['compiler']['path'])
         retained = Path(tempfile.mkdtemp(prefix='runtime-flow-', dir=os.environ['NEXUS_TEST_ROOT']))
-        result = native_flow(self.root, retained, self.software, compiler)
-        self.assertIn('controlledCases=13', result)
+        native_flow(self.root, retained, self.software, compiler)
+
+    test_runtime_flow.prepare_inputs = compiler_inputs

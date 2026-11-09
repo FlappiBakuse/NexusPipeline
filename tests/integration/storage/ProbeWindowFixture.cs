@@ -8,17 +8,18 @@ namespace NexusPipeline.StorageTests;
 internal sealed class ProbeWindowFixture : IDisposable
 {
     private readonly Thread _thread;
-    private readonly TaskCompletionSource<uint> _ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource<(uint ThreadId, IntPtr Handle)> _ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource _closed = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly uint _threadId;
     private readonly ManualResetEventSlim _paused = new(), _resume = new();
     internal string Title { get; } = "Nexus probe " + Guid.NewGuid().ToString("N");
+    internal IntPtr Handle { get; }
 
     internal ProbeWindowFixture()
     {
         _thread = new Thread(Run) { IsBackground = true, Name = "Nexus probe window fixture" };
         _thread.Start();
-        _threadId = _ready.Task.WaitAsync(TimeSpan.FromSeconds(10)).GetAwaiter().GetResult();
+        (_threadId, Handle) = _ready.Task.WaitAsync(TimeSpan.FromSeconds(10)).GetAwaiter().GetResult();
     }
 
     private void Run()
@@ -29,7 +30,7 @@ internal sealed class ProbeWindowFixture : IDisposable
             window = CreateWindowExW(0x08000080, "STATIC", Title, 0x10cf0000, 120, 120, 320, 160,
                 IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
             if (window == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastPInvokeError());
-            _ready.SetResult(GetCurrentThreadId());
+            _ready.SetResult((GetCurrentThreadId(), window));
             int result;
             while ((result = GetMessageW(out var message, IntPtr.Zero, 0, 0)) > 0)
             {

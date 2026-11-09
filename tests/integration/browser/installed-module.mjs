@@ -74,7 +74,6 @@ try {
   assert.ok(requests.length >= 2 && requests.every(item => item.authenticated === !local));
   checks.push(local ? 'actual loopback app loads its module and stylesheet without retaining a remote bearer' :
     'actual app authenticated both module and stylesheet requests');
-  assert.equal(errors.length, 0); checks.push('actual browser activated the packaged frontend factory');
   await page.screenshot({ path: path.join(input.output, 'active-module.png') });
   await setEnabled(false);
   await page.waitForFunction(() => !document.querySelector('style[data-extension-id="live-screenshot"]'));

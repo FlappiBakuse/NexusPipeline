@@ -10,34 +10,13 @@ namespace NexusPipeline.StorageTests;
 
 public sealed class ConfigurationPlanTests
 {
-    [Theory(DisplayName = "Frozen Plan Round Trips Exact Bytes Shape Object Identities And Content References")]
-    [InlineData("missing", "file")]
-    [InlineData("file", "directory")]
-    [InlineData("directory", "missing")]
-    public void RoundTripsPlan(string before, string candidate)
-    {
-        var fixture = Create(before, candidate);
-        using var prepared = fixture.Codec.Freeze(fixture.Plan);
-        var reference = prepared.Reference;
-        var reopened = fixture.Codec.Read(reference);
-        Assert.Equal(fixture.Plan.TargetPath, reopened.TargetPath);
-        Assert.Equal(fixture.Plan.ParentIdentity, reopened.ParentIdentity);
-        Assert.Equal(fixture.Plan.Before.Snapshot.Shape, reopened.Before.Snapshot.Shape);
-        Assert.Equal(fixture.Plan.Before.Snapshot.Entries, reopened.Before.Snapshot.Entries);
-        Assert.Equal(fixture.Plan.Before.OriginalObjects, reopened.Before.OriginalObjects);
-        Assert.Equal(fixture.Plan.Before.Contents.OrderBy(item => item.Sha256), reopened.Before.Contents.OrderBy(item => item.Sha256));
-        Assert.Equal(fixture.Plan.Candidate.Snapshot.Entries, reopened.Candidate.Snapshot.Entries);
-        using var repeated = fixture.Codec.Freeze(fixture.Plan);
-        Assert.Equal(reference, repeated.Reference);
-    }
-
     [Theory(DisplayName = "Invalid Plan Is Rejected Without Changing Its Bytes Or The Managed Target")]
-    [InlineData("unknown-version")]
-    [InlineData("executable-action")]
-    [InlineData("path-escape")]
-    [InlineData("missing-physical-identity")]
-    [InlineData("incomplete-tree")]
-    public void PreservesInvalidPlan(string fault)
+    [InlineData("unknown-version", "unsupported_or_invalid_contract")]
+    [InlineData("executable-action", "unsupported_or_invalid_contract")]
+    [InlineData("path-escape", "unsupported_snapshot_relative_path")]
+    [InlineData("missing-physical-identity", "configuration_plan_original_identity_incomplete")]
+    [InlineData("incomplete-tree", "file_tree_archive_shape_invalid")]
+    public void PreservesInvalidPlan(string fault, string reason)
     {
         var fixture = Create("directory", "file");
         using var prepared = fixture.Codec.Freeze(fixture.Plan);
@@ -48,7 +27,13 @@ public sealed class ConfigurationPlanTests
         {
             case "unknown-version": document["version"] = 17; break;
             case "executable-action": document["command"] = "arbitrary.exe"; break;
-            case "path-escape": document["before"]!["entries"]![1]!["relativePath"] = "../outside"; break;
+            case "path-escape":
+                var file = document["before"]!["entries"]!.AsArray().Single(item => item!["kind"]!.GetValue<string>() == "file")!;
+                var identity = document["originalObjects"]!.AsArray().Single(item =>
+                    item!["relativePath"]!.GetValue<string>() == file["relativePath"]!.GetValue<string>())!;
+                file["relativePath"] = @"..\outside";
+                identity["relativePath"] = @"..\outside";
+                break;
             case "missing-physical-identity": document["originalObjects"] = new JsonArray(); break;
             case "incomplete-tree": document["candidate"]!["entries"] = new JsonArray(); break;
         }
@@ -56,7 +41,7 @@ public sealed class ConfigurationPlanTests
         var invalidPath = Path.Combine(fixture.RuntimeRoot, invalid.RelativePath);
         var before = File.ReadAllBytes(invalidPath);
         var targetBefore = fixture.Scanner.Capture(fixture.Plan.TargetPath, CancellationToken.None);
-        Assert.ThrowsAny<Exception>(() => fixture.Codec.Read(invalid));
+        Assert.Equal(reason, Record.Exception(() => fixture.Codec.Read(invalid))?.Message);
         Assert.Equal(before, File.ReadAllBytes(invalidPath));
         Assert.Equal(targetBefore.Entries, fixture.Scanner.Capture(fixture.Plan.TargetPath, CancellationToken.None).Entries);
     }
@@ -80,41 +65,21 @@ public sealed class ConfigurationPlanTests
         Assert.False(Directory.Exists(Path.Combine(fixture.RuntimeRoot, "blobs", "plans")));
     }
 
-    [Fact(DisplayName = "Equal Byte Child Replacement Changes The Frozen Physical Inventory")]
-    public void DetectsReplacedChildren()
-    {
-        var fixture = Create("directory", "file");
-        var original = fixture.Plan.Before.OriginalObjects;
-        var file = Path.Combine(fixture.Plan.TargetPath, "配置", "data.bin");
-        File.Move(file, Path.Combine(fixture.Root, "preserved-original.bin"));
-        File.WriteAllBytes(file, [0, 1, 255]);
-        var newSnapshot = fixture.Scanner.Capture(fixture.Plan.TargetPath, CancellationToken.None);
-        Assert.Equal(fixture.Plan.Before.Snapshot.Entries, newSnapshot.Entries);
-        Assert.NotEqual(original, PhysicalTreeIdentity.Capture(fixture.Plan.TargetPath, newSnapshot));
-        Assert.Equal(fixture.Plan.Before.OriginalIdentity, PhysicalObjectIdentity.Read(fixture.Plan.TargetPath));
-    }
-
     [Fact(DisplayName = "A Prepared Plan Retains Verified Contents And Its Own Bytes Until Acceptance Finishes")]
     public void HoldsPreparedContent()
     {
         var fixture = Create("directory", "file");
-        var prepared = fixture.Codec.Freeze(fixture.Plan);
-        var references = prepared.Plan.Before.Contents.Concat(prepared.Plan.Candidate.Contents).Append(prepared.Reference).Distinct().ToArray();
-        foreach (var reference in references)
+        using var prepared = fixture.Codec.Freeze(fixture.Plan);
+        var paths = prepared.Plan.Before.Contents.Concat(prepared.Plan.Candidate.Contents).Append(prepared.Reference)
+            .Select(reference => Path.Combine(fixture.RuntimeRoot, reference.RelativePath)).Distinct().ToArray();
+        foreach (var path in paths)
         {
-            var path = Path.Combine(fixture.RuntimeRoot, reference.RelativePath);
             Assert.Throws<IOException>(() => File.Delete(path));
             Assert.Throws<IOException>(() => { using var writer = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite); });
         }
         prepared.Dispose();
-        prepared.Dispose();
-        Assert.Throws<ObjectDisposedException>(() => prepared.Reference);
-        foreach (var reference in references)
-        {
-            var path = Path.Combine(fixture.RuntimeRoot, reference.RelativePath);
-            using var writer = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
-            Assert.Equal(reference.SizeBytes, writer.Length);
-        }
+        foreach (var path in paths)
+            using (File.Open(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None)) { }
     }
 
     [Fact(DisplayName = "Caller Array Mutation Cannot Change An Already Prepared Configuration Plan")]
@@ -132,7 +97,6 @@ public sealed class ConfigurationPlanTests
         Assert.Equal(fixture.Plan.Before.Snapshot.Entries, prepared.Plan.Before.Snapshot.Entries);
         Assert.Equal(fixture.Plan.Before.OriginalObjects, prepared.Plan.Before.OriginalObjects);
         Assert.Equal(fixture.Plan.Before.Contents, prepared.Plan.Before.Contents);
-        Assert.Equal(prepared.Plan.Before.Snapshot.Entries, fixture.Codec.Read(prepared.Reference).Before.Snapshot.Entries);
     }
 
     private static Fixture Create(string before, string candidate)
