@@ -41,22 +41,14 @@ internal sealed class RunWriterScope : IConfigurationWriterScope
         var session = Required();
         OwnerOperationId = session.OwnerOperationId;
         var binding = _runs.ReadBound(session);
-        ProcessScopeId = Guid.Parse(binding.Parent.AttemptId);
+        ProcessScopeId = Guid.Parse(binding.Evidence.AttemptId);
         JournalIds = session.Resources.Select(item => item.JournalId).OrderBy(id => id.ToString("D"), StringComparer.Ordinal).ToImmutableArray();
-        var step = binding.Step;
-        IsHookGroup = step.Hooks is { Count: > 0 };
+        IsHookGroup = binding.Evidence.HasHooks;
         Role = parentScope is StepWriterScope execution ? execution.Role : "process";
         if (IsHookGroup && (parentScope is not StepWriterScope || Role == "judgement"))
             throw new IOException("configuration_hooks_parent_required");
         RequireGroupAdmission(session);
-        if (IsHookGroup && Role != "process")
-        {
-            var hook = ExecutionBindingRoles.Hook(step, Role);
-            Command = EditorCommandPolicy.Freeze(new(hook.Command.Path, hook.Command.Sha256, hook.Arguments.ToImmutableArray(), hook.WorkingDirectory));
-        }
-        else Command = EditorCommandPolicy.Freeze(new(step.ExecutablePath, step.ImageSha256, step.Arguments.ToImmutableArray(), step.WorkingDirectory) { ExclusiveProgram = step.ExclusiveProgram == true });
-        CommandLineSyntax = IsHookGroup && ExecutionBindingRoles.IsHook(Role) && ExecutionBindingRoles.Hook(step, Role).LaunchKind == "command"
-            ? CommandLineSyntax.CommandInterpreter : CommandLineSyntax.ArgumentVector;
+        (Command, CommandLineSyntax) = binding.Evidence.WriterCommand(Role);
         RequireParentAdmission(session);
         _admission.RequireRunAdmission(sessionId);
     }

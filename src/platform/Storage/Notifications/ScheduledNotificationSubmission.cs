@@ -1,6 +1,5 @@
 using System.Runtime.Versioning;
 using NexusPipeline.Core.Notifications;
-using NexusPipeline.Platform.Extensions;
 using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage.Scheduling;
 using NexusPipeline.Platform.Storage.Sqlite;
@@ -9,8 +8,7 @@ namespace NexusPipeline.Platform.Storage.Notifications;
 
 [SupportedOSPlatform("windows")]
 internal sealed class ScheduledNotificationSubmission(RuntimeInstance instance, StateDatabase database, ContractReader contracts,
-    InstanceLease lease, ScheduledProviderDispatch dispatch, NexusPipeline.Core.Maintenance.ResourceLeaseManager resources,
-    ExtensionScope actualScope, IWorkQueueAcceptance queue)
+    InstanceLease lease, Func<NotificationSubmission, WorkNotificationOrigin> bind, NotificationRuntime runtime)
     : INotificationSubmissionAuthorization, INotificationSubmissionQueue
 {
     public void AssertAllowed(NotificationSubmission submission)
@@ -20,22 +18,20 @@ internal sealed class ScheduledNotificationSubmission(RuntimeInstance instance, 
         {
             using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
             using var transaction = connection.BeginTransaction(deferred: true);
-            dispatch.RequireSubmissionInside(work, actualScope, connection, transaction);
+            work.RequireCurrent(connection, transaction);
         });
     }
 
     public ValueTask<NotificationQueueAcceptance> AcceptAsync(NotificationSubmission submission, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested(); var work = Require(submission);
-        using var root = dispatch.AcquireSubmissionRoot(work);
-        using var held = root.Borrow(resources, submission.OperationId, AcceptedProviderInvocation.Claims(work.Entry.ExtensionId));
-        return new(held.Use(() =>
+        return new(work.Use(() =>
         {
             lease.VerifyHeld(instance); cancellationToken.ThrowIfCancellationRequested();
             var prior = lease.PublishExecution(() => ReadExisting(submission, work));
             if (prior is not null) return prior;
             using var prepared = PreparedScheduledSource.Capture(instance, database, contracts, work, submission);
-            using var activity = queue.Prepare(work.Activity);
+            using var activity = runtime.PrepareWork(work.Activity);
             return lease.PublishExecution(() =>
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -43,28 +39,27 @@ internal sealed class ScheduledNotificationSubmission(RuntimeInstance instance, 
                 if (replay is not null) return replay;
                 database.Write((connection, transaction) =>
                 {
-                    dispatch.RequireSubmissionInside(work, actualScope, connection, transaction);
-                    prepared.AcceptInside(connection, transaction, work.Source.Document.Invocation.OccurrenceId, DateTimeOffset.UtcNow, lease.StartupGeneration);
+                    work.RequireCurrent(connection, transaction);
+                    prepared.AcceptInside(connection, transaction, work.OperationId, DateTimeOffset.UtcNow, lease.StartupGeneration);
                     return true;
                 });
-                activity.Committed(prepared.Source.Reference);
+                activity.CommittedScheduled(prepared.Source.Reference);
                 return new NotificationQueueAcceptance(submission.OperationId, prepared.Source.Document.OperationId, true);
             });
         }));
     }
 
-    private AcceptedProviderInvocation Require(NotificationSubmission submission)
+    private WorkNotificationOrigin Require(NotificationSubmission submission)
     {
         lease.VerifyHeld(instance);
-        if (submission.ExtensionId != actualScope.Activation.ExtensionId) throw new UnauthorizedAccessException("scheduled_invocation_not_active");
-        return dispatch.RequireActual(submission.Invocation, submission.ExtensionId, actualScope: actualScope);
+        return bind(submission);
     }
 
-    private NotificationQueueAcceptance? ReadExisting(NotificationSubmission submission, AcceptedProviderInvocation work)
+    private NotificationQueueAcceptance? ReadExisting(NotificationSubmission submission, WorkNotificationOrigin work)
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
         using var transaction = connection.BeginTransaction(deferred: true);
-        dispatch.RequireSubmissionInside(work, actualScope, connection, transaction);
+        work.RequireCurrent(connection, transaction);
         var reference = NotificationScheduledRows.Lookup(connection, transaction, submission.OperationId);
         if (reference is null)
         {
@@ -74,7 +69,7 @@ internal sealed class ScheduledNotificationSubmission(RuntimeInstance instance, 
             return null;
         }
         var source = new NotificationScheduledCodec(instance, contracts).Read(reference, connection, transaction);
-        if (source.Document.Invocation != work.Source.Reference || source.Document.Title != submission.Title ||
+        if (source.Document.Invocation != work.Reference || source.Document.Title != submission.Title ||
             source.Document.Body != submission.Body || !source.Document.Targets.Select(item => item.TaskId).SequenceEqual(submission.NotificationTaskIds))
             throw NotificationScheduledCodec.Invalid();
         transaction.Commit();

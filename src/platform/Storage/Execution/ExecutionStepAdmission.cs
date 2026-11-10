@@ -118,7 +118,7 @@ internal static class ExecutionStepAdmission
         {
             RequirePredecessorsInside(connection, transaction, state, state.Latest, ordinal); transaction.Commit();
         }
-        return UnstartedConfigurationEvidence.Hold(instance, database, contracts, state,
+        return RunBindingEvidence.HoldRestored(instance, database, contracts, state,
             state.Total.Steps.Take(ordinal).Select(step => step.StepId));
     }
 

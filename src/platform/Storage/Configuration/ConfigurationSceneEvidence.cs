@@ -10,6 +10,43 @@ internal sealed record ConfigurationSceneResource(Guid OperationId, Guid Journal
 
 internal sealed class ConfigurationSceneEvidence(RuntimeInstance instance, StateDatabase database, ContractReader contracts)
 {
+    internal IDisposable HoldRestored(Guid parentJournalId, IEnumerable<(string StepId, BlobReference Reference)> references,
+        Func<string, BlobReference, int> readOrdinal)
+    {
+        var held = new Held();
+        try
+        {
+            var registered = new RecoveryJournalRegistry(database).ReadSnapshot(parentJournalId).Journals.Select(item => item.JournalId).ToHashSet();
+            var blobs = new ImmutableBlobStore(instance, contracts);
+            var plans = new ConfigurationPlanCodec(instance, contracts, blobs);
+            var states = new RunStateCodec(instance, contracts, blobs);
+            var scenes = new List<ConfigurationSceneResource>();
+            var scanner = new FileTreeScanner(SnapshotBudget.Default);
+            foreach (var (stepId, reference) in references)
+            {
+                var child = plans.ReadStructure(reference);
+                var run = states.ReadStructure(child.RunState ?? throw new IOException("run_attempt_configuration_state_required"));
+                if (registered.Contains(child.JournalId))
+                {
+                    scenes.Add(new(child.OperationId, child.JournalId, child.Kind, run.Source.Address, reference.RelativePath, reference.Sha256));
+                    continue;
+                }
+                using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+                using var command = connection.CreateCommand();
+                command.CommandText = "SELECT EXISTS(SELECT 1 FROM configuration_run_sessions WHERE parent_journal_id=$parent AND step_id=$step AND invocation_ordinal=$invocation);";
+                command.Parameters.AddWithValue("$parent", parentJournalId.ToString("D")); command.Parameters.AddWithValue("$step", stepId);
+                command.Parameters.AddWithValue("$invocation", readOrdinal(stepId, reference));
+                if ((long)command.ExecuteScalar()! != 0 || scanner.Capture(Path.Combine(instance.RuntimeRoot, "journals", child.JournalId.ToString("D")), default).Shape != FileObjectKind.Missing ||
+                    scanner.Capture(Path.Combine(Path.GetDirectoryName(child.TargetPath)!, ".nexus-" + child.JournalId.ToString("D")), default).Shape != FileObjectKind.Missing)
+                    throw new IOException("execution_unstarted_configuration_unverified");
+                held.Add(TreeReadLease.Acquire(child.TargetPath, child.ParentIdentity, child.Before));
+            }
+            held.Add(Hold(scenes, installed: false));
+            return held;
+        }
+        catch { held.Dispose(); throw; }
+    }
+
     internal IDisposable Hold(IReadOnlyList<ConfigurationSceneResource> resources, bool installed,
         IReadOnlyDictionary<ConfigurationAddress, FileTreeSnapshot>? candidates = null)
     {

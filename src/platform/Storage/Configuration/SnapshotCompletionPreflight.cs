@@ -1,5 +1,4 @@
 using System.Runtime.Versioning;
-using System.Text.Json;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Operations;
 using NexusPipeline.Platform.Serialization;
@@ -26,8 +25,7 @@ internal sealed class SnapshotCompletionPreflight(RuntimeInstance instance, Stat
                         throw new IOException("configuration_snapshot_completion_parent_missing");
                     continue;
                 }
-                var bound = AttemptPreparedBinding.Read(instance, contracts, database, parent.JournalId);
-                foreach (var intent in SnapshotIntentCodec.Read(JsonSerializer.SerializeToElement(bound.Document)))
+                foreach (var intent in ConfigurationCompletionBinding.ReadIntents(instance, database, contracts, parent.JournalId))
                 {
                     if (!operations.Add(intent.CompletionOperationId) || !sessions.Add(intent.SessionId))
                         throw new IOException("configuration_snapshot_completion_intent_unbound");

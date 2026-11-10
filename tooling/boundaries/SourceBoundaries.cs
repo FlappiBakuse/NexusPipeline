@@ -35,6 +35,12 @@ internal static class SourceBoundaries
             var source = Path.GetRelativePath(root, tree.FilePath).Replace('\\', '/');
             var model = compilation.GetSemanticModel(tree);
             var syntax = tree.GetRoot();
+            var scheduling = source.StartsWith("src/platform/Storage/Scheduling/", StringComparison.Ordinal);
+            var notifications = source.StartsWith("src/platform/Storage/Notifications/", StringComparison.Ordinal);
+            var configurationEvidence = source.StartsWith("src/platform/Storage/Configuration/", StringComparison.Ordinal) &&
+                Path.GetFileName(source) is "ConfigurationRunBinding.cs" or "ConfigurationRunStore.cs" or "ConfigurationRunController.cs" or
+                    "ConfigurationRunInventory.cs" or "ConfigurationRunProgress.cs" or "EditOutputRecorder.cs" or "RunStopEvidence.cs" or
+                    "RunCompletionService.cs" or "RunRecoveryBinding.cs" or "SnapshotCompletionOwner.cs" or "SnapshotCompletionPreflight.cs";
             if (!source.EndsWith(".g.cs", StringComparison.Ordinal) &&
                 (source.StartsWith("src/", StringComparison.Ordinal) || source.StartsWith("apps/host/", StringComparison.Ordinal)))
                 foreach (var comparison in syntax.DescendantNodes().OfType<BinaryExpressionSyntax>())
@@ -81,6 +87,32 @@ internal static class SourceBoundaries
                     dependency?.ContainingNamespace.ToDisplayString() == "NexusPipeline.Platform.Storage.Execution" &&
                     dependency.Name is "StepWriterScope" or "StepResultCodec" or "AttemptWriterState" or "ExecutionInvocationStore")
                     Error("CONFIGURATION_WRITER_OWNER_REQUIRED", identifier, dependency.ToDisplayString());
+                if (configurationEvidence && dependency?.ContainingNamespace.ToDisplayString() == "NexusPipeline.Platform.Storage.Execution" &&
+                    (dependency.Name.EndsWith("Codec", StringComparison.Ordinal) ||
+                        dependency.Name is "AttemptPreparedBinding" or "AttemptPreparedProjection" or "RunConfigurationBinding"))
+                    Error("CONFIGURATION_RUN_EVIDENCE_REQUIRED", identifier, dependency.ToDisplayString());
+                var ownerNamespace = dependency?.ContainingNamespace.ToDisplayString();
+                if (dependency is not null &&
+                    (ownerNamespace == "NexusPipeline.Platform.Storage.Configuration" &&
+                        (dependency.Name.EndsWith("Codec", StringComparison.Ordinal) || dependency.Name == "ConfigurationRunRows") ||
+                    ownerNamespace == "NexusPipeline.Platform.Storage.Journals" &&
+                        dependency.Name is ("ConfigurationPlanCodec" or "ConfigurationJournalBinding")))
+                {
+                    if (source == "src/platform/Storage/Execution/ConfigurationCompletionBinding.cs")
+                        Error("CONFIGURATION_COMPLETION_INVENTORY_REQUIRED", identifier, dependency.ToDisplayString());
+                    if (source is "src/platform/Storage/Execution/RunBindingEvidence.cs" or "src/platform/Storage/Execution/AttemptTerminalEvidence.cs")
+                        Error("CONFIGURATION_RESTORATION_OWNER_REQUIRED", identifier, dependency.ToDisplayString());
+                }
+                if ((scheduling || notifications) && dependency is not null)
+                {
+                    if (scheduling && (ownerNamespace == "NexusPipeline.Platform.Storage.Notifications" ||
+                        ownerNamespace == "NexusPipeline.Platform.Storage.Sqlite" && dependency.Name.StartsWith("Notification", StringComparison.Ordinal)))
+                        Error("SCHEDULE_NOTIFICATION_PORT_REQUIRED", identifier, dependency.ToDisplayString());
+                    if (notifications && ownerNamespace == "NexusPipeline.Platform.Storage.Scheduling" &&
+                        dependency.Name is not ("WorkInvocationEvidence" or "WorkStartEvidence" or "WorkNotificationOrigin" or "IWorkNotificationPorts") &&
+                        !(dependency.Name == "PersistentScheduleService" && source == "src/platform/Storage/Notifications/NotificationRuntime.cs"))
+                        Error("NOTIFICATION_WORK_EVIDENCE_REQUIRED", identifier, dependency.ToDisplayString());
+                }
                 var declaration = identifier.Ancestors().OfType<BaseTypeDeclarationSyntax>().FirstOrDefault();
                 if (declaration is null || model.GetDeclaredSymbol(declaration) is not INamedTypeSymbol owner || !symbols.TryGetValue(owner, out var from)) continue;
                 var referenced = model.GetSymbolInfo(identifier).Symbol;

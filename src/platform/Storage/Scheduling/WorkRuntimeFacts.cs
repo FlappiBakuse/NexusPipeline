@@ -6,7 +6,6 @@ using NexusPipeline.Extensibility.Scheduling;
 using NexusPipeline.Platform.Extensions;
 using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage.Extensions;
-using NexusPipeline.Platform.Storage.Notifications;
 using NexusPipeline.Platform.Storage.Sqlite;
 
 namespace NexusPipeline.Platform.Storage.Scheduling;
@@ -143,14 +142,14 @@ internal sealed class WorkRuntimeFacts(RuntimeInstance instance, StateDatabase d
 
     private static long Ordinal(SqliteConnection connection, SqliteTransaction transaction, Guid operationId)
     {
-        using var command = NotificationDeliveryRows.Command(connection, transaction, "SELECT rowid FROM operations WHERE operation_id=$0;", operationId.ToString("D"));
+        using var command = DatabaseConnections.Command(connection, transaction, "SELECT rowid FROM operations WHERE operation_id=$0;", operationId.ToString("D"));
         return command.ExecuteScalar() is long value ? value : throw ManualWorkCodec.Invalid();
     }
 
     private static bool WasAccepted(SqliteConnection connection, SqliteTransaction transaction, string extensionId, string providerId,
         Guid taskId, DateOnly date, int minute)
     {
-        using var command = NotificationDeliveryRows.Command(connection, transaction,
+        using var command = DatabaseConnections.Command(connection, transaction,
             "SELECT EXISTS(SELECT 1 FROM scheduled_provider_occurrences WHERE extension_id=$0 AND provider_id=$1 AND task_id=$2 AND local_date=$3 AND local_minute=$4);",
             extensionId, providerId, taskId.ToString("D"), date.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture), minute);
         return (long)command.ExecuteScalar()! != 0;

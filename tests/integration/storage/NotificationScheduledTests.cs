@@ -1,7 +1,10 @@
 using System.Runtime.Versioning;
 using Microsoft.Data.Sqlite;
 using NexusPipeline.Core.Execution;
+using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Notifications;
+using NexusPipeline.Platform.Storage.Secrets;
+using NexusPipeline.Platform.Storage.Sqlite;
 using Xunit;
 
 namespace NexusPipeline.StorageTests;
@@ -34,6 +37,32 @@ public sealed class NotificationScheduledTests
         Assert.Equal(savedTask ? 1 : 0, sink.Requests.Count);
         Assert.Equal(0, fixture.Base.Count("attempt_receipts")); Assert.Equal(0, fixture.Base.Count("run_records"));
         DeliveryReferenceIndex.VerifyReadOnly(fixture.Base.Source.Instance, fixture.Base.Source.Database, new());
+    }
+
+    [Fact(DisplayName = "A Closed Scheduling Source Restores Its Own Notification Queue And Rejects A Different Run")]
+    public async Task RestoresScheduledQueue()
+    {
+        await using var sink = new NotificationHttpSink((_, _) => Task.FromResult(new NotificationSinkReply(200, "")));
+        await using var fixture = new NotificationScheduledFixture();
+        await fixture.SaveNotification(sink.Address);
+        await fixture.Activate(); await fixture.Tick.TickAsync(); await fixture.PumpUntilResult();
+        var invocation = Assert.Single(fixture.States()).Source.Document.Invocation;
+        var source = fixture.Base.Source;
+        BlobReference reference;
+        using (var connection = DatabaseConnections.Open(source.Database.DatabasePath, readOnly: true))
+        using (var transaction = connection.BeginTransaction(deferred: true))
+            reference = Assert.IsType<BlobReference>(NotificationScheduledRows.Lookup(connection, transaction, invocation.NotificationOperationId));
+        Assert.Throws<IOException>(() => NotificationScheduledSource.VerifyCommitted(source.Instance, source.Database, new(), reference, Guid.NewGuid()));
+        await fixture.Notifications.DisposeAsync();
+
+        var secrets = new SecretFieldService(source.Instance, source.Database, source.Lease, fixture.Base.Resources, fixture.Base.Index, new());
+        await using var restarted = new NotificationRuntime(source.Instance, source.Database, new(), source.Lease,
+            fixture.Base.Resources, fixture.Base.Index, secrets);
+        restarted.InitializeStartup();
+        Assert.True(restarted.HasPendingActivity);
+        await restarted.RunPassAsync(); await restarted.RunPassAsync();
+        Assert.Single(sink.Requests);
+        Assert.False(restarted.HasPendingActivity);
     }
 
     [Fact(DisplayName = "A Task Revision Changed After Read Plans Cannot Execute Its Saved Effect Or Publish Notifications")]

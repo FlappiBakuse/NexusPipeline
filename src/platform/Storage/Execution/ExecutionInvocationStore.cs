@@ -42,7 +42,7 @@ internal sealed class ExecutionInvocationStore(RuntimeInstance instance, StateDa
         if (state.Latest.Revision != state.Journal.Revision || !CanRetry(state, stepId)) throw ExecutionInvocationCodec.Invalid();
         AttemptTerminalEvidence.RequireArtifacts(instance, database, contracts, state);
         StepWritersEvidence.RequireStopped(instance, database, contracts, journalId, state.AllJobs.Where(job => job.StepId == stepId));
-        using var restored = UnstartedConfigurationEvidence.Hold(instance, database, contracts, state, [stepId]);
+        using var restored = RunBindingEvidence.HoldRestored(instance, database, contracts, state, [stepId]);
         using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
         using (var transaction = connection.BeginTransaction(deferred: true))
         {

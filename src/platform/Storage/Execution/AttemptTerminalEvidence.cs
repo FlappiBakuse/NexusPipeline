@@ -4,6 +4,7 @@ using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Execution;
 using NexusPipeline.Platform.Processes;
 using NexusPipeline.Platform.Serialization;
+using NexusPipeline.Platform.Storage.Configuration;
 using NexusPipeline.Platform.Storage.Journals;
 using NexusPipeline.Platform.Storage.Sqlite;
 
@@ -132,36 +133,13 @@ internal static class AttemptTerminalEvidence
     internal static bool IsRestoredInside(SqliteConnection connection, SqliteTransaction transaction, AttemptWriterState state,
         bool requireCompletedGroups = true, bool allowUnregistered = false, string? stepId = null)
     {
-        using var command = connection.CreateCommand(); command.Transaction = transaction;
-        var expected = 0; var restored = true;
-        foreach (var child in ExecutionInvocationCodec.Plans(state.Latest.Root, state.Total, state.Attempt).Where(child => stepId is null || child.StepId == stepId))
-        {
-            var plan = AttemptPlanCodec.Reference(child.Plan);
-            command.Parameters.Clear(); command.Parameters.AddWithValue("$path", plan.RelativePath); command.Parameters.AddWithValue("$digest", plan.Sha256);
-            command.CommandText = "SELECT count(*) FROM operation_journals WHERE plan_path=$path AND plan_digest=$digest;";
-            var count = (long)command.ExecuteScalar()!;
-            var undispatched = BindingSkipCodec.Read(state.Latest.Root, state.Total).Any(item => item.StepId == child.StepId) ||
-                StepResultCodec.ReadUndispatched(state.Latest.Root, state.Total)?.StepIds.Contains(child.StepId) == true;
-            if ((allowUnregistered || undispatched) && count == 0) continue;
-            if (count != 1) throw new IOException("attempt_configuration_membership_unbound");
-            expected++;
-            command.CommandText = "SELECT EXISTS(SELECT 1 FROM configuration_run_resources r JOIN configuration_run_sessions s ON s.session_id=r.session_id " +
-                "JOIN operation_journals j ON j.journal_id=r.journal_id AND j.operation_id=r.operation_id " +
-                "WHERE s.owner_operation_id=$owner AND s.parent_journal_id=$parent AND s.step_id=$step " +
-                "AND ($complete=0 OR (s.phase IN (2,3) AND s.writer_gate=1 AND s.closed_elapsed_milliseconds IS NOT NULL AND s.completion_operation_id IS NOT NULL)) " +
-                "AND r.plan_path=$path AND r.plan_digest=$digest AND j.phase='committed' AND j.operation_kind='configExchange');";
-            command.Parameters.Clear(); command.Parameters.AddWithValue("$owner", state.Journal.OperationId.ToString("D"));
-            command.Parameters.AddWithValue("$parent", state.Journal.JournalId.ToString("D")); command.Parameters.AddWithValue("$step", child.StepId);
-            command.Parameters.AddWithValue("$path", plan.RelativePath); command.Parameters.AddWithValue("$digest", plan.Sha256);
-            command.Parameters.AddWithValue("$complete", requireCompletedGroups);
-            if ((long)command.ExecuteScalar()! != 1) restored = false;
-        }
-        command.Parameters.Clear(); command.Parameters.AddWithValue("$owner", state.Journal.OperationId.ToString("D"));
-        command.Parameters.AddWithValue("$parent", state.Journal.JournalId.ToString("D"));
-        command.Parameters.AddWithValue("$selectedStep", (object?)stepId ?? DBNull.Value);
-        command.CommandText = "SELECT count(*) FROM configuration_run_resources r JOIN configuration_run_sessions s ON s.session_id=r.session_id " +
-            "WHERE (s.owner_operation_id=$owner OR s.parent_journal_id=$parent) AND ($selectedStep IS NULL OR s.step_id=$selectedStep);";
-        if ((long)command.ExecuteScalar()! != expected) throw new IOException("attempt_configuration_membership_unbound");
-        return restored;
+        var references = ExecutionInvocationCodec.Plans(state.Latest.Root, state.Total, state.Attempt)
+            .Where(child => stepId is null || child.StepId == stepId).Select(child =>
+            {
+                var undispatched = BindingSkipCodec.Read(state.Latest.Root, state.Total).Any(item => item.StepId == child.StepId) ||
+                    StepResultCodec.ReadUndispatched(state.Latest.Root, state.Total)?.StepIds.Contains(child.StepId) == true;
+                return (child.StepId, Reference: AttemptPlanCodec.Reference(child.Plan), MayBeUnregistered: allowUnregistered || undispatched);
+            });
+        return ConfigurationRunInventory.IsRestoredInside(connection, transaction, state.Journal, references, requireCompletedGroups, stepId);
     }
 }

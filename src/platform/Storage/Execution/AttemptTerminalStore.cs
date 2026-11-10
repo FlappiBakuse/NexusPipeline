@@ -333,7 +333,7 @@ internal sealed class AttemptTerminalStore(RuntimeInstance instance, StateDataba
         {
             AttemptTerminalEvidence.RequireRestoredInside(connection, transaction, state, requireCompletedGroups, allowUnregistered); transaction.Commit();
         }
-        return UnstartedConfigurationEvidence.Hold(instance, database, contracts, state,
+        return RunBindingEvidence.HoldRestored(instance, database, contracts, state,
             state.Total.Steps.Select(step => step.StepId));
     }
 

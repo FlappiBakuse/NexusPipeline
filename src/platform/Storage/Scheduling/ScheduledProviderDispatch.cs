@@ -1,6 +1,7 @@
 using System.Runtime.Versioning;
 using NexusPipeline.Core.Execution;
 using NexusPipeline.Core.Maintenance;
+using NexusPipeline.Core.Notifications;
 using NexusPipeline.Core.Scheduling;
 using NexusPipeline.Platform.Extensions;
 using NexusPipeline.Platform.Serialization;
@@ -161,7 +162,17 @@ internal sealed class ScheduledProviderDispatch : IPlannedInvocationAuthorizatio
         work.Use(_publication, () => true); return work;
     }
 
-    internal void RequireSubmissionInside(AcceptedProviderInvocation work, ExtensionScope actualScope,
+    internal WorkNotificationOrigin BindNotification(ExtensionScope scope, NotificationSubmission submission)
+    {
+        _lease.VerifyHeld(_instance);
+        if (submission.ExtensionId != scope.Activation.ExtensionId) throw new UnauthorizedAccessException("scheduled_invocation_not_active");
+        var work = RequireActual(submission.Invocation, submission.ExtensionId, actualScope: scope);
+        return new(work.Source.Reference, work.Source.Document.Invocation, work.Activity, work.Budget, _resources,
+            AcceptedProviderInvocation.Claims(work.Entry.ExtensionId), "schedule_admission_blocked",
+            (connection, transaction) => RequireSubmissionInside(work, scope, connection, transaction));
+    }
+
+    private void RequireSubmissionInside(AcceptedProviderInvocation work, ExtensionScope actualScope,
         Microsoft.Data.Sqlite.SqliteConnection connection, Microsoft.Data.Sqlite.SqliteTransaction transaction)
     {
         _ = RequireActual(work.Source.Document.Invocation, work.Entry.ExtensionId, work.Entry.ProviderId, actualScope);
@@ -170,10 +181,6 @@ internal sealed class ScheduledProviderDispatch : IPlannedInvocationAuthorizatio
                 verified.Source.Document.OwnerGeneration != _lease.StartupGeneration) throw ScheduledProviderCodec.Invalid();
         _publication.RequireOpen(work, connection, transaction, requireBegin: true);
     }
-
-    internal ResourceOperationLease AcquireSubmissionRoot(AcceptedProviderInvocation work) =>
-        _resources.TryContinueRun(work.Activity, work.Source.Document.Invocation.NotificationOperationId,
-            AcceptedProviderInvocation.Claims(work.Entry.ExtensionId)).Lease ?? throw new IOException("schedule_admission_blocked");
 
     internal ResourceOperationLease AcquireCallbackRoot(AcceptedProviderInvocation work)
     {

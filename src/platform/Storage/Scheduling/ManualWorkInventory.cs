@@ -1,5 +1,4 @@
 using NexusPipeline.Platform.Serialization;
-using NexusPipeline.Platform.Storage.Notifications;
 using NexusPipeline.Platform.Storage.Sqlite;
 
 namespace NexusPipeline.Platform.Storage.Scheduling;
@@ -23,7 +22,7 @@ internal static class ManualWorkInventory
         var after = "";
         while (true)
         {
-            using var command = NotificationDeliveryRows.Command(connection, transaction,
+            using var command = DatabaseConnections.Command(connection, transaction,
                 "SELECT operation_id,relative_path,size_bytes,sha256 FROM manual_work_runs WHERE operation_id>$0 ORDER BY operation_id LIMIT 200;", after);
             var page = new List<(string Id, BlobReference Reference)>();
             using (var rows = command.ExecuteReader())
@@ -37,7 +36,7 @@ internal static class ManualWorkInventory
             }
             after = page[^1].Id;
         }
-        using var orphans = NotificationDeliveryRows.Command(connection, transaction,
+        using var orphans = DatabaseConnections.Command(connection, transaction,
             "SELECT EXISTS(SELECT 1 FROM operations o LEFT JOIN manual_work_runs m ON m.operation_id=o.operation_id WHERE o.operation_kind='manual.work-run' AND m.operation_id IS NULL) " +
             "OR EXISTS(SELECT 1 FROM manual_work_begin b LEFT JOIN manual_work_runs m ON m.operation_id=b.operation_id WHERE m.operation_id IS NULL) " +
             "OR EXISTS(SELECT 1 FROM manual_work_result r LEFT JOIN manual_work_runs m ON m.operation_id=r.operation_id WHERE m.operation_id IS NULL) " +

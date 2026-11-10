@@ -2,11 +2,8 @@ using System.Collections.Immutable;
 using System.Runtime.Versioning;
 using Microsoft.Data.Sqlite;
 using NexusPipeline.Core.Notifications;
-using NexusPipeline.Core.Secrets;
-using NexusPipeline.Platform.Security;
 using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage.Scheduling;
-using NexusPipeline.Platform.Storage.Secrets;
 using NexusPipeline.Platform.Storage.Sqlite;
 
 namespace NexusPipeline.Platform.Storage.Notifications;
@@ -26,27 +23,27 @@ internal sealed class PreparedScheduledSource : IDisposable
     { Source = source; Deliveries = deliveries; _targets = targets; _held = held; }
 
     internal static PreparedScheduledSource Capture(RuntimeInstance instance, StateDatabase database, ContractReader contracts,
-        AcceptedProviderInvocation actualWork, NotificationSubmission submission)
+        WorkNotificationOrigin actualWork, NotificationSubmission submission)
     {
         var held = new List<IDisposable>();
         try
         {
-            ScheduledProviderState invocation;
+            WorkStartEvidence begin;
             using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
             using (var transaction = connection.BeginTransaction(deferred: true))
             {
-                invocation = new ScheduledProviderEvidence(instance, contracts).Read(actualWork.Source.Reference, connection, transaction);
-                if (invocation.BeginReference is null || invocation.Begin is null || invocation.Close is not null || invocation.Result is not null)
-                    throw NotificationScheduledCodec.Invalid();
+                var invocation = WorkInvocationEvidence.ReadScheduled(instance, contracts, actualWork.Reference, connection, transaction);
+                if (!invocation.IsOpen || invocation.Begin is not { } started) throw NotificationScheduledCodec.Invalid();
+                begin = started;
                 transaction.Commit();
             }
             var targets = PreparedNotificationTargets.Capture(instance, database, contracts, submission.NotificationTaskIds); held.Add(targets);
             var catalog = targets.Catalog;
             var blobs = new ImmutableBlobStore(instance, contracts);
-            held.Add(blobs.OpenVerified(invocation.Source.Reference)); held.Add(blobs.OpenVerified(invocation.BeginReference!));
+            held.Add(blobs.OpenVerified(actualWork.Reference)); held.Add(blobs.OpenVerified(begin.Reference));
             var codec = new NotificationScheduledCodec(instance, contracts);
             var source = codec.Persist(new(NotificationScheduledCodec.Format, 1, instance.InstanceId, submission.OperationId,
-                actualWork.Source.Reference, invocation.BeginReference!, actualWork.Budget.Read().ConsumedMilliseconds,
+                actualWork.Reference, begin.Reference, actualWork.ReadConsumedMilliseconds(),
                 catalog.Reference, catalog.Catalog.Revision, submission.Title, submission.Body, targets.Targets));
             var deliveries = source.Document.Targets.Where(item => item.Disposition == "queued")
                 .Select(item => new NotificationDeliveryCodec(instance, contracts).Persist(codec.Delivery(source, item))).ToImmutableArray();
@@ -60,7 +57,6 @@ internal sealed class PreparedScheduledSource : IDisposable
     internal void AcceptInside(SqliteConnection connection, SqliteTransaction transaction, Guid occurrence, DateTimeOffset created, Guid generation)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        var source = Source.Document;
         _targets.RequireCurrent(connection, transaction);
         NotificationScheduledRows.InsertInside(connection, transaction, Source, occurrence, created);
         foreach (var delivery in Deliveries) NotificationDeliveryRows.AcceptExplicitInside(connection, transaction, delivery, created, generation);

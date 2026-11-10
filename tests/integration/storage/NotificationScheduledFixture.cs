@@ -84,9 +84,8 @@ internal sealed class NotificationScheduledFixture : IAsyncDisposable
             (admitted, scope) =>
             {
                 var scheduling = new ScheduleRegistrationPort(admitted, scope, Dispatch.Registry, new());
-                var backend = new ScheduledNotificationSubmission(Base.Source.Instance, Base.Source.Database, new(), Base.Source.Lease,
-                    Dispatch, Base.Resources, scope, (IWorkQueueAcceptance)Notifications);
-                Port = new(admitted, scope, backend, backend, new());
+                Port = ((IWorkNotificationPorts)Notifications).CreateScheduled(admitted, scope,
+                    submission => Dispatch.BindNotification(scope, submission));
                 return new Extension(token => scheduling.RegisterAsync("daily", new Handler(this), token));
             }, default);
     }

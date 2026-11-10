@@ -44,14 +44,12 @@ public sealed class ConfigurationRunStore
         using (var transaction = connection.BeginTransaction(deferred: true))
             if (OperationRows.ReadExisting(connection, transaction, operation) is not null)
                 return Required(connection, transaction, operation.OperationId, operation.SubjectId);
-        var parent = ReadParent(parentJournalId, stepId, prepared, resources);
+        var parent = RunBindingEvidence.ReadAdmission(_instance, _database, _contracts, parentJournalId, prepared.OwnerOperationId, stepId,
+            resources.Select(item => item.Reference));
         var states = resources.ToDictionary(item => item.Address, item =>
             new RunStateCodec(_instance, _contracts, new(_instance, _contracts)).ReadStructure(item.Plan.RunState!));
         var initial = RunInitialSources.Read(_instance, _database, _contracts, states);
-        var parentPlan = AttemptPreparedBinding.ReadPlan(_instance, _contracts, parent);
-        var total = new ExecutionPlanCodec(_instance, _contracts, new(_instance, _contracts))
-            .Read(AttemptPlanCodec.Reference(parentPlan.ExecutionPlan)).ReadWire();
-        PreparedRetryOrigin.RequireSaved(_instance, _database, _contracts, parentPlan, total, stepId, states);
+        RunBindingEvidence.RequireAdmissionSource(_instance, _database, _contracts, parent, stepId, states);
         return _database.Write((connection, transaction) =>
         {
             if (!OperationRows.Accept(connection, transaction, operation, acceptedAt).IsNew)
@@ -81,7 +79,7 @@ public sealed class ConfigurationRunStore
                 JournalResourceClaims.Insert(connection, transaction, journal.JournalId, claims);
             }
             ConfigurationRunRows.Insert(connection, transaction, operation.OperationId, prepared.OwnerOperationId, parentJournalId, stepId,
-                ExecutionInvocationCodec.Ordinal(new JournalStore(_instance, _contracts).Read(parentJournalId).Root, stepId), prepared.Request, resources, states);
+                RunBindingEvidence.ReadOrdinal(_instance, _contracts, parentJournalId, stepId), prepared.Request, resources, states);
             return Required(connection, transaction, operation.OperationId, operation.SubjectId) with { IsNew = true };
         });
     });
@@ -119,27 +117,6 @@ public sealed class ConfigurationRunStore
     {
         if (session.Phase != ConfigurationRunPhase.Prepared || session.Revision != revision || session.IsWriterAdmissionClosed)
             throw new ConfigurationException("configuration_run_revision_conflict");
-    }
-
-    private RegisteredJournal ReadParent(Guid journalId, string stepId, PreparedConfigurationRun prepared, IReadOnlyList<PreparedRunConfiguration> resources)
-    {
-        var registry = new RecoveryJournalRegistry(_database).ReadSnapshot(journalId).Journals;
-        var journal = registry.SingleOrDefault(item => item.JournalId == journalId && item.Kind == JournalKind.RunAttempt && item.OperationId == prepared.OwnerOperationId)
-            ?? throw new IOException("configuration_run_parent_unbound");
-        var bound = AttemptPreparedBinding.Read(_instance, _contracts, _database, journalId);
-        var parent = bound.Plan;
-        if (journal.Phase == JournalPhase.Applying)
-        {
-            if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
-            var current = AttemptWriterState.Read(_instance, _database, _contracts, journalId);
-            var ordinal = ExecutionStepAdmission.RequireNext(new JournalStore(_instance, _contracts).Read(journalId), bound.Total, stepId,
-                bound.Total.Steps.Single(step => step.StepId == stepId).Hooks?.Any(hook => hook.Role == "preHook") == true ? "preHook" : "process");
-            using var predecessors = ExecutionStepAdmission.HoldPredecessors(_instance, _database, _contracts, current, ordinal);
-        }
-        var expected = ExecutionInvocationCodec.CurrentPlans(new JournalStore(_instance, _contracts).Read(journalId).Root, parent, stepId).ToHashSet();
-        if (!expected.SetEquals(resources.Select(item => item.Reference)) || journal.Phase is not (JournalPhase.Prepared or JournalPhase.Applying))
-            throw new IOException("configuration_run_parent_coverage_invalid");
-        return journal;
     }
 
     private static void RequireParent(SqliteConnection connection, SqliteTransaction transaction, RegisteredJournal parent, string subject)

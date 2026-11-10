@@ -7,7 +7,6 @@ using NexusPipeline.Core.Maintenance;
 using NexusPipeline.Core.Scheduling;
 using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Extensions;
-using NexusPipeline.Platform.Storage.Notifications;
 using NexusPipeline.Extensibility.Protocol;
 using NexusPipeline.Platform.Storage.Execution;
 using NexusPipeline.Platform.Storage.Sqlite;
@@ -32,7 +31,7 @@ public sealed class PersistentScheduleService
     private readonly ScheduledProviderDispatch _providers;
     private readonly ManualWorkRuntime _manual;
     private readonly WorkRuntimeFacts _workFacts;
-    private IWorkQueueAcceptance? _notificationQueue;
+    private IWorkNotificationPorts? _notificationPorts;
     private ScheduleRuntimeService? _runtime;
     private ScheduleOccurrenceStore? _store;
     private Task _completion = Task.CompletedTask;
@@ -99,17 +98,15 @@ public sealed class PersistentScheduleService
     public NotificationSubmissionPort CreateNotificationPort(ExtensionManifest manifest, ExtensionScope actualScope)
     {
         _lease.VerifyHeld(_instance);
-        var backend = new ScheduledNotificationSubmission(_instance, _database, _contracts, _lease, _providers, _resources,
-            actualScope, _notificationQueue ?? throw new IOException("notification_runtime_unavailable"));
-        return new(manifest, actualScope, backend, backend, _contracts);
+        return (_notificationPorts ?? throw new IOException("notification_runtime_unavailable"))
+            .CreateScheduled(manifest, actualScope, submission => _providers.BindNotification(actualScope, submission));
     }
 
     internal NotificationSubmissionPort CreateManualNotifications(ExtensionManifest manifest, ExtensionScope scope, PreparedManualCallback work)
     {
         _lease.VerifyHeld(_instance);
-        var backend = new ManualNotificationSubmission(_instance, _database, _contracts, _lease, _resources, scope, work,
-            _notificationQueue ?? throw new IOException("notification_runtime_unavailable"));
-        return new(manifest, scope, backend, backend, _contracts);
+        return (_notificationPorts ?? throw new IOException("notification_runtime_unavailable"))
+            .CreateManual(manifest, scope, submission => work.BindNotification(_instance, _contracts, _lease, scope, submission));
     }
 
     internal PreparedScheduledCallback PrepareInstalledCallback(ExtensionScope scope, ScheduledPlannedInvocation invocation)
@@ -162,14 +159,14 @@ public sealed class PersistentScheduleService
         return _manual.QuiesceAsync(scope, providerId, taskId, revision, cancellation);
     }
 
-    internal void BindNotificationQueue(IWorkQueueAcceptance queue)
+    internal void BindNotificationPorts(IWorkNotificationPorts ports)
     {
-        ArgumentNullException.ThrowIfNull(queue); _lease.VerifyHeld(_instance);
+        ArgumentNullException.ThrowIfNull(ports); _lease.VerifyHeld(_instance);
         lock (_gate)
         {
-            if (_notificationQueue is not null && !ReferenceEquals(_notificationQueue, queue))
+            if (_notificationPorts is not null && !ReferenceEquals(_notificationPorts, ports))
                 throw new InvalidOperationException("notification_queue_owner_changed");
-            _notificationQueue = queue;
+            _notificationPorts = ports;
         }
     }
 

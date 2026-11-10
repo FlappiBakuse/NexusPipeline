@@ -3,7 +3,10 @@ using NexusPipeline.Core.Maintenance;
 using NexusPipeline.Core.Scheduling;
 using NexusPipeline.Extensibility.Protocol;
 using NexusPipeline.Platform.Extensions;
+using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage.Extensions;
+using NexusPipeline.Platform.Storage.Sqlite;
+using CoreSubmission = NexusPipeline.Core.Notifications.NotificationSubmission;
 
 namespace NexusPipeline.Platform.Storage.Scheduling;
 
@@ -12,7 +15,6 @@ internal sealed class PreparedManualCallback(ManualWorkRuntime owner, ResourceLe
     AcceptedManualWork actual, ManualInvocation context, ManualWorkInvocation wire) : IInstalledWork
 {
     internal ManualWorkInvocation Invocation => wire;
-    internal AcceptedManualWork Accepted { get { RequireCurrent(); return actual; } }
     public AcceptedExecutionRun Activity => actual.Activity;
     public Guid OperationId => actual.Source.Document.OperationId;
     public FrozenScheduledInvocation FrozenInvocation => context.Invocation;
@@ -30,6 +32,25 @@ internal sealed class PreparedManualCallback(ManualWorkRuntime owner, ResourceLe
     {
         if (!ReferenceEquals(actual, owner.RequireActual(context, scope.Activation.ExtensionId, actual.Entry.ProviderId, scope)))
             throw new UnauthorizedAccessException("manual_work_invocation_inactive");
+    }
+
+    internal WorkNotificationOrigin BindNotification(RuntimeInstance instance, ContractReader contracts,
+        InstanceLease lease, ExtensionScope submissionScope, CoreSubmission submission)
+    {
+        lease.VerifyHeld(instance); RequireCurrent();
+        if (!submissionScope.IsPublished || submissionScope.ActivationId != actual.Entry.ActivationId ||
+            submission.ExtensionId != submissionScope.Activation.ExtensionId || !FrozenInvocation.Matches(submission.Invocation) ||
+            submission.OperationId != FrozenInvocation.NotificationOperationId ||
+            submission.NotificationTaskIds.Any(id => !FrozenInvocation.NotificationTaskIds.Contains(id)))
+            throw new UnauthorizedAccessException("manual_notification_invocation_unbound");
+        return new(actual.Source.Reference, FrozenInvocation, actual.Activity, actual.Budget, resources,
+            AcceptedManualWork.Claims(actual.Entry.ExtensionId), "manual_notification_admission_blocked", (connection, transaction) =>
+            {
+                RequireCurrent();
+                var state = ManualWorkRows.Read(instance, contracts, connection, transaction, actual.Source.Reference);
+                if (state.Begin is null || state.Result is not null || state.Source.Document.Creator != JournalWriterStore.CurrentWriter ||
+                    state.Source.Document.OwnerGeneration != lease.StartupGeneration) throw new IOException("notification_manual_source_unbound");
+            });
     }
 
     internal ResourceOperationLease AcquireRoot()

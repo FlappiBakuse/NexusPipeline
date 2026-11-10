@@ -17,19 +17,16 @@ internal sealed class NotificationManualCodec(RuntimeInstance instance, Contract
         return new(document, new ImmutableBlobStore(instance, contracts).PersistPlan(NotificationCatalogCodec.Encode(document)));
     }
 
-    internal NotificationWorkSnapshot Read(BlobReference reference, SqliteConnection connection, SqliteTransaction transaction)
+    internal NotificationWorkSnapshot Read(BlobReference reference, SqliteConnection connection, SqliteTransaction transaction, Guid? expectedRunId = null)
     {
         var document = new NotificationCatalogCodec(instance, contracts).ReadDocument<NotificationWorkDocument>(reference);
         NotificationWorkShape.Require(document, Format, instance.InstanceId);
         var source = new NotificationWorkSnapshot(document, reference); NotificationManualRows.RequireSaved(connection, transaction, source);
-        var invocation = ManualWorkRows.Read(instance, contracts, connection, transaction, document.Invocation);
-        if (invocation.BeginReference != document.Begin || invocation.Begin is null ||
-            invocation.Source.Document.Invocation.NotificationOperationId != document.OperationId ||
-            document.AcceptedConsumedMilliseconds < invocation.Begin.ConsumedMilliseconds ||
-            document.AcceptedConsumedMilliseconds > invocation.Source.Document.Task.TimeoutSeconds * 1000L ||
-            document.Targets.Any(item => !invocation.Source.Document.Invocation.NotificationTaskIds.Contains(item.TaskId)))
+        var invocation = WorkInvocationEvidence.ReadManual(instance, contracts, document.Invocation, connection, transaction);
+        if (!invocation.Binds(document.Begin, document.OperationId, document.AcceptedConsumedMilliseconds, document.Targets.Select(item => item.TaskId)) ||
+            expectedRunId is { } run && (run == Guid.Empty || invocation.RunId != run))
             throw Invalid();
-        NotificationManualRows.RequireOrigin(connection, transaction, document.OperationId, invocation.Source.Document.OperationId);
+        NotificationManualRows.RequireOrigin(connection, transaction, document.OperationId, invocation.OperationId);
         NotificationWorkShape.RequireCatalog(instance, contracts, document, connection, transaction); return source;
     }
 

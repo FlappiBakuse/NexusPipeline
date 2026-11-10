@@ -1,6 +1,5 @@
 using System.Collections.Immutable;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using NexusPipeline.Core.Notifications;
 using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage.Sqlite;
@@ -9,13 +8,6 @@ namespace NexusPipeline.Platform.Storage.Notifications;
 
 internal sealed class NotificationCatalogCodec(RuntimeInstance instance, ContractReader contracts)
 {
-    internal static readonly JsonSerializerOptions Options = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
-        Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase, allowIntegerValues: false) }
-    };
-
     internal NotificationCatalogSnapshot Persist(NotificationTaskCatalog catalog)
     {
         NotificationTaskPolicy.Validate(catalog);
@@ -75,21 +67,19 @@ internal sealed class NotificationCatalogCodec(RuntimeInstance instance, Contrac
     {
         using var parsed = StrictJson.Parse(bytes);
         RequireRequiredMembers(parsed.RootElement, typeof(T));
-        return JsonSerializer.Deserialize<T>(bytes.Span, Options) ?? throw new JsonException("notification_document_missing");
+        return JsonSerializer.Deserialize<T>(bytes.Span, StoredPlanFormat.Options) ?? throw new JsonException("notification_document_missing");
     }
 
     internal static byte[] Encode<T>(T document)
     {
-        var bytes = JsonSerializer.SerializeToUtf8Bytes(document, Options);
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(document, StoredPlanFormat.Options);
         using var parsed = StrictJson.Parse(bytes);
         return bytes;
     }
 
     internal static void RequirePlan(BlobReference reference)
     {
-        if (reference is null || reference.Sha256 is null || reference.Sha256.Length != 64 ||
-            reference.Sha256.Any(c => c is not (>= '0' and <= '9' or >= 'a' and <= 'f')) ||
-            reference.SizeBytes is < 1 or > StrictJson.MaximumBytes || reference.RelativePath != $"blobs/plans/{reference.Sha256}.json")
+        if (!StoredPlanFormat.IsReference(reference))
             throw new IOException("notification_plan_reference_invalid");
     }
 

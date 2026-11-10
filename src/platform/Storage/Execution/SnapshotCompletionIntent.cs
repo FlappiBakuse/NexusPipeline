@@ -3,13 +3,15 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using NexusPipeline.Core.Configuration;
-using NexusPipeline.Platform.Storage.Execution;
 
-namespace NexusPipeline.Platform.Storage.Configuration;
+namespace NexusPipeline.Platform.Storage.Execution;
 
 internal sealed record SnapshotCompletionIntent(string Format, int Version, Guid ParentOperationId,
     Guid ParentJournalId, string ParentPlanDigest, Guid SessionId, Guid CompletionOperationId, string SubjectId,
-    string Terminal, long GroupRevision, string EvidenceDigest, ImmutableArray<string> SlotKeys);
+    string Terminal, long GroupRevision, string EvidenceDigest, ImmutableArray<string> SlotKeys)
+{
+    internal const string FormatId = "nexus.configuration.snapshot-completion";
+}
 
 internal static class SnapshotIntentCodec
 {
@@ -18,7 +20,6 @@ internal static class SnapshotIntentCodec
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow
     };
-    internal const string Format = "nexus.configuration.snapshot-completion";
     internal const string Step = "prepare-snapshot-completion";
     internal const string Reason = "configuration_snapshot_completion_pending";
 
@@ -39,9 +40,9 @@ internal static class SnapshotIntentCodec
                 BindingSkipCodec.IsParticipant(participant) || ExecutionInvocationCodec.IsParticipant(participant) ||
                 BindingTimeoutCodec.IsParticipant(participant)) continue;
             var identity = participant.GetProperty("identity");
-            if (!identity.TryGetProperty("format", out var format) || format.GetString() != Format) throw Invalid();
+            if (!identity.TryGetProperty("format", out var format) || format.GetString() != SnapshotCompletionIntent.FormatId) throw Invalid();
             var item = identity.Deserialize<SnapshotCompletionIntent>(Options) ?? throw Invalid();
-            if (!JsonElement.DeepEquals(identity, JsonSerializer.SerializeToElement(item, Options)) || item.Format != Format || item.Version != 1 ||
+            if (!JsonElement.DeepEquals(identity, JsonSerializer.SerializeToElement(item, Options)) || item.Format != SnapshotCompletionIntent.FormatId || item.Version != 1 ||
                 item.ParentOperationId == Guid.Empty || item.ParentJournalId == Guid.Empty || item.SessionId == Guid.Empty ||
                 item.CompletionOperationId == Guid.Empty || item.ParentOperationId == item.SessionId || item.ParentOperationId == item.CompletionOperationId ||
                 item.SessionId == item.CompletionOperationId || item.ParentOperationId != journal.GetProperty("operationId").GetGuid() ||

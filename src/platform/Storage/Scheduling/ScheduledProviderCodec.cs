@@ -2,25 +2,23 @@ using System.Collections.Immutable;
 using System.Text.Json;
 using NexusPipeline.Core.Scheduling;
 using NexusPipeline.Platform.Serialization;
-using NexusPipeline.Platform.Storage.Notifications;
 using NexusPipeline.Platform.Storage.Sqlite;
 
 namespace NexusPipeline.Platform.Storage.Scheduling;
 
 internal sealed class ScheduledProviderCodec(RuntimeInstance instance, ContractReader contracts)
 {
-    internal static readonly JsonSerializerOptions Options = NotificationCatalogCodec.Options;
     internal BlobReference Persist<T>(T document) => new ImmutableBlobStore(instance, contracts).PersistPlan(Encode(document));
-    internal static byte[] Encode<T>(T document) => BoundedJson.Serialize(document, Options);
+    internal static byte[] Encode<T>(T document) => BoundedJson.Serialize(document, StoredPlanFormat.Options);
 
     internal T ReadDocument<T>(BlobReference reference)
     {
-        NotificationCatalogCodec.RequirePlan(reference);
+        if (!StoredPlanFormat.IsReference(reference)) throw Invalid();
         using var held = new ImmutableBlobStore(instance, contracts).OpenVerified(reference);
         var bytes = new byte[checked((int)held.Length)]; held.ReadExactly(bytes);
         using var parsed = StrictJson.Parse(bytes);
-        var result = JsonSerializer.Deserialize<T>(bytes, Options) ?? throw Invalid();
-        if (!JsonElement.DeepEquals(parsed.RootElement, JsonSerializer.SerializeToElement(result, Options))) throw Invalid();
+        var result = JsonSerializer.Deserialize<T>(bytes, StoredPlanFormat.Options) ?? throw Invalid();
+        if (!JsonElement.DeepEquals(parsed.RootElement, JsonSerializer.SerializeToElement(result, StoredPlanFormat.Options))) throw Invalid();
         return result;
     }
 
@@ -43,7 +41,6 @@ internal sealed class ScheduledProviderCodec(RuntimeInstance instance, ContractR
             document.InitialConsumedMilliseconds < 0 || document.InitialConsumedMilliseconds > document.Task.TimeoutSeconds * 1000L)
             throw Invalid();
         WorkPlanPolicy.Validate(new(document.PlansRevision, ImmutableArray.Create(document.Task)));
-        NotificationCatalogCodec.RequirePlan(document.Plans);
         var plans = ReadDocument<ScheduledWorkPlans>(document.Plans);
         WorkPlanPolicy.Validate(plans);
         if (plans.Revision != document.PlansRevision || !plans.Tasks.Any(task =>

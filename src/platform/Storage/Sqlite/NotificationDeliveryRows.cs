@@ -216,12 +216,7 @@ internal static class NotificationDeliveryRows
         snapshot.Document.SubjectId, snapshot.Reference.Sha256, "notification.delivery");
 
     internal static SqliteCommand Command(SqliteConnection connection, SqliteTransaction? transaction,
-        string sql, params object[] values)
-    {
-        var command = connection.CreateCommand(); command.Transaction = transaction; command.CommandText = sql;
-        for (var index = 0; index < values.Length; index++) command.Parameters.AddWithValue("$" + index, values[index]);
-        return command;
-    }
+        string sql, params object[] values) => DatabaseConnections.Command(connection, transaction, sql, values);
 
     private static void Execute(SqliteConnection connection, SqliteTransaction transaction, string sql, params object[] values)
     {

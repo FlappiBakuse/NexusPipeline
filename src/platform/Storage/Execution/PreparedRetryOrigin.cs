@@ -4,11 +4,11 @@ using Microsoft.Data.Sqlite;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Extensibility.Protocol;
 using NexusPipeline.Platform.Serialization;
-using NexusPipeline.Platform.Storage.Execution;
+using NexusPipeline.Platform.Storage.Configuration;
 using NexusPipeline.Platform.Storage.Journals;
 using NexusPipeline.Platform.Storage.Sqlite;
 
-namespace NexusPipeline.Platform.Storage.Configuration;
+namespace NexusPipeline.Platform.Storage.Execution;
 
 internal sealed record ConfigurationRetrySource(FrozenRunState State, StoredConfigurationRevision Publication,
     Guid PreviousSessionId, BlobReference PreviousChild, RetryConfigurationInput? Input);
@@ -78,11 +78,11 @@ internal sealed class PreparedRetryOrigin
             }
             var session = ConfigurationRunRows.Read(connection, transaction, sessionId, subject) ?? throw Invalid();
             RequireCompleted(session, previousJournal, step.StepId, previousOperation);
-            var bound = ConfigurationRunBinding.Read(instance, database, contracts, session, verifiedParent, verifiedParent is null ? null : total);
+            var evidence = verifiedParent is null ? null : RunBindingEvidence.Read(instance, database, contracts, session, verifiedParent, total);
+            var bound = ConfigurationRunBinding.Read(instance, database, contracts, session, evidence);
             ConfigurationRunHistory.Verify(connection, transaction, session, subject,
                 bound.Resources.ToDictionary(item => item.State.Source.Address, item => item.State), snapshots);
-            if (bound.Parent.AttemptId != previousAttempt ||
-                AttemptPlanCodec.Reference(bound.Parent.ExecutionPlan) != totalReference) throw Invalid();
+            if (bound.Evidence.AttemptId != previousAttempt || bound.Evidence.TotalPlan != totalReference) throw Invalid();
             var items = ImmutableDictionary.CreateBuilder<ConfigurationAddress, ConfigurationRetrySource>();
             foreach (var resource in session.Resources)
             {

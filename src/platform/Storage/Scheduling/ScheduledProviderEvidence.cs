@@ -2,7 +2,6 @@ using System.Collections.Immutable;
 using Microsoft.Data.Sqlite;
 using NexusPipeline.Core.Execution;
 using NexusPipeline.Platform.Serialization;
-using NexusPipeline.Platform.Storage.Notifications;
 using NexusPipeline.Platform.Storage.Sqlite;
 
 namespace NexusPipeline.Platform.Storage.Scheduling;
@@ -28,7 +27,7 @@ internal sealed class ScheduledProviderEvidence(RuntimeInstance instance, Contra
         var operation = OperationRows.ReadExisting(connection, transaction, ScheduledProviderRows.Identity(source)) ??
             throw ScheduledProviderCodec.Invalid();
         if (operation.Status != (result is null ? "accepted" : "completed")) throw ScheduledProviderCodec.Invalid();
-        using var pending = NotificationDeliveryRows.Command(connection, transaction,
+        using var pending = DatabaseConnections.Command(connection, transaction,
             "SELECT trigger_utc_minute FROM scheduled_provider_pending WHERE occurrence_id=$0;", id.ToString("D"));
         var indexed = pending.ExecuteScalar();
         if (result is null ? indexed is not long minute || minute != source.Document.TriggerUtcMinute : indexed is not null)

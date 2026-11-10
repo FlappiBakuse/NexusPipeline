@@ -62,7 +62,7 @@ internal static class JournalCapacityPolicy
         foreach (var group in groups)
         {
             var slots = group.Select(slot => ConfigurationRevisionService.ResourceKey(PlanConfigurationSlots.Address(slot))).Order(StringComparer.Ordinal).ToImmutableArray();
-            var intent = new SnapshotCompletionIntent(SnapshotIntentCodec.Format, 1, Placeholder,
+            var intent = new SnapshotCompletionIntent(SnapshotCompletionIntent.FormatId, 1, Placeholder,
                 Placeholder, Digest, Placeholder, Placeholder, new string('\uffff', 256), "interrupted", 9007199254740990, Digest, slots);
             for (var invocation = 1; invocation <= (plan.Steps.Single(step => step.StepId == group.Key).MaximumAttempts ?? 1); invocation++)
                 Add(events, SnapshotIntentCodec.Participant(intent), Receipt("prepare-snapshot-completion", "completed", "configuration_snapshot_completion_pending"));

@@ -347,7 +347,7 @@ public sealed class ConfigurationRunController : IDisposable
             try
             {
                 var session = Required();
-                var user = ConfigurationRunBinding.Read(_instance, _database, _contracts, session).Step.UserId;
+                var user = ConfigurationRunBinding.Read(_instance, _database, _contracts, session).Evidence.UserId;
                 new Records.RunDiagnosticStore(_instance, _database).Record(session.ParentJournalId, session.StepId,
                     user is null ? null : Guid.Parse(user), "configuration-sync", SynchronizationFailureCode, error);
             }

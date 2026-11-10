@@ -1,5 +1,7 @@
+using System.Collections.Immutable;
 using Microsoft.Data.Sqlite;
 using NexusPipeline.Core.Configuration;
+using NexusPipeline.Core.Execution;
 using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage.Journals;
 using NexusPipeline.Platform.Storage.Sqlite;
@@ -37,7 +39,7 @@ internal static class ConfigurationRunInventory
                     binding.Resources.Single(value => value.State.Source.Address == resource.Address).State, new(new(instance, contracts)));
                 command.CommandText = "SELECT EXISTS(SELECT 1 FROM operations WHERE operation_id=$owner AND subject_id=$subject);";
                 command.Parameters.Clear(); command.Parameters.AddWithValue("$owner", session.OwnerOperationId.ToString("D")); command.Parameters.AddWithValue("$subject", item.Subject);
-                if ((long)command.ExecuteScalar()! != 1 || binding.Parent.OperationId != session.OwnerOperationId.ToString("D"))
+                if ((long)command.ExecuteScalar()! != 1)
                     throw new IOException("configuration_run_parent_subject_unbound");
             }
             command.Parameters.Clear();
@@ -47,6 +49,143 @@ internal static class ConfigurationRunInventory
         }
         catch (Exception error) when (error is ConfigurationException or ArgumentException or InvalidOperationException or FormatException)
         { throw new IOException("configuration_run_metadata_unrecognized", error); }
+    }
+
+    internal static ImmutableArray<ConfigurationRunStatus> ReadCompletion(RuntimeInstance instance, StateDatabase database,
+        ContractReader contracts, RegisteredJournal parent, IReadOnlyList<RegisteredJournal> registered,
+        IEnumerable<(string StepId, BlobReference Reference)> references)
+    {
+        var groups = ReadCompletionGroups(database, parent);
+        var blobs = new ImmutableBlobStore(instance, contracts);
+        var plans = new ConfigurationPlanCodec(instance, contracts, blobs);
+        var expected = references.Select(item =>
+        {
+            var child = plans.ReadStructure(item.Reference);
+            return (item.StepId, Plan: child, item.Reference);
+        }).ToDictionary(item => item.Plan.JournalId);
+        var covered = new HashSet<Guid>();
+        var writers = new JournalWriterStore(database);
+        foreach (var group in groups)
+        {
+            var binding = ConfigurationRunBinding.Read(instance, database, contracts, group);
+            if (binding.ParentJournal.JournalId != parent.JournalId || binding.ParentJournal.OperationId != parent.OperationId ||
+                binding.ParentJournal.Phase != parent.Phase || binding.ParentJournal.Revision != parent.Revision ||
+                binding.ParentJournal.PlanDigest != parent.PlanDigest)
+                throw new IOException("attempt_configuration_parent_unbound");
+            foreach (var resource in group.Resources)
+            {
+                if (!expected.TryGetValue(resource.JournalId, out var child) || child.StepId != group.StepId ||
+                    child.Plan.OperationId != resource.OperationId || child.Reference.RelativePath != resource.PlanPath ||
+                    child.Reference.Sha256 != resource.PlanDigest || !covered.Add(resource.JournalId))
+                    throw new IOException("attempt_configuration_membership_unbound");
+                var journal = registered.Single(item => item.JournalId == resource.JournalId);
+                if (journal.Phase == JournalPhase.Quarantined) throw new IOException("attempt_configuration_child_quarantined");
+                if (writers.ObserveForCurrentExecutor(resource.JournalId) is not { IsComplete: true, State: WriterState.Stopped })
+                    throw new IOException("attempt_writer_stop_unconfirmed");
+                var journalPath = PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(instance.RuntimeRoot, "journals", resource.JournalId.ToString("D")));
+                if (!Directory.Exists(journalPath))
+                {
+                    if (File.Exists(journalPath)) throw new IOException("attempt_configuration_child_projection_unbound");
+                    new InitialConfigurationJournal(instance, contracts, database).VerifyPreparedPlan(journal);
+                    continue;
+                }
+                var physical = new JournalStore(instance, contracts).Read(resource.JournalId);
+                if (physical.Phase == JournalPhase.Quarantined) throw new IOException("attempt_configuration_child_quarantined");
+                _ = ConfigurationJournalBinding.Read(instance, physical, contracts, database);
+            }
+        }
+        if (groups.IsEmpty || registered.Any(item => expected.ContainsKey(item.JournalId) && !covered.Contains(item.JournalId)))
+            throw new IOException("attempt_configuration_membership_unbound");
+        var states = new RunStateCodec(instance, contracts, blobs);
+        foreach (var journal in registered.Where(item => item.Kind == JournalKind.ConfigExchange))
+        {
+            var child = plans.ReadStructure(new(journal.PlanPath, new FileInfo(Path.Combine(instance.RuntimeRoot, journal.PlanPath)).Length, journal.PlanDigest));
+            if (child.RunState is null) continue;
+            var state = states.ReadStructure(child.RunState);
+            if (state.OwnerOperationId == parent.OperationId && (!expected.ContainsKey(journal.JournalId) || !covered.Contains(journal.JournalId)))
+                throw new IOException("attempt_configuration_membership_unbound");
+        }
+        return groups;
+    }
+
+    private static ImmutableArray<ConfigurationRunStatus> ReadCompletionGroups(StateDatabase database, RegisteredJournal parent)
+    {
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var transaction = connection.BeginTransaction(deferred: true);
+        using var command = connection.CreateCommand(); command.Transaction = transaction;
+        command.CommandText = "SELECT subject_id FROM operations WHERE operation_id=$owner AND status='accepted';";
+        command.Parameters.AddWithValue("$owner", parent.OperationId.ToString("D"));
+        var subject = command.ExecuteScalar() as string ?? throw new IOException("attempt_configuration_parent_operation_unbound");
+        command.CommandText = "SELECT s.session_id,o.subject_id,o.operation_kind,o.status FROM configuration_run_sessions s " +
+            "JOIN operations o ON o.operation_id=s.session_id WHERE s.parent_journal_id=$parent OR s.owner_operation_id=$owner LIMIT 4097;";
+        command.Parameters.AddWithValue("$parent", parent.JournalId.ToString("D"));
+        var ids = new List<Guid>();
+        using (var rows = command.ExecuteReader())
+            while (rows.Read())
+            {
+                if (rows.GetString(1) != subject || rows.GetString(2) != "configuration.run.begin" || ids.Count >= 4096)
+                    throw new IOException("attempt_configuration_group_unbound");
+                ids.Add(Guid.Parse(rows.GetString(0)));
+            }
+        var groups = ImmutableArray.CreateBuilder<ConfigurationRunStatus>();
+        foreach (var id in ids)
+        {
+            var group = ConfigurationRunRows.Read(connection, transaction, id, subject)!;
+            if (group.OwnerOperationId != parent.OperationId || group.ParentJournalId != parent.JournalId)
+                throw new IOException("attempt_configuration_group_unbound");
+            command.CommandText = "SELECT status FROM operations WHERE operation_id=$group;";
+            command.Parameters.AddWithValue("$group", id.ToString("D"));
+            if (command.ExecuteScalar() as string != (group.Phase == ConfigurationRunPhase.Prepared ? "accepted" : "completed"))
+                throw new IOException("attempt_configuration_group_operation_unbound");
+            command.Parameters.RemoveAt("$group");
+            foreach (var resource in group.Resources)
+            {
+                command.CommandText = "SELECT EXISTS(SELECT 1 FROM operations WHERE operation_id=$child AND subject_id=$subject " +
+                    "AND operation_kind='configuration.run.resource' AND request_digest=$digest AND status=$status);";
+                command.Parameters.AddWithValue("$child", resource.OperationId.ToString("D"));
+                command.Parameters.AddWithValue("$subject", subject);
+                command.Parameters.AddWithValue("$digest", resource.PlanDigest);
+                command.Parameters.AddWithValue("$status", group.CompletionOperationId.HasValue ? "completed" : "accepted");
+                if ((long)command.ExecuteScalar()! != 1) throw new IOException("attempt_configuration_child_operation_unbound");
+                foreach (var key in new[] { "$child", "$subject", "$digest", "$status" }) command.Parameters.RemoveAt(key);
+            }
+            groups.Add(group);
+        }
+        return groups.ToImmutable();
+    }
+
+    internal static bool IsRestoredInside(SqliteConnection connection, SqliteTransaction transaction, RegisteredJournal parent,
+        IEnumerable<(string StepId, BlobReference Reference, bool MayBeUnregistered)> references, bool requireCompletedGroups, string? stepId)
+    {
+        using var command = connection.CreateCommand(); command.Transaction = transaction;
+        var expected = 0; var restored = true;
+        foreach (var child in references)
+        {
+            var plan = child.Reference;
+            command.Parameters.Clear(); command.Parameters.AddWithValue("$path", plan.RelativePath); command.Parameters.AddWithValue("$digest", plan.Sha256);
+            command.CommandText = "SELECT count(*) FROM operation_journals WHERE plan_path=$path AND plan_digest=$digest;";
+            var count = (long)command.ExecuteScalar()!;
+            if (child.MayBeUnregistered && count == 0) continue;
+            if (count != 1) throw new IOException("attempt_configuration_membership_unbound");
+            expected++;
+            command.CommandText = "SELECT EXISTS(SELECT 1 FROM configuration_run_resources r JOIN configuration_run_sessions s ON s.session_id=r.session_id " +
+                "JOIN operation_journals j ON j.journal_id=r.journal_id AND j.operation_id=r.operation_id " +
+                "WHERE s.owner_operation_id=$owner AND s.parent_journal_id=$parent AND s.step_id=$step " +
+                "AND ($complete=0 OR (s.phase IN (2,3) AND s.writer_gate=1 AND s.closed_elapsed_milliseconds IS NOT NULL AND s.completion_operation_id IS NOT NULL)) " +
+                "AND r.plan_path=$path AND r.plan_digest=$digest AND j.phase='committed' AND j.operation_kind='configExchange');";
+            command.Parameters.Clear(); command.Parameters.AddWithValue("$owner", parent.OperationId.ToString("D"));
+            command.Parameters.AddWithValue("$parent", parent.JournalId.ToString("D")); command.Parameters.AddWithValue("$step", child.StepId);
+            command.Parameters.AddWithValue("$path", plan.RelativePath); command.Parameters.AddWithValue("$digest", plan.Sha256);
+            command.Parameters.AddWithValue("$complete", requireCompletedGroups);
+            if ((long)command.ExecuteScalar()! != 1) restored = false;
+        }
+        command.Parameters.Clear(); command.Parameters.AddWithValue("$owner", parent.OperationId.ToString("D"));
+        command.Parameters.AddWithValue("$parent", parent.JournalId.ToString("D"));
+        command.Parameters.AddWithValue("$selectedStep", (object?)stepId ?? DBNull.Value);
+        command.CommandText = "SELECT count(*) FROM configuration_run_resources r JOIN configuration_run_sessions s ON s.session_id=r.session_id " +
+            "WHERE (s.owner_operation_id=$owner OR s.parent_journal_id=$parent) AND ($selectedStep IS NULL OR s.step_id=$selectedStep);";
+        if ((long)command.ExecuteScalar()! != expected) throw new IOException("attempt_configuration_membership_unbound");
+        return restored;
     }
 
     private static void VerifyWriterAdmission(RuntimeInstance instance, StateDatabase database, ContractReader contracts,
@@ -82,7 +221,7 @@ internal static class ConfigurationRunInventory
             }
             return;
         }
-        if (binding.Step.Hooks is { Count: > 0 })
+        if (binding.Evidence.HasHooks)
         {
             var parent = AttemptWriterState.Read(instance, database, contracts, session.ParentJournalId);
             var candidates = parent.Jobs.Where(job => job.StepId == session.StepId && job.Role != "judgement").ToArray();

@@ -22,7 +22,7 @@ internal sealed class RunStopEvidence(RuntimeInstance instance, StateDatabase da
         if (!session.IsWriterAdmissionClosed || session.ClosedElapsedMilliseconds is not { } elapsed ||
             elapsed is < 0 or > long.MaxValue / TimeSpan.TicksPerMillisecond)
             throw new IOException("configuration_run_stop_duration_missing");
-        if (ConfigurationRunBinding.Read(instance, database, contracts, session).Step.Hooks is { Count: > 0 })
+        if (ConfigurationRunBinding.Read(instance, database, contracts, session).Evidence.HasHooks)
             return ReadGroup(session, requireRestored);
         var groupJobs = session.Resources.Select(resource => (Resource: resource, Jobs: Jobs(resource.JournalId))).ToArray();
         var noJobs = groupJobs.All(item => item.Jobs.Count == 0);
@@ -102,16 +102,7 @@ internal sealed class RunStopEvidence(RuntimeInstance instance, StateDatabase da
     [SupportedOSPlatform("windows")]
     private RunStoppedFacts ReadGroup(ConfigurationRunStatus session, bool requireRestored)
     {
-        var state = AttemptWriterState.Read(instance, database, contracts, session.ParentJournalId);
-        var jobs = state.Jobs.Where(job => job.StepId == session.StepId).ToArray();
-        StepWritersEvidence.RequireStopped(instance, database, contracts, session.ParentJournalId, jobs);
-        if (state.Gate.State == EffectGateState.Entered)
-        {
-            var missing = BindingSuppressionCodec.Read(state.Latest.Root, state.Total).SingleOrDefault(item => item.StepId == session.StepId);
-            if (!jobs.Select(job => job.Role).Concat(missing?.Roles ?? []).Concat(RetryHookCodec.ResolvedRoles(state.Latest.Root, state.Total, session.StepId)).ToHashSet(StringComparer.Ordinal)
-                .SetEquals(ExecutionBindingRoles.Required(state.Total.Steps.Single(step => step.StepId == session.StepId))))
-                throw new IOException("configuration_group_dispatch_pending");
-        }
+        var jobs = StepWritersEvidence.ReadStoppedGroup(instance, database, contracts, session.ParentJournalId, session.StepId);
         var closures = new JobClosureStore(instance, database, contracts);
         var parent = jobs.ToDictionary(job => job.JobName, job => closures.ReadForExecutionEvidence(session.ParentJournalId,
             job.WriterId, job.JobName, job.SessionId) ?? throw new IOException("writer_job_closure_missing"), StringComparer.Ordinal);

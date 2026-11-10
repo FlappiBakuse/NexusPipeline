@@ -33,6 +33,13 @@ internal static class DatabaseConnections
         catch { connection.Dispose(); throw; }
     }
 
+    internal static SqliteCommand Command(SqliteConnection connection, SqliteTransaction? transaction, string sql, params object[] values)
+    {
+        var command = connection.CreateCommand(); command.Transaction = transaction; command.CommandText = sql;
+        for (var index = 0; index < values.Length; index++) command.Parameters.AddWithValue("$" + index, values[index]);
+        return command;
+    }
+
     internal static object Scalar(SqliteConnection connection, string sql)
     {
         using var command = connection.CreateCommand();

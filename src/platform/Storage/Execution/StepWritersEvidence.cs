@@ -1,6 +1,8 @@
 using System.Runtime.Versioning;
+using System.Text.Json;
 using NexusPipeline.Core.Execution;
 using NexusPipeline.Core.Configuration;
+using NexusPipeline.Extensibility.Protocol;
 using NexusPipeline.Platform.Processes;
 using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage.Journals;
@@ -60,9 +62,7 @@ internal static class StepWritersEvidence
             var gate = new JournalEffectGate(database).Read(parentId);
             if (gate.State is not (EffectGateState.Entered or EffectGateState.Sealed))
                 throw new IOException("execution_hook_dispatch_pending");
-            var suppressed = BindingSuppressionCodec.Read(document.Root, total).SingleOrDefault(item => item.StepId == stepId);
-            var represented = jobs.Where(job => job.StepId == stepId).Select(job => job.Role)
-                .Concat(suppressed?.Roles ?? []).Concat(RetryHookCodec.ResolvedRoles(document.Root, total, stepId)).ToHashSet(StringComparer.Ordinal);
+            var represented = GroupRoles(document.Root, total, stepId, jobs.Where(job => job.StepId == stepId));
             if (gate.State == EffectGateState.Entered && !represented.SetEquals(ExecutionBindingRoles.Required(input))) throw new IOException("execution_hook_dispatch_pending");
         }
         using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
@@ -71,6 +71,26 @@ internal static class StepWritersEvidence
             ExecutionStepAdmission.RequireJobsInside(connection, transaction, parentId, WriterIntentCodec.ReadAllJobs(document.Root, total)); transaction.Commit();
         }
         RequireStopped(instance, database, contracts, parentId, jobs.Where(item => item.StepId == stepId));
+    }
+
+    [SupportedOSPlatform("windows")]
+    internal static StepWriterState[] ReadStoppedGroup(RuntimeInstance instance, StateDatabase database,
+        ContractReader contracts, Guid parentId, string stepId)
+    {
+        var state = AttemptWriterState.Read(instance, database, contracts, parentId);
+        var jobs = state.Jobs.Where(job => job.StepId == stepId).ToArray();
+        RequireStopped(instance, database, contracts, parentId, jobs);
+        if (state.Gate.State == EffectGateState.Entered && !GroupRoles(state.Latest.Root, state.Total, stepId, jobs)
+                .SetEquals(ExecutionBindingRoles.Required(state.Total.Steps.Single(step => step.StepId == stepId))))
+            throw new IOException("configuration_group_dispatch_pending");
+        return jobs;
+    }
+
+    private static HashSet<string> GroupRoles(JsonElement journal, ExecutionPlan total, string stepId, IEnumerable<StepWriterState> jobs)
+    {
+        var suppressed = BindingSuppressionCodec.Read(journal, total).SingleOrDefault(item => item.StepId == stepId);
+        return jobs.Select(job => job.Role).Concat(suppressed?.Roles ?? [])
+            .Concat(RetryHookCodec.ResolvedRoles(journal, total, stepId)).ToHashSet(StringComparer.Ordinal);
     }
 
     [SupportedOSPlatform("windows")]

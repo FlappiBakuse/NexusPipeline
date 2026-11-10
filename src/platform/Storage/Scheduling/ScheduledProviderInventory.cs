@@ -1,6 +1,5 @@
 using Microsoft.Data.Sqlite;
 using NexusPipeline.Platform.Serialization;
-using NexusPipeline.Platform.Storage.Notifications;
 using NexusPipeline.Platform.Storage.Sqlite;
 
 namespace NexusPipeline.Platform.Storage.Scheduling;
@@ -22,7 +21,7 @@ internal static class ScheduledProviderInventory
         var after = "";
         while (true)
         {
-            using var command = NotificationDeliveryRows.Command(connection, transaction,
+            using var command = DatabaseConnections.Command(connection, transaction,
                 "SELECT occurrence_id,relative_path,size_bytes,sha256 FROM scheduled_provider_occurrences WHERE occurrence_id>$0 ORDER BY occurrence_id LIMIT 200;", after);
             var page = new List<(string Id, BlobReference Reference)>();
             using (var rows = command.ExecuteReader())
@@ -36,7 +35,7 @@ internal static class ScheduledProviderInventory
             }
             after = page[^1].Id;
         }
-        using var orphans = NotificationDeliveryRows.Command(connection, transaction,
+        using var orphans = DatabaseConnections.Command(connection, transaction,
             "SELECT EXISTS(SELECT 1 FROM operations o LEFT JOIN scheduled_provider_occurrences s ON s.operation_id=o.operation_id WHERE o.operation_kind='schedule.provider-invoke' AND s.operation_id IS NULL) " +
             "OR EXISTS(SELECT 1 FROM scheduled_provider_begin b LEFT JOIN scheduled_provider_occurrences s ON s.occurrence_id=b.occurrence_id WHERE s.occurrence_id IS NULL) " +
             "OR EXISTS(SELECT 1 FROM scheduled_provider_close b LEFT JOIN scheduled_provider_occurrences s ON s.occurrence_id=b.occurrence_id WHERE s.occurrence_id IS NULL) " +

@@ -4,15 +4,19 @@ using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Execution;
 using NexusPipeline.Core.Maintenance;
 using NexusPipeline.Core.Notifications;
+using NexusPipeline.Platform.Extensions;
 using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage.Execution;
+using NexusPipeline.Platform.Storage.Scheduling;
 using NexusPipeline.Platform.Storage.Secrets;
 using NexusPipeline.Platform.Storage.Sqlite;
+using CoreSubmission = NexusPipeline.Core.Notifications.NotificationSubmission;
+using ExtensionManifest = NexusPipeline.Extensibility.Protocol.ExtensionManifest;
 
 namespace NexusPipeline.Platform.Storage.Notifications;
 
 [SupportedOSPlatform("windows")]
-public sealed class NotificationRuntime : IAttemptTerminalObserver, IAsyncDisposable, IWorkQueueAcceptance
+public sealed class NotificationRuntime : IAttemptTerminalObserver, IAsyncDisposable, IWorkNotificationPorts
 {
     private readonly RuntimeInstance _instance;
     private readonly StateDatabase _database;
@@ -53,13 +57,28 @@ public sealed class NotificationRuntime : IAttemptTerminalObserver, IAsyncDispos
         _activity = new(resources); _queue = new(instance, database, contracts);
     }
 
-    public void BindSchedules(NexusPipeline.Platform.Storage.Scheduling.PersistentScheduleService schedules)
+    public void BindSchedules(PersistentScheduleService schedules)
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         ArgumentNullException.ThrowIfNull(schedules);
-        schedules.BindNotificationQueue(this);
+        schedules.BindNotificationPorts(this);
     }
-    IPreparedWorkQueue IWorkQueueAcceptance.Prepare(AcceptedExecutionRun actualOrigin)
+
+    NotificationSubmissionPort IWorkNotificationPorts.CreateScheduled(ExtensionManifest manifest, ExtensionScope scope,
+        Func<CoreSubmission, WorkNotificationOrigin> bind)
+    {
+        var backend = new ScheduledNotificationSubmission(_instance, _database, _contracts, _lease, bind, this);
+        return new(manifest, scope, backend, backend, _contracts);
+    }
+
+    NotificationSubmissionPort IWorkNotificationPorts.CreateManual(ExtensionManifest manifest, ExtensionScope scope,
+        Func<CoreSubmission, WorkNotificationOrigin> bind)
+    {
+        var backend = new ManualNotificationSubmission(_instance, _database, _contracts, _lease, bind, this);
+        return new(manifest, scope, backend, backend, _contracts);
+    }
+
+    internal WorkRegistration PrepareWork(AcceptedExecutionRun actualOrigin)
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         var registration = _activity.BeginRegistration();
@@ -70,22 +89,21 @@ public sealed class NotificationRuntime : IAttemptTerminalObserver, IAsyncDispos
         }
         catch { registration.Dispose(); throw; }
     }
-    private sealed class WorkRegistration(NotificationRuntime owner, AcceptedExecutionRun origin, IDisposable registration)
-        : IPreparedWorkQueue
+    internal sealed class WorkRegistration(NotificationRuntime owner, AcceptedExecutionRun origin, IDisposable registration) : IDisposable
     {
         private BlobReference? _source;
         private int _disposed;
-        public void Committed(BlobReference source)
+        internal void CommittedScheduled(BlobReference source)
         {
             ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
             ObjectDisposedException.ThrowIf(Volatile.Read(ref owner._disposed) != 0, owner);
             owner._lease.VerifyHeld(owner._instance);
             if (!origin.IsActive || _source is not null && _source != source)
                 throw new IOException("notification_scheduled_source_unbound");
-            _ = NotificationScheduledSource.VerifyCommitted(owner._instance, owner._database, owner._contracts, source, origin.RunId);
+            NotificationScheduledSource.VerifyCommitted(owner._instance, owner._database, owner._contracts, source, origin.RunId);
             _source = source;
         }
-        public void CommittedManual(BlobReference source)
+        internal void CommittedManual(BlobReference source)
         {
             ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
             ObjectDisposedException.ThrowIf(Volatile.Read(ref owner._disposed) != 0, owner);

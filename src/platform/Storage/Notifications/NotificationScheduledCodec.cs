@@ -1,8 +1,6 @@
-using System.Collections.Immutable;
 using System.Security.Cryptography;
 using Microsoft.Data.Sqlite;
 using NexusPipeline.Core.Operations;
-using NexusPipeline.Core.Secrets;
 using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage.Scheduling;
 using NexusPipeline.Platform.Storage.Sqlite;
@@ -21,20 +19,17 @@ internal sealed class NotificationScheduledCodec(RuntimeInstance instance, Contr
         return new(document, new ImmutableBlobStore(instance, contracts).PersistPlan(NotificationCatalogCodec.Encode(document)));
     }
 
-    internal NotificationWorkSnapshot Read(BlobReference reference, SqliteConnection connection, SqliteTransaction transaction)
+    internal NotificationWorkSnapshot Read(BlobReference reference, SqliteConnection connection, SqliteTransaction transaction, Guid? expectedRunId = null)
     {
         var document = new NotificationCatalogCodec(instance, contracts).ReadDocument<NotificationWorkDocument>(reference);
         RequireShape(document);
         var source = new NotificationWorkSnapshot(document, reference);
         NotificationScheduledRows.RequireSaved(connection, transaction, source);
-        var invocation = new ScheduledProviderEvidence(instance, contracts).Read(document.Invocation, connection, transaction);
-        if (invocation.BeginReference != document.Begin || invocation.Begin is null ||
-            invocation.Source.Document.Invocation.NotificationOperationId != document.OperationId ||
-            document.AcceptedConsumedMilliseconds < invocation.Begin.ConsumedMilliseconds ||
-            document.AcceptedConsumedMilliseconds > invocation.Source.Document.Task.TimeoutSeconds * 1000L ||
-            document.Targets.Any(item => !invocation.Source.Document.Invocation.NotificationTaskIds.Contains(item.TaskId)))
+        var invocation = WorkInvocationEvidence.ReadScheduled(instance, contracts, document.Invocation, connection, transaction);
+        if (!invocation.Binds(document.Begin, document.OperationId, document.AcceptedConsumedMilliseconds, document.Targets.Select(item => item.TaskId)) ||
+            expectedRunId is { } run && (run == Guid.Empty || invocation.RunId != run))
             throw Invalid();
-        NotificationScheduledRows.RequireOccurrence(connection, transaction, document.OperationId, invocation.Source.Document.OperationId);
+        NotificationScheduledRows.RequireOccurrence(connection, transaction, document.OperationId, invocation.OperationId);
         NotificationWorkShape.RequireCatalog(instance, contracts, document, connection, transaction);
         return source;
     }

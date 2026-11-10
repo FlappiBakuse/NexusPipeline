@@ -39,7 +39,7 @@ internal sealed class ScheduledProviderPublication(RuntimeInstance instance, Sta
                     _ = new ScheduledProviderEvidence(instance, contracts).Read(prior, connection, transaction);
                     return null;
                 }
-                using var occupied = NotificationDeliveryRows.Command(connection, transaction,
+                using var occupied = DatabaseConnections.Command(connection, transaction,
                     "SELECT 1 FROM operations WHERE operation_id=$0;", operation.ToString("D"));
                 if (occupied.ExecuteScalar() is not null) throw ScheduledProviderCodec.Invalid();
             }
