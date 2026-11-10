@@ -53,6 +53,13 @@ function rule(source, target, typeOnly) {
   if (source.startsWith('sdk/') && target.startsWith('apps/')) return 'SDK_UPWARD';
   if (!target.startsWith(base)) return undefined;
   const destination = target.slice(base.length);
+  const appStore = /^app\/store(?:-ports)?\.ts$/.test(destination);
+  if (source === base + 'components/LiveLogPanel.vue' &&
+      (appStore || destination === 'control/client.ts' || destination === 'control/live-logs.ts' && !typeOnly))
+    return 'LIVE_LOG_SUBSCRIPTION_REQUIRED';
+  if (['pages/NotificationEditor.vue', 'pages/notification-commands.ts', 'pages/notification-credentials.ts']
+    .includes(source.slice(base.length)) && appStore)
+    return 'NOTIFICATION_EDITOR_PORT_REQUIRED';
   if (source.startsWith(base + 'control/') && /^(pages|components|extensions|app)\//.test(destination)) return 'CONTROL_DIRECTION';
   if (source.startsWith(base + 'ui/') && (/^(pages|components|extensions|app)\//.test(destination) ||
       destination.startsWith('control/') && destination !== 'control/identity.ts')) return 'UI_DIRECTION';

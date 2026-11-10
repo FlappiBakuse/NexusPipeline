@@ -1,11 +1,10 @@
 import { reactive } from 'vue';
-import type { AppStore } from '../app/store';
-import { integerValue, objectValue } from '../control/client';
 import type {
   ControlNotificationCommandInput,
   ControlNotificationCommandSecret
 } from '../control/wire.generated';
-import { secretFields, secretStates, type SecretField, type SecretState } from './notification-types';
+import type { NotificationEditorPort } from './notification-editor-port';
+import { secretFields, type SecretField, type SecretState } from './notification-types';
 
 export class NotificationCredentials {
   readonly view = reactive({
@@ -17,18 +16,16 @@ export class NotificationCredentials {
     >,
     values: Object.fromEntries(secretFields.map((field) => [field, ''])) as Record<SecretField, string>
   });
-  private readonly instance: string | undefined;
   private owner?: AbortController;
   private alive = true;
 
   constructor(
-    private readonly store: AppStore,
+    private readonly port: Pick<NotificationEditorPort, 'current' | 'readCredentials' | 'report'>,
     private readonly taskId: string | undefined,
     private readonly draft: () => ControlNotificationCommandInput,
     private readonly revision: () => number,
     private readonly failed: (message: string) => void
   ) {
-    this.instance = store.state.capabilities?.instanceId;
     this.view.ready = !taskId;
   }
 
@@ -48,36 +45,21 @@ export class NotificationCredentials {
   }
 
   async read(id: string): Promise<void> {
-    if (id !== this.taskId || !this.alive) return;
+    if (id !== this.taskId || !this.alive || !this.port.current()) return;
     this.owner?.abort();
     this.view.ready = false;
     const owner = new AbortController();
     this.owner = owner;
     try {
-      const statuses = await this.store.client.read(
-        '/control/v1/notifications/' + id + '/credentials',
-        (value) => {
-          const row = objectValue(value),
-            fields = secretStates(value);
-          if (
-            row.taskId !== id ||
-            integerValue(row.catalogRevision) < this.revision() ||
-            fields.length !== secretFields.length ||
-            new Set(fields.map((field) => field.field)).size !== secretFields.length
-          )
-            throw new Error('notification_credentials_invalid');
-          return fields;
-        },
-        owner.signal
-      );
+      const statuses = await this.port.readCredentials(id, this.revision(), owner.signal);
       owner.signal.throwIfAborted();
-      if (this.alive && this.instance === this.store.state.capabilities?.instanceId) {
+      if (this.alive && this.port.current()) {
         this.view.statuses = statuses;
         this.view.ready = true;
       }
     } catch (error) {
-      if (!owner.signal.aborted && this.alive) {
-        this.store.report(error);
+      if (!owner.signal.aborted && this.alive && this.port.current()) {
+        this.port.report(error);
         this.failed(error instanceof Error ? error.message : '凭据状态读取失败');
       }
     }

@@ -1,11 +1,10 @@
 <script setup lang="ts">
 import { computed, ref, watch, onBeforeUnmount, nextTick } from 'vue';
-import type { AppStore } from '../app/store';
-import type { LogIdentity, LogWindow } from '../control/live-logs';
+import type { LiveLogs, LogIdentity, LogWindow } from '../control/live-logs';
 import { t, registerMessages } from '../app/locale';
 
 const props = defineProps<{
-  store: AppStore; identity?: Omit<LogIdentity, 'role'>; roles: readonly string[]; visible: boolean;
+  subscribe: LiveLogs['subscribe']; identity?: Omit<LogIdentity, 'role'>; roles: readonly string[]; visible: boolean;
 }>();
 const value = ref<LogWindow>({ text: '', sequence: 0, omitted: false, connected: false });
 const height = ref(Math.max(180, Math.min(360, Math.round(innerHeight * 0.3))));
@@ -49,7 +48,7 @@ watch(
     }
     if (!props.visible || !inView.value || !props.identity) return;
     const subscriptions = roles.value.map((role) =>
-      props.store.logs.subscribe({ ...props.identity!, role }, (next) => {
+      props.subscribe({ ...props.identity!, role }, (next) => {
         if (!next.connected && !next.text && windows.has(role)) return;
         windows.set(role, next);
         const ordered = roles.value.map((key) => windows.get(key));

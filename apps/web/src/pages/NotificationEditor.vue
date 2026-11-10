@@ -1,24 +1,23 @@
 <script setup lang="ts">
 import { createIdentity } from '../control/identity';
 import { computed, onBeforeUnmount, reactive, ref, toRefs, watch } from 'vue';
-import type { AppStore } from '../app/store';
 import NotificationFields from './NotificationFields.vue';
 import { NotificationCredentials } from './notification-credentials';
 import { NotificationCommands, type NotificationSession } from './notification-commands';
+import type { NotificationEditorPort } from './notification-editor-port';
 import { validateForm } from '../components/form-validation';
 import { t } from '../app/locale';
 import { copyDraft } from '../app/draft-copy';
 import './notification-messages';
 import {
   newNotification,
-  notificationCatalog,
   type NotificationChannel,
   type NotificationTask,
   type SecretField
 } from './notification-types';
 
 const props = defineProps<{
-  store: AppStore;
+  port: NotificationEditorPort;
   task: NotificationTask | null;
   channel: NotificationChannel;
   catalogRevision: number;
@@ -26,10 +25,8 @@ const props = defineProps<{
 
 const emit = defineEmits<{ close: []; saved: [] }>();
 const panel = ref<HTMLElement>();
-const instanceId = props.store.state.capabilities!.instanceId;
-const isCurrent = (): boolean => props.store.state.capabilities?.instanceId === instanceId;
-const draftKey = 'notification/editor/' + instanceId + '/' + (props.task?.id || 'new/' + props.channel);
-const savedDraft = props.store.drafts.get(draftKey);
+const port = props.port;
+const savedDraft = port.readDraft();
 const initial = props.task
   ? {
       name: props.task.name,
@@ -57,11 +54,12 @@ const session = reactive(
         conflict: false
       }
 ) as NotificationSession;
-props.store.drafts.set(draftKey, session);
+port.keepDraft(session);
 const { draft, baseline, pending, busy, error, notice } = toRefs(session);
 let alive = true;
+let latestRead: AbortController | undefined;
 const credentials = new NotificationCredentials(
-  props.store,
+  port,
   props.task?.id,
   () => draft.value,
   () => session.catalogRevision,
@@ -69,7 +67,7 @@ const credentials = new NotificationCredentials(
     error.value = message;
   }
 );
-const commands = new NotificationCommands(props.store, session, credentials, draftKey, !!props.task, () =>
+const commands = new NotificationCommands(port, session, credentials, !!props.task, () =>
   validateForm(panel.value)
 );
 const credentialsReady = computed(() => credentials.view.ready);
@@ -87,32 +85,32 @@ watch(
 );
 watch(
   [dirty, pending],
-  ([edited, operation]) => {
-    if (edited || operation) props.store.dirty.add(draftKey);
-    else props.store.dirty.delete(draftKey);
-  },
+  ([edited, operation]) => port.markDirty(edited || !!operation),
   { immediate: true, flush: 'sync' }
 );
 if (props.task) void loadCredentials(props.task.id);
 onBeforeUnmount(() => {
   alive = false;
+  latestRead?.abort();
   credentials.dispose();
-  if (!pending.value && JSON.stringify(draft.value) === baseline.value) props.store.dirty.delete(draftKey);
+  if (!pending.value && JSON.stringify(draft.value) === baseline.value) port.markDirty(false);
 });
 
 watch(
   () => session.completed,
   (completed) => {
-    if (completed && alive && isCurrent()) emit('saved');
+    if (completed && alive && port.current()) emit('saved');
   },
   { flush: 'post' }
 );
 async function loadLatest(): Promise<void> {
-  if (!isCurrent() || pending.value || busy.value) return;
+  if (!alive || !port.current() || pending.value || busy.value) return;
+  const owner = new AbortController();
+  latestRead = owner;
   busy.value = true;
   try {
-    const latest = await props.store.client.read('/control/v1/notifications', notificationCatalog);
-    if (!isCurrent()) return;
+    const latest = await port.readCatalog(owner.signal);
+    if (owner.signal.aborted || !port.current()) return;
     const task = latest.tasks.find((item) => item.id === session.taskId);
     if (props.task && !task) {
       error.value = '通知任务已删除，当前草稿已保留。';
@@ -129,16 +127,18 @@ async function loadLatest(): Promise<void> {
       baseline.value = JSON.stringify(draft.value);
       session.taskRevision = task.revision;
     }
-    if (props.store.state.error === error.value) props.store.state.error = '';
+    port.clearError(error.value);
     session.catalogRevision = latest.revision;
     session.conflict = false;
     error.value = '';
     credentials.clear();
     if (task) await loadCredentials(task.id);
   } catch (reason) {
-    props.store.report(reason);
+    if (owner.signal.aborted || !port.current()) return;
+    port.report(reason);
     error.value = '无法读取最新通知任务，草稿已保留。';
   } finally {
+    latestRead = undefined;
     busy.value = false;
   }
 }
@@ -173,7 +173,7 @@ async function loadLatest(): Promise<void> {
       <p v-if="notice" role="status">{{ t(notice) }}</p>
       <p v-if="pending" role="alert">
         {{ t('写入结果待确认，请先核实原操作。') }} {{ pending }}
-        <button :disabled="busy || !store.can('operations.read')" @click="commands.checkPending()">
+        <button :disabled="busy || !port.can('operations.read')" @click="commands.checkPending()">
           {{ t('查询操作状态') }}
         </button>
       </p>
@@ -181,7 +181,7 @@ async function loadLatest(): Promise<void> {
     <div slot="footer" class="actions">
       <button
         v-if="task"
-        :disabled="busy || !!pending || dirty || !store.can('notifications.test')"
+        :disabled="busy || !!pending || dirty || !port.can('notifications.test')"
         :title="dirty ? t('先保存当前修改，再测试已保存的任务。') : ''"
         @click="commands.test()"
       >
@@ -191,7 +191,7 @@ async function loadLatest(): Promise<void> {
       <button
         class="primary"
         :disabled="
-          busy || !!pending || session.conflict || !credentialsReady || !store.can('notifications.write')
+          busy || !!pending || session.conflict || !credentialsReady || !port.can('notifications.write')
         "
         @click="commands.save()"
       >

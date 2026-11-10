@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { createIdentity } from '../control/identity';
-import { onBeforeUnmount, reactive, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import type { AppStore } from '../app/store';
 import { ControlFailure, objectValue } from '../control/client';
 import type { ControlNotificationCommand } from '../control/wire.generated';
 import NotificationEditor from './NotificationEditor.vue';
+import { notificationEditorPort } from './notification-editor-port';
 import NotificationChannelChooser from './NotificationChannelChooser.vue';
 import ModalTransition from '../components/ModalTransition.vue';
 import { copyDraft } from '../app/draft-copy';
@@ -27,6 +28,9 @@ const editing = ref<NotificationTask | null>(null);
 const channel = ref<NotificationChannel>('smtp');
 const deleting = ref<NotificationTask | null>(null);
 const instanceId = props.store.state.capabilities!.instanceId;
+const editorPort = computed(() =>
+  notificationEditorPort(props.store, instanceId, editing.value?.id || 'new/' + channel.value)
+);
 const sessionKey = 'notification/page/' + instanceId;
 const session = reactive(
   props.store.drafts.get(sessionKey) || {
@@ -269,7 +273,7 @@ async function reorder(ids: string[]): Promise<void> {
       <NotificationEditor
         v-if="editor && catalog"
         :key="editing?.id || channel"
-        :store="store"
+        :port="editorPort"
         :task="editing"
         :channel="channel"
         :catalog-revision="catalog.revision"

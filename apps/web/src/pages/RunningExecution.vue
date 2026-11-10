@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 import type { AppStore } from '../app/store';
 import { currentStep, finishedSteps, type ActiveRun } from '../control/execution';
+import type { LiveLogs } from '../control/live-logs';
 import LiveLogPanel from '../components/LiveLogPanel.vue';
 import ExtensionOutlet from '../extensions/ExtensionOutlet.vue';
 import LiveTaskSteps from './LiveTaskSteps.vue';
@@ -22,9 +23,10 @@ const progress = computed(() =>
 );
 const identity = computed(() =>
   current.value
-    ? { runId: props.run.runId, attemptId: props.run.attemptId, stepId: current.value.stepId, role: 'main' }
+    ? { runId: props.run.runId, attemptId: props.run.attemptId, stepId: current.value.stepId }
     : undefined
 );
+const subscribeLog: LiveLogs['subscribe'] = (key, listener) => props.store.logs.subscribe(key, listener);
 registerMessages({
   手动: 'Manual',
   自动: 'Automatic',
@@ -75,7 +77,7 @@ registerMessages({
     </div>
     <LiveTaskSteps v-if="current?.tasks.length" :tasks="current.tasks" />
     <div class="running-content">
-      <LiveLogPanel :store="store" v-bind="identity ? { identity } : {}"
+      <LiveLogPanel :subscribe="subscribeLog" v-bind="identity ? { identity } : {}"
         :roles="current?.logRoles || []" :visible="visible && run.phase !== 'reconciliationRequired'" />
       <ExtensionOutlet
         :store="store"
