@@ -10,6 +10,7 @@ import sys
 import xml.etree.ElementTree as ET
 
 from source_snapshot import digest, source_files
+from dotnet_sdk import resolve_sdk
 
 
 def file_records(root, paths):
@@ -49,14 +50,14 @@ def runtime_identity(executable):
     return {"executable": executable, "path": str(resolved), "sha256": digest(resolved.read_bytes())}
 
 
-def build_context(profile, environment=None):
+def build_context(root, profile, environment=None, sdk=None):
     environment = os.environ if environment is None else environment
     relevant = {key: value for key, value in environment.items()
                 if key.upper().startswith(("DOTNET_", "MSBUILD", "NUGET_")) or key.upper() in ("PATH", "PATHEXT")}
     return {"profile": profile, "configuration": "Release", "platform": platform.platform(),
             "machine": platform.machine(), "python": {"version": platform.python_version(),
                 "sha256": digest(Path(sys.executable).read_bytes())},
-            "dotnet": runtime_identity("dotnet"),
+            "dotnet": resolve_sdk(root, environment) if sdk is None else sdk,
             "environmentHash": digest(json.dumps(relevant, sort_keys=True).encode())}
 
 
@@ -74,7 +75,7 @@ def conservative_records(root, expected):
     return records
 
 
-def solution_inputs(root, profile, environment=None, projects=None, source_records=None):
+def solution_inputs(root, profile, environment=None, projects=None, source_records=None, *, sdk=None):
     root = Path(root).resolve(strict=True)
     paths = {root / name for name in ("NexusPipeline.slnx", "Directory.Build.props", "Directory.Build.targets",
                                       "NuGet.Config", "global.json")}
@@ -158,7 +159,7 @@ def solution_inputs(root, profile, environment=None, projects=None, source_recor
             tree = ET.parse(path)
             if tree.findall(".//Import") or any(node.tag not in {"Project", "PropertyGroup", "ItemGroup", "Target", "Error",
                     "TargetFramework", "Nullable", "ImplicitUsings", "TreatWarningsAsErrors", "Deterministic", "Version",
-                    "LangVersion", "DefineConstants", "UseArtifactsOutput", "ArtifactsPath", "RestorePackagesPath",
+                    "LangVersion", "DefineConstants", "UseArtifactsOutput", "ArtifactsPath", "BaseIntermediateOutputPath", "RestorePackagesPath",
                     "EnableDefaultCompileItems", "RestorePackagesWithLockFile", "NuGetLockFilePath", "RestoreLockedMode",
                     "Using", "AssemblyMetadata", "PublishReadyToRunExclude", "FilesToBundle", "RelativePath"} for node in tree.iter()):
                 unknown.append("Unresolved shared build evaluation: " + path.relative_to(root).as_posix())
@@ -187,14 +188,15 @@ def solution_inputs(root, profile, environment=None, projects=None, source_recor
             raise ValueError("Explicit plugin fixture source is empty")
     value = {"algorithm": "nexus-solution-inputs-v1", "files": records, "pluginFixtureInputs": fixture_records,
              "projectNames": sorted(path.stem for path in visited),
-             "context": build_context(profile, environment), "conservativeReasons": sorted(set(unknown))}
+             "context": build_context(root, profile, environment, sdk), "conservativeReasons": sorted(set(unknown))}
     return {**value, "sha256": digest(json.dumps(value, sort_keys=True, separators=(",", ":")).encode())}
 
 
-def project_inputs(root, profile, environment, projects, web_component, artifacts, source_records=None):
+def project_inputs(root, profile, environment, projects, web_component, artifacts, source_records=None, *, sdk=None):
+    sdk = resolve_sdk(root, environment) if sdk is None else sdk
     result = {}
     for project in projects:
-        component = solution_inputs(root, profile, environment, [project], source_records)
+        component = solution_inputs(root, profile, environment, [project], source_records, sdk=sdk)
         if "NexusPipeline.Host" in component["projectNames"]:
             component.update(webInputs=web_component, webArtifacts=artifacts)
         result[project] = component

@@ -8,14 +8,15 @@
 |---|---|---|
 | Web 页面、公共组件或集合 | [前端行为](frontend.md) | 相关 lint/typecheck、最小行为场景；需要产品资源时只构建对应资产 |
 | Core 规则、配置或状态机 | [配置生命周期](configuration.md)、[状态与重试](state-and-retry.md) | 所选产品假设及其实际依赖项目；纯规则不自动启动 Web/桌面 |
-| 启动、数据库、GUI launcher、安装入口 | [启动与容量](startup-and-capacity.md) | 最小数据边界、同源 Windows 产品及受影响原生入口 |
+| 启动、数据库或 GUI launcher | [启动与容量](startup-and-capacity.md) | 最小数据边界及受影响原生入口 |
+| Setup、更新或卸载 | [安装与维护生命周期](installation-lifecycle.md) | 同源 Windows 成品及受影响事务 |
 | SDK 或插件跨仓行为 | [SDK](sdk.md)及 Plugins 作者入口 | 同一 SDK 生产者与受影响真实消费者；只有实际契约变化才扩展消费者范围 |
 
 共同执行顺序见[工作流](workflow.md)。具体命令与四类职责在[验证规范](validation.md)，不要从其他页面复制一份逐渐失效的命令大全。
 
 ## 环境与目录
 
-完整原生开发使用 Windows 11 x64、仓库 `global.json` 锁定的 .NET SDK 10.0.402、Python 3.12+，以及前端原生锁文件允许的 Node/npm。只有当前任务需要相应组件时才准备它；不为纯文档任务安装整个原生栈。
+完整原生开发使用 Windows 11 x64、.NET 10.0 稳定 SDK（`10.0.100` 起）、Python 3.12+，以及前端原生锁文件允许的 Node/npm。仓库 `global.json` 在已安装的 10.0 稳定 SDK 中选择最高版本。只有当前任务需要相应组件时才准备它；不为纯文档任务安装整个原生栈。
 
 源码、依赖缓存、构建槽、测试实例、报告和用户真实数据分开。构建与 runner 的输出根由命令显式传入，避免在仓库生成 node_modules、dist、数据库或诊断文件。复用已拥有的缓存与构建槽；报告指向本次新结果。
 
@@ -45,4 +46,4 @@
 
 [控制面](control-http.md)、[SDK](sdk.md)、[存储格式](storage.md)、[秘密字段](secrets.md)、[进程拥有权](process-ownership.md)、[扩展](extensions.md)、[前端 ABI](frontend-abi.md)保留精确契约说明。旧阶段材料中的测试数量、历史 PASS 和暂缓安排不自动升级为本次任务要求。
 
-依据：[固定 next 工具入口](https://github.com/FlappiBakuse/NexusPipeline/blob/0bb4d144d92805a2d489c65d0be3b7527c7810fd/tooling/nexus.py)、[SDK 锁定](https://github.com/FlappiBakuse/NexusPipeline/blob/0bb4d144d92805a2d489c65d0be3b7527c7810fd/global.json)。
+构建工具与发行流程分别见 [.NET SDK 与依赖锁](command-reference.md#net-sdk-与依赖锁) 和 [发布检查与源码来源](release.md)。

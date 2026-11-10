@@ -1,11 +1,11 @@
 {
   "algorithm": "nexus-sdk-source-manifest-sha256-v1",
-  "sourceFingerprint": "289bb46b4ad9a872e4fec4d9e7863371ac961fec1c4c7982270ff6a8081fe3b3",
+  "sourceFingerprint": "95e7d8e557eeb524dc1bfc650abda34bac88a039c7cffacbd7f4d545bf9f8477",
   "inputs": [
     {
       "path": "Directory.Build.props",
-      "sizeBytes": 2274,
-      "sha256": "ced5dd4e106d239ed2219b52898c18e1217aaff952713f3c5aa7a33449980d5b"
+      "sizeBytes": 2429,
+      "sha256": "ccbd26724076516939474f49399c1993bd1509a8a6cc90d6fab00fd0ff84c12e"
     },
     {
       "path": "contracts/http/automation-binding-effective.json",

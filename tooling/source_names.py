@@ -37,7 +37,7 @@ def check_names(root, records, generated):
     return errors
 
 
-def verify_names(root, output, run_root, env, records):
+def verify_names(root, output, run_root, env, records, dotnet):
     from contract_codegen import expected_outputs
     from source_snapshot import write_json
 
@@ -46,7 +46,7 @@ def verify_names(root, output, run_root, env, records):
     exceptions = json.loads((root / "tooling/naming-exceptions.json").read_bytes())
     inputs = run_root / "naming-inputs.json"
     write_json(inputs, {"files": files, "exceptionFiles": exceptions})
-    command = ["dotnet", str(output / "build/bin/NexusPipeline.Boundaries/release/NexusPipeline.Boundaries.dll"),
+    command = [dotnet, str(output / "build/bin/NexusPipeline.Boundaries/release/NexusPipeline.Boundaries.dll"),
                "--source-names", str(root), str(inputs)]
     report = run_root / "source-names.json"
     with report.open("w", encoding="utf-8", newline="\n") as log:

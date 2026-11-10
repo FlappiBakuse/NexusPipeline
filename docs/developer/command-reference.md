@@ -58,10 +58,22 @@ python -B tooling/nexus.py product-assemble --publication-root '<本次发布目
 
 ## 产物、来源与依赖
 
-Host/Update 的 Test 清单使用 asInvoker，Production 保持 requireAdministrator。每用户 Installer worker 使用 asInvoker，仅承担安装生命周期，不进入公开 ZIP。
+各角色的权限清单和 bundle 归属见[单文件发布](release.md#单文件发布)。
 源码快照算法为 nexus-source-manifest-sha256-v2-lf：相对路径按 UTF-8 字节排序，记录原字节大小、SHA256 与模式；manifest 使用 UTF-8/LF、两空格缩进，receipt 单列 manifest 摘要。
 不可变 manifest 与按 SHA256 去重的原字节由仓外构建槽拥有；更新前核对旧证据。组件复用核验项目闭包、原始回执、全部产物集合和字节；未知 MSBuild 输入拒绝复用。
 原生测试核对产物运行前后字节，保留真实 TRX、退出码及计时。精确方法选择直接消费原生发现，不再维护参数用例计数清单。
 storage-checkin 使用显式 NEXUS_PACKAGED_EXTENSION_ROOT 和 NEXUS_PACKAGED_CHECKIN_RECEIPT，安装真实 ZIP；受控 HTTP 和原生会话使用测试账号。
 跨卷测试要求显式第二个真实卷目录，缺环境记未运行。维护无 Job 正例由产品核对实际进程拥有权，不绕过现有 Job。
-依赖更新使用上面的 dependencies --update-locks；日常构建锁定解析，不自动改锁。Web 原生锁由 web_build.py --update-lock 更新。
+
+### .NET SDK 与依赖锁
+
+构建、发布和原生测试按当前源码根的 `global.json` 解析 .NET 10.0 稳定 SDK。CI 准备同系列 GA SDK。Host 回执绑定实际版本、安装位置及关键工具的字节摘要，编译和发布按该身份判断复用，中间输出按 SDK 隔离。
+
+日常构建以仓内 NuGet 锁为准。所选 SDK 的 ILLink 与仓内锁有差异时，工具在仓外派生 SDK 注入项，应用依赖的请求范围、版本、摘要和依赖边沿用源码锁，再用派生锁执行锁定还原。 [选版与锁的定向验证](validation.md#发布产物与工具链验证)
+
+显式更新 NuGet 锁和 Web 原生锁分别使用下列命令。
+
+```text
+python -B tooling/nexus.py dependencies --update-locks --build-root <仓外构建目录>
+python -B tooling/web_build.py --update-lock --output <仓外构建目录>
+```

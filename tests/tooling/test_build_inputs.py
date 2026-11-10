@@ -38,6 +38,9 @@ class BuildInputTests(unittest.TestCase):
         for name, text in values.items():
             self.write(name, text)
         self.environment = {'PATH': os.environ.get('PATH', os.environ.get('Path', ''))}
+        resolver = patch('build_inputs.resolve_sdk', return_value={'path': 'dotnet', 'version': '10.0.100'})
+        self.sdk = resolver.start()
+        self.addCleanup(resolver.stop)
 
     def tearDown(self):
         self.scope.cleanup()
@@ -170,6 +173,13 @@ class BuildInputTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'Frozen source export changed'):
             reuse_build(self.root, output)
         self.assertEqual(evidence, original.read_bytes())
+
+    def test_tracks_dotnet_sdk(self):
+        output = self.root.parent / 'slot'
+        self.seed_build(output, ['App'])
+        self.assertTrue(reuse_build(self.root, output, projects=['App']))
+        self.sdk.return_value = {'path': 'dotnet', 'version': '10.0.300'}
+        self.assertFalse(reuse_build(self.root, output, projects=['App']))
 
 
 if __name__ == '__main__':

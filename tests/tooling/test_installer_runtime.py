@@ -61,6 +61,7 @@ class RuntimeTests(unittest.TestCase):
                                  ('Launcher', self.software / 'resources/desktop/NexusPipeline.Launcher.exe')):
             for value in (dict(framework=dict(name=FRAMEWORKS[0], version='10.0.1')),
                           dict(framework=dict(name='Microsoft.WindowsDesktop.App', version='10.0.0')),
+                          dict(framework=dict(name=FRAMEWORKS[0], version='10.0.0'), rollForward='Disable'),
                           dict(includedFrameworks=[dict(name=FRAMEWORKS[0], version='10.0.0')])):
                 program.write_bytes(bundle(project, value))
                 with self.subTest(project=project, frameworks=value), self.assertRaises(ValueError):

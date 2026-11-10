@@ -11,6 +11,7 @@ import time
 from build_product import build_environment, update_export
 from sdk_workspace import synchronize
 from source_snapshot import digest, source_files, write_json, external_directory
+from dotnet_sdk import resolve_sdk, sdk_environment, sdk_key
 
 
 def refresh(root, output):
@@ -48,14 +49,17 @@ def refresh(root, output):
     execute([sys.executable, "-B", str(root / "tooling/contract_codegen.py"), "--shapes-only", "--prune-owned"], root, "shapes")
     source = update_export(root, output / "snapshot")
     frozen = Path(source["exportRoot"])
+    sdk = resolve_sdk(frozen, env)
+    env = sdk_environment(env, sdk)
     for name, relative in [("sdk", "sdk/dotnet/NexusPipeline.Extensibility.csproj"),
                            ("boundaries", "tooling/boundaries/NexusPipeline.Boundaries.csproj")]:
-        execute(["dotnet", "build", str(frozen / relative), "--configuration", "Release", "--nologo",
+        execute([sdk['path'], "build", str(frozen / relative), "--configuration", "Release", "--nologo",
                  "--disable-build-servers", "-m:1", f"-p:NexusArtifactsRoot={output / 'build'}",
+                 f'-p:NexusSdkKey={sdk_key(sdk)}',
                  f"-p:NexusPackagesRoot={output.parent / 'cache/nuget'}"], frozen, name)
     assembly = output / "build/bin/NexusPipeline.Extensibility/release/NexusPipeline.Extensibility.dll"
     reader = output / "build/bin/NexusPipeline.Boundaries/release/NexusPipeline.Boundaries.dll"
-    execute(["dotnet", str(reader), "--sdk-surface", str(assembly), "--write",
+    execute([sdk['path'], str(reader), "--sdk-surface", str(assembly), "--write",
              str(root / "contracts/sdk-public-api.json")], frozen, "dotnet-api")
     sdk = output / "frontend-sdk"
     synchronize(frozen / "sdk/frontend", sdk, output / "frontend-owner.json")
@@ -78,7 +82,7 @@ def refresh(root, output):
         raise ValueError("Source changed during SDK descriptor generation")
     execute([sys.executable, "-B", str(root / "tooling/contract_codegen.py"), "--prune-owned"], root, "identity")
     receipt = {"status": "GENERATED", "scope": "Compiled SDK descriptors; package consumers and product validation not run",
-               "source": source, "commands": commands, "sdkVersion": "0.1.0",
+               "source": source, "commands": commands, "sdkVersion": "0.1.0", "dotnet": sdk,
                "contractFingerprint": json.loads((root / "contracts/fingerprint.json").read_bytes())["contractFingerprint"]}
     write_json(run / "generation-receipt.json", receipt)
     print(json.dumps({"status": "GENERATED", "receipt": str(run / "generation-receipt.json")}))

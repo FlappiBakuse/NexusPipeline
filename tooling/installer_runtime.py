@@ -48,6 +48,8 @@ def required_frameworks(application, installer=None, uninstaller=None):
         options = json.loads(raw)['runtimeOptions']
         if 'includedFrameworks' in options:
             raise ValueError('Setup requires framework-dependent product programs')
+        if options.get('rollForward') not in (None, 'Minor', 'LatestPatch') or options.get('applyPatches') is False:
+            raise ValueError('Setup requires product framework patch roll-forward')
         frameworks = options.get('frameworks') or [options['framework']]
         for framework in frameworks:
             name, version = framework['name'], framework['version']
@@ -62,13 +64,21 @@ def required_frameworks(application, installer=None, uninstaller=None):
 def render_runtime(root, application, installer=None, uninstaller=None):
     dependencies = read_dependencies(root)
     required = required_frameworks(application, installer, uninstaller)
-    rows = []
     for framework in FRAMEWORKS:
         item = dependencies[framework]
         if required[framework] != item['minimumVersion']:
             raise ValueError('Setup runtime minimum differs from the actual program')
-        description = '.NET Core Runtime 10 x64' if framework == FRAMEWORKS[0] else 'ASP.NET Core Runtime 10 x64'
-        arguments = [framework, item['minimumVersion'], description, item['url'], item['url'].rsplit('/', 1)[1], item['sha256']]
-        rows.append('  Result := InstallFramework(' + ', '.join("'" + value + "'" for value in arguments) + ', NeedsRestart);')
-        rows.append("  if Result <> '' then Exit;")
-    return (root / SCRIPT).read_text(encoding='utf-8').replace('@@RUNTIME_CALLS@@', '\n'.join(rows))
+    core, web = (dependencies[name] for name in FRAMEWORKS)
+    values = {'CORE_MINIMUM': core['minimumVersion'], 'WEB_MINIMUM': web['minimumVersion'], 'WEB_VERSION': web['version'],
+              'CORE_INSTALL': install_call(core, 'CoreVersion', 'CoreDescription'),
+              'WEB_INSTALL': install_call(web, "'" + web['minimumVersion'] + "'", "'ASP.NET Core Runtime 10 x64'")}
+    script = (root / SCRIPT).read_text(encoding='utf-8')
+    for name, value in values.items():
+        script = script.replace('@@' + name + '@@', value)
+    return script
+
+
+def install_call(item, minimum, description):
+    url = item['url']
+    package = ', '.join(f"'{value}'" for value in (url, url.rsplit('/', 1)[1], item['sha256']))
+    return f"InstallFramework('{item['framework']}', {minimum}, '{item['version']}', {description}, {package}, NeedsRestart)"

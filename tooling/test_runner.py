@@ -5,7 +5,6 @@ import io
 import json
 import os
 from pathlib import Path
-import shutil
 import subprocess
 import sys
 import time
@@ -13,7 +12,7 @@ import unittest
 import uuid
 import xml.etree.ElementTree as ET
 
-from build_product import build_product, update_export
+from build_product import build_environment, build_product, update_export
 from source_snapshot import digest, write_json, external_directory
 from binary_inputs import capture_binary_inputs, verify_binary_inputs, hash_file, PROJECTS
 from test_expectations import suite_classes
@@ -23,6 +22,7 @@ from frozen_build import reuse_build
 from source_snapshot import source_files
 from test_selection import select_tests
 from native_bundles import prepare_bundles, verify_bundles
+from dotnet_sdk import resolve_sdk, VSTEST
 
 
 DESKTOP_MAINTENANCE_METHOD = "NexusPipeline.StorageTests.MaintenanceBinaryTests.RestartsOwnedDesktop"
@@ -106,6 +106,11 @@ def run_tests(root, build_root, output, group, fixture_volume_root=None, method=
     receipt.update(source=invocation_source, buildSource=build_receipt["source"] if build_receipt else None,
                    buildReceipt=str(build_root / "runs" / build_receipt["runId"] / "build-receipt.json") if build_receipt else None)
     try:
+        sdk = None if selection['python'] else resolve_sdk(source_root, build_environment(build_root))
+        if sdk is not None and sdk != build_receipt['componentInputs']['context']['dotnet']:
+            raise ValueError('Native tests require the same resolved SDK as their compiled inputs')
+        if sdk is not None:
+            receipt['dotnet'] = sdk
         binary_inputs, binary_records = capture_binary_inputs(build_root, run_root, group, projects)
         bundle_inputs = prepare_bundles(source_root, build_root, run_root, selection["methods"]) if not selection["python"] else None
     except (OSError, ValueError, subprocess.SubprocessError) as error:
@@ -125,7 +130,7 @@ def run_tests(root, build_root, output, group, fixture_volume_root=None, method=
             receipt["coverage"] = "default-group"
     else:
         result = run_dotnet(source_root, build_root, run_root, group, fixture_volume_root, method, desktop_bundle,
-                            assemblies=selection["assemblies"], bundle_inputs=bundle_inputs)
+                            assemblies=selection["assemblies"], bundle_inputs=bundle_inputs, sdk=sdk)
     test_seconds = time.monotonic() - started
     cleanup_started = time.monotonic()
     verify_binary_inputs(build_root, binary_records)
@@ -159,10 +164,10 @@ def write_result(run_root, result):
     return result["exitCode"]
 
 
-def run_dotnet(source_root, build_root, run_root, group, fixture_volume_root, method, desktop_bundle, *, assemblies, bundle_inputs):
+def run_dotnet(source_root, build_root, run_root, group, fixture_volume_root, method, desktop_bundle, *, assemblies, bundle_inputs, sdk):
     binaries = [str(build_root / f"build/bin/{assembly}/release/{assembly}.dll") for assembly in assemblies]
     report = run_root / (group + ".trx")
-    command = native_test_launcher(source_root, group, method) + binaries + [f"/Logger:trx;LogFileName={group}.trx",
+    command = native_test_launcher(sdk, group, method) + binaries + [f"/Logger:trx;LogFileName={group}.trx",
                f"/ResultsDirectory:{run_root}"]
     selection = suite_filter(source_root, group, method, DESKTOP_MAINTENANCE_METHOD)
     if selection is not None:
@@ -236,7 +241,7 @@ def run_dotnet(source_root, build_root, run_root, group, fixture_volume_root, me
             "nativeReportSha256": digest(report.read_bytes())}
 
 
-def native_test_launcher(source_root, group, method=None):
+def native_test_launcher(sdk, group, method=None):
     methods = [method] if isinstance(method, str) else method or []
     if group != "windows" and not set(methods).intersection({
         "NexusPipeline.StorageTests.HostRestartTests.RestartsSavedPort",
@@ -251,21 +256,9 @@ def native_test_launcher(source_root, group, method=None):
         "NexusPipeline.StorageTests.InstalledUpdateTests.RestoresInstalledIdentity",
         DESKTOP_MAINTENANCE_METHOD,
     }):
-        return ["dotnet", "vstest"]
+        return [sdk['path'], "vstest"]
     # The SDK's command forwarder creates a Job; startup-origin tests must observe the caller's real Job boundary.
-    executable = shutil.which("dotnet")
-    if executable is None:
-        raise ValueError("The pinned .NET SDK is not installed")
-    host = Path(executable).resolve(strict=True)
-    version = json.loads((source_root / "global.json").read_text(encoding="utf-8"))["sdk"]["version"]
-    installed = subprocess.run([str(host), "--list-sdks"], cwd=source_root, capture_output=True,
-                               text=True, encoding="utf-8", check=True)
-    roots = [line[len(version) + 2:-1] for line in installed.stdout.splitlines()
-             if line.startswith(version + " [") and line.endswith("]")]
-    if len(roots) != 1:
-        raise ValueError("The exact pinned SDK must identify one native test runner")
-    runner = (Path(roots[0]) / version / "vstest.console.dll").resolve(strict=True)
-    return [str(host), "exec", str(runner)]
+    return [sdk['path'], "exec", str(Path(sdk['directory']) / VSTEST)]
 
 
 class PythonResult(unittest.TextTestResult):

@@ -96,7 +96,11 @@ python -B tooling/nexus.py test --group core --method NexusPipeline.CoreTests.Re
 
 原生测试回执分别记录 `preparation.status` 和 `responsibilities.test`。编译或测试夹具准备失败时，测试记为 `NOT_RUN`。已有的编译与源码检查证据通过 `buildReceipt` 查询。
 
+需要观察真实 Windows Job 边界的用例用 `dotnet exec` 直接启动实际 SDK 的 `vstest.console.dll`，避免 SDK 命令转发器引入 Job。需要无外层 Job 的用例从已核实的无 Job 进程运行。
+
 默认 `tooling` 运行自带夹具的用例，外部夹具用例在 `deferredMethods` 记为 `NOT_RUN`。原生安装器用例通过完整 `--method` 选择，使用 `NEXUS_INSTALLER_COMPILER` 指向锁定的 Inno 编译器。`test_installer_runtime.RuntimeTests.test_native_runtime` 另需 `NEXUS_INSTALLER_RUNTIME_RECEIPT` 指向两个微软安装包的回执（`status=PASS_OFFICIAL_RUNTIME_HASHES`，每个 `dependencies` 条目含绝对 `path` 和 `sha256`）。准备阶段按仓库锁核对原文件。缺少输入时准备记为 `BLOCKED`，字节或回执不匹配时记为 `FAIL`。
+
+发布来源与 PR 选择的工具用例在 [test_release_sources.py](../../tests/tooling/test_release_sources.py) 和 [test_ci_plans.py](../../tests/tooling/test_ci_plans.py)。工作流结构检查使用 [测试依赖清单](../../tests/tooling/requirements.txt) 中的 PyYAML，从显式仓外 Python 依赖目录通过进程级 `PYTHONPATH` 提供给 runner。
 
 Web 当前 suite 可显式选择，例如 `automation`、`account-summary`、`history-formatting`；完整语法在[前端参数参考](frontend-testing.md)。选择真实相关 suite 或必要单场景，不默认运行全部 controls、所有浏览器和所有 Host 场景。没有 `nexus test --group web`，不要虚构该入口。
 
@@ -114,6 +118,25 @@ python -B tooling/nexus.py product-assemble --publication-root '<本次实际 pu
 ```
 
 尖括号是必须替换的显式输入，publicationRoot 从真实回执取得，不猜最新目录。完整产品任务需要实际软件；纯规则或文档改动不自动 publish 整个产品。Test 与 Production 结果分开；只有权限清单、发行入口或对应交付任务需要时补生产范围，不能借本地 Test 信任执行正式发布。
+
+## 发布产物与工具链验证
+
+先按[成品要求](release.md#发布验收)核对实际源码、装配与资产回执。原生场景使用这些回执绑定的同源成品，记录实际进程退出、运行时与应用归属。按本次触达的边界选场景。
+
+| 改动范围 | 验证方向 |
+|---|---|
+| .NET SDK 选版、锁或测试启动 | 在隔离 SDK 根覆盖受支持的稳定功能带，以实际选版回执核对编译、锁定还原及普通和直启 VSTest。切换同一构建槽的 SDK 时检查编译复用，并比对派生锁的应用依赖。 |
+| Setup 运行时准入 | 在 Windows Sandbox 分别验证匹配运行时复用、Core 较新的兼容混装、Core 过旧时写入前停止或补齐，以及干净环境在线校验、安装和启动。 |
+| Setup 载荷或安装事务 | 核对实际编译成品的共用载荷和体积。按受影响路径验证新装、保留后重装、运行中 Host 拒绝覆盖、跨卷同代覆盖、非法暂存、失败回滚与中断后续做。 |
+| 更新窗口或卸载入口 | 从实际入口验证 Host 开启与关闭、下载取消和重试、升级重启及失败回滚。卸载验证根目录和开始菜单入口、默认保留、取消、显式删除及续做。 |
+
+基础原资产检查可使用以下入口。它覆盖缺少运行时的启动拒绝、已有运行时的 Portable/Setup 启动、默认插件与保留数据的原生卸载和重装。交互下载、同代覆盖和窗口交接另取对应原生证据。
+
+```text
+python -B tooling/asset_qualification.py --assets-receipt <assets-receipt.json> --assembly-receipt <assembly.json> --output <仓外新目录> --dotnet-root <已安装的x64 .NET 10根目录>
+```
+
+自行启动原生场景时，将进程级 `TEMP`、`TMP` 和 `DOTNET_BUNDLE_EXTRACT_BASE_DIR` 指向仓外验收目录。
 
 ## 结果记录与停止条件
 

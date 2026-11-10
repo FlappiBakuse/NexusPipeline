@@ -84,7 +84,7 @@ end;
 CHECKS = r'''
 procedure VerifyCase(const Name, ExpectedMessage: String; Asked, Fetched, Restarted: Boolean; Launched: Integer);
 var
-  Error, Expected: String;
+  Error, Expected, Required: String;
   Restart: Boolean;
 begin
   Scenario := Name;
@@ -97,7 +97,9 @@ begin
   QuietMode := Name = 'quiet';
   DownloadCancelled := Name = 'cancel';
   Restart := False;
-  Error := InstallFramework('Microsoft.NETCore.App', '10.0.0', 'component',
+  Required := '10.0.0';
+  if Name = 'manual' then Required := '10.0.15';
+  Error := InstallFramework('Microsoft.NETCore.App', Required, '10.0.14', 'component',
     'https://controlled.test/runtime.exe', 'runtime.exe', 'verified', Restart);
   Expected := '';
   if ExpectedMessage <> '' then begin
@@ -125,6 +127,7 @@ end;
 
 def case_calls():
     cases = [('already', '', False, False, False, 0), ('quiet', 'RuntimeSilent', False, False, False, 0),
+        ('manual', 'RuntimeManual', False, False, False, 0),
         ('decline', 'RuntimeCancelled', True, False, False, 0),
         ('cancel', 'RuntimeCancelled', True, True, False, 0), ('download', 'RuntimeDownloadFailed', True, True, False, 0),
         ('link', 'RuntimeDigestFailed', True, True, False, 0), ('digest', 'RuntimeDigestFailed', True, True, False, 0),
@@ -142,7 +145,8 @@ def native_flow(root, work, software, compiler):
     runtime = render_runtime(root, software)
     begin = runtime.index('function InstallFramework(')
     end = runtime.index('function PrepareFrameworks(', begin)
-    original = runtime[begin:end]
+    compare = runtime[runtime.index('function NewerVersion('):runtime.index('function VerifyMicrosoftSignature(')]
+    original = compare + runtime[begin:end]
     replacements = {'HasFramework(': 'ProbeFramework(', 'WizardSilent': 'QuietMode', 'MsgBox(': 'ConfirmRuntime(',
         'DependencyDownloadPage.Clear': 'DownloadClear', 'DependencyDownloadPage.Add': 'DownloadAdd',
         'DependencyDownloadPage.Show': 'DownloadShow', 'DependencyDownloadPage.Hide': 'DownloadHide',

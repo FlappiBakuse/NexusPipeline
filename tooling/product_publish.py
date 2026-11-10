@@ -12,6 +12,8 @@ from desktop_bundle import bundle_desktop, require_no_links
 from dotnet_bundle import verify_publish
 from application_manifest import create_manifest
 from source_snapshot import digest, source_files, write_json, external_directory
+from dotnet_sdk import resolve_sdk, sdk_environment, sdk_key
+from sdk_locks import lock_arguments
 
 
 def inventory(root):
@@ -62,13 +64,19 @@ def publish_product(root, build_root, output, runtime_archive, profile):
         raise ValueError('Product source changed after compilation')
     run = output / 'runs' / (datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S') + '-' + uuid.uuid4().hex[:8])
     run.mkdir(parents=True)
-    report = dict(status='RUNNING', profile=profile, source=source, buildReceipt=str(build_root / 'runs' / build['runId'] / 'build-receipt.json'), commands=[])
+    sdk = build['componentInputs']['context']['dotnet']
+    report = dict(status='RUNNING', profile=profile, source=source, dotnet=sdk,
+                  buildReceipt=str(build_root / 'runs' / build['runId'] / 'build-receipt.json'), commands=[])
     write_json(run / 'publish-receipt.json', report)
     env = build_environment(build_root)
     published = {}
     try:
+        if resolve_sdk(frozen, env) != sdk:
+            raise ValueError('Publish requires the same resolved SDK as the compiled inputs')
+        env = sdk_environment(env, sdk)
         for project in projects:
             publish_component(root, build_root, output, profile, build, source, frozen, run, env, report, published, project)
+        lock_arguments(build['restoreLocks'])
         worker = published.pop('Installer')[0]
         report['installerWorker'] = dict(path=str(output / 'publish/installer/NexusPipeline.Installer.exe'), file=worker)
         report['uninstallerEntry'] = dict(path=str(output / 'publish/uninstaller/NexusPipeline.Uninstaller.exe'),
@@ -107,8 +115,12 @@ def publish_component(root, build_root, output, profile, build, source, frozen, 
     binding = {'Maintenance': ('NexusHostSha256', 'Host'), 'Uninstaller': ('NexusInstallerSha256', 'Installer')}.get(project)
     image_hash = published[binding[1]][0]['sha256'] if binding else None
     ready = project in ('Host', 'Launcher')
+    locks = build['restoreLocks']
+    restore_args = lock_arguments(locks)
+    lock_files = {name: sha for name, sha in locks['files'].items()
+                  if name.removesuffix('.packages.lock.json') in component['projectNames']} if locks else None
     publish_inputs = dict(component=component, profile=profile, runtime='win-x64', selfContained=False,
-                          singleFile=True, nativeExtraction=True, readyToRun=ready,
+                          singleFile=True, nativeExtraction=True, readyToRun=ready, restoreLocks=lock_files,
                           sdkSha256=hash_file(sdk) if sdk else None, boundImageSha256=image_hash,
                           tools={name: hash_file(root / 'tooling' / name) for name in ('product_publish.py', 'dotnet_bundle.py', 'verify_manifests.py')})
     if component.get('conservativeReasons'):
@@ -126,10 +138,12 @@ def publish_component(root, build_root, output, profile, build, source, frozen, 
             report['commands'].append(dict(project=project, reusedReceipt=str(original), receiptSha256=proof['receiptSha256']))
             return
     clear_publish_slot(destination, slot_receipt)
-    command = ['dotnet', 'publish', str(frozen / 'apps' / project.lower() / ('NexusPipeline.' + project + '.csproj')),
+    dotnet = report['dotnet']
+    command = [dotnet['path'], 'publish', str(frozen / 'apps' / project.lower() / ('NexusPipeline.' + project + '.csproj')),
                '--configuration', 'Release', '--runtime', 'win-x64', '--self-contained', 'false', '--nologo',
                '--disable-build-servers', '-m:1', '--output', str(destination),
                f'-p:NexusArtifactsRoot={output / "work"}', f'-p:NexusPackagesRoot={build_root.parent / "cache/nuget"}',
+               f'-p:NexusSdkKey={sdk_key(dotnet)}',
                f'-p:NexusTestHost={str(profile == "test").lower()}',
                f'-p:NexusWebRoot={build_root / "web-workspace/apps/web/dist"}', '-p:RestoreLockedMode=true',
                '-p:IncludeNativeLibrariesForSelfExtract=true',
@@ -137,7 +151,7 @@ def publish_component(root, build_root, output, profile, build, source, frozen, 
                '-p:CopyOutputSymbolsToPublishDirectory=false', '-p:PublishReferencesDocumentationFiles=false',
                '-p:DebugType=None', '-p:DebugSymbols=false', '-p:AllowedReferenceRelatedFileExtensions=.xml',
                '-p:PublishIISAssets=false',
-               '-p:PublishTrimmed=false', f'-p:PublishReadyToRun={str(ready).lower()}']
+               '-p:PublishTrimmed=false', f'-p:PublishReadyToRun={str(ready).lower()}', *restore_args]
     if sdk:
         command.append(f'-p:NexusSdkRuntime={sdk}')
     if binding:

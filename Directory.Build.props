@@ -10,6 +10,7 @@
     <DefineConstants Condition="'$(NexusTestHost)' == 'true'">$(DefineConstants);NEXUS_TEST_HOST</DefineConstants>
     <UseArtifactsOutput>true</UseArtifactsOutput>
     <ArtifactsPath>$(NexusArtifactsRoot)</ArtifactsPath>
+    <BaseIntermediateOutputPath Condition="'$(NexusSdkKey)' != ''">$(ArtifactsPath)/obj/$(NexusSdkKey)/$(MSBuildProjectName)/</BaseIntermediateOutputPath>
     <RestorePackagesPath>$(NexusPackagesRoot)</RestorePackagesPath>
     <EnableDefaultCompileItems>true</EnableDefaultCompileItems>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>

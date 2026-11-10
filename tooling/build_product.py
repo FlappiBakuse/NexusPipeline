@@ -15,6 +15,8 @@ from frozen_build import save_build, compile_receipt
 from build_inputs import solution_inputs, project_inputs
 from source_names import verify_names
 from source_checks import check_source
+from dotnet_sdk import resolve_sdk, sdk_environment, sdk_key
+from sdk_locks import prepare_locks, lock_arguments
 
 
 def update_export(root, output):
@@ -107,10 +109,12 @@ def build_product(root, output, profile, projects=None):
     source = {**source, "sourceManifestPath": str(archived_manifest)}
     source_root = Path(source["exportRoot"])
     env = build_environment(output)
+    sdk = resolve_sdk(source_root, env)
+    msbuild_env = sdk_environment(env, sdk)
     cache = output.parent / "cache"
     selected = sorted(set(projects) | {"NexusPipeline.Boundaries"}) if projects is not None else None
     source_records = json.loads(archived_manifest.read_bytes())["files"]
-    component = solution_inputs(source_root, profile, env, selected, source_records)
+    component = solution_inputs(source_root, profile, env, selected, source_records, sdk=sdk)
     web_receipt = None
     if "NexusPipeline.Host" in component["projectNames"]:
         from web_build import build_web
@@ -145,13 +149,17 @@ def build_product(root, output, profile, projects=None):
         solution = run_root / "selected.slnx"
         tree.write(solution, encoding="utf-8", xml_declaration=True)
     reusable = compile_receipt(output, component, profile)
+    locks = (prepare_locks(source_root, component['projectNames'], run_root, cache / 'nuget', sdk, msbuild_env)
+             if reusable is None else json.loads(Path(reusable['path']).read_bytes()).get('restoreLocks'))
     command = [
-        "dotnet", "build", str(solution),
+        sdk['path'], "build", str(solution),
         "--configuration", "Release", "--nologo", "--disable-build-servers", "-m:1",
         f"-p:NexusArtifactsRoot={output / 'build'}",
+        f"-p:NexusSdkKey={sdk_key(sdk)}",
         f"-p:NexusPackagesRoot={cache / 'nuget'}",
         f"-p:NexusTestHost={'true' if profile == 'test' else 'false'}",
     ]
+    command.extend(lock_arguments(locks))
     if web_receipt is not None:
         command.append(f"-p:NexusWebRoot={web_receipt['output']}")
     started_at = datetime.now(timezone.utc).isoformat()
@@ -159,7 +167,7 @@ def build_product(root, output, profile, projects=None):
     if reusable is None:
         print(f"build/{profile}: {' '.join(command)}", flush=True)
         with (run_root / "build.log").open("w", encoding="utf-8", newline="\n") as log:
-            process = subprocess.Popen(command, cwd=source_root, env=env, stdout=subprocess.PIPE,
+            process = subprocess.Popen(command, cwd=source_root, env=msbuild_env, stdout=subprocess.PIPE,
                                        stderr=subprocess.STDOUT, encoding="utf-8", errors="replace")
             for line in process.stdout:
                 print(line, end="", flush=True)
@@ -169,6 +177,7 @@ def build_product(root, output, profile, projects=None):
         code = 0
         (run_root / "build.log").write_text("Compilation reused after component and binary verification.\n", encoding="utf-8")
     compile_code = code
+    lock_arguments(locks)
     source_check = None
     names = None
     if code == 0:
@@ -180,17 +189,17 @@ def build_product(root, output, profile, projects=None):
             source_check = {"exitCode": code, "error": str(error)}
             print(f"ERROR: {error}", file=sys.stderr, flush=True)
     if code == 0:
-        names = verify_names(source_root, output, run_root, env, source_records)
+        names = verify_names(source_root, output, run_root, env, source_records, sdk['path'])
         code = names["exitCode"]
     boundaries = None
     if code == 0:
-        boundary_command = ["dotnet", str(output / "build/bin/NexusPipeline.Boundaries/release/NexusPipeline.Boundaries.dll"),
+        boundary_command = [sdk['path'], str(output / "build/bin/NexusPipeline.Boundaries/release/NexusPipeline.Boundaries.dll"),
                             "--source-boundaries", str(source_root)]
         boundary_report = run_root / 'source-boundaries.json'
         with boundary_report.open('w', encoding='utf-8', newline='\n') as stream:
             code = subprocess.run(boundary_command, cwd=source_root, env=env, stdout=stream, stderr=subprocess.STDOUT).returncode
         boundaries = {'command': boundary_command, 'exitCode': code, 'nativeReport': str(boundary_report)}
-    api_command = ["dotnet", str(output / "build/bin/NexusPipeline.Boundaries/release/NexusPipeline.Boundaries.dll"),
+    api_command = [sdk['path'], str(output / "build/bin/NexusPipeline.Boundaries/release/NexusPipeline.Boundaries.dll"),
                    "--sdk-surface", str(output / "build/bin/NexusPipeline.Extensibility/release/NexusPipeline.Extensibility.dll"),
                    "--verify", str(source_root / "contracts/sdk-public-api.json")]
     api_code = None
@@ -218,9 +227,9 @@ def build_product(root, output, profile, projects=None):
         "runId": run_id, "nativeLog": str(run_root / "build.log"),
         "scope": "Selected project closure" if selected is not None else "Complete solution; no product acceptance",
         "requestedProjects": projects,
-        "componentInputs": component, "reusedCompilation": reusable,
+        "componentInputs": component, "reusedCompilation": reusable, "restoreLocks": locks,
         "projectInputs": project_inputs(source_root, profile, env, component["projectNames"],
-            component.get("webInputs"), component.get("webArtifacts"), source_records),
+            component.get("webInputs"), component.get("webArtifacts"), source_records, sdk=sdk),
         "source": source, "command": command if reusable is None else None, "startedAt": started_at,
         "elapsedSeconds": time.monotonic() - started, "exitCode": code,
     }

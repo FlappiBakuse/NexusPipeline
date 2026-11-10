@@ -5,6 +5,7 @@ from pathlib import Path
 from binary_inputs import hash_file, PROJECTS
 from source_snapshot import digest, source_files, write_json
 from build_inputs import solution_inputs, web_inputs, project_inputs
+from sdk_locks import lock_arguments
 
 
 def compile_receipt(output, component, profile, projects=None):
@@ -18,6 +19,7 @@ def compile_receipt(output, component, profile, projects=None):
     previous = {name: receipt.get("projectInputs", {}).get(name) for name in projects} if projects else receipt.get("componentInputs")
     if previous != component:
         return None
+    lock_arguments(receipt.get('restoreLocks'))
     saved = receipt["binaryManifest"]
     binary_data = Path(saved["path"]).read_bytes()
     if digest(binary_data) != saved["sha256"] or json.loads(binary_data) != capture_build(output):

@@ -9,6 +9,7 @@ from build_inputs import solution_inputs
 
 from build_product import build_environment, update_export
 from source_snapshot import ALGORITHM, digest, source_files, write_json, external_directory
+from dotnet_sdk import resolve_sdk, sdk_environment
 
 
 def update_locks(root, build_root, projects=None):
@@ -18,11 +19,13 @@ def update_locks(root, build_root, projects=None):
     locks = run / "locks"
     locks.mkdir(parents=True)
     frozen = Path(source['exportRoot'])
+    env = build_environment(output)
+    sdk = resolve_sdk(frozen, env)
     selected = None
     solution = frozen / 'NexusPipeline.slnx'
     if projects:
-        component = solution_inputs(frozen, 'test', build_environment(output), projects,
-            json.loads(Path(source['sourceManifestPath']).read_bytes())['files'])
+        component = solution_inputs(frozen, 'test', env, projects,
+            json.loads(Path(source['sourceManifestPath']).read_bytes())['files'], sdk=sdk)
         selected = set(component['projectNames'])
         document = ET.parse(solution)
         for project in list(document.getroot()):
@@ -32,15 +35,15 @@ def update_locks(root, build_root, projects=None):
                 project.set('Path', str(frozen / project.attrib['Path']))
         solution = run / 'selected.slnx'
         document.write(solution, encoding='utf-8', xml_declaration=True)
-    command = ["dotnet", "restore", str(solution),
+    command = [sdk['path'], "restore", str(solution),
                "--force-evaluate", "--disable-parallel", "--disable-build-servers", "-m:1", "--nologo", "-p:RestoreLockedMode=false",
-               f"-p:NexusLockOutputRoot={locks}", f"-p:NexusArtifactsRoot={output / 'build'}",
+               f"-p:NexusLockOutputRoot={locks}", f"-p:NexusArtifactsRoot={run / 'build'}",
                f"-p:NexusPackagesRoot={output.parent / 'cache/nuget'}", "-p:NexusTestHost=true"]
-    process = subprocess.run(command, cwd=source["exportRoot"], env=build_environment(output),
+    process = subprocess.run(command, cwd=frozen, env=sdk_environment(env, sdk),
                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, encoding="utf-8", errors="replace")
     (run / "restore.log").write_bytes(process.stdout.encode())
     print(process.stdout, flush=True)
-    receipt = {"status": "FAIL", "command": command, "exitCode": process.returncode, "source": source,
+    receipt = {"status": "FAIL", "command": command, "exitCode": process.returncode, "source": source, "dotnet": sdk,
                "nativeLog": str(run / "restore.log"), "importedLocks": []}
     write_json(run / "receipt.json", receipt)
     if process.returncode:

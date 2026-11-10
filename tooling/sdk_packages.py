@@ -13,6 +13,7 @@ import zipfile
 from build_product import build_environment
 from sdk_workspace import records, synchronize
 from source_snapshot import digest, source_files, write_json, ordinary_path
+from dotnet_sdk import resolve_sdk, sdk_environment, sdk_key
 
 
 def require_build(root, build):
@@ -51,8 +52,12 @@ def build_sdk(root, build, consumers, output, cache, compile_only=False):
     packages.mkdir(parents=True)
     temporary = cache / "sdk-tmp"
     temporary.mkdir(parents=True, exist_ok=True)
-    env = {key: value for key, value in build_environment(build).items() if key.upper() != "PATH"}
-    tools = [shutil.which(name) for name in ("node", "dotnet", "git")]
+    environment = build_environment(build)
+    sdk = resolve_sdk(frozen, environment)
+    if sdk != receipt['componentInputs']['context']['dotnet']:
+        raise ValueError('SDK packaging requires the same resolved SDK as the compiled inputs')
+    env = {key: value for key, value in sdk_environment(environment, sdk).items() if key.upper() != "PATH"}
+    tools = [shutil.which('node'), sdk['path'], shutil.which('git')]
     if any(path is None for path in tools):
         raise ValueError("SDK packaging requires node, dotnet and git")
     env["PATH"] = os.pathsep.join(dict.fromkeys([str(Path(path).parent) for path in tools] +
@@ -84,8 +89,9 @@ def build_sdk(root, build, consumers, output, cache, compile_only=False):
     try:
         consumer_records = {kind: records(consumers / kind) for kind in ("dotnet", "frontend")}
         stage = "build"
-        run(["dotnet", "pack", str(frozen / "sdk/dotnet/NexusPipeline.Extensibility.csproj"), "--no-build", "--no-restore",
+        run([sdk['path'], "pack", str(frozen / "sdk/dotnet/NexusPipeline.Extensibility.csproj"), "--no-build", "--no-restore",
              "--configuration", "Release", "--output", str(packages), f"-p:NexusArtifactsRoot={build / 'build'}",
+             f'-p:NexusSdkKey={sdk_key(sdk)}',
              f"-p:NexusPackagesRoot={build.parent / 'cache/nuget'}"], frozen, "dotnet-pack")
         nupkg = packages / "NexusPipeline.Extensibility.0.1.0.nupkg"
         with zipfile.ZipFile(nupkg) as archive:
@@ -100,9 +106,10 @@ def build_sdk(root, build, consumers, output, cache, compile_only=False):
         dotnet = output / "dotnet/source"
         stage = "typecheck"
         synchronize(consumers / "dotnet", dotnet, output / "workspace-locks/dotnet.json")
-        run(["dotnet", "build", str(dotnet / "ProtocolConsumer.csproj"), "-m:1", "--disable-build-servers",
+        run([sdk['path'], "build", str(dotnet / "ProtocolConsumer.csproj"), "-m:1", "--disable-build-servers",
              "-p:UseArtifactsOutput=true", f"-p:ArtifactsPath={output / 'dotnet/build'}",
-             f"-p:RestorePackagesPath={output / 'dotnet/packages' / digest(nupkg.read_bytes())}", f"-p:RestoreSources={packages}"], dotnet, "dotnet-consumer-build")
+             f"-p:BaseIntermediateOutputPath={output / 'dotnet/build/obj' / sdk_key(sdk)}/",
+             f"-p:RestorePackagesPath={output / 'dotnet/packages' / digest(nupkg.read_bytes())}", f"-p:RestoreSources={packages}"], frozen, "dotnet-consumer-build")
         binary = output / "dotnet/build/bin/ProtocolConsumer/debug"
         if (binary / "NexusPipeline.Extensibility.dll").read_bytes() != assembly:
             raise ValueError("Independent consumer loaded a stale same-version SDK")
@@ -145,7 +152,8 @@ def build_sdk(root, build, consumers, output, cache, compile_only=False):
         result = {"status": "PASS", "scope": "Current packaged SDK and independent compiled consumers; no plugin business qualification",
                   "validationMode": validation_mode, "runtimeConsumers": "NOT_RUN",
                   "lifecycle": responsibilities["test"], "responsibilities": responsibilities,
-                  "contractFingerprint": fingerprint, "hostSource": receipt["source"], "hostBuildReceiptSha256": digest((build / "build-receipt.json").read_bytes()),
+                  "contractFingerprint": fingerprint, "hostSource": receipt["source"], "dotnet": sdk,
+                  "hostBuildReceiptSha256": digest((build / "build-receipt.json").read_bytes()),
                   "commands": commands, "consumerInputs": consumer_records, "consumerRoot": str(consumers), "frontendSourceRoot": str(frozen),
                   "frontendApiDescriptorSha256": digest((frozen / "contracts/sdk-frontend-api.json").read_bytes()), "frontendCompilerSha256": digest(compiler.read_bytes()),
                   "packages": [{"path": str(path), "sha256": digest(path.read_bytes()), "sizeBytes": path.stat().st_size} for path in (nupkg, immutable)]}

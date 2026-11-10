@@ -30,27 +30,35 @@ begin
   Result := RemoveBackslashUnlessRoot(ExpandFileName(Result));
 end;
 
-function HasFramework(const Framework, Required: String): Boolean;
+function ReadRuntimes(var Root: String; var Output: TExecOutput): Boolean;
 var
-  Dotnet, Prefix, ExpectedPath, Line, VersionText: String;
-  I, Code, Marker: Integer;
-  Version, Minimum, Maximum: Int64;
-  Output: TExecOutput;
+  Dotnet: String;
+  Code: Integer;
 begin
   Result := False;
   if not IsX64Compatible then Exit;
-  if not StrToVersion(Required, Minimum) or not StrToVersion('10.1.0', Maximum) then Exit;
-  ExpectedPath := RuntimeRoot;
-  Dotnet := AddBackslash(ExpectedPath) + 'dotnet.exe';
+  Root := RuntimeRoot;
+  Dotnet := AddBackslash(Root) + 'dotnet.exe';
   if not FileExists(Dotnet) or HasLinkInPath(Dotnet) then Exit;
-  ExpectedPath := AddBackslash(ExpectedPath) + 'shared\' + Framework;
-  if HasLinkInPath(ExpectedPath) then Exit;
   try
     if not ExecAndCaptureOutput(Dotnet, '--list-runtimes', '', SW_HIDE, ewWaitUntilTerminated, Code, Output) then Exit;
   except
     Exit;
   end;
-  if (Code <> 0) or Output.Error then Exit;
+  Result := (Code = 0) and not Output.Error;
+end;
+
+function LatestFramework(const Root, Framework, Required: String; const Output: TExecOutput): String;
+var
+  Prefix, ExpectedPath, Line, VersionText: String;
+  I, Marker: Integer;
+  Version, Minimum, Maximum, Latest: Int64;
+begin
+  Result := '';
+  if not StrToVersion(Required, Minimum) or not StrToVersion('10.1.0', Maximum) then Exit;
+  ExpectedPath := AddBackslash(Root) + 'shared\' + Framework;
+  if HasLinkInPath(ExpectedPath) then Exit;
+  Latest := -1;
   Prefix := Framework + ' ';
   for I := 0 to GetArrayLength(Output.StdOut) - 1 do begin
     Line := Output.StdOut[I];
@@ -58,13 +66,36 @@ begin
     if (Copy(Line, 1, Length(Prefix)) = Prefix) and (Marker > Length(Prefix)) then begin
       VersionText := Copy(Line, Length(Prefix) + 1, Marker - Length(Prefix) - 1);
       if StrToVersion(VersionText, Version) and (Version >= Minimum) and (Version < Maximum) and
+         (Version > Latest) and
          (CompareText(Copy(Line, Marker + 2, Length(ExpectedPath)), ExpectedPath) = 0) and
          (Copy(Line, Marker + 2 + Length(ExpectedPath), MaxInt) = ']') then begin
-        Result := True;
-        Exit;
+        Result := VersionText;
+        Latest := Version;
       end;
     end;
   end;
+  if (Result <> '') and HasLinkInPath(AddBackslash(ExpectedPath) + Result) then Result := '';
+end;
+
+function FrameworkVersion(const Framework, Required: String): String;
+var
+  Root: String;
+  Output: TExecOutput;
+begin
+  Result := '';
+  if ReadRuntimes(Root, Output) then Result := LatestFramework(Root, Framework, Required, Output);
+end;
+
+function HasFramework(const Framework, Required: String): Boolean;
+begin
+  Result := FrameworkVersion(Framework, Required) <> '';
+end;
+
+function NewerVersion(const Left, Right: String): Boolean;
+var
+  A, B: Int64;
+begin
+  Result := StrToVersion(Left, A) and StrToVersion(Right, B) and (A > B);
 end;
 
 function VerifyMicrosoftSignature(const Package: String): Boolean;
@@ -94,7 +125,7 @@ begin
   Result := Result and (Code = 0) and not Output.Error;
 end;
 
-function InstallFramework(const Framework, Required, Description, URL, FileName, Digest: String;
+function InstallFramework(const Framework, Required, Available, Description, URL, FileName, Digest: String;
   var NeedsRestart: Boolean): String;
 var
   Package: String;
@@ -102,6 +133,10 @@ var
 begin
   Result := '';
   if HasFramework(Framework, Required) then Exit;
+  if NewerVersion(Required, Available) then begin
+    Result := FmtMessage(CustomMessage('RuntimeManual'), [Description]);
+    Exit;
+  end;
   if WizardSilent then begin
     Result := FmtMessage(CustomMessage('RuntimeSilent'), [Description]);
     Exit;
@@ -146,7 +181,79 @@ begin
   else if not HasFramework(Framework, Required) then Result := FmtMessage(CustomMessage('RuntimeStillMissing'), [Description]);
 end;
 
-function PrepareFrameworks(var NeedsRestart: Boolean): String;
+function WebCoreMinimum(const Root, WebVersion: String): String;
+var
+  Config, Script, Params: String;
+  Code: Integer;
+  Output: TExecOutput;
 begin
-@@RUNTIME_CALLS@@
+  Result := '';
+  Config := AddBackslash(Root) + 'shared\Microsoft.AspNetCore.App\' + WebVersion + '\Microsoft.AspNetCore.App.runtimeconfig.json';
+  if not FileExists(Config) or HasLinkInPath(Config) then Exit;
+  Script := ExpandConstant('{tmp}\nexus-runtime-requirement.ps1');
+  if not SaveStringToFile(Script,
+    'param([string]$Config)' + #13#10 +
+    '$ErrorActionPreference = ''Stop''' + #13#10 +
+    'Import-Module (Join-Path $PSHOME ''Modules\Microsoft.PowerShell.Utility\Microsoft.PowerShell.Utility.psd1'')' + #13#10 +
+    '$options = (ConvertFrom-Json -InputObject ([IO.File]::ReadAllText($Config))).runtimeOptions' + #13#10 +
+    '$core = $options.framework' + #13#10 +
+    'if ($options.tfm -cne ''net10.0'' -or $options.rollForward -cne ''LatestPatch'' -or' + #13#10 +
+    '    $core.name -cne ''Microsoft.NETCore.App'' -or $core.version -cnotmatch ''^10\.0\.[0-9]+$'') { exit 1 }' + #13#10 +
+    '[Console]::WriteLine($core.version)' + #13#10, False) then Exit;
+  Params := '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + Script + '" -Config "' + Config + '"';
+  try
+    if not ExecAndCaptureOutput(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), Params,
+      '', SW_HIDE, ewWaitUntilTerminated, Code, Output) then Exit;
+  except
+    Exit;
+  end;
+  if (Code = 0) and not Output.Error and (GetArrayLength(Output.StdOut) = 1) then
+    Result := Output.StdOut[0];
+end;
+
+function RequiredCore(const WebMinimum: String): String;
+begin
+  Result := '@@CORE_MINIMUM@@';
+  if NewerVersion(WebMinimum, Result) then Result := WebMinimum;
+end;
+
+function PrepareFrameworks(var NeedsRestart: Boolean): String;
+var
+  Root, WebVersion, WebMinimum, CoreVersion, CoreDescription: String;
+  Output: TExecOutput;
+begin
+  WebVersion := '';
+  if ReadRuntimes(Root, Output) then
+    WebVersion := LatestFramework(Root, 'Microsoft.AspNetCore.App', '@@WEB_MINIMUM@@', Output);
+  if WebVersion = '' then begin
+    WebVersion := '@@WEB_VERSION@@';
+    WebMinimum := WebVersion;
+  end else WebMinimum := WebCoreMinimum(Root, WebVersion);
+  if WebMinimum = '' then begin
+    Result := FmtMessage(CustomMessage('RuntimeFrameworkInvalid'), [WebVersion]);
+    Exit;
+  end;
+  CoreVersion := RequiredCore(WebMinimum);
+  CoreDescription := '.NET Core Runtime 10 x64 (>= ' + CoreVersion + ')';
+  Log('Runtime prerequisite ASP.NET Core=' + WebVersion + ', minimum Core=' + CoreVersion);
+  Result := @@CORE_INSTALL@@;
+  if Result <> '' then Exit;
+  Result := @@WEB_INSTALL@@;
+  if Result <> '' then Exit;
+  if ReadRuntimes(Root, Output) then begin
+    WebVersion := LatestFramework(Root, 'Microsoft.AspNetCore.App', '@@WEB_MINIMUM@@', Output);
+    if WebVersion <> '' then begin
+      WebMinimum := WebCoreMinimum(Root, WebVersion);
+      if WebMinimum = '' then begin
+        Result := FmtMessage(CustomMessage('RuntimeFrameworkInvalid'), [WebVersion]);
+        Exit;
+      end;
+      CoreVersion := LatestFramework(Root, 'Microsoft.NETCore.App', RequiredCore(WebMinimum), Output);
+      if CoreVersion <> '' then begin
+        Log('Runtime prerequisites resolved ASP.NET Core=' + WebVersion + ', Core=' + CoreVersion);
+        Exit;
+      end;
+    end;
+  end;
+  Result := FmtMessage(CustomMessage('RuntimeStillMissing'), ['.NET Core / ASP.NET Core Runtime 10 x64']);
 end;
