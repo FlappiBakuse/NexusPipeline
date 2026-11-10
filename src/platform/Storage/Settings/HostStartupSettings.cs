@@ -19,7 +19,7 @@ public static class HostStartupSettings
     public static HostSettingsService Create(RuntimeInstance instance, StateDatabase database, InstanceLease lease,
         ResourceLeaseManager resources, RecoveryIndex recovery)
     {
-        var host = PhysicalPathPolicy.NormalizeWithoutLinks(Environment.ProcessPath ?? throw new IOException("host_process_path_unavailable"));
+        var host = PhysicalPathPolicy.RuntimeProcessPath();
         var executable = host;
         var manifestPath = Path.Combine(Path.GetDirectoryName(host)!, ApplicationTree.ManifestPath);
         if (StringComparer.OrdinalIgnoreCase.Equals(Path.GetFileName(host), ApplicationTree.HostEntry) && File.Exists(manifestPath))

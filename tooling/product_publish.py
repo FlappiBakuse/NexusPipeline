@@ -50,7 +50,8 @@ def publish_product(root, build_root, output, runtime_archive, profile):
             raise ValueError('Existing product workspace is not owned by this build')
     output.mkdir(parents=True, exist_ok=True)
     write_json(ownership, expected_owner)
-    result = build_product(root, build_root, profile, ['NexusPipeline.Host', 'NexusPipeline.Launcher', 'NexusPipeline.Maintenance', 'NexusPipeline.Installer'])
+    projects = ('Host', 'Launcher', 'Maintenance', 'Installer', 'Uninstaller')
+    result = build_product(root, build_root, profile, ['NexusPipeline.' + name for name in projects])
     if result:
         raise ValueError('Product compile failed; original build reports retained')
     build = json.loads((build_root / 'build-receipt.json').read_bytes())
@@ -66,9 +67,12 @@ def publish_product(root, build_root, output, runtime_archive, profile):
     env = build_environment(build_root)
     published = {}
     try:
-        for project in ('Host', 'Launcher', 'Maintenance', 'Installer'):
+        for project in projects:
             publish_component(root, build_root, output, profile, build, source, frozen, run, env, report, published, project)
-        report['installerWorker'] = dict(path=str(output / 'publish/installer/NexusPipeline.Installer.exe'), file=published.pop('Installer')[0])
+        worker = published.pop('Installer')[0]
+        report['installerWorker'] = dict(path=str(output / 'publish/installer/NexusPipeline.Installer.exe'), file=worker)
+        report['uninstallerEntry'] = dict(path=str(output / 'publish/uninstaller/NexusPipeline.Uninstaller.exe'),
+                                         file=published.pop('Uninstaller')[0], workerSha256=worker['sha256'])
         desktop = output / 'desktop'
         desktop_result = bundle_desktop(frozen, Path(runtime_archive), desktop)
         report['desktop'] = desktop_result
@@ -99,10 +103,13 @@ def publish_component(root, build_root, output, profile, build, source, frozen, 
     slot_receipt = output / ('publish-' + project.lower() + '-files.json')
     proof_path = output / ('publish-' + project.lower() + '-proof.json')
     component = build['projectInputs']['NexusPipeline.' + project]
-    sdk = shared_sdk(build_root, build)
+    sdk = None if project in ('Maintenance', 'Uninstaller') else shared_sdk(build_root, build)
+    binding = {'Maintenance': ('NexusHostSha256', 'Host'), 'Uninstaller': ('NexusInstallerSha256', 'Installer')}.get(project)
+    image_hash = published[binding[1]][0]['sha256'] if binding else None
+    ready = project in ('Host', 'Launcher')
     publish_inputs = dict(component=component, profile=profile, runtime='win-x64', selfContained=False,
-                          singleFile=True, nativeExtraction=True, readyToRun=True,
-                          sdkSha256=hash_file(sdk),
+                          singleFile=True, nativeExtraction=True, readyToRun=ready,
+                          sdkSha256=hash_file(sdk) if sdk else None, boundImageSha256=image_hash,
                           tools={name: hash_file(root / 'tooling' / name) for name in ('product_publish.py', 'dotnet_bundle.py', 'verify_manifests.py')})
     if component.get('conservativeReasons'):
         publish_inputs['sourceSnapshotHash'] = source['sourceSnapshotHash']
@@ -125,13 +132,16 @@ def publish_component(root, build_root, output, profile, build, source, frozen, 
                f'-p:NexusArtifactsRoot={output / "work"}', f'-p:NexusPackagesRoot={build_root.parent / "cache/nuget"}',
                f'-p:NexusTestHost={str(profile == "test").lower()}',
                f'-p:NexusWebRoot={build_root / "web-workspace/apps/web/dist"}', '-p:RestoreLockedMode=true',
-               f'-p:NexusSdkRuntime={sdk}',
                '-p:IncludeNativeLibrariesForSelfExtract=true',
                '-p:IncludeAllContentForSelfExtract=false', '-p:EnableCompressionInSingleFile=false',
                '-p:CopyOutputSymbolsToPublishDirectory=false', '-p:PublishReferencesDocumentationFiles=false',
                '-p:DebugType=None', '-p:DebugSymbols=false', '-p:AllowedReferenceRelatedFileExtensions=.xml',
                '-p:PublishIISAssets=false',
-               '-p:PublishTrimmed=false', '-p:PublishReadyToRun=true']
+               '-p:PublishTrimmed=false', f'-p:PublishReadyToRun={str(ready).lower()}']
+    if sdk:
+        command.append(f'-p:NexusSdkRuntime={sdk}')
+    if binding:
+        command.append(f'-p:{binding[0]}={image_hash}')
     started = time.monotonic()
     try:
         completed = subprocess.run(command, cwd=frozen, env=env, capture_output=True, encoding='utf-8', errors='replace', timeout=600)
@@ -145,15 +155,15 @@ def publish_component(root, build_root, output, profile, build, source, frozen, 
     if completed.returncode:
         raise ValueError('Framework-dependent single-file publish failed: ' + str(log))
     entry = destination / ('NexusPipeline.' + project + '.exe')
-    bundle = verify_publish(entry, project, shared_sdk(build_root, build).read_bytes())
+    bundle = verify_publish(entry, project, sdk.read_bytes() if sdk else None)
     from verify_manifests import embedded_manifest, pe_subsystem
     import xml.etree.ElementTree as ET
     levels = [element.attrib['level'] for element in ET.fromstring(embedded_manifest(entry)).iter()
               if element.tag.endswith('requestedExecutionLevel')]
-    expected_level = 'asInvoker' if project == 'Installer' or profile == 'test' else 'requireAdministrator'
+    expected_level = 'asInvoker' if project in ('Installer', 'Uninstaller') or profile == 'test' else 'requireAdministrator'
     if levels != [expected_level]:
         raise ValueError('Published executable privilege differs from its role')
-    expected_subsystem = 2 if project in ('Host', 'Launcher') else 3
+    expected_subsystem = 3 if project == 'Installer' else 2
     if pe_subsystem(entry) != expected_subsystem:
         raise ValueError('Published executable subsystem differs from its GUI or console role')
     bundle['executionLevel'] = levels[0]

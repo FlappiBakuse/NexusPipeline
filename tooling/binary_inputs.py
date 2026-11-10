@@ -34,7 +34,7 @@ for projects in PROJECTS.values():
         projects.append("TargetGame")
 for group in ("storage", "storage-execution", "storage-android"):
     PROJECTS[group].append("AndroidTool")
-PROJECTS["storage"].extend(["ManagedExtension", "NexusPipeline.Maintenance"])
+PROJECTS["storage"].extend(["ManagedExtension", "NexusPipeline.Maintenance", "NexusPipeline.Installer"])
 
 
 def capture_binary_inputs(build_root, run_root, group, projects=None):

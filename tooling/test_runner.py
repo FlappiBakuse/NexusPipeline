@@ -193,7 +193,7 @@ def run_dotnet(source_root, build_root, run_root, group, fixture_volume_root, me
                    NEXUS_TARGET_GAME_FIXTURE_EXE=str(build_root / "build/bin/TargetGame/release/TargetGame.exe"),
                    NEXUS_PROCESS_FIXTURE_EXE=str(build_root / "build/bin/OwnedWriter/release/OwnedWriter.exe"),
                    NEXUS_TEST_HOST_EXE=str(build_root / "build/bin/NexusPipeline.Host/release/NexusPipeline.Host.exe"),
-                   NEXUS_TEST_MAINTENANCE_EXE=str(build_root / "build/bin/NexusPipeline.Maintenance/release/NexusPipeline.Maintenance.exe"),
+                   NEXUS_TEST_INSTALLER_EXE=str(build_root / "build/bin/NexusPipeline.Installer/release/NexusPipeline.Installer.exe"),
                    NEXUS_TEST_PYTHON_EXE=str(Path(sys.executable).resolve()))
     process = subprocess.run(command, env=env, cwd=source_root, capture_output=True,
                              encoding="utf-8", errors="replace")

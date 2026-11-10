@@ -25,6 +25,7 @@ OutputDir=@@OUTPUT@@
 OutputBaseFilename=NexusPipeline-v@@VERSION@@-win-x64-Setup
 Compression=lzma2
 SolidCompression=yes
+MergeDuplicateFiles=yes
 WizardStyle=modern
 DefaultDialogFontName=Microsoft YaHei UI
 LanguageDetectionMethod=uilanguage
@@ -84,6 +85,7 @@ Name: desktopicon; Description: "{cm:DesktopIcon}"; Flags: unchecked
 
 [Icons]
 Name: "{code:InstallerGroup}\NexusPipeline v@@VERSION@@"; Filename: "{app}\NexusPipeline.exe"; Check: NewInstallation
+Name: "{code:InstallerGroup}\NexusPipeline Uninstall"; Filename: "{app}\NexusPipeline.uninstall.exe"; Check: NewInstallation
 Name: "{code:InstallerDesktop}\NexusPipeline v@@VERSION@@"; Filename: "{app}\NexusPipeline.exe"; Tasks: desktopicon; Check: NewInstallation
 
 [Run]

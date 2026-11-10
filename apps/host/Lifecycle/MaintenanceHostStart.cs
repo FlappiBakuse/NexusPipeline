@@ -42,6 +42,9 @@ internal static class MaintenanceHostStart
             using var restored = bootstrap.Inputs.Operation.State == NexusPipeline.Core.Maintenance.HostUpdateState.Completed
                 ? MaintenanceStartupInputs.Hold(instance, observed, contracts, roots, verifier, binding, CancellationToken.None) : null;
             var helper = MaintenanceStartupPeers.RequireHelper(bootstrap, options.JobName, restored?.Restored);
+#if NEXUS_TEST_HOST
+            if (restored is null) HostUpdateTrust.RequireCandidateStartup(bootstrap.Inputs.Manifest.HostVersion);
+#endif
             using var producer = new NativeClientBinding(helper);
             using var lease = InstanceLease.Acquire(instance, contracts);
             void RequireProducer()

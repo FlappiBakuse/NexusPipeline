@@ -44,8 +44,7 @@ internal sealed class ExecutionRuntimeServices : IAsyncDisposable
         var inbox = new ExecutionAdmissionInbox();
         _retention = new(database, new(instance, database, contracts, lease, resources, recovery));
         Admission = new(instance, database, contracts, lease, resources, recovery, inbox, new(5, 5, 30),
-            judgementRuntime: new(PhysicalPathPolicy.NormalizeWithoutLinks(Environment.ProcessPath
-                ?? throw new IOException("host_process_path_unavailable")),
+            judgementRuntime: new(PhysicalPathPolicy.RuntimeProcessPath(),
                 JudgementRuntimeDiscovery.FindPython()), providers: providers);
         History = new(instance, database, contracts, lease);
         Notifications = new(instance, database, contracts, lease, resources, recovery, secrets);

@@ -17,13 +17,14 @@ internal static class StoreResponseReader
     }
 
     internal static async Task Artifact(HttpResponseMessage response, Stream destination, long length,
-        string sha256, CancellationToken cancellationToken, long maximumBytes = MaximumArtifactBytes)
+        string sha256, CancellationToken cancellationToken, long maximumBytes = MaximumArtifactBytes,
+        Action<long>? received = null)
     {
         if (maximumBytes is < 1 or > 1073741824 || length < 1 || length > maximumBytes || sha256.Length != 64 ||
             sha256.Any(character => character is not (>= '0' and <= '9' or >= 'a' and <= 'f')) || !destination.CanWrite)
             throw Invalid();
         RequireResponse(response, length, length);
-        await Copy(response, destination, length, length, sha256, cancellationToken);
+        await Copy(response, destination, length, length, sha256, cancellationToken, received);
     }
 
     private static void RequireResponse(HttpResponseMessage response, long maximum, long? expected)
@@ -35,7 +36,7 @@ internal static class StoreResponseReader
     }
 
     private static async Task Copy(HttpResponseMessage response, Stream destination, long maximum,
-        long? expected, string? sha256, CancellationToken cancellationToken)
+        long? expected, string? sha256, CancellationToken cancellationToken, Action<long>? received = null)
     {
         await using var input = await response.Content.ReadAsStreamAsync(cancellationToken);
         using var digest = sha256 is null ? null : IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
@@ -49,6 +50,7 @@ internal static class StoreResponseReader
             digest?.AppendData(buffer, 0, read);
             await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
             total += read;
+            received?.Invoke(total);
         }
         if (total == 0 || expected is { } exact && total != exact ||
             response.Content.Headers.ContentLength is { } declared && total != declared ||

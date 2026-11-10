@@ -33,12 +33,14 @@ def read_dependencies(root):
     return result
 
 
-def required_frameworks(application, installer=None):
+def required_frameworks(application, installer=None, uninstaller=None):
     result = {}
     programs = [(application / 'NexusPipeline.exe', 'Host'), (application / 'NexusPipeline.update.exe', 'Maintenance'),
                 (application / 'resources/desktop/NexusPipeline.Launcher.exe', 'Launcher')]
     if installer is not None:
         programs.append((installer, 'Installer'))
+    if uninstaller is not None:
+        programs.append((uninstaller, 'Uninstaller'))
     for path, project in programs:
         with path.open('rb') as stream:
             files = read_bundle(stream)
@@ -57,9 +59,9 @@ def required_frameworks(application, installer=None):
     return result
 
 
-def render_runtime(root, application, installer=None):
+def render_runtime(root, application, installer=None, uninstaller=None):
     dependencies = read_dependencies(root)
-    required = required_frameworks(application, installer)
+    required = required_frameworks(application, installer, uninstaller)
     rows = []
     for framework in FRAMEWORKS:
         item = dependencies[framework]

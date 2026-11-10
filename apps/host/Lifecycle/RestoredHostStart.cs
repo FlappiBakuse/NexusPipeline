@@ -6,7 +6,7 @@ using NexusPipeline.Platform.Storage.Journals;
 using NexusPipeline.Platform.Storage.Maintenance;
 using NexusPipeline.Platform.Storage.Sqlite;
 
-namespace NexusPipeline.Maintenance;
+namespace NexusPipeline.Host.Lifecycle;
 
 [SupportedOSPlatform("windows")]
 internal static class RestoredHostStart

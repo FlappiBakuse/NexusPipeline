@@ -6,6 +6,7 @@
   <Project Path="apps/launcher/NexusPipeline.Launcher.csproj" />
   <Project Path="apps/maintenance/NexusPipeline.Maintenance.csproj" />
   <Project Path="apps/installer/NexusPipeline.Installer.csproj" />
+  <Project Path="apps/uninstaller/NexusPipeline.Uninstaller.csproj" />
   <Project Path="tooling/boundaries/NexusPipeline.Boundaries.csproj" />
   <Project Path="tests/contracts/NexusPipeline.ContractTests.csproj" />
   <Project Path="tests/unit/NexusPipeline.CoreTests.csproj" />

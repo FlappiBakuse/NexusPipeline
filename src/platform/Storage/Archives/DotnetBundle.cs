@@ -10,13 +10,19 @@ internal static class DotnetBundle
     private static readonly byte[] Marker = Convert.FromHexString("8b1202b96a612038727b930214d7a03213f5b9e6efae3318ee3b2dce24b36aae");
     private const int MaximumImage = 2 * 1024 * 1024;
 
-    internal static byte[] ReadAssembly(Stream input, string name)
+    internal static byte[] ReadAssembly(Stream input, string name, bool standalone = false)
     {
         try
         {
             if (!input.CanSeek || input.Length is < 64 or > 268435456) throw Invalid();
             var files = ReadFiles(input);
             if (!files.TryGetValue(name, out var file) || file.Kind != 1 || file.Size > 67108864) throw Invalid();
+            if (standalone)
+            {
+                var prefix = Path.GetFileNameWithoutExtension(name);
+                if (files.Count != 3 || files.GetValueOrDefault(prefix + ".deps.json") is not { Kind: 3 } ||
+                    files.GetValueOrDefault(prefix + ".runtimeconfig.json") is not { Kind: 4 }) throw Invalid();
+            }
             input.Position = file.Offset;
             var bytes = new byte[checked((int)file.Size)];
             input.ReadExactly(bytes);

@@ -13,13 +13,15 @@ internal static class UpdateBuildProfile
     internal static void Require(UpdatePayloadManifest manifest, ArchivedFileTree contents, ImmutableBlobStore blobs, string profile)
     {
         if (manifest.Profile != profile) throw Invalid();
+        var host = manifest.Files.SingleOrDefault(file => file.RelativePath == manifest.HostEntry) ?? throw Invalid();
         foreach (var (entry, assembly) in new[] { (manifest.HostEntry, "NexusPipeline.Host.dll"),
             (manifest.MaintenanceEntry, "NexusPipeline.Maintenance.dll") })
         {
             var file = manifest.Files.SingleOrDefault(file => file.RelativePath == entry) ?? throw Invalid();
             var reference = contents.Contents.SingleOrDefault(blob => blob.Sha256 == file.Sha256 && blob.SizeBytes == file.SizeBytes) ?? throw Invalid();
             using var input = blobs.OpenVerified(reference);
-            RequireBundle(input, assembly, profile);
+            if (entry == manifest.MaintenanceEntry) RequireWindow(input, profile, host.Sha256);
+            else RequireBundle(input, assembly, profile);
         }
         if (manifest.Files.SingleOrDefault(file => file.RelativePath == manifest.LauncherEntry) is { } launcher)
         {
@@ -50,14 +52,24 @@ internal static class UpdateBuildProfile
     internal static void RequireProduction(Stream input)
         => Require(input, "production");
 
-    internal static void Require(Stream input, string requiredProfile)
+    internal static void RequireWindow(Stream input, string profile, string hostSha256)
+    {
+        using var managed = new MemoryStream(DotnetBundle.ReadAssembly(input, "NexusPipeline.Maintenance.dll", standalone: true), writable: false);
+        RequireAttributes(managed, profile, hostSha256);
+    }
+
+    internal static void Require(Stream input, string requiredProfile) => RequireAttributes(input, requiredProfile);
+
+    private static void RequireAttributes(Stream input, string requiredProfile, string? hostSha256 = null)
     {
         if (requiredProfile is not ("production" or "test")) throw Invalid();
         try
         {
             using var image = new PEReader(input, PEStreamOptions.LeaveOpen);
             if (!image.HasMetadata) throw Invalid();
-            var reader = image.GetMetadataReader(); var matches = 0;
+            var reader = image.GetMetadataReader();
+            var profileCount = 0;
+            var hostCount = 0;
             foreach (var handle in reader.GetAssemblyDefinition().GetCustomAttributes())
             {
                 var attribute = reader.GetCustomAttribute(handle);
@@ -68,11 +80,19 @@ internal static class UpdateBuildProfile
                 if (reader.GetString(type.Namespace) != "System.Reflection" || reader.GetString(type.Name) != "AssemblyMetadataAttribute") continue;
                 var value = reader.GetBlobReader(attribute.Value);
                 if (value.Length > 4096 || value.ReadUInt16() != 1) throw Invalid();
-                var key = value.ReadSerializedString(); var profile = value.ReadSerializedString();
-                if (key != "Nexus.BuildProfile") continue;
-                if (profile != requiredProfile || ++matches != 1 || value.RemainingBytes != 2 || value.ReadUInt16() != 0) throw Invalid();
+                var key = value.ReadSerializedString(); var text = value.ReadSerializedString();
+                if (key == "Nexus.BuildProfile")
+                {
+                    if (text != requiredProfile || ++profileCount != 1) throw Invalid();
+                }
+                else if (key == "Nexus.HostSha256" && hostSha256 is not null)
+                {
+                    if (text != hostSha256 || ++hostCount != 1) throw Invalid();
+                }
+                else continue;
+                if (value.RemainingBytes != 2 || value.ReadUInt16() != 0) throw Invalid();
             }
-            if (matches != 1) throw Invalid();
+            if (profileCount != 1 || hostSha256 is not null && hostCount != 1) throw Invalid();
         }
         catch (Exception error) when (error is BadImageFormatException or InvalidOperationException or ArgumentOutOfRangeException)
         { throw new IOException("update_payload_profile_invalid", error); }

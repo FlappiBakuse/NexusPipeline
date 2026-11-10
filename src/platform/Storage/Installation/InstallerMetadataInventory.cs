@@ -70,9 +70,14 @@ internal static class InstallerMetadataInventory
             }
         foreach (var name in new[] { InstallationAnchor.IdentityFile, InstallationAnchor.WorkerFile })
             AddIfPresent("manager", Path.Combine(paths.ManagerRoot, name));
-        foreach (var (role, directory) in new[] { ("desktop", paths.DesktopRoot), ("group", paths.GroupRoot) })
+        AddIfPresent("entry", Path.Combine(root, InstallationAnchor.PublicUninstaller));
+        foreach (var (role, shortcut) in new[]
         {
-            var shortcut = Path.Combine(directory, "NexusPipeline v0.18.0.lnk");
+            ("desktop", Path.Combine(paths.DesktopRoot, "NexusPipeline v0.18.0.lnk")),
+            ("group", Path.Combine(paths.GroupRoot, "NexusPipeline v0.18.0.lnk")),
+            ("group", Path.Combine(paths.GroupRoot, InstallationAnchor.UninstallShortcut))
+        })
+        {
             PhysicalPathPolicy.NormalizeWithoutLinks(shortcut);
             if (!File.Exists(shortcut)) continue;
             var held = CaptureFile(role, shortcut);
@@ -141,14 +146,16 @@ internal static class InstallerMetadataInventory
         => PhysicalPathPolicy.NormalizeWithoutLinks(role switch
         {
             "uninstall" => Path.Combine(root, "uninstall"), "manager" => paths.ManagerRoot,
-            "desktop" => paths.DesktopRoot, "group" => paths.GroupRoot, _ => throw InstallationIdentityCodec.Invalid()
+            "desktop" => paths.DesktopRoot, "group" => paths.GroupRoot, "entry" => root, _ => throw InstallationIdentityCodec.Invalid()
         });
 
     internal static bool KnownFile(string role, string name) => role switch
     {
         "uninstall" => name is "unins000.exe" or "unins000.dat" or "unins000.msg",
         "manager" => name is InstallationAnchor.IdentityFile or InstallationAnchor.WorkerFile,
-        "desktop" or "group" => name == "NexusPipeline v0.18.0.lnk",
+        "desktop" => name == "NexusPipeline v0.18.0.lnk",
+        "group" => name is "NexusPipeline v0.18.0.lnk" or InstallationAnchor.UninstallShortcut,
+        "entry" => name == InstallationAnchor.PublicUninstaller,
         _ => false
     };
 

@@ -184,11 +184,9 @@ var
 begin
   if CurStep <> ssPostInstall then Exit;
   Action := 'register --root "' + InstallerRoot + '" --transaction ' + InstallerTransaction;
-  if InstallerTransition then begin
-    ExtractTemporaryFile('nexus-installer-payload.zip');
+  if InstallerTransition then
     Action := 'apply-transition --root "' + InstallerRoot + '" --transaction ' + InstallerTransaction +
-      ' --archive "' + ExpandConstant('{tmp}\nexus-installer-payload.zip') + '"' + TransitionWork;
-  end;
+      ' --payload-root "' + ExpandConstant('{tmp}\nexus-transition-payload') + '"' + TransitionWork;
   if not InstallerPrepared or not InstallerCall(Action) then
     RaiseException(CustomMessage('OwnershipPending'));
   InstallerQualified := True;
@@ -219,7 +217,7 @@ end;
 
 function InitializeUninstall: Boolean;
 var
-  Source: String;
+  Source, Entry: String;
   Choice: Integer;
 begin
   Result := False;
@@ -231,6 +229,10 @@ begin
     InstallerHelper := ExpandConstant('{tmp}\nexus-installer-remove.exe');
     if not FileCopy(Source, InstallerHelper, True) then RaiseException(CustomMessage('OwnershipFailed'));
     InstallerRoot := ExpandConstant('{app}');
+    Entry := AddBackslash(InstallerRoot) + 'NexusPipeline.uninstall.exe';
+    if DirExists(Entry) or HasLinkInPath(Entry) or
+      (FileExists(Entry) and (CompareText(GetSHA256OfFile(Entry), '@@UNINSTALL_SHA256@@') <> 0)) then
+      RaiseException(CustomMessage('OwnershipFailed'));
     AcquireGuard('uninstall-check --root "' + InstallerRoot + '"', True);
     DeleteInstanceData := RemovalPending;
     Choice := IDYES;

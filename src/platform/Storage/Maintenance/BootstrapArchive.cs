@@ -4,15 +4,15 @@ namespace NexusPipeline.Platform.Storage.Maintenance;
 
 internal static class BootstrapArchive
 {
-    internal static ArchivedFileTree Select(ArchivedFileTree candidate, string maintenanceEntry)
+    internal static ArchivedFileTree Select(ArchivedFileTree candidate, string entryPath)
     {
         FileTreeArchive.ValidateArchive(candidate);
-        PhysicalPathPolicy.ValidateRelativePath(maintenanceEntry);
-        if (!candidate.Snapshot.Entries.Any(entry => entry.RelativePath == maintenanceEntry && entry.Kind == FileObjectKind.File))
+        PhysicalPathPolicy.ValidateRelativePath(entryPath);
+        if (!candidate.Snapshot.Entries.Any(entry => entry.RelativePath == entryPath && entry.Kind == FileObjectKind.File))
             throw new IOException("maintenance_bootstrap_entry_missing");
         var entries = candidate.Snapshot.Entries.Where(entry => entry.RelativePath.Length == 0 ||
-            entry.RelativePath == maintenanceEntry || entry.Kind == FileObjectKind.Directory &&
-            maintenanceEntry.StartsWith(entry.RelativePath + "/", StringComparison.Ordinal)).ToArray();
+            entry.RelativePath == entryPath || entry.Kind == FileObjectKind.Directory &&
+            entryPath.StartsWith(entry.RelativePath + "/", StringComparison.Ordinal)).ToArray();
         var paths = entries.Select(entry => entry.RelativePath).ToHashSet(StringComparer.Ordinal);
         var hashes = entries.Where(entry => entry.Kind == FileObjectKind.File).Select(entry => entry.Sha256).ToHashSet(StringComparer.Ordinal);
         var result = new ArchivedFileTree(new(candidate.Snapshot.Shape, Array.AsReadOnly(entries)),

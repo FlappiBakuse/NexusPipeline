@@ -337,7 +337,13 @@ internal static class ApplicationHost
                 address = advertised, processId = Environment.ProcessId,
                 desktopVerificationKey = desktop?.VerificationKeyBase64
             }));
-            await app.WaitForShutdownAsync();
+            using var windowStop = CancellationTokenSource.CreateLinkedTokenSource(app.Lifetime.ApplicationStopping);
+            var updateWindow = !startupUpdating && UpdateWindowHost.IsDefault(payloadRoots.HostPayloadRoot, instance)
+                ? UpdateWindowHost.ServeAsync(payloadRoots.HostPayloadRoot, updates, maintenance, settingsService,
+                    windowIntent ?? new(UpdateWindowMode.Headless, false, "/"), windowStop.Token)
+                : Task.CompletedTask;
+            try { await app.WaitForShutdownAsync(); }
+            finally { windowStop.Cancel(); await updateWindow; }
         }
         finally
         {

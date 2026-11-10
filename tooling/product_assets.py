@@ -140,12 +140,11 @@ def installer(root, application, assembly, version, output, compiler):
     for item in assembly['files']:
         relative = Path(item['path'])
         source = application / relative
-        destination = '{app}' if relative.parent == Path('.') else '{app}\\' + str(relative.parent)
-        rows.append(f'Source: "{source}"; DestDir: "{destination}"; Flags: ignoreversion; Check: NewInstallation')
-    transition = output / 'nexus-installer-payload.zip'
-    write_archive(transition, {item['path']: application / item['path'] for item in assembly['files']
-        if not item['path'].startswith('plugins/')})
-    rows.append(f'Source: "{transition}"; DestName: "nexus-installer-payload.zip"; Flags: dontcopy')
+        suffix = '' if relative.parent == Path('.') else '\\' + str(relative.parent)
+        rows.append(f'Source: "{source}"; DestDir: "{{app}}{suffix}"; Flags: ignoreversion; Check: NewInstallation')
+        if not item['path'].startswith('plugins/'):
+            rows.append(f'Source: "{source}"; DestDir: "{{tmp}}\\nexus-transition-payload{suffix}"; '
+                        'Flags: ignoreversion; Check: not NewInstallation')
     pointer = assembly['publishReceipt']
     receipt = Path(pointer['receipt'])
     if hash_file(receipt) != pointer['sha256']:
@@ -159,10 +158,18 @@ def installer(root, application, assembly, version, output, compiler):
     if worker['file']['path'] != 'NexusPipeline.Installer.exe' or worker_path.stat().st_size != worker['file']['sizeBytes'] or hash_file(worker_path) != worker['file']['sha256']:
         raise ValueError('Private installer worker changed')
     rows.append(f'Source: "{worker_path}"; DestName: "nexus-installer-input.exe"; Flags: dontcopy')
+    facade = publication['uninstallerEntry']
+    facade_path = Path(facade['path'])
+    require_no_links(facade_path)
+    if (any(character in str(facade_path) for character in ('"', '\n', '\r', ';')) or
+            facade['workerSha256'] != worker['file']['sha256'] or facade['file']['path'] != 'NexusPipeline.Uninstaller.exe' or
+            facade_path.stat().st_size != facade['file']['sizeBytes'] or hash_file(facade_path) != facade['file']['sha256']):
+        raise ValueError('Public uninstaller entry changed')
+    rows.append(f'Source: "{facade_path}"; DestDir: "{{app}}"; DestName: "NexusPipeline.uninstall.exe"; Flags: ignoreversion; Check: NewInstallation')
     rows.append(f'Source: "{application / MANIFEST}"; DestName: "nexus-installer-target.json"; Flags: dontcopy')
     values['FILES'] = '\n'.join(rows)
-    values['RUNTIME_CODE'] = render_runtime(root, application, worker_path)
-    values.update(render_lifecycle(root, application, {**assembly, 'installerWorker': worker}))
+    values['RUNTIME_CODE'] = render_runtime(root, application, worker_path, facade_path)
+    values.update(render_lifecycle(root, application, {**assembly, 'installerWorker': worker, 'uninstallerEntry': facade}))
     script = (root / 'tooling/installer.iss').read_text(encoding='utf-8')
     for key, value in values.items():
         script = script.replace('@@' + key + '@@', value)

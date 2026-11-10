@@ -11,6 +11,7 @@ internal sealed class InstallerTargetManifest
     internal string Sha256 { get; }
     internal ReadOnlyMemory<byte> Bytes { get; }
     internal string ProductVersion => Manifest.HostVersion;
+    internal long SizeBytes => Manifest.Files.Sum(file => file.SizeBytes) + Bytes.Length;
     private ApplicationManifest Manifest { get; }
 
     private InstallerTargetManifest(string profile, string digest, byte[] bytes, ApplicationManifest manifest)

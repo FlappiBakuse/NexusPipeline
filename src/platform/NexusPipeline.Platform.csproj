@@ -10,7 +10,6 @@
     <InternalsVisibleTo Include="NexusPipeline.WindowsTests" />
     <InternalsVisibleTo Include="OwnedWriter" />
     <InternalsVisibleTo Include="NexusPipeline.Host" />
-    <InternalsVisibleTo Include="NexusPipeline.Maintenance" />
     <InternalsVisibleTo Include="NexusPipeline.Installer" />
     <PackageReference Include="Jint" Version="4.17.0" />
     <PackageReference Include="JsonSchema.Net" Version="9.4.1" />

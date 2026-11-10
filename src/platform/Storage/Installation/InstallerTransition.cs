@@ -9,16 +9,17 @@ internal sealed class InstallerTransition(InstallerPaths paths, string profile)
 {
     private readonly InstallerCheckpointStore _store = new(paths, profile);
 
-    internal void Apply(string root, Guid transactionId, string archive, string workRoot)
+    internal void Apply(string root, Guid transactionId, string payloadRoot, string workRoot)
     {
         var frame = _store.RequireCurrentSetup(root, transactionId);
         InstallerSourceBinding.Require(frame);
+        if (frame.Stage == "payload") new InstallerOwnedRuntime(paths, profile).RequireExternalRoot(frame.Root, payloadRoot, workRoot);
         var runtime = new InstallerRetainedRuntime(paths).RequireRuntime(frame.OwnedSource!.Identity);
         using var lease = InstanceLease.AcquireInstaller(runtime, new ContractReader(), frame.SetupOwner);
         _ = new InstallerRuntimeAdmission(runtime, new(), new(root, Path.Combine(runtime.RuntimeRoot, "extensions"))).Open(lease, workRoot);
         if (frame.Stage == "payload")
         {
-            var target = new InstallerTargetTree(frame).Extract(archive);
+            var target = new InstallerTargetTree(frame).Stage(payloadRoot);
             try { frame = _store.FreezeTarget(root, transactionId, target); }
             catch
             {
@@ -64,7 +65,7 @@ internal sealed class InstallerTransition(InstallerPaths paths, string profile)
         InstallerRuntimeGate.RequireHeld(frame.Root);
         frame = _store.RequireStopped(frame.Root, frame.TransactionId);
         InstallerSourceBinding.Require(frame);
-        new InstallerOwnedRuntime(paths, profile).RequireInspectionRoot(frame.Root, workRoot);
+        new InstallerOwnedRuntime(paths, profile).RequireExternalRoot(frame.Root, workRoot);
         foreach (var name in new[] { ApplicationTree.HostEntry, ApplicationTree.LauncherEntry, ApplicationTree.MaintenanceEntry, ApplicationTree.DesktopEntry })
             if (File.Exists(Path.Combine(frame.Root, name))) ExclusiveProgramAdmission.RequireStopped(Path.Combine(frame.Root, name));
         var runtime = new InstallerRetainedRuntime(paths).RequireRuntime(frame.OwnedSource!.Identity);

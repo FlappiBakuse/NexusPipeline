@@ -82,11 +82,11 @@ class CiPlanTests(GitFixture):
                  ("apps/desktop/main.cjs", [], False, True, []),
                  ("apps/installer/Program.cs", ["NexusPipeline.Installer"], False, False, []),
                  ("apps/launcher/Program.cs", ["NexusPipeline.Launcher"], False, False, []),
-                 ("apps/maintenance/InstallerEntry.cs", ["NexusPipeline.Host", "NexusPipeline.Installer", "NexusPipeline.Launcher", "NexusPipeline.Maintenance"], True, False, []),
-                 ("src/core/a.cs", ["NexusPipeline.Host", "NexusPipeline.Installer", "NexusPipeline.Launcher", "NexusPipeline.Maintenance"], True, False, []),
-                 ("sdk/frontend/a.ts", ["NexusPipeline.Host", "NexusPipeline.Installer", "NexusPipeline.Launcher", "NexusPipeline.Maintenance"], True, False,
+                 ("apps/uninstaller/Program.cs", ["NexusPipeline.Uninstaller"], False, False, []),
+                 ("src/core/a.cs", ["NexusPipeline.Host", "NexusPipeline.Installer", "NexusPipeline.Launcher", "NexusPipeline.Maintenance", "NexusPipeline.Uninstaller"], True, False, []),
+                 ("sdk/frontend/a.ts", ["NexusPipeline.Host", "NexusPipeline.Installer", "NexusPipeline.Launcher", "NexusPipeline.Maintenance", "NexusPipeline.Uninstaller"], True, False,
                   ["@bundled"]),
-                 ("unknown.props", ["NexusPipeline.Host", "NexusPipeline.Installer", "NexusPipeline.Launcher", "NexusPipeline.Maintenance"], True, True,
+                 ("unknown.props", ["NexusPipeline.Host", "NexusPipeline.Installer", "NexusPipeline.Launcher", "NexusPipeline.Maintenance", "NexusPipeline.Uninstaller"], True, True,
                   ["@bundled"])]
         for root in (HOST,):
             with production_tools(root) as owner:

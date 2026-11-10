@@ -63,6 +63,7 @@ def plugins(root):
 def host_scope(paths):
     scope = {"projects": [], "web": False, "desktop": False, "extensions": []}
     projects = set()
+    host_projects = ["NexusPipeline." + name for name in ("Host", "Launcher", "Installer", "Maintenance", "Uninstaller")]
     for path in paths:
         if documentation(path):
             continue
@@ -72,15 +73,17 @@ def host_scope(paths):
             scope["desktop"] = True
         elif path.startswith("apps/installer/"):
             projects.add("NexusPipeline.Installer")
+        elif path.startswith("apps/uninstaller/"):
+            projects.add("NexusPipeline.Uninstaller")
         elif path.startswith("apps/launcher/"):
             projects.add("NexusPipeline.Launcher")
         elif path.startswith(("sdk/", "contracts/")):
-            projects.update(["NexusPipeline.Host", "NexusPipeline.Launcher", "NexusPipeline.Installer", "NexusPipeline.Maintenance"])
+            projects.update(host_projects)
             scope.update(web=True, extensions=DEFAULTS)
         elif path.startswith(("src/", "apps/host/", "apps/maintenance/")):
-            projects.update(["NexusPipeline.Host", "NexusPipeline.Launcher", "NexusPipeline.Installer", "NexusPipeline.Maintenance"])
+            projects.update(host_projects)
         else:
-            projects.update(["NexusPipeline.Host", "NexusPipeline.Launcher", "NexusPipeline.Installer", "NexusPipeline.Maintenance"])
+            projects.update(host_projects)
             scope.update(web=True, desktop=True, extensions=DEFAULTS)
     scope["projects"] = sorted(projects)
     scope["web"] |= "NexusPipeline.Host" in projects

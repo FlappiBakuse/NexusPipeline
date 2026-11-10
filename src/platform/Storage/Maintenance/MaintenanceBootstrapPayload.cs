@@ -15,7 +15,7 @@ internal sealed class MaintenanceBootstrapPayload : IDisposable
     private readonly FileTreeSnapshot _snapshot;
     private TreeReadLease? _tree;
     internal string Root { get; }
-    internal string HelperPath => PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(Root, _inputs.Manifest.MaintenanceEntry));
+    internal string HelperPath => PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(Root, _inputs.Manifest.HostEntry));
     internal MaintenanceHandoffInputs Inputs => _inputs;
 
     private MaintenanceBootstrapPayload(MaintenanceHandoffInputs inputs, string root, TreeReadLease tree,
@@ -39,7 +39,7 @@ internal sealed class MaintenanceBootstrapPayload : IDisposable
             {
                 if (File.Exists(path)) throw Invalid();
                 _ = new FileTreeArchive(new(SnapshotBudget.Default), new(inputs.Instance, contracts))
-                    .MaterializeNew(BootstrapArchive.Select(inputs.Plan.Candidate, inputs.Manifest.MaintenanceEntry), path, cancellation);
+                    .MaterializeNew(BootstrapArchive.Select(inputs.Plan.Candidate, inputs.Manifest.HostEntry), path, cancellation);
             }
             var result = HoldTree(inputs, path, cancellation); lease.VerifyHeld(lease.Instance); return result;
         }
@@ -67,15 +67,15 @@ internal sealed class MaintenanceBootstrapPayload : IDisposable
     internal void RequireHelper(ProcessIdentity actual)
     {
         RequireCurrent();
-        var expected = _inputs.Manifest.Files.Single(file => file.RelativePath == _inputs.Manifest.MaintenanceEntry);
+        var expected = _inputs.Manifest.Files.Single(file => file.RelativePath == _inputs.Manifest.HostEntry);
         if (!StringComparer.OrdinalIgnoreCase.Equals(actual.ImagePath, HelperPath) || actual.ImageSha256 != expected.Sha256) throw Invalid();
         using var image = new FileStream(HelperPath, FileMode.Open, FileAccess.Read, FileShare.Read);
-        UpdateBuildProfile.RequireBundle(image, "NexusPipeline.Maintenance.dll", _inputs.Manifest.Profile);
+        UpdateBuildProfile.RequireBundle(image, "NexusPipeline.Host.dll", _inputs.Manifest.Profile);
     }
 
     private static MaintenanceBootstrapPayload HoldTree(MaintenanceHandoffInputs inputs, string path, CancellationToken cancellation)
     {
-        var expected = BootstrapArchive.Select(inputs.Plan.Candidate, inputs.Manifest.MaintenanceEntry);
+        var expected = BootstrapArchive.Select(inputs.Plan.Candidate, inputs.Manifest.HostEntry);
         var actual = new FileTreeScanner(SnapshotBudget.Default).Capture(path, cancellation);
         if (actual.Shape != expected.Snapshot.Shape || !actual.Entries.SequenceEqual(expected.Snapshot.Entries)) throw Invalid();
         PhysicalTreeIdentity.RequireSingleLinks(path, actual);

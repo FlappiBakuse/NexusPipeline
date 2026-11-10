@@ -21,8 +21,10 @@ internal static class InstallerShortcut
             var status = link.GetPath(target, target.Capacity, IntPtr.Zero, 4);
             if (status < 0) Marshal.ThrowExceptionForHR(status);
             link.GetArguments(arguments, arguments.Capacity);
+            string[] allowed = Path.GetFileName(path) == InstallationAnchor.UninstallShortcut
+                ? [InstallationAnchor.PublicUninstaller] : [ApplicationTree.HostEntry, ApplicationTree.LauncherEntry];
             if (status != 0 || target.Length == 0 || arguments.Length != 0 ||
-                !new[] { ApplicationTree.HostEntry, ApplicationTree.LauncherEntry }.Any(entry => StringComparer.OrdinalIgnoreCase.Equals(
+                !allowed.Any(entry => StringComparer.OrdinalIgnoreCase.Equals(
                     PhysicalPathPolicy.NormalizeWithoutLinks(target.ToString()), Path.Combine(root, entry))))
                 throw InstallationIdentityCodec.Invalid();
         }

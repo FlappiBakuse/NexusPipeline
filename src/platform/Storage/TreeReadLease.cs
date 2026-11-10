@@ -28,10 +28,10 @@ internal sealed class TreeReadLease : IDisposable
         => AcquireCore(target, parentIdentity, before, application: true);
 
     internal static TreeReadLease AcquireApplication(string target, PhysicalObjectIdentity parentIdentity, FileTreeSnapshot snapshot,
-        IReadOnlyList<PhysicalTreeObject> objects)
+        IReadOnlyList<PhysicalTreeObject> objects, bool exclusiveRoot)
     {
         ApplicationTree.Validate(snapshot, complete: true);
-        return AcquireSnapshot(target, parentIdentity, snapshot, objects, application: true);
+        return AcquireSnapshot(target, parentIdentity, snapshot, objects, application: !exclusiveRoot);
     }
 
     private static TreeReadLease AcquireCore(string target, PhysicalObjectIdentity parentIdentity, ArchivedFileTree before, bool application)

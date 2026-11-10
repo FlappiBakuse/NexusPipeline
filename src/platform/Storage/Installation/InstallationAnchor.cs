@@ -12,6 +12,8 @@ internal sealed class InstallationAnchor
     internal const string IdentityFile = "identity.protected";
     internal const string WorkerFile = "nexus-installer-worker.exe";
     internal const string EngineEntry = "uninstall/unins000.exe";
+    internal const string PublicUninstaller = "NexusPipeline.uninstall.exe";
+    internal const string UninstallShortcut = "NexusPipeline Uninstall.lnk";
     private static readonly string[] Values = ["ApplicationRoot", "InstallationId", "IdentitySha256"];
     private readonly string _manager;
     private readonly string _registry;

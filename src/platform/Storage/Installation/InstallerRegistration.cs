@@ -134,11 +134,11 @@ internal sealed class InstallerRegistration(InstallerPaths paths, string profile
         _store.Create(destination.Root, transactionId, manifestSha256, setup, workerSha256, target);
     }
 
-    internal void ApplyTransition(string root, Guid transactionId, string archive, string workRoot)
+    internal void ApplyTransition(string root, Guid transactionId, string payloadRoot, string workRoot)
     {
         var frame = _store.RequireCurrentSetup(root, transactionId);
         if (frame.WorkerSha256 != RequireWorker()) throw InstallationIdentityCodec.Invalid();
-        new InstallerTransition(paths, profile).Apply(root, transactionId, archive, workRoot);
+        new InstallerTransition(paths, profile).Apply(root, transactionId, payloadRoot, workRoot);
     }
 
     internal InstallationIdentity Register(string root, Guid transactionId)

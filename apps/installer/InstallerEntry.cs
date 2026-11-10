@@ -2,14 +2,15 @@ using System.Diagnostics;
 using System.Runtime.Versioning;
 using System.Text.Json;
 using NexusPipeline.Platform.Processes;
+using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Installation;
 
-namespace NexusPipeline.Maintenance;
+namespace NexusPipeline.Installer;
 
 [SupportedOSPlatform("windows")]
 internal static class InstallerEntry
 {
-    internal static int Run(string[] args, string? workerPath = null)
+    internal static int Run(string[] args, string workerPath)
     {
         try
         {
@@ -100,7 +101,7 @@ internal static class InstallerEntry
         }
     }
 
-    private static int? Transition(string[] args, string? workerPath)
+    private static int? Transition(string[] args, string workerPath)
     {
         if (args is ["installer-state", "recover-transition", "--root", var recoveredRoot, "--work-root", var recoveredWork])
         {
@@ -108,15 +109,19 @@ internal static class InstallerEntry
             return 0;
         }
         if (args is ["installer-state", "apply-transition", "--root", var appliedRoot, "--transaction", var appliedId,
-            "--archive", var archive, "--work-root", var appliedWork] && Guid.TryParseExact(appliedId, "D", out var appliedTransaction))
+            "--payload-root", var payload, "--work-root", var appliedWork] && Guid.TryParseExact(appliedId, "D", out var appliedTransaction))
         {
-            Registration(workerPath).ApplyTransition(appliedRoot, appliedTransaction, archive, appliedWork);
+            if (!StringComparer.OrdinalIgnoreCase.Equals(payload, Path.Combine(Path.GetDirectoryName(workerPath)!, "nexus-transition-payload")))
+                throw new IOException("installer_payload_root_unbound");
+            Registration(workerPath).ApplyTransition(appliedRoot, appliedTransaction, payload, appliedWork);
             return 0;
         }
         if (args is ["installer-state", "begin-transition", "--root", var root, "--transaction", var id, "--manifest", var digest,
             "--manifest-file", var manifest, "--work-root", var work] && Guid.TryParseExact(id, "D", out var transaction))
         {
-            var prepared = Registration(workerPath).BeginTransition(root, transaction, Target(manifest, digest), Parent(), work);
+            var target = Target(manifest, digest);
+            RequireTransitionSpace(root, Path.GetDirectoryName(workerPath)!, target);
+            var prepared = Registration(workerPath).BeginTransition(root, transaction, target, Parent(), work);
             Console.WriteLine(JsonSerializer.Serialize(new { format = "nexus.installer.transition-preparation", version = 1,
                 prepared.TransactionId, installationId = prepared.OwnedSource!.Identity.InstallationId,
                 runtimeId = prepared.OwnedSource.Identity.RuntimeId, sourceManifestSha256 = prepared.OwnedSource.Identity.ManifestSha256,
@@ -131,6 +136,18 @@ internal static class InstallerEntry
             return 0;
         }
         return null;
+    }
+
+    private static void RequireTransitionSpace(string application, string temporary, InstallerTargetManifest target)
+    {
+        var root = PhysicalPathPolicy.NormalizeWithoutLinks(application);
+        var appVolume = PhysicalObjectIdentity.Read(root).VolumeSerial;
+        var tempVolume = PhysicalObjectIdentity.Read(temporary).VolumeSerial;
+        var appFree = new DriveInfo(Path.GetPathRoot(root)!).AvailableFreeSpace;
+        var tempFree = new DriveInfo(Path.GetPathRoot(temporary)!).AvailableFreeSpace;
+        var required = appVolume == tempVolume ? 2 * target.SizeBytes : target.SizeBytes;
+        if (appFree < required || tempFree < required)
+            throw new IOException("installer_transition_space_insufficient");
     }
 
     private static int Inspect(string action, string root)
@@ -188,8 +205,8 @@ internal static class InstallerEntry
     private const string Profile = "production";
 #endif
 
-    private static InstallerRegistration Registration(string? workerPath)
+    private static InstallerRegistration Registration(string workerPath)
     {
-        return new(InstallerPaths.Current(), Profile, workerPath ?? throw new IOException("installer_worker_required"));
+        return new(InstallerPaths.Current(), Profile, workerPath);
     }
 }

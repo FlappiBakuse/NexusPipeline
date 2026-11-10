@@ -142,26 +142,6 @@ internal sealed class PublishedUpdateInputs : IDisposable
             new(desktop ? UpdateWindowMode.Desktop : UpdateWindowMode.Headless, desktop, desktop ? "/settings" : "/"));
     }
 
-    internal FrozenPayloadApply BindFailedCandidate(RuntimeInstance instance, StateDatabase database,
-        FrozenPayloadApply plan, string candidate, HostUpdateTiming timing, bool desktop)
-    {
-        var path = Path.Combine(candidate, ApplicationTree.ManifestPath);
-        var manifest = JsonNode.Parse(File.ReadAllBytes(path))!;
-        var broken = Path.Combine(candidate, ApplicationTree.HostEntry);
-        SingleFileFixture.FailStartup(broken);
-        var item = manifest["files"]!.AsArray().Single(item =>
-            item!["path"]!.GetValue<string>() == ApplicationTree.HostEntry)!;
-        item["sizeBytes"] = new FileInfo(broken).Length;
-        item["sha256"] = Digest(File.ReadAllBytes(broken));
-        var bytes = JsonSerializer.SerializeToUtf8Bytes(manifest);
-        File.WriteAllBytes(path, bytes);
-        var archive = Path.Combine(Path.GetDirectoryName(candidate)!, "failed-candidate.zip");
-        ApplicationPayloadSeed.Archive(candidate, archive, bytes);
-        return UpdateSourceSeed.BindArchive(instance, database, plan, candidate, archive, bytes,
-            UpdateSourceSeed.StoreBinding(), "0.18.0", "test", timing,
-            new(desktop ? UpdateWindowMode.Desktop : UpdateWindowMode.Headless, desktop, desktop ? "/settings" : "/"));
-    }
-
     internal void VerifyPayload(string root, bool derived = true, bool bundled = true)
     {
         var files = _assembly.RootElement.GetProperty("files").EnumerateArray()

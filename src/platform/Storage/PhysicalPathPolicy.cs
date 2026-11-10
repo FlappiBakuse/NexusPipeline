@@ -2,13 +2,18 @@ namespace NexusPipeline.Platform.Storage;
 
 internal static class PhysicalPathPolicy
 {
-    internal static string RuntimeApplicationDirectory()
+    internal static string RuntimeApplicationDirectory() =>
+        NormalizeWithoutLinks(Path.TrimEndingDirectorySeparator(WithoutNativePrefix(AppContext.BaseDirectory)));
+
+    internal static string RuntimeProcessPath() => NormalizeWithoutLinks(WithoutNativePrefix(
+        Environment.ProcessPath ?? throw new IOException("host_process_path_unavailable")));
+
+    private static string WithoutNativePrefix(string path)
     {
-        var path = AppContext.BaseDirectory;
-        // A native apphost can give the CLR a Win32-prefixed base directory; external inputs stay strict.
+        // A native apphost can report its own paths using the Win32 DOS prefix.
         if (path.StartsWith("\\\\?\\", StringComparison.Ordinal) && path.Length >= 7 &&
-            char.IsAsciiLetter(path[4]) && path[5] == ':' && path[6] == '\\') path = path[4..];
-        return NormalizeWithoutLinks(Path.TrimEndingDirectorySeparator(path));
+            char.IsAsciiLetter(path[4]) && path[5] == ':' && path[6] == '\\') return path[4..];
+        return path;
     }
 
     internal static string NativePath(string path)

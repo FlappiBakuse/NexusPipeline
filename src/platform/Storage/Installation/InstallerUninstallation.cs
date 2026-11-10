@@ -16,6 +16,29 @@ internal sealed class InstallerUninstallation(InstallerPaths paths, string profi
     private readonly InstallerCheckpointStore _store = new(paths, profile, "ownership");
     private readonly InstallerDataStore _data = new(paths, profile);
 
+    internal ProcessIdentityLease HoldEngine(string root, string workerPath)
+    {
+        root = PhysicalPathPolicy.NormalizeWithoutLinks(root);
+        var identity = _data.Exists ? InstallationIdentityCodec.Unseal(_data.Read(root).Installation, root) : Original(root).Identity;
+        var worker = Path.Combine(paths.ManagerRoot, InstallationAnchor.WorkerFile);
+        var engine = PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(root, InstallationAnchor.EngineEntry));
+        var registry = InstallerMetadataInventory.CaptureRegistry(paths.UninstallRegistryKey);
+        if (identity.State != "active" || PhysicalObjectIdentity.Read(root) != identity.RootIdentity ||
+            !StringComparer.OrdinalIgnoreCase.Equals(workerPath, worker) ||
+            registry.Values.SingleOrDefault(value => value.Name == "UninstallString")?.Text != "\"" + engine + "\"")
+            throw InstallationIdentityCodec.Invalid();
+        RequireFile(worker, identity.Worker);
+        PhysicalObjectIdentity.RequireSingleLink(engine);
+        var hold = ProcessIdentityLease.HoldImage(engine);
+        try
+        {
+            if (hold.Sha256 != identity.NativeEngine.Sha256 ||
+                PhysicalObjectIdentity.Read(engine) != identity.NativeEngine.Identity) throw InstallationIdentityCodec.Invalid();
+            return hold;
+        }
+        catch { hold.Dispose(); throw; }
+    }
+
     internal (string GuardName, bool PendingData) Check(string root, ProcessIdentity native)
     {
         if (_data.Exists)
@@ -156,6 +179,13 @@ internal sealed class InstallerUninstallation(InstallerPaths paths, string profi
     {
         if (_data.Exists) throw new IOException("installer_data_removal_pending");
         InstallerCheckpointStore.RequireCaller(native);
+        var (identity, pending) = Original(root);
+        RequireHandoff(identity, native, pending is not null, data: false, finishing: false);
+        return (identity, pending);
+    }
+
+    private (InstallationIdentity Identity, InstallerCheckpoint? Pending) Original(string root)
+    {
         InstallerCheckpoint? pending = null;
         InstallationIdentity identity;
         if (Directory.Exists(Path.Combine(paths.ManagerRoot, "metadata-checkpoint")))
@@ -168,7 +198,6 @@ internal sealed class InstallerUninstallation(InstallerPaths paths, string profi
                 throw InstallationIdentityCodec.Invalid();
         }
         else identity = new InstallationAnchor(paths.ManagerRoot, paths.RegistryKey).Read(root) ?? throw InstallationIdentityCodec.Invalid();
-        RequireHandoff(identity, native, pending is not null, data: false, finishing: false);
         return (identity, pending);
     }
 
@@ -217,7 +246,7 @@ internal sealed class InstallerUninstallation(InstallerPaths paths, string profi
             InstallerMetadataInventory.CaptureRegistry(paths.UninstallRegistryKey).Exists)
             throw new IOException("installer_native_removal_pending");
         var before = InstallerSnapshotCodec.Decode(intent.Metadata, root);
-        foreach (var file in before.Files.Where(file => file.Role is "desktop" or "group"))
+        foreach (var file in before.Files.Where(file => file.Role is "desktop" or "group" or "entry"))
         {
             var path = Path.Combine(InstallerMetadataInventory.DirectoryPath(root, paths, file.Role), file.Name);
             if (File.Exists(path) || Directory.Exists(path)) throw new IOException("installer_native_removal_pending");

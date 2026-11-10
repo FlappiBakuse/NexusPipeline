@@ -36,6 +36,9 @@ internal sealed class HostUpdateService : IAsyncDisposable
         {
             _verifier = new(contracts, trust.Policy);
             _feeds = new(instance, database, lease, resources, contracts, _verifier);
+#if NEXUS_TEST_HOST
+            createClient = HostUpdateTrust.FixtureTransport(createClient);
+#endif
             _transport = new(trust.Policy, createClient);
         }
     }
@@ -60,7 +63,8 @@ internal sealed class HostUpdateService : IAsyncDisposable
         finally { _serial.Release(); }
     }
 
-    internal async Task<HostUpdateOperation> PrepareAsync(HostUpdateRequest request, CancellationToken cancellation)
+    internal async Task<HostUpdateOperation> PrepareAsync(HostUpdateRequest request, CancellationToken cancellation,
+        Action<long, long>? received = null)
     {
         RequireAvailable();
         var identity = UpdateRequestIdentity.Create(request);
@@ -85,7 +89,7 @@ internal sealed class HostUpdateService : IAsyncDisposable
                 ?? throw new IOException("maintenance_preparation_unavailable");
             var accepted = _feeds!.RequireRelease(root, request.Feed, request.HostVersion);
             using var download = await OwnedUpdateDownload.Receive(_instance, _lease, _resources, request.OperationId,
-                accepted.Release.Artifact, (destination, token) => _transport!.Artifact(accepted.Release.Artifact, destination, token), linked.Token);
+                accepted.Release.Artifact, (destination, token) => _transport!.Artifact(accepted.Release.Artifact, destination, token, received), linked.Token);
             using var candidate = VerifiedUpdateCandidate.Prepare(_instance, _feeds, root, request.Feed,
                 request.HostVersion, _contracts, linked.Token);
             using var prepared = PreparedHostUpdate.Prepare(_instance, _lease, _database, _resources, root, request,

@@ -9,7 +9,6 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="../maintenance/InstallerEntry.cs" Link="InstallerEntry.cs" />
     <ProjectReference Include="../../src/core/NexusPipeline.Core.csproj" />
     <ProjectReference Include="../../src/platform/NexusPipeline.Platform.csproj" />
   </ItemGroup>

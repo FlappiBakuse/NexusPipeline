@@ -103,7 +103,14 @@ def verify_publish(path, project, sdk):
         files = read_bundle(stream)
         main = read_member(stream, files, 'NexusPipeline.' + project + '.dll', 1)
         require(main[:2] == b'MZ', 'managed entry')
-        require(read_member(stream, files, 'NexusPipeline.Extensibility.dll', 1) == sdk, 'shared SDK producer bytes')
+        if project in ('Maintenance', 'Uninstaller'):
+            prefix = 'NexusPipeline.' + project
+            require(set(files) == {prefix + suffix for suffix in ('.dll', '.deps.json', '.runtimeconfig.json')},
+                    'standalone entry closure')
+            if project == 'Maintenance':
+                require(path.stat().st_size <= 512 * 1024, 'update window size limit')
+        else:
+            require(read_member(stream, files, 'NexusPipeline.Extensibility.dll', 1) == sdk, 'shared SDK producer bytes')
         config = json.loads(read_member(stream, files, 'NexusPipeline.' + project + '.runtimeconfig.json', 4))['runtimeOptions']
         frameworks = config.get('frameworks', [config['framework']] if 'framework' in config else [])
         expected = {'Microsoft.NETCore.App', 'Microsoft.AspNetCore.App'} if project == 'Host' else {'Microsoft.NETCore.App'}

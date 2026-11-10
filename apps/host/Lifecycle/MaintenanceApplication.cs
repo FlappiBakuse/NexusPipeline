@@ -7,7 +7,7 @@ using NexusPipeline.Platform.Storage.Journals;
 using NexusPipeline.Platform.Storage.Maintenance;
 using NexusPipeline.Platform.Storage.Sqlite;
 
-namespace NexusPipeline.Maintenance;
+namespace NexusPipeline.Host.Lifecycle;
 
 [SupportedOSPlatform("windows")]
 internal static class MaintenanceApplication
@@ -20,7 +20,7 @@ internal static class MaintenanceApplication
         var failureExit = 1;
         try
         {
-            var options = MaintenanceEntryArguments.Parse(args, "apply");
+            var options = MaintenanceEntryArguments.Parse(args, "maintenance-apply");
             var trust = UpdateReleaseTrust.Configured() ?? throw new IOException("maintenance_release_trust_unavailable");
             var contracts = new ContractReader(); var verifier = new UpdateFeedVerifier(contracts, trust.Policy);
             var instance = new InstanceRoot(contracts).OpenExisting(options.RuntimeRoot);

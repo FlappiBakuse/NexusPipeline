@@ -1,6 +1,5 @@
 using System.Runtime.Versioning;
 using NexusPipeline.Core.Configuration;
-using NexusPipeline.Platform.Storage.Archives;
 using NexusPipeline.Platform.Storage.Journals;
 
 namespace NexusPipeline.Platform.Storage.Installation;
@@ -13,33 +12,31 @@ internal sealed class InstallerTargetTree(InstallerCheckpoint frame)
     private PhysicalObjectIdentity TargetIdentity => Target.Objects.Single(item => item.RelativePath.Length == 0).Identity;
     private ArchivedFileTree TargetTree => InstallerApplicationObjects.Tree(Target.Snapshot, Target.Objects);
 
-    internal InstallerApplicationTarget Extract(string archivePath)
+    internal InstallerApplicationTarget Stage(string payloadRoot)
     {
         InstallerRuntimeGate.RequireHeld(frame.Root);
         var workspace = InstallerPayloadTree.Workspace(frame);
         using var held = StableDirectoryLease.Acquire(workspace);
         if (PhysicalObjectIdentity.Read(workspace) != frame.PayloadIdentity || frame.Stage != "payload") throw InstallationIdentityCodec.Invalid();
-        var archive = PhysicalPathPolicy.NormalizeWithoutLinks(archivePath);
-        PhysicalObjectIdentity.RequireSingleLink(archive);
-        using var input = new FileStream(archive, FileMode.Open, FileAccess.Read, FileShare.Read);
-        using var zip = PayloadArchive.Open(input, new(4096, 1073741824), InstallationIdentityCodec.Invalid, PayloadArchiveKind.Application);
-        if (zip.Files.Any(entry => !ApplicationTree.Roots.Contains(entry.RelativePath.Split('/')[0], StringComparer.Ordinal)))
-            throw InstallationIdentityCodec.Invalid();
-        _ = InstallerTargetManifest.Read(zip.ReadManifest(), frame.ManifestSha256, frame.Profile);
+        var manifest = InstallerTargetManifest.Read(frame);
+        using var source = InstallationPayload.Open(payloadRoot, frame.ManifestSha256, frame.Profile, exclusiveRoot: true);
+        manifest.RequireInstalled(source.Snapshot);
         ExclusiveDirectory.Create(DirectoryPath);
         var identity = PhysicalObjectIdentity.Read(DirectoryPath);
         try
         {
-            foreach (var entry in zip.Files)
+            foreach (var entry in source.Snapshot.Entries.Where(entry => entry.Kind == FileObjectKind.File))
             {
-                var path = PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(DirectoryPath, entry.RelativePath.Replace('/', Path.DirectorySeparatorChar)));
+                var path = PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(DirectoryPath, entry.RelativePath));
                 Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                using var input = File.OpenRead(Path.Combine(source.Root, entry.RelativePath));
                 using var destination = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough);
-                zip.CopyFile(entry.RelativePath, destination);
+                input.CopyTo(destination);
                 destination.Flush(flushToDisk: true);
             }
-            using var payload = InstallationPayload.Open(DirectoryPath, frame.ManifestSha256, frame.Profile);
-            InstallerTargetManifest.Read(frame).RequireInstalled(payload.Snapshot);
+            using var verified = source.Borrow();
+            using var payload = InstallationPayload.Open(DirectoryPath, frame.ManifestSha256, frame.Profile, exclusiveRoot: true);
+            manifest.RequireInstalled(payload.Snapshot);
             if (payload.RootIdentity != identity) throw InstallationIdentityCodec.Invalid();
             return new(payload.Snapshot, payload.Objects.ToArray());
         }

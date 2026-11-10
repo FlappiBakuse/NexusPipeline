@@ -113,18 +113,18 @@ public sealed class InstallerRestartTests
 
     private static InstallerCheckpoint Prepare(InstallerOwnedTests.OwnedFixture fixture, string stage)
     {
-        var archive = InstallerExchangeTests.Archive(fixture);
         using var gate = InstallerRuntimeGate.Acquire(fixture.Product.Application);
         if (stage == "prepared") return fixture.Product.Owner.BeginTransition(fixture.Product.Application, fixture.Product.Transaction,
             fixture.Product.Target, InstallerRetainedFixture.Parent(), Work(fixture));
         if (stage == "payload") return InstallerExchangeTests.Preserve(fixture);
+        var payload = InstallerExchangeTests.Payload(fixture);
         if (stage is "target" or "swapped")
         {
-            var target = InstallerExchangeTests.Freeze(fixture, archive);
+            var target = InstallerExchangeTests.Freeze(fixture, payload);
             if (stage == "swapped") InstallerExchangeTests.MoveTargets(target, 4);
             return target;
         }
-        var frame = InstallerExchangeTests.PublishFrame(fixture, archive, stage != "planned", stage is "observed" or "committed");
+        var frame = InstallerExchangeTests.PublishFrame(fixture, payload, stage != "planned", stage is "observed" or "committed");
         if (stage == "committed") new InstallerCheckpointStore(fixture.Product.Paths, "test").CommitTransition(frame);
         return frame;
     }

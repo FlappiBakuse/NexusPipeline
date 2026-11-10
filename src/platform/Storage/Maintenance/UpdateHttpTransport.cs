@@ -17,7 +17,8 @@ internal sealed class UpdateHttpTransport(UpdateTrustPolicy trust, Func<HttpClie
         return verifier.Verify(feed, signature, channel);
     }
 
-    internal async Task Artifact(HostUpdateArtifact artifact, Stream destination, CancellationToken cancellation)
+    internal async Task Artifact(HostUpdateArtifact artifact, Stream destination, CancellationToken cancellation,
+        Action<long, long>? received = null)
     {
         trust.RequireArtifact(artifact.Url);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
@@ -38,7 +39,8 @@ internal sealed class UpdateHttpTransport(UpdateTrustPolicy trust, Func<HttpClie
                 continue;
             }
             await StoreResponseReader.Artifact(response, destination, artifact.SizeBytes, artifact.Sha256,
-                timeout.Token, maximumBytes: 1073741824);
+                timeout.Token, maximumBytes: 1073741824,
+                received: received is null ? null : bytes => received(bytes, artifact.SizeBytes));
             return;
         }
     }

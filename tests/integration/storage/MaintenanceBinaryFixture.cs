@@ -27,12 +27,14 @@ internal sealed class MaintenanceBinaryFixture : IDisposable
     internal Task<string> HostErrors { get; private set; } = Task.FromResult("");
     private readonly List<Process> _processes = [];
     private readonly bool _desktop;
+    private readonly bool _failCandidateStartup;
 
     internal MaintenanceBinaryFixture(bool failCandidateStartup = false, HostUpdateTiming timing = HostUpdateTiming.Now,
         bool desktop = false, bool acceptPending = true, string hostVersion = "0.18.0", PublishedUpdateInputs? published = null,
         InstalledMaintenanceScope? installed = null)
     {
         _desktop = desktop;
+        _failCandidateStartup = failCandidateStartup;
         Root = installed?.Root ?? Path.Combine(Environment.GetEnvironmentVariable("NEXUS_TEST_ROOT")!, "m-" + Guid.NewGuid().ToString("N")[..8]);
         if (installed is null) ExclusiveDirectory.Create(Root);
         var contracts = new ContractReader();
@@ -59,16 +61,12 @@ internal sealed class MaintenanceBinaryFixture : IDisposable
             File.WriteAllText(Path.Combine(candidate, "README.md"), "candidate");
         }
         else published.ExtractCandidate(candidate);
-        if (failCandidateStartup && published is null)
-            SingleFileFixture.FailStartup(Path.Combine(candidate, ApplicationTree.HostEntry));
         var blobs = new ImmutableBlobStore(Instance, contracts);
         var archive = new FileTreeArchive(new(SnapshotBudget.Default), blobs);
         var plan = new FrozenPayloadApply(Instance.InstanceId, Guid.NewGuid(), Guid.NewGuid(), JournalKind.UpdateApply,
             PayloadAction.Upgrade, null, target, PhysicalObjectIdentity.Read(Root), archive.CaptureApplication(target, default),
             archive.CaptureApplication(candidate, default), ["maintenance:host-payload"]);
-        Plan = (published is not null && failCandidateStartup
-            ? published.BindFailedCandidate(Instance, Database, plan, candidate, timing, desktop)
-            : installed is not null ? published!.BindOwnedCandidate(Instance, Database, plan, candidate, timing, desktop)
+        Plan = (installed is not null ? published!.BindOwnedCandidate(Instance, Database, plan, candidate, timing, desktop)
             : published?.Bind(Instance, Database, plan, candidate, timing, desktop)) ?? UpdateSourceSeed.Bind(Instance, Database, plan, candidate, executableTestPayload: true, timing: timing,
             window: desktop ? new(UpdateWindowMode.Desktop, true, "/settings") : null,
             hostVersion: hostVersion);
@@ -143,6 +141,9 @@ internal sealed class MaintenanceBinaryFixture : IDisposable
     {
         var start = new ProcessStartInfo(HostPath) { UseShellExecute = false, RedirectStandardOutput = true,
             RedirectStandardError = true, CreateNoWindow = true };
+        if (_failCandidateStartup)
+            start.Environment["NEXUS_TEST_UPDATE_FAIL_VERSION"] =
+                new UpdateSourceCodec(Instance, new()).ReadMetadata(Plan.MaintenanceSource!).HostVersion;
         foreach (var value in new[] { _desktop ? "desktop" : "serve", "--runtime-root", Instance.RuntimeRoot, "--port", "saved" }) start.ArgumentList.Add(value);
         var process = Process.Start(start) ?? throw new IOException("fixture_host_start_failed");
         HostErrors = process.StandardError.ReadToEndAsync();
@@ -201,12 +202,13 @@ internal sealed class MaintenanceBinaryFixture : IDisposable
 
     internal Process ObserveHelper()
     {
-        foreach (var process in Process.GetProcessesByName("NexusPipeline.update"))
+        var helper = Path.Combine(Instance.RuntimeRoot, "staging", "host-update-" + Plan.OperationId.ToString("N"),
+            "bootstrap", ApplicationTree.HostEntry);
+        foreach (var process in Process.GetProcessesByName("NexusPipeline"))
         {
             try
             {
-                if (!process.HasExited && ProcessIdentityReader.Read(process.Id).ImagePath
-                    .StartsWith(Root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                if (!process.HasExited && StringComparer.OrdinalIgnoreCase.Equals(ProcessIdentityReader.Read(process.Id).ImagePath, helper))
                 { _ = process.Handle; return process; }
             }
             catch (ArgumentException) { }

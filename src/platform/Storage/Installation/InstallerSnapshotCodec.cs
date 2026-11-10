@@ -43,7 +43,7 @@ internal static class InstallerSnapshotCodec
         if (snapshot is null || snapshot.Root is null || snapshot.Root != PhysicalPathPolicy.NormalizeSyntax(snapshot.Root) ||
             snapshot.Root.StartsWith("\\\\", StringComparison.Ordinal) || Path.GetDirectoryName(snapshot.Root) is null ||
             snapshot.RootIdentity is not null && !InstallationIdentityCodec.Physical(snapshot.RootIdentity) ||
-            snapshot.Files is null || snapshot.Files.Length > 7 || snapshot.Directories is null || snapshot.Directories.Length != Roles.Length ||
+            snapshot.Files is null || snapshot.Files.Length > 9 || snapshot.Directories is null || snapshot.Directories.Length != Roles.Length ||
             snapshot.Directories.Any(directory => directory is null || directory.Identity is not null && !InstallationIdentityCodec.Physical(directory.Identity)) ||
             !snapshot.Directories.Select(directory => directory.Role).SequenceEqual(Roles)) throw InstallationIdentityCodec.Invalid();
         ValidateRegistry(snapshot.Uninstall); ValidateRegistry(snapshot.Ownership);
@@ -53,7 +53,8 @@ internal static class InstallerSnapshotCodec
         foreach (var file in snapshot.Files)
             if (file is null || !InstallerMetadataInventory.KnownFile(file.Role, file.Name) || !keys.Add(file.Role + "/" + file.Name) ||
                 !InstallationIdentityCodec.Physical(file.Identity) || !InstallationIdentityCodec.Physical(file.ParentIdentity) ||
-                file.ParentIdentity != snapshot.Directories.Single(directory => directory.Role == file.Role).Identity ||
+                file.ParentIdentity != (file.Role == "entry" ? snapshot.RootIdentity :
+                    snapshot.Directories.Single(directory => directory.Role == file.Role).Identity) ||
                 file.SizeBytes is < 1 or > 268435456 || !InstallationIdentityCodec.Digest(file.Sha256)) throw InstallationIdentityCodec.Invalid();
         var ordered = snapshot.Files.OrderBy(file => file.Role, StringComparer.Ordinal).ThenBy(file => file.Name, StringComparer.Ordinal);
         if (!snapshot.Files.SequenceEqual(ordered) || JsonSerializer.SerializeToUtf8Bytes(snapshot).Length > MaximumBytes - 128)

@@ -110,7 +110,7 @@ public sealed class InstallerEntryTests
 
     private static async Task<(int ExitCode, string Output)> Execute(string root, string[] command)
     {
-        var executable = Environment.GetEnvironmentVariable("NEXUS_TEST_MAINTENANCE_EXE") ?? throw new IOException("maintenance_fixture_required");
+        var executable = Environment.GetEnvironmentVariable("NEXUS_TEST_INSTALLER_EXE") ?? throw new IOException("installer_fixture_required");
         var start = new ProcessStartInfo(executable) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
         foreach (var argument in command) start.ArgumentList.Add(argument);
         start.Environment["NEXUS_TEST_ROOT"] = root;

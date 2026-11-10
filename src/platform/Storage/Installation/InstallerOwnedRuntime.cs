@@ -20,7 +20,7 @@ internal sealed class InstallerOwnedRuntime(InstallerPaths paths, string profile
         var destination = InstallationDestination.Inspect(root, paths, InstallerPaths.ProtectedRoots());
         if (destination is not { Kind: InstallationDestinationKind.Owned, Identity: { State: "active" } identity })
             throw new IOException("installer_active_installation_required");
-        RequireInspectionRoot(destination.Root, workRoot);
+        RequireExternalRoot(destination.Root, workRoot);
         new InstallerRetainedRuntime(paths).RequireManager(checkpoint);
         var metadata = InstallerMetadataInventory.Capture(destination.Root, paths);
         InstallerRegistration.RequireNative(metadata, identity.ProductVersion);
@@ -37,16 +37,18 @@ internal sealed class InstallerOwnedRuntime(InstallerPaths paths, string profile
         return read(new("nexus.installer.owned-source", 1, profile, setup, identity, metadata, payload.Snapshot, payload.Objects));
     }
 
-    internal void RequireInspectionRoot(string application, string requested)
+    internal void RequireExternalRoot(string application, string requested, string? additional = null)
     {
-        var work = Path.TrimEndingDirectorySeparator(PhysicalPathPolicy.NormalizeWithoutLinks(requested));
-        foreach (var reserved in new[] { application, paths.ManagerRoot })
+        var root = Path.TrimEndingDirectorySeparator(PhysicalPathPolicy.NormalizeWithoutLinks(requested));
+        foreach (var reserved in new[] { application, paths.ManagerRoot, additional })
         {
-            var other = Path.TrimEndingDirectorySeparator(reserved);
-            if (StringComparer.OrdinalIgnoreCase.Equals(work, other) ||
-                work.StartsWith(other + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase) ||
-                other.StartsWith(work + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            if (reserved is null) continue;
+            var other = Path.TrimEndingDirectorySeparator(PhysicalPathPolicy.NormalizeSyntax(reserved));
+            if (IsInside(Path.GetRelativePath(root, other)) || IsInside(Path.GetRelativePath(other, root)))
                 throw new IOException("installer_inspection_root_overlaps_installation");
         }
     }
+
+    private static bool IsInside(string relative) => !Path.IsPathRooted(relative) && relative != ".." &&
+        !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal);
 }

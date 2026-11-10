@@ -42,6 +42,7 @@ internal sealed class HostMaintenanceController : IAsyncDisposable
     private bool _handedOff, _stopping;
     private HostRestartHandoff? _restart;
     private ResourceOperationLease? _restartRoot;
+    private NativeClientBinding? _updateWindow;
     internal string? FailureCode { get; private set; }
     internal bool HasDesktop => _ownedDesktop is not null;
 
@@ -141,7 +142,21 @@ internal sealed class HostMaintenanceController : IAsyncDisposable
             subject.StartsWith("local:", StringComparison.Ordinal) ? store.Cancel(operationId, HostAutomaticUpdates.Subject) : null;
     }
 
-    internal async Task<HostUpdateOperation> StartAsync(Guid operationId, string subject, CancellationToken cancellation)
+    internal async Task BindWindowAsync(NativeClientBinding window, CancellationToken cancellation)
+    {
+        await _serial.WaitAsync(cancellation);
+        try
+        {
+            if (_stopping || _flight is { IsCompleted: false } || _handoff is not null ||
+                Interlocked.CompareExchange(ref _updateWindow, window, null) is not null) throw Invalid();
+        }
+        finally { _serial.Release(); }
+    }
+
+    internal void ReleaseWindow(NativeClientBinding window) => Interlocked.CompareExchange(ref _updateWindow, null, window);
+
+    internal async Task<HostUpdateOperation> StartAsync(Guid operationId, string subject, CancellationToken cancellation,
+        NativeClientBinding? window = null)
     {
         await _serial.WaitAsync(cancellation);
         try
@@ -150,8 +165,9 @@ internal sealed class HostMaintenanceController : IAsyncDisposable
             if (subject.StartsWith("local:", StringComparison.Ordinal) && Store().Read(operationId, subject) is null &&
                 Store().Read(operationId, HostAutomaticUpdates.Subject) is not null) subject = HostAutomaticUpdates.Subject;
             var current = Read(operationId, subject) ?? throw new IOException("maintenance_operation_missing");
-            if (_handoff?.Plan.OperationId == operationId || current.State is HostUpdateState.Completed or HostUpdateState.Cancelled)
-                return current;
+            if (current.State is HostUpdateState.Completed or HostUpdateState.Cancelled) return current;
+            if (Volatile.Read(ref _updateWindow) is { } bound && !ReferenceEquals(bound, window)) throw Invalid();
+            if (_handoff?.Plan.OperationId == operationId) return current;
             if (_flight is { IsCompleted: false } || current.State != HostUpdateState.Pending) throw Invalid();
             if (_desktop is not null && _ownedDesktop is null) throw new IOException("maintenance_desktop_family_proof_required");
             if (_trust is null) throw new IOException("maintenance_release_trust_unavailable");
@@ -169,7 +185,8 @@ internal sealed class HostMaintenanceController : IAsyncDisposable
                 if (!_drain.TryReserve() || !_drain.TryEnterEffect()) throw Invalid();
                 _handoff = store.BeginHandoff(operationId, subject, _drain, cancellation);
                 var accepted = Read(operationId, subject) ?? throw Invalid();
-                _flight = Task.Run(() => CloseDesktopAsync(origin));
+                var windowExit = window is null ? Task.CompletedTask : WaitForWindowAsync(window);
+                _flight = Task.Run(() => CloseDesktopAsync(origin, windowExit));
                 return accepted;
             }
             catch
@@ -181,10 +198,18 @@ internal sealed class HostMaintenanceController : IAsyncDisposable
         finally { _serial.Release(); }
     }
 
-    private async Task CloseDesktopAsync(MaintenanceStartupOrigin origin)
+    private async Task WaitForWindowAsync(NativeClientBinding window)
+    {
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(_application.ApplicationStopping);
+        deadline.CancelAfter(TimeSpan.FromSeconds(15));
+        await window.WaitForExitAsync(deadline.Token);
+    }
+
+    private async Task CloseDesktopAsync(MaintenanceStartupOrigin origin, Task windowExit)
     {
         try
         {
+            await windowExit;
             _bootstrap = MaintenanceBootstrapPayload.Prepare(_handoff ?? throw Invalid(), _lease, _database, _contracts, _roots,
                 new(_contracts, _trust!.Policy), _application.ApplicationStopping);
             if (_ownedDesktop is not null)
@@ -200,7 +225,7 @@ internal sealed class HostMaintenanceController : IAsyncDisposable
                 handoff.HandoffId, _ready.PipeName, _helper.Name);
             var writerId = Guid.Empty;
             // The bootstrap tree can exceed Win32's current-directory limit; maintenance uses absolute paths.
-            var root = _helper.Start(bootstrap.HelperPath, options.ToArguments("apply"), Path.GetPathRoot(bootstrap.HelperPath)!,
+            var root = _helper.Start(bootstrap.HelperPath, options.ToArguments("maintenance-apply"), Path.GetPathRoot(bootstrap.HelperPath)!,
                 _instance.InstanceId, handoff.HandoffId,
                 actual => writerId = MaintenanceRegisteredActor.RegisterSuspended(handoff, _lease, bootstrap, _helper, actual));
             await ObserveHelperAsync(root, writerId);
