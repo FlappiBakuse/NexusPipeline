@@ -21,7 +21,7 @@ test('drawn window actions require the bound current main-frame session and reta
       send: (name, value) => publications.push({ name, maximized: value.maximized }) },
   };
   const sandbox = {
-    module: { exports: {} }, URL, URLSearchParams, AbortSignal, Date, performance,
+    module: { exports: {} }, URL, URLSearchParams, AbortController, AbortSignal, Date, performance,
     setTimeout: () => 1, clearTimeout() {},
     require(name) {
       if (name === './native-frontend.cjs') return { installFrontendBridge: () => ({ invalidate() {}, dispose() {} }) };

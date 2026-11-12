@@ -16,6 +16,7 @@ function installNativeBridge(window, config, page, authorizedQuit, setLocale = (
   let connecting;
   let frontend;
   let login;
+  const stopping = new AbortController();
   function validateSender(event) {
     if (!window || window.isDestroyed() || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame ||
         event.senderFrame.url.split('#')[0] !== page) throw new Error('desktop_source_denied');
@@ -126,7 +127,8 @@ function installNativeBridge(window, config, page, authorizedQuit, setLocale = (
         const current = generation;
         const request = requestIdentity(crypto.randomUUID());
         const query = new URLSearchParams({ sessionId: request.sessionId, correlationId: request.correlationId });
-        const response = await fetch(new URL('control/v1/desktop/maintenance?' + query, host), { signal: AbortSignal.timeout(5000) });
+        const response = await fetch(new URL('control/v1/desktop/maintenance?' + query, host), {
+          signal: AbortSignal.any([stopping.signal, AbortSignal.timeout(30000)]) });
         if (response.status === 204) await response.body?.cancel();
         else {
           const text = await responseText(response);
@@ -195,7 +197,7 @@ function installNativeBridge(window, config, page, authorizedQuit, setLocale = (
   });
   async function dispose() {
     frontend.dispose();
-    ended = true; clearTimeout(timer); invalidate();
+    ended = true; stopping.abort(); clearTimeout(timer); invalidate();
     for (const name of ['desktop.connect', 'desktop.prepared', 'desktop.action', 'desktop.locale']) ipcMain.removeHandler(name);
     await login.dispose();
   }

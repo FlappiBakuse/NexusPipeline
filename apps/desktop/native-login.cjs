@@ -5,12 +5,15 @@ const { createLoginWindow } = require('./login-window.cjs');
 
 function installLoginBridge(config, parent, connect, generation) {
   const active = new Map();
+  const stopping = new AbortController();
   let ended = false; let timer; let polling;
   const identity = session => ({ format: 'nexus.desktop.login', version: 1, instanceId: session.instanceId,
     nativeClientId: session.clientId, sessionId: session.sessionId, correlationId: crypto.randomUUID() });
   async function post(request) {
     const response = await fetch(new URL('control/v1/desktop/login', config.address), { method: 'POST',
-      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request), redirect: 'error', signal: AbortSignal.timeout(request.type === 'candidate' ? 60000 : 5000) });
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(request), redirect: 'error',
+      signal: request.type === 'poll' ? AbortSignal.any([stopping.signal, AbortSignal.timeout(30000)]) :
+        AbortSignal.timeout(request.type === 'candidate' ? 60000 : 5000) });
     return readLogin(await responseText(response), config.verificationKey, request);
   }
   async function complete(state, status, values) {
@@ -50,9 +53,9 @@ function installLoginBridge(config, parent, connect, generation) {
     } finally { if (!ended) timer = setTimeout(() => { polling = poll(); }, 500); }
   }
   function invalidate() { for (const state of active.values()) if (state.window) void state.window.cancel(); }
-  return Object.freeze({ start: async () => { if (!polling) { polling = poll(); await polling; } }, invalidate,
+  return Object.freeze({ start: async () => { if (!polling) polling = poll(); }, invalidate,
     dispose: async () => {
-      ended = true; clearTimeout(timer); invalidate(); await polling;
+      ended = true; stopping.abort(); clearTimeout(timer); invalidate(); await polling;
       await Promise.all([...active.values()].filter(state => state.window).map(state => state.window.cancel()));
     } });
 }

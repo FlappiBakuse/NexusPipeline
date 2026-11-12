@@ -20,6 +20,7 @@ internal sealed class DesktopControl : IAsyncDisposable
     private readonly object _maintenanceGate = new();
     private PreparedDesktopExit? _maintenanceExit;
     private bool _maintenancePermitSent;
+    private TaskCompletionSource _maintenanceChanged = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly HostLifecycle _lifecycle;
     private readonly DesktopExitWatch _exit;
     private readonly DesktopPresence? _presence;
@@ -93,13 +94,22 @@ internal sealed class DesktopControl : IAsyncDisposable
         });
         app.MapPost("/control/v1/desktop/authorize", (Delegate)AuthorizeAsync);
         app.MapPost("/control/v1/desktop/mode", (Delegate)PublishModeAsync);
-        app.MapGet("/control/v1/desktop/maintenance", (HttpContext context) =>
+        app.MapGet("/control/v1/desktop/maintenance", async (HttpContext context) =>
         {
             if (!IsNative(context)) return Results.StatusCode(403);
             if (context.Request.Query.Count != 2 ||
                 !Guid.TryParseExact(context.Request.Query["sessionId"], "D", out var sessionId) || sessionId != _session.Identity.SessionId ||
                 !Guid.TryParseExact(context.Request.Query["correlationId"], "D", out var correlationId) || correlationId == Guid.Empty)
                 return Results.StatusCode(400);
+            Task? changed;
+            lock (_maintenanceGate) changed = _maintenanceExit is null || _maintenancePermitSent ? _maintenanceChanged.Task : null;
+            if (changed is not null)
+            {
+                using var waiting = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted, _nativeEnding.Token);
+                try { await changed.WaitAsync(TimeSpan.FromSeconds(25), waiting.Token); }
+                catch (TimeoutException) { return Results.NoContent(); }
+            }
+            if (!IsNative(context) || sessionId != _session.Identity.SessionId) return Results.StatusCode(403);
             lock (_maintenanceGate)
             {
                 if (_maintenanceExit is null || _maintenancePermitSent) return Results.NoContent();
@@ -152,6 +162,9 @@ internal sealed class DesktopControl : IAsyncDisposable
         {
             if (_maintenanceExit is not null) throw new IOException("desktop_maintenance_exit_already_pending");
             _maintenanceExit = prepared; _maintenancePermitSent = false;
+            var changed = _maintenanceChanged;
+            _maintenanceChanged = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            changed.TrySetResult();
         }
     }
 

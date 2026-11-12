@@ -24,7 +24,10 @@ internal sealed class DesktopLoginControl(ControlAuthentication authority, Deskt
             var correlation = ControlRequestBody.Uuid(value.GetProperty("correlationId"));
             if (value.GetProperty("type").GetString() == "poll")
             {
-                var offers = sessions.Poll(native).Select(offer => new { captureId = offer.CaptureId, nonce = offer.Nonce,
+                using var waiting = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted, desktop.NativeLifetime);
+                var pending = await sessions.WaitForOffersAsync(native, waiting.Token);
+                desktop.RequireCurrent(native);
+                var offers = pending.Select(offer => new { captureId = offer.CaptureId, nonce = offer.Nonce,
                     clientId = offer.ClientId, extensionId = offer.ExtensionId, activationId = offer.ActivationId, operationId = offer.OperationId,
                     policy = JsonSerializer.SerializeToElement(offer.Policy, Wire), isCanceled = offer.IsCanceled }).ToArray();
                 return desktop.SignedFrontend(new { format = "nexus.desktop.login", version = 1, instanceId = native.InstanceId,

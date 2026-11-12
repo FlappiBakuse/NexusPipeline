@@ -11,14 +11,39 @@ public sealed class BrowserLoginSessions(TimeProvider? timeProvider = null) : IA
     private readonly TimeProvider _clock = timeProvider ?? TimeProvider.System;
     private readonly Dictionary<DesktopSessionIdentity, DateTimeOffset> _peers = [];
     private readonly Dictionary<Guid, Entry> _entries = [];
+    private readonly HashSet<DesktopSessionIdentity> _waiting = [];
+    private TaskCompletionSource _changed = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private bool _stopping;
     private long _pollSequence;
 
     public bool CanCapture(NativeClientAccess client)
     {
         client.RequireCurrent();
-        lock (_gate) return !_stopping && _peers.TryGetValue(client.Desktop, out var observed) &&
-            _clock.GetUtcNow() - observed < TimeSpan.FromSeconds(5);
+        lock (_gate) return !_stopping && (_waiting.Contains(client.Desktop) ||
+            _peers.TryGetValue(client.Desktop, out var observed) && _clock.GetUtcNow() - observed < TimeSpan.FromSeconds(5));
+    }
+
+    public async Task<IReadOnlyList<BrowserLoginOffer>> WaitForOffersAsync(DesktopSessionIdentity native, CancellationToken cancellation)
+    {
+        Task changed;
+        lock (_gate)
+        {
+            var offers = Poll(native);
+            if (offers.Count != 0 || _stopping) return offers;
+            if (!_waiting.Add(native)) throw new IOException("browser_login_poll_busy");
+            changed = _changed.Task;
+        }
+        try { await changed.WaitAsync(TimeSpan.FromSeconds(25), _clock, cancellation).ConfigureAwait(false); }
+        catch (TimeoutException) { }
+        finally { lock (_gate) _waiting.Remove(native); }
+        return Poll(native);
+    }
+
+    private void SignalChanged()
+    {
+        var changed = _changed;
+        _changed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        changed.TrySetResult();
     }
 
     public IReadOnlyList<BrowserLoginOffer> Poll(DesktopSessionIdentity native)
@@ -52,6 +77,7 @@ public sealed class BrowserLoginSessions(TimeProvider? timeProvider = null) : IA
             if (_entries.Count >= 8 || _entries.Values.Any(item => item.Client.ClientId == client.ClientId))
             { entry.Dispose(); throw new IOException("browser_login_capture_busy"); }
             _entries.Add(entry.Offer.CaptureId, entry);
+            SignalChanged();
         }
         using var retire = entry.Cancellation.Token.Register(() => Cancel(entry));
         _ = ObserveExitAsync(entry);
@@ -135,6 +161,7 @@ public sealed class BrowserLoginSessions(TimeProvider? timeProvider = null) : IA
         lock (_gate)
         {
             _stopping = true; pending = _entries.Values.ToArray(); _peers.Clear();
+            SignalChanged();
             foreach (var entry in pending) entry.Cancellation.Cancel();
         }
         try { await Task.WhenAll(pending.Select(entry => entry.Finished.Task)).WaitAsync(timeout).ConfigureAwait(false); }

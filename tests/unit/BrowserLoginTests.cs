@@ -6,6 +6,32 @@ namespace NexusPipeline.CoreTests;
 
 public sealed class BrowserLoginTests
 {
+    [Fact(DisplayName = "An Outstanding Empty Login Read Keeps Its Peer Available And Wakes For A Real Offer Or Cancellation")]
+    public async Task WaitsForRealOffers()
+    {
+        using var fixture = new Fixture(); var clock = new LoginClock();
+        await using var service = new BrowserLoginSessions(clock);
+        using var stopping = new CancellationTokenSource();
+        var waiting = service.WaitForOffersAsync(fixture.Native, stopping.Token);
+        Assert.False(waiting.IsCompleted);
+        clock.Now += TimeSpan.FromSeconds(10); Assert.True(service.CanCapture(fixture.Access));
+        var capture = service.CaptureAsync(fixture.Access, "fixture", Guid.NewGuid(), Guid.NewGuid(), Policy(), () => { }, fixture.Callback.Token, default).AsTask();
+        var offer = Assert.Single(await waiting.WaitAsync(TimeSpan.FromSeconds(2)));
+        using var secret = new SecretValue("synthetic");
+        service.Complete(fixture.Native, offer.CaptureId, offer.Nonce, "completed", new Dictionary<string, SecretValue> { ["token"] = secret });
+        using var result = await capture;
+        var next = service.WaitForOffersAsync(fixture.Native, stopping.Token);
+        Assert.False(next.IsCompleted); stopping.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => next);
+        clock.Now += TimeSpan.FromSeconds(10); Assert.False(service.CanCapture(fixture.Access));
+    }
+
+    private sealed class LoginClock : TimeProvider
+    {
+        internal DateTimeOffset Now = DateTimeOffset.UtcNow;
+        public override DateTimeOffset GetUtcNow() => Now;
+    }
+
     [Fact(DisplayName = "A Rejected Login Candidate Keeps The Same Capture Until Accepted And Native Cleanup Completes")]
     public async Task ContinuesRejectedLogin()
     {

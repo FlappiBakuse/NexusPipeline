@@ -44,7 +44,7 @@ for (const scenario of [
     }
   };
   const sandbox = {
-    module: { exports: {} }, URL, URLSearchParams, AbortSignal, Date, performance: { now: () => clock },
+    module: { exports: {} }, URL, URLSearchParams, AbortController, AbortSignal, Date, performance: { now: () => clock },
     setTimeout: (callback, delay) => {
       if (delay === 100) { clock += delay; queueMicrotask(() => { if (scenario.navigation) navigating({}, page, false, true); callback(); }); }
       else timers.set(++timerId, { callback, delay });

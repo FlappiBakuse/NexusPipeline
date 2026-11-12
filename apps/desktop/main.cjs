@@ -39,6 +39,8 @@ process.on('uncaughtException', () => app.exit(1));
 app.on('window-all-closed', () => { if (quitting) app.quit(); });
 // Bound transient renderer allocation without limiting the retained application heap.
 app.commandLine.appendSwitch('js-flags', '--max-semi-space-size=1');
+// The delayed DX12 inventory starts another process without serving a desktop feature.
+if (process.platform === 'win32') app.commandLine.appendSwitch('disable-gpu-process-for-dx12-info-collection');
 app.whenReady().then(async () => {
   Menu.setApplicationMenu(null);
   const windowState = createWindowState(config.profilePath, screen);
