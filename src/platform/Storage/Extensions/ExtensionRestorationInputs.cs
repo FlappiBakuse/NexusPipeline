@@ -11,8 +11,7 @@ internal static class ExtensionRestorationInputs
         var held = new List<IDisposable>();
         try
         {
-            var references = bound.Plan.Before.Contents.Concat(bound.Plan.Candidate.Contents)
-                .Concat(PayloadSourceCodec.References(bound.Source))
+            var references = PayloadSourceCodec.References(bound.Source)
                 .Concat(bound.Physical.Select(item => item.Intent.Artifact))
                 .Concat(bound.Restoration.Select(item => item.Intent.Artifact))
                 .Prepend(bound.PlanReference).Prepend(bound.Plan.ExtensionSource!).Distinct().ToArray();

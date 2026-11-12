@@ -28,6 +28,7 @@ internal sealed class StepJudgementWorker : IDisposable
     private readonly ImmutableBlobStore _blobs;
     private readonly List<ExecutionJudgementExchange> _exchanges = [];
     private readonly List<IDisposable> _held = [];
+    private readonly JudgementLogReader _log = new();
     private readonly CancellationTokenSource _transportStopping = new();
     private ConfigurationWriterProcess? _writer;
     private StepWriterScope? _scope;
@@ -111,7 +112,7 @@ internal sealed class StepJudgementWorker : IDisposable
             if (_stopRequested()) { _owner.Cancel(); return; }
             raw = await _capture!().ConfigureAwait(false);
             if (!final && IsPeriodicallyRejected(raw)) return;
-            var draft = new JudgementInputBuilder(_instance, _database, _contracts).Prepare(_total, _initialization!.Identity, raw, final);
+            var draft = new JudgementInputBuilder(_instance, _database, _contracts, _log).Prepare(_total, _initialization!.Identity, raw, final);
             lock (_gate)
             {
                 if (!final && _closing || _owner.IsCancelled || _stopRequested() ||
@@ -273,6 +274,7 @@ internal sealed class StepJudgementWorker : IDisposable
         if (_writer is not null && _stopped is null && !_released || !_pending.IsCompleted) throw new IOException("execution_judgement_collection_pending");
         _writer?.Dispose(); _output?.Dispose(); _inputs?.Dispose();
         foreach (var held in _held) held.Dispose();
+        _log.Dispose();
         _transportStopping.Dispose();
     }
 }

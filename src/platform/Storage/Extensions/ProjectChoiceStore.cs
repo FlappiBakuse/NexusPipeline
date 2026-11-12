@@ -101,12 +101,16 @@ internal sealed class ProjectChoiceStore(RuntimeInstance instance, StateDatabase
             project.Consumer.Installed.ExtensionId, project.Selection, edits.Select(edit => edit.Intent).ToArray())!;
     }
 
-    internal static ConfigurationContractStamp Contract(CompiledProjectDocument project) => new(1,
+    internal static ConfigurationContractStamp Contract(CompiledProjectDocument project) => Contract(project.ScriptRevision,
+        project.RootId, project.RootRevision, project.Consumer.Installed.Package.ManifestSha256,
+        project.Provider.Installed.Package.ManifestSha256, project.CompilerId);
+
+    internal static ConfigurationContractStamp Contract(long scriptRevision, Guid rootId, long rootRevision,
+        string consumer, string provider, string compilerId) => new(1,
         Convert.ToHexStringLower(SHA256.HashData(BoundedJson.Serialize(new
         {
-            format = "nexus.project-choice-contract", version = 1, project.ScriptRevision, project.RootId, project.RootRevision,
-            consumer = project.Consumer.Installed.Package.ManifestSha256, provider = project.Provider.Installed.Package.ManifestSha256,
-            project.CompilerId
+            format = "nexus.project-choice-contract", version = 1, ScriptRevision = scriptRevision, RootId = rootId, RootRevision = rootRevision,
+            consumer, provider, CompilerId = compilerId
         }))), null, false);
 
     private static string RequestDigest(Guid bindingId, long bindingRevision, long expectedRevision, string extensionId, JsonElement choice,

@@ -61,7 +61,7 @@ internal static class NotificationReferenceInventory
         transaction.Commit();
     }
 
-    private static IEnumerable<(Guid OperationId, BlobReference Reference)> Pages(SqliteConnection connection,
+    internal static IEnumerable<(Guid OperationId, BlobReference Reference)> Pages(SqliteConnection connection,
         SqliteTransaction transaction, string table)
     {
         var after = "";
@@ -83,7 +83,7 @@ internal static class NotificationReferenceInventory
         }
     }
 
-    private static void RequireNoOrphans(SqliteConnection connection, SqliteTransaction transaction)
+    internal static void RequireNoOrphans(SqliteConnection connection, SqliteTransaction transaction)
     {
         using var command = NotificationDeliveryRows.Command(connection, transaction,
             "SELECT EXISTS(SELECT 1 FROM operations o LEFT JOIN notification_deliveries d ON d.operation_id=o.operation_id " +

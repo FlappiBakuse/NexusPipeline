@@ -10,6 +10,44 @@ namespace NexusPipeline.StorageTests;
 [SupportedOSPlatform("windows")]
 public sealed class HistoryProjectionTests
 {
+    [Theory(DisplayName = "Cold Admission Verifies Complete Execution Catalogs And Rejects Changed Log Image Or Closure Bindings")]
+    [InlineData("valid")]
+    [InlineData("log")]
+    [InlineData("image")]
+    [InlineData("closure")]
+    public async Task AdmitsVerifiedHistory(string fault)
+    {
+        var fixture = new PcStageFixture(hooks: false, nativeWindow: true);
+        await fixture.ExecuteAsync(async () =>
+        {
+            _ = Assert.IsType<AttemptReceipt>(await fixture.Consumer.RunNextAsync());
+            var source = fixture.Source;
+            var projection = new HistoryProjection(source.Instance, source.Database, new(), source.Lease);
+            await projection.RunAsync(default); Assert.True(projection.IsComplete);
+            var changed = fault switch
+            {
+                "log" => "UPDATE execution_log_entries SET recorded_bytes=recorded_bytes+1,observed_bytes=observed_bytes+1;",
+                "image" => "UPDATE execution_image_entries SET png_size=png_size+1 WHERE png_size IS NOT NULL;",
+                "closure" => "UPDATE journal_writer_job_closures SET plan_size=plan_size+1;",
+                _ => ""
+            };
+            if (changed.Length > 0) fixture.Base.Execute(changed);
+            try
+            {
+                var sequence = source.Database.CommitSequence;
+                void Read() => StateDatabase.OpenExisting(source.Instance, Path.Combine(source.Root, "admission-diagnostics"),
+                    new NexusPipeline.Platform.Storage.Journals.JournalStartupAdmission(source.Instance, new()));
+                if (fault == "valid") Read();
+                else Assert.ThrowsAny<IOException>(Read);
+                Assert.Equal(sequence, source.Database.CommitSequence);
+            }
+            finally
+            {
+                if (changed.Length > 0) fixture.Base.Execute(changed.Replace("+1", "-1", StringComparison.Ordinal));
+            }
+        });
+    }
+
     [Theory(DisplayName = "Stopped Or Failed Historical Backfill Resumes Without Reexecuting An Attempt")]
     [InlineData(false)]
     [InlineData(true)]

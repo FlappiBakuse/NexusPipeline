@@ -70,6 +70,17 @@ internal sealed class ProjectChoiceLease : IDisposable
         if (!_root.IsActive) throw new IOException("project_selection_unavailable");
     }
 
+    internal void RequirePreview(SelectedProjectSource source, ProjectCompilerInstallation consumer,
+        ProjectCompilerInstallation provider, string compilerId, JsonElement selection)
+    {
+        RequireCurrent();
+        if (source.Binding.Id != Proof.Source.Address.BindingId || source.Binding.Revision != _bindingRevision ||
+            consumer.Metadata.ExtensionId != _extensionId || !JsonElement.DeepEquals(selection, Selection) ||
+            ProjectChoiceStore.Contract(source.Script.Revision, source.Root.Id, source.Root.Revision,
+                consumer.Metadata.Package.ManifestSha256, provider.Metadata.Package.ManifestSha256, compilerId) != _saved.Revision.Contract)
+            throw new IOException("project_selection_contract_changed");
+    }
+
     internal void RequireCurrent()
     {
         RequireLive();

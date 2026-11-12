@@ -12,19 +12,17 @@ public static class ConfigurationRecoveryHolds
     {
         try
         {
-            var instance = new InstanceRoot(new()).OpenExisting(database.RuntimeRoot);
-            JournalResourceClaims.VerifyInventory(instance, database, new(), payloadRoots);
             for (var attempt = 0; attempt < 8; attempt++)
             {
                 var revision = index.Current.Revision;
-                if (index.TryUpdateHolds(RecoveryHoldOwner.ConfigurationOperations, revision, Read(database))) return;
+                if (index.TryUpdateHolds(RecoveryHoldOwner.ConfigurationOperations, revision, Read(database, payloadRoots))) return;
             }
             throw new IOException("configuration_holds_publication_conflict");
         }
         catch { index.BlockUnknown("configuration_holds_reconciliation_required"); throw; }
     }
 
-    private static IReadOnlyList<RecoveryResourceHold> Read(StateDatabase database)
+    private static IReadOnlyList<RecoveryResourceHold> Read(StateDatabase database, PayloadApplyRoots? payloadRoots)
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
         using var transaction = connection.BeginTransaction(deferred: true);
@@ -39,11 +37,13 @@ public static class ConfigurationRecoveryHolds
         }
         if (groups.Count > 4096) throw new IOException("configuration_hold_inventory_limit");
         var holds = new Dictionary<(Guid Owner, string Key), RecoveryResourceHold>();
+        var registered = new List<RegisteredJournal>();
         foreach (var group in groups)
         {
             var journals = Members(connection, transaction, group.Session, group.Run);
             foreach (var journal in journals)
             {
+                registered.Add(RecoveryJournalRegistry.ReadInside(connection, transaction, journal));
                 using var command = connection.CreateCommand(); command.Transaction = transaction;
                 command.CommandText = "SELECT r.resource_key,c.mode FROM journal_resources r LEFT JOIN journal_resource_claims c " +
                     "ON c.journal_id=r.journal_id AND c.resource_key=r.resource_key WHERE r.journal_id=$journal ORDER BY r.resource_key LIMIT 4097;";
@@ -62,6 +62,11 @@ public static class ConfigurationRecoveryHolds
                     holds[key] = new(group.Owner, claim.Key, "configuration_operation_pending") { Mode = mode };
                 }
             }
+        }
+        if (registered.Count > 0)
+        {
+            var instance = new InstanceRoot(new()).OpenExisting(database.RuntimeRoot);
+            JournalResourceClaims.VerifyScope(instance, database, new(), registered.DistinctBy(item => item.JournalId), payloadRoots);
         }
         return holds.Values.ToArray();
     }

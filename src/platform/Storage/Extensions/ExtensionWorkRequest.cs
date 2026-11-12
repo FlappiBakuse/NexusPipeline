@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using NexusPipeline.Core.Operations;
 
@@ -6,6 +7,9 @@ namespace NexusPipeline.Platform.Storage.Extensions;
 
 internal static class ExtensionWorkRequest
 {
+    internal static Guid PageOperation(Guid instance, Guid producer, Guid? previous) =>
+        new(SHA256.HashData(Encoding.UTF8.GetBytes($"nexus.extension.work-page/1/{instance:D}/{producer:D}/{previous:D}")).AsSpan(0, 16));
+
     internal static OperationIdentity Identity(RuntimeInstance instance, Guid id, string subject, Guid producer,
         BlobReference plan, Guid? previous, BlobReference? previousPlan)
     {

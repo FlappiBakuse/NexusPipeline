@@ -82,7 +82,7 @@ internal static class ApplicationHost
         var operations = new OperationQueryService(instance, instanceLease, runtime.Database);
         startup?.Advance(StartupStage.PreparingServices);
         var builder = WebApplication.CreateSlimBuilder(new WebApplicationOptions { ContentRootPath = payloadRoots.HostPayloadRoot });
-        await using var services = new ExecutionRuntimeServices(instance, runtime.Database, contracts, instanceLease, resources, lifecycle, runtime.Recovery, providers, secretService, nativeBinding);
+        await using var services = new ExecutionRuntimeServices(instance, runtime.Database, contracts, instanceLease, resources, lifecycle, runtime.Recovery, providers, secretService, nativeBinding, runtime.Notifications);
         var extensionSecrets = new SecretAccessPolicy(instance, runtime.Database, instanceLease, resources);
         var desktopPresence = new NexusPipeline.Core.Desktop.DesktopPresence();
         using var nativeClients = new NexusPipeline.Core.Desktop.NativeClientSessions(instance.InstanceId);
@@ -327,7 +327,7 @@ internal static class ApplicationHost
 
             startup?.Advance(StartupStage.StartupUpdates);
             var startupUpdating = await automaticUpdates.ApplyStartupAsync();
-            if (!startupUpdating) { services.Start(app.Lifetime); automaticUpdates.Start(); }
+            if (!startupUpdating) { services.Start(app.Lifetime); automaticUpdates.Start(); packages.StartCleanup(); }
             if (!startupUpdating && startup is not null) await startup.CompleteAsync();
             var webAddress = app.Urls.Single(value => new Uri(value).Port != mcpPort);
             var advertised = new UriBuilder(webAddress) { Host = IPAddress.Loopback.ToString() }.Uri.GetLeftPart(UriPartial.Authority);

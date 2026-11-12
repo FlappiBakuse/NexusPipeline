@@ -19,8 +19,7 @@ internal sealed class BoundPreparedAttempt(RunAttemptPlan plan, JournalDocument 
     internal ExecutionPlan Total { get; } = total;
     internal AttemptValidatedRead ValidatedRead { get; } = validatedRead;
     // Read-only evidence consumers need the verified graph without allocating a mutable writer document.
-    private readonly Lazy<JsonObject> _document = new(() => JsonNode.Parse(documentSource.Export())!.AsObject());
-    internal JsonObject Document => _document.Value;
+    internal JsonObject Document => JsonNode.Parse(documentSource.Export())!.AsObject();
 }
 
 internal static class AttemptPreparedBinding
@@ -52,7 +51,7 @@ internal static class AttemptPreparedBinding
         return metadata;
     }
 
-    private static void RequireRegistration(RegisteredJournal journal, RunAttemptPlan plan)
+    internal static void RequireRegistration(RegisteredJournal journal, RunAttemptPlan plan)
     {
         if (journal.Kind != JournalKind.RunAttempt) throw new IOException("attempt_kind_unbound");
         if (plan.OperationId != journal.OperationId.ToString("D") || plan.JournalId != journal.JournalId.ToString("D") ||
@@ -61,17 +60,24 @@ internal static class AttemptPreparedBinding
 
     internal static BoundPreparedAttempt Read(RuntimeInstance instance, ContractReader contracts, StateDatabase database, Guid journalId,
         JournalStore? protectedHistory = null)
+        => database.AttemptReads?.Find(journalId) is { } owner
+            ? owner.ReadBinding((journals, inputs) => ReadCurrent(instance, contracts, database, journalId, journals, inputs))
+            : ReadCurrent(instance, contracts, database, journalId, protectedHistory);
+
+    private static BoundPreparedAttempt ReadCurrent(RuntimeInstance instance, ContractReader contracts, StateDatabase database, Guid journalId,
+        JournalStore? protectedHistory, AttemptBoundInputs? heldInputs = null)
     {
         using var paths = OperatingSystem.IsWindows() ? DirectoryAttributeScope.Hold(instance) : null;
         using var blobLease = OperatingSystem.IsWindows() ? BlobReadScope.Hold(instance) : null;
         JournalReadScope.SelectParent(instance, contracts, journalId);
-        if (protectedHistory is not null && (protectedHistory.Instance != instance || !ReferenceEquals(protectedHistory.Contracts, contracts)))
+        if (protectedHistory is not null && protectedHistory.Instance != instance)
             throw new IOException("attempt_journal_owner_unbound");
         var snapshot = new RecoveryJournalRegistry(database).ReadSnapshot(journalId);
         RecoveryRegistryPolicy.Verify(snapshot);
         var registered = snapshot.Journals.Single(item => item.JournalId == journalId);
         if (registered.Kind != JournalKind.RunAttempt) throw new IOException("attempt_kind_unbound");
-        using var inputs = new AttemptPlanCodec(instance, contracts, new(instance, contracts)).ReadBound(Reference(instance, registered));
+        using var openedInputs = heldInputs is null ? new AttemptPlanCodec(instance, contracts, new(instance, contracts)).ReadBound(Reference(instance, registered)) : null;
+        var inputs = heldInputs ?? openedInputs!;
         var plan = inputs.Plan; var total = inputs.Total;
         RequireRegistration(registered, plan);
         JournalResourceClaims.VerifyAttempt(registered, plan, total, JournalResourceClaims.Read(database, journalId));

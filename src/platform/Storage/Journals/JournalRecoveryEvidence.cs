@@ -29,7 +29,7 @@ public sealed class JournalRecoveryEvidence(RuntimeInstance instance, JournalSto
 
     public void VerifyAll(IReadOnlyList<RegisteredJournal> registered)
     {
-        VerifyRegisteredDirectory(registered);
+        if (database is null) VerifyRegisteredDirectory(registered);
         foreach (var journal in registered)
         {
             var physical = journals.Read(journal.JournalId);

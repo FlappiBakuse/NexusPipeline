@@ -24,7 +24,7 @@ internal static class InstalledNativeImports
             if (directory.RelativeVirtualAddress == 0 && directory.Size == 0) return;
             if (directory.RelativeVirtualAddress <= 0 || directory.Size < width || directory.Size / width > 256)
                 throw Invalid();
-            var bytes = image.GetSectionData(directory.RelativeVirtualAddress).GetContent(0, directory.Size);
+            var bytes = ReadRva(input, image.PEHeaders, directory.RelativeVirtualAddress, directory.Size, exact: true);
             var terminated = false;
             for (var offset = 0; offset + width <= bytes.Length; offset += width)
             {
@@ -34,8 +34,7 @@ internal static class InstalledNativeImports
                     throw Invalid();
                 var rva = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(descriptor[nameOffset..]);
                 if (rva <= 0) throw Invalid();
-                var block = image.GetSectionData(rva);
-                var nameBytes = block.GetContent(0, Math.Min(block.Length, 256));
+                var nameBytes = ReadRva(input, image.PEHeaders, rva, 256, exact: false);
                 var length = nameBytes.AsSpan().IndexOf((byte)0);
                 if (length is < 5 or > 255) throw Invalid();
                 var name = Encoding.ASCII.GetString(nameBytes.AsSpan(0, length));
@@ -46,6 +45,24 @@ internal static class InstalledNativeImports
             }
             if (!terminated) throw Invalid();
         }
+    }
+
+    private static byte[] ReadRva(FileStream input, PEHeaders headers, int rva, int maximum, bool exact)
+    {
+        var sections = headers.SectionHeaders.Where(section => section.VirtualAddress >= 0 && rva >= section.VirtualAddress &&
+            (long)rva < (long)section.VirtualAddress + Math.Max(section.VirtualSize, section.SizeOfRawData)).Take(2).ToArray();
+        if (sections.Length != 1) throw Invalid();
+        var section = sections[0];
+        var relative = (long)rva - section.VirtualAddress;
+        var available = section.SizeOfRawData - relative;
+        if (available <= 0 || exact && maximum > available) throw Invalid();
+        var count = checked((int)Math.Min(maximum, available));
+        var offset = section.PointerToRawData + relative;
+        if (offset < 0 || offset + count > input.Length) throw Invalid();
+        // GetSectionData materializes the whole PE image; dependency discovery needs these bounded ranges only.
+        var bytes = new byte[count];
+        input.Position = offset; input.ReadExactly(bytes);
+        return bytes;
     }
 
     private static IOException Invalid() => new("extension_native_image_invalid");

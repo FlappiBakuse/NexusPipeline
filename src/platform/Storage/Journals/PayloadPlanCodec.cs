@@ -37,7 +37,7 @@ public sealed class PayloadPlanCodec(RuntimeInstance instance, ContractReader co
         var held = new List<FileStream>();
         try
         {
-            foreach (var reference in frozen.Before.Contents.Concat(frozen.Candidate.Contents).Distinct().OrderBy(item => item.Sha256, StringComparer.Ordinal))
+            foreach (var reference in ContentInputs(frozen).OrderBy(item => item.Sha256, StringComparer.Ordinal))
                 held.Add(blobs.OpenVerified(reference));
             if (frozen.MaintenanceSource is { } sourceReference)
             {
@@ -59,13 +59,20 @@ public sealed class PayloadPlanCodec(RuntimeInstance instance, ContractReader co
     public FrozenPayloadApply Read(BlobReference reference)
     {
         var plan = ReadStructure(reference);
-        foreach (var blob in plan.Before.Contents.Concat(plan.Candidate.Contents).Distinct()) blobs.Verify(blob);
+        foreach (var blob in ContentInputs(plan)) blobs.Verify(blob);
         if (plan.MaintenanceSource is { } sourceReference)
         {
             var source = new UpdateSourceCodec(instance, contracts).ReadMetadata(sourceReference);
             foreach (var sourceInput in UpdateSourceCodec.References(source)) blobs.Verify(sourceInput);
         }
         return plan;
+    }
+
+    internal IReadOnlyList<BlobReference> ContentInputs(FrozenPayloadApply plan)
+    {
+        if (plan.Kind != JournalKind.ExtensionApply) return plan.Before.Contents.Concat(plan.Candidate.Contents).Distinct().ToArray();
+        var source = new PayloadSourceCodec(instance, contracts).ReadMetadata(plan.ExtensionSource ?? throw new IOException("extension_payload_source_required"));
+        return source.Package is { } package ? [package.Archive] : [];
     }
 
     internal FrozenPayloadApply ReadStructure(BlobReference reference) => ReadStructure(reference, out _);

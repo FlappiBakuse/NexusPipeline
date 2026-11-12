@@ -28,7 +28,6 @@ internal sealed class InstalledActivationOrigin : IDisposable
     private readonly BlobReference _plan;
     private readonly long _settingsRevision;
     private ProcessIdentityLease? _processIdentity;
-    private bool _ownsIdentity;
     private InstallationReadLease? _evidence;
     private ExtensionCatalogStore.InstalledHistory? _catalogEvidence;
     private DatabaseValidationLease? _sql;
@@ -72,8 +71,7 @@ internal sealed class InstalledActivationOrigin : IDisposable
             evidence = null;
             try
             {
-                result._processIdentity = executor ?? ProcessIdentityLease.HoldCurrent();
-                result._ownsIdentity = executor is null;
+                result._processIdentity = executor ?? lease.ExecutorIdentity;
                 var package = installed.Operation.Source.Package ?? throw Invalid();
                 result._catalogEvidence = catalog.ProtectInstalledHistory(root, package.Catalog, package.Entry);
                 result._sql = new(database.DatabasePath, "activation.sql.validate");
@@ -176,7 +174,7 @@ internal sealed class InstalledActivationOrigin : IDisposable
     private void DisposeEvidence()
     {
         try { _evidence?.Dispose(); }
-        finally { try { if (_ownsIdentity) _processIdentity?.Dispose(); } finally { _borrow.Dispose(); } }
+        finally { _borrow.Dispose(); }
     }
 
     private static IOException Invalid() => new("extension_installed_activation_unbound");

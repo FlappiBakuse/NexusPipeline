@@ -8,7 +8,7 @@
 |---|---|---|
 | Web 页面、公共组件或集合 | [前端行为](frontend.md) | 相关 lint/typecheck、最小行为场景；需要产品资源时只构建对应资产 |
 | Core 规则、配置或状态机 | [配置生命周期](configuration.md)、[状态与重试](state-and-retry.md) | 所选产品假设及其实际依赖项目；纯规则不自动启动 Web/桌面 |
-| 启动、数据库或 GUI launcher | [启动与容量](startup-and-capacity.md) | 最小数据边界及受影响原生入口 |
+| 启动、数据库或 GUI launcher | [启动与容量](startup-and-capacity.md)、[性能预算](performance.md) | 最小数据边界及受影响原生入口 |
 | Setup、更新或卸载 | [安装与维护生命周期](installation-lifecycle.md) | 同源 Windows 成品及受影响事务 |
 | SDK 或插件跨仓行为 | [SDK](sdk.md)及 Plugins 作者入口 | 同一 SDK 生产者与受影响真实消费者；只有实际契约变化才扩展消费者范围 |
 

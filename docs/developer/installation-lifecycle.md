@@ -57,3 +57,17 @@ installer-state uninstall-finish --root <目录> --transaction <GUID>
 ```
 
 `check-transition` 只读返回已核对来源。`uninstall-check` 返回门禁名及 `choose` 或 `delete` 状态。三个卸载写入口均核对实际父进程、冻结 worker 与原生引擎，`uninstall-finish` 还要求原生移除已完成。 [worker 入口](../../apps/installer/InstallerEntry.cs) · [Inno 调用](../../tooling/installer-lifecycle.iss)
+## 已提交插件事务的工作区
+
+已提交插件旧树由服务就绪后的分页清理回收，当前载荷、活跃 scope、未决事务与未知对象保留。
+安装/移除回执在工作区回收后仍可读取；分页、中断和删除证明统一见[扩展清理](extensions.md#废弃工作目录清理)。
+
+## 历史插件 ZIP 退役
+
+历史 ZIP 只从已知提交来源选取，保留现役安装、回滚、执行及共享引用。
+候选、持有期与回执重放规则见[历史包退役](extensions.md#历史包与展开内容退役)。
+
+## 插件展开内容与包输入
+
+插件从持续受保护的已验证 ZIP 直接物化候选树，展开成员不另写 CAS 副本。
+配置交换和宿主更新保留各自内容来源；完整包输入与交接规则见[下载与包验证](extensions.md#独占下载与包验证)。

@@ -7,7 +7,8 @@ using NexusPipeline.Platform.Storage.Sqlite;
 
 namespace NexusPipeline.Host.Lifecycle;
 
-internal sealed record ReadyRuntime(StateDatabase Database, RecoveryIndex Recovery);
+internal sealed record ReadyRuntime(StateDatabase Database, RecoveryIndex Recovery,
+    Platform.Storage.Notifications.NotificationStartupState? Notifications);
 
 internal static class RuntimeReadiness
 {
@@ -17,16 +18,16 @@ internal static class RuntimeReadiness
         using var paths = DirectoryAttributeScope.Hold(instance);
         using var blobs = BlobReadScope.Hold(instance);
         using var identity = InstanceReadScope.Hold(instance, contracts);
+        using var executor = new Platform.Processes.ProcessIdentityScope(lease.ExecutorIdentity);
         var trust = Platform.Storage.Maintenance.UpdateReleaseTrust.Configured();
         reportProgress?.Invoke(StartupStage.CheckingDatabase);
         var database = File.Exists(Path.Combine(instance.RuntimeRoot, "state-initialization.guard"))
-            ? StateDatabase.OpenExisting(instance, Path.Combine(instance.RuntimeRoot, "diagnostics", "state-inspection"),
-                new JournalStartupAdmission(instance, contracts, roots, trust), lease)
-            : StateDatabase.CreateFresh(instance);
+            ? StateDatabase.OpenCurrent(instance, lease)
+            : StateDatabase.CreateFresh(instance, lease);
         reportProgress?.Invoke(StartupStage.RecoveringOperations);
         var index = new StartupJournalRecovery(instance, contracts, database, roots, trust).Recover(lease);
         Platform.Storage.Settings.StartupRegistrationCoordinator.ReconcileStopped(instance, database, lease, index,
             new Platform.Windows.StartupRegistrationEffects());
-        return new(database, index);
+        return new(database, index, null);
     }
 }

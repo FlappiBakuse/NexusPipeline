@@ -121,17 +121,10 @@ internal sealed class ExecutionCancellationStore(RuntimeInstance instance, State
     internal static void VerifyInventory(RuntimeInstance instance, StateDatabase database, ContractReader contracts, int pageSize = 128)
     {
         if (pageSize is < 1 or > 128) throw new ArgumentOutOfRangeException(nameof(pageSize));
+        VerifyTargets(database);
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
         using var transaction = connection.BeginTransaction(deferred: true);
-        ExecutionCancellationRows.RequireRecognizedTargets(connection, transaction);
         const string targets = "(c.operation_kind IN ('execution.cancel','execution.close') OR j.operation_kind='runAttempt' AND c.operation_id<>j.operation_id AND c.operation_kind<>'execution.retry.cancel')";
-        using (var invalid = connection.CreateCommand())
-        {
-            invalid.Transaction = transaction;
-            invalid.CommandText = "SELECT EXISTS(SELECT 1 FROM operations c LEFT JOIN operation_journals j ON j.journal_id=c.initial_journal_id WHERE " +
-                targets + " AND (c.initial_journal_id IS NULL OR j.operation_kind IS NULL OR j.operation_kind<>'runAttempt'));";
-            if ((long)invalid.ExecuteScalar()! != 0) throw new IOException("execution_cancel_operation_unbound");
-        }
         var after = "";
         while (true)
         {
@@ -145,6 +138,20 @@ internal sealed class ExecutionCancellationStore(RuntimeInstance instance, State
             if (parents.Count < pageSize) break;
             after = parents[^1].ToString("D");
         }
+        transaction.Commit();
+    }
+
+    internal static void VerifyTargets(StateDatabase database)
+    {
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var transaction = connection.BeginTransaction(deferred: true);
+        ExecutionCancellationRows.RequireRecognizedTargets(connection, transaction);
+        using var command = connection.CreateCommand(); command.Transaction = transaction;
+        command.CommandText = "SELECT EXISTS(SELECT 1 FROM operations c LEFT JOIN operation_journals j ON j.journal_id=c.initial_journal_id " +
+            "WHERE (c.operation_kind IN ('execution.cancel','execution.close') OR j.operation_kind='runAttempt' " +
+            "AND c.operation_id<>j.operation_id AND c.operation_kind<>'execution.retry.cancel') " +
+            "AND (c.initial_journal_id IS NULL OR j.operation_kind IS NULL OR j.operation_kind<>'runAttempt'));";
+        if ((long)command.ExecuteScalar()! != 0) throw new IOException("execution_cancel_operation_unbound");
         transaction.Commit();
     }
 }

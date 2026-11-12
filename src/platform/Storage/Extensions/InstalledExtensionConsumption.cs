@@ -6,7 +6,7 @@ namespace NexusPipeline.Platform.Storage.Extensions;
 
 [SupportedOSPlatform("windows")]
 internal sealed class InstalledExtensionConsumption(InstanceLease lease, ExtensionActivator activator,
-    ResourceLeaseManager resources, ExtensionScope scope, PreparedExtensionActivation.InstalledConsumptionFacts facts)
+    ResourceLeaseManager resources, ExtensionScope scope, InstalledConsumptionFacts facts)
 {
     private readonly AsyncLocal<Use?> _invocation = new();
     private readonly AsyncLocal<bool> _projecting = new();
@@ -85,7 +85,7 @@ internal sealed class InstalledExtensionConsumption(InstanceLease lease, Extensi
         using var held = actualRoot.Borrow(resources, actualRoot.OperationId,
             [new("extension:" + scope.Activation.ExtensionId, ResourceClaimMode.Reference)]);
         using var usage = scope.BeginUse();
-        using var installation = acceptedUse is null ? facts.OpenReadLease() : null;
+        var installation = acceptedUse is null ? facts.BorrowReadLease() : null;
         using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(invocationCancellation, scope.Cancellation);
         using var invocation = new Use(this, actualRoot, usage, parent: acceptedUse, invocationCheck: requireInvocation, ownsRoot: false,
             subjectId: subjectId, clientId: clientId, frontendOperationId: frontendOperationId, work: work, callbackLifetime: lifetime.Token,
@@ -104,13 +104,9 @@ internal sealed class InstalledExtensionConsumption(InstanceLease lease, Extensi
 
     private Use OpenUse(ResourceOperationLease root, IDisposable usage)
     {
-        var installation = facts.OpenReadLease();
-        try
-        {
-            RequireCurrent(installation);
-            return new(this, root, usage, installation: installation, ownsInstallation: true);
-        }
-        catch { installation?.Dispose(); throw; }
+        var installation = facts.BorrowReadLease();
+        RequireCurrent(installation);
+        return new(this, root, usage, installation: installation);
     }
 
     private void RequireCurrent(InstallationReadLease? installation = null)
@@ -137,8 +133,7 @@ internal sealed class InstalledExtensionConsumption(InstanceLease lease, Extensi
     internal sealed class Use(InstalledExtensionConsumption owner, ResourceOperationLease root, IDisposable usage,
         ResourceOperationBorrow? borrow = null, Use? parent = null, Action? invocationCheck = null, bool ownsRoot = true,
         string? subjectId = null, Guid? clientId = null, Guid? frontendOperationId = null, IInstalledWork? work = null,
-        CancellationToken callbackLifetime = default, bool isDesktopCall = false, InstallationReadLease? installation = null,
-        bool ownsInstallation = false) : IDisposable
+        CancellationToken callbackLifetime = default, bool isDesktopCall = false, InstallationReadLease? installation = null) : IDisposable
     {
         private int _disposed;
         internal ResourceOperationLease Root => root;
@@ -180,12 +175,11 @@ internal sealed class InstalledExtensionConsumption(InstanceLease lease, Extensi
         public void Dispose()
         {
             if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
-            try { if (ownsInstallation) installation?.Dispose(); }
-            finally
+            try
             {
-                try { if (borrow is null) { if (ownsRoot) root.Dispose(); } else borrow.Dispose(); }
-                finally { usage.Dispose(); }
+                if (borrow is null) { if (ownsRoot) root.Dispose(); } else borrow.Dispose();
             }
+            finally { usage.Dispose(); }
         }
     }
 }

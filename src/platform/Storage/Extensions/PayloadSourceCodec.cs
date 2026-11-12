@@ -92,12 +92,32 @@ internal sealed class PayloadSourceCodec(RuntimeInstance instance, ContractReade
                 entry.SizeBytes == file.SizeBytes && entry.Sha256 == file.Sha256))) throw Invalid();
     }
 
-    internal static ImmutableArray<BlobReference> References(ExtensionPayloadSource source)
+    internal BlobReference? ReadOriginalArchive(ExtensionPayloadSource source, FrozenPayloadApply plan, PayloadApplyRoots roots)
+    {
+        if (plan.Before.Snapshot.Shape == NexusPipeline.Core.Configuration.FileObjectKind.Missing) return null;
+        var original = new InstalledFootprintCodec(instance, roots, contracts)
+            .ReadMetadata(source.OriginalFootprint ?? throw Invalid());
+        if (!original.IsInstalled || original.ExtensionId != source.ExtensionId ||
+            original.Revision != source.ExpectedInstalledRevision || original.TargetPath != plan.TargetPath ||
+            original.ParentIdentity != plan.ParentIdentity) throw Invalid();
+        var previous = ReadMetadata(original.Source);
+        if (previous.ExtensionId != original.ExtensionId || previous.JournalId != original.JournalId ||
+            previous.OperationId != original.OperationId || previous.Package is not { } package ||
+            package.Archive.Sha256 != original.Package.ArchiveSha256 ||
+            package.Entry.ManifestSha256 != original.Package.ManifestSha256 ||
+            package.Entry.PackageVersion != original.Package.PackageVersion) throw Invalid();
+        return package.Archive;
+    }
+
+    internal static ImmutableArray<BlobReference> References(ExtensionPayloadSource source, bool includeArchive = true)
     {
         var references = ImmutableArray.CreateBuilder<BlobReference>();
         if (source.OriginalFootprint is { } original) references.Add(original);
         if (source.Package is { } package)
-            references.AddRange(ImmutableArray.Create(package.Catalog.Pointer, package.Catalog.Catalog, package.Catalog.Signature, package.Archive));
+        {
+            references.AddRange(ImmutableArray.Create(package.Catalog.Pointer, package.Catalog.Catalog, package.Catalog.Signature));
+            if (includeArchive) references.Add(package.Archive);
+        }
         return references.Distinct().ToImmutableArray();
     }
 

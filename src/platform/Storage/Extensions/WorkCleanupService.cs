@@ -17,6 +17,29 @@ internal sealed class WorkCleanupService(RuntimeInstance instance, StateDatabase
     ExtensionActivator activator)
 {
     internal const int PageNodeCount = 64;
+    private const string SweepSubject = "host:extension-work";
+
+    internal async ValueTask<bool> RunNextPageAsync(Guid producerJournalId, CancellationToken cancellation,
+        ICleanupPersistenceObserver? observer = null)
+    {
+        var registry = new RecoveryJournalRegistry(database);
+        var producer = registry.ReadJournal(producerJournalId);
+        if (producer.Kind != JournalKind.ExtensionApply || producer.Phase != JournalPhase.Committed) throw Invalid();
+        var path = PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(instance.RuntimeRoot, producer.PlanPath));
+        var reference = new BlobReference(producer.PlanPath, new FileInfo(path).Length, producer.PlanDigest);
+        Guid? previous = null; BlobReference? previousPlan = null;
+        for (var page = 0; page < ExtensionWorkHistory.MaximumPages; page++)
+        {
+            cancellation.ThrowIfCancellationRequested();
+            var id = ExtensionWorkRequest.PageOperation(instance.InstanceId, producerJournalId, previous);
+            var result = await RunPageAsync(id, SweepSubject, producerJournalId, reference, previous, previousPlan,
+                cancellation, observer).ConfigureAwait(false);
+            if (registry.ReadJournal(result.JournalId).Phase != JournalPhase.Committed) return false;
+            if (result.Acceptance.IsNew) return true;
+            previous = result.JournalId; previousPlan = result.Plan;
+        }
+        throw Invalid();
+    }
 
     internal async ValueTask<CleanupAcceptanceResult> RunPageAsync(Guid operationId, string subject,
         Guid producerJournalId, BlobReference producerPlan, Guid? previousJournalId, BlobReference? previousPlan,

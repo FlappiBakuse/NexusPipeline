@@ -3,6 +3,7 @@ using System.Runtime.Versioning;
 using Microsoft.Data.Sqlite;
 using NexusPipeline.Core.Maintenance;
 using NexusPipeline.Platform.Extensions;
+using NexusPipeline.Platform.Processes;
 using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage.Journals;
 using NexusPipeline.Platform.Storage.Sqlite;
@@ -23,24 +24,27 @@ internal sealed class ExtensionWorkExecution
     private readonly ExtensionInstalledMetadata? _installed;
     private WorkEvidenceScope? _evidence;
     internal IReadOnlySet<int>? ProtectedPrevious => _evidence?.Previous;
+    internal ProcessIdentityLease? Executor { get; }
 
     private ExtensionWorkExecution(RuntimeInstance instance, StateDatabase database, InstanceLease lease,
         ContractReader contracts, PayloadApplyRoots roots, BoundWorkPage work, BlobReference planReference, Action authority,
-        JournalRecoveryOwnership.CompletedExtensionProof stop)
+        JournalRecoveryOwnership.CompletedExtensionProof stop, ProcessIdentityLease? executor = null)
     { _instance = instance; _database = database; _lease = lease; _contracts = contracts; _roots = roots; _work = work; _planReference = planReference; _authority = authority; _stop = stop;
+        Executor = executor;
         _installed = new ExtensionInstalledEvidence(instance, database, contracts, roots).ReadCurrent(work.Origin.Producer.Source.ExtensionId)?.Metadata; }
 
     [SupportedOSPlatform("windows")]
     internal static ExtensionWorkExecution Owned(RuntimeInstance instance, StateDatabase database, InstanceLease lease,
         ContractReader contracts, PayloadApplyRoots roots, BoundWorkPage work, ResourceOperationLease root,
-        ResourceOperationBorrow borrow, ExtensionActivator.ApplyReservation inventory, ResourceLeaseManager resources, BlobReference planReference) =>
+        ResourceOperationBorrow borrow, ExtensionActivator.ApplyReservation inventory, ResourceLeaseManager resources,
+        BlobReference planReference, ProcessIdentityLease executor) =>
         new(instance, database, lease, contracts, roots, work, planReference, () => borrow.Use(() => inventory.Use(root, (_, _, _) =>
         {
-            var observed = new JournalWriterStore(database).ObserveForCurrentExecutor(work.Origin.Proof.ProducerJournalId);
+            var observed = new JournalWriterStore(database).ObserveForCurrentExecutor(work.Origin.Proof.ProducerJournalId, executor);
             if (!observed.IsComplete || observed.State != WriterState.Stopped) throw Pending();
             return true;
         })), new JournalRecoveryOwnership(database).CaptureCompletedWriters(instance, database, lease,
-            work.Origin.Proof.ProducerJournalId, resources, root, work.Origin.Producer.Source.ExtensionId));
+            work.Origin.Proof.ProducerJournalId, resources, root, work.Origin.Producer.Source.ExtensionId, executor), executor);
 
     [SupportedOSPlatform("windows")]
     internal static ExtensionWorkExecution Recovery(RuntimeInstance instance, StateDatabase database, InstanceLease lease,

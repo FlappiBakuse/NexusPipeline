@@ -7,8 +7,10 @@ using System.Runtime.ExceptionServices;
 namespace NexusPipeline.Platform.Storage.Journals;
 
 public sealed class JournalStartupAdmission(RuntimeInstance instance, ContractReader contracts, PayloadApplyRoots? payloadRoots = null,
-    Maintenance.UpdateReleaseTrust? maintenanceTrust = null) : IDatabaseStartupAdmission
+    Maintenance.UpdateReleaseTrust? maintenanceTrust = null, InstanceLease? startupLease = null) : IDatabaseStartupAdmission
 {
+    public Notifications.NotificationStartupState? NotificationStartup { get; private set; }
+
     public void Verify(DatabaseInspection inspection)
     {
         var database = StateDatabase.Inspected(inspection, instance);
@@ -37,13 +39,14 @@ public sealed class JournalStartupAdmission(RuntimeInstance instance, ContractRe
             },
             () =>
             {
-                try { journals.InspectCompletedHistory(); }
+                try { journals.InspectCompletedHistory(verifyExecution: true); }
                 catch (Exception error) { historyFailure = ExceptionDispatchInfo.Capture(error); }
             });
         inventoryFailure?.Throw();
         historyFailure?.Throw();
         var snapshot = RecoveryJournalRegistry.ReadInspectedSnapshot(inspection);
-        journals.InspectBindings(snapshot);
+        new JournalRecoveryEvidence(instance, new(instance, contracts), database).VerifyRecognizedAll(snapshot.Journals);
+        journals.InspectBindings(snapshot, verifyExecution: true);
         return snapshot;
     }
 
@@ -80,18 +83,18 @@ public sealed class JournalStartupAdmission(RuntimeInstance instance, ContractRe
         using (StartupProfile.Measure("inventory.JournalResourceClaims"))
             JournalResourceClaims.VerifyInventory(instance, database, contracts, payloadRoots);
         using (StartupProfile.Measure("inventory.JobClosureStore"))
-            JobClosureStore.VerifyInventory(instance, database, contracts);
+            JobClosureStore.VerifyConfigurations(instance, database, contracts);
         using (StartupProfile.Measure("inventory.RecoveryCapacityInventory"))
             RecoveryCapacityInventory.Verify(instance, database, contracts);
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
         using (StartupProfile.Measure("inventory.ExecutionCancellationStore"))
-            Execution.ExecutionCancellationStore.VerifyInventory(instance, database, contracts);
+            Execution.ExecutionCancellationStore.VerifyTargets(database);
         using (StartupProfile.Measure("inventory.RecordRetirementInventory"))
             Records.RecordRetirementInventory.VerifyReadOnly(instance, database, contracts);
         using (StartupProfile.Measure("inventory.LogCatalogInventory"))
-            Execution.LogCatalogInventory.VerifyReadOnly(instance, database, contracts);
+            Execution.LogCatalogInventory.VerifyCatalog(database);
         using (StartupProfile.Measure("inventory.ImageCatalogInventory"))
-            Execution.ImageCatalogInventory.VerifyReadOnly(instance, database, contracts);
+            Execution.ImageCatalogInventory.VerifyCatalog(database);
         using (StartupProfile.Measure("inventory.StartupRegistrationCoordinator"))
             Settings.StartupRegistrationCoordinator.VerifyReadOnly(database);
         using (StartupProfile.Measure("inventory.Notifications"))
@@ -103,7 +106,14 @@ public sealed class JournalStartupAdmission(RuntimeInstance instance, ContractRe
         using (StartupProfile.Measure("inventory.WorkEffectInventory"))
             Scheduling.WorkEffectInventory.Verify(instance, database, contracts, rotations: true);
         using (StartupProfile.Measure("inventory.DeliveryReferenceIndex"))
+        {
             Notifications.DeliveryReferenceIndex.VerifyReadOnly(instance, database, contracts);
+            if (startupLease is not null)
+            {
+                startupLease.VerifyHeld(instance);
+                NotificationStartup = new(instance, startupLease.StartupGeneration);
+            }
+        }
         using (StartupProfile.Measure("inventory.SecretFieldStore"))
             SecretFieldStore.VerifyInventory(database);
         using (StartupProfile.Measure("inventory.PreparationEvidenceStore"))

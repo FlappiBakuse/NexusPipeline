@@ -112,6 +112,13 @@ public sealed class JournalStore
     public JournalDocument Append(Guid journalId, long expectedRevision, ReadOnlyMemory<byte> bytes,
         NoEffectEvidence? noEffect = null, bool hasVerifiedRecoveryEvidence = false)
     {
+        var owner = JournalReadScope.WriteOwner(this, journalId) ?? this;
+        return owner.AppendCore(journalId, expectedRevision, bytes, noEffect, hasVerifiedRecoveryEvidence, _publicationObserver);
+    }
+
+    private JournalDocument AppendCore(Guid journalId, long expectedRevision, ReadOnlyMemory<byte> bytes,
+        NoEffectEvidence? noEffect, bool hasVerifiedRecoveryEvidence, IJournalPublicationObserver? observer)
+    {
         lock (_gate)
         {
             using var publication = JournalPublicationGate.Acquire(_instance, journalId);
@@ -131,7 +138,7 @@ public sealed class JournalStore
             var totalBytes = _protection?.JournalId == journalId ? _protection.TotalBytes :
                 Directory.EnumerateFiles(JournalDirectory(journalId)).Sum(path => new FileInfo(path).Length);
             if (checked(totalBytes + next.Export().Length) > MaximumHistoryBytes) throw new IOException("journal_history_byte_limit");
-            WriteRevision(JournalDirectory(journalId), next);
+            WriteRevision(JournalDirectory(journalId), next, observer);
             if (_protection?.JournalId == journalId) _protection.Include(next);
             return next;
         }
@@ -219,11 +226,11 @@ public sealed class JournalStore
 
     private static string FileName(long revision) => revision.ToString("D10", CultureInfo.InvariantCulture) + ".json";
 
-    private void WriteRevision(string directory, JournalDocument document)
+    private void WriteRevision(string directory, JournalDocument document, IJournalPublicationObserver? observer = null)
     {
         using var output = new FileStream(Path.Combine(directory, FileName(document.Revision)), FileMode.CreateNew,
             FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough);
-        _publicationObserver?.RevisionCreated(output.Name);
+        (observer ?? _publicationObserver)?.RevisionCreated(output.Name);
         output.Write(document.Export());
         output.Flush(flushToDisk: true);
     }

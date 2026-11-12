@@ -40,11 +40,16 @@ internal sealed class ExtensionApplyWorkflow(RuntimeInstance instance, StateData
         var catalog = catalogs.ReadCached(request.Catalog!.Channel) ?? throw Invalid();
         if (catalog.Identity != request.Catalog ||
             catalog.Entries.SingleOrDefault(item => item.ExtensionId == request.ExtensionId) != request.Candidate) throw Invalid();
-        using var downloaded = await OwnedExtensionDownload.Receive(instance, lease, resources, operationId,
+        var blobs = new ImmutableBlobStore(instance, contracts);
+        var archivePath = Path.Combine(instance.RuntimeRoot, $"blobs/content/{request.Candidate!.ArtifactSha256}.bin");
+        using var cached = File.Exists(archivePath) ? blobs.OpenVerified(new($"blobs/content/{request.Candidate.ArtifactSha256}.bin",
+            request.Candidate.ArtifactBytes, request.Candidate.ArtifactSha256)) : null;
+        using var downloaded = cached is null ? await OwnedExtensionDownload.Receive(instance, lease, resources, operationId,
             request.Candidate!, (destination, cancellation) => transport.Artifact(catalog, request.ExtensionId,
-                destination, cancellation), hostCancellation).ConfigureAwait(false);
+                destination, cancellation), hostCancellation).ConfigureAwait(false) : null;
+        if (downloaded is not null) archivePath = downloaded.Adopt(blobs, hostCancellation);
         using var verified = VerifiedExtensionPackage.Prepare(catalogs, catalog.Identity.Channel, operationId,
-            packageRoot, request.ExtensionId, downloaded.ArchivePath, contracts, hostCancellation);
+            packageRoot, request.ExtensionId, archivePath, contracts, hostCancellation);
         var candidate = verified.CaptureCandidate(packageRoot, new(instance, contracts), hostCancellation);
         return await ApplyAsync(operationId, subject, request, candidate, accepted, hostCancellation).ConfigureAwait(false);
     }

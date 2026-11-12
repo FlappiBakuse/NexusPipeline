@@ -1,5 +1,6 @@
 using System.Runtime.Versioning;
 using NexusPipeline.Platform.Storage.Scheduling;
+using NexusPipeline.Platform.Storage.Execution;
 using Xunit;
 
 namespace NexusPipeline.StorageTests;
@@ -10,13 +11,34 @@ public sealed class ScheduleLifetimeTests
     [Fact]
     public async Task ReportsLoopFailure()
     {
-        using var fixture = new ExecutionAdmissionFixture(); var source = fixture.Source;
-        fixture.Execute("CREATE TRIGGER fixture_schedule_failure BEFORE INSERT ON schedule_minute_claims BEGIN SELECT RAISE(ABORT,'fixture_schedule_failure'); END;");
+        var clock = new Clock(); using var fixture = new ScheduleNativeFixture(clock); var source = fixture.Source;
+        fixture.Base.Execute("CREATE TRIGGER fixture_schedule_failure BEFORE INSERT ON schedule_minute_claims BEGIN SELECT RAISE(ABORT,'fixture_schedule_failure'); END;");
         var service = new PersistentScheduleService(source.Instance, source.Database, source.Lease,
-            fixture.Resources, fixture.Lifecycle, fixture.Index, fixture.Service);
+            fixture.Base.Resources, fixture.Base.Lifecycle, fixture.Base.Index, fixture.Base.Service, clock);
         service.Start(); await service.Completion.WaitAsync(TimeSpan.FromSeconds(5));
-        Assert.False(service.IsRunning); Assert.Equal("schedule_reconciliation_required", service.FailureCode);
-        Assert.False(fixture.Index.Current.IsReady); await service.StopAsync();
+        Assert.False(service.IsRunning); Assert.Equal("schedule_reconciliation_required:SqliteException", service.FailureCode);
+        Assert.False(fixture.Base.Index.Current.IsReady); await service.StopAsync();
+    }
+
+    [Fact(DisplayName = "Empty Runtime Minutes Leave Persistent State Untouched Across Ticks And Restart")]
+    public async Task SkipsEmptyMinutes()
+    {
+        using var fixture = new ExecutionAdmissionFixture(); var source = fixture.Source; var clock = new Clock();
+        fixture.Execute("CREATE TRIGGER reject_empty_minute BEFORE INSERT ON schedule_minute_claims BEGIN SELECT RAISE(ABORT,'unexpected_empty_minute'); END;");
+        var store = new ScheduleOccurrenceStore(source.Instance, source.Database, source.Lease, fixture.Resources, clock);
+        var admission = new ScheduledExecutionAdmission(source.Instance, source.Database, source.Lease, fixture.Service, clock);
+        var before = fixture.Count("operations");
+        for (var restart = 0; restart < 2; restart++)
+        {
+            var runtime = new ScheduleRuntimeService(store, admission, clock); runtime.Initialize();
+            for (var minute = 0; minute < 5; minute++)
+            {
+                await runtime.TickAsync(); await runtime.TickAsync(); clock.Now += TimeSpan.FromMinutes(1);
+            }
+            await runtime.StopAsync();
+        }
+        Assert.Equal(before, fixture.Count("operations")); Assert.Equal(0, fixture.Count("schedule_minute_claims"));
+        Assert.Null(store.ReadCheckpoint().Watermark.HighestUtcMinute);
     }
 
     [Fact(DisplayName = "Automatic Update Idle Check Includes Unissued Startup Work Waiting Occurrences And The Upcoming Window")]

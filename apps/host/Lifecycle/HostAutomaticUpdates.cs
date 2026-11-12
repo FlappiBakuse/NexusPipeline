@@ -33,6 +33,8 @@ internal sealed class HostAutomaticUpdates : IAsyncDisposable
     private DateTimeOffset _nextCheck;
     private bool _pendingPluginScan;
     private long _observedSettingsRevision = -1;
+    private long _observedMutation = -1;
+    private bool _hasPending;
     private AutomaticUpdateStatus _status = new(null, null, null);
     internal AutomaticUpdateStatus Status => Volatile.Read(ref _status);
 
@@ -89,6 +91,8 @@ internal sealed class HostAutomaticUpdates : IAsyncDisposable
 
     private async Task<bool> TickAsync()
     {
+        var observed = _database.CommitSequence;
+        if (_observedMutation == observed && !_hasPending && !_pendingPluginScan && _clock.GetUtcNow() < _nextCheck) return false;
         if (await ApplyPendingAsync(false)) return true;
         var saved = _settings.Read();
         if (saved.Saved.Revision != _observedSettingsRevision)
@@ -104,12 +108,15 @@ internal sealed class HostAutomaticUpdates : IAsyncDisposable
             _nextCheck = _clock.GetUtcNow() + AutomaticUpdatePolicy.CheckInterval;
             await CheckAsync();
         }
+        _observedMutation = observed;
         return false;
     }
 
     private async Task<bool> ApplyPendingAsync(bool startup)
     {
-        foreach (var item in _maintenance.Pending())
+        var pending = _maintenance.Pending();
+        _hasPending = pending.Count != 0;
+        foreach (var item in pending)
         {
             if (item.Subject == Subject && _settings.Read().Effective.Updates is not { CheckEnabled: true, AutoApplyEnabled: true }) continue;
             if (!AutomaticUpdatePolicy.ShouldApplyPending(item.Timing, _startupPending.Contains(item.OperationId), startup)) continue;

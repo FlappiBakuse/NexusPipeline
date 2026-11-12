@@ -34,12 +34,14 @@ public sealed class LogCatalogTests
             runId = receipt.Facts.RunId; attemptId = receipt.Facts.AttemptId;
         }
         var databasePath = Path.Combine(instance.RuntimeRoot, "state", "nexus.db");
-        using var lease = InstanceLease.Acquire(instance, new());
-        var reopened = StateDatabase.OpenExisting(instance, Path.Combine(root, "log-limit-migration-inspection"),
-            new JournalStartupAdmission(instance, new()), lease);
-        Assert.Equal(entries, new LogCatalogReader(instance, reopened, new())
-            .ReadPage(new(runId, attemptId)).Items.ToArray());
-        Assert.NotNull(new AttemptReceiptStore(reopened).Read(attemptId));
+        using (var lease = InstanceLease.Acquire(instance, new()))
+        {
+            var reopened = StateDatabase.OpenExisting(instance, Path.Combine(root, "log-limit-migration-inspection"),
+                new JournalStartupAdmission(instance, new()), lease);
+            Assert.Equal(entries, new LogCatalogReader(instance, reopened, new())
+                .ReadPage(new(runId, attemptId)).Items.ToArray());
+            Assert.NotNull(new AttemptReceiptStore(reopened).Read(attemptId));
+        }
         Assert.Equal(StateDatabase.SchemaDigest,
             DatabaseInspector.Inspect(databasePath, instance.InstanceId, Path.Combine(root, "new-catalog-inspection")).SchemaDigest);
         _ = StateDatabase.OpenExisting(instance, Path.Combine(root, "idempotent-log-limit-inspection"));

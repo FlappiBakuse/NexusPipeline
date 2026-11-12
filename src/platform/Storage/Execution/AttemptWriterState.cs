@@ -24,10 +24,11 @@ internal sealed record AttemptWriterState(RegisteredJournal Journal, RunAttemptP
     internal ImmutableArray<ExecutionStepCompletion> Coverage => StepResultCodec.Coverage(Latest.Root, Total);
     internal static AttemptWriterState Read(RuntimeInstance instance, StateDatabase database, ContractReader contracts, Guid journalId)
     {
+        using var reads = OperatingSystem.IsWindows() ? DatabaseReadScope.Hold(database.DatabasePath) : null;
         using var paths = OperatingSystem.IsWindows() ? DirectoryAttributeScope.Hold(instance) : null;
         using var blobs = OperatingSystem.IsWindows() ? BlobReadScope.Hold(instance) : null;
         JournalReadScope.SelectParent(instance, contracts, journalId);
-        var journals = new JournalStore(instance, contracts);
+        var journals = database.AttemptReads?.Find(journalId)?.Journals ?? new JournalStore(instance, contracts);
         using var historyLease = OperatingSystem.IsWindows() ? JournalReadScope.Hold(journals, journalId) : null;
         var bound = AttemptPreparedBinding.Read(instance, contracts, database, journalId, journals);
         var journal = new RecoveryJournalRegistry(database).ReadJournal(journalId);
@@ -134,13 +135,22 @@ internal sealed record AttemptWriterState(RegisteredJournal Journal, RunAttemptP
         if (closure.InstanceId != instance.InstanceId || closure.JournalIds.Length != 1 || closure.RunElapsedMilliseconds is null)
             throw new IOException("execution_writer_closure_unbound");
         var state = Read(instance, database, contracts, closure.JournalIds[0]);
-        var projected = new JournalStore(instance, contracts).ReadAllRevisions(state.Journal.JournalId).Single(item => item.Revision == state.Journal.Revision);
+        state.RequireClosure(closure);
+        return state;
+    }
+
+    internal void RequireClosure(FrozenJobClosure closure)
+    {
+        if (closure.InstanceId.ToString("D") != Attempt.InstanceId || closure.JournalIds.Length != 1 ||
+            closure.JournalIds[0] != Journal.JournalId || closure.RunElapsedMilliseconds is null)
+            throw new IOException("execution_writer_closure_unbound");
+        var state = this;
+        var projected = RequireValidatedRead().History.Single(item => item.Revision == Journal.Revision);
         var step = WriterIntentCodec.ReadAllJobs(projected.Root, state.Total).SingleOrDefault(item => item.JobName == closure.JobName)
             ?? throw new IOException("execution_writer_closure_unbound");
         if (state.Journal.OperationId != closure.OperationId || step.WriterId != closure.WriterId || step.SessionId != closure.SessionId ||
             step.ClosedElapsedMilliseconds != closure.RunElapsedMilliseconds ||
             closure.WasExecuted && state.Gate.State != EffectGateState.Entered)
             throw new IOException("execution_writer_closure_unbound");
-        return state;
     }
 }

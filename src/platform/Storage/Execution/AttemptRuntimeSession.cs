@@ -31,6 +31,7 @@ internal sealed class AttemptRuntimeSession : IExecutionAttemptSession, IDisposa
     private readonly RunAttemptPlan _attempt;
     private readonly RegisteredJournal _parent;
     private readonly AttemptTerminalStore _terminal;
+    private readonly AttemptReadSession? _readSession;
     private readonly Dictionary<string, Guid> _configurationSessions = new(StringComparer.Ordinal);
     private readonly Dictionary<string, ExecutionRuntimeStep> _steps = new(StringComparer.Ordinal);
     private readonly Dictionary<string, PreparedConfigurationRun> _currentConfigurations;
@@ -59,6 +60,7 @@ internal sealed class AttemptRuntimeSession : IExecutionAttemptSession, IDisposa
         _parent = new(accepted.Receipt.JournalId, accepted.Identity.OperationId, JournalKind.RunAttempt, JournalPhase.Prepared, 1,
             accepted.Receipt.Plan.RelativePath, accepted.Receipt.Plan.Sha256, _total.ResourceKeys);
         _terminal = new(instance, database, contracts, lease); StepIds = Array.AsReadOnly(_total.Steps.Select(step => step.StepId).ToArray());
+        _readSession = lease.BindAttemptReads(database).Start(instance, database, contracts, _parent.JournalId);
     }
 
     public void PrepareConfigurationGroups()
@@ -317,6 +319,6 @@ internal sealed class AttemptRuntimeSession : IExecutionAttemptSession, IDisposa
         if (!IsTerminal) throw new IOException("execution_runtime_reconciliation_required");
         foreach (var step in _steps.Values) step.Dispose();
         foreach (var configuration in _retryConfigurations) configuration.Dispose();
-        _accepted.Dispose(); _disposed = true;
+        _readSession?.Dispose(); _accepted.Dispose(); _disposed = true;
     }
 }

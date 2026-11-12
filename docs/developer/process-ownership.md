@@ -19,3 +19,13 @@ Windows 的普通 Job 通知允许丢失，观察器不提供保证不漏事件�
 
 原生依据见 [Job completion port](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-jobobject_associate_completion_port)
 和 [GetQueuedCompletionStatus](https://learn.microsoft.com/en-us/windows/win32/api/ioapiset/nf-ioapiset-getqueuedcompletionstatus)。
+
+## 映像证明的持有期
+
+`ProcessIdentityLease` 在实例连续只读保护内共享 executor 映像摘要，扩展、执行和清理借用同一证明。
+每次仍读取进程创建时间、SID、提权、路径和物理身份；实例关闭释放，新拥有期重新验证。
+单纯选择目录或读取用户 SID 只消费路径与令牌，不创建未使用的完整映像摘要。
+
+所属桌面创建挂起进程前取得映像和祖先目录保护，启动及原生客户端注册共用一次摘要。
+成功后保护交给原生客户端绑定；失败先停止所属启动再释放。维护等待整个所属进程族停止后释放，允许载荷替换。
+外部客户端自行取得保护并完整核验，不借用所属启动的证明。

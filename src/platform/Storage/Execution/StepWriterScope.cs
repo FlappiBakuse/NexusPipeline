@@ -62,7 +62,7 @@ internal sealed class StepWriterScope : IConfigurationWriterScope
             HookCommand(step, role);
         CommandLineSyntax = ExecutionBindingRoles.IsHook(role) && ExecutionBindingRoles.Hook(step, role).LaunchKind == "command"
             ? CommandLineSyntax.CommandInterpreter : CommandLineSyntax.ArgumentVector;
-        _ = new JournalWriterStore(database).RequireRegisteredExecutor(parentJournalId);
+        _ = new JournalWriterStore(database).RequireRegisteredExecutor(parentJournalId, lease.ExecutorIdentity);
     }
 
     public void RequirePrepared() => RequirePrepared(Read());

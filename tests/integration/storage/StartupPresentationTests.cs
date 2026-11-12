@@ -55,6 +55,20 @@ public sealed class StartupPresentationTests
         Assert.Equal(before, Files(instance));
     }
 
+    [Fact(DisplayName = "Presentation Queries Reject Sql Writes And Leave All Original Files Unchanged")]
+    public void RejectsPresentationWrites()
+    {
+        var instance = Create(); var database = StateDatabase.CreateFresh(instance);
+        using var lease = InstanceLease.Acquire(instance, new());
+        var before = Files(instance);
+        using (var reading = new StartupDatabaseRead(database.DatabasePath))
+        {
+            using var command = reading.Connection.CreateCommand(); command.CommandText = "DELETE FROM settings_current;";
+            Assert.Equal(8, Assert.Throws<SqliteException>(() => command.ExecuteNonQuery()).SqliteErrorCode);
+        }
+        Assert.Equal(before, Files(instance));
+    }
+
     private static RuntimeInstance Create() => new InstanceRoot(new()).OpenOrCreate(Path.Combine(
         Environment.GetEnvironmentVariable("NEXUS_TEST_ROOT")!, "presentation-" + Guid.NewGuid().ToString("N")));
 

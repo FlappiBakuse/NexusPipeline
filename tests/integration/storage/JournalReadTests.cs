@@ -109,6 +109,15 @@ public sealed class JournalReadTests
         {
             JournalReadScope.SelectParent(store.Instance, store.Contracts, first);
             Assert.Equal(original, reader.Read(first).Export());
+            JournalReadScope.SelectParent(store.Instance, store.Contracts, second);
+            using (var held = new FileStream(secondPath, FileMode.Open, FileAccess.Read, FileShare.Read))
+            {
+                held.Lock(0, held.Length);
+                try { Assert.Equal(secondBytes, reader.Read(second).Export()); }
+                finally { held.Unlock(0, held.Length); }
+            }
+            JournalReadScope.SelectParent(store.Instance, store.Contracts, first);
+            Assert.Equal(original, reader.Read(first).Export());
         }
         Assert.Throws<IOException>(() => File.WriteAllText(firstPath, "changed"));
         using (JournalReadScope.Hold(reader, first)) Assert.Equal(original, reader.Read(first).Export());
@@ -124,6 +133,38 @@ public sealed class JournalReadTests
 
     private static string HistoryPath(JournalStore store, Guid journal) =>
         Path.Combine(store.Instance.RuntimeRoot, "journals", journal.ToString("D"), "0000000001.json");
+
+    [Theory(DisplayName = "Publication Appends Stay Visible And Remain Correct Beyond The Protected History Budget")]
+    [InlineData(2)]
+    [InlineData(260)]
+    public void PublishesProtectedAppend(int revisions)
+    {
+        var (store, id, _) = Fixture();
+        using var lease = InstanceLease.Acquire(store.Instance, new());
+        lease.PublishExecution(() =>
+        {
+            var reader = new JournalStore(store.Instance, new());
+            JournalReadScope.SelectParent(store.Instance, new(), id);
+            for (var revision = 2; revision <= revisions; revision++)
+            {
+                var next = System.Text.Json.Nodes.JsonNode.Parse(reader.Read(id).Export())!.AsObject();
+                next["revision"] = revision;
+                next["updatedAt"] = new DateTime(2026, 10, 20, 0, 0, 0, DateTimeKind.Utc).AddSeconds(revision).ToString("O");
+                next["participants"]!.AsArray().Add(JsonSerializer.SerializeToNode(new
+                {
+                    participantId = Guid.NewGuid(), kind = "database", resourceKey = "fixture:configuration",
+                    identity = new { revision }
+                }));
+                _ = reader.Append(id, revision - 1, JsonSerializer.SerializeToUtf8Bytes(next));
+                Assert.Equal(revision, store.Read(id).Revision);
+            }
+            Assert.Equal(Enumerable.Range(1, revisions).Select(value => (long)value), reader.ReadAllRevisions(id).Select(item => item.Revision));
+            if (revisions <= 256) Assert.Throws<IOException>(() => File.WriteAllText(HistoryPath(store, id), "changed"));
+        });
+        var original = File.ReadAllBytes(HistoryPath(store, id));
+        File.WriteAllBytes(HistoryPath(store, id), original);
+        Assert.Equal(revisions, store.Read(id).Revision);
+    }
 
     private static void AssertTampering(string fault, Action read)
     {

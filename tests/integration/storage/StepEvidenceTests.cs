@@ -13,10 +13,76 @@ namespace NexusPipeline.StorageTests;
 [SupportedOSPlatform("windows")]
 public sealed class StepEvidenceTests
 {
-    [Fact(DisplayName = "A Real Keyword Success And Nonzero Root Exit Remain Different Facts With The Exact Raw Bytes")]
-    public async Task SeparatesBusinessExit()
+    [Fact(DisplayName = "Owned Evidence Reads Preserve Current SQL Checks And Release Immutable Byte Protection At The End")]
+    public async Task ReusesOwnedEvidence()
     {
         using var fixture = new StepWriterFixture("tail", judgement: new(AutomationJudgementLanguage.Keywords, ["ready"], [], null));
+        var source = fixture.Base.Source; var binding = Binding(fixture);
+        using var collector = new StepEvidenceCollector(source.Instance, source.Database, new(), source.Lease, binding, fixture.Writer);
+        fixture.Scope.EnterApplying();
+        using var reads = source.Lease.BindAttemptReads(source.Database).Start(source.Instance, source.Database, new(), fixture.JournalId)!;
+        collector.Start(); await fixture.Writer.AwaitRootAsync(TimeSpan.FromSeconds(10)); await collector.ObserveExitAsync();
+        var stopped = await fixture.Writer.StopAsync(TimeSpan.FromSeconds(10));
+        var proof = await collector.CollectAsync(stopped, TimeSpan.FromSeconds(10));
+        new AttemptTerminalStore(source.Instance, source.Database, new(), source.Lease).RecordCollected(fixture.JournalId, proof);
+        var expected = proof.Use(binding, value => value);
+        Assert.Equal(expected, new StepEvidenceReader(source.Instance, source.Database, new()).Read(binding, expected.Artifact, true));
+        _ = AttemptWriterState.Read(source.Instance, source.Database, new(), fixture.JournalId);
+        _ = AttemptWriterState.Read(source.Instance, source.Database, new(), fixture.JournalId);
+        var state = AttemptWriterState.Read(source.Instance, source.Database, new(), fixture.JournalId);
+        var protectedPaths = Directory.EnumerateFiles(Path.Combine(source.Instance.RuntimeRoot, "journals", fixture.JournalId.ToString("D")))
+            .Append(Path.Combine(source.Instance.RuntimeRoot, state.Journal.PlanPath))
+            .Append(Path.Combine(source.Instance.RuntimeRoot, state.Attempt.ExecutionPlan.RelativePath)).Distinct().ToArray();
+        var locks = new List<FileStream>();
+        try
+        {
+            foreach (var protectedPath in protectedPaths)
+            {
+                var file = new FileStream(protectedPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+                locks.Add(file); file.Lock(0, file.Length);
+            }
+            Assert.Throws<IOException>(() => new JournalStore(source.Instance, new()).Read(fixture.JournalId));
+            var context = new StepEvidenceReader(source.Instance, source.Database, new()).Context(binding);
+            Assert.Equal(state.Total.RunId, context.Total.RunId);
+            Assert.Equal(expected, new StepEvidenceReader(source.Instance, source.Database, new()).Read(binding, expected.Artifact, true));
+            Assert.Equal(state.Latest.Revision, AttemptWriterState.Read(source.Instance, source.Database, new(), fixture.JournalId).Latest.Revision);
+        }
+        finally
+        {
+            foreach (var file in locks) { file.Unlock(0, file.Length); file.Dispose(); }
+        }
+        var blobs = new ImmutableBlobStore(source.Instance, new());
+        var evidence = StepEvidenceCodec.Read(blobs, binding, expected.Artifact);
+        var raw = RawOutputCodec.Read(blobs, binding, evidence.RawOutput!);
+        var path = Path.Combine(source.Instance.RuntimeRoot, raw.Parts[0].Content.RelativePath);
+        Assert.Throws<IOException>(() => File.WriteAllBytes(path, [1]));
+        using (var connection = NexusPipeline.Platform.Storage.Sqlite.DatabaseConnections.Open(source.Database.DatabasePath))
+        using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "UPDATE journal_writer_job_roots SET image_sha256=$digest WHERE journal_id=$journal;";
+            command.Parameters.AddWithValue("$journal", fixture.JournalId.ToString("D"));
+            command.Parameters.AddWithValue("$digest", new string('0', 64)); command.ExecuteNonQuery();
+            Assert.Throws<IOException>(() => AttemptWriterState.Read(source.Instance, source.Database, new(), fixture.JournalId));
+            command.Parameters["$digest"].Value = evidence.Root!.ImageSha256; command.ExecuteNonQuery();
+        }
+        Assert.Equal(expected, new StepEvidenceReader(source.Instance, source.Database, new()).Read(binding, expected.Artifact, true));
+        collector.Dispose();
+        reads.Dispose();
+        var original = File.ReadAllBytes(path);
+        try
+        {
+            File.WriteAllBytes(path, [1]);
+            Assert.Throws<IOException>(() => new StepEvidenceReader(source.Instance, source.Database, new()).Read(binding, expected.Artifact, true));
+        }
+        finally { File.WriteAllBytes(path, original); }
+    }
+
+    [Theory(DisplayName = "Configured Or Absent Business Judgement Preserves The Real Exit And Rejects Unavailable Or Changed Raw Bytes")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task SeparatesBusinessExit(bool keywords)
+    {
+        using var fixture = new StepWriterFixture("tail", judgement: new(AutomationJudgementLanguage.Keywords, keywords ? ["ready"] : [], [], null));
         var source = fixture.Base.Source; var binding = Binding(fixture);
         using var collector = new StepEvidenceCollector(source.Instance, source.Database, new(), source.Lease, binding, fixture.Writer);
         fixture.Scope.EnterApplying(); collector.Start();
@@ -27,7 +93,8 @@ public sealed class StepEvidenceTests
         var terminal = new AttemptTerminalStore(source.Instance, source.Database, new(), source.Lease);
         terminal.RecordCollected(fixture.JournalId, proof);
         var result = proof.Use(binding, value => value);
-        Assert.Equal(EngineOutcome.Failed, result.Engine); Assert.Equal(BusinessOutcome.Succeeded, result.Business);
+        Assert.Equal(EngineOutcome.Failed, result.Engine);
+        Assert.Equal(keywords ? BusinessOutcome.Succeeded : BusinessOutcome.NotApplicable, result.Business);
         var blobs = new ImmutableBlobStore(source.Instance, new());
         var document = StepEvidenceCodec.Read(blobs, binding, result.Artifact);
         Assert.Equal(37, document.ExitCode); Assert.NotNull(document.Closure);
@@ -46,6 +113,14 @@ public sealed class StepEvidenceTests
             Assert.Equal(references, reader.ReadReferences(binding, result.Artifact));
             Assert.Throws<IOException>(() => reader.Read(binding, result.Artifact, true));
         }
+        var path = Path.Combine(source.Instance.RuntimeRoot, raw.Parts[0].Content.RelativePath);
+        var original = File.ReadAllBytes(path); var changed = original.ToArray(); changed[0] ^= 1;
+        try
+        {
+            File.WriteAllBytes(path, changed);
+            Assert.Throws<IOException>(() => reader.Read(binding, result.Artifact, true));
+        }
+        finally { File.WriteAllBytes(path, original); }
         var before = new JournalStore(source.Instance, new()).Read(fixture.JournalId).Export();
         Assert.Throws<IOException>(() => proof.Use(binding with { AttemptId = Guid.NewGuid() }, _ => true));
         Assert.Equal(before, new JournalStore(source.Instance, new()).Read(fixture.JournalId).Export());

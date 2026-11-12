@@ -23,6 +23,7 @@ public sealed class CleanupRecoverySession : ICleanupRecoverySession
     private readonly ICleanupPersistenceObserver? _observer;
     private readonly JsonObject _journal;
     private readonly WorkCleanupItems? _work;
+    private readonly PhysicalObjectDeletion.FileLease? _held;
 
     public CleanupRecoverySession(RuntimeInstance instance, Guid journalId, ContractReader contracts, StateDatabase database,
         Func<CleanupWriterObservation> writers, ICleanupPersistenceObserver? observer = null, PayloadApplyRoots? payloadRoots = null)
@@ -30,10 +31,10 @@ public sealed class CleanupRecoverySession : ICleanupRecoverySession
 
     internal CleanupRecoverySession(RuntimeInstance instance, Guid journalId, ContractReader contracts, StateDatabase database,
         Func<CleanupWriterObservation> writers, ICleanupPersistenceObserver? observer, PayloadApplyRoots? payloadRoots,
-        ExtensionWorkExecution? workExecution)
+        ExtensionWorkExecution? workExecution, PhysicalObjectDeletion.FileLease? held = null, BlobCleanup? cleanup = null)
     {
         if (database.InstanceId != instance.InstanceId) throw new IOException("cleanup_database_unbound");
-        _instance = instance; _writers = writers; _observer = observer;
+        _instance = instance; _writers = writers; _observer = observer; _held = held;
         _store = new(instance, contracts); _registry = new(database); _outbox = new(database);
         var bound = CleanupJournalBinding.Read(instance, contracts, _registry.ReadSnapshot(journalId), journalId, database, payloadRoots);
         _plan = bound.Plan; _journal = bound.Document;
@@ -41,19 +42,23 @@ public sealed class CleanupRecoverySession : ICleanupRecoverySession
             _work = new(instance, database, contracts, payloadRoots ?? throw new IOException("extension_work_roots_required"), _plan, workExecution);
         _projection = new(_store, _registry, _outbox, observer, database, workExecution);
         var blobs = new ImmutableBlobStore(instance, contracts);
-        _cleanup = new(instance, blobs, new(instance, contracts, database, blobs, payloadRoots));
+        _cleanup = cleanup ?? new(instance, blobs, new(instance, contracts, database, blobs, payloadRoots));
     }
 
     internal IDisposable ProtectReadHistory() => _store.ProtectReadHistory(_plan.JournalId);
 
-    public FileCleanupInspection Inspect()
+    public FileCleanupInspection Inspect() => InspectItems(readReferences: true);
+
+    public FileCleanupInspection InspectRecovery() => InspectItems(readReferences: Phase != JournalPhase.Prepared);
+
+    private FileCleanupInspection InspectItems(bool readReferences)
     {
         var registered = _registry.ReadJournal(_plan.JournalId);
         var agrees = registered.Phase == Phase && registered.Revision == Revision;
         var observed = Observe();
         var inspected = _work is null ? _cleanup.Inspect(_plan.Items.Where(item =>
             !_journal["receipts"]!.AsArray().Any(node => node!["stepId"]!.GetValue<string>() == item.StepId &&
-                node["effect"]!.GetValue<string>() is "completed" or "notExecuted")).ToArray()) : null;
+                node["effect"]!.GetValue<string>() is "completed" or "notExecuted")).ToArray(), _held, readReferences) : null;
         IReadOnlyList<CleanupItemInspection> items = _work is not null ? _work.InspectItems(_journal) :
             Array.AsReadOnly(_plan.Items.Select(item => new CleanupItemInspection(item.StepId, InspectItem(item, inspected!))).ToArray());
         // A durable cancellation marks items skipped; its proof still comes from their current physical inventory.
@@ -69,7 +74,7 @@ public sealed class CleanupRecoverySession : ICleanupRecoverySession
     public void CommitNoEffects()
     {
         RequireStopped();
-        if (!Inspect().CanProveNoEffects) throw new IOException("cleanup_no_effect_unverified");
+        if (!InspectRecovery().CanProveNoEffects) throw new IOException("cleanup_no_effect_unverified");
         Synchronize(false);
         if (_journal["receipts"]!.AsArray().Count == 0)
             Save(JournalPhase.Prepared, "verify-no-effect", "notExecuted", "cleanup_no_effect");
@@ -94,7 +99,7 @@ public sealed class CleanupRecoverySession : ICleanupRecoverySession
         CleanupStepResult result;
         try
         {
-            result = _work is null ? _cleanup.RemoveVerified(_plan.Items.Single(item => item.StepId == stepId)) :
+            result = _work is null ? _cleanup.RemoveVerified(_plan.Items.Single(item => item.StepId == stepId), _held) :
                 _work.Remove(stepId, _journal);
         }
         catch (IOException) { return CleanupStepResult.Unknown; }
@@ -111,7 +116,7 @@ public sealed class CleanupRecoverySession : ICleanupRecoverySession
         RequireStopped();
         if (_work is not null) throw new IOException("extension_work_referenced_skip_rejected");
         var item = _plan.Items.Single(item => item.StepId == stepId);
-        if (_cleanup.Inspect(item) == CleanupItemState.Unknown) throw new IOException("cleanup_referenced_object_unverified");
+        if (_cleanup.Inspect(item, _held) == CleanupItemState.Unknown) throw new IOException("cleanup_referenced_object_unverified");
         Save(JournalPhase.Applying, stepId, "notExecuted", "cleanup_referenced");
     }
 

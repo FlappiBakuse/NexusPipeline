@@ -50,8 +50,11 @@ internal sealed class WindowCaptureProcess : IExecutionCaptureProcess
             _output = new(redirectInput: true); CapturePngSpool? spool = null;
             try
             {
-                if (runtime.MaximumFramesPerStep == 1) _png = spool = new(instance, captureId, facts.Width, facts.Height);
-                else _batch = new(instance, captureId, facts.Width, facts.Height, checked((int)runtime.MaximumFramesPerStep));
+                if (runtime.MaximumFramesPerStep == 1)
+                    _png = spool = preview is null ? new(instance, captureId, facts.Width, facts.Height) :
+                        new(captureId, facts.Width, facts.Height);
+                else _batch = new(instance, captureId, facts.Width, facts.Height, checked((int)runtime.MaximumFramesPerStep),
+                    preview: preview is not null);
                 _helper.ObserveProcessIdentities(_ => { });
             }
             catch { spool?.Dispose(); _output.Dispose(); throw; }

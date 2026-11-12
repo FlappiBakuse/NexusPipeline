@@ -3,6 +3,8 @@
   "classes": [
     "NexusPipeline.StorageTests.ActivationFailureTests",
     "NexusPipeline.StorageTests.ApplyWorkflowTests",
+    "NexusPipeline.StorageTests.ArchiveCleanupTests",
+    "NexusPipeline.StorageTests.ArchiveRecoveryTests",
     "NexusPipeline.StorageTests.InstalledBettergiTests",
     "NexusPipeline.StorageTests.CatalogStoreTests",
     "NexusPipeline.StorageTests.CatalogTrustTests",
@@ -16,6 +18,8 @@
     "NexusPipeline.StorageTests.EmulatorRuntimeTests",
     "NexusPipeline.StorageTests.EmulatorSourceTests",
     "NexusPipeline.StorageTests.ExtensionDigestTests",
+    "NexusPipeline.StorageTests.ExtensionPresentationTests",
+    "NexusPipeline.StorageTests.ExpandedContentTests",
     "NexusPipeline.StorageTests.HistoricalTrustTests",
     "NexusPipeline.StorageTests.InstallationCommitTests",
     "NexusPipeline.StorageTests.InstallationRecoveryTests",

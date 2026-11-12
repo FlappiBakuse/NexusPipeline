@@ -45,7 +45,7 @@ internal sealed class MuMuLiveProcess : ILiveCaptureProcess
         {
             _output = new(redirectInput: true);
             CapturePngSpool? spool = null;
-            try { _png = spool = new(instance, id); _helper.ObserveProcessIdentities(_ => { }); }
+            try { _png = spool = new(id); _helper.ObserveProcessIdentities(_ => { }); }
             catch { spool?.Dispose(); _output.Dispose(); throw; }
         }
         catch { _helper.Dispose(); throw; }

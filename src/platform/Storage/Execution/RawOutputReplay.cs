@@ -7,12 +7,7 @@ internal static class RawOutputReplay
     {
         var continuous = manifest.DiscardedBytes == 0 && manifest.FailureCode is null;
         var decoder = new ExecutionOutputDecoder(manifest.FileLogBaseline is not null, observe, _ => continuous = false, observeSource);
-        var ends = new List<(long Offset, long Order, int Source, bool Flush)>();
-        if (manifest.StandardOutputEofOffset is { } stdout) ends.Add((stdout, manifest.StandardOutputEndOrder!.Value, -2, true));
-        if (manifest.StandardErrorEofOffset is { } stderr) ends.Add((stderr, manifest.StandardErrorEndOrder!.Value, -1, true));
-        foreach (var source in manifest.FileSources)
-            if (source.EndOffset is { } end) ends.Add((end, source.EndOrder!.Value, source.Id, source.FlushPartial));
-        ends.Sort((left, right) => left.Offset != right.Offset ? left.Offset.CompareTo(right.Offset) : left.Order.CompareTo(right.Order));
+        var ends = Ends(manifest);
         var nextEnd = 0;
         foreach (var part in manifest.Parts)
         {
@@ -33,5 +28,16 @@ internal static class RawOutputReplay
         }
         if (continuous && includePartial) decoder.FlushObservedTails();
         return continuous;
+    }
+
+    internal static List<(long Offset, long Order, int Source, bool Flush)> Ends(RawOutputManifest manifest)
+    {
+        var ends = new List<(long Offset, long Order, int Source, bool Flush)>();
+        if (manifest.StandardOutputEofOffset is { } stdout) ends.Add((stdout, manifest.StandardOutputEndOrder!.Value, -2, true));
+        if (manifest.StandardErrorEofOffset is { } stderr) ends.Add((stderr, manifest.StandardErrorEndOrder!.Value, -1, true));
+        foreach (var source in manifest.FileSources)
+            if (source.EndOffset is { } end) ends.Add((end, source.EndOrder!.Value, source.Id, source.FlushPartial));
+        ends.Sort((left, right) => left.Offset != right.Offset ? left.Offset.CompareTo(right.Offset) : left.Order.CompareTo(right.Order));
+        return ends;
     }
 }

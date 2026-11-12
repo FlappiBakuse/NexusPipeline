@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using NexusPipeline.Core.Configuration;
 using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Archives;
 
@@ -23,10 +24,13 @@ internal sealed class ExtensionPackageArchive : IDisposable
 
     internal static ExtensionPackageArchive Open(Stream input, CancellationToken cancellation = default) =>
         new(PayloadArchive.Open(input, new(MaximumFiles, MaximumPackageBytes), Invalid, PayloadArchiveKind.Extension, cancellation));
+    internal static ExtensionPackageArchive OpenFrozen(Stream input, FileTreeSnapshot snapshot, CancellationToken cancellation) =>
+        new(PayloadArchive.Open(input, new(MaximumFiles, MaximumPackageBytes), Invalid, PayloadArchiveKind.Extension, cancellation, snapshot.Entries));
     internal byte[] ReadManifest(CancellationToken cancellation = default) => _archive.ReadManifest(cancellation);
     internal byte[]? ReadDocument(string name, CancellationToken cancellation = default) =>
         _archive.ReadDocument(name, 512 * 1024, cancellation);
-    internal ArchivedFileTree CaptureCandidate(ImmutableBlobStore blobs, CancellationToken cancellation) => _archive.CaptureCandidate(blobs, cancellation);
+    internal ArchivedFileTree CaptureCandidate(ImmutableBlobStore blobs, CancellationToken cancellation) => _archive.CaptureCandidate(null, cancellation);
+    internal void CopyFile(string name, Stream destination, CancellationToken cancellation) => _archive.CopyFile(name, destination, cancellation);
     public void Dispose() => _archive.Dispose();
     private static IOException Invalid() => new("extension_package_content_invalid");
 }

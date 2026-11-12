@@ -99,6 +99,7 @@ internal sealed class JobClosureStore(RuntimeInstance instance, StateDatabase da
         }
         if (expectedReference is not null && reference != expectedReference) throw new IOException("writer_job_closure_reference_unbound");
         var result = new JobClosureCodec(instance, contracts, new(instance, contracts)).Read(reference);
+        verifiedParent?.RequireClosure(result);
         if (executionEvidence)
         {
             command.CommandText = "SELECT EXISTS(SELECT 1 FROM operation_journals j JOIN operations o ON o.operation_id=j.operation_id " +
@@ -143,6 +144,12 @@ internal sealed class JobClosureStore(RuntimeInstance instance, StateDatabase da
     }
 
     internal static void VerifyInventory(RuntimeInstance instance, StateDatabase database, ContractReader contracts, int pageSize = 128)
+        => VerifyInventory(instance, database, contracts, pageSize, configurationsOnly: false);
+
+    internal static void VerifyConfigurations(RuntimeInstance instance, StateDatabase database, ContractReader contracts)
+        => VerifyInventory(instance, database, contracts, 128, configurationsOnly: true);
+
+    private static void VerifyInventory(RuntimeInstance instance, StateDatabase database, ContractReader contracts, int pageSize, bool configurationsOnly)
     {
         if (pageSize is < 1 or > 128) throw new ArgumentOutOfRangeException(nameof(pageSize));
         using var parents = JournalReadScope.HoldParents(instance, contracts);
@@ -155,7 +162,9 @@ internal sealed class JobClosureStore(RuntimeInstance instance, StateDatabase da
             using var command = connection.CreateCommand(); command.Transaction = transaction;
             command.CommandText = "SELECT c.journal_id,c.writer_id,c.job_name,j.session_id FROM journal_writer_job_closures c LEFT JOIN journal_writer_jobs j " +
                 "ON j.journal_id=c.journal_id AND j.writer_id=c.writer_id AND j.job_name=c.job_name " +
-                "WHERE (c.journal_id,c.writer_id,c.job_name)>($journal,$writer,$job) ORDER BY c.journal_id,c.writer_id,c.job_name LIMIT $limit;";
+                "WHERE (c.journal_id,c.writer_id,c.job_name)>($journal,$writer,$job) " +
+                (configurationsOnly ? "AND c.journal_id NOT IN (SELECT journal_id FROM operation_journals WHERE operation_kind='runAttempt') " : "") +
+                "ORDER BY c.journal_id,c.writer_id,c.job_name LIMIT $limit;";
             command.Parameters.AddWithValue("$journal", after.Journal); command.Parameters.AddWithValue("$writer", after.Writer);
             command.Parameters.AddWithValue("$job", after.Job); command.Parameters.AddWithValue("$limit", pageSize);
             var keys = new List<(Guid Journal, Guid Writer, string Job, int Session)>();
@@ -168,6 +177,29 @@ internal sealed class JobClosureStore(RuntimeInstance instance, StateDatabase da
             if (keys.Count < pageSize) break;
             var last = keys[^1]; after = (last.Journal.ToString("D"), last.Writer.ToString("D"), last.Job);
         }
+        transaction.Commit();
+    }
+
+    internal void VerifyAttempt(AttemptWriterState state)
+    {
+        _ = state.RequireValidatedRead();
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var transaction = connection.BeginTransaction(deferred: true);
+        using var command = connection.CreateCommand(); command.Transaction = transaction;
+        command.CommandText = "SELECT c.writer_id,c.job_name,j.session_id FROM journal_writer_job_closures c LEFT JOIN journal_writer_jobs j " +
+            "ON j.journal_id=c.journal_id AND j.writer_id=c.writer_id AND j.job_name=c.job_name " +
+            "WHERE c.journal_id=$journal ORDER BY c.writer_id,c.job_name LIMIT 1025;";
+        command.Parameters.AddWithValue("$journal", state.Journal.JournalId.ToString("D"));
+        var keys = new List<(Guid Writer, string Job, int Session)>();
+        using (var row = command.ExecuteReader()) while (row.Read())
+        {
+            if (row.IsDBNull(2)) throw new IOException("writer_job_closure_unbound");
+            keys.Add((Guid.Parse(row.GetString(0)), row.GetString(1), row.GetInt32(2)));
+        }
+        if (keys.Count > 1024) throw new IOException("execution_owned_job_capacity_exceeded");
+        foreach (var key in keys)
+            _ = ReadCore(state.Journal.JournalId, key.Writer, key.Job, key.Session, executionEvidence: false, verifiedParent: state)
+                ?? throw new IOException("writer_job_closure_missing");
         transaction.Commit();
     }
 

@@ -27,7 +27,7 @@ internal sealed class ScriptSourcePort : ISelectedSource, IDisposable
             Check();
             var target = source.Script.ConfigurationPaths[declaration.DeclarationIndex];
             if (target.RootId != source.Script.RootId) throw new IOException("project_configuration_root_unbound");
-            var captured = source.CaptureResource(target.RelativePath, lifetime);
+            var captured = source.InspectResource(target.RelativePath, lifetime);
             if (captured.Archive.Snapshot.Entries.Count > 4096 || captured.Archive.Snapshot.Entries.Sum(item => item.SizeBytes) > 32 * 1024 * 1024)
                 throw new IOException("project_configuration_source_limit");
             var contract = AdapterConfigurationPolicy.Contract(source.Script, declaration);

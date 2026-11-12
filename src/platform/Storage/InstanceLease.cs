@@ -10,6 +10,11 @@ public sealed class InstanceLease : IDisposable
     private readonly FileStream _lock;
     private readonly FileStream _identity;
     private readonly ExecutionPublicationQueue _executionPublications = new();
+    private readonly Execution.AttemptReadRegistry _attemptReads = new();
+    private readonly object _executorGate = new();
+    private Processes.ProcessIdentityLease? _executor;
+    private readonly object _databaseGate = new();
+    private Sqlite.DatabaseReadPool? _databaseReads;
     public RuntimeInstance Instance { get; }
     internal Guid StartupGeneration { get; } = Guid.NewGuid();
     internal Execution.RunBudgetOwner RunBudgets { get; }
@@ -60,7 +65,44 @@ public sealed class InstanceLease : IDisposable
 
     public void Dispose()
     {
-        _executionPublications.Close(() => { RunBudgets.Close(); LiveLogs.Close(); _lock.Dispose(); _identity.Dispose(); });
+        _executionPublications.Close(() =>
+        {
+            _attemptReads.Dispose(); RunBudgets.Close(); LiveLogs.Close();
+            lock (_executorGate) if (OperatingSystem.IsWindows()) _executor?.Dispose();
+            try { lock (_databaseGate) _databaseReads?.Dispose(); }
+            finally { _lock.Dispose(); _identity.Dispose(); }
+        });
+    }
+
+    internal void BindDatabase()
+    {
+        lock (_databaseGate)
+        {
+            VerifyHeld(Instance);
+            _databaseReads ??= new(Path.Combine(Instance.RuntimeRoot, "state", "nexus.db"));
+        }
+    }
+
+    internal Execution.AttemptReadRegistry BindAttemptReads(Sqlite.StateDatabase database)
+    {
+        VerifyHeld(Instance);
+        if (database.InstanceId != Instance.InstanceId || database.RuntimeRoot != Instance.RuntimeRoot)
+            throw new IOException("attempt_read_instance_unbound");
+        database.AttemptReads = _attemptReads;
+        return _attemptReads;
+    }
+
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    internal Processes.ProcessIdentityLease ExecutorIdentity
+    {
+        get
+        {
+            lock (_executorGate)
+            {
+                VerifyHeld(Instance);
+                return _executor ??= Processes.ProcessIdentityLease.HoldCurrent();
+            }
+        }
     }
 
     internal void BindExtensionActivator(NexusPipeline.Platform.Extensions.ExtensionActivator owner,
@@ -100,7 +142,15 @@ public sealed class InstanceLease : IDisposable
     internal T PublishExecution<T>(Func<T> callback)
     {
         VerifyHeld(Instance);
-        return _executionPublications.Run(() => { VerifyHeld(Instance); return callback(); });
+        return _executionPublications.Run(() =>
+        {
+            VerifyHeld(Instance);
+            using var identity = OperatingSystem.IsWindows() ? new Processes.ProcessIdentityScope(ExecutorIdentity) : null;
+            using var reads = OperatingSystem.IsWindows() ? Sqlite.DatabaseReadScope.Hold(Path.Combine(Instance.RuntimeRoot, "state", "nexus.db")) : null;
+            using var journals = OperatingSystem.IsWindows() ? Journals.JournalReadScope.HoldParents(Instance, new(), _attemptReads) : null;
+            using var writes = OperatingSystem.IsWindows() ? new Sqlite.DatabaseWriteScope(Path.Combine(Instance.RuntimeRoot, "state", "nexus.db")) : null;
+            return callback();
+        });
     }
 
     internal void PublishExecution(Action callback) => PublishExecution(() => { callback(); return true; });

@@ -18,6 +18,9 @@ internal sealed class OwnedExtensionDownload : IDisposable
     private readonly PhysicalObjectIdentity _parentIdentity, _identity, _stagingIdentity;
     private FileStream? _stream;
     private bool _disposed;
+    private bool _adopted;
+    private bool _stagingRemoved;
+    private BlobReference? _sealed;
     internal string ArchivePath { get; }
 
     private OwnedExtensionDownload(RuntimeInstance instance, InstanceLease lease, PhysicalDirectoryHandle directory,
@@ -68,6 +71,7 @@ internal sealed class OwnedExtensionDownload : IDisposable
             if (PhysicalObjectIdentity.Read(owned._stream.SafeFileHandle) != identity ||
                 PhysicalObjectIdentity.Read(path) != identity || identity != owned._identity) throw Invalid();
             PhysicalObjectIdentity.RequireSingleLink(path);
+            owned._sealed = new($"blobs/content/{entry.ArtifactSha256}.bin", entry.ArtifactBytes, entry.ArtifactSha256);
             return owned;
         }
         catch (Exception failure)
@@ -85,12 +89,55 @@ internal sealed class OwnedExtensionDownload : IDisposable
         }
     }
 
+    internal string Adopt(ImmutableBlobStore blobs, CancellationToken cancellation)
+    {
+        _lease.VerifyHeld(_instance); cancellation.ThrowIfCancellationRequested();
+        if (_disposed || _adopted || _stream is null || _sealed is null || !_root.IsActive ||
+            blobs.Instance != _instance || PhysicalObjectIdentity.Read(_stream.SafeFileHandle) != _identity ||
+            _stream.Length != _sealed.SizeBytes) throw Invalid();
+        var destination = PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(_instance.RuntimeRoot, _sealed.RelativePath));
+        Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+        using var parent = StableDirectoryLease.Acquire(Path.GetDirectoryName(destination)!);
+        if (File.Exists(destination)) { blobs.Verify(_sealed); return destination; }
+        _stream.Dispose(); _stream = null;
+        _stream = new FileStream(_directory.OpenOwnedFile(Path.GetFileName(ArchivePath)), FileAccess.Read);
+        if (PhysicalObjectIdentity.Read(_stream.SafeFileHandle) != _identity || _stream.Length != _sealed.SizeBytes ||
+            Convert.ToHexStringLower(SHA256.HashData(_stream)) != _sealed.Sha256) throw Invalid();
+        try
+        {
+            PhysicalObjectMove.MoveVerified(new(ArchivePath, _parentIdentity, _identity, destination,
+                PhysicalObjectIdentity.Read(Path.GetDirectoryName(destination)!), FileObjectKind.File), _stream.SafeFileHandle);
+        }
+        catch (IOException) when (File.Exists(destination) && File.Exists(ArchivePath))
+        { blobs.Verify(_sealed); return destination; }
+        _adopted = true;
+        _stream.Dispose(); _stream = null;
+        blobs.Verify(_sealed);
+        RemoveDirectory();
+        return destination;
+    }
+
+    private void RemoveDirectory()
+    {
+        if (_stagingRemoved) return;
+        _directory.Dispose();
+        PhysicalObjectDeletion.DeleteVerified(new(Path.GetDirectoryName(ArchivePath)!, _stagingIdentity,
+            _parentIdentity, FileObjectKind.Directory, 0, null));
+        _stagingRemoved = true;
+    }
+
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
         try
         {
+            if (_adopted)
+            {
+                _stream?.Dispose(); _stream = null;
+                RemoveDirectory();
+                return;
+            }
             FileObjectDeletion intent;
             try
             {
@@ -105,9 +152,7 @@ internal sealed class OwnedExtensionDownload : IDisposable
             }
             finally { _stream?.Dispose(); _stream = null; }
             PhysicalObjectDeletion.DeleteVerified(intent);
-            _directory.Dispose();
-            PhysicalObjectDeletion.DeleteVerified(new(Path.GetDirectoryName(ArchivePath)!, _stagingIdentity,
-                _parentIdentity, FileObjectKind.Directory, 0, null));
+            RemoveDirectory();
         }
         finally { _directory.Dispose(); _parents.Dispose(); _root.Dispose(); }
     }
@@ -115,8 +160,8 @@ internal sealed class OwnedExtensionDownload : IDisposable
     internal FileStream OpenRead()
     {
         _lease.VerifyHeld(_instance);
-        if (_disposed || _stream is null || !_root.IsActive) throw Invalid();
-        var input = new FileStream(_directory.OpenFile(Path.GetFileName(ArchivePath), write: false), FileAccess.Read);
+        if (_disposed || _adopted || _stream is null || !_root.IsActive) throw Invalid();
+        var input = new FileStream(_directory.OpenReadFile(Path.GetFileName(ArchivePath)), FileAccess.Read);
         if (PhysicalObjectIdentity.Read(input.SafeFileHandle) == _identity) return input;
         input.Dispose(); throw Invalid();
     }

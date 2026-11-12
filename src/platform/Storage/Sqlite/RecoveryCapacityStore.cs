@@ -5,8 +5,10 @@ namespace NexusPipeline.Platform.Storage.Sqlite;
 
 internal static class RecoveryCapacityStore
 {
-    internal const string ActiveReservation = "(r.released=0 OR EXISTS(SELECT 1 FROM recovery_capacity_members cm " +
-        "JOIN file_effects f ON f.journal_id=cm.journal_id WHERE cm.owner_journal_id=r.owner_journal_id AND f.state='pending'))";
+    internal const string ActiveOwners = "SELECT owner_journal_id FROM recovery_capacity_reservations INDEXED BY recovery_capacity_open_read WHERE released=0 " +
+        "UNION SELECT cm.owner_journal_id FROM file_effects f INDEXED BY file_effects_pending_read " +
+        "JOIN recovery_capacity_members cm USING(journal_id) WHERE f.state='pending'";
+    internal const string ActiveReservation = "(r.owner_journal_id IN (" + ActiveOwners + "))";
     private const string Usage = "SELECT COALESCE(sum((SELECT count(*) FROM recovery_capacity_members m WHERE m.owner_journal_id=r.owner_journal_id)+remaining_journals),0)," +
         "COALESCE(sum((SELECT count(*) FROM file_effects f JOIN recovery_capacity_members m USING(journal_id) WHERE m.owner_journal_id=r.owner_journal_id)+remaining_effects),0)," +
         "COALESCE(sum((SELECT count(*) FROM journal_writer_jobs j JOIN recovery_capacity_members m USING(journal_id) WHERE m.owner_journal_id=r.owner_journal_id)+remaining_jobs),0) " +

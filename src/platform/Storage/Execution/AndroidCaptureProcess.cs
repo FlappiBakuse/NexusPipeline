@@ -44,7 +44,7 @@ internal sealed class AndroidCaptureProcess : IExecutionCaptureProcess
             CapturePngSpool? spool = null;
             try
             {
-                _png = spool = new(instance, captureId);
+                _png = spool = preview is null ? new(instance, captureId) : new(captureId);
                 _helper.ObserveProcessIdentities(_ => { });
             }
             catch { spool?.Dispose(); _output.Dispose(); throw; }

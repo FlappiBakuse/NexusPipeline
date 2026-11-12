@@ -40,6 +40,14 @@ public sealed class RecoveryCapacityTests
         Assert.Equal(completed.Order(), observed.Order());
         Assert.Equal(completed.Order(), registry.ReadInactiveIds().Order());
         Assert.Equal(active.JournalId, Assert.Single(registry.ReadActiveSnapshot().Journals).JournalId);
+        fixture.Database.Write((connection, transaction) =>
+        {
+            using var change = connection.CreateCommand(); change.Transaction = transaction;
+            change.CommandText = "UPDATE journal_resources SET resource_key=' ' WHERE journal_id=$id;";
+            change.Parameters.AddWithValue("$id", completed.Order().Last().ToString("D")); change.ExecuteNonQuery();
+            return true;
+        });
+        Assert.Equal("recovery_registry_journal_invalid", Assert.Throws<IOException>(() => registry.ReadInactiveIds()).Message);
     }
 
     [Fact(DisplayName = "Completed History Beyond The Old Global Limit Does Not Consume Active Admission Capacity Or Lose Point Reads")]

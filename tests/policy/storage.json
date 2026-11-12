@@ -37,6 +37,7 @@
     "NexusPipeline.StorageTests.ControllerCrashTests",
     "NexusPipeline.StorageTests.DatabaseCheckpointTests",
     "NexusPipeline.StorageTests.DatabaseCopyTests",
+    "NexusPipeline.StorageTests.DatabaseReaderTests",
     "NexusPipeline.StorageTests.DatabaseScopeTests",
     "NexusPipeline.StorageTests.DirectoryAttributeTests",
     "NexusPipeline.StorageTests.DirectoryProtectionTests",

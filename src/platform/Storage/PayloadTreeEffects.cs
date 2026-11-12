@@ -27,7 +27,7 @@ internal sealed class PayloadTreeEffects(FileTreeScanner scanner, FileTreeArchiv
         RequireWorkspace(plan, previous, []);
         RequireTree(plan.TargetPath, plan.Before.Snapshot, plan.Before.OriginalObjects);
         var candidate = Path.Combine(work, "candidate"); RequireMissing(candidate);
-        _ = archive.MaterializeNew(plan.Candidate, candidate, cancellation);
+        archive.MaterializePackage(plan, candidate, cancellation);
         var actual = scanner.Capture(candidate, cancellation);
         if (actual.Shape != plan.Candidate.Snapshot.Shape || !actual.Entries.SequenceEqual(plan.Candidate.Snapshot.Entries)) throw Invalid();
         PhysicalTreeIdentity.RequireSingleLinks(candidate, actual);

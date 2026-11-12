@@ -67,7 +67,7 @@ public sealed class AttemptReceiptStore(StateDatabase database) : IAttemptReceip
 
     public AttemptReceipt? Read(Guid attemptId)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
         return ReadInside(connection, null, attemptId);
     }
 

@@ -60,7 +60,7 @@ internal sealed class ScheduleRuntimeService(IScheduleOccurrenceStore store, ISc
         var minute = now.ToUnixTimeSeconds() / 60;
         if (_highestCommittedMinute is not null && minute <= _highestCommittedMinute) return;
         _ = store.CommitCurrentMinute();
-        _highestCommittedMinute = store.ReadCheckpoint().Watermark.HighestUtcMinute;
+        _highestCommittedMinute = Math.Max(minute, store.ReadCheckpoint().Watermark.HighestUtcMinute ?? minute);
     }
 
     internal async Task StopAsync()

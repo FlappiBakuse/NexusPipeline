@@ -73,7 +73,7 @@ internal static class ConfigurationCompletionBinding
             gate.OperationId != parent.OperationId || gate.PlanDigest != parent.PlanDigest)
             throw new IOException("attempt_configuration_gate_unverified");
         AttemptTerminalEvidence.RequireStopped(database, parentJournalId);
-        JournalResourceClaims.VerifyInventory(instance, database, contracts);
+        JournalResourceClaims.VerifyScope(instance, database, contracts, registry.Journals);
         var references = ExecutionInvocationCodec.Plans(physical.Root, bound.Total, bound.Plan)
             .Select(item => (item.StepId, Reference: AttemptPlanCodec.Reference(item.Plan)));
         var groups = ConfigurationRunInventory.ReadCompletion(instance, database, contracts, parent, registry.Journals, references);

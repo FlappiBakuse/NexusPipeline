@@ -43,6 +43,7 @@ internal sealed class PhysicalDirectoryHandle(SafeFileHandle handle) : IDisposab
         write ? 0x0012019fu : 0x00120089u, 1, write ? 3u : 1u, 0x00200060);
 
     internal SafeFileHandle OpenReadFile(string name) => OpenChild(name, 0x00120089, 7, 1, 0x00200060);
+    internal SafeFileHandle OpenOwnedFile(string name) => OpenChild(name, 0x00130089, 1, 1, 0x00200060);
 
     private SafeFileHandle OpenChild(string name, uint access, uint share, uint disposition, uint options)
     {

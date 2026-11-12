@@ -27,6 +27,12 @@ public sealed class NotificationDeliveryService
 
     public int MaterializePending(int maximumRoutes = 64)
     {
+        using var reads = new NotificationAttemptReads(_instance, _database, _contracts, _lease);
+        return MaterializePending(maximumRoutes, reads);
+    }
+
+    internal int MaterializePending(int maximumRoutes, NotificationAttemptReads reads)
+    {
         _lease.VerifyHeld(_instance);
         if (maximumRoutes is < 1 or > 200) throw new ArgumentOutOfRangeException(nameof(maximumRoutes));
         var pending = new List<(BlobReference Source, int Ordinal)>();
@@ -42,7 +48,11 @@ public sealed class NotificationDeliveryService
                 for (var ordinal = next; ordinal < count && pending.Count < maximumRoutes; ordinal++)
                     pending.Add((source, ordinal));
             }
-        foreach (var item in pending) Materialize(item.Source, item.Ordinal);
+        foreach (var item in pending)
+        {
+            reads.HoldReceipt(item.Source);
+            Materialize(item.Source, item.Ordinal);
+        }
         return pending.Count;
     }
 

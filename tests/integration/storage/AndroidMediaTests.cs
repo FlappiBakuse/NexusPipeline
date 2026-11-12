@@ -34,6 +34,7 @@ public sealed class AndroidMediaTests
             {
                 await RequireMainAsync(fixture, running);
                 await using var preview = await OpenAsync(fixture, context);
+                using var writes = new PreviewWriteWatch(fixture.Source.Instance.RuntimeRoot);
                 var first = await preview.CaptureAsync();
                 var second = await preview.CaptureAsync();
                 Assert.Equal(3, first.Width); Assert.Equal(2, first.Height);
@@ -42,7 +43,7 @@ public sealed class AndroidMediaTests
                 Assert.Equal(original, first.Png.ToArray()); Assert.Equal(original, second.Png.ToArray());
                 var digest = Convert.ToHexStringLower(SHA256.HashData(original));
                 Assert.False(File.Exists(Path.Combine(fixture.Source.Instance.RuntimeRoot, "blobs", "content", digest + ".bin")));
-                Assert.Empty(Directory.EnumerateFiles(Path.Combine(fixture.Source.Instance.RuntimeRoot, "blobs", "content"), ".capture-*.tmp"));
+                await writes.RequireNoPngAsync();
                 File.WriteAllText(fixture.Marker + ".main.release", "release");
                 var receipt = Assert.IsType<AttemptReceipt>(await running.WaitAsync(TimeSpan.FromSeconds(90)));
                 Assert.Equal(LifecycleOutcome.Completed, receipt.Facts.Lifecycle);

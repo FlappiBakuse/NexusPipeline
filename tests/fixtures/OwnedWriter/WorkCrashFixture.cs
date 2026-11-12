@@ -13,7 +13,7 @@ using NexusPipeline.Platform.Storage.Sqlite;
 internal static class WorkCrashFixture
 {
     internal sealed record Input(RuntimeInstance Instance, string Archive, byte[] PublicKey, Guid InitialOperationId,
-        Guid RemoveOperationId, Guid CleanupOperationId, PayloadApplyRoots Roots, string Point, string Report);
+        Guid RemoveOperationId, PayloadApplyRoots Roots, string Point, string Report);
 
     internal static async Task<int> RunAsync(string[] args)
     {
@@ -22,7 +22,11 @@ internal static class WorkCrashFixture
         var input = JsonSerializer.Deserialize<Input>(File.ReadAllBytes(path)) ?? throw new IOException("fixture_input_invalid");
         foreach (var item in new[] { input.Archive, input.Report, input.Roots.HostPayloadRoot, input.Roots.ExtensionPayloadRoot })
             OwnedFixtureEvidence.RequirePath(item);
-        if (input.Point is not ("accepted" or "started" or "removed")) return 2;
+        var content = input.Point.StartsWith("content-", StringComparison.Ordinal);
+        var adopted = input.Point == "download-adopted";
+        var archive = content || input.Point.StartsWith("archive-", StringComparison.Ordinal);
+        var point = archive ? input.Point[(content ? "content-".Length : "archive-".Length)..] : input.Point;
+        if (!adopted && point is not ("accepted" or "started" or "removed")) return 2;
         var contracts = new ContractReader(); var instance = new InstanceRoot(contracts).OpenExisting(input.Instance.RuntimeRoot);
         if (instance != input.Instance) return 2;
         using var lease = InstanceLease.Acquire(instance, contracts);
@@ -35,17 +39,43 @@ internal static class WorkCrashFixture
             new Dictionary<string, byte[]> { ["fixture-only"] = input.PublicKey }, new("https://store.example.test/metadata/store/1/"),
             [new Uri("https://assets.example.test/releases/download/")], 1, 1, new(0, 18, 0), "0.1.0"));
         var catalog = new ExtensionCatalogStore(instance, database, lease, resources, contracts, verifier);
+        if (adopted)
+        {
+            var entry = catalog.ReadCached(ExtensionStoreChannel.Stable)!.Entries.Single();
+            using var download = await OwnedExtensionDownload.Receive(instance, lease, resources, input.InitialOperationId, entry,
+                async (stream, cancellation) =>
+                {
+                    using var source = File.OpenRead(input.Archive);
+                    await source.CopyToAsync(stream, cancellation);
+                }, default);
+            var published = download.Adopt(new(instance, contracts), default);
+            OwnedFixtureEvidence.WriteReport(input.Report, new { status = "adopted", processId = Environment.ProcessId,
+                path = published, identity = PhysicalObjectIdentity.Read(published), staging = download.ArchivePath });
+            Thread.Sleep(Timeout.Infinite);
+        }
         var settings = new HostSettingsStore(database); var original = settings.Read();
         var change = new HostSettingsChange(original.Revision, original.Values with { Extensions = [new("fixture-plugin", false)] });
         _ = settings.Commit(HostSettingsStore.Identity(Guid.NewGuid(), "local", change), change, DateTimeOffset.UtcNow);
         ExtensionProjectionPublication.PublishIfDirty(instance, database, lease, contracts, input.Roots, resources, index);
-        _ = await Apply(input.InitialOperationId, PayloadAction.Install);
+        var installed = await Apply(input.InitialOperationId, PayloadAction.Install);
+        BlobReference? expanded = null;
+        if (content)
+        {
+            var initial = new ExtensionPayloadBinding(instance, database, contracts, input.Roots).Read(installed.JournalId, installed.Plan);
+            var file = initial.Plan.Candidate.Snapshot.Entries.First(item => item.Kind == FileObjectKind.File);
+            expanded = new ImmutableBlobStore(instance, contracts).PersistContent(Path.Combine(initial.Plan.TargetPath, file.RelativePath), file, default);
+        }
         var removed = await Apply(input.RemoveOperationId, PayloadAction.Remove);
         ExtensionProjectionPublication.PublishIfDirty(instance, database, lease, contracts, input.Roots, resources, index);
-        var bound = new ExtensionPayloadBinding(instance, database, contracts, input.Roots).Read(removed.JournalId, removed.Plan);
-        _ = await new WorkCleanupService(instance, database, lease, contracts, input.Roots, resources, index, activator)
-            .RunPageAsync(input.CleanupOperationId, "local", removed.JournalId, removed.Plan, null, null, default,
-                new Barrier(input, instance, database, bound));
+        var producer = archive ? installed : removed;
+        var bound = new ExtensionPayloadBinding(instance, database, contracts, input.Roots).Read(producer.JournalId, producer.Plan);
+        var barrier = new Barrier(input, point, instance, database, bound, expanded ?? bound.Source.Package?.Archive);
+        if (archive)
+            _ = new ExtensionArchiveCleanup(instance, database, lease, contracts, input.Roots, resources, index)
+                .RunNextPage(installed.JournalId, expanded ?? bound.Source.Package!.Archive, default, barrier);
+        else
+            _ = await new WorkCleanupService(instance, database, lease, contracts, input.Roots, resources, index, activator)
+                .RunNextPageAsync(removed.JournalId, default, barrier);
         return 1;
 
         async Task<PayloadAcceptanceResult> Apply(Guid operation, PayloadAction action)
@@ -70,14 +100,14 @@ internal static class WorkCrashFixture
         }
     }
 
-    private sealed class Barrier(Input input, RuntimeInstance instance, StateDatabase database, BoundExtensionPayload producer)
+    private sealed class Barrier(Input input, string fault, RuntimeInstance instance, StateDatabase database, BoundExtensionPayload producer, BlobReference? content)
         : ICleanupPersistenceObserver
     {
         public void Reached(CleanupPersistencePoint point, Guid journalId, long revision, JournalPhase phase)
         {
-            var match = input.Point == "accepted" && point == CleanupPersistencePoint.AcceptanceCommitted ||
-                input.Point == "started" && point == CleanupPersistencePoint.SqlProjectionCommitted && revision == 3 ||
-                input.Point == "removed" && point == CleanupPersistencePoint.FileRemoved;
+            var match = fault == "accepted" && point == CleanupPersistencePoint.AcceptanceCommitted ||
+                fault == "started" && point == CleanupPersistencePoint.SqlProjectionCommitted && revision == 3 ||
+                fault == "removed" && point == CleanupPersistencePoint.FileRemoved;
             if (!match) return;
             var registered = new RecoveryJournalRegistry(database).ReadJournal(journalId);
             var full = PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(instance.RuntimeRoot, registered.PlanPath));
@@ -87,7 +117,7 @@ internal static class WorkCrashFixture
                 Plan = new BlobReference(registered.PlanPath, new FileInfo(full).Length, registered.PlanDigest),
                 ProducerJournalId = producer.Plan.JournalId, ProducerPlan = producer.PlanReference,
                 Workspace = ExtensionWorkspacePath.For(producer.Plan),
-                ProducerBytes = producer.Latest.Export(), MetadataRevision = 2
+                ProducerBytes = producer.Latest.Export(), Archive = content, MetadataRevision = 2
             });
             Thread.Sleep(Timeout.Infinite);
         }

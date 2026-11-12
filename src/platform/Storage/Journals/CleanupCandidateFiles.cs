@@ -34,7 +34,8 @@ internal static class CleanupCandidateFiles
     internal static FileStream OpenVerified(RuntimeInstance instance, ImmutableBlobStore blobs, BlobReference item)
     {
         Validate(item);
-        if (SecretId(item) is null) return blobs.OpenVerified(item);
+        // The enclosing recovery may need DELETE access after this candidate inspection closes.
+        if (SecretId(item) is null) return blobs.OpenVerified(item, retainInScope: false);
         var path = PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(instance.RuntimeRoot, item.RelativePath));
         var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
         try

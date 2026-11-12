@@ -19,7 +19,9 @@ internal sealed class StepEvidenceFactory(RuntimeInstance instance, StateDatabas
 
     internal PreparedStepResult CreateInterruptedCollected(StepEvidenceBinding binding, BlobReference? providerControl = null, BlobReference? workspaceOutput = null)
     {
-        lease.VerifyHeld(instance); RequireStopped(binding);
+        lease.VerifyHeld(instance);
+        using var history = JournalReadScope.HoldAttempt(instance, contracts, database, binding.ParentJournalId);
+        RequireStopped(binding);
         var context = _reader.Context(binding);
         var latest = new JournalStore(instance, contracts).Read(binding.ParentJournalId);
         var prior = StepResultCodec.Read(latest.Root, context.Total).SingleOrDefault(item => item.Binding == binding);
@@ -56,7 +58,9 @@ internal sealed class StepEvidenceFactory(RuntimeInstance instance, StateDatabas
         ProcessIdentity? root, int? exitCode, BlobReference? previousObservation = null, StepStopProof? stopProof = null,
         BlobReference? judgementEvidence = null, BlobReference? providerControl = null, BlobReference? taskAdapter = null, BlobReference? workspaceOutput = null)
     {
-        lease.VerifyHeld(instance); var context = _reader.Context(binding);
+        lease.VerifyHeld(instance);
+        using var history = JournalReadScope.HoldAttempt(instance, contracts, database, binding.ParentJournalId);
+        var context = _reader.Context(binding);
         if (root != context.Root) throw new IOException("execution_step_native_root_unbound");
         var raw = RawOutputCodec.Read(_blobs, binding, rawOutput);
         _ = FileLogEvidence.Require(instance, contracts, _blobs, context.Total, binding, context.Job.FileLogBaseline, raw);
@@ -147,6 +151,7 @@ internal sealed class StepEvidenceFactory(RuntimeInstance instance, StateDatabas
         ProcessIdentity? root, int? exitCode, Func<ExecutionStepEvidence, T> callback)
     {
         lease.VerifyHeld(instance);
+        using var history = JournalReadScope.HoldAttempt(instance, contracts, database, binding.ParentJournalId);
         var document = StepEvidenceCodec.Read(_blobs, binding, evidence.Artifact);
         if (document.Root != root || document.ExitCode is not null && document.ExitCode != exitCode ||
             _reader.Read(binding, evidence.Artifact, collected) != evidence)
@@ -156,7 +161,9 @@ internal sealed class StepEvidenceFactory(RuntimeInstance instance, StateDatabas
 
     internal T UseRecovery<T>(StepEvidenceBinding binding, ExecutionStepEvidence evidence, Func<ExecutionStepEvidence, T> callback)
     {
-        lease.VerifyHeld(instance); RequireStopped(binding);
+        lease.VerifyHeld(instance);
+        using var history = JournalReadScope.HoldAttempt(instance, contracts, database, binding.ParentJournalId);
+        RequireStopped(binding);
         if (_reader.Read(binding, evidence.Artifact, true) != evidence) throw new IOException("execution_step_evidence_changed");
         return Hold(binding, evidence, callback);
     }

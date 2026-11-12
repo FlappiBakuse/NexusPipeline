@@ -20,7 +20,8 @@ internal sealed class PreparedWorkCleanup : IDisposable
     internal OperationIdentity Identity { get; }
 
     private PreparedWorkCleanup(InstanceLease lease, ResourceOperationBorrow borrow,
-        ExtensionActivator.ApplyReservation inventory, FrozenFileCleanup plan, ExtensionWorkExecution execution, OperationIdentity identity)
+        ExtensionActivator.ApplyReservation inventory, FrozenFileCleanup plan,
+        ExtensionWorkExecution execution, OperationIdentity identity)
     { _lease = lease; _borrow = borrow; _inventory = inventory; _plan = plan; Execution = execution; Identity = identity; }
 
     internal static async ValueTask<PreparedWorkCleanup> PrepareAsync(RuntimeInstance instance, StateDatabase database,
@@ -37,7 +38,9 @@ internal sealed class PreparedWorkCleanup : IDisposable
             inventory = await activator.ReserveForApplyAsync(root, work.Origin.Producer.Source.ExtensionId,
                 acceptedCancellation, requireInactive: true).ConfigureAwait(false);
             var planReference = new CleanupPlanCodec(instance, contracts, new(instance, contracts), database, roots).Persist(plan);
-            var execution = ExtensionWorkExecution.Owned(instance, database, lease, contracts, roots, work, root, borrow, inventory, resources, planReference);
+            var executor = lease.ExecutorIdentity;
+            var execution = ExtensionWorkExecution.Owned(instance, database, lease, contracts, roots, work, root,
+                borrow, inventory, resources, planReference, executor);
             if (isNew) execution.RequireBeforeAcceptance(plan); else execution.Require(plan);
             if (isNew)
                 ExtensionWorkInventory.Require(work.Origin,
@@ -45,7 +48,11 @@ internal sealed class PreparedWorkCleanup : IDisposable
             return new(lease, borrow, inventory, plan, execution, ExtensionWorkRequest.Identity(instance, plan.OperationId, subject,
                 work.Origin.Proof.ProducerJournalId, work.Origin.Proof.ProducerPlan, work.Page.PreviousJournalId, work.Page.PreviousPlan));
         }
-        catch { inventory?.Dispose(); borrow.Dispose(); throw; }
+        catch
+        {
+            try { inventory?.Dispose(); } finally { borrow.Dispose(); }
+            throw;
+        }
     }
 
     internal T Publish<T>(Func<FrozenFileCleanup, T> effect)

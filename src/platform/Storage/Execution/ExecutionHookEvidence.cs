@@ -64,8 +64,14 @@ internal sealed class HookEvidenceReader(RuntimeInstance instance, StateDatabase
     }
 
     internal IReadOnlyList<BlobReference> ReadReferences(StepEvidenceBinding binding, string role, BlobReference artifact)
+        => References(Read(binding, role, artifact, verifyContents: false), binding, artifact);
+
+    internal IReadOnlyList<BlobReference> ReadValidatedReferences(StepEvidenceBinding binding, string role, BlobReference artifact,
+        (ExecutionPlan Total, StepWriterState Job, ProcessIdentity? Root) context) =>
+        References(ReadFromValidatedContext(binding, role, artifact, context, verifyContents: false), binding, artifact);
+
+    private IReadOnlyList<BlobReference> References(HookEvidenceDocument value, StepEvidenceBinding binding, BlobReference artifact)
     {
-        var value = Read(binding, role, artifact, verifyContents: false);
         var refs = new List<BlobReference> { artifact, value.Closure };
         if (value.RawOutput is { } reference)
         {

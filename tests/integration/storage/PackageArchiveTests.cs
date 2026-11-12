@@ -36,7 +36,7 @@ public sealed class PackageArchiveTests
         Assert.Equal("{}"u8.ToArray(), archive.ReadManifest());
     }
 
-    [Fact(DisplayName = "A Verified Archive Candidate Uses The Existing Cas And File Tree Materializer With Implicit Parents")]
+    [Fact(DisplayName = "A Verified Archive Candidate Keeps Implicit Parents And Copies Checked Members Without Expanded Cas")]
     public void MaterializesVerifiedArchives()
     {
         var root = Path.Combine(Environment.GetEnvironmentVariable("NEXUS_TEST_ROOT")!, Guid.NewGuid().ToString("N"));
@@ -48,15 +48,15 @@ public sealed class PackageArchiveTests
         using var archive = ExtensionPackageArchive.Open(input);
         Assert.Equal(new[] { "", "nested", "nested/deeper" }, archive.Directories);
         var captured = archive.CaptureCandidate(new(instance, contracts), CancellationToken.None);
-        var path = Path.Combine(root, "candidate");
-        _ = new FileTreeArchive(new(SnapshotBudget.Default), new(instance, contracts))
-            .MaterializeNew(captured, path, CancellationToken.None);
-        Assert.Equal(data, File.ReadAllBytes(Path.Combine(path, "nested", "deeper", "value.bin")));
-        Assert.Equal("{}"u8.ToArray(), File.ReadAllBytes(Path.Combine(path, "manifest.json")));
+        Assert.All(captured.Contents, content => Assert.False(File.Exists(Path.Combine(instance.RuntimeRoot, content.RelativePath))));
+        input.Position = 0;
+        using var frozen = ExtensionPackageArchive.OpenFrozen(input, captured.Snapshot, default);
+        using var output = new MemoryStream();
+        frozen.CopyFile("nested/deeper/value.bin", output, default);
+        Assert.Equal(data, output.ToArray());
+        Assert.Equal("{}"u8.ToArray(), frozen.ReadManifest());
         var expected = Assert.Single(archive.Files, item => item.RelativePath == "nested/deeper/value.bin");
         Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(data)), expected.Sha256);
-        Assert.Throws<IOException>(() => new FileTreeArchive(new(SnapshotBudget.Default), new(instance, contracts))
-            .MaterializeNew(captured, path, CancellationToken.None));
     }
 
     [Theory(DisplayName = "No Archive Path Can Escape Or Alias An Existing File Or Directory Node")]

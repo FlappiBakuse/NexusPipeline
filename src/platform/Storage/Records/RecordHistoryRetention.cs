@@ -16,6 +16,7 @@ public sealed class RecordHistoryRetention
     private Guid? _resumeAfter;
     private DateOnly? _resumeDay;
     private bool _resumeComplete;
+    private long _observedMutation = -1;
     public string? FailureCode { get; private set; }
 
     public RecordHistoryRetention(StateDatabase database, ContentRetirementService retirement, TimeProvider? clock = null)
@@ -39,13 +40,16 @@ public sealed class RecordHistoryRetention
 
     internal void Tick()
     {
-        var saved = new HostSettingsStore(_database).Read(); var now = _clock.GetUtcNow();
+        var now = _clock.GetUtcNow();
         var localDate = TimeZoneInfo.ConvertTime(now, TimeZoneInfo.Local).Date;
+        var today = DateOnly.FromDateTime(localDate);
+        if (_resumeComplete && _nextSweep is { } nextDay && today < nextDay && _observedMutation == _database.CommitSequence) return;
+        var saved = new HostSettingsStore(_database).Read();
+        _observedMutation = _database.CommitSequence;
         if (_settingsRevision != saved.Revision)
         { _settingsRevision = saved.Revision; _after = null; _nextSweep = null; _resumeDay = null; }
         var cutoffDate = localDate.AddDays(1 - saved.Values.HistoryRetentionDays);
         var cutoff = new DateTimeOffset(cutoffDate, TimeZoneInfo.Local.GetUtcOffset(cutoffDate));
-        var today = DateOnly.FromDateTime(localDate);
         if (_resumeDay != today) { _resumeDay = today; _resumeAfter = null; _resumeComplete = false; }
         if (!_resumeComplete)
         {
@@ -58,8 +62,9 @@ public sealed class RecordHistoryRetention
         using (var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true))
         using (var command = connection.CreateCommand())
         {
-            command.CommandText = "SELECT r.run_id FROM run_records r JOIN execution_start_sources s ON s.run_id=r.run_id AND s.attempt_ordinal=1 " +
-                "JOIN operations o ON o.operation_id=s.operation_id WHERE r.history_retired_at_utc_ticks IS NULL AND r.run_id>$after " +
+            command.CommandText = "SELECT r.run_id FROM operations o INDEXED BY execution_start_retention_read " +
+                "JOIN execution_start_sources s ON s.operation_id=o.operation_id AND s.attempt_ordinal=1 " +
+                "JOIN run_records r ON r.run_id=s.run_id WHERE o.operation_kind='execution.start' AND r.history_retired_at_utc_ticks IS NULL AND r.run_id>$after " +
                 "AND julianday(o.created_at)<julianday($cutoff) ORDER BY r.run_id LIMIT 1;";
             command.Parameters.AddWithValue("$after", _after?.ToString("D") ?? "");
             command.Parameters.AddWithValue("$cutoff", cutoff.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture));

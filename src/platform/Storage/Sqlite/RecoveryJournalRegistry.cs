@@ -115,33 +115,25 @@ public sealed class RecoveryJournalRegistry(StateDatabase database) : IRecoveryR
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
         using var transaction = connection.BeginTransaction(deferred: true);
         using var command = connection.CreateCommand(); command.Transaction = transaction;
-        command.CommandText = "SELECT j.journal_id,j.operation_id,j.operation_kind,j.phase,j.revision,j.plan_path,j.plan_digest,k.resource_key " +
-            "FROM operation_journals j JOIN recovery_capacity_members m ON m.journal_id=j.journal_id " +
-            "JOIN recovery_capacity_reservations r USING(owner_journal_id) LEFT JOIN journal_resources k ON k.journal_id=j.journal_id " +
-            "WHERE j.phase='committed' AND NOT " + RecoveryCapacityStore.ActiveReservation + " ORDER BY j.journal_id,k.resource_key;";
-        var result = new HashSet<Guid>(); RegisteredJournal? current = null; var resources = new List<string>();
-        using var rows = command.ExecuteReader();
-        while (rows.Read())
+        command.CommandText = "SELECT j.journal_id,CASE WHEN j.phase='committed' AND r.owner_journal_id IS NOT NULL AND NOT " +
+            RecoveryCapacityStore.ActiveReservation + " THEN 1 ELSE 0 END " +
+            "FROM operation_journals j LEFT JOIN recovery_capacity_members m ON m.journal_id=j.journal_id " +
+            "LEFT JOIN recovery_capacity_reservations r USING(owner_journal_id) " +
+            "WHERE j.journal_id>$after ORDER BY j.journal_id LIMIT 128;";
+        var after = command.Parameters.AddWithValue("$after", "");
+        var result = new HashSet<Guid>();
+        while (true)
         {
-            var id = Guid.ParseExact(rows.GetString(0), "D");
-            if (current?.JournalId != id)
+            var page = new List<(Guid Id, bool Inactive)>(128);
+            using (var rows = command.ExecuteReader())
+                while (rows.Read()) page.Add((Guid.ParseExact(rows.GetString(0), "D"), rows.GetInt64(1) == 1));
+            foreach (var item in page.Where(item => item.Inactive))
             {
-                Finish(); resources = [];
-                if (!Enum.TryParse<JournalKind>(rows.GetString(2), true, out var kind) ||
-                    !Enum.TryParse<JournalPhase>(rows.GetString(3), true, out var phase)) throw new IOException("recovery_registry_journal_invalid");
-                current = new(id, Guid.ParseExact(rows.GetString(1), "D"), kind, phase, rows.GetInt64(4), rows.GetString(5), rows.GetString(6), []);
+                _ = ReadJournalInside(connection, transaction, item.Id);
+                result.Add(item.Id);
             }
-            if (rows.IsDBNull(7) || resources.Count >= 4096) throw new IOException("recovery_registry_resource_limit");
-            resources.Add(rows.GetString(7));
-        }
-        Finish(); return result;
-
-        void Finish()
-        {
-            if (current is null) return;
-            try { Validate(current with { ResourceKeys = resources }); }
-            catch (ArgumentException error) { throw new IOException("recovery_registry_journal_invalid", error); }
-            result.Add(current.JournalId);
+            if (page.Count < 128) return result;
+            after.Value = page[^1].Id.ToString("D");
         }
     }
 
@@ -384,9 +376,10 @@ public sealed class RecoveryJournalRegistry(StateDatabase database) : IRecoveryR
         const string columns = "SELECT j.journal_id,j.operation_id,j.operation_kind,j.phase,j.revision,j.plan_path,j.plan_digest ";
         command.CommandText = requiredJournalId is not null ? FamilyQuery : includeHistory
             ? columns + "FROM operation_journals j ORDER BY j.journal_id LIMIT 10001;"
-            : columns + "FROM operation_journals j LEFT JOIN recovery_capacity_members m ON m.journal_id=j.journal_id " +
-                "LEFT JOIN recovery_capacity_reservations r USING(owner_journal_id) WHERE r.owner_journal_id IS NULL OR j.phase<>'committed' OR " +
-                RecoveryCapacityStore.ActiveReservation + " ORDER BY j.journal_id LIMIT 10001;";
+            : columns + "FROM operation_journals j WHERE j.journal_id IN (" +
+                "SELECT journal_id FROM operation_journals INDEXED BY journals_unfinished_read WHERE phase<>'committed' " +
+                "UNION SELECT m.journal_id FROM recovery_capacity_members m WHERE m.owner_journal_id IN (" +
+                RecoveryCapacityStore.ActiveOwners + ")) ORDER BY j.journal_id LIMIT 10001;";
         command.Parameters.AddWithValue("$required", requiredJournalId is { } required ? required.ToString("D") : DBNull.Value);
         var result = new List<RegisteredJournal>();
         using (var reader = command.ExecuteReader())

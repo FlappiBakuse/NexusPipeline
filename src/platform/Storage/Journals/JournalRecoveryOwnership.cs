@@ -5,6 +5,7 @@ using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Execution;
 using NexusPipeline.Core.Maintenance;
 using NexusPipeline.Platform.Storage.Sqlite;
+using NexusPipeline.Platform.Processes;
 using NexusPipeline.Platform.Storage.Extensions;
 using NexusPipeline.Platform.Storage.Maintenance;
 using NexusPipeline.Platform.Storage.Execution;
@@ -194,7 +195,8 @@ public sealed class JournalRecoveryOwnership(StateDatabase database) : IRecovery
     [SupportedOSPlatform("windows")]
     internal CompletedExtensionProof CaptureCompletedWriters(RuntimeInstance instance, StateDatabase expected,
         InstanceLease lease, Guid journalId, ResourceLeaseManager? resources = null, ResourceOperationLease? root = null,
-        string? extensionId = null) => CompletedExtensionProof.Capture(this, instance, expected, lease, journalId, resources, root, extensionId);
+        string? extensionId = null, ProcessIdentityLease? executor = null) =>
+        CompletedExtensionProof.Capture(this, instance, expected, lease, journalId, resources, root, extensionId, executor);
 
     internal sealed class CompletedExtensionProof
     {
@@ -211,7 +213,7 @@ public sealed class JournalRecoveryOwnership(StateDatabase database) : IRecovery
         [SupportedOSPlatform("windows")]
         internal static CompletedExtensionProof Capture(JournalRecoveryOwnership owner, RuntimeInstance instance,
             StateDatabase expected, InstanceLease lease, Guid journalId, ResourceLeaseManager? resources,
-            ResourceOperationLease? root, string? extensionId)
+            ResourceOperationLease? root, string? extensionId, ProcessIdentityLease? executor)
         {
             lease.VerifyHeld(instance);
             if (!ReferenceEquals(owner.Database, expected) || expected.InstanceId != instance.InstanceId ||
@@ -222,7 +224,7 @@ public sealed class JournalRecoveryOwnership(StateDatabase database) : IRecovery
             using var borrow = root is null ? null : root.Borrow(resources ?? throw Invalid(), root.OperationId,
                 [new("extension:" + (extensionId ?? throw Invalid()), ResourceClaimMode.Mutation)]);
             var before = owner.ReadExtensionWriters(journalId);
-            var observed = root is null ? owner._writers.Observe(journalId) : owner._writers.ObserveForCurrentExecutor(journalId);
+            var observed = root is null ? owner._writers.Observe(journalId) : owner._writers.ObserveForCurrentExecutor(journalId, executor);
             if (!observed.IsComplete || observed.State != WriterState.Stopped ||
                 !before.SequenceEqual(owner.ReadExtensionWriters(journalId))) throw Invalid();
             return new(instance, lease, journalId, before, root);

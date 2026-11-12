@@ -11,7 +11,7 @@ internal sealed class ProjectResourceSubset : IDisposable
         IReadOnlyList<ResourceClaim> Claims);
     private readonly List<IDisposable> _held = [];
     private readonly Dictionary<string, PhysicalObjectIdentity> _directories = new(StringComparer.OrdinalIgnoreCase);
-    private readonly List<(string Path, ArchivedFileTree Archive)> _parts = [];
+    private readonly List<TreeReadLease> _trees = [];
     internal IReadOnlyList<string> IncludedPaths { get; private set; } = [];
     internal ArchivedFileTree Archive { get; private set; } = null!;
 
@@ -64,8 +64,9 @@ internal sealed class ProjectResourceSubset : IDisposable
             var archive = new FileTreeArchive(scanner, blobs).Capture(part.Path, cancellation);
             if (archive.Snapshot.Shape != part.Before.Shape || !archive.Snapshot.Entries.SequenceEqual(part.Before.Entries) ||
                 !archive.OriginalObjects.SequenceEqual(part.Identities) || !PhysicalResourceAdmission.ReadTree(part.Path, archive.Snapshot).SequenceEqual(part.Claims)) throw Changed();
-            _held.Add(TreeReadLease.Acquire(part.Path, PhysicalObjectIdentity.Read(Path.GetDirectoryName(part.Path)!), archive));
-            _parts.Add((part.Path, archive)); contents.AddRange(archive.Contents);
+            var tree = TreeReadLease.Acquire(part.Path, PhysicalObjectIdentity.Read(Path.GetDirectoryName(part.Path)!), archive);
+            _held.Add(tree); _trees.Add(tree);
+            contents.AddRange(archive.Contents);
             foreach (var entry in archive.Snapshot.Entries)
             {
                 var relative = entry.RelativePath.Length == 0 ? part.Relative : part.Relative + "/" + entry.RelativePath;
@@ -82,12 +83,7 @@ internal sealed class ProjectResourceSubset : IDisposable
     internal void RequireCurrent()
     {
         foreach (var (path, identity) in _directories) if (PhysicalObjectIdentity.Read(path) != identity) throw Changed();
-        foreach (var part in _parts)
-        {
-            var current = new FileTreeScanner(SnapshotBudget.Default).CaptureArchive(part.Path, default);
-            if (current.Shape != part.Archive.Snapshot.Shape || !current.Entries.SequenceEqual(part.Archive.Snapshot.Entries) ||
-                !PhysicalTreeIdentity.Capture(part.Path, current).SequenceEqual(part.Archive.OriginalObjects)) throw Changed();
-        }
+        foreach (var tree in _trees) { using var current = tree.Borrow(); }
     }
     public void Dispose() { for (var index = _held.Count - 1; index >= 0; index--) _held[index].Dispose(); _held.Clear(); }
     private static IOException Changed() => new("project_source_changed");

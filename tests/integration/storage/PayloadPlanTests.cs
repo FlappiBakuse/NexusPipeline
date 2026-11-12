@@ -80,7 +80,8 @@ public sealed class PayloadPlanTests
         using var fixture = PayloadTestFixture.Create(JournalKind.ExtensionApply, PayloadAction.Install);
         var prepared = fixture.Codec.Freeze(fixture.Plan);
         var reference = prepared.Reference;
-        var candidate = prepared.Plan.Candidate.Contents[0];
+        var candidate = new NexusPipeline.Platform.Storage.Extensions.PayloadSourceCodec(fixture.Instance, new())
+            .ReadMetadata(prepared.Plan.ExtensionSource!).Package!.Archive;
         prepared.Dispose();
         prepared.Dispose();
         Assert.Throws<ObjectDisposedException>(() => prepared.Plan);

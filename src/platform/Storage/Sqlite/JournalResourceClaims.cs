@@ -62,7 +62,15 @@ internal static class JournalResourceClaims
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
         using var transaction = connection.BeginTransaction(deferred: true);
-        foreach (var batch in RecoveryJournalRegistry.ReadHistoryInside(connection, transaction).Chunk(128))
+        VerifyScope(instance, database, contracts, RecoveryJournalRegistry.ReadHistoryInside(connection, transaction), payloadRoots);
+    }
+
+    internal static void VerifyScope(RuntimeInstance instance, StateDatabase database, ContractReader contracts,
+        IEnumerable<RegisteredJournal> registered, PayloadApplyRoots? payloadRoots = null)
+    {
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var transaction = connection.BeginTransaction(deferred: true);
+        foreach (var batch in registered.Chunk(128))
         {
             var claims = ReadBatch(connection, transaction, batch.Select(item => item.JournalId).ToArray());
             VerifyBatch(instance, database, contracts, batch, journal => Verify(journal, claims[journal.JournalId]));

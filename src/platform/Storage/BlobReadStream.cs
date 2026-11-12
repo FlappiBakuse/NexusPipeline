@@ -26,7 +26,7 @@ internal sealed class BlobReadStream : FileStream
     [DllImport("kernel32.dll", EntryPoint = "CreateFileW", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern SafeFileHandle CreateFile(string path, uint access, uint share, IntPtr security, uint disposition, uint flags, IntPtr template);
 
-    internal static FileStream Open(string path, BlobReference reference)
+    internal static FileStream Open(string path, BlobReference reference, bool retainInScope)
     {
         var reader = new BlobReadStream(path);
         try
@@ -37,7 +37,7 @@ internal sealed class BlobReadStream : FileStream
                 if (Held.TryGetValue(path, out var prior))
                 {
                     reader.Attach(prior, identity, reference);
-                    BlobReadScope.Track(path);
+                    if (retainInScope) BlobReadScope.Track(path);
                     return reader;
                 }
             if (Convert.ToHexStringLower(SHA256.HashData(reader)) != reference.Sha256) throw Invalid();
@@ -58,7 +58,7 @@ internal sealed class BlobReadStream : FileStream
                 }
             }
             finally { anchor?.Dispose(); }
-            BlobReadScope.Track(path);
+            if (retainInScope) BlobReadScope.Track(path);
             return reader;
         }
         catch { reader.Dispose(); throw; }
@@ -78,11 +78,14 @@ internal sealed class BlobReadStream : FileStream
         Release(content);
     }
 
-    internal static IDisposable Retain(string path)
+    internal static IDisposable Retain(string path) => Retain(path, out _);
+
+    internal static IDisposable Retain(string path, out BlobReference reference)
     {
         lock (Gate)
         {
             if (!Held.TryGetValue(path, out var content)) throw Invalid();
+            reference = content.Reference;
             content.Readers++;
             return new RetainedContent(content);
         }

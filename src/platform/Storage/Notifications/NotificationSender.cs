@@ -119,13 +119,14 @@ internal sealed class NotificationSender : IAsyncDisposable
         }
     }
 
-    internal int ReconcilePendingResults()
+    internal int ReconcilePendingResults(NotificationAttemptReads? reads = null)
     {
         _lease.VerifyHeld(_instance);
         PendingResult[] saved; lock (_gate) saved = _pending.Values.ToArray();
         foreach (var item in saved)
         {
             item.Borrow.VerifyHeld();
+            reads?.HoldDelivery(item.Snapshot.Document.OperationId);
             _store.Publish(item.Snapshot, item.Claimed, item.Result);
             lock (_gate) _pending.Remove(item.Snapshot.Document.OperationId);
             item.Borrow.Dispose();

@@ -18,7 +18,10 @@ internal sealed class UnenteredPayloadLease : IDisposable
             lease._held.Add(plan.Kind == JournalKind.UpdateApply
                 ? TreeReadLease.AcquireApplication(plan.TargetPath, plan.ParentIdentity, plan.Before)
                 : TreeReadLease.Acquire(plan.TargetPath, plan.ParentIdentity, plan.Before));
-            foreach (var blob in plan.Before.Contents.Concat(plan.Candidate.Contents).Distinct()) lease._held.Add(blobs.OpenVerified(blob));
+            var contents = plan.Kind == JournalKind.ExtensionApply
+                ? new PayloadSourceCodec(instance, new()).ReadMetadata(plan.ExtensionSource!).Package is { } package ? new[] { package.Archive } : []
+                : plan.Before.Contents.Concat(plan.Candidate.Contents).Distinct();
+            foreach (var blob in contents) lease._held.Add(blobs.OpenVerified(blob));
             lease._held.Add(blobs.OpenVerified(planReference));
             if (plan.ExtensionSource is { } source) lease._held.Add(blobs.OpenVerified(source));
             var scanner = new FileTreeScanner(SnapshotBudget.Default);

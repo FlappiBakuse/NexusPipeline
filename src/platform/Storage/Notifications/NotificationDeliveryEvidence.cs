@@ -2,6 +2,7 @@ using System.Collections.Immutable;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Extensibility.Protocol;
 using NexusPipeline.Platform.Serialization;
+using NexusPipeline.Platform.Storage.Execution;
 using NexusPipeline.Platform.Storage.Journals;
 using NexusPipeline.Platform.Storage.Sqlite;
 
@@ -18,7 +19,7 @@ internal sealed class NotificationDeliveryEvidence(RuntimeInstance instance, Sta
         return result;
     }
 
-    internal NotificationDeliverySnapshot ReadFromSnapshot(BlobReference reference,
+    internal NotificationDeliverySnapshot ReadMetadata(BlobReference reference,
         Microsoft.Data.Sqlite.SqliteConnection connection, Microsoft.Data.Sqlite.SqliteTransaction transaction)
     {
         if (database.InstanceId != instance.InstanceId || database.RuntimeRoot != instance.RuntimeRoot)
@@ -49,6 +50,14 @@ internal sealed class NotificationDeliveryEvidence(RuntimeInstance instance, Sta
                 throw new IOException("notification_delivery_operation_unbound");
         RequireReferenceRows(connection, transaction, document);
         new NotificationCatalogCodec(instance, contracts).RequirePublishedCursor(connection, transaction, catalog);
+        return snapshot;
+    }
+
+    internal NotificationDeliverySnapshot ReadFromSnapshot(BlobReference reference,
+        Microsoft.Data.Sqlite.SqliteConnection connection, Microsoft.Data.Sqlite.SqliteTransaction transaction)
+    {
+        var snapshot = ReadMetadata(reference, connection, transaction);
+        var document = snapshot.Document;
         if (document.Source.Kind == "executionReceipt") RequireExecutionSource(snapshot, connection, transaction);
         else new ExplicitSourceEvidence(instance, database, contracts).RequireDelivery(snapshot, connection, transaction);
         return snapshot;
@@ -80,22 +89,24 @@ internal sealed class NotificationDeliveryEvidence(RuntimeInstance instance, Sta
         if (registered.Kind != JournalKind.RunAttempt || registered.Phase != JournalPhase.Committed)
             throw new IOException("notification_delivery_source_unbound");
         var planReference = AttemptReference(registered);
-        var attemptBytes = ReadBytes(planReference);
-        var attempt = contracts.Read<RunAttemptPlan>(attemptBytes, "run-attempt-plan.schema.json");
+        var owner = database.AttemptReads?.Find(registered.JournalId);
+        var metadata = owner?.ReadPlanMetadata(registered, planReference);
+        var attempt = metadata?.Plan ?? contracts.Read<RunAttemptPlan>(ReadBytes(planReference), "run-attempt-plan.schema.json");
         var source = document.Source;
         if (attempt.JournalId != receipt.JournalId.ToString("D") || attempt.OperationId != receipt.OperationId.ToString("D") ||
             attempt.RunId != receipt.Facts.RunId.ToString("D") || attempt.AttemptId != receipt.Facts.AttemptId.ToString("D") ||
             attempt.AttemptOrdinal != receipt.Facts.Ordinal || attempt.ExecutionPlan.RelativePath != source.TotalPlan.RelativePath ||
             attempt.ExecutionPlan.SizeBytes != source.TotalPlan.SizeBytes || attempt.ExecutionPlan.Sha256 != source.TotalPlan.Sha256)
             throw new IOException("notification_delivery_source_unbound");
-        var total = contracts.Read<ExecutionPlan>(ReadBytes(source.TotalPlan), "execution-plan.schema.json");
+        var total = metadata?.Total ?? contracts.Read<ExecutionPlan>(ReadBytes(source.TotalPlan), "execution-plan.schema.json");
         if (total.RunId != attempt.RunId || total.InstanceId != instance.InstanceId.ToString("D") ||
             new BlobReference(total.DefinitionBundle.RelativePath, total.DefinitionBundle.SizeBytes, total.DefinitionBundle.Sha256) != source.DefinitionBundle)
             throw new IOException("notification_delivery_source_unbound");
         if (source.RouteKind == "queue" && total.QueueId != source.RouteId.ToString("D") ||
             source.RouteKind == "binding" && !total.Selection.Any(item => item.BindingId == source.RouteId.ToString("D")))
             throw new IOException("notification_delivery_route_unbound");
-        _ = contracts.Read<AutomationBundle>(ReadBytes(source.DefinitionBundle), "automation-bundle.schema.json");
+        _ = (metadata is null ? null : owner?.ReadDefinitions()) ??
+            contracts.Read<AutomationBundle>(ReadBytes(source.DefinitionBundle), "automation-bundle.schema.json");
         if (document.Registration is not null)
             new ReceiptRouteCodec(instance, database, contracts).RequireOrigin(snapshot, connection, transaction);
     }

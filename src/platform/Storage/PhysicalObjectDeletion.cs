@@ -26,31 +26,44 @@ public static class PhysicalObjectDeletion
     {
         if (intent.Kind != FileObjectKind.File) throw new ArgumentException("A content file is required");
         ArgumentNullException.ThrowIfNull(isUnreferenced);
-        return Delete(intent, isUnreferenced);
+        return Delete(intent, isUnreferenced, singleLink: true);
     }
 
-    private static bool Delete(FileObjectDeletion intent, Func<bool> authorize, long maximumBytes = 1_073_741_824)
+    internal static FileLease HoldFile(FileObjectDeletion intent)
     {
-        if (intent.Kind is not (FileObjectKind.File or FileObjectKind.Directory) || intent.SizeBytes < 0 || intent.SizeBytes > maximumBytes ||
-            intent.Kind == FileObjectKind.Directory && (intent.SizeBytes != 0 || intent.Sha256 is not null) ||
-            intent.Kind == FileObjectKind.File && (intent.Sha256 is null || intent.Sha256.Length != 64))
-            throw new ArgumentException("Invalid exact-object deletion intent");
+        Validate(intent, 1_073_741_824);
+        if (intent.Kind != FileObjectKind.File) throw new ArgumentException("A content file is required");
+        var path = PhysicalPathPolicy.NormalizeWithoutLinks(intent.Path);
+        var parent = Path.GetDirectoryName(path) ?? throw new IOException("deletion_root_rejected");
+        var directory = StableDirectoryLease.Acquire(parent);
+        SafeFileHandle? handle = null;
+        FileStream? source = null;
+        try
+        {
+            if (PhysicalObjectIdentity.Read(parent) != intent.ParentIdentity) throw new IOException("deletion_parent_identity_changed");
+            handle = OpenObject(intent, path, FileShare.Read);
+            PhysicalObjectIdentity.RequireSingleLink(handle);
+            source = new FileStream(handle, FileAccess.Read);
+            VerifyFile(intent, source);
+            return new(intent, parent, directory, source);
+        }
+        catch { source?.Dispose(); handle?.Dispose(); directory.Dispose(); throw; }
+    }
+
+    private static bool Delete(FileObjectDeletion intent, Func<bool> authorize, long maximumBytes = 1_073_741_824,
+        bool singleLink = false)
+    {
+        Validate(intent, maximumBytes);
         var path = PhysicalPathPolicy.NormalizeWithoutLinks(intent.Path);
         var parent = Path.GetDirectoryName(path) ?? throw new IOException("deletion_root_rejected");
         using var parentLease = StableDirectoryLease.Acquire(parent);
         if (PhysicalObjectIdentity.Read(parent) != intent.ParentIdentity) throw new IOException("deletion_parent_identity_changed");
-        var access = intent.Kind == FileObjectKind.File ? 0x80010080u : 0x00010080u;
-        using var handle = CreateFile(PhysicalPathPolicy.NativePath(path), access, 5, IntPtr.Zero, 3, 0x02200000, IntPtr.Zero);
-        if (handle.IsInvalid) throw Failure("deletion_open_failed");
-        if (PhysicalObjectIdentity.Read(handle) != intent.Identity) throw new IOException("deletion_object_identity_changed");
-        if (!ReadAttributes(handle, 9, out var tag, 8)) throw Failure("deletion_attributes_unavailable");
-        var isDirectory = (tag.Attributes & 0x10) != 0;
-        if (isDirectory != (intent.Kind == FileObjectKind.Directory)) throw new IOException("deletion_object_shape_changed");
+        using var handle = OpenObject(intent, path, FileShare.Read | FileShare.Delete);
         if (intent.Kind == FileObjectKind.File)
         {
+            if (singleLink) PhysicalObjectIdentity.RequireSingleLink(handle);
             using var source = new FileStream(handle, FileAccess.Read);
-            if (source.Length != intent.SizeBytes || Convert.ToHexStringLower(SHA256.HashData(source)) != intent.Sha256)
-                throw new IOException("deletion_object_bytes_changed");
+            VerifyFile(intent, source);
             if (!authorize()) return false;
             MarkDeleted(handle);
         }
@@ -60,6 +73,58 @@ public static class PhysicalObjectDeletion
             MarkDeleted(handle);
         }
         return true;
+    }
+
+    private static void Validate(FileObjectDeletion intent, long maximumBytes)
+    {
+        if (intent.Kind is not (FileObjectKind.File or FileObjectKind.Directory) || intent.SizeBytes < 0 || intent.SizeBytes > maximumBytes ||
+            intent.Kind == FileObjectKind.Directory && (intent.SizeBytes != 0 || intent.Sha256 is not null) ||
+            intent.Kind == FileObjectKind.File && (intent.Sha256 is null || intent.Sha256.Length != 64))
+            throw new ArgumentException("Invalid exact-object deletion intent");
+    }
+
+    private static SafeFileHandle OpenObject(FileObjectDeletion intent, string path, FileShare share)
+    {
+        var access = intent.Kind == FileObjectKind.File ? 0x80010080u : 0x00010080u;
+        var handle = CreateFile(PhysicalPathPolicy.NativePath(path), access, (uint)share, IntPtr.Zero, 3, 0x02200000, IntPtr.Zero);
+        try
+        {
+            if (handle.IsInvalid) throw Failure("deletion_open_failed");
+            if (PhysicalObjectIdentity.Read(handle) != intent.Identity) throw new IOException("deletion_object_identity_changed");
+            if (!ReadAttributes(handle, 9, out var tag, 8)) throw Failure("deletion_attributes_unavailable");
+            if (((tag.Attributes & 0x10) != 0) != (intent.Kind == FileObjectKind.Directory))
+                throw new IOException("deletion_object_shape_changed");
+            return handle;
+        }
+        catch { handle.Dispose(); throw; }
+    }
+
+    private static void VerifyFile(FileObjectDeletion intent, FileStream source)
+    {
+        if (source.Length != intent.SizeBytes || Convert.ToHexStringLower(SHA256.HashData(source)) != intent.Sha256)
+            throw new IOException("deletion_object_bytes_changed");
+    }
+
+    internal sealed class FileLease(FileObjectDeletion owned, string parent, StableDirectoryLease directory, FileStream source) : IDisposable
+    {
+        internal void Require(FileObjectDeletion intent)
+        {
+            if (intent != owned || PhysicalObjectIdentity.Read(parent) != intent.ParentIdentity ||
+                PhysicalObjectIdentity.Read(source.SafeFileHandle) != intent.Identity)
+                throw new IOException("deletion_file_lease_unbound");
+            PhysicalObjectIdentity.RequireSingleLink(source.SafeFileHandle);
+        }
+
+        internal bool TryDelete(FileObjectDeletion intent, Func<bool> authorize)
+        {
+            Require(intent);
+            if (!authorize()) return false;
+            MarkDeleted(source.SafeFileHandle);
+            source.Dispose();
+            return true;
+        }
+
+        public void Dispose() { source.Dispose(); directory.Dispose(); }
     }
 
     private static void MarkDeleted(SafeFileHandle handle)

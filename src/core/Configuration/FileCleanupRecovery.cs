@@ -12,6 +12,7 @@ public sealed record FileCleanupInspection(JournalPhase Phase, bool DatabaseAgre
 public interface ICleanupRecoverySession
 {
     FileCleanupInspection Inspect();
+    FileCleanupInspection InspectRecovery() => Inspect();
     void CommitNoEffects();
     void BeginApplying(bool hasVerifiedRecoveryEvidence);
     CleanupStepResult RemoveVerified(string stepId);
@@ -38,7 +39,7 @@ public sealed class FileCleanupRecovery(ICleanupRecoverySession session)
 
     public FileCleanupResult Recover(bool isExplicitQuarantineRecovery = false)
     {
-        var inspection = Freeze(session.Inspect());
+        var inspection = Freeze(session.InspectRecovery());
         if (inspection.Phase == JournalPhase.Committed)
         {
             if (!inspection.DatabaseAgrees)

@@ -63,6 +63,9 @@ public sealed class BlobReferenceIndex
             if (content.Count == 0) return referenced;
             referenced.UnionWith(MaintenancePendingInventory.ReadReferenced(_instance, _database, _contracts, _payloadRoots, content));
             var digests = content.GroupBy(item => item.Sha256).ToDictionary(group => group.Key, group => group.ToArray(), StringComparer.Ordinal);
+            foreach (var digest in ExtensionInstalledRows.ReadArchiveDigests(_database))
+                if (digests.TryGetValue(digest, out var installed)) referenced.UnionWith(installed);
+            if (referenced.IsSupersetOf(content)) return referenced;
             if (OperatingSystem.IsWindows())
                 new Secrets.SecretDocumentInventory(_instance, _database, _contracts).VisitReferences(item =>
                 {
@@ -124,21 +127,23 @@ public sealed class BlobReferenceIndex
             else if (journal.Kind is JournalKind.UpdateApply or JournalKind.ExtensionApply)
             {
                 if (_payloadRoots is null) throw new IOException("blob_reference_payload_roots_unavailable");
-                var plan = new PayloadPlanCodec(_instance, _contracts, _blobs, _payloadRoots).ReadStructure(reference);
+                var plan = new PayloadPlanCodec(_instance, _contracts, _blobs, _payloadRoots).ReadStructure(reference, out var extensionSource);
                 if (plan.JournalId != journal.JournalId || plan.OperationId != journal.OperationId || plan.Kind != journal.Kind || !plan.ResourceKeys.SequenceEqual(journal.ResourceKeys))
                     throw new IOException("blob_reference_plan_unbound");
-                foreach (var item in plan.Before.Contents.Concat(plan.Candidate.Contents)) include(item);
+                if (journal.Kind != JournalKind.ExtensionApply || journal.Phase != JournalPhase.Committed)
+                    foreach (var item in plan.Before.Contents.Concat(plan.Candidate.Contents)) include(item);
                 if (plan.MaintenanceSource is { } maintenanceReference)
                 {
                     var sourceCodec = new UpdateSourceCodec(_instance, _contracts);
                     var source = sourceCodec.ReadMetadata(maintenanceReference); sourceCodec.RequireFrozenBinding(source, plan);
                     foreach (var item in UpdateSourceCodec.References(source)) include(item);
                 }
-                if (plan.ExtensionSource is { } sourceReference)
+                if (extensionSource is { } extension)
                 {
-                    var sourceCodec = new PayloadSourceCodec(_instance, _contracts);
-                    var source = sourceCodec.ReadMetadata(sourceReference); sourceCodec.RequireFrozenBinding(source, plan);
-                    foreach (var item in PayloadSourceCodec.References(source)) include(item);
+                    var unfinished = journal.Phase != JournalPhase.Committed;
+                    foreach (var item in PayloadSourceCodec.References(extension, includeArchive: unfinished)) include(item);
+                    if (unfinished && new PayloadSourceCodec(_instance, _contracts).ReadOriginalArchive(extension, plan, _payloadRoots) is { } original)
+                        include(original);
                 }
             }
             else if (journal.Kind == JournalKind.AssetPrepare)

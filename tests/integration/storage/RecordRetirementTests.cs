@@ -21,6 +21,9 @@ public sealed class RecordRetirementTests
     {
         using var fixture = await RecordRetirementFixture.CreateAsync();
         var source = fixture.Source; var original = new JournalStore(source.Instance, new()).Read(fixture.Receipt.JournalId).Export();
+        var registered = new RecoveryJournalRegistry(source.Database).ReadJournal(fixture.Receipt.JournalId);
+        _ = new PlanReferenceClosure(source.Instance, new(), new(source.Instance, new()), source.Database)
+            .Read(registered, AttemptPreparedBinding.Reference(source.Instance, registered));
         var before = fixture.Items.ToArray();
         var operation = Guid.NewGuid();
         var page = Assert.IsType<ContentRetirementPage>(fixture.Retirement.RetireLogsPage(operation, "retirement-fixture", fixture.Receipt.Facts.RunId));

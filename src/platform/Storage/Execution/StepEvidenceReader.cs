@@ -18,6 +18,7 @@ internal sealed class StepEvidenceReader(RuntimeInstance instance, StateDatabase
     private readonly ImmutableBlobStore _blobs = new(instance, contracts);
     internal ExecutionStepEvidence Read(StepEvidenceBinding binding, BlobReference artifact, bool collected)
     {
+        using var history = JournalReadScope.HoldAttempt(instance, contracts, database, binding.ParentJournalId);
         var context = Context(binding);
         return ReadFromValidatedContext(binding, artifact, collected, context);
     }
@@ -25,17 +26,22 @@ internal sealed class StepEvidenceReader(RuntimeInstance instance, StateDatabase
     internal ExecutionStepEvidence ReadFromValidatedContext(StepEvidenceBinding binding, BlobReference artifact, bool collected,
         (ExecutionPlan Total, StepWriterState Job, ProcessIdentity? Root) context)
     {
+        using var history = JournalReadScope.HoldAttempt(instance, contracts, database, binding.ParentJournalId);
         var retirement = VerifiedRecordRetirement.ForArtifact(instance, database, contracts, binding, "process", artifact);
         var document = ReadDocument(binding, artifact, collected, context, verifyContents: true, 0, retirement: retirement);
         return new(artifact, document.Engine, document.Business, document.Generation, document.ReasonCode);
     }
 
-    internal IReadOnlyList<BlobReference> ReadReferences(StepEvidenceBinding binding, BlobReference artifact) =>
-        ReadValidatedReferences(binding, artifact, Context(binding));
+    internal IReadOnlyList<BlobReference> ReadReferences(StepEvidenceBinding binding, BlobReference artifact)
+    {
+        using var history = JournalReadScope.HoldAttempt(instance, contracts, database, binding.ParentJournalId);
+        return ReadValidatedReferences(binding, artifact, Context(binding));
+    }
 
     internal IReadOnlyList<BlobReference> ReadValidatedReferences(StepEvidenceBinding binding, BlobReference artifact,
         (ExecutionPlan Total, StepWriterState Job, ProcessIdentity? Root) context)
     {
+        // The caller owns the validated snapshot; this path verifies its artifacts and current SQL bindings.
         var references = new List<BlobReference>();
         var document = StepEvidenceCodec.Read(_blobs, binding, artifact);
         _ = ReadDocument(binding, artifact, document.Stage == "collected", context, verifyContents: false, 0, references);
@@ -47,6 +53,8 @@ internal sealed class StepEvidenceReader(RuntimeInstance instance, StateDatabase
         RequireContextBinding(binding);
         var journal = new RecoveryJournalRegistry(database).ReadJournal(binding.ParentJournalId);
         if (journal.Kind != JournalKind.RunAttempt || journal.OperationId != binding.ParentOperationId || journal.PlanDigest != binding.PlanDigest) throw Invalid();
+        if (database.AttemptReads?.Find(binding.ParentJournalId)?.ReadContext(this, journal, binding, role) is { } current)
+            return current;
         var attempt = ReadPlan<RunAttemptPlan>(AttemptPreparedBinding.Reference(instance, journal), "run-attempt-plan.schema.json");
         var total = ReadPlan<ExecutionPlan>(AttemptPlanCodec.Reference(attempt.ExecutionPlan), "execution-plan.schema.json");
         var latest = new JournalStore(instance, contracts).Read(binding.ParentJournalId);
@@ -129,7 +137,8 @@ internal sealed class StepEvidenceReader(RuntimeInstance instance, StateDatabase
     private AutomationScriptScript Script(ExecutionPlan total, string stepId)
     {
         var content = total.DefinitionBundle;
-        var bundle = ReadPlan<AutomationBundle>(new(content.RelativePath, content.SizeBytes, content.Sha256), "automation-bundle.schema.json", content: true);
+        var bundle = database.AttemptReads?.Find(total)?.ReadDefinitions() ??
+            ReadPlan<AutomationBundle>(new(content.RelativePath, content.SizeBytes, content.Sha256), "automation-bundle.schema.json", content: true);
         var scriptId = total.Steps.Single(item => item.StepId == stepId).ScriptId;
         return bundle.Scripts.Single(item => item.Id == scriptId);
     }
@@ -242,7 +251,19 @@ internal sealed class StepEvidenceReader(RuntimeInstance instance, StateDatabase
         var judgement = new AttemptBusinessJudgement(binding.AttemptId, definition);
         var retiredRaw = raw is not null && document.RawOutput is { } outputReference &&
             retirement?.ReplacesRawReplay(binding, outputReference) == true;
-        var continuous = raw is not null && !retiredRaw && RawOutputReplay.Read(_blobs, raw, line => judgement.ObserveLine(judgement.InputIdentity, line));
+        var continuous = false;
+        RawReplayResult? replay = null;
+        if (raw is not null && !retiredRaw)
+        {
+            if (judgement.Mode == ExecutionJudgementMode.None)
+                foreach (var part in raw.Parts) _blobs.Verify(part.Content);
+            else if (database.AttemptReads?.Find(binding.ParentJournalId) is { } owner && document.RawOutput is { } rawReference)
+            {
+                replay = owner.Replay(binding, rawReference, raw, definition);
+                continuous = replay.Continuous;
+            }
+            else continuous = RawOutputReplay.Read(_blobs, raw, line => judgement.ObserveLine(judgement.InputIdentity, line));
+        }
         if (judgement.Mode == ExecutionJudgementMode.None && document.TaskAdapter is { } adapterReference &&
             document.Business != BusinessOutcome.Unverified && prior?.Business != document.Business)
         {
@@ -262,11 +283,12 @@ internal sealed class StepEvidenceReader(RuntimeInstance instance, StateDatabase
         }
         if (document.ReasonCode == "execution_completion_missing")
         {
-            if (!retiredRaw && (!continuous || judgement.Business != BusinessOutcome.Unverified)) throw Invalid();
+            if (!retiredRaw && (!continuous || (replay?.Business ?? judgement.Business) != BusinessOutcome.Unverified)) throw Invalid();
             return document;
         }
         if (document.Business != BusinessOutcome.Unverified && prior?.Business != document.Business &&
-            !retiredRaw && (!continuous || judgement.Decision is null || judgement.Business != document.Business || judgement.Decision.ReasonCode != document.ReasonCode)) throw Invalid();
+            !retiredRaw && (!continuous || (replay?.ReasonCode ?? judgement.Decision?.ReasonCode) is not { } reason ||
+                (replay?.Business ?? judgement.Business) != document.Business || reason != document.ReasonCode)) throw Invalid();
         if (document.Business == BusinessOutcome.Partial && prior?.Business != BusinessOutcome.Partial) throw Invalid();
         return document;
     }

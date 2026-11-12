@@ -23,7 +23,7 @@ public sealed class ExtensionDetailsReader(RuntimeInstance instance, StateDataba
         NexusPipeline.Core.Extensions.ExtensionIdentifiers.Require(extensionId);
         var installed = new ExtensionInstalledEvidence(instance, database, contracts, roots).ReadCurrent(extensionId);
         if (installed?.Metadata.IsInstalled != true) return null;
-        using var held = TreeReadLease.Acquire(installed.Footprint.TargetPath, installed.Footprint.ParentIdentity, installed.Footprint.Payload);
+        using var held = TreeReadLease.AcquireMetadata(installed.Footprint.TargetPath, installed.Footprint.ParentIdentity, installed.Footprint.Payload);
         var manifest = ReadHeldListing(installed, contracts);
         if (manifest.Icon is not { } name) return null;
         var file = installed.Footprint.Payload.Snapshot.Entries.SingleOrDefault(item => item.RelativePath == name);
@@ -42,7 +42,7 @@ public sealed class ExtensionDetailsReader(RuntimeInstance instance, StateDataba
 
     internal static NexusPipeline.Extensibility.Protocol.ExtensionManifest ReadListing(BoundExtensionInstallation installed, ContractReader contracts)
     {
-        using var held = TreeReadLease.Acquire(installed.Footprint.TargetPath, installed.Footprint.ParentIdentity, installed.Footprint.Payload);
+        using var held = TreeReadLease.AcquireMetadata(installed.Footprint.TargetPath, installed.Footprint.ParentIdentity, installed.Footprint.Payload);
         return ReadHeldListing(installed, contracts);
     }
 
@@ -63,7 +63,7 @@ public sealed class ExtensionDetailsReader(RuntimeInstance instance, StateDataba
             throw new ArgumentException("extension_id_invalid");
         var installed = new ExtensionInstalledEvidence(instance, database, contracts, roots).ReadCurrent(extensionId);
         if (installed is null || !installed.Metadata.IsInstalled) return null;
-        using var held = TreeReadLease.Acquire(installed.Footprint.TargetPath, installed.Footprint.ParentIdentity, installed.Footprint.Payload);
+        using var held = TreeReadLease.AcquireMetadata(installed.Footprint.TargetPath, installed.Footprint.ParentIdentity, installed.Footprint.Payload);
         var manifestBytes = ReadFile("manifest.json", 256 * 1024) ?? throw new IOException("extension_manifest_missing");
         if (Convert.ToHexStringLower(SHA256.HashData(manifestBytes)) != installed.Metadata.Package.ManifestSha256)
             throw new IOException("extension_manifest_changed");

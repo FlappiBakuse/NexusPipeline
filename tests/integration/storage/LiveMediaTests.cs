@@ -10,11 +10,13 @@ namespace NexusPipeline.StorageTests;
 [SupportedOSPlatform("windows")]
 public sealed class LiveMediaTests
 {
-    [Fact(DisplayName = "Actual Running Window Previews Require The Server Subject And Close Before The Original Final Capture And Restore")]
-    public async Task ScopesRunningPreviews()
+    [Theory(DisplayName = "Running Window Previews Create No Png Files And Close Before The Original Final Capture And Restore")]
+    [InlineData(1)]
+    [InlineData(3)]
+    public async Task ScopesRunningPreviews(int frames)
     {
         var fixture = new PcStageFixture(configuration: true, distinctConfiguration: true,
-            hooks: false, mainWait: true, nativeWindow: true);
+            hooks: false, mainWait: true, nativeWindow: true, captureFrames: frames);
         await fixture.ExecuteAsync(async () =>
         {
             var state = fixture.State;
@@ -42,13 +44,17 @@ public sealed class LiveMediaTests
                 await using var otherPreview = fixture.LiveMedia.OpenPreview(PcStageFixture.Subject, context, "other-fixture", "window");
                 await Assert.ThrowsAsync<UnauthorizedAccessException>(() => fixture.LiveMedia.CaptureAsync(
                     new(context, preview.PreviewId, Guid.NewGuid(), 1, "other-fixture"), default).AsTask());
-                var first = await preview.CaptureAsync();
-                var second = await preview.CaptureAsync();
-                Assert.True(first.Width > 0 && first.Height is > 0 and <= 360);
-                Assert.True(second.CapturedAt >= first.CapturedAt);
-                Assert.True(second.SizeBytes >= 33);
+                using var writes = new PreviewWriteWatch(fixture.Source.Instance.RuntimeRoot);
+                DateTimeOffset? captured = null;
+                for (var frame = 0; frame < 4; frame++)
+                {
+                    var image = await preview.CaptureAsync();
+                    Assert.True(image.Width > 0 && image.Height is > 0 and <= 360);
+                    Assert.True(image.SizeBytes >= 33 && (captured is null || image.CapturedAt >= captured));
+                    captured = image.CapturedAt;
+                }
+                await writes.RequireNoPngAsync();
                 Assert.False(running.IsCompleted);
-                Assert.Empty(Directory.EnumerateFiles(Path.Combine(fixture.Source.Instance.RuntimeRoot, "blobs", "content"), ".capture-*.tmp"));
                 await preview.DisposeAsync();
                 await Assert.ThrowsAsync<UnauthorizedAccessException>(() => preview.CaptureAsync().AsTask());
                 File.WriteAllText(fixture.HookMarker + ".main.release", "release");
@@ -65,6 +71,24 @@ public sealed class LiveMediaTests
                 await running.WaitAsync(TimeSpan.FromSeconds(45));
             }
         });
+    }
+
+    [Fact(DisplayName = "Preview Buffers Reject Excess And Truncated Input And Honor Cancellation")]
+    public async Task RejectsInvalidPreviewInput()
+    {
+        using var oversized = new NexusPipeline.Platform.Media.CapturePngSpool(Guid.NewGuid());
+        using var large = new MemoryStream(new byte[NexusPipeline.Platform.Media.CapturePngSpool.MaximumBytes + 1]);
+        var limit = await Assert.ThrowsAsync<IOException>(() => oversized.ReadOutputAsync(large, default));
+        Assert.Equal("capture_worker_frame_byte_limit", limit.Message);
+
+        using var truncated = new NexusPipeline.Platform.Media.CapturePngSpool(Guid.NewGuid());
+        using var shortInput = new MemoryStream(new byte[10]);
+        await Assert.ThrowsAsync<EndOfStreamException>(() => truncated.ReadLengthAsync(shortInput, 57, default));
+        Assert.Throws<IOException>(() => truncated.ReadLiveFrame());
+
+        using var canceled = new NexusPipeline.Platform.Media.CapturePngSpool(Guid.NewGuid());
+        using var stop = new CancellationTokenSource(); stop.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => canceled.ReadOutputAsync(large, stop.Token));
     }
 
     [Theory(DisplayName = "Preview Output Preserves Aspect Ratio Capture Time And Original Bytes")]

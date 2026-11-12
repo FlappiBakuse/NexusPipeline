@@ -35,6 +35,7 @@ internal sealed class PreparedExtensionActivation : IAsyncDisposable
     private Task? _callback;
     private Task? _failedCallback;
     private ExtensionScope? _scope;
+    private InstalledConsumptionFacts? _consumption;
     private bool _committed;
     private Task? _dispose;
     internal string ExtensionId { get; }
@@ -211,62 +212,16 @@ internal sealed class PreparedExtensionActivation : IAsyncDisposable
     internal InstalledConsumptionFacts CaptureConsumptionFacts()
     {
         RequireBeforeCallback();
-        ExtensionScope scope;
-        lock (_gate) scope = _scope ?? throw Invalid();
-        return new InstalledConsumptionFacts(this, scope.ActivationId);
-    }
-
-    internal sealed class InstalledConsumptionFacts
-    {
-        private readonly RuntimeInstance _instance;
-        private readonly StateDatabase _database;
-        private readonly InstanceLease _lease;
-        private readonly ContractReader _contracts;
-        private readonly PayloadApplyRoots _roots;
-        private readonly BlobReference _plan, _source, _physical;
-        private readonly Guid _journal, _activation;
-        private readonly string _extension;
-        private readonly bool _existingInstallation;
-
-        internal InstalledConsumptionFacts(PreparedExtensionActivation owner, Guid activation)
+        lock (_gate)
         {
-            owner.RequireBeforeCallback();
-            lock (owner._gate)
-                if (owner._scope?.ActivationId != activation || owner._dispose is not null) throw Invalid();
-            _instance = owner._instance; _database = owner._database; _lease = owner._lease;
-            _contracts = owner._contracts; _roots = owner._roots; _plan = owner._originalPlan;
-            _source = owner.Source; _physical = owner._physical; _journal = owner.JournalId;
-            _activation = activation; _extension = owner.ExtensionId;
-            _existingInstallation = owner._installedOrigin is not null;
+            var scope = _scope ?? throw Invalid();
+            if (_dispose is not null) throw Invalid();
+            if (_consumption is not null) return _consumption;
+            var facts = new InstalledConsumptionFacts(_instance, _database, _lease, _contracts, _roots, _originalPlan,
+                Source, _physical, JournalId, scope.ActivationId, ExtensionId, _installedOrigin is not null);
+            scope.OwnAsync(facts).GetAwaiter().GetResult();
+            return _consumption = facts;
         }
-
-        internal void PublishCurrent(ResourceLeaseManager resources, RecoveryIndex recovery) =>
-            ExtensionProjectionPublication.PublishIfDirty(_instance, _database, _lease, _contracts, _roots, resources, recovery);
-
-        internal InstallationReadLease? OpenReadLease() => InstallationReadLease.TryAcquire(
-            _instance, _database, _lease, _contracts, _roots, _journal, ReadCurrent);
-
-        internal void RequireCurrent() => _ = ReadCurrent();
-
-        private BoundExtensionPayload ReadCurrent()
-        {
-            _lease.VerifyHeld(_instance);
-            var bound = new ExtensionPayloadBinding(_instance, _database, _contracts, _roots).Read(_journal, _plan);
-            if (bound.Registered.Phase != JournalPhase.Committed || bound.Commit is not { } commit ||
-                bound.Footprint is not { IsInstalled: true } footprint || commit.Source != _source ||
-                commit.PhysicalResult != _physical || !_existingInstallation &&
-                (commit.ActivationId != _activation || commit.ActivationState != "published" || !commit.DesiredEnabled)) throw Unavailable();
-            var expected = ExtensionPayloadBinding.DerivedInstallation(bound.Plan, commit, footprint);
-            using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
-            using var transaction = connection.BeginTransaction(deferred: true);
-            if (ExtensionInstalledRows.ReadCurrentMetadata(connection, transaction, _extension) != expected ||
-                HostSettingsRows.ReadCurrent(connection, transaction).Values.Extensions
-                    .SingleOrDefault(item => item.ExtensionId == _extension)?.Enabled != true) throw Unavailable();
-            transaction.Commit();
-            return bound;
-        }
-
-        private static IOException Unavailable() => new("extension_installation_consumption_unavailable");
     }
 
     internal void RegisterCallback(ExtensionScope scope, Task callback)

@@ -18,11 +18,10 @@ public sealed class StartupJournalRecovery(RuntimeInstance instance, ContractRea
         using var profile = StartupProfile.Begin("operations.recovery");
         lease.VerifyHeld(instance);
         using var reads = DatabaseReadScope.Hold(database.DatabasePath);
-        InspectCompletedHistory();
         var registry = new RecoveryJournalRegistry(database);
         var before = registry.ReadActiveSnapshot();
         Console.Error.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { kind = "startup.active-journals", count = before.Journals.Count }));
-        InspectBindings(before);
+        InspectBindings(before, completeActiveInventory: false);
         ReleaseStoppedMaintenance(lease, before);
         var evidence = new JournalRecoveryEvidence(instance, new(instance, contracts), database);
         IRecoveryEvidence completionEvidence = OperatingSystem.IsWindows()
@@ -42,7 +41,7 @@ public sealed class StartupJournalRecovery(RuntimeInstance instance, ContractRea
         _ownership.VerifyStopped(snapshot.Journals);
     }
 
-    internal void InspectBindings(RecoveryRegistrySnapshot snapshot, bool completeActiveInventory = true)
+    internal void InspectBindings(RecoveryRegistrySnapshot snapshot, bool completeActiveInventory = true, bool verifyExecution = false)
     {
         using var timing = StartupProfile.Measure("history.bindings");
         using var parents = JournalReadScope.HoldParents(instance, contracts);
@@ -63,7 +62,10 @@ public sealed class StartupJournalRecovery(RuntimeInstance instance, ContractRea
             foreach (var journal in snapshot.Journals)
             {
                 using var preparation = StartupProfile.Measure("history.prepare." + journal.Kind);
-                prepared.Add(handlers[journal.Kind].Prepare(journal));
+                if (verifyExecution && journal.Kind == JournalKind.RunAttempt && OperatingSystem.IsWindows() &&
+                    Directory.Exists(Path.Combine(instance.RuntimeRoot, "journals", journal.JournalId.ToString("D"))))
+                    ExecutionHistoryInventory.Verify(instance, database, contracts, journal);
+                else prepared.Add(handlers[journal.Kind].Prepare(journal));
             }
         }
         finally
@@ -72,7 +74,7 @@ public sealed class StartupJournalRecovery(RuntimeInstance instance, ContractRea
         }
     }
 
-    internal void InspectCompletedHistory()
+    internal void InspectCompletedHistory(bool verifyExecution = false)
     {
         using var timing = StartupProfile.Measure("history.completed");
         var registry = new RecoveryJournalRegistry(database);
@@ -84,7 +86,7 @@ public sealed class StartupJournalRecovery(RuntimeInstance instance, ContractRea
             {
                 try
                 {
-                    InspectBindings(snapshot, completeActiveInventory: false);
+                    InspectBindings(snapshot, completeActiveInventory: false, verifyExecution);
                     Interlocked.Add(ref count, snapshot.Journals.Count);
                 }
                 catch (Exception error)

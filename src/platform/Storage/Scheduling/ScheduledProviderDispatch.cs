@@ -57,7 +57,8 @@ internal sealed class ScheduledProviderDispatch : IPlannedInvocationAuthorizatio
             if (work.Budget.Read().IsExhausted) Close(work, "scheduled_provider_deadline");
         await CollectReturnedAsync().ConfigureAwait(false);
         if (_stopping.IsCancellationRequested) return;
-        if (canCommit)
+        var currentMinute = _clock.GetUtcNow().ToUnixTimeSeconds() / 60;
+        if (canCommit && (_scanned is null || currentMinute > _scanned))
         {
             ScheduleMinuteDocument? minute;
             using (var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true))
@@ -66,9 +67,10 @@ internal sealed class ScheduledProviderDispatch : IPlannedInvocationAuthorizatio
                 var current = _clock.GetUtcNow().ToUnixTimeSeconds() / 60;
                 minute = ScheduleMinuteRows.ReadMinute(connection, transaction, ScheduleMinuteCodec.OperationId(_instance.InstanceId, current), _instance.InstanceId);
             }
-            if (minute is not null && (_scanned is null || minute.Scan.HighestUtcMinute > _scanned))
+            if (_scanned is null || currentMinute > _scanned)
             {
-                var scanningMinute = minute.Scan.HighestUtcMinute;
+                var scanningMinute = minute?.Scan.HighestUtcMinute ?? currentMinute;
+                var observedAt = minute?.ObservedAtUtc ?? _clock.GetUtcNow();
                 var retryMinute = false;
                 foreach (var entry in Registry.PublishedPlanningEntries())
                 {
@@ -84,14 +86,22 @@ internal sealed class ScheduledProviderDispatch : IPlannedInvocationAuthorizatio
                     catch (OperationCanceledException) when (readDeadline.IsCancellationRequested) { continue; }
                     catch (InvalidOperationException error) when (error.Message is "scheduled_provider_revoked" or "scheduled_plans_unavailable") { continue; }
                     if (_clock.GetUtcNow().ToUnixTimeSeconds() / 60 != scanningMinute) break;
-                    foreach (var occurrence in ScheduleMinutePolicy.ProviderOccurrences(_instance.InstanceId, plans, minute.ObservedAtUtc))
+                    var occurrences = ScheduleMinutePolicy.ProviderOccurrences(_instance.InstanceId, plans, observedAt);
+                    if (occurrences.Count > 0 && minute is null)
+                    {
+                        minute = new ScheduleOccurrenceStore(_instance, _database, _lease, _resources, _clock).CommitProviderMinute(scanningMinute);
+                        if (minute is null) break;
+                        observedAt = minute.ObservedAtUtc;
+                        occurrences = ScheduleMinutePolicy.ProviderOccurrences(_instance.InstanceId, plans, observedAt);
+                    }
+                    foreach (var occurrence in occurrences)
                     {
                         lock (_gate) if (_held.Count >= 4096) break;
                         var budget = new ExecutionTimeBudget(_clock, started, TimeSpan.FromSeconds(occurrence.Task.TimeoutSeconds), occurrence.Invocation.DeadlineUtc);
                         var manual = occurrence.Task.OwnerTaskId is not { } ownerId ? null :
                             await entry.ReadManualAsync(ownerId, readDeadline.Token).ConfigureAwait(false) ?? throw ScheduledProviderCodec.Invalid();
                         AcceptedProviderInvocation? accepted;
-                        try { accepted = _publication.Accept(plans, occurrence, budget, minute.ObservedAtUtc, _stopping.Token, manual); }
+                        try { accepted = _publication.Accept(plans, occurrence, budget, observedAt, _stopping.Token, manual); }
                         catch (IOException error) when (error.Message is "scheduled_provider_minute_elapsed" or "schedule_admission_blocked")
                         { retryMinute |= error.Message == "schedule_admission_blocked"; continue; }
                         if (accepted is not null) lock (_gate) _held.Add(occurrence.Invocation.OccurrenceId, accepted);

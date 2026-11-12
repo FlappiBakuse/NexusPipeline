@@ -1,4 +1,3 @@
-using System.Security.Cryptography;
 using NexusPipeline.Platform.Serialization;
 
 namespace NexusPipeline.Platform.Storage.Journals;
@@ -51,9 +50,11 @@ internal sealed class JournalHistoryProtection : IDisposable
         var last = documents[^1]; _planPath = last.PlanPath; _planDigest = last.PlanDigest;
         var path = PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(instance.RuntimeRoot, last.PlanPath));
         _planDirectory = StableDirectoryLease.Acquire(Path.GetDirectoryName(path)!);
-        _plan = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
-        if (_plan.Length > StrictJson.MaximumBytes || Convert.ToHexStringLower(SHA256.HashData(_plan)) != last.PlanDigest)
-            throw new IOException("journal_plan_digest_mismatch");
+        var length = new FileInfo(path).Length;
+        if (length > StrictJson.MaximumBytes) throw new IOException("journal_plan_digest_mismatch");
+        try { _plan = BlobReadStream.Open(path, new(last.PlanPath, length, last.PlanDigest), retainInScope: false); }
+        catch (IOException error) when (error.Message == "immutable_blob_mismatch")
+        { throw new IOException("journal_plan_digest_mismatch", error); }
         RequireInventory();
     }
 

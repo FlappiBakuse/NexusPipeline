@@ -7,7 +7,7 @@ public sealed class FileEffectOutbox(StateDatabase database)
 {
     public IReadOnlyList<FileEffect> Read(Guid journalId)
     {
-        using var connection = DatabaseConnections.Open(database.DatabasePath);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
         return FileEffectRows.Read(connection, journalId);
     }
 

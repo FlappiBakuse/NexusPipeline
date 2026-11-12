@@ -44,6 +44,7 @@ internal sealed class SelectedProjectSource : IDisposable
     private readonly List<IDisposable> _held = [];
     private readonly HashSet<string> _missing = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, SourceResourceArchive> _archives = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, TreeReadLease> _resourceLeases = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, ProjectResourceSubset> _subsets = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _inputs = new(StringComparer.OrdinalIgnoreCase);
     private long _bytes;
@@ -192,6 +193,12 @@ internal sealed class SelectedProjectSource : IDisposable
         => CaptureResource(relative, null, cancellation);
 
     internal SourceResourceArchive CaptureResource(string relative, IReadOnlyList<string>? included, CancellationToken cancellation)
+        => CaptureResource(relative, included, cancellation, persist: true);
+
+    internal SourceResourceArchive InspectResource(string relative, CancellationToken cancellation)
+        => CaptureResource(relative, null, cancellation, persist: false);
+
+    private SourceResourceArchive CaptureResource(string relative, IReadOnlyList<string>? included, CancellationToken cancellation, bool persist)
     {
         RequireMutable(); ProjectSubsetPolicy.Require(relative, included); cancellation.ThrowIfCancellationRequested();
         var subset = included?.Order(StringComparer.Ordinal).ToArray();
@@ -217,11 +224,14 @@ internal sealed class SelectedProjectSource : IDisposable
         {
             foreach (var batch in claims.Chunk(4096))
                 held.Add(ProjectReadLease.Acquire(_manager, batch, _actualRoot));
-            var archive = new FileTreeArchive(scanner, _blobs).Capture(path, cancellation);
+            var store = new FileTreeArchive(scanner, _blobs);
+            var archive = persist ? store.Capture(path, cancellation) : store.Inspect(path, cancellation);
             if (archive.Snapshot.Shape != before.Shape || !archive.Snapshot.Entries.SequenceEqual(before.Entries) ||
                 !PhysicalResourceAdmission.ReadTree(path, archive.Snapshot).SequenceEqual(claims)) throw Changed();
-            held.Add(TreeReadLease.Acquire(path, PhysicalObjectIdentity.Read(Path.GetDirectoryName(path)!), archive));
-            foreach (var content in archive.Contents) { cancellation.ThrowIfCancellationRequested(); held.Add(_blobs.OpenVerified(content)); }
+            var tree = TreeReadLease.Acquire(path, PhysicalObjectIdentity.Read(Path.GetDirectoryName(path)!), archive);
+            held.Add(tree); _resourceLeases.Add(relative, tree);
+            if (persist)
+                foreach (var content in archive.Contents) { cancellation.ThrowIfCancellationRequested(); held.Add(_blobs.OpenVerified(content)); }
             var result = new SourceResourceArchive(relative, archive); _archives.Add(relative, result); _held.AddRange(held); return result;
         }
         catch { for (var index = held.Count - 1; index >= 0; index--) held[index].Dispose(); throw; }
@@ -254,10 +264,20 @@ internal sealed class SelectedProjectSource : IDisposable
         foreach (var resource in _archives.Values)
         {
             if (_subsets.TryGetValue(resource.Path, out var subset)) { subset.RequireCurrent(); continue; }
-            var path = Resolve(resource.Path); var current = new FileTreeScanner(SnapshotBudget.Default).CaptureArchive(path, default);
-            if (current.Shape != resource.Archive.Snapshot.Shape || !current.Entries.SequenceEqual(resource.Archive.Snapshot.Entries) ||
-                !PhysicalTreeIdentity.Capture(path, current).SequenceEqual(resource.Archive.OriginalObjects)) throw Changed();
+            using var current = _resourceLeases[resource.Path].Borrow();
         }
+    }
+
+    internal string Fingerprint()
+    {
+        RequireCurrent();
+        return Convert.ToHexStringLower(SHA256.HashData(BoundedJson.Serialize(new
+        {
+            _definitionDigest, _identity,
+            directories = _directories.Values.OrderBy(item => item.Path, StringComparer.Ordinal),
+            files = _files.Values.Select(item => new { item.Read.Path, item.Read.Identity, item.Read.Sha256 }).OrderBy(item => item.Path, StringComparer.Ordinal),
+            resources = _archives.Values.OrderBy(item => item.Path, StringComparer.Ordinal)
+        })));
     }
 
     private (AutomationBinding? Binding, AutomationScript Script, AutomationRoot Root) ReadDefinitions()

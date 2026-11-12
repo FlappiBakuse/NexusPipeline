@@ -165,7 +165,7 @@ public sealed class ExtensionRuntimeLifecycle : IExtensionRuntimeLifecycle, IAsy
         ExtensionProjectionPublication.PublishIfDirty(_instance, _database, _lease, _contracts, _roots, _resources, _recovery);
         if (_activation is null) return;
         var selected = ReadEnabledInstallations();
-        using var executor = NexusPipeline.Platform.Processes.ProcessIdentityLease.HoldCurrent();
+        var executor = _lease.ExecutorIdentity;
         await Parallel.ForEachAsync(selected, new ParallelOptions
         {
             MaxDegreeOfParallelism = 4,

@@ -121,6 +121,7 @@ public sealed class ExecutionRuntimeConsumer
         }
         catch (Exception error)
         {
+            ExecutionFailureTrace.Record(accepted, error);
             if (!terminalObserved && session?.CommittedReceipt is { } recovered)
             {
                 ObserveTerminal(recovered);

@@ -150,8 +150,11 @@ public sealed class ExecutionLogReader(RuntimeInstance instance, StateDatabase d
                 throw Invalid();
             transaction.Commit();
         }
-        var attempt = AttemptPreparedBinding.ReadPlan(instance, contracts, registered);
-        var total = new ExecutionPlanCodec(instance, contracts, new(instance, contracts))
+        using var history = JournalReadScope.HoldAttempt(instance, contracts, database, registered.JournalId);
+        var metadata = database.AttemptReads?.Find(registered.JournalId)?
+            .ReadPlanMetadata(registered, AttemptPreparedBinding.Reference(instance, registered));
+        var attempt = metadata?.Plan ?? AttemptPreparedBinding.ReadPlan(instance, contracts, registered);
+        var total = metadata?.Total ?? new ExecutionPlanCodec(instance, contracts, new(instance, contracts))
             .Read(AttemptPlanCodec.Reference(attempt.ExecutionPlan)).ReadWire();
         var journal = new JournalStore(instance, contracts).Read(registered.JournalId);
         if (journal.Revision != registered.Revision || journal.Phase != registered.Phase ||
@@ -232,6 +235,50 @@ public sealed class ExecutionLogReader(RuntimeInstance instance, StateDatabase d
         if (database.InstanceId != instance.InstanceId || database.RuntimeRoot != instance.RuntimeRoot) throw Invalid();
         var context = Context(expected.Facts.RunId, expected.Facts.AttemptId);
         if (context.Receipt != expected) throw Invalid();
+        return CaptureCatalog(expected, context, materialize);
+    }
+
+    internal LogCatalogSnapshot CaptureValidatedCatalog(NexusPipeline.Core.Execution.AttemptReceipt expected, AttemptWriterState state)
+    {
+        if (database.InstanceId != instance.InstanceId || database.RuntimeRoot != instance.RuntimeRoot) throw Invalid();
+        _ = state.RequireValidatedRead();
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var transaction = connection.BeginTransaction(deferred: true);
+        AttemptWriterState.RequireCursor(connection, transaction, state.Journal, state.Gate.State);
+        var source = StartSourceRows.Read(connection, transaction, expected.OperationId);
+        StartSourceRows.RequireAttempt(source, state.Attempt);
+        if (!state.IsExecutionStart || source.RunId != expected.Facts.RunId || source.JournalId != state.Journal.JournalId ||
+            expected.JournalId != state.Journal.JournalId || state.Journal.Phase != JournalPhase.Committed ||
+            state.Latest.Revision != state.Journal.Revision || AttemptPreparedBinding.ExpectedReceipt(state.Attempt, state.Latest) != expected ||
+            AttemptReceiptStore.ReadInside(connection, transaction, expected.Facts.AttemptId) != expected) throw Invalid();
+        transaction.Commit();
+        return CaptureCatalog(expected, new(expected, state.Journal, state.Attempt, state.Total, state.Latest), materialize: false);
+    }
+
+    internal LogCatalogSnapshot CaptureReferenceCatalog(NexusPipeline.Core.Execution.AttemptReceipt expected,
+        RegisteredJournal registered, RunAttemptPlan attempt, ExecutionPlan total, JournalDocument journal)
+    {
+        if (database.InstanceId != instance.InstanceId || database.RuntimeRoot != instance.RuntimeRoot) throw Invalid();
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var transaction = connection.BeginTransaction(deferred: true);
+        var current = RecoveryJournalRegistry.ReadInside(connection, transaction, registered.JournalId);
+        AttemptPreparedBinding.RequireRegistration(current, attempt);
+        var source = StartSourceRows.Read(connection, transaction, expected.OperationId);
+        StartSourceRows.RequireAttempt(source, attempt);
+        if (journal.JournalId != current.JournalId || journal.Kind != JournalKind.RunAttempt ||
+            current.Phase != JournalPhase.Committed || current.Revision != journal.Revision || journal.Phase != current.Phase ||
+            current.PlanDigest != registered.PlanDigest || current.PlanPath != registered.PlanPath ||
+            journal.PlanDigest != current.PlanDigest || journal.PlanPath != current.PlanPath ||
+            expected.JournalId != current.JournalId || source.RunId != expected.Facts.RunId || source.JournalId != current.JournalId ||
+            AttemptPreparedBinding.ExpectedReceipt(attempt, journal) != expected ||
+            AttemptReceiptStore.ReadInside(connection, transaction, expected.Facts.AttemptId) != expected) throw Invalid();
+        transaction.Commit();
+        // GC already holds the bound plans and journal; opening their opaque content could conflict with its deletion guard.
+        return CaptureCatalog(expected, new(expected, current, attempt, total, journal), materialize: false);
+    }
+
+    private LogCatalogSnapshot CaptureCatalog(NexusPipeline.Core.Execution.AttemptReceipt expected, SavedContext context, bool materialize)
+    {
         var main = context.Main;
         var hooks = context.Hooks;
         var entries = new List<LogCatalogEntry>();

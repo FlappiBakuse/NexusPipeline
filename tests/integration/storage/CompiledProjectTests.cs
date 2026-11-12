@@ -79,12 +79,15 @@ public sealed class CompiledProjectTests
         manifest.Remove("managed"); manifest.Remove("frontend"); manifest["capabilities"] = new JsonArray("task.adapt", "configuration.edit");
         manifest.Remove("execution");
         manifest["permissions"] = new JsonObject { ["fileAccess"] = new JsonArray("selected-script-root") };
-        manifest["specialized"] = new JsonObject { ["adapterEntry"] = "adapter.js", ["compiler"] = new JsonObject
+        manifest["specialized"] = new JsonObject { ["adapterEntry"] = "adapter/main.js", ["compiler"] = new JsonObject
             { ["extensionId"] = "fixture-plugin", ["compilerId"] = "project" } };
         if (worker) manifest["specialized"]!["executionProvider"] = new JsonObject { ["extensionId"] = "fixture-plugin", ["entryId"] = "main" };
         using var consumer = new InstallRuntimeFixture(catalog: project.Catalog, originalManifest: manifest,
-            managedPayloadEdit: directory => File.WriteAllText(Path.Combine(directory, "adapter.js"),
-                CompiledTaskChecks.Adapter(project)),
+            managedPayloadEdit: directory =>
+            {
+                Directory.CreateDirectory(Path.Combine(directory, "adapter"));
+                File.WriteAllText(Path.Combine(directory, "adapter/main.js"), CompiledTaskChecks.Adapter(project));
+            },
             payloadRoots: provider.Roots, existingActivator: provider.Activator, catalogSequence: 2);
         try
         {
@@ -285,6 +288,7 @@ public sealed class CompiledProjectTests
         var catalog = project.Catalog; var clock = new PreviewClock();
         await using var previews = new ProjectPreviewService(catalog.Instance, catalog.Database, catalog.Lease, catalog.Resources,
             new(), provider.Roots, provider.Activator, clock);
+        using var writes = new PreviewWriteWatch(catalog.Instance.RuntimeRoot);
         var discovery = await compilation.DiscoverAsync(project.Binding, 1, "maas", JsonSerializer.SerializeToElement(new { }), () => { }, default);
         Assert.True(discovery.GetProperty("Exists").GetBoolean());
         var first = await previews.PrepareAsync(compilation, "fixture", project.Binding, 1, "maas", () => { }, default);
@@ -310,6 +314,15 @@ public sealed class CompiledProjectTests
         owner.Cancel();
         Assert.Throws<IOException>(() => previews.Read("fixture", owned.PreviewId, "index", () => { }));
         Assert.False(previews.Release("fixture", owned.PreviewId));
+        for (var index = 0; index < 12; index++)
+        {
+            project.Write("interface.json", System.Text.Encoding.UTF8.GetBytes($"{{\"task\":[],\"preview\":{index}}}"));
+            var preview = await previews.PrepareAsync(compilation, "fixture", project.Binding, 1, "maas", () => { }, default);
+            Assert.NotEmpty(previews.Read("fixture", preview.PreviewId, "index", () => { }).ContentBase64);
+            Assert.True(previews.Release("fixture", preview.PreviewId));
+        }
+        await ProjectPreviewBudget.VerifyAsync(compilation, provider, project);
+        await writes.RequireNoBlobsAsync();
         var third = await previews.PrepareAsync(compilation, "fixture", project.Binding, 1, "maas", () => { }, default);
         var selection = JsonSerializer.SerializeToElement(new { mount = true, resourcePath = "assets" });
         _ = await compilation.SaveAsync(Guid.NewGuid(), "fixture", project.Binding, 1, 2, "maas", selection, () => { }, DateTimeOffset.UtcNow, default);

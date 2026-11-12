@@ -36,3 +36,22 @@ NexusPipeline.exe control support --address http://127.0.0.1:58731 --binary-stdo
 ```
 
 支持包的 stdout 是二进制；非交互 CLI 诊断仍写 stderr。调用者自行选择安全的外部输出路径。
+
+## 启动与读写归因
+
+`startup.profile` 汇总数据库准入、恢复和逐插件激活；阶段墙钟以 `startup.stage` 为准，并发与嵌套子项不可相加。
+`provider.prepare/inputs/runtime.capture/runtime.protect/hold` 区分输入、闭包及重新保护；
+`managed.load/metadata/callback` 区分加载、PE 扫描及回调。`inventory.*`、`history.protect/sql-snapshot`、
+`extension.binding/binding-sql`、`contract.evaluate`、`writer.executor/identity`、`recovery.*`、
+`execution.reconcile`、`providers.restore` 指向实际 owner。连接打开计时未覆盖全部 SQL 成本。
+
+`installation.sql.validate`、`activation.sql.validate`、`catalog.sql.validate`、`history.text.parse` 分别记录实际完整核验或解析。
+浏览器 `nexus.frontend.<extensionId>.<stage>` 记录 resources、import、identity-before、activate、identity-after，
+同阶段保留最近一次，失败/取消保留耗时；不记录账号、请求内容或秘密。
+结合 session/current-page/plugins prepared、interface presented 和网络时间线定位首屏阻塞。
+
+逐文件诊断从首次进程创建前开始，记录管理员令牌、动态后代创建身份、事件丢失和解析缺口。
+以原始历史 run/journal/资产路径匹配读写，避免只按目录总量归因；当前 SQLite 与旧历史正文分列。
+进程逻辑计数、FileIO 请求和设备 I/O 分别保留，系统映像加载、IPC 与业务校验用实际调用栈解释。
+SQL 记录真实语句及查询计划，区分索引查找、标量子查询和表扫描。观察器开销独立于普通复测。
+剩余耗时需 CPU 热点证据，缓存开关微测或逻辑字节下降不代替端到端吞吐结果。

@@ -59,6 +59,8 @@ internal sealed class DatabaseValidationLease : IDisposable
         }
     }
 
+    internal void Invalidate() { lock (_gate) _validated = null; }
+
     private void RequireIdentity()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);

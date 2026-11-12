@@ -59,16 +59,28 @@ internal static class ExecutionRetryInventory
             _ = RunBudgetRows.Read(connection, transaction, run, boundary =>
             {
                 if (boundary.TerminalReceiptDigest is null || boundary.JournalId is not { } journal) return;
+                var receipt = ReadTerminal(connection, transaction, run, journal, boundary.TerminalReceiptDigest);
+                if (RetryDecision.Classify(receipt.Facts) != AttemptOutcome.Interrupted) return;
                 var parent = RecoveryJournalRegistry.ReadInside(connection, transaction, journal);
                 using var inputs = AttemptPreparedBinding.ReadPlanInputs(instance, contracts, parent);
                 var attempt = inputs.Plan;
-                var receipt = AttemptReceiptStore.ReadInside(connection, transaction, Guid.Parse(attempt.AttemptId))
-                    ?? throw RetryIntentCodec.Invalid();
+                if (receipt.Facts.AttemptId.ToString("D") != attempt.AttemptId) throw RetryIntentCodec.Invalid();
                 var total = inputs.Total;
                 var decision = Decision(instance, database, contracts, attempt, total, receipt, boundary, new JournalStore(instance, contracts).Read(receipt.JournalId).Root);
                 if ((decision.IsEligible || decision.ReasonCode == "retry_backoff") &&
                     ExecutionRetryRows.After(connection, transaction, receipt.Facts.AttemptId) is null) throw RetryIntentCodec.Invalid();
             });
+    }
+
+    private static AttemptReceipt ReadTerminal(SqliteConnection connection, SqliteTransaction transaction,
+        Guid run, Guid journal, string digest)
+    {
+        using var command = connection.CreateCommand(); command.Transaction = transaction;
+        command.CommandText = "SELECT attempt_id FROM attempt_receipts WHERE journal_id=$journal AND run_id=$run AND source_receipt_digest=$digest;";
+        command.Parameters.AddWithValue("$journal", journal.ToString("D"));
+        command.Parameters.AddWithValue("$run", run.ToString("D")); command.Parameters.AddWithValue("$digest", digest);
+        var id = command.ExecuteScalar() as string ?? throw RetryIntentCodec.Invalid();
+        return AttemptReceiptStore.ReadInside(connection, transaction, Guid.ParseExact(id, "D")) ?? throw RetryIntentCodec.Invalid();
     }
 
     private static IEnumerable<Guid> ReadIds(SqliteConnection connection, SqliteTransaction transaction, bool retries)

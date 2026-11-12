@@ -31,7 +31,7 @@ internal sealed class NotificationReceiptCodec(RuntimeInstance instance, StateDa
     internal NotificationReceiptSnapshot Read(BlobReference reference, SqliteConnection connection, SqliteTransaction transaction) =>
         ReadContext(reference, connection, transaction).Snapshot;
 
-    internal ReceiptReadContext ReadContext(BlobReference reference, SqliteConnection connection, SqliteTransaction transaction)
+    internal NotificationReceiptSnapshot ReadMetadata(BlobReference reference, SqliteConnection connection, SqliteTransaction transaction)
     {
         var document = new NotificationCatalogCodec(instance, contracts).ReadDocument<NotificationReceiptDocument>(reference);
         Require(document);
@@ -41,13 +41,26 @@ internal sealed class NotificationReceiptCodec(RuntimeInstance instance, StateDa
         ExecutionNotificationSource.RequirePublishedRecord(connection, transaction, document.Receipt);
         var registered = RecoveryJournalRegistry.ReadInside(connection, transaction, document.Receipt.JournalId);
         if (registered.Phase != JournalPhase.Committed || registered.PlanDigest != document.Receipt.PlanDigest) throw Invalid();
+        return snapshot;
+    }
+
+    internal ReceiptReadContext ReadContext(BlobReference reference, SqliteConnection connection, SqliteTransaction transaction)
+    {
+        var snapshot = ReadMetadata(reference, connection, transaction);
+        var document = snapshot.Document;
+        var registered = RecoveryJournalRegistry.ReadInside(connection, transaction, document.Receipt.JournalId);
+        using var history = JournalReadScope.HoldAttempt(instance, contracts, database, registered.JournalId);
         var attemptReference = AttemptPreparedBinding.Reference(instance, registered);
-        var attempt = contracts.Read<NexusPipeline.Platform.Serialization.Protocol.RunAttemptPlan>(Bytes(attemptReference), "run-attempt-plan.schema.json");
+        var owner = database.AttemptReads?.Find(registered.JournalId);
+        var metadata = owner?.ReadPlanMetadata(registered, attemptReference);
+        var attempt = metadata?.Plan ??
+            contracts.Read<NexusPipeline.Platform.Serialization.Protocol.RunAttemptPlan>(Bytes(attemptReference), "run-attempt-plan.schema.json");
         if (attempt.InstanceId != instance.InstanceId.ToString("D") || attempt.AttemptId != document.Receipt.Facts.AttemptId.ToString("D") ||
             attempt.RunId != document.Receipt.Facts.RunId.ToString("D") || attempt.OperationId != document.Receipt.OperationId.ToString("D") ||
             attempt.JournalId != registered.JournalId.ToString("D") || attempt.AttemptOrdinal != document.Receipt.Facts.Ordinal ||
             AttemptPlanCodec.Reference(attempt.ExecutionPlan) != document.TotalPlan) throw Invalid();
-        var total = contracts.Read<NexusPipeline.Platform.Serialization.Protocol.ExecutionPlan>(Bytes(document.TotalPlan), "execution-plan.schema.json");
+        var total = metadata?.Total ??
+            contracts.Read<NexusPipeline.Platform.Serialization.Protocol.ExecutionPlan>(Bytes(document.TotalPlan), "execution-plan.schema.json");
         if (total.InstanceId != instance.InstanceId.ToString("D") || total.RunId != attempt.RunId ||
             new BlobReference(total.DefinitionBundle.RelativePath, total.DefinitionBundle.SizeBytes, total.DefinitionBundle.Sha256) != document.DefinitionBundle)
             throw Invalid();
@@ -56,7 +69,8 @@ internal sealed class NotificationReceiptCodec(RuntimeInstance instance, StateDa
             AttemptPreparedBinding.ExpectedReceipt(attempt, physical) != document.Receipt ||
             !ExecutionNotificationSource.OrderedFacts(attempt, total, physical.Root, document.Receipt).SequenceEqual(document.OrderedFacts))
             throw Invalid();
-        var bundle = ExecutionNotificationSource.ReadBundle(instance, contracts, document.DefinitionBundle);
+        var bundle = (metadata is null ? null : owner?.ReadDefinitions()) ??
+            ExecutionNotificationSource.ReadBundle(instance, contracts, document.DefinitionBundle);
         var routes = ExecutionNotificationSource.ReadRoutes(total, bundle);
         if (routes.Length != document.RouteCount) throw Invalid();
         var catalog = new NotificationCatalogCodec(instance, contracts).Read(document.Catalog);

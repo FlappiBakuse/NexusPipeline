@@ -53,6 +53,11 @@ public sealed record PhysicalObjectIdentity(string VolumeSerial, string FileId)
     internal static void RequireSingleLink(string path)
     {
         using var handle = OpenRead(path, FileShare.ReadWrite | FileShare.Delete);
+        RequireSingleLink(handle);
+    }
+
+    internal static void RequireSingleLink(SafeFileHandle handle)
+    {
         if (!ReadStandard(handle, 1, out var info, (uint)Marshal.SizeOf<FileStandardInformation>()))
             throw new IOException("physical_link_count_unavailable", new Win32Exception(Marshal.GetLastWin32Error()));
         // Hard links do not have one exclusive namespace within the declared edit tree.

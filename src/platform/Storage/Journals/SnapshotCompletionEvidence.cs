@@ -20,7 +20,7 @@ internal sealed class SnapshotCompletionEvidence(RuntimeInstance instance, State
 
     public void VerifyRecognizedAll(IReadOnlyList<RegisteredJournal> registered)
     {
-        new JournalRecoveryEvidence(instance, new(instance, contracts), database).VerifyRecognizedAll(registered);
+        new JournalRecoveryEvidence(instance, new(instance, contracts), database).VerifyRecognizedScope(registered);
         new SnapshotCompletionPreflight(instance, database, contracts).Verify(registered);
     }
 

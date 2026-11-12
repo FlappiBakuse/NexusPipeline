@@ -113,8 +113,6 @@ internal sealed class VerifiedExtensionPackage : IDisposable
                 {
                     _package.RequireInstance(blobs); _package.RequireCurrent(cancellation);
                     FileTreeArchive.ValidateArchive(_contents);
-                    foreach (var content in _contents.Contents)
-                    { cancellation.ThrowIfCancellationRequested(); blobs.Verify(content); }
                     return use(Binding, _contents);
                 }
             });
@@ -139,9 +137,6 @@ internal sealed class VerifiedExtensionPackage : IDisposable
             PhysicalObjectIdentity.Read(Path.GetDirectoryName(Binding.ArchivePath)!) != Binding.ParentIdentity ||
             _input.Length != Binding.Entry.ArtifactBytes) throw Invalid();
         PhysicalObjectIdentity.RequireSingleLink(Binding.ArchivePath);
-        _input.Position = 0;
-        if (Convert.ToHexStringLower(SHA256.HashData(_input)) != Binding.Entry.ArtifactSha256) throw Invalid();
-        _input.Position = 0;
         cancellation.ThrowIfCancellationRequested();
     }
 

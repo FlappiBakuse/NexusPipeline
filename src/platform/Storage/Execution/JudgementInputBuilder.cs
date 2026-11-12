@@ -9,7 +9,8 @@ using NexusPipeline.Platform.Storage.Sqlite;
 
 namespace NexusPipeline.Platform.Storage.Execution;
 
-internal sealed class JudgementInputBuilder(RuntimeInstance instance, StateDatabase database, ContractReader contracts)
+internal sealed class JudgementInputBuilder(RuntimeInstance instance, StateDatabase database, ContractReader contracts,
+    JudgementLogReader? liveLog = null)
 {
     private static readonly JsonSerializerOptions Options = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
     internal JudgementWorkerInvocation Build(ExecutionPlan total, JudgementWorkerIdentity identity, JudgementInvocation invocation, BlobReference rawOutput)
@@ -24,7 +25,7 @@ internal sealed class JudgementInputBuilder(RuntimeInstance instance, StateDatab
         var script = bundle.Scripts.Single(item => item.Id == step.ScriptId);
         var settings = new HostSettingsStore(database).Read();
         if (settings.Revision != total.SettingsRevision) throw new IOException("execution_judgement_settings_changed");
-        var log = ReadLog(identity, rawOutput, final);
+        var log = ReadLog(identity, rawOutput, final, liveLog);
         var files = JudgementFileInventory.Read(step);
         var inputBytes = BoundedJson.Serialize(new
         {
@@ -70,12 +71,13 @@ internal sealed class JudgementInputBuilder(RuntimeInstance instance, StateDatab
         }
     }
 
-    private JudgementLogTail ReadLog(JudgementWorkerIdentity identity, BlobReference rawOutput, bool final)
+    private JudgementLogTail ReadLog(JudgementWorkerIdentity identity, BlobReference rawOutput, bool final, JudgementLogReader? reader = null)
     {
         var blobs = new ImmutableBlobStore(instance, contracts);
         var raw = RawOutputCodec.Read(blobs, identity.Primary, rawOutput);
         var context = new StepEvidenceReader(instance, database, contracts).Context(identity.Primary);
         _ = FileLogEvidence.Require(instance, contracts, blobs, context.Total, identity.Primary, context.Job.FileLogBaseline, raw);
+        if (reader is not null) return reader.Read(blobs, raw, final);
         var log = new JudgementLogTail();
         if (!RawOutputReplay.Read(blobs, raw, log.AppendLine, includePartial: final)) throw new IOException("execution_judgement_log_unverified");
         return log;

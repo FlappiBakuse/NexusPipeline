@@ -27,8 +27,11 @@ public sealed class ExtensionPackageService : IExtensionPackages, IAsyncDisposab
     private readonly StoreHttpTransport? _transport;
     private readonly ExtensionApplyCoordinator _applies;
     private readonly BundledExtensionInstaller _bundled;
+    private readonly ExtensionWorkSweep _workCleanup;
+    private readonly ExtensionArchiveCleanup _archiveCleanup;
     private readonly SemaphoreSlim _refresh = new(1, 1);
     private readonly CancellationTokenSource _stopping = new();
+    private Task _cleanupLoop = Task.CompletedTask;
     public bool HasReleaseTrust => _catalog is not null;
 
     public ExtensionPackageService(RuntimeInstance instance, StateDatabase database, InstanceLease lease,
@@ -54,6 +57,26 @@ public sealed class ExtensionPackageService : IExtensionPackages, IAsyncDisposab
         _applies = new(new(instance, database, lease, contracts, roots, resources, recovery,
             _catalog, runtime.Activator, _transport));
         _bundled = new(instance, database, lease, contracts, roots, resources, recovery, runtime);
+        _workCleanup = new(database, roots, recovery, runtime.Activator,
+            new(instance, database, lease, contracts, roots, resources, recovery, runtime.Activator));
+        _archiveCleanup = new(instance, database, lease, contracts, roots, resources, recovery);
+    }
+
+    internal void StartCleanup() => _cleanupLoop = RunCleanupAsync(_stopping.Token);
+
+    private async Task RunCleanupAsync(CancellationToken cancellation)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
+        var executor = _lease.ExecutorIdentity;
+        try
+        {
+            while (await timer.WaitForNextTickAsync(cancellation).ConfigureAwait(false))
+            {
+                await _workCleanup.SweepAsync(1, cancellation).ConfigureAwait(false);
+                _archiveCleanup.Sweep(cancellation, executor);
+            }
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
     }
 
     internal async Task InstallBundledAsync(string directory, bool allPackages)
@@ -89,10 +112,15 @@ public sealed class ExtensionPackageService : IExtensionPackages, IAsyncDisposab
         if (catalog is null || catalog.Identity != identity) return null;
         var entry = catalog.Entries.SingleOrDefault(item => item.ExtensionId == extensionId);
         if (entry is null) return null;
-        using var download = await OwnedExtensionDownload.Receive(_instance, _lease, _resources,
+        using var content = _resources.TryAcquire(Guid.NewGuid(), [new("blobs:content", ResourceClaimMode.Reference)]).Lease
+            ?? throw new IOException("extension_catalog_details_unavailable");
+        var reference = new BlobReference($"blobs/content/{entry.ArtifactSha256}.bin", entry.ArtifactBytes, entry.ArtifactSha256);
+        using var cached = File.Exists(Path.Combine(_instance.RuntimeRoot, reference.RelativePath))
+            ? new ImmutableBlobStore(_instance, _contracts).OpenVerified(reference) : null;
+        using var download = cached is null ? await OwnedExtensionDownload.Receive(_instance, _lease, _resources,
             Guid.NewGuid(), entry, (destination, token) => _transport!.Artifact(catalog, extensionId, destination, token),
-            cancellation.Token).ConfigureAwait(false);
-        using var input = download.OpenRead();
+            cancellation.Token).ConfigureAwait(false) : null;
+        using var input = cached ?? download!.OpenRead();
         using var archive = ExtensionPackageArchive.Open(input, cancellation.Token);
         var manifestBytes = archive.ReadManifest(cancellation.Token);
         var manifest = new ExtensionManifestAdmission(_contracts).ReadCurrent(manifestBytes, extensionId);
@@ -167,7 +195,7 @@ public sealed class ExtensionPackageService : IExtensionPackages, IAsyncDisposab
     {
         if (timeout <= TimeSpan.Zero || timeout > TimeSpan.FromSeconds(120)) throw new ArgumentOutOfRangeException(nameof(timeout));
         _stopping.Cancel();
-        await _applies.StopAsync(timeout).ConfigureAwait(false);
+        await Task.WhenAll(_applies.StopAsync(timeout), _cleanupLoop).WaitAsync(timeout).ConfigureAwait(false);
         if (!await _refresh.WaitAsync(timeout).ConfigureAwait(false)) throw new TimeoutException("extension_refresh_stop_pending");
         _refresh.Release();
     }
@@ -188,6 +216,6 @@ public sealed class ExtensionPackageService : IExtensionPackages, IAsyncDisposab
     public async ValueTask DisposeAsync()
     {
         try { await StopAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false); }
-        finally { _transport?.Dispose(); }
+        finally { try { _workCleanup.Dispose(); } finally { _transport?.Dispose(); } }
     }
 }

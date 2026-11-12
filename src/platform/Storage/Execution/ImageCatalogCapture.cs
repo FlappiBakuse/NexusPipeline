@@ -12,8 +12,10 @@ internal sealed class ImageCatalogCapture(RuntimeInstance instance, StateDatabas
 {
     internal ImageCatalogSnapshot Read(AttemptReceipt expected) => Read(expected, metadataOnly: false);
     internal ImageCatalogSnapshot ReadMetadata(AttemptReceipt expected) => Read(expected, metadataOnly: true);
+    internal ImageCatalogSnapshot ReadValidated(AttemptReceipt expected, AttemptWriterState state) =>
+        Read(expected, metadataOnly: false, state);
 
-    private ImageCatalogSnapshot Read(AttemptReceipt expected, bool metadataOnly)
+    private ImageCatalogSnapshot Read(AttemptReceipt expected, bool metadataOnly, AttemptWriterState? state = null)
     {
         if (database.InstanceId != instance.InstanceId || database.RuntimeRoot != instance.RuntimeRoot)
             throw ImageCatalogRows.Invalid();
@@ -28,21 +30,27 @@ internal sealed class ImageCatalogCapture(RuntimeInstance instance, StateDatabas
             source = StartSourceRows.Read(connection, transaction, expected.OperationId);
             if (source.RunId != expected.Facts.RunId || source.JournalId != expected.JournalId ||
                 registered.Phase != JournalPhase.Committed) throw ImageCatalogRows.Invalid();
+            if (state is not null)
+            {
+                if (state.Journal.JournalId != registered.JournalId) throw ImageCatalogRows.Invalid();
+                AttemptWriterState.RequireCursor(connection, transaction, state.Journal, state.Gate.State);
+            }
             transaction.Commit();
         }
-        var bound = metadataOnly ? null : AttemptPreparedBinding.Read(instance, contracts, database, registered.JournalId);
+        var bound = metadataOnly || state is not null ? null : AttemptPreparedBinding.Read(instance, contracts, database, registered.JournalId);
         var metadata = metadataOnly ? new ImageMetadataRead(instance, database, contracts).Read(registered) : null;
-        var plan = metadata?.Plan ?? bound!.Plan; var total = metadata?.Total ?? bound!.Total;
-        if (!metadataOnly && !bound!.IsExecutionStart || plan.AttemptId != expected.Facts.AttemptId.ToString("D") ||
+        var plan = state?.Attempt ?? metadata?.Plan ?? bound!.Plan; var total = state?.Total ?? metadata?.Total ?? bound!.Total;
+        if (!metadataOnly && !(state?.IsExecutionStart ?? bound!.IsExecutionStart) || plan.AttemptId != expected.Facts.AttemptId.ToString("D") ||
             plan.OperationId != expected.OperationId.ToString("D") ||
             plan.RunId != expected.Facts.RunId.ToString("D")) throw ImageCatalogRows.Invalid();
         StartSourceRows.RequireAttempt(source, plan);
-        var history = metadata?.History ?? bound!.ValidatedRead.History;
+        var validated = state?.RequireValidatedRead() ?? bound?.ValidatedRead;
+        var history = metadata?.History ?? validated!.History;
         var terminal = history[^1];
         if (terminal.Revision != registered.Revision || terminal.Phase != registered.Phase ||
             AttemptPreparedBinding.ExpectedReceipt(plan, terminal) != expected) throw ImageCatalogRows.Invalid();
-        var captures = metadata?.Captures ?? bound!.ValidatedRead.Captures;
-        return FromMetadata(expected, terminal, source, captures) with { ValidatedRead = bound?.ValidatedRead };
+        var captures = metadata?.Captures ?? validated!.Captures;
+        return FromMetadata(expected, terminal, source, captures) with { ValidatedRead = validated };
     }
 
     internal static ImageCatalogSnapshot FromMetadata(AttemptReceipt expected, JournalDocument terminal,

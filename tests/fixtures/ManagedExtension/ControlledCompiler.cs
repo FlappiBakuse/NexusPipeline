@@ -37,9 +37,14 @@ internal sealed class ControlledCompiler(string directory) : IProjectCompiler
             { IncludedPaths = selection.TryGetProperty("includedPaths", out var included) ? included.EnumerateArray().Select(value => value.GetString()!).ToArray() : null } } : [];
         var preview = selection.TryGetProperty("previewText", out var text)
             ? JsonSerializer.SerializeToUtf8Bytes(new { value = text.GetString() }) : "{}"u8.ToArray();
-        return new("root", [new("root", CompiledAssetKind.Index, "{}"u8.ToArray(), ["artifact", "index"]),
-            new("index", CompiledAssetKind.Index, preview, []),
-            new("artifact", CompiledAssetKind.Artifact, artifact, [])],
+        var pages = selection.TryGetProperty("previewPages", out var count) ? count.GetInt32() : 0;
+        if (pages is < 0 or > 128) throw new IOException("fixture_preview_capacity");
+        var names = Enumerable.Range(0, pages).Select(index => "page-" + index).ToArray();
+        var assets = new List<CompiledAsset> { new("root", CompiledAssetKind.Index, "{}"u8.ToArray(), ["artifact", "index"]),
+            new("index", CompiledAssetKind.Index, preview, names), new("artifact", CompiledAssetKind.Artifact, artifact, []) };
+        foreach (var name in names) assets.Add(new(name, CompiledAssetKind.Page,
+            JsonSerializer.SerializeToUtf8Bytes(new { v = new string('x', 65528) }), []));
+        return new("root", assets,
             JsonSerializer.SerializeToElement(new { file.Path, file.Sha256, configurationSha256 = configuration?.Sha256 }))
         {
             ResourceTrees = trees, PreviewIndex = "index",

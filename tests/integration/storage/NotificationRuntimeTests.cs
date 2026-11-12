@@ -124,6 +124,26 @@ public sealed class NotificationRuntimeTests
         Assert.False(owner.IsActive);
     }
 
+    [Fact(DisplayName = "Settling And Restarting Keep Ended Notifications Unread While Explicit Diagnosis Still Validates Them")]
+    public async Task SettlesCurrentActivity()
+    {
+        await using var sink = new NotificationHttpSink((_, _) => Task.FromResult(new NotificationSinkReply(200, "")));
+        await using var fixture = new RuntimeFixture();
+        await fixture.Save(sink.Address); var first = fixture.Enqueue();
+        await fixture.Runtime.RunPassAsync();
+        Assert.False(fixture.Runtime.HasPendingActivity); Assert.Single(sink.Requests);
+        using var historical = new FileStream(Path.Combine(fixture.Base.Source.Instance.RuntimeRoot, first.Delivery.RelativePath),
+            FileMode.Open, FileAccess.Read, FileShare.None);
+        _ = fixture.Enqueue(); await fixture.Runtime.RunPassAsync();
+        Assert.False(fixture.Runtime.HasPendingActivity); Assert.Equal(2, sink.Requests.Count);
+        await using var restart = fixture.NewRuntime();
+        restart.InitializeStartup();
+        Assert.False(restart.HasPendingActivity);
+        var source = fixture.Base.Source;
+        Assert.Throws<IOException>(() => DeliveryReferenceIndex.VerifyReadOnly(source.Instance, source.Database, new()));
+        Assert.Equal(2, sink.Requests.Count);
+    }
+
     private sealed class RuntimeFixture : IAsyncDisposable
     {
         internal ExecutionAdmissionFixture Base { get; } = new();

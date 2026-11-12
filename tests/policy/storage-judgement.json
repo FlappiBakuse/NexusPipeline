@@ -8,6 +8,7 @@
     "NexusPipeline.StorageTests.JudgementFilesTests",
     "NexusPipeline.StorageTests.JudgementHistoryTests",
     "NexusPipeline.StorageTests.JudgementInputsTests",
+    "NexusPipeline.StorageTests.JudgementLogTests",
     "NexusPipeline.StorageTests.JudgementIntegrationTests",
     "NexusPipeline.StorageTests.JudgementProbeTests",
     "NexusPipeline.StorageTests.JudgementTransportTests",

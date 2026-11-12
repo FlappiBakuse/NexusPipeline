@@ -14,6 +14,30 @@ namespace NexusPipeline.StorageTests;
 
 public sealed class BlobCleanupTests
 {
+    [Fact(DisplayName = "Candidate Inspection Releases Its Own Read Handles Before Deletion In An Outer Read Scope")]
+    public void ReleasesCandidateReads()
+    {
+        var fixture = Create();
+        using var reads = BlobReadScope.Hold(fixture.Instance);
+        Assert.Equal(CleanupItemState.VerifiedUnreferenced, fixture.Cleanup.Inspect(fixture.Item));
+        Assert.Equal(CleanupStepResult.Deleted, fixture.Cleanup.RemoveVerified(fixture.Item));
+        Assert.False(File.Exists(fixture.Path));
+    }
+
+    [Fact(DisplayName = "One Exact Deletion Guard Reuses Reference Discovery While Preventing New Publication")]
+    public void ReusesGuardedReferences()
+    {
+        var fixture = Create(); var reads = 0;
+        var index = new BlobReferenceIndex(fixture.Instance, new(), fixture.Database, fixture.Blobs) { InventoryRead = () => reads++ };
+        var cleanup = new BlobCleanup(fixture.Instance, fixture.Blobs, index);
+        using var held = PhysicalObjectDeletion.HoldFile(BlobCleanup.Intent(fixture.Item, PhysicalPathPolicy.NormalizeWithoutLinks(fixture.Path)));
+        Assert.Equal(CleanupItemState.VerifiedUnreferenced, cleanup.Inspect([fixture.Item], held)[fixture.Item.StepId]);
+        Assert.Equal(CleanupItemState.VerifiedUnreferenced, cleanup.Inspect([fixture.Item], held)[fixture.Item.StepId]);
+        Assert.Throws<IOException>(() => Attach(fixture));
+        Assert.Equal(CleanupStepResult.Deleted, cleanup.RemoveVerified(fixture.Item, held));
+        Assert.Equal(1, reads); Assert.False(File.Exists(fixture.Path));
+    }
+
     [Fact(DisplayName = "An Unreferenced Exact Content Object Can Be Removed Without Touching Other Bytes")]
     public void DeletesExactContent()
     {

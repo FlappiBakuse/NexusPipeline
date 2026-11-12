@@ -31,6 +31,7 @@ internal static class ScriptProjectChecks
         await using var previews = new ProjectPreviewService(catalog.Instance, catalog.Database, catalog.Lease, catalog.Resources,
             catalog.Contracts, provider.Roots, provider.Activator);
         await ScriptControlChecks.VerifyAsync(project, provider, service, previews);
+        using var writes = new PreviewWriteWatch(catalog.Instance.RuntimeRoot);
         using var owner = new CancellationTokenSource();
         var preview = await previews.PrepareScriptAsync(service, "script-ui", script.Id, script.Revision, "maas", choice,
             () => { }, default, owner.Token);
@@ -41,6 +42,7 @@ internal static class ScriptProjectChecks
         owner.Cancel();
         Assert.Throws<IOException>(() => previews.Read("script-ui", preview.PreviewId, "index", () => { }));
         var current = await previews.PrepareScriptAsync(service, "script-ui", script.Id, script.Revision, "maas", choice, () => { }, default);
+        await writes.RequireNoBlobsAsync();
         var before = definitions.Read();
         var change = new AutomationChanges(before.Revision, [], [script with { Name = "Changed script" }], [], [], [], [], []);
         definitions.Commit(AutomationDefinitionStore.Identity(Guid.NewGuid(), "fixture", change), change, DateTimeOffset.UtcNow);

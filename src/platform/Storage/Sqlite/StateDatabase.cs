@@ -19,6 +19,8 @@ public sealed class StateDatabase
     public static string SchemaDigest => DatabaseSchema.Digest;
     private long _commitSequence;
     public long CommitSequence => Interlocked.Read(ref _commitSequence);
+    internal Execution.AttemptReadRegistry? AttemptReads { get; set; }
+    internal BlobReferenceFacts ReferenceFacts { get; } = new();
 
     private StateDatabase(string path, Guid instanceId, string runtimeRoot, bool readOnly = false)
     {
@@ -88,14 +90,45 @@ public sealed class StateDatabase
             transaction.Commit();
         }
         inspected.OwnedCopy?.Discard();
+        startupLease?.BindDatabase();
         return new(databasePath, actual.InstanceId, actual.RuntimeRoot);
+    }
+
+    public static StateDatabase OpenCurrent(RuntimeInstance instance, InstanceLease startupLease)
+    {
+        using var profile = StartupProfile.Begin("database.admission");
+        startupLease.VerifyHeld(instance);
+        var actual = new InstanceRoot(new()).OpenExisting(instance.RuntimeRoot);
+        if (actual != instance) throw new IOException("runtime_identity_mismatch");
+        var guard = PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(actual.RuntimeRoot, "state-initialization.guard"));
+        using (var input = new FileStream(guard, FileMode.Open, FileAccess.Read, FileShare.Read))
+            if (input.Length != 0) throw new IOException("unrecognized_state_initialization_guard");
+        var path = PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(actual.RuntimeRoot, "state", "nexus.db"));
+        using (var connection = DatabaseConnections.Open(path, readOnly: true))
+        using (var transaction = connection.BeginTransaction(deferred: true))
+        {
+            var digest = DatabaseSchema.VerifyCatalog(connection, transaction);
+            DatabaseInspector.VerifyIdentity(connection, actual.InstanceId, digest, transaction);
+            transaction.Commit();
+        }
+        using (var connection = DatabaseConnections.Open(path))
+        using (var transaction = connection.BeginTransaction(deferred: false))
+        {
+            DatabaseReadIndexes.Ensure(connection, transaction);
+            startupLease.VerifyHeld(actual);
+            transaction.Commit();
+        }
+        startupLease.BindDatabase();
+        return new(path, actual.InstanceId, actual.RuntimeRoot);
     }
 
     internal T Write<T>(Func<SqliteConnection, SqliteTransaction, T> operation)
     {
         if (_readOnly) throw new IOException("maintenance_observation_is_read_only");
         using var lease = _writer.Enter();
-        using var connection = DatabaseConnections.Open(DatabasePath);
+        var borrowed = DatabaseWriteScope.Borrow(DatabasePath);
+        using var opened = borrowed is null ? DatabaseConnections.Open(DatabasePath) : null;
+        var connection = borrowed ?? opened!;
         using var transaction = connection.BeginTransaction(deferred: false);
         var result = operation(connection, transaction);
         transaction.Commit();
@@ -103,12 +136,13 @@ public sealed class StateDatabase
         return result;
     }
 
-    public static StateDatabase CreateFresh(RuntimeInstance instance)
+    public static StateDatabase CreateFresh(RuntimeInstance instance, InstanceLease? startupLease = null)
     {
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Windows runtime required");
         var verified = new InstanceRoot(new ContractReader()).OpenExisting(instance.RuntimeRoot);
         if (verified.InstanceId != instance.InstanceId)
             throw new IOException("runtime_identity_mismatch");
+        startupLease?.VerifyHeld(verified);
         var directory = Path.Combine(instance.RuntimeRoot, "state");
         var path = Path.Combine(directory, "nexus.db");
         DatabaseConnections.RejectLinks(path);
@@ -142,6 +176,7 @@ public sealed class StateDatabase
         HostSettingsRows.Execute(connection, transaction, "INSERT INTO startup_registration_current VALUES(1,NULL);");
         NexusPipeline.Platform.Storage.Secrets.SecretReplayProof.Initialize(instance, connection, transaction);
         transaction.Commit();
+        startupLease?.BindDatabase();
         return new(path, instance.InstanceId, instance.RuntimeRoot);
     }
 

@@ -18,8 +18,8 @@ internal sealed class AdmissionPublicationEvidence(RuntimeInstance instance, Sta
         var snapshot = registry.ReadActiveSnapshot();
         RecoveryRegistryPolicy.Verify(snapshot);
         RequireRegistered(registered, snapshot.Journals);
-        new StartupJournalRecovery(instance, contracts, database, roots).InspectBindings(snapshot);
-        JournalResourceClaims.VerifyInventory(instance, database, contracts, roots);
+        new StartupJournalRecovery(instance, contracts, database, roots).InspectBindings(snapshot, completeActiveInventory: false);
+        JournalResourceClaims.VerifyScope(instance, database, contracts, snapshot.Journals, roots);
         var after = registry.ReadActiveSnapshot();
         RecoveryRegistryPolicy.Verify(after);
         RequireRegistered(snapshot.Journals, after.Journals);

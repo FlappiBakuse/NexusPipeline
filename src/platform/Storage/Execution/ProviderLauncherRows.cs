@@ -8,6 +8,25 @@ namespace NexusPipeline.Platform.Storage.Execution;
 
 internal static class ProviderLauncherRows
 {
+    internal static IEnumerable<Guid> ReadRecoveryParents(StateDatabase database)
+    {
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        var after = "";
+        while (true)
+        {
+            using var command = connection.CreateCommand();
+            command.CommandText = "SELECT DISTINCT r.journal_id FROM execution_provider_launcher_roots r " +
+                "WHERE r.journal_id>$after AND NOT EXISTS(SELECT 1 FROM execution_provider_launcher_ended e " +
+                "WHERE e.journal_id=r.journal_id AND e.launcher_id=r.launcher_id) ORDER BY r.journal_id LIMIT 64;";
+            command.Parameters.AddWithValue("$after", after);
+            var ids = new List<Guid>();
+            using (var row = command.ExecuteReader()) while (row.Read()) ids.Add(Guid.ParseExact(row.GetString(0), "D"));
+            foreach (var id in ids) yield return id;
+            if (ids.Count < 64) yield break;
+            after = ids[^1].ToString("D");
+        }
+    }
+
     internal static ProcessIdentity Creator(StateDatabase database, ProviderLauncherBinding binding)
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);

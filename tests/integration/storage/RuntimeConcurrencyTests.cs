@@ -12,8 +12,8 @@ namespace NexusPipeline.StorageTests;
 [SupportedOSPlatform("windows")]
 public sealed class RuntimeConcurrencyTests
 {
-    [Fact(DisplayName = "Completed History Still Rejects Tampered Journal Bytes Before Cold Recovery Mutates State")]
-    public async Task RejectsColdTampering()
+    [Fact(DisplayName = "Normal Startup Leaves Completed History Unread And Explicit Access Or Diagnosis Rejects Its Damaged Bytes")]
+    public async Task LoadsHistoryOnDemand()
     {
         using var fixture = new ExecutionRuntimeFixture();
         _ = await fixture.Consumer.RunNextAsync(); var source = fixture.Source;
@@ -22,12 +22,23 @@ public sealed class RuntimeConcurrencyTests
         Assert.True(new NexusPipeline.Platform.Storage.Journals.StartupJournalRecovery(source.Instance, new(), source.Database, roots).Recover(source.Lease).Current.IsReady);
         Assert.Empty(new RecoveryJournalRegistry(source.Database).ReadActiveSnapshot().Journals);
         var state = fixture.State;
+        var planPath = Path.Combine(source.Instance.RuntimeRoot, state.Journal.PlanPath);
+        var originalPlan = File.ReadAllBytes(planPath);
+        var plan = System.Text.Json.Nodes.JsonNode.Parse(originalPlan)!; plan["version"] = 999;
+        var unknownPlan = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(plan); File.WriteAllBytes(planPath, unknownPlan);
+        Assert.True(new NexusPipeline.Platform.Storage.Journals.StartupJournalRecovery(source.Instance, new(), source.Database, roots).Recover(source.Lease).Current.IsReady);
+        Assert.Equal(unknownPlan, File.ReadAllBytes(planPath));
+        Assert.ThrowsAny<Exception>(() => AttemptWriterState.Read(source.Instance, source.Database, new(), state.Journal.JournalId));
+        File.WriteAllBytes(planPath, originalPlan);
         var path = Path.Combine(source.Instance.RuntimeRoot, "journals", state.Journal.JournalId.ToString("D"), state.Journal.Revision.ToString("D10") + ".json");
         var document = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllBytes(path))!; document["version"] = 999;
         var unknown = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(document); File.WriteAllBytes(path, unknown);
-        var sequence = source.Database.CommitSequence;
-        Assert.ThrowsAny<Exception>(() => new NexusPipeline.Platform.Storage.Journals.StartupJournalRecovery(source.Instance, new(), source.Database, roots).Recover(source.Lease));
-        Assert.Equal(sequence, source.Database.CommitSequence); Assert.Equal(unknown, File.ReadAllBytes(path));
+        var current = StateDatabase.OpenCurrent(source.Instance, source.Lease);
+        Assert.True(new NexusPipeline.Platform.Storage.Journals.StartupJournalRecovery(source.Instance, new(), current, roots).Recover(source.Lease).Current.IsReady);
+        Assert.ThrowsAny<Exception>(() => AttemptWriterState.Read(source.Instance, current, new(), state.Journal.JournalId));
+        Assert.ThrowsAny<Exception>(() => StateDatabase.OpenExisting(source.Instance, Path.Combine(source.Root, "explicit-inspection"),
+            new NexusPipeline.Platform.Storage.Journals.JournalStartupAdmission(source.Instance, new(), roots)));
+        Assert.Equal(unknown, File.ReadAllBytes(path));
     }
 
     [Fact(DisplayName = "Independent Admitted Runs Reach Their Real Writers Together And One Cancellation Leaves The Other Running")]

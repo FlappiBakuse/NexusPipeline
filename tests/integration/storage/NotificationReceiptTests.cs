@@ -1,6 +1,9 @@
 using System.Runtime.Versioning;
 using Microsoft.Data.Sqlite;
+using NexusPipeline.Platform.Storage.Execution;
+using NexusPipeline.Platform.Storage.Journals;
 using NexusPipeline.Platform.Storage.Notifications;
+using NexusPipeline.Platform.Storage.Sqlite;
 using Xunit;
 
 namespace NexusPipeline.StorageTests;
@@ -8,6 +11,46 @@ namespace NexusPipeline.StorageTests;
 [SupportedOSPlatform("windows")]
 public sealed class NotificationReceiptTests
 {
+    [Fact(DisplayName = "Terminal Notification Batches Reuse Protected Evidence And Recheck Current Source Bindings")]
+    public async Task ReusesTerminalEvidence()
+    {
+        using var fixture = new NotificationReceiptFixture();
+        await fixture.Execute(taskCount: 2, queueNotifications: false, repetitions: 3);
+        var source = fixture.Source;
+        using var reads = new NotificationAttemptReads(source.Instance, source.Database, new(), source.Lease);
+        reads.HoldReceipt(fixture.Snapshot.Reference);
+        var registered = new RecoveryJournalRegistry(source.Database).ReadJournal(fixture.Receipt.JournalId);
+        var metadata = AttemptPreparedBinding.ReadPlanMetadata(source.Instance, new(), registered);
+        var planPath = Path.Combine(source.Instance.RuntimeRoot, registered.PlanPath);
+        var paths = Directory.EnumerateFiles(Path.Combine(source.Instance.RuntimeRoot, "journals", registered.JournalId.ToString("D")))
+            .Append(planPath).Append(Path.Combine(source.Instance.RuntimeRoot, metadata.Plan.ExecutionPlan.RelativePath)).ToArray();
+        var locks = new List<FileStream>();
+        try
+        {
+            foreach (var path in paths)
+            {
+                var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+                locks.Add(file); file.Lock(0, file.Length);
+            }
+            Assert.Throws<IOException>(() => new JournalStore(source.Instance, new()).Read(registered.JournalId));
+            new LogCatalogProjection(source.Instance, source.Database, new(), source.Lease).OnCommitted(fixture.Receipt);
+            Assert.Equal(3, fixture.Delivery.MaterializePending(64, reads));
+            var status = fixture.Delivery.ReadPendingForRun(fixture.Receipt.Facts.RunId);
+            Assert.True(status.IsExpanded); Assert.Equal(6, status.Queued);
+            fixture.Sql("UPDATE notification_receipt_sources SET route_count=route_count+1;");
+            try { Assert.ThrowsAny<Exception>(() => fixture.Delivery.ReadPendingForRun(fixture.Receipt.Facts.RunId)); }
+            finally { fixture.Sql("UPDATE notification_receipt_sources SET route_count=route_count-1;"); }
+            Assert.Throws<IOException>(() => new FileStream(planPath, FileMode.Open, FileAccess.ReadWrite, FileShare.Read).Dispose());
+        }
+        finally
+        {
+            foreach (var file in locks) { file.Unlock(0, file.Length); file.Dispose(); }
+        }
+        reads.Dispose();
+        using var released = new FileStream(planPath, FileMode.Open, FileAccess.ReadWrite, FileShare.Read);
+        Assert.Equal(6, fixture.Count("notification_deliveries"));
+    }
+
     [Theory(DisplayName = "Three Queue Occurrences Publish One Notification Route Per Binding And Remain Startup Reconcilable")]
     [InlineData(false)]
     [InlineData(true)]

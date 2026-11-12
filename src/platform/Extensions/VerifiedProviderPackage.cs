@@ -10,6 +10,7 @@ using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Execution;
 using NexusPipeline.Platform.Storage.Configuration;
 using NexusPipeline.Platform.Storage.Extensions;
+using NexusPipeline.Platform.Execution.Judgement;
 
 namespace NexusPipeline.Platform.Extensions;
 
@@ -20,7 +21,7 @@ internal sealed record VerifiedPackageFile(string RelativePath, long SizeBytes, 
 internal sealed class VerifiedProviderPackage
 {
     private readonly byte[] _manifestBytes;
-    private PreparedExtensionActivation.InstalledConsumptionFacts? _installed;
+    private InstalledConsumptionFacts? _installed;
     internal void RequireConsumptionEligibility() => _installed?.RequireCurrent();
     internal InstallationReadLease? OpenConsumptionLease() => _installed?.OpenReadLease();
     internal ExtensionManifest Manifest => JsonSerializer.Deserialize<ExtensionManifest>(_manifestBytes)!;
@@ -97,7 +98,7 @@ internal sealed class VerifiedProviderPackage
             PhysicalPathPolicy.ValidateRelativePath(relative);
             ExecutionPlanInterpreterImage image;
             using (StartupProfile.Measure("provider.runtime.capture"))
-                image = ExecutionHookImages.Capture(Path.Combine(verified.Root, relative), runtime: true);
+                image = CaptureRuntime(verified, relative);
             using (StartupProfile.Measure("provider.runtime.protect")) RequireImage(verified, image);
             return image;
         }
@@ -105,6 +106,32 @@ internal sealed class VerifiedProviderPackage
         var launcher = policy.Launcher is null ? null : Capture(policy.Launcher.Entry);
         return new(verified.Root, verified.ArchivePath, verified.ManifestBytes, verified.Manifest,
             policy, verified.Files, verified.Archive, worker, launcher);
+    }
+
+    private static ExecutionPlanInterpreterImage CaptureRuntime(ReadProviderPackage package, string relative)
+    {
+        var path = PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(package.Root, relative));
+        if (string.Equals(Path.GetFileName(path), "powershell.exe", StringComparison.OrdinalIgnoreCase))
+            return ExecutionHookImages.Capture(path, runtime: true);
+        var files = package.Files.ToDictionary(item => Path.GetFullPath(Path.Combine(package.Root, item.RelativePath)), StringComparer.OrdinalIgnoreCase);
+        VerifiedPackageFile Find(string requested)
+        {
+            if (!files.TryGetValue(requested, out var file) || file.SizeBytes is < 1 or > 1073741824)
+                throw new IOException("execution_provider_runtime_outside_package");
+            return file;
+        }
+        var image = Find(path);
+        var parent = Path.GetDirectoryName(path)!;
+        // Both input readers keep these verified package bytes protected throughout closure discovery.
+        var runtime = JudgementRuntimeAssets.Paths(path).Select(name =>
+        {
+            var file = Find(Path.GetFullPath(Path.Combine(parent, name)));
+            return new ExecutionPlanRuntimeFile { RelativePath = name, SizeBytes = file.SizeBytes, Sha256 = file.Sha256,
+                Identity = FileTreeProtocol.ToWire(file.Identity), ParentIdentity = FileTreeProtocol.ToWire(file.ParentIdentity) };
+        }).ToDictionary(file => file.RelativePath, StringComparer.OrdinalIgnoreCase).Values
+            .OrderBy(file => file.RelativePath, StringComparer.Ordinal).ToArray();
+        return new() { Path = path, SizeBytes = image.SizeBytes, Sha256 = image.Sha256,
+            Identity = FileTreeProtocol.ToWire(image.Identity), ParentIdentity = FileTreeProtocol.ToWire(image.ParentIdentity), RuntimeFiles = runtime };
     }
 
     internal IDisposable Hold()

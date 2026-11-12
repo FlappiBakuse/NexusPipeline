@@ -144,8 +144,22 @@ public sealed class ExecutionProviderRegistry
     public void RestoreSavedReferences(RuntimeInstance instance, StateDatabase database, ContractReader contracts,
         InstanceLease lease, ResourceLeaseManager resources)
     {
-        foreach (var journal in new RecoveryJournalRegistry(database).ReadSnapshot().Journals.Where(item => item.Kind == NexusPipeline.Core.Configuration.JournalKind.RunAttempt))
-            RestoreRetainedReferences(instance, database, contracts, lease, resources, journal.JournalId);
+        using var reads = new HistoryReadScope(instance, database, contracts);
+        using var parents = JournalReadScope.HoldParents(instance, contracts);
+        var inspected = 0; var retained = 0;
+        foreach (var id in ProviderLauncherRows.ReadRecoveryParents(database))
+        {
+            inspected++;
+            lease.VerifyHeld(instance);
+            var journal = new RecoveryJournalRegistry(database).ReadJournal(id);
+            JournalReadScope.SelectParent(instance, contracts, id);
+            var plan = AttemptPreparedBinding.ReadPlanMetadata(instance, contracts, journal);
+            var latest = new JournalStore(instance, contracts).Read(id);
+            if (!ProviderLauncherCodec.Read(latest.Root, plan.Total, plan.Plan.ExecutionPlan.Sha256)
+                .Any(item => item.Stage is "retained" or "recoveredRetained")) continue;
+            RestoreRetainedReferences(instance, database, contracts, lease, resources, id); retained++;
+        }
+        Console.Error.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { kind = "startup.provider-candidates", inspected, retained }));
     }
 
     [SupportedOSPlatform("windows")]

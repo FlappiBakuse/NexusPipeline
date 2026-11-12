@@ -20,6 +20,7 @@ public static class ProcessIdentityReader
     public static ProcessIdentity Read(int processId)
     {
         if (processId <= 0) throw new ArgumentOutOfRangeException(nameof(processId));
+        if (processId == Environment.ProcessId && ProcessIdentityScope.ReadCurrent() is { } current) return current;
         using var process = JobNative.OpenProcess(0x1000, false, processId);
         if (process.IsInvalid) throw Failure();
         return Read(process, processId);
@@ -28,6 +29,8 @@ public static class ProcessIdentityReader
     internal static ProcessIdentity Read(SafeKernelHandle process, int processId)
     {
         var metadata = ReadMetadata(process, processId);
+        if (processId == Environment.ProcessId && ProcessIdentityScope.ReadCurrent() is { } current &&
+            ProcessIdentityMetadata.From(current) == metadata) return current;
         using var file = File.OpenRead(metadata.ImagePath);
         using var timing = Storage.StartupProfile.Measure("process.image-hash");
         return new(metadata.ProcessId, metadata.CreatedAtUtc, metadata.ImagePath,

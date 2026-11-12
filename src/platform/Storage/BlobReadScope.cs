@@ -7,13 +7,15 @@ public sealed class BlobReadScope : IDisposable
     private readonly string _root;
     private readonly int _thread = Environment.CurrentManagedThreadId;
     private readonly BlobReadScope? _previous = _current;
+    private readonly Action<string>? _capture;
     private readonly Dictionary<string, (IDisposable Lease, LinkedListNode<string> Node)> _held = new(StringComparer.OrdinalIgnoreCase);
     private readonly LinkedList<string> _recent = new();
     private bool _disposed;
 
-    private BlobReadScope(RuntimeInstance instance)
+    private BlobReadScope(RuntimeInstance instance, Action<string>? capture = null)
     {
         _root = PhysicalPathPolicy.NormalizeWithoutLinks(instance.RuntimeRoot);
+        _capture = capture;
         _current = this;
     }
 
@@ -23,9 +25,14 @@ public sealed class BlobReadScope : IDisposable
         return new(instance);
     }
 
+    internal static BlobReadScope Capture(RuntimeInstance instance, Action<string> capture) => new(instance, capture);
+
     internal static void Track(string path)
     {
         if (_current is not { } scope) return;
+        for (var observing = scope; observing is not null; observing = observing._previous)
+            if (observing._capture is not null && path.StartsWith(observing._root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                observing._capture(path);
         var relative = Path.GetRelativePath(scope._root, path);
         if (Path.IsPathRooted(relative) || relative == ".." || relative.StartsWith("..\\", StringComparison.Ordinal)) return;
         if (scope._held.TryGetValue(path, out var current))

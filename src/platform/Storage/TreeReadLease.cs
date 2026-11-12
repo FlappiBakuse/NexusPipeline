@@ -24,6 +24,12 @@ internal sealed class TreeReadLease : IDisposable
     internal static TreeReadLease Acquire(string target, PhysicalObjectIdentity parentIdentity, ArchivedFileTree before)
         => AcquireCore(target, parentIdentity, before, application: false);
 
+    internal static TreeReadLease AcquireMetadata(string target, PhysicalObjectIdentity parentIdentity, ArchivedFileTree before)
+    {
+        FileTreeArchive.ValidateArchive(before);
+        return AcquireSnapshot(target, parentIdentity, before.Snapshot, before.OriginalObjects, application: false, verifyContents: false);
+    }
+
     internal static TreeReadLease AcquireApplication(string target, PhysicalObjectIdentity parentIdentity, ArchivedFileTree before)
         => AcquireCore(target, parentIdentity, before, application: true);
 
@@ -42,7 +48,7 @@ internal sealed class TreeReadLease : IDisposable
     }
 
     private static TreeReadLease AcquireSnapshot(string target, PhysicalObjectIdentity parentIdentity, FileTreeSnapshot snapshot,
-        IReadOnlyList<PhysicalTreeObject> objects, bool application)
+        IReadOnlyList<PhysicalTreeObject> objects, bool application, bool verifyContents = true)
     {
         using var timing = StartupProfile.Measure("payload.verify");
         var lease = new TreeReadLease(target, snapshot, objects, application);
@@ -56,6 +62,7 @@ internal sealed class TreeReadLease : IDisposable
                 lease._held.Add(StableDirectoryLease.Acquire(Path.Combine(target, entry.RelativePath)));
             foreach (var entry in snapshot.Entries.Where(item => item.Kind == FileObjectKind.File))
                 lease._held.Add(new FileStream(PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(target, entry.RelativePath)), FileMode.Open, FileAccess.Read, FileShare.Read));
+            if (!verifyContents) { lease.RequireNamespace(); return lease; }
             var scanner = new FileTreeScanner(SnapshotBudget.Default);
             var actual = application ? ApplicationTree.Capture(scanner, target, default) : scanner.Capture(target, default);
             if (actual.Shape != snapshot.Shape || !actual.Entries.SequenceEqual(snapshot.Entries) ||

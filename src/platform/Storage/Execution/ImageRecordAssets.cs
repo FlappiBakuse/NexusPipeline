@@ -14,7 +14,7 @@ internal sealed class ImageRecordAssets(RuntimeInstance instance, StateDatabase 
 {
     private readonly List<ImageCatalogSnapshot> _family = [];
 
-    internal void Capture(AttemptReceipt final)
+    internal void Capture(AttemptReceipt final, ImageCatalogSnapshot? current = null)
     {
         if (_family.Count != 0) throw ImageCatalogRows.Invalid();
         IReadOnlyList<AttemptReceipt> receipts;
@@ -26,7 +26,7 @@ internal sealed class ImageRecordAssets(RuntimeInstance instance, StateDatabase 
             transaction.Commit();
         }
         var reader = new ImageCatalogCapture(instance, database, contracts);
-        foreach (var receipt in receipts) _family.Add(reader.Read(receipt));
+        foreach (var receipt in receipts) _family.Add(current?.Receipt == receipt ? current : reader.Read(receipt));
     }
 
     internal void PublishInside(SqliteConnection connection, SqliteTransaction transaction, AttemptReceipt final)

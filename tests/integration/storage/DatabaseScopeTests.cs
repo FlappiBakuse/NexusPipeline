@@ -9,6 +9,34 @@ namespace NexusPipeline.StorageTests;
 
 public sealed class DatabaseScopeTests
 {
+    [Fact(DisplayName = "Publication Commits Stay Durable And A Failed Transaction Does Not Leak Into Its Successor")]
+    public void PreservesWriteBoundaries()
+    {
+        var root = Path.Combine(Environment.GetEnvironmentVariable("NEXUS_TEST_ROOT")!, "publication-sql-" + Guid.NewGuid().ToString("N"));
+        var instance = new InstanceRoot(new()).OpenOrCreate(root);
+        var database = StateDatabase.CreateFresh(instance);
+        var accepted = new OperationIdentity(Guid.NewGuid(), "fixture", new string('a', 64), "fixture.command");
+        var rejected = new OperationIdentity(Guid.NewGuid(), "fixture", new string('b', 64), "fixture.command");
+        var following = new OperationIdentity(Guid.NewGuid(), "fixture", new string('c', 64), "fixture.command");
+        using (var lease = InstanceLease.Acquire(instance, new()))
+            lease.PublishExecution(() =>
+            {
+                Assert.True(database.Accept(accepted, DateTimeOffset.UtcNow).IsNew);
+                Assert.Throws<IOException>(() => database.Write<bool>((connection, transaction) =>
+                {
+                    _ = OperationRows.Accept(connection, transaction, rejected, DateTimeOffset.UtcNow);
+                    throw new IOException("fixture_rollback");
+                }));
+                Assert.True(database.Accept(following, DateTimeOffset.UtcNow).IsNew);
+            });
+        var reopened = StateDatabase.OpenExisting(instance, Path.Combine(root, "diagnostics", "reopen"));
+        Assert.False(reopened.Accept(accepted, DateTimeOffset.UtcNow).IsNew);
+        Assert.False(reopened.Accept(following, DateTimeOffset.UtcNow).IsNew);
+        Assert.True(reopened.Accept(rejected, DateTimeOffset.UtcNow).IsNew);
+        Assert.Equal(2, reopened.ReadSettings().Synchronous);
+        Directory.Move(root, root + "-released");
+    }
+
     [Fact(DisplayName = "Historical Binding Readers Observe New Commits And Keep Nested Instances And File Lifetimes Separate")]
     public void IsolatesHistoryReaders()
     {
@@ -103,8 +131,10 @@ public sealed class DatabaseScopeTests
         Assert.Equal(mode == "WAL" ? 2 : 1, Read(Path.Combine(moved, "nexus.db")));
     }
 
-    [Fact(DisplayName = "Nested Database Readers Keep The Original File Protected Until Their Outer Owner Exits And Reopen Replaced Bytes")]
-    public void PreservesNestedLifetime()
+    [Theory(DisplayName = "Nested Database Readers Observe New Commits And Keep The Original File Protected Until Its Owner Exits")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void PreservesNestedLifetime(bool instanceOwned)
     {
         var root = Path.Combine(Environment.GetEnvironmentVariable("NEXUS_TEST_ROOT")!, "database-reads-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
@@ -114,19 +144,31 @@ public sealed class DatabaseScopeTests
         Create(replacement, 2);
         var original = PhysicalObjectIdentity.Read(path);
         var candidate = PhysicalObjectIdentity.Read(replacement);
-        using (var outer = DatabaseReadScope.Hold(path))
+        using (var pool = instanceOwned ? new DatabaseReadPool(path) : null)
         {
-            using (DatabaseReadScope.Hold(path))
+            using (var outer = DatabaseReadScope.Hold(path))
             {
+                using (DatabaseReadScope.Hold(path))
+                {
+                    Assert.Equal(1L, Read(path));
+                    Assert.Equal("database_read_scope_order", Assert.Throws<InvalidOperationException>(() => outer.Dispose()).Message);
+                }
+                var denied = Record.Exception(() => File.Move(replacement, path, overwrite: true));
+                Assert.True(denied is IOException or UnauthorizedAccessException, denied?.Message);
+                Assert.Throws<IOException>(() => Directory.Move(root, root + "-moved"));
+                Assert.Equal(original, PhysicalObjectIdentity.Read(path));
+                Assert.Equal(candidate, PhysicalObjectIdentity.Read(replacement));
                 Assert.Equal(1L, Read(path));
-                Assert.Equal("database_read_scope_order", Assert.Throws<InvalidOperationException>(() => outer.Dispose()).Message);
             }
-            var denied = Record.Exception(() => File.Move(replacement, path, overwrite: true));
-            Assert.True(denied is IOException or UnauthorizedAccessException, denied?.Message);
-            Assert.Throws<IOException>(() => Directory.Move(root, root + "-moved"));
-            Assert.Equal(original, PhysicalObjectIdentity.Read(path));
-            Assert.Equal(candidate, PhysicalObjectIdentity.Read(replacement));
-            Assert.Equal(1L, Read(path));
+            using (var writer = DatabaseConnections.Open(path))
+            using (var command = writer.CreateCommand())
+            { command.CommandText = "UPDATE value SET number=3;"; command.ExecuteNonQuery(); }
+            using (DatabaseReadScope.Hold(path)) Assert.Equal(3L, Read(path));
+            if (instanceOwned)
+            {
+                var denied = Record.Exception(() => File.Move(replacement, path, overwrite: true));
+                Assert.True(denied is IOException or UnauthorizedAccessException, denied?.Message);
+            }
         }
         File.Move(replacement, path, overwrite: true);
         Assert.Equal(candidate, PhysicalObjectIdentity.Read(path));

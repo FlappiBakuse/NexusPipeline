@@ -12,24 +12,27 @@ internal sealed record BoundPreparedPayload(FrozenPayloadApply Plan, JsonObject 
 
 internal static class PayloadPreparedBinding
 {
-    internal static FrozenPayloadApply ReadPlan(RuntimeInstance instance, ContractReader contracts, PayloadApplyRoots roots, RegisteredJournal journal)
+    internal static FrozenPayloadApply ReadPlan(RuntimeInstance instance, ContractReader contracts, PayloadApplyRoots roots,
+        RegisteredJournal journal, bool verifyContents = true)
     {
         if (journal.Kind is not (JournalKind.UpdateApply or JournalKind.ExtensionApply)) throw new IOException("payload_kind_unbound");
         var path = PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(instance.RuntimeRoot, journal.PlanPath));
-        var plan = new PayloadPlanCodec(instance, contracts, new(instance, contracts), roots)
-            .Read(new(journal.PlanPath, new FileInfo(path).Length, journal.PlanDigest));
+        var codec = new PayloadPlanCodec(instance, contracts, new(instance, contracts), roots);
+        var reference = new BlobReference(journal.PlanPath, new FileInfo(path).Length, journal.PlanDigest);
+        var plan = verifyContents ? codec.Read(reference) : codec.ReadStructure(reference);
         if (plan.OperationId != journal.OperationId || plan.JournalId != journal.JournalId || plan.Kind != journal.Kind ||
             !plan.ResourceKeys.SequenceEqual(journal.ResourceKeys)) throw new IOException("payload_plan_registration_unbound");
         return plan;
     }
 
     internal static BoundPreparedPayload Read(RuntimeInstance instance, ContractReader contracts, StateDatabase database,
-        PayloadApplyRoots roots, Guid journalId)
+        PayloadApplyRoots roots, Guid journalId, bool verifyContents = true)
     {
         var snapshot = new RecoveryJournalRegistry(database).ReadSnapshot(journalId);
         RecoveryRegistryPolicy.Verify(snapshot);
         var registered = snapshot.Journals.Single(item => item.JournalId == journalId);
-        var plan = ReadPlan(instance, contracts, roots, registered);
+        var plan = ReadPlan(instance, contracts, roots, registered,
+            verifyContents && !(registered.Kind == JournalKind.ExtensionApply && registered.Phase == JournalPhase.Committed));
         if (plan.Kind == JournalKind.UpdateApply)
         {
             var sourceCodec = new UpdateSourceCodec(instance, contracts);

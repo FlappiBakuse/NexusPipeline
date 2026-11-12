@@ -109,8 +109,10 @@ public sealed class JournalWriterStore(StateDatabase database)
 
     public WriterStopObservation Observe(Guid journalId) => Observe(journalId, null);
 
-    internal Guid RequireCurrentExecutor(Guid journalId) => RequireCurrentWriter(journalId, requireNoWorkers: true);
-    internal Guid RequireRegisteredExecutor(Guid journalId) => RequireCurrentWriter(journalId, requireNoWorkers: false);
+    internal Guid RequireCurrentExecutor(Guid journalId, ProcessIdentityLease? executor = null) =>
+        RequireCurrentWriter(journalId, requireNoWorkers: true, executor);
+    internal Guid RequireRegisteredExecutor(Guid journalId, ProcessIdentityLease? executor = null) =>
+        RequireCurrentWriter(journalId, requireNoWorkers: false, executor);
 
     internal static void RegisterAttemptJobInside(SqliteConnection connection, SqliteTransaction transaction,
         RegisteredJournal expected, StepWriterState step, AttemptWriterState? context = null, JournalDocument? before = null)
@@ -162,11 +164,12 @@ public sealed class JournalWriterStore(StateDatabase database)
         return current.Process;
     }
 
-    private Guid RequireCurrentWriter(Guid journalId, bool requireNoWorkers)
+    private Guid RequireCurrentWriter(Guid journalId, bool requireNoWorkers, ProcessIdentityLease? executor = null)
     {
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
         var writer = CurrentWriter;
-        if (ProcessIdentityReader.Read(Environment.ProcessId) != writer.Process) throw new IOException("cleanup_executor_identity_changed");
+        if ((executor?.ReadCurrent() ?? ProcessIdentityReader.Read(Environment.ProcessId)) != writer.Process)
+            throw new IOException("cleanup_executor_identity_changed");
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
         using var command = connection.CreateCommand();
         command.CommandText = "SELECT EXISTS(SELECT 1 FROM journal_writers WHERE journal_id=$journal AND writer_id=$writer " +

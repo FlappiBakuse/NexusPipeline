@@ -156,6 +156,14 @@ public sealed class ProviderLauncherTests
         var state = fixture.State;
         var evidence = new ProviderLauncherEvidence(fixture.Source.Instance, fixture.Source.Database, new());
         var expected = evidence.RequireAll(state, verifyContents: true);
+        var launcher = Assert.Single(ProviderLauncherCodec.Read(state.Latest.Root, state.Total, state.Attempt.ExecutionPlan.Sha256));
+        using (var historical = new FileStream(Path.Combine(fixture.Source.Instance.RuntimeRoot, launcher.Artifact!.RelativePath),
+            FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            var restored = new NexusPipeline.Platform.Extensions.ExecutionProviderRegistry();
+            restored.RestoreSavedReferences(fixture.Source.Instance, fixture.Source.Database, new(), fixture.Source.Lease, fixture.Base.Resources);
+            Assert.Equal(0, restored.RetainedCount);
+        }
         await fixture.Scope.DisposeAsync();
         File.Delete(fixture.Package.Worker); File.Delete(fixture.Package.Launcher!);
         Assert.Equal(expected, evidence.RequireAll(fixture.State, verifyContents: true));

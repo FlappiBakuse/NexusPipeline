@@ -19,12 +19,12 @@ internal static class ScheduleMinuteRows
             result = new(reader.GetInt64(0), reader.IsDBNull(1) ? null : reader.GetInt64(1));
             if (reader.Read() || result.Revision < 0 || result.HighestUtcMinute is < 0) throw ScheduleMinuteCodec.Invalid();
         }
-        command.CommandText = "SELECT COUNT(*),MAX(watermark_revision),MAX(utc_minute) FROM schedule_minute_claims;";
+        command.CommandText = "SELECT utc_minute FROM schedule_minute_claims WHERE watermark_revision=$revision;";
+        command.Parameters.AddWithValue("$revision", result.Revision - 1);
         using (var reader = command.ExecuteReader())
         {
-            if (!reader.Read() || reader.GetInt64(0) != result.Revision ||
-                (result.Revision == 0 ? !reader.IsDBNull(1) || result.HighestUtcMinute is not null :
-                    reader.GetInt64(1) != result.Revision - 1 || reader.IsDBNull(2) || reader.GetInt64(2) != result.HighestUtcMinute))
+            if (result.Revision == 0 ? reader.Read() || result.HighestUtcMinute is not null :
+                !reader.Read() || reader.GetInt64(0) != result.HighestUtcMinute || reader.Read())
                 throw ScheduleMinuteCodec.Invalid();
         }
         return result;

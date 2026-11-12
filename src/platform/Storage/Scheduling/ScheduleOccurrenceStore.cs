@@ -37,12 +37,21 @@ internal sealed class ScheduleOccurrenceStore(RuntimeInstance instance, StateDat
     public ImmutableArray<ScheduledOccurrence> CommitMinute(ScheduleMinuteScan scan)
     {
         ArgumentNullException.ThrowIfNull(scan);
-        return CommitMinuteCore(scan);
+        return CommitMinuteCore(scan, retainEmpty: true);
     }
 
-    public ImmutableArray<ScheduledOccurrence> CommitCurrentMinute() => CommitMinuteCore(null);
+    public ImmutableArray<ScheduledOccurrence> CommitCurrentMinute() => CommitMinuteCore(null, retainEmpty: false);
 
-    private ImmutableArray<ScheduledOccurrence> CommitMinuteCore(ScheduleMinuteScan? scan)
+    internal ScheduleMinuteDocument? CommitProviderMinute(long minute)
+    {
+        if (clock.GetUtcNow().ToUnixTimeSeconds() / 60 != minute) return null;
+        _ = CommitMinuteCore(null, retainEmpty: true);
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var transaction = connection.BeginTransaction(deferred: true);
+        return ScheduleMinuteRows.ReadMinute(connection, transaction, ScheduleMinuteCodec.OperationId(instance.InstanceId, minute), instance.InstanceId);
+    }
+
+    private ImmutableArray<ScheduledOccurrence> CommitMinuteCore(ScheduleMinuteScan? scan, bool retainEmpty)
     {
         RequireInstance();
         var admission = resources.TryAcquire(Guid.NewGuid(),
@@ -79,6 +88,7 @@ internal sealed class ScheduleOccurrenceStore(RuntimeInstance instance, StateDat
             if (scan is not null && !JsonElement.DeepEquals(JsonSerializer.SerializeToElement(scan, ScheduleMinuteCodec.Options),
                 JsonSerializer.SerializeToElement(expected, ScheduleMinuteCodec.Options))) throw new IOException("schedule_scan_changed");
             if (watermark.HighestUtcMinute >= expected.HighestUtcMinute) return [];
+            if (!retainEmpty && expected.Occurrences.IsEmpty) return [];
             var document = new ScheduleMinuteDocument("nexus.schedule.minute", 1, instance.InstanceId,
                 ScheduleMinuteCodec.Subject, now, settingsRevision, expected);
             var identity = ScheduleMinuteCodec.Identity(document);

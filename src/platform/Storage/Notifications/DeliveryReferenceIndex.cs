@@ -22,16 +22,16 @@ internal static class DeliveryReferenceIndex
             if (secrets.TryGetValue(id, out var matches))
                 referenced.UnionWith(matches.Where(item => item.Sha256 == digest && item.SizeBytes == sizeBytes));
         }
-        NotificationReferenceInventory.Visit(instance, database, contracts, (source, expanded, routes) =>
+        NotificationReferenceMetadata.Visit(instance, database, contracts, (source, expanded, routes) =>
         {
-            var document = source.Snapshot.Document;
+            var document = source.Document;
             if (!expanded)
                 foreach (var item in document.Tasks.SelectMany(task => task.Secrets))
                     if (item.Payload is { } payload) IncludeSecret(payload.SecretId, payload.Digest, payload.SizeBytes);
             if (!hasContent) return;
             Include(routes);
-            Include(new[] { source.Snapshot.Reference, document.TotalPlan, document.DefinitionBundle, document.Catalog }
-                .Concat(source.Catalog.Document.Tasks.Select(task => task.Definition)));
+            Include(new[] { source.Reference, document.TotalPlan, document.DefinitionBundle, document.Catalog }
+                .Concat(new NotificationCatalogCodec(instance, contracts).Read(document.Catalog).Document.Tasks.Select(task => task.Definition)));
             if (!expanded && document.Screenshot is { } screenshot)
                 Include([new($"blobs/content/{screenshot.Sha256}.bin", screenshot.SizeBytes, screenshot.Sha256)]);
         }, (delivery, state) =>
@@ -68,6 +68,8 @@ internal static class DeliveryReferenceIndex
         return ReadReferenced(instance, database, contracts, new HashSet<BlobReference> { candidate }).Contains(candidate);
     }
 
-    internal static void VerifyReadOnly(RuntimeInstance instance, StateDatabase database, ContractReader contracts) =>
+    internal static void VerifyReadOnly(RuntimeInstance instance, StateDatabase database, ContractReader contracts)
+    {
         NotificationReferenceInventory.Visit(instance, database, contracts, (_, _, _) => { }, (_, _) => { });
+    }
 }

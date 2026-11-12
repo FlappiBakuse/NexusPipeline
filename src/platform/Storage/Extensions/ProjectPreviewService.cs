@@ -19,6 +19,7 @@ internal sealed record ProjectPreviewRead(string Name, string Sha256, string Con
 [SupportedOSPlatform("windows")]
 internal sealed class ProjectPreviewService : IAsyncDisposable
 {
+    internal const long MaximumBytes = 32 * 1024 * 1024;
     private readonly object _gate = new();
     private readonly RuntimeInstance _instance;
     private readonly StateDatabase _database;
@@ -32,6 +33,7 @@ internal sealed class ProjectPreviewService : IAsyncDisposable
     private readonly CancellationTokenSource _lifetime = new();
     private readonly Task _sweep;
     private bool _disposed;
+    private long _bytes;
     private sealed record Entry(Guid Id, string Subject, ProjectPreviewSource Source, DateTimeOffset Expires, ResourceOperationLease Root,
         CancellationToken OwnerLifetime);
 
@@ -49,13 +51,8 @@ internal sealed class ProjectPreviewService : IAsyncDisposable
         JsonElement? selection = null)
     {
         RequireSubject(subject); requireCaller();
-        Func<CompiledProjectSnapshot, Action, Action, ValueTask<ProjectPreview>> publish = (snapshot, current, _) =>
-        {
-            return ValueTask.FromResult(Publish(subject, ProjectPreviewSource.Binding(snapshot), current, ownerLifetime));
-        };
-        return selection is { } draft
-            ? compilation.UseAsync(bindingId, bindingRevision, extensionId, draft, requireCaller, publish, cancellation)
-            : compilation.UseSavedAsync(bindingId, bindingRevision, extensionId, requireCaller, publish, cancellation);
+        return compilation.PreviewAsync(bindingId, bindingRevision, extensionId, selection, requireCaller,
+            (source, current) => ValueTask.FromResult(Publish(subject, source, current, ownerLifetime)), cancellation);
     }
 
     internal ValueTask<ProjectPreview> PrepareScriptAsync(ScriptProjectService compilation, string subject, Guid scriptId,
@@ -65,7 +62,7 @@ internal sealed class ProjectPreviewService : IAsyncDisposable
         RequireSubject(subject); requireCaller();
         return compilation.CompileAsync(scriptId, scriptRevision, extensionId, selection, requireCaller,
             (source, graph, consumer, provider, current) => ValueTask.FromResult(Publish(subject,
-                ProjectPreviewSource.Script(_instance, _contracts, source, graph, consumer, provider, selection, cancellation),
+                ProjectPreviewSource.Script(source, graph, consumer, provider, selection, cancellation),
                 current, ownerLifetime)), cancellation);
     }
 
@@ -85,8 +82,8 @@ internal sealed class ProjectPreviewService : IAsyncDisposable
                 ObjectDisposedException.ThrowIf(_disposed, this); Expire();
                 foreach (var old in _entries.Values.Where(item => item.Subject == subject && item.Source.OwnerId == source.OwnerId && item.Source.IsScript == source.IsScript).ToArray())
                     Remove(old);
-                if (_entries.Count >= 8) throw new IOException("project_preview_capacity");
-                _entries.Add(id, entry);
+                if (_entries.Count >= 8 || source.SizeBytes > MaximumBytes - _bytes) throw new IOException("project_preview_capacity");
+                _entries.Add(id, entry); _bytes += source.SizeBytes;
             }
             current();
             return new ProjectPreview(id, source.Fingerprint, source.CanExecute, previewIndex,
@@ -114,9 +111,7 @@ internal sealed class ProjectPreviewService : IAsyncDisposable
             if (!names.Contains(assetName)) throw new UnauthorizedAccessException("project_preview_asset_forbidden");
             var asset = entry.Source.Assets.SingleOrDefault(item => item.Name == assetName) ?? throw Unavailable();
             if (asset.Kind == CompiledAssetKind.Artifact) throw new UnauthorizedAccessException("project_preview_asset_forbidden");
-            using var input = new ImmutableBlobStore(_instance, _contracts).OpenVerified(asset.Content);
-            if (input.Length is < 1 or > 524288) throw Unavailable();
-            var bytes = new byte[checked((int)input.Length)]; input.ReadExactly(bytes);
+            if (!entry.Source.Contents.TryGetValue(asset.Name, out var bytes) || bytes.Length is < 1 or > 524288) throw Unavailable();
             using var parsed = StrictJson.Parse(bytes); Current(entry, requireCaller);
             return new(asset.Name, asset.Content.Sha256, Convert.ToBase64String(bytes));
         }
@@ -163,7 +158,11 @@ internal sealed class ProjectPreviewService : IAsyncDisposable
     }
     private void Expire()
     { foreach (var entry in _entries.Values.Where(item => item.Expires <= _clock.GetUtcNow() || item.OwnerLifetime.IsCancellationRequested).ToArray()) Remove(entry); }
-    private void Remove(Entry entry) { _entries.Remove(entry.Id); entry.Root.Dispose(); }
+    private void Remove(Entry entry)
+    {
+        if (_entries.Remove(entry.Id)) _bytes -= entry.Source.SizeBytes;
+        entry.Root.Dispose();
+    }
     private static void RequireSubject(string subject)
     {
         if (string.IsNullOrWhiteSpace(subject) || subject.Length > 256 || subject.Any(char.IsControl)) throw new ArgumentException("project_subject_invalid");

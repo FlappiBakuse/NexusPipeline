@@ -7,30 +7,42 @@ internal static class DatabaseConnections
     internal static SqliteConnection Open(string path, bool readOnly = false, bool allowPooling = true)
     {
         using var timing = StartupProfile.Measure("database.open");
-        var protectedPath = readOnly ? DatabaseReadScope.ProtectedPath(path) : null;
-        var connection = new SqliteConnection(new SqliteConnectionStringBuilder
-        {
-            DataSource = OperatingSystem.IsWindows() ? PhysicalPathPolicy.NativePath(protectedPath ?? path) : path,
-            Mode = readOnly ? SqliteOpenMode.ReadOnly : SqliteOpenMode.ReadWrite,
-            Cache = SqliteCacheMode.Private,
-            Pooling = allowPooling && protectedPath is not null,
-            DefaultTimeout = 2
-        }.ToString());
+        DatabaseReadPool.BorrowLease? shared = null;
+        SqliteConnection? connection = null;
         try
         {
+            var protectedPath = readOnly ? DatabaseReadScope.ProtectedPath(path) : null;
+            if (readOnly && allowPooling) shared = DatabaseReadPool.Borrow(path);
+            connection = new(new SqliteConnectionStringBuilder
+            {
+                DataSource = OperatingSystem.IsWindows() ? PhysicalPathPolicy.NativePath(protectedPath ?? path) : path,
+                Mode = readOnly ? SqliteOpenMode.ReadOnly : SqliteOpenMode.ReadWrite,
+                Cache = SqliteCacheMode.Private,
+                Pooling = shared?.IsPooled ?? (allowPooling && protectedPath is not null),
+                // Explicit foreign-key enforcement gives the instance pool a key unaffected by scoped pool cleanup.
+                ForeignKeys = shared is null ? null : true,
+                DefaultTimeout = 2
+            }.ToString());
             connection.Open();
-            if (allowPooling && protectedPath is not null) DatabaseReadScope.Track(connection);
+            if (shared is null && allowPooling && protectedPath is not null) DatabaseReadScope.Track(connection);
             using var command = connection.CreateCommand();
             command.CommandText = "PRAGMA foreign_keys=ON; PRAGMA trusted_schema=OFF;";
+            if (shared?.IsPooled == true) command.CommandText += " PRAGMA cache_size=-16384;";
             command.ExecuteNonQuery();
             if (!readOnly)
             {
                 command.CommandText = "PRAGMA synchronous=FULL;";
                 command.ExecuteNonQuery();
             }
+            shared?.Attach(connection);
             return connection;
         }
-        catch { connection.Dispose(); throw; }
+        catch
+        {
+            try { connection?.Dispose(); }
+            finally { shared?.Dispose(); }
+            throw;
+        }
     }
 
     internal static SqliteCommand Command(SqliteConnection connection, SqliteTransaction? transaction, string sql, params object[] values)

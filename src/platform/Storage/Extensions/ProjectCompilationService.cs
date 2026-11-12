@@ -145,8 +145,37 @@ internal sealed class ProjectCompilationService
         catch (IOException error) when (error.Message == "project_secret_publication_pending") { return new("pending", null); }
     }
 
-    internal async ValueTask<T> UseAsync<T>(Guid bindingId, long expectedBindingRevision, string extensionId, JsonElement selection,
+    internal ValueTask<T> UseAsync<T>(Guid bindingId, long expectedBindingRevision, string extensionId, JsonElement selection,
         Action requireCaller, Func<CompiledProjectSnapshot, Action, Action, ValueTask<T>> publish, CancellationToken cancellation,
+        ProjectChoiceLease? choice = null, ResourceOperationLease? actualRoot = null) =>
+        CompileAsync(bindingId, expectedBindingRevision, extensionId, selection, requireCaller,
+            (selected, configurations, consumer, provider, compilerId, chosen, graph, current, live) =>
+            {
+                var snapshot = Capture(selected, configurations, consumer, provider, compilerId, chosen, graph, cancellation, choice);
+                current(); return publish(snapshot, current, live);
+            },
+            cancellation, choice, actualRoot);
+
+    internal async ValueTask<T> PreviewAsync<T>(Guid bindingId, long bindingRevision, string extensionId, JsonElement? selection,
+        Action requireCaller, Func<ProjectPreviewSource, Action, ValueTask<T>> publish, CancellationToken cancellation)
+    {
+        using var choice = selection is null ? new ProjectChoiceLease(_instance, _database, _lease, _resources, _contracts,
+            bindingId, bindingRevision, extensionId) : null;
+        return await CompileAsync(bindingId, bindingRevision, extensionId, selection ?? choice!.Selection, requireCaller,
+            (selected, configurations, consumer, provider, compilerId, chosen, graph, current, _) =>
+            {
+                choice?.RequirePreview(selected, consumer, provider, compilerId, chosen);
+                var readSet = choice is null ? configurations.ReadSet : ConfigurationReadPolicy.Freeze(
+                    configurations.ReadSet.Append(choice.Proof.Source).ToArray());
+                var executable = graph.CanExecute && BindProtected(graph.ProtectedInputs, provider, bindingId, cancellation)
+                    .All(input => input.Reference.SecretId is not null);
+                return publish(ProjectPreviewSource.Create(selected, graph, consumer, provider, chosen, readSet, executable), current);
+            }, cancellation, choice).ConfigureAwait(false);
+    }
+
+    private async ValueTask<T> CompileAsync<T>(Guid bindingId, long expectedBindingRevision, string extensionId, JsonElement selection,
+        Action requireCaller, Func<SelectedProjectSource, ProjectConfigMounts, ProjectCompilerInstallation, ProjectCompilerInstallation,
+            string, JsonElement, FrozenCompilation, Action, Action, ValueTask<T>> publish, CancellationToken cancellation,
         ProjectChoiceLease? choice = null, ResourceOperationLease? actualRoot = null)
     {
         ArgumentNullException.ThrowIfNull(requireCaller); ArgumentNullException.ThrowIfNull(publish);
@@ -197,8 +226,7 @@ internal sealed class ProjectCompilationService
                 using var source = new SelectedSourcePort(selected, Live, cancellation, configurations);
                 var graph = CompilationGraph.Freeze(await compiler.CompileAsync(source, chosen, cancellation).ConfigureAwait(false));
                 Current();
-                var snapshot = Capture(selected, configurations, consumer, provider, use.CompilerId, chosen, graph, cancellation, choice);
-                Current(); return await publish(snapshot, Current, Live).ConfigureAwait(false);
+                return await publish(selected, configurations, consumer, provider, use.CompilerId, chosen, graph, Current, Live).ConfigureAwait(false);
             }
             finally { active = false; }
         }, cancellation).ConfigureAwait(false);
@@ -269,7 +297,8 @@ internal sealed class ProjectCompilationService
         var metadata = configurations.Metadata.ToDictionary(item => item.ResourceId, StringComparer.Ordinal);
         var document = new CompiledProjectDocument("nexus.compiled-project", 1, _instance.InstanceId, source.BindingId,
             source.BindingRevision, source.ScriptRevision, source.RootId, source.RootRevision, source.RootIdentity,
-            new(consumer.Metadata, consumer.ManifestContent), new(provider.Metadata, provider.ManifestContent), compilerId, selection,
+            new(consumer.Metadata, consumer.PersistManifest(blobs, cancellation)),
+            new(provider.Metadata, provider.PersistManifest(blobs, cancellation)), compilerId, selection,
             source.Directories, source.Files.Select(item => new CompiledSourceFile(item.Path, item.Identity, item.Content)).ToImmutableArray(),
             configurations.Mounts.Select(item => new CompiledConfigMount(metadata[item.Saved.Address.ResourceId], item.Manifest)).ToImmutableArray(),
             configurations.ReadSet, configurations.Capture(), resources.ToImmutable(), graph.RootIndex,

@@ -1,6 +1,8 @@
 using System.Runtime.Versioning;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Execution;
+using NexusPipeline.Core.Extensions;
+using NexusPipeline.Core.Maintenance;
 using NexusPipeline.Platform.Processes;
 using NexusPipeline.Platform.Storage;
 using NexusPipeline.Platform.Storage.Extensions;
@@ -22,6 +24,15 @@ public sealed class ColdFailureTests
         await fixture.StartAsync();
         var before = new ExtensionPayloadBinding(fixture.Instance, fixture.Package.Catalog.Database,
             fixture.Package.Catalog.Contracts, fixture.Roots).Read(fixture.JournalId, fixture.Plan);
+        var contracts = fixture.Package.Catalog.Contracts;
+        var blobs = new ImmutableBlobStore(fixture.Instance, contracts);
+        var candidate = before.Source.Package!.Archive;
+        var original = new PayloadSourceCodec(fixture.Instance, contracts)
+            .ReadOriginalArchive(before.Source, before.Plan, fixture.Roots)!;
+        var pending = new BlobReferenceIndex(fixture.Instance, contracts, fixture.Package.Catalog.Database, blobs, fixture.Roots);
+        Assert.True(pending.IsReferenced(candidate));
+        Assert.True(pending.IsReferenced(original));
+        blobs.Verify(candidate); blobs.Verify(original);
         var failure = before.Restoration[0].Record.Failure;
         Assert.NotNull(failure); Assert.Equal(fixture.Native.ProcessId, failure.Writer.Process.ProcessId);
         Assert.Equal(fixture.Native.CreatedAtUtc, failure.Writer.Process.CreatedAtUtc);
@@ -60,6 +71,17 @@ public sealed class ColdFailureTests
         for (var i = 0; i < bytes.Length; i++) Assert.Equal(bytes[i], after.History[i].Export());
         var final = after.Latest.Export();
         _ = new StartupJournalRecovery(fixture.Instance, fixture.Package.Catalog.Contracts, database, fixture.Roots).Recover(lease);
+        Assert.Equal(final, Read().Latest.Export());
+        var references = new BlobReferenceIndex(fixture.Instance, contracts, database, blobs, fixture.Roots);
+        Assert.True(references.IsReferenced(original));
+        Assert.False(references.IsReferenced(candidate));
+        var resources = new ResourceLeaseManager(new HostLifecycle(index, TimeProvider.System));
+        var cleanup = new ExtensionArchiveCleanup(fixture.Instance, database, lease, contracts, fixture.Roots, resources, index);
+        Assert.Equal("completed", cleanup.RunNextPage(fixture.JournalId, candidate, default)!.Acceptance.Status);
+        Assert.False(File.Exists(Path.Combine(fixture.Instance.RuntimeRoot, candidate.RelativePath)));
+        blobs.Verify(original);
+        var query = new ExtensionQueryService(fixture.Instance, lease, database, contracts, fixture.Roots);
+        Assert.Equal(ExtensionApplyOutcome.OriginalRestored, query.Read(before.Plan.OperationId, before.Identity.SubjectId)!.Outcome);
         Assert.Equal(final, Read().Latest.Export());
 
         BoundExtensionPayload Read() => new ExtensionPayloadBinding(fixture.Instance, database,

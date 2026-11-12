@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using System.Security.Cryptography;
 using NexusPipeline.Core.Configuration;
 using NexusPipeline.Core.Maintenance;
 using NexusPipeline.Core.Operations;
@@ -16,6 +17,25 @@ namespace NexusPipeline.StorageTests;
 
 public sealed class SettingsStartupTests
 {
+    [Fact(DisplayName = "A Declared Startup Image Digest Defers Content Verification Until Enable And Rejects Changed Bytes Before Opening The Scheduler")]
+    public void KeepsDeclaredImageDigest()
+    {
+        using var fixture = new Fixture();
+        var executable = System.IO.Path.Combine(fixture.Root, "declared-launcher.exe");
+        var expected = Convert.ToHexStringLower(SHA256.HashData(new byte[] { 1, 3, 5, 7 }));
+        byte[] changed = [2, 4, 6, 8]; File.WriteAllBytes(executable, changed);
+        var effects = new DeclaredImageEffects();
+        var service = HostStartupSettings.CreateForInstallation(fixture.Instance, fixture.Database, fixture.Lease,
+            fixture.Resources, fixture.Index, executable, effects, expected);
+        Assert.False(service.Read().Saved.Values.AutoStart);
+        var change = new HostSettingsChange(0, HostSettings.Default with { AutoStart = true });
+        var result = service.Save(Identity(change), change, DateTimeOffset.UtcNow);
+        Assert.Equal(StartupEffectState.Quarantined, result.StartupEffect!.State);
+        Assert.False(service.Read().Effective.AutoStart);
+        Assert.False(effects.OpenedScheduler);
+        Assert.Equal(changed, File.ReadAllBytes(executable));
+    }
+
     [Fact(DisplayName = "Startup Settings Commit Precedes Snapshot And System Effects And Old Replay Cannot Reenable The Task")]
     public void OrdersStartupEffects()
     {
@@ -178,6 +198,19 @@ public sealed class SettingsStartupTests
             Service = HostStartupSettings.CreateForInstallation(Instance, Database, Lease, Resources, Index, executable, Effects);
         }
         public void Dispose() => Lease.Dispose();
+    }
+
+    private sealed class DeclaredImageEffects : IStartupRegistrationEffects
+    {
+        internal bool OpenedScheduler;
+        public StartupRegistrationInspection Inspect(StartupRegistrationDefinition expected) => new(StartupRegistrationState.Missing, null);
+        public void ValidateOnly(StartupRegistrationDefinition definition) { }
+        public StartupRegistrationEffect RemoveIfMatching(StartupRegistrationDefinition expected) => StartupRegistrationEffect.AlreadySatisfied;
+        public StartupRegistrationEffect CreateIfMissing(StartupRegistrationCommand command) => new StartupRegistrationEffects(() =>
+        {
+            OpenedScheduler = true;
+            throw new IOException("fixture_scheduler_opened");
+        }).CreateIfMissing(command);
     }
 
 }

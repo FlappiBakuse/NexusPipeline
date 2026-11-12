@@ -6,11 +6,13 @@ using NexusPipeline.Core.Maintenance;
 using NexusPipeline.Core.Operations;
 using NexusPipeline.Platform.Extensions;
 using NexusPipeline.Platform.Serialization;
+using NexusPipeline.Platform.Processes;
 using NexusPipeline.Platform.Storage.Journals;
 using NexusPipeline.Platform.Storage.Sqlite;
 
 namespace NexusPipeline.Platform.Storage.Extensions;
 
+[SupportedOSPlatform("windows")]
 internal sealed class PreparedExtensionPayload : IDisposable
 {
     private readonly object _gate = new();
@@ -29,6 +31,7 @@ internal sealed class PreparedExtensionPayload : IDisposable
     private readonly ExtensionPayloadSource _source;
     private readonly OperationIdentity _identity;
     private readonly BlobReference _planReference;
+    private readonly ProcessIdentityLease _executor;
     private bool _disposed;
 
     private PreparedExtensionPayload(RuntimeInstance instance, StateDatabase database, InstanceLease lease, IRecoveryIndex recovery,
@@ -39,6 +42,7 @@ internal sealed class PreparedExtensionPayload : IDisposable
         _instance = instance; _database = database; _lease = lease; _root = root; _borrow = borrow;
         _recovery = recovery; _parent = parent; _candidate = candidate; _blobs = blobs; _contracts = contracts; _roots = roots;
         _plan = plan; _source = source; _identity = identity; _planReference = planReference;
+        _executor = lease.ExecutorIdentity;
     }
 
     [SupportedOSPlatform("windows")]
@@ -138,9 +142,12 @@ internal sealed class PreparedExtensionPayload : IDisposable
                     CatalogPackageSource? package = null;
                     if (binding is not null)
                     {
-                        var archive = blobs.PersistContent(binding.ArchivePath,
-                            new(Path.GetFileName(binding.ArchivePath), FileObjectKind.File,
-                                binding.Entry.ArtifactBytes, binding.Entry.ArtifactSha256), cancellation);
+                        var archive = new BlobReference($"blobs/content/{binding.Entry.ArtifactSha256}.bin",
+                            binding.Entry.ArtifactBytes, binding.Entry.ArtifactSha256);
+                        if (binding.ArchivePath != Path.Combine(instance.RuntimeRoot, archive.RelativePath.Replace('/', Path.DirectorySeparatorChar)))
+                            archive = blobs.PersistContent(binding.ArchivePath,
+                                new(Path.GetFileName(binding.ArchivePath), FileObjectKind.File,
+                                    binding.Entry.ArtifactBytes, binding.Entry.ArtifactSha256), cancellation);
                         package = new(catalog!, binding.Entry, archive);
                     }
                     var source = new ExtensionPayloadSource(PayloadSourceCodec.Format, 1, instance.InstanceId,
@@ -223,7 +230,7 @@ internal sealed class PreparedExtensionPayload : IDisposable
                     if (registered.Kind != JournalKind.ExtensionApply || registered.OperationId != _identity.OperationId ||
                         registered.PlanPath != _planReference.RelativePath || registered.PlanDigest != _planReference.Sha256)
                         throw Invalid();
-                    _ = new JournalWriterStore(_database).RequireCurrentExecutor(registered.JournalId);
+                    _ = new JournalWriterStore(_database).RequireCurrentExecutor(registered.JournalId, _executor);
                     var package = binding is null ? null : new NexusPipeline.Core.Extensions.ExtensionPackageIdentity(_source.ExtensionId,
                         binding.Entry.PackageVersion, binding.Entry.Kind == "managed-code"
                             ? NexusPipeline.Core.Extensions.ExtensionPackageKind.ManagedCode
@@ -234,7 +241,7 @@ internal sealed class PreparedExtensionPayload : IDisposable
                         original?.Metadata.Footprint != _source.OriginalFootprint) throw Invalid();
                     if (original is not null)
                     {
-                        var stopped = new JournalWriterStore(_database).ObserveForCurrentExecutor(original.Metadata.JournalId);
+                        var stopped = new JournalWriterStore(_database).ObserveForCurrentExecutor(original.Metadata.JournalId, _executor);
                         if (!stopped.IsComplete || stopped.State != NexusPipeline.Core.Execution.WriterState.Stopped)
                             throw new IOException("extension_original_writer_stop_unconfirmed");
                     }
@@ -272,7 +279,7 @@ internal sealed class PreparedExtensionPayload : IDisposable
             {
                 var bound = new ExtensionPayloadBinding(_instance, _database, _contracts, _roots).Read(_plan.JournalId, _planReference);
                 if (bound.Identity != _identity || bound.Commit is not null) throw Invalid();
-                _ = new JournalWriterStore(_database).RequireCurrentExecutor(_plan.JournalId);
+                _ = new JournalWriterStore(_database).RequireCurrentExecutor(_plan.JournalId, _executor);
                 _database.Write((connection, transaction) =>
                 {
                     PayloadEffectCursor.RequireInside(connection, transaction, bound.Registered, _source, _identity);

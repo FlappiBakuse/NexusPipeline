@@ -20,7 +20,7 @@ Core 负责纯规则。SQL、文件、恢复记录与外部副作用仍由明确
 | HostMaintenanceController | HostUpdateService、MaintenancePendingStore | AutomaticUpdatePolicy | 可信 feed、维护操作、payload journal | drain、实际跨进程交接、候选验证 |
 
 StateDatabase 单写门、InstanceLease、ResourceLeaseManager 和 RecoveryIndex 提供已有的公共约束，
-不成为第二个业务状态 owner。恢复从 JournalStartupAdmission 和 StartupJournalRecovery 进入，
+不成为第二个业务状态 owner。普通启动由 StateDatabase.OpenCurrent 与 StartupJournalRecovery 处理身份、格式及当前恢复候选；显式完整诊断通过 JournalStartupAdmission 检查历史库存，
 各 journal kind 的 typed owner 负责自己的计划与物理证据；未知副作用不自动重放。
 
 执行 writer 和取消入口直接调用 ExecutionAttemptProjection，并传入当前 ContractReader。
@@ -30,7 +30,7 @@ ExecutionRunFinality 由 Platform 完成操作消费者直接使用；Core 保�
 当前队列主线：Host AutomationUseCases/ExchangeUseCases 校验敏感动作权限 → ExecutionAdmission 冻结输入 → BindingSkipStore 使用 Core RetryDecision 分类 → CompletionIntentSource 统一完成候选 → LocalCompletionAuthorization 核真实来源 → CompletionActionStore/Effects 持久倒计时及效果。
 配置主线：ValueService 拥有输入并传类型 → ConfigurationPatchService 保留资源租约前后幂等查询/CAS → ConfigurationRevisionStore 持久发布。
 调度主线：ScheduleRuntimeService → ScheduleOccurrenceStore（内部调用 ScheduleMinutePolicy）→ 等待准入；未知时区诊断仅影响该日程。
-JournalStartupAdmission 在一次核验作用域复用同一只读 StateDatabase；仍检查全部历史与停止证明。当前 schema 为唯一准入，旧或未知原字节只读拒绝。
+JournalStartupAdmission 在显式完整诊断的一次核验作用域复用同一只读 StateDatabase，检查全部历史与停止证明。普通恢复只核对当前候选，完成历史在对应读取、维护或诊断时验证。当前 schema 为唯一准入，旧或未知原字节只读拒绝。
 
 ## 运行配置绑定证据
 

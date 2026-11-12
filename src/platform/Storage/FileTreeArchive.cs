@@ -12,8 +12,20 @@ public sealed record ArchivedFileTree(FileTreeSnapshot Snapshot, IReadOnlyList<P
 
 public sealed class FileTreeArchive(FileTreeScanner scanner, ImmutableBlobStore blobs)
 {
+    internal void MaterializePackage(FrozenPayloadApply plan, string destination, CancellationToken cancellation) =>
+        Extensions.ExtensionPackageMaterializer.Materialize(blobs, plan, destination, cancellation);
+
     public ArchivedFileTree Capture(string requestedSource, CancellationToken cancellationToken)
         => CaptureCore(requestedSource, cancellationToken, scanner.CaptureArchive);
+
+    internal ArchivedFileTree Inspect(string requestedSource, CancellationToken cancellation)
+    {
+        var source = PhysicalPathPolicy.NormalizeWithoutLinks(requestedSource);
+        var snapshot = scanner.CaptureArchive(source, cancellation);
+        return new(snapshot, PhysicalTreeIdentity.Capture(source, snapshot), snapshot.Entries
+            .Where(item => item.Kind == FileObjectKind.File).Select(item =>
+                new BlobReference($"blobs/content/{item.Sha256}.bin", item.SizeBytes, item.Sha256!)).Distinct().ToArray());
+    }
 
     internal ArchivedFileTree CaptureApplication(string requestedSource, CancellationToken cancellationToken)
         => CaptureCore(requestedSource, cancellationToken, (path, cancellation) => ApplicationTree.Capture(scanner, path, cancellation));

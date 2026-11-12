@@ -13,11 +13,13 @@ internal sealed class ProcessIdentityLease : IDisposable
     private readonly PhysicalObjectIdentity _identity;
     private readonly string _path;
     private readonly string _sha256;
+    private readonly long _length;
     private bool _disposed;
 
     private ProcessIdentityLease(string path, StableDirectoryLease directory, FileStream image)
     {
         _path = path; _directory = directory; _image = image;
+        _length = image.Length;
         _identity = PhysicalObjectIdentity.Read(image.SafeFileHandle);
         if (PhysicalObjectIdentity.Read(path) != _identity) throw new IOException("process_image_identity_changed");
         using var timing = StartupProfile.Measure("process.image-hash");
@@ -70,6 +72,7 @@ internal sealed class ProcessIdentityLease : IDisposable
             ObjectDisposedException.ThrowIf(_disposed, this);
             var metadata = ProcessIdentityReader.ReadMetadata(process, processId);
             if (!StringComparer.OrdinalIgnoreCase.Equals(metadata.ImagePath, _path) ||
+                _image.Length != _length || PhysicalObjectIdentity.Read(_image.SafeFileHandle) != _identity ||
                 PhysicalObjectIdentity.Read(_path) != _identity) throw new IOException("process_image_identity_changed");
             return new(metadata.ProcessId, metadata.CreatedAtUtc, metadata.ImagePath, _sha256, metadata.UserSid, metadata.IsElevated);
         }

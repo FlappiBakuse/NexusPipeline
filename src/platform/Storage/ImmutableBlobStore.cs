@@ -78,10 +78,12 @@ public sealed class ImmutableBlobStore
         using var input = OpenVerified(reference);
     }
 
-    public FileStream OpenVerified(BlobReference reference)
+    public FileStream OpenVerified(BlobReference reference) => OpenVerified(reference, retainInScope: true);
+
+    internal FileStream OpenVerified(BlobReference reference, bool retainInScope)
     {
         var path = Resolve(reference, readLeaf: OperatingSystem.IsWindows());
-        if (OperatingSystem.IsWindows()) return BlobReadStream.Open(path, reference);
+        if (OperatingSystem.IsWindows()) return BlobReadStream.Open(path, reference, retainInScope);
         var input = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
         try
         {

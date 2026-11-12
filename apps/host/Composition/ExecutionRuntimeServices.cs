@@ -37,7 +37,7 @@ internal sealed class ExecutionRuntimeServices : IAsyncDisposable
 
     internal ExecutionRuntimeServices(RuntimeInstance instance, StateDatabase database, ContractReader contracts, InstanceLease lease,
         ResourceLeaseManager resources, HostLifecycle lifecycle, RecoveryIndex recovery, ExecutionProviderRegistry providers, SecretFieldService secrets,
-        NativeClientBinding? nativeBinding = null)
+        NativeClientBinding? nativeBinding = null, NotificationStartupState? notifications = null)
     {
         using var paths = DirectoryAttributeScope.Hold(instance);
         using var blobs = BlobReadScope.Hold(instance);
@@ -48,7 +48,7 @@ internal sealed class ExecutionRuntimeServices : IAsyncDisposable
                 JudgementRuntimeDiscovery.FindPython()), providers: providers);
         History = new(instance, database, contracts, lease);
         Notifications = new(instance, database, contracts, lease, resources, recovery, secrets);
-        try { Notifications.InitializeStartup(); }
+        try { Notifications.InitializeStartup(notifications); }
         catch { Notifications.DisposeAsync().AsTask().GetAwaiter().GetResult(); throw; }
         var finality = new ExecutionRunFinality(instance, database, contracts);
         try { Authorization = new(instance, database, contracts, lease, finality, nativeBinding); }

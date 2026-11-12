@@ -31,8 +31,23 @@ internal sealed class FileCleanupProjection(JournalStore store, RecoveryJournalR
                     desired == FileEffectState.NotExecuted ? new(true, false, false, false) : null);
                 observer?.Reached(CleanupPersistencePoint.OutboxCommitted, plan.JournalId, next.Revision, next.Phase);
             }
-            registry.Advance(registered with { Revision = next.Revision, Phase = next.Phase }, next.Revision - 1,
-                noEffects ? new(true, false, false, false) : null, verifiedRecovery);
+            registry.Database.Write((connection, transaction) =>
+            {
+                registry.AdvanceInside(connection, transaction, registered with { Revision = next.Revision, Phase = next.Phase },
+                    next.Revision - 1, noEffects ? new(true, false, false, false) : null, verifiedRecovery);
+                if (next.Phase == JournalPhase.Committed)
+                {
+                    using var command = connection.CreateCommand(); command.Transaction = transaction;
+                    command.CommandText = "UPDATE operations SET status='completed' WHERE initial_journal_id=$journal " +
+                        "AND operation_id=$operation AND operation_kind IN ($kind,$content) AND status='accepted';";
+                    command.Parameters.AddWithValue("$journal", plan.JournalId.ToString("D"));
+                    command.Parameters.AddWithValue("$operation", plan.OperationId.ToString("D"));
+                    command.Parameters.AddWithValue("$kind", ExtensionArchiveCleanup.OperationKind);
+                    command.Parameters.AddWithValue("$content", ExtensionArchiveCleanup.ContentOperationKind);
+                    command.ExecuteNonQuery();
+                }
+                return true;
+            });
             observer?.Reached(CleanupPersistencePoint.SqlProjectionCommitted, plan.JournalId, next.Revision, next.Phase);
         }
     }
@@ -67,6 +82,15 @@ internal sealed class FileCleanupProjection(JournalStore store, RecoveryJournalR
                 }
                 registry.AdvanceInside(connection, transaction, current with { Revision = next.Revision, Phase = next.Phase },
                     current.Revision, noEffects ? new(true, false, false, false) : null, verifiedRecovery);
+                if (next.Phase == JournalPhase.Committed)
+                {
+                    using var command = connection.CreateCommand(); command.Transaction = transaction;
+                    command.CommandText = "UPDATE operations SET status='completed' WHERE operation_id=$operation " +
+                        "AND operation_kind='file.cleanup' AND status='accepted' AND initial_journal_id=$journal;";
+                    command.Parameters.AddWithValue("$operation", plan.OperationId.ToString("D"));
+                    command.Parameters.AddWithValue("$journal", plan.JournalId.ToString("D"));
+                    if (command.ExecuteNonQuery() != 1) throw new IOException("extension_work_operation_unbound");
+                }
                 return true;
             });
             if (next.Phase is JournalPhase.Committed or JournalPhase.Quarantined) work.ReleaseProtectedEvidence();

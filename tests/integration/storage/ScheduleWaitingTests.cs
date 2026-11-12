@@ -104,7 +104,7 @@ public sealed class ScheduleWaitingTests
         var calls = clock.ReadCount;
         _ = fixture.Store.CommitCurrentMinute();
         Assert.Equal(calls + 1, clock.ReadCount);
-        Assert.Equal(1, fixture.Store.ReadCheckpoint().Watermark.Revision);
+        Assert.Equal(0, fixture.Store.ReadCheckpoint().Watermark.Revision);
         Assert.Equal(0, fixture.Count("journal_writer_job_roots"));
         ScheduleMinuteInventory.Verify(fixture.Source.Database);
     }

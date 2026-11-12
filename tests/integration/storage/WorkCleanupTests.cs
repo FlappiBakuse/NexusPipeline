@@ -35,8 +35,37 @@ public sealed class WorkCleanupTests(ITestOutputHelper output)
             .ReadCurrent("fixture-plugin")!.Metadata);
         var repeated = await fixture.RunAsync(result.Acceptance.OperationId);
         Assert.False(repeated.Acceptance.IsNew); Assert.Equal(result.JournalId, repeated.JournalId); Assert.Equal(result.Plan, repeated.Plan);
+        Assert.Equal("completed", repeated.Acceptance.Status);
         var ready = new StartupJournalRecovery(owner.Instance, owner.Contracts, owner.Database, fixture.Original.Roots).Recover(owner.Lease);
         Assert.True(ready.Current.IsReady);
+    }
+
+    [Fact(DisplayName = "The Host Sweep Waits For The Producer And The Durable Page Chain Resumes")]
+    public async Task ResumesSweptPages()
+    {
+        await using var fixture = await WorkCleanupFixture.CreateAsync(files: 70);
+        var owner = fixture.Original.Package.Catalog;
+        var roots = fixture.Original.Roots;
+        var original = fixture.Producer.Latest.Export();
+        var foreign = Directory.CreateDirectory(Path.Combine(roots.ExtensionPayloadRoot,
+            ExtensionWorkspacePath.Prefix + Guid.NewGuid().ToString("N"))).FullName;
+        var sentinel = Path.Combine(foreign, "foreign.bin"); File.WriteAllBytes(sentinel, [1, 3, 5]);
+        ExtensionWorkSweep Sweep() => new(owner.Database, roots, owner.Index, fixture.Original.Activator, fixture.Service());
+
+        await Sweep().SweepAsync(1, default);
+        Assert.True(Directory.Exists(fixture.Workspace));
+        var registry = new RecoveryJournalRegistry(owner.Database);
+        Assert.DoesNotContain(registry.ReadHistory(), item => item.Kind == JournalKind.FileCleanup);
+        Assert.True(await fixture.Service().RunNextPageAsync(fixture.Producer.Plan.JournalId, default));
+        var first = Assert.Single(registry.ReadHistory(), item => item.Kind == JournalKind.FileCleanup);
+        var firstBytes = new JournalStore(owner.Instance, owner.Contracts).Read(first.JournalId).Export();
+
+        for (var page = 0; page < 3 && Directory.Exists(fixture.Workspace); page++)
+            Assert.True(await fixture.Service().RunNextPageAsync(fixture.Producer.Plan.JournalId, default));
+        Assert.False(Directory.Exists(fixture.Workspace));
+        Assert.Equal(firstBytes, new JournalStore(owner.Instance, owner.Contracts).Read(first.JournalId).Export());
+        Assert.Equal(original, fixture.Original.Binding().Read(fixture.Producer.Plan.JournalId, fixture.Producer.PlanReference).Latest.Export());
+        Assert.Equal(new byte[] { 1, 3, 5 }, File.ReadAllBytes(sentinel));
     }
 
     [Fact(DisplayName = "A Real Three Hundred File Backup Uses Bounded Pages And Only The Final Page Removes Its Workspace")]

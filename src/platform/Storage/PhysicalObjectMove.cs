@@ -12,7 +12,7 @@ internal sealed record FileObjectMove(string Source, PhysicalObjectIdentity Sour
 
 internal static class PhysicalObjectMove
 {
-    internal static void MoveVerified(FileObjectMove intent)
+    internal static void MoveVerified(FileObjectMove intent, SafeFileHandle? owned = null)
     {
         if (intent.Kind is not (FileObjectKind.File or FileObjectKind.Directory)) throw new ArgumentException("physical_move_kind_invalid");
         var source = PhysicalPathPolicy.NormalizeWithoutLinks(intent.Source);
@@ -29,7 +29,8 @@ internal static class PhysicalObjectMove
         if (PhysicalObjectIdentity.Read(sourceParentHandle) != intent.SourceParent ||
             PhysicalObjectIdentity.Read(destinationParentHandle) != intent.DestinationParent)
             throw new IOException("physical_move_parent_changed");
-        using var entry = Open(source, 0x00110080);
+        using var opened = owned is null ? Open(source, 0x00110080) : null;
+        var entry = owned ?? opened!;
         if (PhysicalObjectIdentity.Read(entry) != intent.SourceIdentity) throw new IOException("physical_move_object_changed");
         if (!ReadAttributes(entry, 9, out var attributes, 8)) throw Failure("physical_move_attributes_unavailable");
         if (((attributes.Attributes & 0x10) != 0) != (intent.Kind == FileObjectKind.Directory))

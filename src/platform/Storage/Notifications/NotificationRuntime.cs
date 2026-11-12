@@ -117,14 +117,15 @@ public sealed class NotificationRuntime : IAttemptTerminalObserver, IAsyncDispos
         }
     }
 
-    public void InitializeStartup()
+    public void InitializeStartup(NotificationStartupState? verified = null)
     {
         ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         using var registering = _activity.BeginRegistration();
         try
         {
+            verified?.Consume(_instance, _lease.StartupGeneration);
             while (_registration.ReconcilePending(64) == 64) { }
-            if (!_queue.ReadVerifiedPending()) return;
+            if (!_queue.HasIndexedPending()) return;
             using var root = _resources.TryAcquire(Guid.NewGuid(), [new("notifications:queue", ResourceClaimMode.Mutation)]).Lease ??
                 throw new IOException("notification_startup_queue_blocked");
             _activity.Ensure(root);
@@ -135,6 +136,8 @@ public sealed class NotificationRuntime : IAttemptTerminalObserver, IAsyncDispos
     public void OnCommitted(AttemptReceipt receipt)
     {
         using var registering = _activity.BeginRegistration();
+        using var reads = new NotificationAttemptReads(_instance, _database, _contracts, _lease);
+        reads.HoldJournal(receipt.JournalId);
         _records.OnCommitted(receipt);
         _registration.OnCommitted(receipt);
         var status = _delivery.ReadPendingForRun(receipt.Facts.RunId);
@@ -180,25 +183,28 @@ public sealed class NotificationRuntime : IAttemptTerminalObserver, IAsyncDispos
         try
         {
             if (!_activity.IsActive) return;
-            _sender.ReconcilePendingResults();
+            using var reads = new NotificationAttemptReads(_instance, _database, _contracts, _lease);
+            _sender.ReconcilePendingResults(reads);
             using (var materialization = _activity.Continue(Guid.NewGuid()))
             {
                 if (materialization is null) return;
-                _delivery.MaterializePending(64);
+                _delivery.MaterializePending(64, reads);
             }
-            var sending = _queue.Read("sending", _sendingAfter);
+            var sending = _queue.Read("sending", _sendingAfter, reads);
             foreach (var item in sending)
             {
                 using var root = _activity.Continue(item.Operation);
                 if (root is null) return;
+                reads.HoldDelivery(item.Operation);
                 _sender.ReconcileStoppedOwner(root, _resources, item.Reference);
             }
             _sendingAfter = sending.Count == 4 ? sending[^1].Operation : null;
-            foreach (var item in _queue.Read("queued"))
+            foreach (var item in _queue.Read("queued", reads: reads))
             {
                 cancellation.ThrowIfCancellationRequested();
                 using var root = _activity.Continue(item.Operation);
                 if (root is null) return;
+                reads.HoldDelivery(item.Operation);
                 await _sender.SendOwnedAsync(root, _resources, item.Reference, cancellation).ConfigureAwait(false);
             }
             TryReleaseSettled();
@@ -211,7 +217,8 @@ public sealed class NotificationRuntime : IAttemptTerminalObserver, IAsyncDispos
         var epoch = _activity.ReadReleaseEpoch();
         if (epoch is null) return false;
         using var root = _activity.Continue(Guid.NewGuid());
-        if (root is null || _queue.HasIndexedPending() || _queue.ReadVerifiedPending()) return false;
+        if (root is null || _queue.HasIndexedPending()) return false;
+        _queue.VerifyProjection();
         return _activity.TryRelease(epoch.Value);
     }
 

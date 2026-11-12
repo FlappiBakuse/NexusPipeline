@@ -8,6 +8,23 @@ internal sealed record ExtensionInstalledMetadata(string ExtensionId, long Revis
 
 internal static class ExtensionInstalledRows
 {
+    internal static HashSet<string> ReadArchiveDigests(StateDatabase database)
+    {
+        using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
+        using var transaction = connection.BeginTransaction(deferred: true);
+        using var command = connection.CreateCommand(); command.Transaction = transaction;
+        command.CommandText = "SELECT extension_id FROM extension_installations UNION SELECT extension_id FROM extension_installation_revisions;";
+        var extensions = new List<string>();
+        using (var rows = command.ExecuteReader())
+            while (rows.Read()) extensions.Add(rows.GetString(0));
+        var digests = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var extension in extensions)
+            if (ReadCurrentMetadata(connection, transaction, extension) is { IsInstalled: true } installed)
+                digests.Add(installed.Package.ArchiveSha256);
+        transaction.Commit();
+        return digests;
+    }
+
     internal static ExtensionInstalledMetadata? ReadCurrentMetadata(SqliteConnection connection,
         SqliteTransaction transaction, string extensionId)
     {
