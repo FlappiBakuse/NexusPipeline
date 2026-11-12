@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import type { RecordsStore } from '../app/store-ports';
 import type { AttemptFacts, AttemptTiming } from '../control/records';
+import type { ActiveRun } from '../control/execution';
 import ExtensionOutlet from '../extensions/ExtensionOutlet.vue';
 import HistoryInvocations from './HistoryInvocations.vue';
 import AttemptLogs from './AttemptLogs.vue';
@@ -24,6 +25,7 @@ const props = withDefaults(
     stepIds?: string[];
     stepNames?: { stepId: string; scriptName: string }[];
     userId?: string;
+    preparedReport?: ActiveRun;
   }>(),
   { ordinal: 1 }
 );
@@ -44,7 +46,7 @@ watch(root, (element) => {
     (entries) => {
       shown.value = entries[0]?.isIntersecting === true;
     },
-    { rootMargin: '240px' }
+    { rootMargin: '0px' }
   );
   observer.observe(element);
 });

@@ -4,6 +4,24 @@ import type { RecordPage } from '../../apps/web/src/control/models.js';
 export async function recordWindowContract(check: (condition: unknown, name: string) => void): Promise<void> {
   const window = new RecordWindow();
   const scope = new AbortController();
+  const cached = new RecordWindow();
+  let requests = 0;
+  const cachedRead = async (cursor: RecordPage['next']): Promise<RecordPage> => {
+    requests++;
+    return { items: [{ runId: cursor ? 'second' : 'first' }],
+      ...(cursor ? {} : { next: { endedAt: '2026-10-24T00:00:00Z', runId: 'first' } }) };
+  };
+  await cached.read(1, cachedRead, scope.signal, true, 'instance-and-permissions-one');
+  await cached.read(2, cachedRead, scope.signal, false, 'instance-and-permissions-one');
+  const returned = await cached.read(1, cachedRead, scope.signal, false, 'instance-and-permissions-one');
+  check(returned.data.items[0]!.runId === 'first' && requests === 2, 'returning to a visited page reuses its verified rows');
+  returned.data.items[0]!.runId = 'local-view-change';
+  const isolated = await cached.read(1, cachedRead, scope.signal, false, 'instance-and-permissions-one');
+  check(isolated.data.items[0]!.runId === 'first', 'display changes cannot modify cached record data');
+  await cached.read(1, cachedRead, scope.signal, false, 'other-instance-or-permissions');
+  check(requests === 3, 'another instance or permission scope reads its own current data');
+  await cached.read(1, cachedRead, scope.signal, true, 'other-instance-or-permissions');
+  check(requests === 4, 'an explicit refresh replaces cached pages');
   const id = (index: number) => '00000000-0000-4000-8000-' + index.toString(16).padStart(12, '0');
   const read = async (cursor: RecordPage['next']): Promise<RecordPage> => {
     const start = cursor ? parseInt(cursor.runId.slice(-12), 16) + 1 : 0;

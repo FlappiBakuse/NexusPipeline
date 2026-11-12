@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import type { RecordsStore } from '../app/store-ports';
 import type { RecordRow } from '../control/models';
 import { historyAttempts, historyDisplay, type HistoryAttempt, type HistoryDisplay } from '../control/records';
-import { executionRun, type ActiveStep } from '../control/execution';
+import { executionRun, type ActiveStep, type ActiveRun } from '../control/execution';
 import { historyRow } from './history-row';
 import {
   historyDuration,
@@ -21,6 +21,7 @@ const emit = defineEmits<{ close: []; attempt: [id: string] }>();
 const attempts = ref<HistoryAttempt[]>([]);
 const display = ref<HistoryDisplay>();
 const steps = ref<ActiveStep[]>([]);
+const report = ref<ActiveRun>();
 const error = ref('');
 const active = ref(true);
 let owner: AbortController | undefined;
@@ -70,8 +71,10 @@ async function load(): Promise<void> {
     ]);
     controller.signal.throwIfAborted();
     if (details[0].status === 'fulfilled') display.value = details[0].value;
-    if (details[1].status === 'fulfilled')
+    if (details[1].status === 'fulfilled') {
+      report.value = details[1].value;
       steps.value = details[1].value.steps.filter(step => !props.row.userId || step.userId === props.row.userId);
+    }
     for (const result of details) if (result.status === 'rejected') props.store.report(result.reason);
     if (props.attemptId) {
       await nextTick();
@@ -95,6 +98,7 @@ watch(
       attempts.value = [];
       display.value = undefined;
       steps.value = [];
+      report.value = undefined;
     }
     if (visible) void load();
   },
@@ -174,6 +178,7 @@ onBeforeUnmount(() => owner?.abort());
         :facts="item.facts"
         :timing="timing(item.attemptId)"
         :step-names="display?.steps"
+        :prepared-report="item.attemptId === report?.attemptId ? report : undefined"
         :step-ids="row.userId ? display?.accounts.find(account => account.userId === row.userId)?.stepIds || [] : undefined"
         v-bind="row.userId ? { userId: row.userId } : {}"
         @focus="emit('attempt', item.attemptId)"

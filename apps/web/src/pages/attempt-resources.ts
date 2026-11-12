@@ -1,7 +1,7 @@
 import { onBeforeUnmount, reactive, watch, type Ref } from 'vue';
 import type { RecordsStore } from '../app/store-ports';
 import { ControlFailure, arrayValue, boundedInteger, objectValue, stringValue } from '../control/client';
-import { executionRun, type ActiveStep } from '../control/execution';
+import { executionRun, type ActiveStep, type ActiveRun } from '../control/execution';
 import { historyImage, type AttemptFacts, type HistoryImage } from '../control/records';
 
 export type HistoryLog = Record<string, unknown> & {
@@ -12,7 +12,7 @@ export const historyLogId = (log: HistoryLog): string =>
 type Kind = 'logs' | 'images' | 'report';
 type Status = { loaded: boolean; busy: boolean; requested: boolean; indexing: boolean; error: string };
 type Catalog<T> = Status & { items: T[]; next: number | null };
-type Props = { store: RecordsStore; runId: string; attemptId: string; stepIds?: string[]; userId?: string };
+type Props = { store: RecordsStore; runId: string; attemptId: string; stepIds?: string[]; userId?: string; preparedReport?: ActiveRun };
 const status = (): Status => ({ loaded: false, busy: false, requested: true, indexing: false, error: '' });
 const catalog = <T>(): Catalog<T> => ({ ...status(), items: [], next: -1 });
 
@@ -72,7 +72,8 @@ export function useAttemptResources(props: Props, active: Ref<boolean>) {
     }
   }
   async function loadReport(signal: AbortSignal, guard: () => void): Promise<void> {
-    const report = await props.store.client.read(base() + '/report', executionRun, signal);
+    const report = props.preparedReport?.attemptId === props.attemptId && props.preparedReport.runId === props.runId
+      ? props.preparedReport : await props.store.client.read(base() + '/report', executionRun, signal);
     guard();
     if (report.runId !== props.runId || report.attemptId !== props.attemptId) throw Error('history_report_identity_invalid');
     state.report.steps = report.steps.filter(step => !props.stepIds || props.stepIds.includes(step.stepId));

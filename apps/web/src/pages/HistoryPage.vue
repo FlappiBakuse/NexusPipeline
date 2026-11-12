@@ -141,7 +141,9 @@ async function load(target = 1, reset = true): Promise<void> {
       target,
       (cursor) => fetchPage(cursor, 50),
       controller.signal,
-      reset
+      reset,
+      JSON.stringify([query.toString(), props.store.state.capabilities?.instanceId,
+        props.store.state.capabilities?.hostVersion, props.store.state.capabilities?.capabilities])
     );
     controller.signal.throwIfAborted();
     page.value = result.data;
