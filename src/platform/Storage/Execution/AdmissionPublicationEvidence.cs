@@ -8,7 +8,7 @@ namespace NexusPipeline.Platform.Storage.Execution;
 
 [SupportedOSPlatform("windows")]
 internal sealed class AdmissionPublicationEvidence(RuntimeInstance instance, StateDatabase database,
-    ContractReader contracts, PayloadApplyRoots roots) : IRecoveryEvidence
+    ContractReader contracts, PayloadApplyRoots roots, Guid? completedCleanup = null) : IRecoveryEvidence
 {
     public void VerifyAll(IReadOnlyList<RegisteredJournal> registered)
     {
@@ -26,6 +26,14 @@ internal sealed class AdmissionPublicationEvidence(RuntimeInstance instance, Sta
         if (snapshot.Revision != after.Revision || snapshot.IsReady != after.IsReady ||
             !snapshot.Isolations.ToHashSet().SetEquals(after.Isolations) || !snapshot.FileEffects.ToHashSet().SetEquals(after.FileEffects))
             throw new IOException("execution_admission_publication_registry_changed");
+        if (completedCleanup is { } id)
+        {
+            var completed = registry.ReadJournal(id);
+            if (completed.Kind != JournalKind.FileCleanup) throw new IOException("cleanup_publication_kind_unbound");
+            if (completed.Phase == JournalPhase.Committed)
+                _ = CleanupJournalBinding.ReadExact(instance, contracts, completed,
+                    new FileEffectOutbox(database).Read(id), database, roots);
+        }
     }
 
     private static void RequireRegistered(IReadOnlyList<RegisteredJournal> expected, IReadOnlyList<RegisteredJournal> actual)

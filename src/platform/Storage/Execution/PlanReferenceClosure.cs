@@ -10,10 +10,12 @@ namespace NexusPipeline.Platform.Storage.Execution;
 
 internal sealed class PlanReferenceClosure(RuntimeInstance instance, ContractReader contracts, ImmutableBlobStore blobs, StateDatabase database)
 {
-    internal IReadOnlyList<BlobReference> Read(RegisteredJournal registered, BlobReference reference)
+    internal IReadOnlyList<BlobReference> Read(RegisteredJournal registered, BlobReference reference,
+        bool? retiredContent = null, ReferenceReadBudget? budget = null)
     {
-        var cacheable = registered.Phase == JournalPhase.Committed && !HasRetiredContent(registered.JournalId);
+        var cacheable = registered.Phase == JournalPhase.Committed && !(retiredContent ?? HasRetiredContent(registered.JournalId));
         if (cacheable && database.ReferenceFacts.Find(registered) is { } saved) return saved;
+        using var measured = budget?.Enter();
         var result = ReadCurrent(registered, reference).Where(item => item.RelativePath.StartsWith("blobs/content/", StringComparison.Ordinal)).ToArray();
         if (cacheable) database.ReferenceFacts.Store(registered, result);
         return result;

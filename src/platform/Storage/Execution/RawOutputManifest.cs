@@ -47,11 +47,17 @@ internal static class RawOutputCodec
     internal static RawOutputManifest Read(ImmutableBlobStore blobs, StepEvidenceBinding expected, BlobReference artifact)
     {
         if (artifact.RelativePath != $"blobs/plans/{artifact.Sha256}.json" || artifact.SizeBytes is < 1 or > StrictJson.MaximumBytes) throw Invalid();
-        using var stream = blobs.OpenVerified(artifact); var bytes = new byte[checked((int)stream.Length)]; stream.ReadExactly(bytes);
-        using var document = StrictJson.Parse(bytes);
-        var value = document.RootElement.Deserialize<RawOutputManifest>(Options) ?? throw Invalid();
-        if (!JsonElement.DeepEquals(document.RootElement, JsonSerializer.SerializeToElement(value, Options))) throw Invalid();
-        Validate(value, expected); return value;
+        using var stream = blobs.OpenVerified(artifact);
+        var value = BlobReadStream.ReadEvidence(stream, () =>
+        {
+            var bytes = new byte[checked((int)stream.Length)]; stream.ReadExactly(bytes);
+            using var document = StrictJson.Parse(bytes);
+            var result = document.RootElement.Deserialize<RawOutputManifest>(Options) ?? throw Invalid();
+            if (!JsonElement.DeepEquals(document.RootElement, JsonSerializer.SerializeToElement(result, Options))) throw Invalid();
+            Validate(result, expected); return result;
+        });
+        if (value.Binding != expected) throw Invalid();
+        return value;
     }
 
     private static void Validate(RawOutputManifest value, StepEvidenceBinding expected)

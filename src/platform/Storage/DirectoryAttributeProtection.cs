@@ -10,12 +10,13 @@ internal sealed class DirectoryAttributeProtection : IDisposable
     private readonly Dictionary<string, SafeFileHandle> _directories = new(StringComparer.Ordinal);
     private bool _disposed;
 
-    private DirectoryAttributeProtection() { }
+    internal string? RuntimeRoot { get; }
+    private DirectoryAttributeProtection(string? runtimeRoot = null) => RuntimeRoot = runtimeRoot;
 
     internal static DirectoryAttributeProtection Acquire(RuntimeInstance instance)
     {
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
-        var result = new DirectoryAttributeProtection();
+        var result = new DirectoryAttributeProtection(instance.RuntimeRoot);
         try
         {
             using var scope = DirectoryAttributeScope.Enter(result);

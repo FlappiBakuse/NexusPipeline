@@ -7,15 +7,15 @@ internal static class DatabaseConnections
     internal static SqliteConnection Open(string path, bool readOnly = false, bool allowPooling = true)
     {
         using var timing = StartupProfile.Measure("database.open");
-        DatabaseReadPool.BorrowLease? shared = null;
+        DatabaseConnectionPool.BorrowLease? shared = null;
         SqliteConnection? connection = null;
         try
         {
             var protectedPath = readOnly ? DatabaseReadScope.ProtectedPath(path) : null;
-            if (readOnly && allowPooling) shared = DatabaseReadPool.Borrow(path);
+            if (allowPooling) shared = DatabaseConnectionPool.Borrow(path);
             connection = new(new SqliteConnectionStringBuilder
             {
-                DataSource = OperatingSystem.IsWindows() ? PhysicalPathPolicy.NativePath(protectedPath ?? path) : path,
+                DataSource = OperatingSystem.IsWindows() ? PhysicalPathPolicy.NativePath(shared?.Path ?? protectedPath ?? path) : path,
                 Mode = readOnly ? SqliteOpenMode.ReadOnly : SqliteOpenMode.ReadWrite,
                 Cache = SqliteCacheMode.Private,
                 Pooling = shared?.IsPooled ?? (allowPooling && protectedPath is not null),

@@ -33,6 +33,21 @@ internal sealed class InstalledExtensionRuntime : IAsyncDisposable
     internal Guid ActivationId => _scope.ActivationId;
     private int _disposed;
 
+    internal IDisposable ProtectWorkTarget(string workspace)
+    {
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
+        var current = Storage.PhysicalPathPolicy.NormalizeWithoutLinks(_source.TargetPath);
+        workspace = Storage.PhysicalPathPolicy.NormalizeWithoutLinks(workspace);
+        if (Overlaps(current, workspace) || Overlaps(workspace, current))
+            throw new IOException("extension_work_scope_referenced");
+        // A scope use keeps its package and native lifetime held while another installation's tree retires.
+        return _scope.BeginUse();
+    }
+
+    private static bool Overlaps(string parent, string path) =>
+        StringComparer.OrdinalIgnoreCase.Equals(parent, path) ||
+        path.StartsWith(parent + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+
     private InstalledExtensionRuntime(PreparedExtensionActivation source, ExtensionScope scope, IDisposable files, InstalledNativeSlot nativeSlot, InstalledNativeSource nativeSource,
         PackageLoadContext? context, ConstructorInfo? entry, ExtensionActivationContext? activationContext,
         TaskAdapterExecutor? adapter, ExecutionProviderRegistry? providers, InstalledExtensionConsumption? adapterConsumption = null)

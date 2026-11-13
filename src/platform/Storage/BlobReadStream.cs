@@ -2,6 +2,9 @@ using System.Security.Cryptography;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
+using NexusPipeline.Core.Configuration;
+using NexusPipeline.Platform.Storage.Execution;
+using NexusPipeline.Platform.Storage.Journals;
 
 namespace NexusPipeline.Platform.Storage;
 
@@ -9,6 +12,7 @@ internal sealed class BlobReadStream : FileStream
 {
     private static readonly object Gate = new();
     private static readonly Dictionary<string, HeldContent> Held = new(StringComparer.OrdinalIgnoreCase);
+    private static long _parsedBytes;
     private HeldContent? _content;
 
     private BlobReadStream(string path) : base(OpenLeaf(path), FileAccess.Read) { }
@@ -80,6 +84,18 @@ internal sealed class BlobReadStream : FileStream
 
     internal static IDisposable Retain(string path) => Retain(path, out _);
 
+    internal static FileTreeSnapshot ReadSnapshot(FileStream input, Func<FileTreeSnapshot> read)
+        => input is BlobReadStream { _content: { } content } && content.Reference.SizeBytes <= 4096
+            ? content.ReadSnapshot(read) : read();
+
+    internal static T ReadEvidence<T>(FileStream input, Func<T> read) where T : class
+    {
+        if (typeof(T) != typeof(FrozenJobClosure) && typeof(T) != typeof(StepEvidenceDocument) && typeof(T) != typeof(RawOutputManifest))
+            throw new ArgumentException("blob_evidence_type_not_immutable");
+        return input is BlobReadStream { _content: { } content } && content.Reference.SizeBytes <= 65536
+            ? content.ReadEvidence(read) : read();
+    }
+
     internal static IDisposable Retain(string path, out BlobReference reference)
     {
         lock (Gate)
@@ -106,6 +122,7 @@ internal sealed class BlobReadStream : FileStream
             if (--content.Readers == 0)
             {
                 Held.Remove(content.Path);
+                _parsedBytes -= content.ParsedBytes;
                 content.Anchor.Dispose();
             }
     }
@@ -127,11 +144,32 @@ internal sealed class BlobReadStream : FileStream
     // The private handle denies writes and deletion even if a consumer closes its exposed SafeFileHandle.
     private sealed class HeldContent(string path, BlobReference reference, PhysicalObjectIdentity identity, FileStream anchor)
     {
+        private FileTreeSnapshot? _snapshot;
+        private object? _evidence;
+        internal long ParsedBytes { get; private set; }
         internal string Path { get; } = path;
         internal BlobReference Reference { get; } = reference;
         internal PhysicalObjectIdentity Identity { get; } = identity;
         internal FileStream Anchor { get; } = anchor;
         internal int Readers;
+        internal FileTreeSnapshot ReadSnapshot(Func<FileTreeSnapshot> read)
+        {
+            lock (this) return _snapshot ??= read();
+        }
+
+        internal T ReadEvidence<T>(Func<T> read) where T : class
+        {
+            lock (this)
+            {
+                if (_evidence is T saved) return saved;
+                var value = read();
+                var bytes = 256 + Reference.SizeBytes * 8;
+                lock (Gate)
+                    if (_evidence is null && bytes <= 8388608 - _parsedBytes)
+                    { _evidence = value; ParsedBytes = bytes; _parsedBytes += bytes; }
+                return value;
+            }
+        }
     }
 
     private static IOException Invalid() => new("immutable_blob_mismatch");

@@ -62,7 +62,7 @@ public sealed class OwnedCleanupExecutor(RuntimeInstance instance, ContractReade
             {
                 IRecoveryEvidence evidence = roots is null ? new JournalRecoveryEvidence(instance, new(instance, contracts), database) :
                     OperatingSystem.IsWindows() ? new NexusPipeline.Platform.Storage.Execution.AdmissionPublicationEvidence(
-                        instance, database, contracts, roots) :
+                        instance, database, contracts, roots, journalId) :
                     throw new PlatformNotSupportedException();
                 new RecoveryCoordinator(registry, evidence, index).VerifyAndPublish();
                 if (roots is not null)

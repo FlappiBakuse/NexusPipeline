@@ -29,6 +29,7 @@ internal static class StepWritersEvidence
             if (row.GetString(2) != "execution.start") return;
             if (row.Read()) throw new IOException("execution_configuration_membership_unbound");
         }
+        using var parentRead = JournalReadScope.HoldAttempt(instance, contracts, database, parentId);
         var registry = new RecoveryJournalRegistry(database).ReadSnapshot(parentId);
         var parent = registry.Journals.Single(item => item.JournalId == parentId);
         var expected = verifiedParent?.Journal;
@@ -36,16 +37,20 @@ internal static class StepWritersEvidence
             expected.Kind != parent.Kind || expected.Phase != parent.Phase || expected.Revision != parent.Revision ||
             expected.PlanPath != parent.PlanPath || expected.PlanDigest != parent.PlanDigest ||
             !expected.ResourceKeys.SequenceEqual(parent.ResourceKeys))) throw new IOException("execution_configuration_membership_unbound");
-        var attempt = verifiedParent?.Attempt ?? AttemptPreparedBinding.ReadPlan(instance, contracts, parent);
+        var graph = verifiedParent is null ? AttemptPreparedBinding.ReadPlanGraph(instance, contracts, parent, database) : null;
+        var attempt = verifiedParent?.Attempt ?? graph!.Plan;
         var child = registry.Journals.Single(item => item.JournalId == childJournalId);
-        var total = verifiedParent?.Total ?? new ExecutionPlanCodec(instance, contracts, new(instance, contracts)).Read(AttemptPlanCodec.Reference(attempt.ExecutionPlan)).ReadWire();
-        var document = verifiedParent?.Latest ?? new JournalStore(instance, contracts).Read(parentId);
+        var total = verifiedParent?.Total ?? graph!.Total;
+        var journals = new JournalStore(instance, contracts);
+        var history = journals.ReadAllRevisions(parentId);
+        var document = verifiedParent?.Latest ?? history[^1];
+        using var parsed = new AttemptReadScope(history, total);
         if (!ExecutionInvocationCodec.Plans(document.Root, total, attempt).Any(item => item.StepId == stepId && item.Plan.RelativePath == child.PlanPath && item.Plan.Sha256 == child.PlanDigest))
             throw new IOException("execution_configuration_membership_unbound");
         PreviewDomainEvidence.RequireStopped(database,
             verifiedParent ?? AttemptWriterState.Read(instance, database, contracts, parentId), stepId);
         new CaptureEvidenceReader(instance, database, contracts).RequireResolvedForRecovery(parent, attempt, total,
-            new JournalStore(instance, contracts).ReadAllRevisions(parentId), stepId);
+            history, stepId);
         new TargetJobEvidence(instance, database, contracts).RequireResolved(document.Root, total, attempt.ExecutionPlan.Sha256, stepId);
         new ProviderLauncherEvidence(instance, database, contracts).RequireResolved(document.Root, total, attempt.ExecutionPlan.Sha256, stepId);
         new AndroidControlEvidence(instance, database, contracts).RequireStopped(document.Root, total, attempt.ExecutionPlan.Sha256, stepId);

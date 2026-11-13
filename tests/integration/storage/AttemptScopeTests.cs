@@ -18,7 +18,8 @@ public sealed class AttemptScopeTests
         {
             await fixture.Consumer.RunNextAsync(); var state = fixture.State;
             var root = state.Latest.Root; var total = state.Total;
-            using var scope = new AttemptReadScope(state.RequireValidatedRead().History, total);
+            using var memo = new AttemptReadMemo(total);
+            using var scope = new AttemptReadScope(state.RequireValidatedRead().History, total, memo);
             var jobs = WriterIntentCodec.ReadJobs(root, total);
             Assert.NotEmpty(jobs);
             Assert.NotEmpty(StepResultCodec.Read(root, total));
@@ -33,13 +34,19 @@ public sealed class AttemptScopeTests
             var changedPlan = wire.Deserialize<ExecutionPlan>(StepResultCodec.Options)!;
             Assert.Throws<JsonException>(() => WriterIntentCodec.ReadJobs(root, changedPlan));
             var clone = JsonSerializer.Deserialize<ExecutionPlan>(JsonSerializer.Serialize(total, StepResultCodec.Options), StepResultCodec.Options)!;
-            using var nested = new AttemptReadScope(state.RequireValidatedRead().History, clone);
+            using var nested = new AttemptReadScope(state.RequireValidatedRead().History, clone, memo);
             Assert.Equal(jobs.ToArray(), WriterIntentCodec.ReadJobs(root, clone).ToArray());
             Assert.Throws<InvalidOperationException>(() => scope.Dispose());
             nested.Dispose();
             Assert.Equal(jobs.ToArray(), WriterIntentCodec.ReadJobs(root, total).ToArray());
             scope.Dispose();
             Assert.False(AttemptReadScope.TryRead<StepWriterState>(root, total, out _));
+            using var following = new AttemptReadScope(state.RequireValidatedRead().History, total, memo);
+            Assert.Equal(jobs.ToArray(), WriterIntentCodec.ReadJobs(root, total).ToArray());
+            Assert.Throws<JsonException>(() => WriterIntentCodec.ReadJobs(JsonSerializer.SerializeToElement(changed), total));
+            Assert.Throws<JsonException>(() => WriterIntentCodec.ReadJobs(root, changedPlan));
+            memo.Dispose();
+            Assert.Equal(jobs.ToArray(), WriterIntentCodec.ReadJobs(root, total).ToArray());
         });
     }
 }

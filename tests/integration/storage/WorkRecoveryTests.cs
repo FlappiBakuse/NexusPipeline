@@ -16,10 +16,14 @@ namespace NexusPipeline.StorageTests;
 [SupportedOSPlatform("windows")]
 public sealed class WorkRecoveryTests(ITestOutputHelper output)
 {
-    [Theory(DisplayName = "Actual Killed Cleanup Owners Keep No Effect Completed And Unreceipted Deletion Distinct")]
+    [Theory(DisplayName = "Stopped Work Owners Reconcile Their Original Deletion Intent And Preserve Unknown Objects")]
     [InlineData("accepted", JournalPhase.Committed, FileEffectState.NotExecuted)]
     [InlineData("started", JournalPhase.Committed, FileEffectState.Completed)]
-    [InlineData("removed", JournalPhase.Quarantined, FileEffectState.Started)]
+    [InlineData("removed", JournalPhase.Committed, FileEffectState.Completed)]
+    [InlineData("root-removed", JournalPhase.Committed, FileEffectState.Completed)]
+    [InlineData("empty-removed", JournalPhase.Committed, FileEffectState.Completed)]
+    [InlineData("unstarted-missing", JournalPhase.Quarantined, FileEffectState.Pending)]
+    [InlineData("replaced-root", JournalPhase.Quarantined, FileEffectState.Completed)]
     public async Task DistinguishesRecoveryStates(
         string point, JournalPhase expected, FileEffectState firstEffect)
     {
@@ -51,6 +55,12 @@ public sealed class WorkRecoveryTests(ITestOutputHelper output)
         var producerPlan = reached.GetProperty("ProducerPlan").Deserialize<BlobReference>()!;
         var workspace = reached.GetProperty("Workspace").GetString()!;
         var producerBytes = reached.GetProperty("ProducerBytes").GetBytesFromBase64();
+        if (point == "unstarted-missing") Directory.Delete(workspace, recursive: true);
+        if (point == "replaced-root")
+        {
+            Directory.CreateDirectory(workspace);
+            File.WriteAllText(Path.Combine(workspace, "foreign.txt"), "preserve unknown replacement");
+        }
         var scanner = new FileTreeScanner(new(4097, 268435456));
         var before = scanner.Capture(workspace, default);
         var beforeIds = PhysicalTreeIdentity.Capture(workspace, before);
@@ -68,17 +78,18 @@ public sealed class WorkRecoveryTests(ITestOutputHelper output)
         Assert.Equal(producerBytes, new ExtensionPayloadBinding(instance, database, new(), roots).Read(producerId, producerPlan).Latest.Export());
         var installed = new ExtensionInstalledEvidence(instance, database, new(), roots).ReadCurrent("fixture-plugin")!;
         Assert.Equal(2, installed.Metadata.Revision); Assert.False(installed.Metadata.IsInstalled);
-        if (point == "started") Assert.False(Directory.Exists(workspace));
+        if (expected == JournalPhase.Committed && point != "accepted") Assert.False(Directory.Exists(workspace));
         else
         {
             var after = scanner.Capture(workspace, default);
             Assert.Equal(before.Entries, after.Entries); Assert.Equal(beforeIds, PhysicalTreeIdentity.Capture(workspace, after));
         }
-        if (point == "removed")
+        if (expected == JournalPhase.Quarantined)
         {
             Assert.Contains(new RecoveryJournalRegistry(database).ReadSnapshot().Isolations, value => value.JournalId == journalId);
-            Assert.DoesNotContain(effects, value => value.State == FileEffectState.Completed);
+            Assert.Contains(effects, value => value.State is FileEffectState.Started or FileEffectState.Pending);
         }
+        else if (point != "accepted") Assert.All(effects, value => Assert.Equal(FileEffectState.Completed, value.State));
         var bytes = JournalBytes(instance, journalId);
         _ = new StartupJournalRecovery(instance, new(), database, roots).Recover(lease);
         Assert.Equal(expected, new RecoveryJournalRegistry(database).ReadJournal(journalId).Phase);
@@ -99,7 +110,7 @@ public sealed class WorkRecoveryTests(ITestOutputHelper output)
         output.WriteLine(JsonSerializer.Serialize(new
         {
             point, stopped, registered, effectStates = effects.Select(value => new { value.StepId, value.State }),
-            expected, scope = "Actual controlled owner Job stopped and cold recovery; unreceipted removal remains quarantined."
+            expected, scope = "Actual controlled owner Job stopped; original deletion intent reconciled and unknown inventory isolated."
         }));
     }
 

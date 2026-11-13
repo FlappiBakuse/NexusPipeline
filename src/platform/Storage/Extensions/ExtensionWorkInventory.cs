@@ -17,6 +17,18 @@ internal static class ExtensionWorkInventory
                 var index = steps.ToList().FindIndex(value => value == receipt["stepId"]!.GetValue<string>());
                 if (index >= 0) result.Add(plan.ExtensionWork!.Page.Indices[index]);
             }
+        foreach (var receipt in journal["receipts"]!.AsArray().GroupBy(value => value!["stepId"]!.GetValue<string>()).Select(group => group.Last()))
+        {
+            if (receipt!["effect"]!.GetValue<string>() != "started") continue;
+            var index = steps.ToList().FindIndex(value => value == receipt["stepId"]!.GetValue<string>());
+            if (index < 0) continue;
+            var proof = plan.ExtensionWork!.Origin.Proof;
+            var node = proof.Nodes.Single(value => value.Index == plan.ExtensionWork.Page.Indices[index]);
+            if (proof.Nodes.FirstOrDefault(value => !result.Contains(value.Index))?.Index != node.Index) continue;
+            var path = PhysicalPathPolicy.NormalizeWithoutLinks(WorkNodeDerivation.Resolve(proof, node));
+            if (!Exists(path) && PhysicalObjectIdentity.Read(Path.GetDirectoryName(path)!) == node.ParentIdentity)
+                result.Add(node.Index);
+        }
         return result;
     }
 

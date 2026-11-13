@@ -26,7 +26,8 @@ public sealed class ExpandedContentTests
         Assert.All(members, content => Assert.False(File.Exists(Path.Combine(owner.Instance.RuntimeRoot, content.RelativePath))));
         foreach (var file in before.Plan.Candidate.Snapshot.Entries.Where(item => item.Kind == FileObjectKind.File))
             blobs.PersistContent(Path.Combine(before.Plan.TargetPath, file.RelativePath), file, default);
-        var retained = members[0];
+        var manifest = members.Single(content => content.Sha256 == before.Source.Package!.Entry.ManifestSha256);
+        var retained = members.First(content => content != manifest);
         if (shared)
         {
             var record = RecordStoreFixture.Record(1, Guid.NewGuid());
@@ -41,20 +42,23 @@ public sealed class ExpandedContentTests
         foreach (var content in members)
         {
             var result = cleanup.RunNextPage(before.Plan.JournalId, content, default, executor: executor);
-            if (shared && content == retained) { Assert.Null(result); continue; }
+            if (content == manifest || shared && content == retained) { Assert.Null(result); blobs.Verify(content); continue; }
             receipt ??= result;
             Assert.Equal("completed", result!.Acceptance.Status);
             Assert.False(File.Exists(Path.Combine(owner.Instance.RuntimeRoot, content.RelativePath)));
         }
         if (shared) blobs.Verify(retained);
         blobs.Verify(before.Source.Package!.Archive);
-        var replay = cleanup.RunNextPage(before.Plan.JournalId, members.First(content => !shared || content != retained), default)!;
+        var replay = cleanup.RunNextPage(before.Plan.JournalId, members.First(content => content != manifest && (!shared || content != retained)), default)!;
         Assert.False(replay.Acceptance.IsNew); Assert.Equal(receipt!.JournalId, replay.JournalId);
         Assert.NotNull(new ExtensionDetailsReader(owner.Instance, owner.Database, owner.Lease, owner.Contracts, roots).Read("fixture-plugin"));
         fixture.Prepare(PayloadAction.Upgrade); fixture.Accept();
         _ = await fixture.Session().ApplyAsync(fixture.Prepared!, default);
+        fixture.Prepared!.Dispose(); fixture.Verified!.Dispose(); fixture.Root!.Dispose();
         var current = new ExtensionInstalledEvidence(owner.Instance, owner.Database, owner.Contracts, roots).ReadCurrent("fixture-plugin")!;
         Assert.Equal("0.6.0", current.Metadata.Package.PackageVersion);
+        Assert.Equal("completed", cleanup.RunNextPage(before.Plan.JournalId, manifest, default, executor: executor)!.Acceptance.Status);
+        Assert.False(File.Exists(Path.Combine(owner.Instance.RuntimeRoot, manifest.RelativePath)));
         Assert.All(current.Footprint.Payload.Contents, content =>
         {
             if (shared && content == retained) return;

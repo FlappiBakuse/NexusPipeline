@@ -3,21 +3,21 @@ using Microsoft.Data.Sqlite;
 
 namespace NexusPipeline.Platform.Storage.Sqlite;
 
-internal sealed class DatabaseReadPool : IDisposable
+internal sealed class DatabaseConnectionPool : IDisposable
 {
     private static readonly object PoolsGate = new();
-    private static readonly Dictionary<string, DatabaseReadPool> Pools = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly Dictionary<string, DatabaseConnectionPool> Pools = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _gate = new();
     private readonly string _path;
     private readonly StableDirectoryLease _directory;
     private readonly FileStream _file;
     private readonly PhysicalObjectIdentity _identity;
-    private string? _pool;
+    private readonly HashSet<string> _keys = [];
     private int _readers;
     private int _pooled;
     private bool _disposed;
 
-    internal DatabaseReadPool(string path)
+    internal DatabaseConnectionPool(string path)
     {
         _path = PhysicalPathPolicy.NormalizeWithoutLinks(path);
         _directory = StableDirectoryLease.Acquire(Path.GetDirectoryName(_path)!);
@@ -27,6 +27,8 @@ internal sealed class DatabaseReadPool : IDisposable
             try
             {
                 _identity = PhysicalObjectIdentity.Read(_file.SafeFileHandle);
+                if (PhysicalPathPolicy.NormalizeWithoutLinks(_path) != _path || PhysicalObjectIdentity.Read(_path) != _identity)
+                    throw new IOException("database_read_identity_changed");
                 RequireIdentity();
                 lock (PoolsGate)
                     if (!Pools.TryAdd(_path, this)) throw new IOException("database_read_owner_already_bound");
@@ -36,7 +38,7 @@ internal sealed class DatabaseReadPool : IDisposable
         catch { _directory.Dispose(); throw; }
     }
 
-    internal static BorrowLease? Borrow(string path)
+    internal static BorrowLease? Borrow(string path, bool connection = true)
     {
         lock (PoolsGate)
         {
@@ -44,7 +46,7 @@ internal sealed class DatabaseReadPool : IDisposable
             lock (pool._gate)
             {
                 pool.RequireIdentity();
-                var pooled = pool._pooled < 4;
+                var pooled = connection && pool._pooled < 4;
                 pool._readers++;
                 if (pooled) pool._pooled++;
                 return new(pool, pooled);
@@ -55,8 +57,8 @@ internal sealed class DatabaseReadPool : IDisposable
     private void RequireIdentity()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (PhysicalPathPolicy.NormalizeWithoutLinks(_path) != _path ||
-            PhysicalObjectIdentity.Read(_path) != _identity || PhysicalObjectIdentity.Read(_file.SafeFileHandle) != _identity)
+        // The open file and every ancestor deny deletion for this owner's lifetime.
+        if (PhysicalObjectIdentity.Read(_file.SafeFileHandle) != _identity)
             throw new IOException("database_read_identity_changed");
     }
 
@@ -64,7 +66,7 @@ internal sealed class DatabaseReadPool : IDisposable
     {
         lock (_gate)
         {
-            _pool ??= connection.ConnectionString;
+            _keys.Add(connection.ConnectionString);
             if (_disposed) SqliteConnection.ClearPool(connection);
         }
     }
@@ -87,11 +89,12 @@ internal sealed class DatabaseReadPool : IDisposable
             if (_disposed) return;
             _disposed = true;
             Pools.Remove(_path);
-            if (_pool is not null)
+            foreach (var key in _keys)
             {
-                using var connection = new SqliteConnection(_pool);
+                using var connection = new SqliteConnection(key);
                 SqliteConnection.ClearPool(connection);
             }
+            _keys.Clear();
             if (_readers == 0) ReleaseFiles();
         }
     }
@@ -102,11 +105,12 @@ internal sealed class DatabaseReadPool : IDisposable
         finally { _directory.Dispose(); }
     }
 
-    internal sealed class BorrowLease(DatabaseReadPool owner, bool pooled) : IDisposable
+    internal sealed class BorrowLease(DatabaseConnectionPool owner, bool pooled) : IDisposable
     {
-        private DatabaseReadPool? _owner = owner;
+        private DatabaseConnectionPool? _owner = owner;
         private SqliteConnection? _connection;
         internal bool IsPooled => pooled;
+        internal string Path => _owner?._path ?? throw new ObjectDisposedException(nameof(BorrowLease));
 
         internal void Attach(SqliteConnection connection)
         {

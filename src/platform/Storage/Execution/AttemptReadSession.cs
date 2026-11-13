@@ -22,7 +22,10 @@ internal sealed class AttemptReadSession : IDisposable
     private readonly AttemptBoundInputs _inputs;
     private readonly BlobReference _planReference;
     private readonly ExecutionPlan _total;
+    internal AttemptReadMemo ParsedHistory { get; }
     private readonly DatabaseValidationLease _sql;
+    private readonly DatabaseValidationLease _cancellationSql;
+    private ExecutionCancellationIntent? _close;
     private readonly Action _released;
     private readonly DirectoryAttributeProtection _paths;
     private readonly Dictionary<string, IDisposable> _verified = new(StringComparer.OrdinalIgnoreCase);
@@ -47,13 +50,19 @@ internal sealed class AttemptReadSession : IDisposable
         _planReference = AttemptPreparedBinding.Reference(instance, registered);
         _inputs = AttemptPreparedBinding.ReadPlanInputs(instance, contracts, registered);
         _total = _inputs.Total;
+        ParsedHistory = new(_total);
         try
         {
             _paths = DirectoryAttributeProtection.Acquire(instance);
             try
             {
                 _history = _journals.ProtectReadHistory(journal);
-                try { _sql = new(database.DatabasePath, "attempt.sql.validate"); }
+                try
+                {
+                    _sql = new(database.DatabasePath, "attempt.sql.validate");
+                    try { _cancellationSql = new(database.DatabasePath, "attempt.cancel.validate"); }
+                    catch { _sql.Dispose(); throw; }
+                }
                 catch { _history.Dispose(); throw; }
             }
             catch { _paths.Dispose(); throw; }
@@ -66,12 +75,27 @@ internal sealed class AttemptReadSession : IDisposable
         _total.DefinitionBundle.SizeBytes == total.DefinitionBundle.SizeBytes &&
         _total.DefinitionBundle.Sha256 == total.DefinitionBundle.Sha256;
 
+    internal ExecutionCancellationIntent? ReadClose(RegisteredJournal parent)
+    {
+        lock (_gate)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (parent.JournalId != JournalId || parent.OperationId.ToString("D") != _inputs.Plan.OperationId)
+                throw new IOException("attempt_read_context_unbound");
+            using var paths = DirectoryAttributeScope.Enter(_paths);
+            _cancellationSql.RequireCurrent((connection, transaction) =>
+                _close = ExecutionCancellationRows.Read(connection, transaction, parent, _inputs.Plan));
+            return _close;
+        }
+    }
+
     internal BoundPreparedAttempt ReadBinding(Func<JournalStore?, AttemptBoundInputs?, BoundPreparedAttempt> read)
     {
         lock (_gate)
         {
             if (_disposed) return read(null, null);
             using var paths = DirectoryAttributeScope.Enter(_paths);
+            using var instance = InstanceReadScope.Hold(_instance, _contracts);
             using var blobs = BlobReadScope.Capture(_instance, RetainVerified);
             using var selected = JournalReadScope.Hold(_journals, JournalId);
             var history = _journals.ReadAllRevisions(JournalId);
@@ -174,7 +198,8 @@ internal sealed class AttemptReadSession : IDisposable
                 _rawFiles.Clear(); _replays.Clear(); _bound = null; _definitions = null;
                 foreach (var held in _verified.Values) held.Dispose();
                 _verified.Clear();
-                _sql.Dispose(); _history.Dispose(); _inputs.Dispose(); _paths.Dispose();
+                ParsedHistory.Dispose();
+                _cancellationSql.Dispose(); _sql.Dispose(); _history.Dispose(); _inputs.Dispose(); _paths.Dispose();
             }
             finally { _released(); }
         }

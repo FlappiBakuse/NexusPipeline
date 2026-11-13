@@ -19,6 +19,7 @@ internal sealed class ExtensionWorkSweep(StateDatabase database, PayloadApplyRoo
     private string? _completedScopes, _scanningScopes;
     private bool _unresolved;
     private bool _inventoryUnavailable;
+    private DateTimeOffset _retryAt;
 
     internal async Task SweepAsync(int pageLimit, CancellationToken cancellation)
     {
@@ -40,9 +41,9 @@ internal sealed class ExtensionWorkSweep(StateDatabase database, PayloadApplyRoo
             if (!recovery.Current.IsReady) break;
             try
             {
-                // A retired managed scope can leave its assembly mapped until the producer process exits.
                 var observed = writers.Observe(candidate.JournalId);
-                if (!observed.IsComplete || observed.State != WriterState.Stopped) { _unresolved = true; continue; }
+                if (!observed.IsComplete || observed.State != WriterState.Stopped)
+                { if (!candidate.CurrentWriter) _unresolved = true; continue; }
                 if (!await cleanup.RunNextPageAsync(candidate.JournalId, cancellation).ConfigureAwait(false))
                     Block(candidate.OperationId, "page_unresolved");
             }
@@ -59,9 +60,9 @@ internal sealed class ExtensionWorkSweep(StateDatabase database, PayloadApplyRoo
         var published = activator.ReadPublishedScopes();
         var scopes = string.Join(',', published.Select(scope => scope.ActivationId).Order());
         if (_entries is null && _completedRevision == database.CommitSequence && _completedScopes == scopes) return [];
+        if (_entries is null && DateTimeOffset.UtcNow < _retryAt && _scanRevision == database.CommitSequence && _scanningScopes == scopes) return [];
         var root = PhysicalPathPolicy.NormalizeWithoutLinks(roots.ExtensionPayloadRoot);
         if (!Directory.Exists(root)) return [];
-        var active = published.Select(scope => scope.ExtensionId).ToHashSet(StringComparer.Ordinal);
         if (_entries is null)
         {
             _scanRevision = database.CommitSequence;
@@ -71,10 +72,12 @@ internal sealed class ExtensionWorkSweep(StateDatabase database, PayloadApplyRoo
         }
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
         using var command = connection.CreateCommand();
-        command.CommandText = "SELECT j.journal_id,r.extension_id FROM operations o JOIN operation_journals j " +
-            "ON j.journal_id=o.initial_journal_id AND j.operation_id=o.operation_id LEFT JOIN extension_installation_revisions r " +
-            "ON r.journal_id=j.journal_id WHERE o.operation_id=$operation AND o.operation_kind='extension.apply' " +
+        command.CommandText = "SELECT j.journal_id,EXISTS(SELECT 1 FROM journal_writers w " +
+            "WHERE w.journal_id=j.journal_id AND w.writer_id=$writer) FROM operations o JOIN operation_journals j " +
+            "ON j.journal_id=o.initial_journal_id AND j.operation_id=o.operation_id " +
+            "WHERE o.operation_id=$operation AND o.operation_kind='extension.apply' " +
             "AND j.operation_kind='extensionApply' AND j.phase='committed';";
+        command.Parameters.AddWithValue("$writer", JournalWriterStore.CurrentWriter.WriterId.ToString("D"));
         var operation = command.Parameters.Add("$operation", SqliteType.Text);
         var candidates = new List<WorkCandidate>();
         for (var scanned = 0; scanned < limit * 16 && candidates.Count < limit; scanned++)
@@ -83,6 +86,7 @@ internal sealed class ExtensionWorkSweep(StateDatabase database, PayloadApplyRoo
             {
                 _entries.Dispose(); _entries = null;
                 _completedRevision = _unresolved ? null : _scanRevision; _completedScopes = _scanningScopes;
+                _retryAt = _unresolved ? DateTimeOffset.UtcNow.AddMinutes(1) : default;
                 break;
             }
             var entry = _entries.Current;
@@ -91,10 +95,11 @@ internal sealed class ExtensionWorkSweep(StateDatabase database, PayloadApplyRoo
                 _blocked.Contains(id)) continue;
             operation.Value = id.ToString("D");
             using var row = command.ExecuteReader();
-            if (!row.Read() || !row.IsDBNull(1) && active.Contains(row.GetString(1))) continue;
+            if (!row.Read()) continue;
             var journal = Guid.ParseExact(row.GetString(0), "D");
+            var currentWriter = row.GetInt64(1) != 0;
             if (row.Read()) throw new IOException("extension_work_producer_ambiguous");
-            candidates.Add(new(id, journal));
+            candidates.Add(new(id, journal, currentWriter));
         }
         return candidates;
     }
@@ -105,6 +110,6 @@ internal sealed class ExtensionWorkSweep(StateDatabase database, PayloadApplyRoo
         Console.Error.WriteLine($"extension_work_cleanup_blocked {operationId:D} {reason}");
     }
 
-    private sealed record WorkCandidate(Guid OperationId, Guid JournalId);
+    private sealed record WorkCandidate(Guid OperationId, Guid JournalId, bool CurrentWriter);
     public void Dispose() { _entries?.Dispose(); _entries = null; }
 }

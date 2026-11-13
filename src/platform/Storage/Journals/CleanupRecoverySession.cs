@@ -86,6 +86,8 @@ public sealed class CleanupRecoverySession : ICleanupRecoverySession
         RequireStopped();
         if (Inspect().Items.Any(item => item.State == CleanupItemState.Unknown)) throw new IOException("cleanup_inventory_unverified");
         Synchronize(hasVerifiedRecoveryEvidence);
+        foreach (var step in _work?.PendingCompletions(_journal) ?? [])
+            Save(JournalPhase.Applying, step, "completed", "cleanup_deleted", hasVerifiedRecoveryEvidence);
         Save(JournalPhase.Applying, "begin-cleanup", "started", "cleanup_applying", hasVerifiedRecoveryEvidence);
     }
 

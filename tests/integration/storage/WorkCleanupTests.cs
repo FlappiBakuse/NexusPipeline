@@ -145,7 +145,7 @@ public sealed class WorkCleanupTests(ITestOutputHelper output)
         Assert.Equal(fixture.Producer.Latest.Export(), fixture.Original.Binding().Read(fixture.Producer.Plan.JournalId).Latest.Export());
     }
 
-    [Fact(DisplayName = "A Real Reference Blocks Admission And An Active Installed Scope Is Not Implicitly Stopped For Cleanup")]
+    [Fact(DisplayName = "A Live Producer Or A Real Reference Blocks Cleanup Without Stopping The Current Installation")]
     public async Task RespectsActiveReferences()
     {
         await using (var fixture = await WorkCleanupFixture.CreateAsync())
@@ -164,9 +164,18 @@ public sealed class WorkCleanupTests(ITestOutputHelper output)
         }
         await using var active = await WorkCleanupFixture.CreateAsync(enabled: true);
         var current = active.Producer.Commit!.ActivationId!.Value;
+        var runtime = active.Original.Activator.RequirePublishedRuntime("fixture-plugin");
+        var target = active.Producer.Plan.TargetPath;
+        var files = Directory.EnumerateFiles(target, "*", SearchOption.AllDirectories)
+            .ToDictionary(path => path, File.ReadAllBytes);
+        Assert.Throws<IOException>(() => runtime.ProtectWorkTarget(target));
+        Assert.Throws<IOException>(() => runtime.ProtectWorkTarget(Path.GetDirectoryName(target)!));
         var blocked = await Assert.ThrowsAsync<IOException>(async () => await active.RunAsync(Guid.NewGuid()));
         Assert.Equal("extension_work_scope_referenced", blocked.Message);
+        Assert.True(Directory.Exists(active.Workspace));
+        Assert.Equal(current, active.Original.Activator.RequirePublishedRuntime("fixture-plugin").ActivationId);
         Assert.True(active.Original.Activator.IsPublished("fixture-plugin", current));
+        foreach (var file in files) Assert.Equal(file.Value, File.ReadAllBytes(file.Key));
         Assert.False(File.Exists(Path.Combine(active.Upgrade.NextActivationDirectory, "cleaned.json")));
     }
 

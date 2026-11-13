@@ -155,11 +155,11 @@ public sealed class JournalWriterStore(StateDatabase database)
         return ObserveInside(connection, transaction, journalId, null, RequireExecutor(identity));
     }
 
-    private static ProcessIdentity RequireExecutor(ProcessIdentityLease? identity)
+    private ProcessIdentity RequireExecutor(ProcessIdentityLease? identity)
     {
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
         var current = CurrentWriter;
-        if ((identity?.ReadCurrent() ?? ProcessIdentityReader.Read(Environment.ProcessId)) != current.Process)
+        if (((identity ?? database.ExecutorIdentity)?.ReadCurrent() ?? ProcessIdentityReader.Read(Environment.ProcessId)) != current.Process)
             throw new IOException("journal_executor_identity_changed");
         return current.Process;
     }
@@ -168,7 +168,7 @@ public sealed class JournalWriterStore(StateDatabase database)
     {
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
         var writer = CurrentWriter;
-        if ((executor?.ReadCurrent() ?? ProcessIdentityReader.Read(Environment.ProcessId)) != writer.Process)
+        if (((executor ?? database.ExecutorIdentity)?.ReadCurrent() ?? ProcessIdentityReader.Read(Environment.ProcessId)) != writer.Process)
             throw new IOException("cleanup_executor_identity_changed");
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
         using var command = connection.CreateCommand();

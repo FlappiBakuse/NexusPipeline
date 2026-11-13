@@ -9,6 +9,31 @@ namespace NexusPipeline.StorageTests;
 
 public sealed class DatabaseScopeTests
 {
+    [Fact(DisplayName = "Scoped Recovery Snapshots Observe External Commits And Never Share Facts Between Instances")]
+    public void RefreshesHistorySnapshots()
+    {
+        var root = Path.Combine(Environment.GetEnvironmentVariable("NEXUS_TEST_ROOT")!, "history-snapshots-" + Guid.NewGuid().ToString("N"));
+        var instance = new InstanceRoot(new()).OpenOrCreate(Path.Combine(root, "first"));
+        var other = new InstanceRoot(new()).OpenOrCreate(Path.Combine(root, "other"));
+        var database = StateDatabase.CreateFresh(instance); var foreign = StateDatabase.CreateFresh(other);
+        var registry = new RecoveryJournalRegistry(database);
+        var original = registry.ReadActiveSnapshot();
+        using (new HistoryReadScope(instance, database, new()))
+        {
+            Assert.Equal(original.Revision, registry.ReadActiveSnapshot().Revision);
+            using (var connection = DatabaseConnections.Open(database.DatabasePath))
+            using (var command = connection.CreateCommand())
+            {
+                command.CommandText = "UPDATE recovery_index_state SET revision=revision+1 WHERE singleton=1;";
+                command.ExecuteNonQuery();
+            }
+            Assert.Equal(original.Revision + 1, registry.ReadActiveSnapshot().Revision);
+            Assert.Equal(original.Revision, new RecoveryJournalRegistry(foreign).ReadActiveSnapshot().Revision);
+            Assert.Equal(original.Revision + 1, registry.ReadActiveSnapshot().Revision);
+        }
+        Directory.Move(instance.RuntimeRoot, instance.RuntimeRoot + "-released");
+    }
+
     [Fact(DisplayName = "Publication Commits Stay Durable And A Failed Transaction Does Not Leak Into Its Successor")]
     public void PreservesWriteBoundaries()
     {
@@ -144,7 +169,7 @@ public sealed class DatabaseScopeTests
         Create(replacement, 2);
         var original = PhysicalObjectIdentity.Read(path);
         var candidate = PhysicalObjectIdentity.Read(replacement);
-        using (var pool = instanceOwned ? new DatabaseReadPool(path) : null)
+        using (var pool = instanceOwned ? new DatabaseConnectionPool(path) : null)
         {
             using (var outer = DatabaseReadScope.Hold(path))
             {
@@ -162,7 +187,18 @@ public sealed class DatabaseScopeTests
             }
             using (var writer = DatabaseConnections.Open(path))
             using (var command = writer.CreateCommand())
-            { command.CommandText = "UPDATE value SET number=3;"; command.ExecuteNonQuery(); }
+            {
+                Assert.Equal(2L, DatabaseConnections.Scalar(writer, "PRAGMA synchronous;"));
+                using var rollback = writer.BeginTransaction(); command.Transaction = rollback;
+                command.CommandText = "UPDATE value SET number=9;"; command.ExecuteNonQuery(); rollback.Rollback();
+                command.Transaction = null; command.CommandText = "UPDATE value SET number=3;"; command.ExecuteNonQuery();
+            }
+            using (var reader = DatabaseConnections.Open(path, readOnly: true))
+            using (var command = reader.CreateCommand())
+            {
+                command.CommandText = "UPDATE value SET number=7;";
+                Assert.Throws<SqliteException>(() => command.ExecuteNonQuery());
+            }
             using (DatabaseReadScope.Hold(path)) Assert.Equal(3L, Read(path));
             if (instanceOwned)
             {

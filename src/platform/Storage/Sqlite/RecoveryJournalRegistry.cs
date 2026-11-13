@@ -161,17 +161,16 @@ public sealed class RecoveryJournalRegistry(StateDatabase database) : IRecoveryR
         return result;
     }
 
-    internal IEnumerable<RegisteredJournal> ReadHistory(bool completedFamiliesOnly = false)
+    internal IEnumerable<RegisteredJournal> ReadHistory(bool completedFamiliesOnly = false, string after = "")
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
         using var transaction = connection.BeginTransaction(deferred: true);
-        foreach (var journal in ReadHistoryInside(connection, transaction, completedFamiliesOnly)) yield return journal;
+        foreach (var journal in ReadHistoryInside(connection, transaction, completedFamiliesOnly, after)) yield return journal;
     }
 
     internal static IEnumerable<RegisteredJournal> ReadHistoryInside(SqliteConnection connection, SqliteTransaction transaction,
-        bool completedFamiliesOnly = false)
+        bool completedFamiliesOnly = false, string after = "")
     {
-        string after = "";
         while (true)
         {
             using var command = connection.CreateCommand(); command.Transaction = transaction;
@@ -303,7 +302,7 @@ public sealed class RecoveryJournalRegistry(StateDatabase database) : IRecoveryR
     internal RecoveryRegistrySnapshot ReadActiveSnapshot() => ReadSnapshot(null);
 
     internal RecoveryRegistrySnapshot ReadSnapshot(Guid? requiredJournalId) =>
-        HistoryReadScope.ReadDatabase(database, (connection, transaction) => ReadSnapshot(connection, transaction, requiredJournalId));
+        HistoryReadScope.ReadSnapshot(database, requiredJournalId, (connection, transaction) => ReadSnapshot(connection, transaction, requiredJournalId));
 
     internal static RecoveryRegistrySnapshot ReadInspectedSnapshot(DatabaseInspection inspection)
     {
@@ -364,7 +363,7 @@ public sealed class RecoveryJournalRegistry(StateDatabase database) : IRecoveryR
         command.CommandText = "SELECT ready,revision FROM recovery_index_state WHERE singleton=1;";
         using var state = command.ExecuteReader();
         if (!state.Read()) throw new IOException("recovery_registry_state_missing");
-        var result = new RecoveryRegistrySnapshot(state.GetInt64(1), state.GetInt64(0) == 1, journals, isolations.AsReadOnly(), effects);
+        var result = new RecoveryRegistrySnapshot(state.GetInt64(1), state.GetInt64(0) == 1, journals, isolations.AsReadOnly(), effects.AsReadOnly());
         RecoveryRegistryPolicy.Verify(result);
         return result;
     }

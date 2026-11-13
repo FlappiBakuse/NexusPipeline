@@ -66,7 +66,7 @@ public sealed class ExtensionPackageService : IExtensionPackages, IAsyncDisposab
 
     private async Task RunCleanupAsync(CancellationToken cancellation)
     {
-        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
         var executor = _lease.ExecutorIdentity;
         try
         {

@@ -8,6 +8,7 @@ internal sealed class DatabaseValidationLease : IDisposable
     private readonly string _path;
     private readonly StableDirectoryLease _directory;
     private readonly FileStream _file;
+    private readonly PhysicalObjectIdentity _identity;
     private readonly SqliteConnection _connection;
     private readonly string _measurement;
     private long? _validated;
@@ -21,7 +22,13 @@ internal sealed class DatabaseValidationLease : IDisposable
         try
         {
             _file = new(_path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-            try { _connection = DatabaseConnections.Open(_path, readOnly: true, allowPooling: false); }
+            try
+            {
+                _identity = PhysicalObjectIdentity.Read(_file.SafeFileHandle);
+                if (PhysicalPathPolicy.NormalizeWithoutLinks(_path) != _path || PhysicalObjectIdentity.Read(_path) != _identity)
+                    throw new IOException("database_validation_identity_changed");
+                _connection = DatabaseConnections.Open(_path, readOnly: true, allowPooling: false);
+            }
             catch { _file.Dispose(); throw; }
         }
         catch { _directory.Dispose(); throw; }
@@ -64,8 +71,7 @@ internal sealed class DatabaseValidationLease : IDisposable
     private void RequireIdentity()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (PhysicalPathPolicy.NormalizeWithoutLinks(_path) != _path ||
-            PhysicalObjectIdentity.Read(_path) != PhysicalObjectIdentity.Read(_file.SafeFileHandle))
+        if (PhysicalObjectIdentity.Read(_file.SafeFileHandle) != _identity)
             throw new IOException("database_validation_identity_changed");
     }
 

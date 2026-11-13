@@ -40,9 +40,11 @@ internal sealed class ExecutionReadControl(ControlAuthentication authority, Exec
             while (!deadline.IsCancellationRequested)
             {
                 request.Require(ControlCapability.LogsRead);
-                var heartbeat = Task.Delay(TimeSpan.FromSeconds(1), deadline.Token);
-                if (await Task.WhenAny(available, heartbeat) == available)
+                using var heartbeat = CancellationTokenSource.CreateLinkedTokenSource(deadline.Token);
+                var keepalive = Task.Delay(TimeSpan.FromSeconds(25), heartbeat.Token);
+                if (await Task.WhenAny(available, keepalive) == available)
                 {
+                    await heartbeat.CancelAsync();
                     if (!await available) return;
                     while (subscription.Events.TryRead(out var frame)) await SendAsync("frame", frame);
                     available = subscription.Events.WaitToReadAsync(deadline.Token).AsTask();

@@ -1,11 +1,42 @@
 using NexusPipeline.Platform.Serialization;
 using NexusPipeline.Platform.Storage;
+using NexusPipeline.Platform.Storage.Configuration;
+using NexusPipeline.Core.Configuration;
 using Xunit;
 
 namespace NexusPipeline.StorageTests;
 
 public sealed class BlobScopeTests
 {
+    [Fact(DisplayName = "Frozen Snapshot Reads Preserve Immutable Values And Recheck Changed Files After Protection Ends")]
+    public void ProtectsSnapshotValues()
+    {
+        var (instance, store) = Create(); var codec = new ConfigurationSnapshotCodec(store);
+        var manifest = codec.Write(new(FileObjectKind.Directory, [new("", FileObjectKind.Directory, 0, null)]));
+        var missing = codec.Write(new(FileObjectKind.Missing, []));
+        var path = Path.Combine(instance.RuntimeRoot, manifest.RelativePath); var bytes = File.ReadAllBytes(path);
+        var (foreign, other) = Create(); var foreignCodec = new ConfigurationSnapshotCodec(other);
+        var foreignManifest = foreignCodec.Write(new(FileObjectKind.Directory, [new("", FileObjectKind.Directory, 0, null)]));
+        using (BlobReadScope.Hold(instance))
+        {
+            var tree = codec.Read(manifest);
+            Assert.Equal(FileObjectKind.Directory, tree.Shape);
+            var entries = Assert.IsAssignableFrom<IList<FileTreeEntry>>(tree.Entries);
+            Assert.Throws<NotSupportedException>(() => entries[0] = new("", FileObjectKind.File, 0, new string('a', 64)));
+            Assert.Equal(FileObjectKind.Missing, codec.Read(missing).Shape);
+            Assert.Equal(FileObjectKind.Directory, codec.Read(manifest).Shape);
+            Assert.Throws<IOException>(() => File.WriteAllBytes(path, [1, 2, 3]));
+            Assert.Equal(FileObjectKind.Directory, foreignCodec.Read(foreignManifest).Shape);
+            File.WriteAllBytes(Path.Combine(foreign.RuntimeRoot, foreignManifest.RelativePath), [1, 2, 3]);
+            Assert.Throws<IOException>(() => foreignCodec.Read(foreignManifest));
+            Assert.Equal(FileObjectKind.Directory, codec.Read(manifest).Shape);
+        }
+        File.WriteAllBytes(path, [1, 2, 3]);
+        Assert.Throws<IOException>(() => codec.Read(manifest));
+        File.WriteAllBytes(path, bytes);
+        Assert.Equal(FileObjectKind.Directory, codec.Read(manifest).Shape);
+    }
+
     [Theory(DisplayName = "Verified Blob Reads Reject Missing Leaves And Live Or Broken Reparse Entries Without Following Them")]
     [InlineData("missing")]
     [InlineData("leaf-link")]

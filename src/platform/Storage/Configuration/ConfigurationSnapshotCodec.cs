@@ -22,19 +22,24 @@ internal sealed class ConfigurationSnapshotCodec(ImmutableBlobStore blobs)
         held?.Add(input);
         try
         {
-            var bytes = new byte[checked((int)input.Length)];
-            input.ReadExactly(bytes);
-            using var document = StrictJson.Parse(bytes);
-            var value = document.Deserialize<ConfigurationSnapshotDocument>(Options);
-            if (value is null || value.Format != "nexus.configuration.snapshot" || value.Version != 1)
-                throw new IOException("configuration_snapshot_format_unknown");
-            var tree = FileTreePolicy.Freeze(value.Tree);
-            if (!Serialize(tree).AsSpan().SequenceEqual(bytes)) throw new IOException("configuration_snapshot_encoding_unknown");
-            return tree;
+            return BlobReadStream.ReadSnapshot(input, () => Decode(input));
         }
         catch (Exception error) when (error is ConfigurationException or JsonException or ArgumentException)
         { throw new IOException("configuration_snapshot_invalid", error); }
         finally { if (held is null) input.Dispose(); }
+    }
+
+    private static FileTreeSnapshot Decode(FileStream input)
+    {
+        var bytes = new byte[checked((int)input.Length)];
+        input.ReadExactly(bytes);
+        using var document = StrictJson.Parse(bytes);
+        var value = document.Deserialize<ConfigurationSnapshotDocument>(Options);
+        if (value is null || value.Format != "nexus.configuration.snapshot" || value.Version != 1)
+            throw new IOException("configuration_snapshot_format_unknown");
+        var tree = FileTreePolicy.Freeze(value.Tree);
+        if (!Serialize(tree).AsSpan().SequenceEqual(bytes)) throw new IOException("configuration_snapshot_encoding_unknown");
+        return tree;
     }
 
     private static byte[] Serialize(FileTreeSnapshot tree) =>

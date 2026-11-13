@@ -19,13 +19,7 @@ internal static class ConfigurationRunInventory
             using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
             using var transaction = connection.BeginTransaction(deferred: true);
             using var command = connection.CreateCommand(); command.Transaction = transaction;
-            command.CommandText = "SELECT s.session_id,o.subject_id,o.operation_kind,o.status FROM configuration_run_sessions s " +
-                "JOIN operations o ON o.operation_id=s.session_id LIMIT 4097;";
-            var items = new List<(Guid Id, string Subject, string Kind, string Status)>();
-            using (var row = command.ExecuteReader())
-                while (row.Read()) items.Add((Guid.Parse(row.GetString(0)), row.GetString(1), row.GetString(2), row.GetString(3)));
-            if (items.Count > 4096) throw new IOException("configuration_run_inventory_limit");
-            foreach (var item in items)
+            foreach (var item in ReadSessions(connection, transaction))
             {
                 var session = ConfigurationRunRows.Read(connection, transaction, item.Id, item.Subject)!;
                 if (item.Kind != "configuration.run.begin" ||
@@ -49,6 +43,29 @@ internal static class ConfigurationRunInventory
         }
         catch (Exception error) when (error is ConfigurationException or ArgumentException or InvalidOperationException or FormatException)
         { throw new IOException("configuration_run_metadata_unrecognized", error); }
+    }
+
+    internal static IEnumerable<(Guid Id, string Subject, string Kind, string Status)> ReadSessions(
+        SqliteConnection connection, SqliteTransaction transaction)
+    {
+        var after = "";
+        while (true)
+        {
+            using var command = connection.CreateCommand(); command.Transaction = transaction;
+            command.CommandText = "SELECT s.session_id,o.subject_id,o.operation_kind,o.status FROM configuration_run_sessions s " +
+                "LEFT JOIN operations o ON o.operation_id=s.session_id WHERE s.session_id>$after ORDER BY s.session_id LIMIT 128;";
+            command.Parameters.AddWithValue("$after", after);
+            var page = new List<(Guid Id, string Subject, string Kind, string Status)>();
+            using (var row = command.ExecuteReader())
+                while (row.Read())
+                {
+                    if (row.IsDBNull(1) || row.IsDBNull(2) || row.IsDBNull(3)) throw new IOException("configuration_run_operation_unbound");
+                    after = row.GetString(0);
+                    page.Add((Guid.Parse(after), row.GetString(1), row.GetString(2), row.GetString(3)));
+                }
+            foreach (var item in page) yield return item;
+            if (page.Count < 128) yield break;
+        }
     }
 
     internal static ImmutableArray<ConfigurationRunStatus> ReadCompletion(RuntimeInstance instance, StateDatabase database,

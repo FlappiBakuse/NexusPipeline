@@ -79,7 +79,7 @@ public sealed class ConfigurationRunStore
                 JournalResourceClaims.Insert(connection, transaction, journal.JournalId, claims);
             }
             ConfigurationRunRows.Insert(connection, transaction, operation.OperationId, prepared.OwnerOperationId, parentJournalId, stepId,
-                RunBindingEvidence.ReadOrdinal(_instance, _contracts, parentJournalId, stepId), prepared.Request, resources, states);
+                RunBindingEvidence.ReadOrdinal(_instance, _database, _contracts, parentJournalId, stepId), prepared.Request, resources, states);
             return Required(connection, transaction, operation.OperationId, operation.SubjectId) with { IsNew = true };
         });
     });

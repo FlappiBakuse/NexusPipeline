@@ -14,7 +14,8 @@ public sealed class InstanceLease : IDisposable
     private readonly object _executorGate = new();
     private Processes.ProcessIdentityLease? _executor;
     private readonly object _databaseGate = new();
-    private Sqlite.DatabaseReadPool? _databaseReads;
+    private Sqlite.DatabaseConnectionPool? _databaseReads;
+    private DirectoryAttributeProtection? _directories;
     public RuntimeInstance Instance { get; }
     internal Guid StartupGeneration { get; } = Guid.NewGuid();
     internal Execution.RunBudgetOwner RunBudgets { get; }
@@ -70,7 +71,7 @@ public sealed class InstanceLease : IDisposable
             _attemptReads.Dispose(); RunBudgets.Close(); LiveLogs.Close();
             lock (_executorGate) if (OperatingSystem.IsWindows()) _executor?.Dispose();
             try { lock (_databaseGate) _databaseReads?.Dispose(); }
-            finally { _lock.Dispose(); _identity.Dispose(); }
+            finally { _directories?.Dispose(); _lock.Dispose(); _identity.Dispose(); }
         });
     }
 
@@ -89,6 +90,7 @@ public sealed class InstanceLease : IDisposable
         if (database.InstanceId != Instance.InstanceId || database.RuntimeRoot != Instance.RuntimeRoot)
             throw new IOException("attempt_read_instance_unbound");
         database.AttemptReads = _attemptReads;
+        database.RuntimeLease = this;
         return _attemptReads;
     }
 
@@ -145,6 +147,9 @@ public sealed class InstanceLease : IDisposable
         return _executionPublications.Run(() =>
         {
             VerifyHeld(Instance);
+            using var paths = OperatingSystem.IsWindows()
+                ? DirectoryAttributeScope.Enter(_directories ??= DirectoryAttributeProtection.Acquire(Instance)) : null;
+            using var instance = OperatingSystem.IsWindows() ? InstanceReadScope.Hold(Instance, new()) : null;
             using var identity = OperatingSystem.IsWindows() ? new Processes.ProcessIdentityScope(ExecutorIdentity) : null;
             using var reads = OperatingSystem.IsWindows() ? Sqlite.DatabaseReadScope.Hold(Path.Combine(Instance.RuntimeRoot, "state", "nexus.db")) : null;
             using var journals = OperatingSystem.IsWindows() ? Journals.JournalReadScope.HoldParents(Instance, new(), _attemptReads) : null;

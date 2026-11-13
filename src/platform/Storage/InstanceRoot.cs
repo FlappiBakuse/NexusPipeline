@@ -61,7 +61,7 @@ public sealed class InstanceRoot
         var identityPath = Path.Combine(root, "instance.json");
         if ((File.GetAttributes(identityPath) & FileAttributes.ReparsePoint) != 0)
             throw new IOException("invalid_runtime_identity");
-        using var input = new FileStream(identityPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        using var input = new FileStream(identityPath, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 1);
         if (input.Length > StrictJson.MaximumBytes)
             throw new IOException("invalid_runtime_identity");
         var identityBytes = new byte[checked((int)input.Length)];

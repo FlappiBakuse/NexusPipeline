@@ -13,14 +13,14 @@ internal sealed class PreparedWorkCleanup : IDisposable
 {
     private readonly InstanceLease _lease;
     private readonly ResourceOperationBorrow _borrow;
-    private readonly ExtensionActivator.ApplyReservation _inventory;
+    private readonly WorkScopeProtection _inventory;
     private readonly FrozenFileCleanup _plan;
     private int _disposed;
     internal ExtensionWorkExecution Execution { get; }
     internal OperationIdentity Identity { get; }
 
     private PreparedWorkCleanup(InstanceLease lease, ResourceOperationBorrow borrow,
-        ExtensionActivator.ApplyReservation inventory, FrozenFileCleanup plan,
+        WorkScopeProtection inventory, FrozenFileCleanup plan,
         ExtensionWorkExecution execution, OperationIdentity identity)
     { _lease = lease; _borrow = borrow; _inventory = inventory; _plan = plan; Execution = execution; Identity = identity; }
 
@@ -32,11 +32,11 @@ internal sealed class PreparedWorkCleanup : IDisposable
         lease.VerifyHeld(instance); lease.RequireExtensionActivator(activator, resources);
         if (plan.ExtensionWork is not { } work || plan.OperationId != root.OperationId) throw Invalid();
         var borrow = root.Borrow(resources, plan.OperationId, FileCleanupItems.Claims(plan));
-        ExtensionActivator.ApplyReservation? inventory = null;
+        WorkScopeProtection? inventory = null;
         try
         {
-            inventory = await activator.ReserveForApplyAsync(root, work.Origin.Producer.Source.ExtensionId,
-                acceptedCancellation, requireInactive: true).ConfigureAwait(false);
+            inventory = await WorkScopeProtection.AcquireAsync(activator, database, root, work.Origin,
+                acceptedCancellation).ConfigureAwait(false);
             var planReference = new CleanupPlanCodec(instance, contracts, new(instance, contracts), database, roots).Persist(plan);
             var executor = lease.ExecutorIdentity;
             var execution = ExtensionWorkExecution.Owned(instance, database, lease, contracts, roots, work, root,

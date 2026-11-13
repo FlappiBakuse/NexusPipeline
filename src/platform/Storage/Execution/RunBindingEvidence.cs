@@ -36,6 +36,7 @@ internal sealed class RunBindingEvidence
         _instance = instance; _database = database; _contracts = contracts; _blobs = new(instance, contracts);
         _attempt = attempt; _total = total; _ordinal = session.InvocationOrdinal;
         _step = total.Steps.SingleOrDefault(item => item.StepId == session.StepId) ?? throw new IOException("configuration_run_step_unknown");
+        using var history = JournalReadScope.HoldAttempt(instance, contracts, database, session.ParentJournalId);
         var latest = new JournalStore(instance, contracts).Read(session.ParentJournalId);
         _taskRetry = ExecutionInvocationCodec.Read(latest.Root, total).SingleOrDefault(item =>
             item.StepId == session.StepId && item.Ordinal == _ordinal)?.TaskRetry;
@@ -85,6 +86,7 @@ internal sealed class RunBindingEvidence
     internal static RegisteredJournal ReadAdmission(RuntimeInstance instance, StateDatabase database, ContractReader contracts,
         Guid journalId, Guid owner, string stepId, IEnumerable<BlobReference> references)
     {
+        using var history = JournalReadScope.HoldAttempt(instance, contracts, database, journalId);
         var registry = new RecoveryJournalRegistry(database).ReadSnapshot(journalId).Journals;
         var journal = registry.SingleOrDefault(item => item.JournalId == journalId && item.Kind == JournalKind.RunAttempt && item.OperationId == owner)
             ?? throw new IOException("configuration_run_parent_unbound");
@@ -106,14 +108,15 @@ internal sealed class RunBindingEvidence
     internal static void RequireAdmissionSource(RuntimeInstance instance, StateDatabase database, ContractReader contracts,
         RegisteredJournal journal, string stepId, IReadOnlyDictionary<ConfigurationAddress, FrozenRunState> states)
     {
-        var attempt = AttemptPreparedBinding.ReadPlan(instance, contracts, journal);
-        var total = new ExecutionPlanCodec(instance, contracts, new(instance, contracts))
-            .Read(AttemptPlanCodec.Reference(attempt.ExecutionPlan)).ReadWire();
-        PreparedRetryOrigin.RequireSaved(instance, database, contracts, attempt, total, stepId, states);
+        var graph = AttemptPreparedBinding.ReadPlanGraph(instance, contracts, journal, database);
+        PreparedRetryOrigin.RequireSaved(instance, database, contracts, graph.Plan, graph.Total, stepId, states);
     }
 
-    internal static int ReadOrdinal(RuntimeInstance instance, ContractReader contracts, Guid journalId, string stepId) =>
-        ExecutionInvocationCodec.Ordinal(new JournalStore(instance, contracts).Read(journalId).Root, stepId);
+    internal static int ReadOrdinal(RuntimeInstance instance, StateDatabase database, ContractReader contracts, Guid journalId, string stepId)
+    {
+        using var history = JournalReadScope.HoldAttempt(instance, contracts, database, journalId);
+        return ExecutionInvocationCodec.Ordinal(new JournalStore(instance, contracts).Read(journalId).Root, stepId);
+    }
 
     internal static IDisposable HoldRestored(RuntimeInstance instance, StateDatabase database, ContractReader contracts,
         AttemptWriterState state, IEnumerable<string> selectedSteps)

@@ -30,10 +30,16 @@ internal static class AttemptPreparedBinding
         return new(journal.PlanPath, new FileInfo(path).Length, journal.PlanDigest);
     }
 
-    internal static RunAttemptPlan ReadPlan(RuntimeInstance instance, ContractReader contracts, RegisteredJournal journal)
+    internal static RunAttemptPlan ReadPlan(RuntimeInstance instance, ContractReader contracts, RegisteredJournal journal, StateDatabase? database = null)
+        => ReadPlanGraph(instance, contracts, journal, database).Plan;
+
+    internal static AttemptMetadataPlan ReadPlanGraph(RuntimeInstance instance, ContractReader contracts, RegisteredJournal journal, StateDatabase? database = null)
     {
+        if (database?.AttemptReads?.Find(journal.JournalId)?.ReadPlanMetadata(journal, Reference(instance, journal)) is { } saved)
+            return saved;
+        if (JournalReadScope.ReadPlanGraph(instance, contracts, journal) is { } held) return held;
         using var inputs = ReadPlanInputs(instance, contracts, journal);
-        return inputs.Plan;
+        return new(inputs.Plan, inputs.Total);
     }
 
     internal static AttemptBoundInputs ReadPlanInputs(RuntimeInstance instance, ContractReader contracts, RegisteredJournal journal)
@@ -67,6 +73,7 @@ internal static class AttemptPreparedBinding
     private static BoundPreparedAttempt ReadCurrent(RuntimeInstance instance, ContractReader contracts, StateDatabase database, Guid journalId,
         JournalStore? protectedHistory, AttemptBoundInputs? heldInputs = null)
     {
+        using var reads = new HistoryReadScope(instance, database, contracts);
         using var paths = OperatingSystem.IsWindows() ? DirectoryAttributeScope.Hold(instance) : null;
         using var blobLease = OperatingSystem.IsWindows() ? BlobReadScope.Hold(instance) : null;
         JournalReadScope.SelectParent(instance, contracts, journalId);
@@ -84,7 +91,7 @@ internal static class AttemptPreparedBinding
         var journals = protectedHistory ?? new JournalStore(instance, contracts);
         using var historyScope = JournalReadScope.Hold(journals, journalId);
         var history = journals.ReadAllRevisions(journalId);
-        using var parsedHistory = new AttemptReadScope(history, total);
+        using var parsedHistory = new AttemptReadScope(history, total, database.AttemptReads?.Find(journalId)?.ParsedHistory);
         PreviewDomainCodec.RequireHistory(history, total, plan.ExecutionPlan.Sha256);
         var projected = history.SingleOrDefault(item => item.Revision == registered.Revision) ?? throw new IOException("attempt_sql_prefix_missing");
         if (projected.Phase != registered.Phase || snapshot.FileEffects.Any(item => item.JournalId == journalId)) throw new IOException("attempt_sql_projection_unbound");

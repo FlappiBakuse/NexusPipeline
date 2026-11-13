@@ -21,7 +21,12 @@ public sealed class RetryRuntimeTests
             retrySafe: true, retryApproved: true, maximumAttempts: 3);
         using var stopping = new CancellationTokenSource();
         var running = fixture.Consumer.RunNextAsync(stopping.Token);
-        await AttemptsWritten(fixture.Marker, 2); stopping.Cancel();
+        await AttemptsWritten(fixture.Marker, 2);
+        var active = Assert.Single(fixture.Consumer.ReadActive("provider-runtime-fixture"));
+        Assert.Equal(1, active.Ordinal);
+        Assert.Equal(2, active.Steps[0].InvocationOrdinal);
+        Assert.Equal(3, active.Steps[0].MaximumInvocations);
+        stopping.Cancel();
         var first = Assert.IsType<AttemptReceipt>(await running);
         Assert.Equal(LifecycleOutcome.Interrupted, first.Facts.Lifecycle);
         Assert.Equal(1, first.Facts.Ordinal); RequireClosure(fixture, first);
@@ -44,6 +49,7 @@ public sealed class RetryRuntimeTests
         Assert.Equal(["1", "1", "2"], attempts.Select(item => item[1]));
         Assert.All(attempts, item => Assert.Equal(attempts[0][2], item[2])); Assert.Single(Directory.GetFiles(fixture.Marker + ".effects"));
         var firstState = AttemptWriterState.Read(fixture.Source.Instance, fixture.Source.Database, new(), first.JournalId);
+        RequireProjectionIsolation(fixture.Source.Instance, firstState);
         var secondState = AttemptWriterState.Read(fixture.Source.Instance, fixture.Source.Database, new(), second.JournalId);
         Assert.Equal(2, firstState.AllJobs.Length); Assert.Single(secondState.AllJobs);
         Assert.Equal(2, secondState.PreviousInvocationCount(secondState.Total.Steps[0].StepId));
@@ -187,6 +193,48 @@ public sealed class RetryRuntimeTests
         Directory.GetFiles(Path.Combine(fixture.Source.Instance.RuntimeRoot, "blobs", "plans"))
             .OrderBy(path => path, StringComparer.Ordinal).Select(path => Path.GetFileName(path) + ":" +
                 Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(path)))));
+
+    private static void RequireProjectionIsolation(RuntimeInstance instance, AttemptWriterState state)
+    {
+        var history = new JournalStore(instance, new()).ReadAllRevisions(state.Journal.JournalId);
+        var root = history[^1].Root;
+        var expected = ExecutionInvocationCodec.Views(root).Select(view => view.GetRawText()).ToArray();
+        var jobs = WriterIntentCodec.ReadAllJobs(root, state.Total);
+        var coverage = StepResultCodec.Coverage(root, state.Total);
+        for (var pass = 0; pass < 3; pass++)
+        {
+            Assert.Equal<StepWriterState>(jobs, state.AllJobs);
+            Assert.Equal<ExecutionStepCompletion>(coverage, state.Coverage);
+        }
+        var previous = state with { Latest = history[0] };
+        Assert.Equal<StepWriterState>(WriterIntentCodec.ReadAllJobs(previous.Latest.Root, previous.Total), previous.AllJobs);
+        Assert.Equal<ExecutionStepCompletion>(StepResultCodec.Coverage(previous.Latest.Root, previous.Total), previous.Coverage);
+        var changed = state with { Total = state.Total with { Steps = [] } };
+        Assert.ThrowsAny<Exception>(() => changed.AllJobs);
+        Assert.Equal<StepWriterState>(jobs, state.AllJobs);
+        using var memo = new AttemptReadMemo(state.Total);
+        using var scope = new AttemptReadScope(history, state.Total, memo);
+        var previousViews = ExecutionInvocationCodec.Views(history[^2].Root).Select(view => view.GetRawText()).ToArray();
+        for (var pass = 0; pass < 3; pass++)
+        {
+            Assert.Equal(previousViews, ExecutionInvocationCodec.Views(history[^2].Root).Select(view => view.GetRawText()));
+            Assert.Equal(expected, ExecutionInvocationCodec.Views(root).Select(view => view.GetRawText()));
+            Assert.Equal(state.AllJobs.Length, WriterIntentCodec.ReadAllJobs(root, state.Total).Length);
+            Assert.Single(ExecutionInvocationCodec.Read(root, state.Total));
+        }
+        var damaged = System.Text.Json.Nodes.JsonNode.Parse(history[^1].Export())!.AsObject();
+        var participant = damaged["participants"]!.AsArray().First(item =>
+            item!["identity"]!["format"]!.GetValue<string>() == ExecutionInvocationCodec.Format)!;
+        participant["identity"]!["version"] = 999;
+        using var foreign = System.Text.Json.JsonDocument.Parse(damaged.ToJsonString());
+        Assert.Throws<IOException>(() => ExecutionInvocationCodec.Current(foreign.RootElement));
+        Assert.Equal(expected, ExecutionInvocationCodec.Views(root).Select(view => view.GetRawText()));
+        scope.Dispose();
+        using var following = new AttemptReadScope(history, state.Total, memo);
+        Assert.Equal(expected, ExecutionInvocationCodec.Views(root).Select(view => view.GetRawText()));
+        Assert.Equal<StepWriterState>(jobs, WriterIntentCodec.ReadAllJobs(root, state.Total));
+        Assert.Throws<IOException>(() => ExecutionInvocationCodec.Current(foreign.RootElement));
+    }
 
     private static async Task AttemptsWritten(string marker, int expected)
     {

@@ -68,7 +68,7 @@ public sealed class WorkAdmissionTests
         var recovery = new StartupJournalRecovery(owner.Instance, owner.Contracts, owner.Database, fixture.Original.Roots);
         Assert.ThrowsAny<IOException>(() => recovery.InspectBindings(registry.ReadSnapshot()));
         Assert.ThrowsAny<IOException>(() => new RecoveryCoordinator(registry,
-            new AdmissionPublicationEvidence(owner.Instance, owner.Database, owner.Contracts, fixture.Original.Roots),
+            new AdmissionPublicationEvidence(owner.Instance, owner.Database, owner.Contracts, fixture.Original.Roots, last.JournalId),
             owner.Index).VerifyAndPublish());
         Assert.False(owner.Index.Current.IsReady);
         Assert.Equal(sql, JsonSerializer.Serialize(registry.ReadSnapshot()));

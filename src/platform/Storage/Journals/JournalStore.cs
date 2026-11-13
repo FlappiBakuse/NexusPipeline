@@ -91,6 +91,7 @@ public sealed class JournalStore
 
     public JournalDocument Read(Guid journalId)
     {
+        JournalReadScope.SelectActiveParent(_instance, _contracts, journalId);
         lock (_gate)
         {
             using var publication = JournalPublicationGate.Acquire(_instance, journalId);
@@ -100,6 +101,7 @@ public sealed class JournalStore
 
     public IReadOnlyList<JournalDocument> ReadAllRevisions(Guid journalId)
     {
+        JournalReadScope.SelectActiveParent(_instance, _contracts, journalId);
         lock (_gate)
         {
             using var publication = JournalPublicationGate.Acquire(_instance, journalId);
@@ -112,6 +114,7 @@ public sealed class JournalStore
     public JournalDocument Append(Guid journalId, long expectedRevision, ReadOnlyMemory<byte> bytes,
         NoEffectEvidence? noEffect = null, bool hasVerifiedRecoveryEvidence = false)
     {
+        JournalReadScope.SelectActiveParent(_instance, _contracts, journalId);
         var owner = JournalReadScope.WriteOwner(this, journalId) ?? this;
         return owner.AppendCore(journalId, expectedRevision, bytes, noEffect, hasVerifiedRecoveryEvidence, _publicationObserver);
     }

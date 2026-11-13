@@ -18,6 +18,7 @@ public sealed record ExecutionStepView(string StepId, string ScriptId, string? U
     public bool HasTaskReport { get; init; }
     public IReadOnlyList<string> LogRoles { get; init; } = Array.AsReadOnly(new[] { "main" });
     public int MaximumInvocations { get; init; } = 1;
+    public int InvocationOrdinal { get; init; }
     public IReadOnlyList<ExecutionInvocationView> Invocations { get; init; } = [];
     public string? Engine { get; init; }
     public string? Business { get; init; }
@@ -70,6 +71,7 @@ internal sealed class ExecutionProgress
                     task.IsEnabled, Array.AsReadOnly(task.Dependencies.ToArray()), "unknown", null)
                     { WorkflowRole = task.WorkflowRole ?? "business", TitleLocales = task.TitleLocales?.ToDictionary(pair => pair.Key, pair => pair.Value.GetString()!) }).ToArray()))
                 { HasTaskReport = step.Adapter is not null || step.Provider is not null,
+                    MaximumInvocations = checked((int)(step.MaximumAttempts ?? 1)),
                     LogRoles = Array.AsReadOnly(ExecutionBindingRoles.Required(step)
                     .Where(role => role != "judgement").Select(role => role == "process" ? "main" : role).ToArray()) }).ToArray())
         { Display = accepted.Prepared.Display };
@@ -101,6 +103,14 @@ internal sealed class ExecutionProgress
 
     internal void Phase(string phase)
     { lock (_gate) _view = _view with { Phase = phase }; _changed(); }
+
+    internal void Invocation(string stepId, int ordinal)
+    {
+        lock (_gate)
+            _view = _view with { Steps = _view.Steps.Select(step => step.StepId == stepId
+                ? step with { InvocationOrdinal = ordinal } : step).ToArray() };
+        _changed();
+    }
 
     internal void Observe(string stepId, IReadOnlyList<AdapterTaskObservation> observations)
     {

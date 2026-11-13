@@ -55,7 +55,17 @@ public sealed class ExecutionNotificationRegistration : IAttemptTerminalObserver
         throw new IOException("notification_registration_conflict");
     }
 
-    public int ReconcilePending(int limit = 64)
+    internal bool HasPending()
+    {
+        _lease.VerifyHeld(_instance);
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT EXISTS(SELECT 1 FROM run_records r LEFT JOIN notification_receipt_sources s " +
+            "ON s.attempt_id=r.attempt_id WHERE s.attempt_id IS NULL);";
+        return (long)command.ExecuteScalar()! != 0;
+    }
+
+    public int ReconcilePending(int limit = 64, CancellationToken cancellation = default)
     {
         _lease.VerifyHeld(_instance);
         if (limit is < 1 or > 200) throw new ArgumentOutOfRangeException(nameof(limit));
@@ -71,7 +81,10 @@ public sealed class ExecutionNotificationRegistration : IAttemptTerminalObserver
         }
         foreach (var attempt in attempts)
         {
+            cancellation.ThrowIfCancellationRequested();
             var receipt = new AttemptReceiptStore(_database).Read(attempt) ?? throw NotificationReceiptCodec.Invalid();
+            using var reads = new NotificationAttemptReads(_instance, _database, _contracts, _lease);
+            reads.HoldJournal(receipt.JournalId);
             OnCommitted(receipt);
         }
         return attempts.Count;

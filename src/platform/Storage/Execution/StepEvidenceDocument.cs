@@ -39,11 +39,17 @@ internal static class StepEvidenceCodec
     internal static StepEvidenceDocument Read(ImmutableBlobStore blobs, StepEvidenceBinding expected, BlobReference reference)
     {
         Plan(reference);
-        using var stream = blobs.OpenVerified(reference); var bytes = new byte[checked((int)stream.Length)]; stream.ReadExactly(bytes);
-        using var parsed = StrictJson.Parse(bytes);
-        var value = parsed.RootElement.Deserialize<StepEvidenceDocument>(Options) ?? throw Invalid();
-        if (!JsonElement.DeepEquals(parsed.RootElement, JsonSerializer.SerializeToElement(value, Options))) throw Invalid();
-        Validate(value, expected); return value;
+        using var stream = blobs.OpenVerified(reference);
+        var value = BlobReadStream.ReadEvidence(stream, () =>
+        {
+            var bytes = new byte[checked((int)stream.Length)]; stream.ReadExactly(bytes);
+            using var parsed = StrictJson.Parse(bytes);
+            var document = parsed.RootElement.Deserialize<StepEvidenceDocument>(Options) ?? throw Invalid();
+            if (!JsonElement.DeepEquals(parsed.RootElement, JsonSerializer.SerializeToElement(document, Options))) throw Invalid();
+            Validate(document, expected); return document;
+        });
+        if (value.Binding != expected) throw Invalid();
+        return value;
     }
 
     internal static void Plan(BlobReference reference)

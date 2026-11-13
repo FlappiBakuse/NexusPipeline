@@ -54,6 +54,7 @@ internal sealed class ExecutionRuntimeStep : IDisposable
     private bool _providerInterrupted;
     private bool _activeCollected, _collected, _restored, _disposed;
     internal string StepId { get; }
+    internal int InvocationOrdinal { get; private set; }
     internal bool IsCollected => _collected;
     internal bool IsRestored => _restored;
     internal IReadOnlyList<AdapterTaskObservation> TaskObservations { get; private set; } = [];
@@ -112,6 +113,7 @@ internal sealed class ExecutionRuntimeStep : IDisposable
             _writer.RegisterPreparedJob();
         }
         var state = _lease.PublishExecution(() => _scope!.VerifyReadOnly());
+        InvocationOrdinal = ExecutionInvocationCodec.Ordinal(state.Latest.Root, StepId) + state.PreviousInvocationCount(StepId);
         var job = state.Jobs.Single(job => job.StepId == StepId && job.Role == role);
         var binding = StepResultCodec.Binding(state.Latest.Root, job);
         if (ExecutionBindingRoles.IsHook(role))

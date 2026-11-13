@@ -108,6 +108,7 @@ internal sealed class AttemptRuntimeSession : IExecutionAttemptSession, IDisposa
             _configurationSessions.TryGetValue(stepId, out var sessionId) ? sessionId : null, _resources, _targetObserver, _liveMedia, _adapters, prepared,
             _rawAllowances.TryGetValue(stepId, out var allowance) ? allowance : _rawAllowances[stepId] = new(BindingOutputBudget.MaximumForStep(input), 0), () => BindingElapsed(stepId), _configurationFactory);
         _steps.Add(stepId, step); step.InitializeCapture();
+        _progress?.Invocation(stepId, step.InvocationOrdinal);
     }
 
     public ValueTask<bool> TryRetryAsync(string stepId)
@@ -264,6 +265,7 @@ internal sealed class AttemptRuntimeSession : IExecutionAttemptSession, IDisposa
 
     private ExecutionCancellationIntent? ReadClose()
     {
+        if (_readSession is not null) return _readSession.ReadClose(_parent);
         using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
         using var transaction = connection.BeginTransaction(deferred: true);
         return ExecutionCancellationRows.Read(connection, transaction, _parent, _attempt);

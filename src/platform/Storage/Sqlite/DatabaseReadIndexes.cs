@@ -19,6 +19,16 @@ internal static class DatabaseReadIndexes
             "CREATE INDEX recovery_capacity_open_read ON recovery_capacity_reservations(owner_journal_id) WHERE released=0"),
         ["journals_unfinished_read"] = ("operation_journals",
             "CREATE INDEX journals_unfinished_read ON operation_journals(journal_id) WHERE phase<>'committed'"),
+        ["journals_plan_read"] = ("operation_journals",
+            "CREATE INDEX journals_plan_read ON operation_journals(plan_path,plan_digest)"),
+        ["configuration_runs_owner_read"] = ("configuration_run_sessions",
+            "CREATE INDEX configuration_runs_owner_read ON configuration_run_sessions(owner_operation_id,parent_journal_id,step_id)"),
+        ["configuration_runs_parent_read"] = ("configuration_run_sessions",
+            "CREATE INDEX configuration_runs_parent_read ON configuration_run_sessions(parent_journal_id,step_id)"),
+        ["configuration_runs_active_read"] = ("configuration_run_sessions",
+            "CREATE INDEX configuration_runs_active_read ON configuration_run_sessions(session_id,owner_operation_id) WHERE phase IN (0,1)"),
+        ["configuration_edits_active_read"] = ("configuration_edit_sessions",
+            "CREATE INDEX configuration_edits_active_read ON configuration_edit_sessions(session_id) WHERE phase IN (0,1)"),
         ["file_effects_pending_read"] = ("file_effects",
             "CREATE INDEX file_effects_pending_read ON file_effects(journal_id) WHERE state='pending'")
     };

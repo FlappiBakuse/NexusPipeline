@@ -6,6 +6,22 @@ namespace NexusPipeline.StorageTests;
 
 public sealed class TreeSnapshotTests
 {
+    [Theory(DisplayName = "Snapshot Digests Preserve Every Byte Across Small Files And Buffer Boundaries")]
+    [InlineData(0)]
+    [InlineData(223)]
+    [InlineData(65536)]
+    [InlineData(65537)]
+    public void PreservesFullContent(int length)
+    {
+        var root = NewRoot(); var file = Path.Combine(root, "source.bin");
+        var bytes = Enumerable.Range(0, length).Select(index => (byte)(index * 37)).ToArray();
+        File.WriteAllBytes(file, bytes);
+        var value = Assert.Single(new FileTreeScanner(SnapshotBudget.Default).Capture(file, default).Entries);
+        Assert.Equal(length, value.SizeBytes);
+        Assert.Equal(Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bytes)), value.Sha256);
+        Assert.Equal(bytes, File.ReadAllBytes(file));
+    }
+
     [Fact(DisplayName = "Missing Empty File And Empty Directory Remain Distinct")]
     public void DistinguishesEmptyObjects()
     {

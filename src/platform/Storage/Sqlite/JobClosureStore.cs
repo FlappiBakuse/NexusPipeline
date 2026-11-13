@@ -360,8 +360,8 @@ internal sealed class JobClosureStore(RuntimeInstance instance, StateDatabase da
                 parentId = Guid.Parse(row.GetString(0)); stepId = row.GetString(1);
             }
             parent = new RecoveryJournalRegistry(database).ReadJournal(parentId);
-            var plan = AttemptPreparedBinding.ReadPlan(instance, contracts, parent);
-            total = new ExecutionPlanCodec(instance, contracts, new(instance, contracts)).Read(AttemptPlanCodec.Reference(plan.ExecutionPlan)).ReadWire();
+            var inputs = AttemptPreparedBinding.ReadPlanGraph(instance, contracts, parent, database);
+            total = inputs.Total;
             if (total.Steps.Single(item => item.StepId == stepId).Hooks is not { Count: > 0 }) return false;
             var history = new JournalStore(instance, contracts).ReadAllRevisions(parentId);
             var projected = history.SingleOrDefault(item => item.Revision == parent.Revision);

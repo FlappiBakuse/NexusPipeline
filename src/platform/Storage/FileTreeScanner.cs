@@ -81,15 +81,17 @@ public sealed class FileTreeScanner(SnapshotBudget budget)
         total = checked(total + length);
         if (total > budget.MaximumTotalBytes) throw new IOException("snapshot_byte_limit");
         using var hasher = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        var buffer = ArrayPool<byte>.Shared.Rent(65536);
+        var buffer = ArrayPool<byte>.Shared.Rent((int)Math.Clamp(length, 1, 65536));
         try
         {
-            while (true)
+            var remaining = length;
+            while (remaining > 0)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var count = source.Read(buffer, 0, buffer.Length);
-                if (count == 0) break;
+                var count = source.Read(buffer, 0, (int)Math.Min(buffer.Length, remaining));
+                if (count == 0) throw new IOException("snapshot_source_changed");
                 hasher.AppendData(buffer.AsSpan(0, count));
+                remaining -= count;
             }
         }
         finally { ArrayPool<byte>.Shared.Return(buffer, clearArray: true); }

@@ -26,6 +26,7 @@ internal sealed class WorkCleanupItems
         try
         {
             Require(journal);
+            var removed = ExtensionWorkInventory.Removed(_plan, journal, Previous);
             var states = steps.ToDictionary(step => step, _ => CleanupItemState.VerifiedUnreferenced, StringComparer.Ordinal);
             foreach (var receipt in journal["receipts"]!.AsArray())
             {
@@ -35,7 +36,8 @@ internal sealed class WorkCleanupItems
                 {
                     "completed" => CleanupItemState.DeletedWithEvidence,
                     "notExecuted" => CleanupItemState.SkippedWithEvidence,
-                    _ => CleanupItemState.VerifiedUnreferenced
+                    _ => removed.Contains(FileCleanupItems.WorkNode(_plan, step).Index)
+                        ? CleanupItemState.DeletedWithEvidence : CleanupItemState.VerifiedUnreferenced
                 };
             }
             return steps.Select(step => new CleanupItemInspection(step, states[step])).ToArray();
@@ -61,6 +63,15 @@ internal sealed class WorkCleanupItems
     {
         if (_execution is null) throw new IOException("extension_work_cleanup_authority_required");
         _execution.Publish(_plan, action);
+    }
+
+    internal IReadOnlyList<string> PendingCompletions(JsonObject journal)
+    {
+        Require(journal);
+        var removed = ExtensionWorkInventory.Removed(_plan, journal, Previous);
+        return FileCleanupItems.Steps(_plan).Where(step =>
+            journal["receipts"]!.AsArray().LastOrDefault(value => value!["stepId"]!.GetValue<string>() == step)?["effect"]!.GetValue<string>() == "started" &&
+            removed.Contains(FileCleanupItems.WorkNode(_plan, step).Index)).ToArray();
     }
 
     private void Require(JsonObject journal)

@@ -1,4 +1,5 @@
 using System.Runtime.Versioning;
+using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Data.Sqlite;
@@ -29,26 +30,41 @@ internal sealed class ExtensionArchiveCleanup(RuntimeInstance instance, StateDat
     private bool _reported;
     private readonly Queue<Guid> _producers = new();
     private readonly Queue<(Guid Producer, BlobReference Content)> _candidates = new();
+    private BlobReferenceScan? _referenceScan;
 
     internal void Sweep(CancellationToken cancellation, ProcessIdentityLease? executor = null)
     {
         cancellation.ThrowIfCancellationRequested();
         if (!recovery.Current.IsReady || DateTimeOffset.UtcNow < _nextScan) return;
         if (_completedRevision == database.CommitSequence) return;
+        using (var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true))
+        using (var command = connection.CreateCommand())
+        {
+            command.CommandText = "SELECT EXISTS(SELECT 1 FROM operations WHERE operation_kind='execution.start' AND status='accepted') " +
+                "OR EXISTS(SELECT 1 FROM notification_delivery_pending) " +
+                "OR EXISTS(SELECT 1 FROM notification_receipt_progress WHERE next_ordinal<route_count);";
+            if ((long)command.ExecuteScalar()! != 0) return;
+        }
         if (_after.Length == 0 && _producers.Count == 0 && _candidates.Count == 0) _scanRevision = database.CommitSequence;
         using var paths = DirectoryAttributeScope.Hold(instance);
         using var reads = BlobReadScope.Hold(instance);
+        using var parents = JournalReadScope.HoldParents(instance, contracts, database.AttemptReads);
+        var started = Stopwatch.GetTimestamp();
+        var budget = new ReferenceReadBudget(TimeSpan.FromMilliseconds(50), 2097152);
         try
         {
-            var installed = ExtensionInstalledRows.ReadArchiveDigests(database);
-            for (var scanned = 0; _candidates.Count == 0 && scanned < ScanPageSize; scanned++)
+            var installed = ExtensionInstalledRows.ReadContentDigests(database);
+            for (var scanned = 0; _referenceScan is null && _candidates.Count < 256 && scanned < ScanPageSize; scanned++)
             {
                 cancellation.ThrowIfCancellationRequested();
                 if (_producers.Count == 0)
                 {
                     foreach (var item in ReadPage()) _producers.Enqueue(item);
                     if (_producers.Count == 0)
-                    { _after = ""; _completedRevision = _scanRevision; return; }
+                    {
+                        if (_candidates.Count == 0) { _after = ""; _completedRevision = _scanRevision; return; }
+                        break;
+                    }
                 }
                 var producer = _producers.Dequeue(); _after = producer.ToString("D");
                 foreach (var content in ReadCandidates(producer))
@@ -58,21 +74,37 @@ internal sealed class ExtensionArchiveCleanup(RuntimeInstance instance, StateDat
             var candidates = _candidates.Take(256).ToArray();
             if (candidates.Length > 0)
             {
-                var referenced = candidates.Length > 1
-                    ? References().ReadReferenced(candidates.Select(item => item.Content).ToHashSet()) : [];
+                var selected = candidates.Select(item => item.Content).ToHashSet();
+                _referenceScan ??= new(selected);
+                var referenced = new BlobReferenceIndex(instance, contracts, database, _blobs, roots)
+                    { ReadBudget = budget }
+                    .ReadReferenced(selected, _referenceScan);
                 foreach (var (producer, content) in candidates)
                 {
+                    var accepted = !referenced.Contains(content) &&
+                        RunNextPage(producer, content, cancellation, executor: executor)?.Acceptance.IsNew == true;
                     _candidates.Dequeue();
-                    if (!referenced.Contains(content) && RunNextPage(producer, content, cancellation, executor: executor)?.Acceptance.IsNew == true) return;
+                    if (_candidates.Count == 0) _referenceScan = null;
+                    if (accepted) return;
                 }
             }
             _reported = false;
         }
+        catch (ReferenceReadDeferred) { }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or SqliteException or
             FormatException or System.Text.Json.JsonException or InvalidOperationException)
         {
+            _referenceScan = null;
             if (!_reported) Console.Error.WriteLine($"extension_archive_cleanup_unavailable {error.GetType().Name}");
             _reported = true; _nextScan = DateTimeOffset.UtcNow.AddMinutes(1);
+        }
+        finally
+        {
+            // A protected graph is indivisible; cool down after it instead of draining missed timer ticks.
+            var ticks = Math.Max(TimeSpan.FromSeconds(5).Ticks, Stopwatch.GetElapsedTime(started).Ticks * 49);
+            ticks = Math.Max(ticks, checked((long)(budget.ObservedReadBytes * (double)TimeSpan.TicksPerSecond / 262144)));
+            var next = DateTimeOffset.UtcNow.AddTicks(ticks);
+            if (next > _nextScan) _nextScan = next;
         }
     }
 

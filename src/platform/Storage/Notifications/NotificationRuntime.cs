@@ -34,6 +34,7 @@ public sealed class NotificationRuntime : IAttemptTerminalObserver, IAsyncDispos
     private readonly CancellationTokenSource _stopping = new();
     private Task _worker = Task.CompletedTask;
     private Guid? _sendingAfter;
+    private bool _registrationPending;
     private int _started, _disposed, _stepping;
     public string? FailureCode { get; private set; }
     internal bool HasPendingActivity => _activity.IsActive;
@@ -124,8 +125,8 @@ public sealed class NotificationRuntime : IAttemptTerminalObserver, IAsyncDispos
         try
         {
             verified?.Consume(_instance, _lease.StartupGeneration);
-            while (_registration.ReconcilePending(64) == 64) { }
-            if (!_queue.HasIndexedPending()) return;
+            _registrationPending = _registration.HasPending();
+            if (!_registrationPending && !_queue.HasIndexedPending()) return;
             using var root = _resources.TryAcquire(Guid.NewGuid(), [new("notifications:queue", ResourceClaimMode.Mutation)]).Lease ??
                 throw new IOException("notification_startup_queue_blocked");
             _activity.Ensure(root);
@@ -183,6 +184,11 @@ public sealed class NotificationRuntime : IAttemptTerminalObserver, IAsyncDispos
         try
         {
             if (!_activity.IsActive) return;
+            if (Volatile.Read(ref _registrationPending))
+            {
+                using var registering = _activity.BeginRegistration();
+                Volatile.Write(ref _registrationPending, _registration.ReconcilePending(64, cancellation) == 64);
+            }
             using var reads = new NotificationAttemptReads(_instance, _database, _contracts, _lease);
             _sender.ReconcilePendingResults(reads);
             using (var materialization = _activity.Continue(Guid.NewGuid()))
@@ -214,6 +220,7 @@ public sealed class NotificationRuntime : IAttemptTerminalObserver, IAsyncDispos
 
     internal bool TryReleaseSettled()
     {
+        if (Volatile.Read(ref _registrationPending)) return false;
         var epoch = _activity.ReadReleaseEpoch();
         if (epoch is null) return false;
         using var root = _activity.Continue(Guid.NewGuid());
@@ -224,6 +231,7 @@ public sealed class NotificationRuntime : IAttemptTerminalObserver, IAsyncDispos
 
     private async Task RunAsync()
     {
+        await Task.Yield();
         while (!_stopping.IsCancellationRequested)
         {
             try { await RunPassAsync(_stopping.Token).ConfigureAwait(false); FailureCode = _sender.FailureCode; }

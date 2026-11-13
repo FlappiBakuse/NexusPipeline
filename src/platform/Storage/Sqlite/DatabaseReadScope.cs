@@ -9,6 +9,7 @@ internal sealed class DatabaseReadScope : IDisposable
     private readonly int _thread = Environment.CurrentManagedThreadId;
     private readonly string _path;
     private readonly DatabaseReadScope? _owner;
+    private readonly DatabaseConnectionPool.BorrowLease? _shared;
     private DatabaseReadScope Owner => _owner ?? this;
     private StableDirectoryLease? _directory;
     private FileStream? _file;
@@ -17,14 +18,20 @@ internal sealed class DatabaseReadScope : IDisposable
 
     private DatabaseReadScope(string path)
     {
-        _path = PhysicalPathPolicy.NormalizeWithoutLinks(path);
+        _path = PhysicalPathPolicy.NormalizeSyntax(path);
         if (_previous is { } prior && StringComparer.OrdinalIgnoreCase.Equals(prior._path, _path)) _owner = prior.Owner;
+        else
+        {
+            _shared = DatabaseConnectionPool.Borrow(_path, connection: false);
+            _path = _shared?.Path ?? PhysicalPathPolicy.NormalizeWithoutLinks(_path);
+        }
         _current = this;
     }
 
     private void Protect()
     {
-        if (_file is not null) return;
+        if (_shared is not null || _file is not null) return;
+        _ = PhysicalPathPolicy.NormalizeWithoutLinks(_path);
         _directory = StableDirectoryLease.Acquire(Path.GetDirectoryName(_path)!);
         try
         {
@@ -41,7 +48,6 @@ internal sealed class DatabaseReadScope : IDisposable
     {
         if (_current is not { } scope || !StringComparer.OrdinalIgnoreCase.Equals(
                 PhysicalPathPolicy.NormalizeSyntax(path), scope._path)) return null;
-        _ = PhysicalPathPolicy.NormalizeWithoutLinks(path);
         scope.Owner.Protect();
         return scope._path;
     }
@@ -67,6 +73,10 @@ internal sealed class DatabaseReadScope : IDisposable
                 SqliteConnection.ClearPool(pool);
             }
         }
-        finally { try { _file?.Dispose(); } finally { _directory?.Dispose(); } }
+        finally
+        {
+            try { _shared?.Dispose(); }
+            finally { try { _file?.Dispose(); } finally { _directory?.Dispose(); } }
+        }
     }
 }

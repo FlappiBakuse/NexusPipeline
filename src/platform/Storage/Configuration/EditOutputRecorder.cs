@@ -22,7 +22,7 @@ public sealed class EditOutputRecorder(RuntimeInstance instance, StateDatabase d
     {
         lease.VerifyHeld(instance);
         if (stopped.Closure.InstanceId != instance.InstanceId || !stopped.Closure.JournalIds.Contains(journalId) ||
-            stopped.Closure.Creator != ProcessIdentityReader.Read(Environment.ProcessId)) throw new IOException("configuration_editor_stop_proof_unbound");
+            stopped.Closure.Creator != lease.ExecutorIdentity.ReadCurrent()) throw new IOException("configuration_editor_stop_proof_unbound");
         return SealCore(journalId, stopped.Closure, stopped.Reference);
     }
 

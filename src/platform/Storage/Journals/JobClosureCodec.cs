@@ -35,7 +35,13 @@ internal sealed class JobClosureCodec(RuntimeInstance instance, ContractReader c
     {
         if (reference.RelativePath != $"blobs/plans/{reference.Sha256}.json" || reference.SizeBytes > StrictJson.MaximumBytes)
             throw new IOException("writer_job_closure_reference_invalid");
-        using var input = blobs.OpenVerified(reference); var bytes = new byte[checked((int)input.Length)]; input.ReadExactly(bytes); return Decode(bytes);
+        using var input = blobs.OpenVerified(reference);
+        var value = BlobReadStream.ReadEvidence(input, () =>
+        {
+            var bytes = new byte[checked((int)input.Length)]; input.ReadExactly(bytes); return Decode(bytes);
+        });
+        if (value.InstanceId != instance.InstanceId) throw new IOException("writer_job_closure_unrecognized");
+        return value;
     }
 
     private FrozenJobClosure Decode(ReadOnlyMemory<byte> bytes)

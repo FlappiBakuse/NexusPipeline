@@ -25,8 +25,10 @@ internal static class WorkCrashFixture
         var content = input.Point.StartsWith("content-", StringComparison.Ordinal);
         var adopted = input.Point == "download-adopted";
         var archive = content || input.Point.StartsWith("archive-", StringComparison.Ordinal);
-        var point = archive ? input.Point[(content ? "content-".Length : "archive-".Length)..] : input.Point;
-        if (!adopted && point is not ("accepted" or "started" or "removed")) return 2;
+        var empty = input.Point == "empty-removed";
+        var point = archive ? input.Point[(content ? "content-".Length : "archive-".Length)..] : input.Point switch
+        { "empty-removed" or "replaced-root" => "root-removed", "unstarted-missing" => "accepted", _ => input.Point };
+        if (!adopted && point is not ("accepted" or "started" or "removed" or "root-removed")) return 2;
         var contracts = new ContractReader(); var instance = new InstanceRoot(contracts).OpenExisting(input.Instance.RuntimeRoot);
         if (instance != input.Instance) return 2;
         using var lease = InstanceLease.Acquire(instance, contracts);
@@ -67,7 +69,7 @@ internal static class WorkCrashFixture
         }
         var removed = await Apply(input.RemoveOperationId, PayloadAction.Remove);
         ExtensionProjectionPublication.PublishIfDirty(instance, database, lease, contracts, input.Roots, resources, index);
-        var producer = archive ? installed : removed;
+        var producer = archive || empty ? installed : removed;
         var bound = new ExtensionPayloadBinding(instance, database, contracts, input.Roots).Read(producer.JournalId, producer.Plan);
         var barrier = new Barrier(input, point, instance, database, bound, expanded ?? bound.Source.Package?.Archive);
         if (archive)
@@ -75,7 +77,7 @@ internal static class WorkCrashFixture
                 .RunNextPage(installed.JournalId, expanded ?? bound.Source.Package!.Archive, default, barrier);
         else
             _ = await new WorkCleanupService(instance, database, lease, contracts, input.Roots, resources, index, activator)
-                .RunNextPageAsync(removed.JournalId, default, barrier);
+                .RunNextPageAsync(producer.JournalId, default, barrier);
         return 1;
 
         async Task<PayloadAcceptanceResult> Apply(Guid operation, PayloadAction action)
@@ -107,7 +109,9 @@ internal static class WorkCrashFixture
         {
             var match = fault == "accepted" && point == CleanupPersistencePoint.AcceptanceCommitted ||
                 fault == "started" && point == CleanupPersistencePoint.SqlProjectionCommitted && revision == 3 ||
-                fault == "removed" && point == CleanupPersistencePoint.FileRemoved;
+                fault == "removed" && point == CleanupPersistencePoint.FileRemoved ||
+                fault == "root-removed" && point == CleanupPersistencePoint.FileRemoved &&
+                    !Directory.Exists(ExtensionWorkspacePath.For(producer.Plan));
             if (!match) return;
             var registered = new RecoveryJournalRegistry(database).ReadJournal(journalId);
             var full = PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(instance.RuntimeRoot, registered.PlanPath));

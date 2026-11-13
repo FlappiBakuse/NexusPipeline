@@ -53,6 +53,10 @@ internal sealed class BundledExtensionInstaller(RuntimeInstance instance, StateD
                 item.Installed.Package.ArchiveSha256 != item.Entry.ArtifactSha256 ||
                 item.Installed.Package.ManifestSha256 != item.Entry.ManifestSha256)).ToArray();
         if (selected.Length == 0 && !allPackages) return;
+        if (selected.Length == 0 && runtime.Catalog!.ReadCached(catalog.Identity.Channel) is { } current &&
+            current.Identity == catalog.Identity && current.PointerBytes().AsSpan().SequenceEqual(catalog.PointerBytes()) &&
+            current.CatalogBytes().AsSpan().SequenceEqual(catalog.CatalogBytes()) &&
+            current.SignatureBytes().AsSpan().SequenceEqual(catalog.SignatureBytes())) return;
         var paths = selected.ToDictionary(item => item.Entry.ArtifactUrl,
             item => PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(directory,
                 item.Entry.ArtifactName + "-" + item.Entry.PackageVersion + ".zip")), StringComparer.Ordinal);

@@ -37,6 +37,7 @@ internal static class ExecutionInvocationCodec
 
     internal static ExecutionInvocation Decode(JsonElement participant)
     {
+        if (AttemptReadScope.TryInvocation(participant, out var saved)) return saved;
         var identity = participant.GetProperty("identity");
         var value = identity.Deserialize<ExecutionInvocation>(StepResultCodec.Options) ?? throw Invalid();
         if (!JsonElement.DeepEquals(identity, JsonSerializer.SerializeToElement(value, StepResultCodec.Options)) ||
@@ -56,11 +57,12 @@ internal static class ExecutionInvocationCodec
                 retry.Selection.SelectedIds.IsDefaultOrEmpty || retry.Selection.SelectedIds.Length > 4096)
                 throw Invalid();
         }
-        return value;
+        return AttemptReadScope.RememberInvocation(participant, value);
     }
 
     internal static ImmutableArray<ExecutionInvocation> Read(JsonElement journal, ExecutionPlan total)
     {
+        if (AttemptReadScope.TryRead<ExecutionInvocation>(journal, total, out var saved)) return saved;
         var result = ImmutableArray.CreateBuilder<ExecutionInvocation>();
         foreach (var participant in journal.GetProperty("participants").EnumerateArray().Where(IsParticipant))
         {
@@ -73,7 +75,7 @@ internal static class ExecutionInvocationCodec
                 participant.GetProperty("resourceKey").GetString() != "automation:" + step.ScriptId) throw Invalid();
             result.Add(value);
         }
-        return result.ToImmutable();
+        return AttemptReadScope.Remember(journal, total, result.ToImmutable());
     }
 
     internal static int OrdinalForJob(JsonElement journal, string stepId, string jobName)
@@ -90,27 +92,30 @@ internal static class ExecutionInvocationCodec
     // Only invocation-owned events are projected. Configuration completion and unknown formats remain visible to their owners.
     internal static JsonElement Current(JsonElement journal)
     {
+        if (AttemptReadScope.TryProjection(journal, out var saved)) return saved;
         var participants = journal.GetProperty("participants").EnumerateArray().ToArray();
         var starts = new Dictionary<string, int>(StringComparer.Ordinal);
         for (var index = 0; index < participants.Length; index++)
             if (IsParticipant(participants[index])) starts[Decode(participants[index]).StepId] = index;
-        if (starts.Count == 0) return journal;
+        if (starts.Count == 0) return AttemptReadScope.RememberProjection(journal, journal);
         var selected = participants.Where((participant, index) =>
         {
             var step = ScopedStep(participant);
             return step is null || !starts.TryGetValue(step, out var start) || index > start;
         });
         var projected = selected.ToArray();
-        return projected.Length == participants.Length ? journal : WithParticipants(journal, projected);
+        return AttemptReadScope.RememberProjection(journal,
+            projected.Length == participants.Length ? journal : WithParticipants(journal, projected));
     }
 
     internal static IReadOnlyList<JsonElement> Views(JsonElement journal)
     {
+        if (AttemptReadScope.TryViews(journal, out var saved)) return saved;
         var participants = journal.GetProperty("participants").EnumerateArray().ToArray();
         var result = new List<JsonElement>();
         for (var index = 0; index < participants.Length; index++)
             if (IsParticipant(participants[index])) result.Add(WithParticipants(journal, participants.Take(index)));
-        result.Add(journal); return result;
+        result.Add(journal); return AttemptReadScope.RememberViews(journal, result.AsReadOnly());
     }
 
     internal static JsonElement ForJob(JsonElement journal, ExecutionPlan total, string jobName) => Views(journal)

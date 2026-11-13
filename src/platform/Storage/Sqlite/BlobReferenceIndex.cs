@@ -34,13 +34,16 @@ public sealed class BlobReferenceIndex
         => ReadReferenced(new HashSet<BlobReference> { blob }).Contains(blob);
 
     internal Action? InventoryRead { get; init; }
+    internal ReferenceReadBudget? ReadBudget { get; init; }
 
-    internal HashSet<BlobReference> ReadReferenced(IReadOnlySet<BlobReference> candidates)
+    internal HashSet<BlobReference> ReadReferenced(IReadOnlySet<BlobReference> candidates, BlobReferenceScan? scan = null)
     {
         if (candidates.Count is < 1 or > 256) throw new ArgumentException("blob_reference_batch_invalid");
+        scan?.RequireCandidates(candidates);
+        if (scan?.Completed == true) return scan.Referenced;
         try
         {
-            var referenced = new HashSet<BlobReference>();
+            var referenced = scan?.Referenced ?? new HashSet<BlobReference>();
             var content = new HashSet<BlobReference>();
             foreach (var blob in candidates)
             {
@@ -59,22 +62,38 @@ public sealed class BlobReferenceIndex
                     referenced.Add(blob);
             }
             InventoryRead?.Invoke();
-            referenced.UnionWith(Notifications.DeliveryReferenceIndex.ReadReferenced(_instance, _database, _contracts, candidates));
+            if (scan?.NotificationsRead != true)
+            {
+                referenced.UnionWith(Notifications.DeliveryReferenceIndex.ReadReferenced(_instance, _database, _contracts, candidates));
+                if (scan is not null) scan.NotificationsRead = true;
+            }
             if (content.Count == 0) return referenced;
             referenced.UnionWith(MaintenancePendingInventory.ReadReferenced(_instance, _database, _contracts, _payloadRoots, content));
             var digests = content.GroupBy(item => item.Sha256).ToDictionary(group => group.Key, group => group.ToArray(), StringComparer.Ordinal);
-            foreach (var digest in ExtensionInstalledRows.ReadArchiveDigests(_database))
+            foreach (var digest in ExtensionInstalledRows.ReadContentDigests(_database))
                 if (digests.TryGetValue(digest, out var installed)) referenced.UnionWith(installed);
+            if (referenced.IsSupersetOf(content)) return referenced;
+            var journals = new RecoveryJournalRegistry(_database).ReadHistory(after: scan?.After ?? "");
+            if (scan is null)
+            {
+                journals = journals.ToArray();
+                foreach (var journal in journals)
+                    if (journal.Phase == JournalPhase.Committed && journal.Kind is (JournalKind.ConfigExchange or JournalKind.ConfigEdit) &&
+                        _database.ReferenceFacts.Find(journal) is { } saved)
+                        foreach (var item in saved)
+                            if (digests.TryGetValue(item.Sha256, out var matches)) referenced.UnionWith(matches);
+            }
             if (referenced.IsSupersetOf(content)) return referenced;
             if (OperatingSystem.IsWindows())
                 new Secrets.SecretDocumentInventory(_instance, _database, _contracts).VisitReferences(item =>
                 {
                     if (digests.TryGetValue(item.Sha256, out var matches)) referenced.UnionWith(matches);
                 });
-            VisitJournalReferences(item =>
+            VisitJournalReferences(journals, item =>
             {
                 if (digests.TryGetValue(item.Sha256, out var matches)) referenced.UnionWith(matches);
-            });
+            }, () => referenced.IsSupersetOf(content), scan);
+            if (scan is not null) scan.Completed = true;
             return referenced;
         }
         catch (Exception error) when (error is JsonException or InvalidOperationException or SqliteException)
@@ -83,36 +102,27 @@ public sealed class BlobReferenceIndex
         }
     }
 
-    private void VisitJournalReferences(Action<BlobReference> include)
+    private void VisitJournalReferences(IEnumerable<RegisteredJournal> journals, Action<BlobReference> include, Func<bool> complete,
+        BlobReferenceScan? scan)
     {
-        foreach (var journal in new RecoveryJournalRegistry(_database).ReadHistory())
+        var retired = ReadRetiredJournals();
+        foreach (var journal in journals)
         {
+            var key = journal.JournalId.ToString("D");
+            if (scan is not null && StringComparer.Ordinal.Compare(key, scan.After) <= 0) continue;
+            if (journal.Phase == JournalPhase.Committed && journal.Kind is (JournalKind.ConfigExchange or JournalKind.ConfigEdit) &&
+                _database.ReferenceFacts.Find(journal) is { } saved)
+            {
+                foreach (var item in saved) include(item);
+                if (scan is not null) scan.After = key;
+                if (complete()) return;
+                continue;
+            }
             var path = PhysicalPathPolicy.NormalizeWithoutLinks(Path.Combine(_instance.RuntimeRoot, journal.PlanPath));
             var reference = new BlobReference(journal.PlanPath, new FileInfo(path).Length, journal.PlanDigest);
             if (journal.Kind is JournalKind.ConfigExchange or JournalKind.ConfigEdit)
             {
-                var codecForPlan = new ConfigurationPlanCodec(_instance, _contracts, _blobs);
-                var plan = codecForPlan.ReadStructure(reference);
-                if (plan.JournalId != journal.JournalId || plan.OperationId != journal.OperationId || plan.Kind != journal.Kind)
-                    throw new IOException("blob_reference_plan_unbound");
-                foreach (var item in codecForPlan.References(plan)) include(item);
-                var directory = Path.Combine(_instance.RuntimeRoot, "journals", journal.JournalId.ToString("D"));
-                if (Directory.Exists(directory))
-                {
-                    var physical = new JournalStore(_instance, _contracts).Read(journal.JournalId);
-                    using var document = StrictJson.Parse(physical.Export());
-                    var participants = document.RootElement.GetProperty("participants");
-                    if (participants.GetArrayLength() > 2) throw new IOException("blob_reference_edit_participant_unknown");
-                    if (participants.GetArrayLength() == 2)
-                    {
-                        if (participants[1].GetProperty("kind").GetString() != "file" || participants[1].GetProperty("identity").GetProperty("format").GetString() != "nexus.configuration.edit-output-reference")
-                            throw new IOException("blob_reference_edit_participant_unknown");
-                        var workspace = new ConfigurationWorkspaceCodec(_contracts).Decode(participants[0].GetProperty("identity"), plan, journal.PlanDigest);
-                        var codec = new EditOutputCodec(_instance, _contracts, _blobs);
-                        var output = codec.Read(codec.ReadReference(participants[1].GetProperty("identity")), workspace, journal.PlanDigest, _database, verifyContents: false);
-                        foreach (var item in output.Plan.Candidate.Contents) include(item);
-                    }
-                }
+                foreach (var item in ReadConfigurationReferences(journal, reference, ReadBudget)) include(item);
             }
             else if (journal.Kind == JournalKind.FileCleanup)
             {
@@ -122,7 +132,8 @@ public sealed class BlobReferenceIndex
             }
             else if (journal.Kind == JournalKind.RunAttempt)
             {
-                foreach (var item in new PlanReferenceClosure(_instance, _contracts, _blobs, _database).Read(journal, reference)) include(item);
+                foreach (var item in new PlanReferenceClosure(_instance, _contracts, _blobs, _database)
+                    .Read(journal, reference, retired.Contains(journal.JournalId), ReadBudget)) include(item);
             }
             else if (journal.Kind is JournalKind.UpdateApply or JournalKind.ExtensionApply)
             {
@@ -183,7 +194,52 @@ public sealed class BlobReferenceIndex
                 }
             }
             else throw new IOException("blob_reference_kind_not_implemented");
+            if (scan is not null) scan.After = key;
+            if (complete()) return;
         }
+    }
+
+    private IReadOnlyList<BlobReference> ReadConfigurationReferences(RegisteredJournal journal, BlobReference reference,
+        ReferenceReadBudget? budget)
+    {
+        if (journal.Phase == JournalPhase.Committed && _database.ReferenceFacts.Find(journal) is { } saved) return saved;
+        using var measured = journal.Phase == JournalPhase.Committed ? budget?.Enter() : null;
+        var references = new List<BlobReference>();
+        var codecForPlan = new ConfigurationPlanCodec(_instance, _contracts, _blobs);
+        var plan = codecForPlan.ReadStructure(reference);
+        if (plan.JournalId != journal.JournalId || plan.OperationId != journal.OperationId || plan.Kind != journal.Kind)
+            throw new IOException("blob_reference_plan_unbound");
+        references.AddRange(codecForPlan.References(plan));
+        var directory = Path.Combine(_instance.RuntimeRoot, "journals", journal.JournalId.ToString("D"));
+        if (Directory.Exists(directory))
+        {
+            var physical = new JournalStore(_instance, _contracts).Read(journal.JournalId);
+            using var document = StrictJson.Parse(physical.Export());
+            var participants = document.RootElement.GetProperty("participants");
+            if (participants.GetArrayLength() > 2) throw new IOException("blob_reference_edit_participant_unknown");
+            if (participants.GetArrayLength() == 2)
+            {
+                if (participants[1].GetProperty("kind").GetString() != "file" || participants[1].GetProperty("identity").GetProperty("format").GetString() != "nexus.configuration.edit-output-reference")
+                    throw new IOException("blob_reference_edit_participant_unknown");
+                var workspace = new ConfigurationWorkspaceCodec(_contracts).Decode(participants[0].GetProperty("identity"), plan, journal.PlanDigest);
+                var codec = new EditOutputCodec(_instance, _contracts, _blobs);
+                var output = codec.Read(codec.ReadReference(participants[1].GetProperty("identity")), workspace, journal.PlanDigest, _database, verifyContents: false);
+                references.AddRange(output.Plan.Candidate.Contents);
+            }
+        }
+        if (journal.Phase == JournalPhase.Committed) _database.ReferenceFacts.Store(journal, references);
+        return references;
+    }
+
+    private HashSet<Guid> ReadRetiredJournals()
+    {
+        using var connection = DatabaseConnections.Open(_database.DatabasePath, readOnly: true);
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT a.journal_id FROM record_content_retirements r JOIN attempt_receipts a USING(run_id);";
+        using var rows = command.ExecuteReader();
+        var result = new HashSet<Guid>();
+        while (rows.Read()) result.Add(Guid.Parse(rows.GetString(0)));
+        return result;
     }
 
     private bool SecretIsCurrent(BlobReference item, Guid id)

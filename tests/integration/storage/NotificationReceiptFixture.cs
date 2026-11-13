@@ -39,7 +39,8 @@ internal sealed class NotificationReceiptFixture : IDisposable
 
     internal async Task Execute(bool emptyQueue = false, int taskCount = 1, bool queueNotifications = true,
         IReadOnlyList<NotificationSecretEdit>? edits = null, byte[]? indexedFixtureImage = null,
-        IAttemptTerminalObserver? terminalObserver = null, Action? afterAccept = null, int repetitions = 1)
+        IAttemptTerminalObserver? terminalObserver = null, Action? afterAccept = null, int repetitions = 1,
+        bool readSnapshot = true)
     {
         if (taskCount is < 1 or > 99) throw new ArgumentOutOfRangeException(nameof(taskCount));
         TaskIds = [TaskId];
@@ -77,6 +78,7 @@ internal sealed class NotificationReceiptFixture : IDisposable
         afterAccept?.Invoke();
         Receipt = Assert.IsType<AttemptReceipt>(await consumer.RunNextAsync());
         Assert.Null(consumer.FailureCode);
+        if (!readSnapshot) return;
         using var connection = DatabaseConnections.Open(Source.Database.DatabasePath, readOnly: true);
         using var transaction = connection.BeginTransaction(deferred: true);
         var reference = NotificationReceiptRows.Find(connection, transaction, Receipt.Facts.AttemptId);

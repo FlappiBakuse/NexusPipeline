@@ -11,6 +11,35 @@ namespace NexusPipeline.StorageTests;
 [SupportedOSPlatform("windows")]
 public sealed class NotificationRuntimeTests
 {
+    [Fact(DisplayName = "Startup Defers Missing Historical Registration While Keeping Queue Ownership And Exact Once Delivery")]
+    public async Task BackfillsAfterStartup()
+    {
+        await using var sink = new NotificationHttpSink((_, _) => Task.FromResult(new NotificationSinkReply(200, "")));
+        var input = new NotificationTaskInput("historical receipt", "", NotificationTaskKind.Webhook, true,
+            NotificationChannelConfiguration.Default with { WebhookKind = NotificationWebhookKind.Generic,
+                WebhookTemplate = "{\"text\":{text}}" });
+        using var fixture = new NotificationReceiptFixture(input);
+        var source = fixture.Source;
+        using var url = new SecretValue(sink.Address.AbsoluteUri);
+        await fixture.Execute(edits: [new(NotificationSecretField.WebhookUrl, 0, SecretDisposition.Set, url)],
+            terminalObserver: new NexusPipeline.Platform.Storage.Execution.ExecutionRecordProjection(source.Instance,
+                source.Database, new(), source.Lease, new(source.Instance, source.Database, new())), readSnapshot: false);
+        await using var runtime = new NotificationRuntime(source.Instance, source.Database, new(), source.Lease,
+            fixture.Base.Resources, fixture.Base.Index,
+            new(source.Instance, source.Database, source.Lease, fixture.Base.Resources, fixture.Base.Index, new()));
+        runtime.InitializeStartup();
+        Assert.Equal(0, fixture.Count("notification_receipt_sources"));
+        Assert.True(runtime.HasPendingActivity);
+        Assert.Null(fixture.Base.Lifecycle.RequestClose(Guid.NewGuid(), Guid.NewGuid()).Permit);
+        await runtime.RunPassAsync();
+        Assert.Equal(1, fixture.Count("notification_receipt_sources"));
+        Assert.False(runtime.HasPendingActivity);
+        Assert.Single(sink.Requests);
+        await runtime.RunPassAsync();
+        Assert.Single(sink.Requests);
+        Assert.True(fixture.Base.Index.Current.IsReady);
+    }
+
     [Theory(DisplayName = "Actual Notification Runtime Protects Drain Until Acknowledgement And Keeps Unknown Pending")]
     [InlineData(false)]
     [InlineData(true)]

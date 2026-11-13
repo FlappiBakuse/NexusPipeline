@@ -10,6 +10,8 @@ internal sealed class JournalReadScope : IDisposable
     private readonly JournalReadScope? _owner;
     private Guid _journalId;
     private IDisposable? _protection;
+    private Execution.AttemptBoundInputs? _inputs;
+    private BlobReference? _planReference;
     private readonly bool _parents;
     private bool _disposed;
     private JournalReadScope Owner => _owner ?? this;
@@ -22,7 +24,8 @@ internal sealed class JournalReadScope : IDisposable
         {
             _owner = parents.Owner; _store = _owner._store;
         }
-        else if (journalId is { } id && _previous is { } prior && prior.Matches(store, id) && prior.Owner._store.ProtectedJournalId == id)
+        else if (journalId is { } id && store.ProtectedJournalId is null && _previous is { } prior &&
+            prior.Matches(store, id) && prior.Owner._store.ProtectedJournalId == id)
             _store = prior.Owner._store;
         else
         {
@@ -41,18 +44,41 @@ internal sealed class JournalReadScope : IDisposable
     internal static JournalReadScope HoldParents(RuntimeInstance instance, NexusPipeline.Platform.Serialization.ContractReader contracts,
         Execution.AttemptReadRegistry? attempts = null) => new(new JournalStore(instance, contracts), null, attempts);
 
+    internal static void SelectActiveParent(RuntimeInstance instance, NexusPipeline.Platform.Serialization.ContractReader contracts, Guid journalId)
+    {
+        if (_current?.Owner._attempts?.Find(journalId) is not null) SelectParent(instance, contracts, journalId);
+    }
+
     internal static void SelectParent(RuntimeInstance instance, NexusPipeline.Platform.Serialization.ContractReader contracts, Guid journalId)
     {
-        if (_current?.Owner is not { _parents: true } scope || scope._store.Instance != instance ||
-            scope._journalId == journalId) return;
+        if (_current?.Owner is not { _parents: true } scope || scope._store.Instance != instance) return;
+        var active = scope._attempts?.Find(journalId);
+        if (scope._journalId == journalId && (active is null || ReferenceEquals(scope._store, active.Journals))) return;
+        scope._inputs?.Dispose(); scope._inputs = null; scope._planReference = null;
         scope._protection?.Dispose(); scope._protection = null; scope._journalId = Guid.Empty;
-        if (scope._attempts?.Find(journalId) is { } active) scope._store = active.Journals;
+        if (active is not null) scope._store = active.Journals;
         else
         {
             scope._store = new(instance, contracts);
             scope._protection = scope._store.ProtectReadHistory(journalId);
         }
         scope._journalId = journalId;
+    }
+
+    internal static Execution.AttemptMetadataPlan? ReadPlanGraph(RuntimeInstance instance,
+        NexusPipeline.Platform.Serialization.ContractReader contracts, NexusPipeline.Core.Configuration.RegisteredJournal journal)
+    {
+        if (_current?.Owner is not { _parents: true } scope || scope._store.Instance != instance) return null;
+        SelectParent(instance, contracts, journal.JournalId);
+        var reference = Execution.AttemptPreparedBinding.Reference(instance, journal);
+        if (scope._planReference != reference)
+        {
+            scope._inputs?.Dispose(); scope._inputs = null; scope._planReference = null;
+            scope._inputs = new Execution.AttemptPlanCodec(instance, contracts, new(instance, contracts)).ReadBound(reference);
+            scope._planReference = reference;
+        }
+        Execution.AttemptPreparedBinding.RequireRegistration(journal, scope._inputs!.Plan);
+        return new(scope._inputs.Plan, scope._inputs.Total);
     }
 
     // Every reader uses the same embedded schemas; the instance and protected journal identify these bytes.
@@ -70,6 +96,7 @@ internal sealed class JournalReadScope : IDisposable
         if (_thread != Environment.CurrentManagedThreadId || !ReferenceEquals(_current, this))
             throw new InvalidOperationException("journal_read_scope_order");
         _disposed = true; _current = _previous;
+        _inputs?.Dispose();
         _protection?.Dispose();
     }
 }

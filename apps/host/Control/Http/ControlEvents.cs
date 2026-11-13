@@ -26,8 +26,10 @@ internal sealed class ControlEvents(ControlAuthentication authority, ControlEven
             context.Response.Headers.CacheControl = "no-store";
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted);
             using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
+            var lastSent = System.Diagnostics.Stopwatch.GetTimestamp();
             try
             {
+                await context.Response.StartAsync(deadline.Token);
                 do
                 {
                     request.Require(ControlCapability.StatusRead);
@@ -38,8 +40,10 @@ internal sealed class ControlEvents(ControlAuthentication authority, ControlEven
                         after = value.Sequence;
                         if (value.Kind == "resync") return;
                     }
+                    if (values.Count == 0 && System.Diagnostics.Stopwatch.GetElapsedTime(lastSent) < TimeSpan.FromSeconds(25)) continue;
                     if (values.Count == 0) await context.Response.WriteAsync(": keepalive\n\n", deadline.Token);
                     await context.Response.Body.FlushAsync(deadline.Token);
+                    lastSent = System.Diagnostics.Stopwatch.GetTimestamp();
                 } while (await timer.WaitForNextTickAsync(deadline.Token));
             }
             catch (OperationCanceledException) when (deadline.IsCancellationRequested) { }

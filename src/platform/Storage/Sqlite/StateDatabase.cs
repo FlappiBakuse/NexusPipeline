@@ -20,6 +20,8 @@ public sealed class StateDatabase
     private long _commitSequence;
     public long CommitSequence => Interlocked.Read(ref _commitSequence);
     internal Execution.AttemptReadRegistry? AttemptReads { get; set; }
+    internal InstanceLease? RuntimeLease { get; set; }
+    internal Processes.ProcessIdentityLease? ExecutorIdentity => OperatingSystem.IsWindows() ? RuntimeLease?.ExecutorIdentity : null;
     internal BlobReferenceFacts ReferenceFacts { get; } = new();
 
     private StateDatabase(string path, Guid instanceId, string runtimeRoot, bool readOnly = false)
@@ -91,7 +93,7 @@ public sealed class StateDatabase
         }
         inspected.OwnedCopy?.Discard();
         startupLease?.BindDatabase();
-        return new(databasePath, actual.InstanceId, actual.RuntimeRoot);
+        return new(databasePath, actual.InstanceId, actual.RuntimeRoot) { RuntimeLease = startupLease };
     }
 
     public static StateDatabase OpenCurrent(RuntimeInstance instance, InstanceLease startupLease)
@@ -119,7 +121,7 @@ public sealed class StateDatabase
             transaction.Commit();
         }
         startupLease.BindDatabase();
-        return new(path, actual.InstanceId, actual.RuntimeRoot);
+        return new(path, actual.InstanceId, actual.RuntimeRoot) { RuntimeLease = startupLease };
     }
 
     internal T Write<T>(Func<SqliteConnection, SqliteTransaction, T> operation)
@@ -130,9 +132,14 @@ public sealed class StateDatabase
         using var opened = borrowed is null ? DatabaseConnections.Open(DatabasePath) : null;
         var connection = borrowed ?? opened!;
         using var transaction = connection.BeginTransaction(deferred: false);
+        var changes = SQLitePCL.raw.sqlite3_total_changes(connection.Handle!);
+        var schema = (long)DatabaseConnections.Scalar(connection, "PRAGMA main.schema_version;");
         var result = operation(connection, transaction);
         transaction.Commit();
-        Interlocked.Increment(ref _commitSequence);
+        // Read-only and idempotent transactions do not invalidate background inventories.
+        if (SQLitePCL.raw.sqlite3_total_changes(connection.Handle!) != changes ||
+            (long)DatabaseConnections.Scalar(connection, "PRAGMA main.schema_version;") != schema)
+            Interlocked.Increment(ref _commitSequence);
         return result;
     }
 
@@ -177,7 +184,7 @@ public sealed class StateDatabase
         NexusPipeline.Platform.Storage.Secrets.SecretReplayProof.Initialize(instance, connection, transaction);
         transaction.Commit();
         startupLease?.BindDatabase();
-        return new(path, instance.InstanceId, instance.RuntimeRoot);
+        return new(path, instance.InstanceId, instance.RuntimeRoot) { RuntimeLease = startupLease };
     }
 
     public DatabaseSettings ReadSettings()

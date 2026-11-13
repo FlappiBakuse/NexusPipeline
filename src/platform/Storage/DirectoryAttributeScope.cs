@@ -16,7 +16,9 @@ public sealed class DirectoryAttributeScope : IDisposable
         _current = this;
     }
 
-    public static DirectoryAttributeScope Hold(RuntimeInstance instance) => new(DirectoryAttributeProtection.Acquire(instance), true);
+    public static DirectoryAttributeScope Hold(RuntimeInstance instance) => _current is { } current &&
+        StringComparer.OrdinalIgnoreCase.Equals(current._protection.RuntimeRoot, instance.RuntimeRoot)
+        ? new(current._protection, false) : new(DirectoryAttributeProtection.Acquire(instance), true);
 
     internal static DirectoryAttributeScope HoldDirectories(IEnumerable<string> directories) =>
         new(DirectoryAttributeProtection.AcquireDirectories(directories), true);

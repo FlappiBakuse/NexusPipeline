@@ -9,6 +9,12 @@ internal sealed record ExtensionInstalledMetadata(string ExtensionId, long Revis
 internal static class ExtensionInstalledRows
 {
     internal static HashSet<string> ReadArchiveDigests(StateDatabase database)
+        => ReadDigests(database, includeManifest: false);
+
+    internal static HashSet<string> ReadContentDigests(StateDatabase database)
+        => ReadDigests(database, includeManifest: true);
+
+    private static HashSet<string> ReadDigests(StateDatabase database, bool includeManifest)
     {
         using var connection = DatabaseConnections.Open(database.DatabasePath, readOnly: true);
         using var transaction = connection.BeginTransaction(deferred: true);
@@ -20,7 +26,10 @@ internal static class ExtensionInstalledRows
         var digests = new HashSet<string>(StringComparer.Ordinal);
         foreach (var extension in extensions)
             if (ReadCurrentMetadata(connection, transaction, extension) is { IsInstalled: true } installed)
+            {
                 digests.Add(installed.Package.ArchiveSha256);
+                if (includeManifest) digests.Add(installed.Package.ManifestSha256);
+            }
         transaction.Commit();
         return digests;
     }

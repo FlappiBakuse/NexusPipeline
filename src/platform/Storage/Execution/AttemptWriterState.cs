@@ -19,9 +19,9 @@ internal sealed record AttemptWriterState(RegisteredJournal Journal, RunAttemptP
     internal bool IsExecutionStart { get; init; }
     internal ImmutableDictionary<string, int> PreviousInvocations { get; init; } = ImmutableDictionary<string, int>.Empty;
     internal int PreviousInvocationCount(string stepId) => PreviousInvocations.TryGetValue(stepId, out var count) ? count : 0;
-    internal ImmutableArray<StepWriterState> Jobs => WriterIntentCodec.ReadJobs(Latest.Root, Total);
-    internal ImmutableArray<StepWriterState> AllJobs => WriterIntentCodec.ReadAllJobs(Latest.Root, Total);
-    internal ImmutableArray<ExecutionStepCompletion> Coverage => StepResultCodec.Coverage(Latest.Root, Total);
+    internal ImmutableArray<StepWriterState> Jobs => ValidatedRead?.Jobs(this, all: false) ?? WriterIntentCodec.ReadJobs(Latest.Root, Total);
+    internal ImmutableArray<StepWriterState> AllJobs => ValidatedRead?.Jobs(this, all: true) ?? WriterIntentCodec.ReadAllJobs(Latest.Root, Total);
+    internal ImmutableArray<ExecutionStepCompletion> Coverage => ValidatedRead?.Coverage(this) ?? StepResultCodec.Coverage(Latest.Root, Total);
     internal static AttemptWriterState Read(RuntimeInstance instance, StateDatabase database, ContractReader contracts, Guid journalId)
     {
         using var reads = OperatingSystem.IsWindows() ? DatabaseReadScope.Hold(database.DatabasePath) : null;

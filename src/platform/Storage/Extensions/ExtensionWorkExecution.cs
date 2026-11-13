@@ -36,9 +36,9 @@ internal sealed class ExtensionWorkExecution
     [SupportedOSPlatform("windows")]
     internal static ExtensionWorkExecution Owned(RuntimeInstance instance, StateDatabase database, InstanceLease lease,
         ContractReader contracts, PayloadApplyRoots roots, BoundWorkPage work, ResourceOperationLease root,
-        ResourceOperationBorrow borrow, ExtensionActivator.ApplyReservation inventory, ResourceLeaseManager resources,
+        ResourceOperationBorrow borrow, WorkScopeProtection inventory, ResourceLeaseManager resources,
         BlobReference planReference, ProcessIdentityLease executor) =>
-        new(instance, database, lease, contracts, roots, work, planReference, () => borrow.Use(() => inventory.Use(root, (_, _, _) =>
+        new(instance, database, lease, contracts, roots, work, planReference, () => borrow.Use(() => inventory.Use(root, () =>
         {
             var observed = new JournalWriterStore(database).ObserveForCurrentExecutor(work.Origin.Proof.ProducerJournalId, executor);
             if (!observed.IsComplete || observed.State != WriterState.Stopped) throw Pending();
