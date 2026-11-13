@@ -23,6 +23,8 @@ import { loaderContract } from './loader-contract.js';
 import { frontendLoadingContract } from './frontend-loading-contract.js';
 import { startupAppearanceContract } from './startup-appearance-contract.js';
 import { pageLoadingContract } from './page-loading-contract.js';
+import { executionLayoutContract } from './execution-layout-contract.js';
+import { logPanelContract } from './log-panel-contract.js';
 
 const checks: string[] = [];
 const create = <N extends UiElementName>(name: N): UiElement<N> => document.createElement(name) as UiElement<N>;
@@ -73,6 +75,8 @@ async function structural(): Promise<string[]> {
   await preparationContract(assert);
   await loaderContract(assert);
   await pageLoadingContract(fixture, assert);
+  await executionLayoutContract(fixture, assert);
+  await logPanelContract(fixture, assert);
   await scriptCreationContract(fixture, assert);
   await bindingLayoutContract(fixture, assert);
   await feedbackLayoutContract(fixture, assert);

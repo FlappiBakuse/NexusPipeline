@@ -17,8 +17,28 @@ let release: (() => void) | undefined;
 let observer: IntersectionObserver | undefined;
 let drag: { pointer: number; y: number; height: number } | undefined;
 let selected = '';
+let generation = 0;
+let renderTimer: ReturnType<typeof setTimeout> | undefined;
 const roles = computed(() => ['preHook', 'main', 'postHook'].filter(role => props.roles.includes(role)));
 const windows = new Map<string, LogWindow>();
+function renderWindow(epoch: number): void {
+  renderTimer = undefined;
+  if (epoch !== generation || !props.visible || !inView.value) return;
+  const ordered = roles.value.map((key) => windows.get(key));
+  const text = ordered.map((item) => item?.text || '').join('');
+  const lines = text.split('\n');
+  value.value = {
+    text: lines.slice(-500).join('\n').slice(-256 * 1024),
+    sequence: Math.max(0, ...ordered.map((item) => item?.sequence || 0)),
+    omitted: lines.length > 500 || text.length > 256 * 1024 || ordered.some((item) => item?.omitted),
+    connected: ordered.some((item) => item?.connected)
+  };
+  if (follow) void nextTick(() => {
+    if (epoch !== generation || !props.visible || !inView.value) return;
+    const element = windowElement.value;
+    if (element) element.scrollTop = element.scrollHeight;
+  });
+}
 registerMessages({
   运行日志: 'Run log',
   暂无日志输出: 'No log output',
@@ -37,6 +57,8 @@ watch(root, (element) => {
 watch(
   [() => JSON.stringify(props.identity), () => roles.value.join(), () => props.visible, inView],
   () => {
+    const epoch = ++generation;
+    clearTimeout(renderTimer); renderTimer = undefined;
     release?.();
     release = undefined;
     const identity = JSON.stringify(props.identity);
@@ -49,25 +71,10 @@ watch(
     if (!props.visible || !inView.value || !props.identity) return;
     const subscriptions = roles.value.map((role) =>
       props.subscribe({ ...props.identity!, role }, (next) => {
+        if (epoch !== generation) return;
         if (!next.connected && !next.text && windows.has(role)) return;
         windows.set(role, next);
-        const ordered = roles.value.map((key) => windows.get(key));
-        const text = ordered.map((item) => item?.text || '').join('');
-        const lines = text.split('\n');
-        value.value = {
-          text: lines
-            .slice(-500)
-            .join('\n')
-            .slice(-256 * 1024),
-          sequence: Math.max(0, ...ordered.map((item) => item?.sequence || 0)),
-          omitted: lines.length > 500 || text.length > 256 * 1024 || ordered.some((item) => item?.omitted),
-          connected: ordered.some((item) => item?.connected)
-        };
-        if (follow)
-          void nextTick(() => {
-            const element = windowElement.value;
-            if (element) element.scrollTop = element.scrollHeight;
-          });
+        renderTimer ??= setTimeout(() => renderWindow(epoch), 200);
       })
     );
     release = () => subscriptions.forEach((unsubscribe) => unsubscribe());
@@ -107,6 +114,7 @@ function viewportChanged(): void {
 }
 window.addEventListener('resize', viewportChanged);
 onBeforeUnmount(() => {
+  generation++; clearTimeout(renderTimer);
   release?.();
   observer?.disconnect();
   window.removeEventListener('resize', viewportChanged);

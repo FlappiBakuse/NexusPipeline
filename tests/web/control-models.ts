@@ -43,6 +43,8 @@ export async function run(): Promise<string[]> {
   const step = { stepId: 'step', scriptId: 'script', userId: null, bindingId: null, dependsOn: [], phase: 'collected',
     tasks: [], logRoles: ['main'], invocations: [invocation] };
   assert.deepEqual(executionStep(step).invocations?.[0], invocation);
+  assert.equal(executionStep({ ...step, invocationOrdinal: 2, maximumInvocations: 3 }).invocationOrdinal, 2);
+  for (const invocationOrdinal of [-1, 100, '2']) assert.throws(() => executionStep({ ...step, invocationOrdinal }));
   for (const [field, value] of [['startedAt', 'invalid'], ['endedAt', false], ['durationMilliseconds', -1]])
     assert.throws(() => executionStep({ ...step, invocations: [{ ...invocation, [field as string]: value }] }));
   assert.equal(executionStep({ ...step, invocations: [{ ...invocation, startedAt: null, durationMilliseconds: null }] })

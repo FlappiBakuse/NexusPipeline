@@ -26,6 +26,7 @@ export interface ActiveStep {
   tasks: RunTask[];
   logRoles: string[];
   maximumInvocations?: number;
+  invocationOrdinal?: number;
   invocations?: { ordinal: number; engine: string; business: string; reasonCode: string;
     startedAt: string | null; endedAt: string | null; durationMilliseconds: number | null }[];
   engine?: string;
@@ -99,6 +100,7 @@ export function executionStep(value: unknown): ActiveStep {
         ...(step.reasonCode == null ? {} : { reasonCode: stringValue(step.reasonCode) }),
         logRoles: arrayValue(step.logRoles, stringValue),
         ...(step.maximumInvocations == null ? {} : { maximumInvocations: boundedInteger(step.maximumInvocations, 1, 99) }),
+        ...(step.invocationOrdinal == null ? {} : { invocationOrdinal: boundedInteger(step.invocationOrdinal, 0, 99) }),
         ...(step.invocations == null ? {} : { invocations: arrayValue(step.invocations, value => {
           const item = objectValue(value);
           return { ordinal: boundedInteger(item.ordinal, 1, 99), engine: stringValue(item.engine),

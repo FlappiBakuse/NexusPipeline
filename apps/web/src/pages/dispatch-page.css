@@ -1,5 +1,6 @@
 .dispatch-targets,
 .dispatch-running {
+  min-width: 0;
   padding: 20px;
   border: 1px solid var(--border);
   border-radius: 16px;

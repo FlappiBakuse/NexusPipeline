@@ -7,7 +7,7 @@ import LiveLogPanel from '../components/LiveLogPanel.vue';
 import ExtensionOutlet from '../extensions/ExtensionOutlet.vue';
 import LiveTaskSteps from './LiveTaskSteps.vue';
 import { t, registerMessages } from '../app/locale';
-import { runPhase, runAttempt } from './execution-text';
+import { runPhase, runAttempt, invocationAttempt } from './execution-text';
 
 const props = defineProps<{ store: AppStore; run: ActiveRun; visible: boolean; cancelling: boolean }>();
 const emit = defineEmits<{ cancel: [run: ActiveRun] }>();
@@ -19,7 +19,7 @@ const queue = computed(() => props.run.display?.targetKind === 'queue');
 const progress = computed(() =>
   queue.value
     ? (finishedSteps(props.run) / Math.max(1, props.run.steps.length)) * 100
-    : (props.run.ordinal / Math.max(1, props.run.display?.maximumAttempts || props.run.ordinal)) * 100
+    : (invocationAttempt(props.run).ordinal / invocationAttempt(props.run).maximum) * 100
 );
 const identity = computed(() =>
   current.value
@@ -100,6 +100,7 @@ registerMessages({
 
 <style scoped>
 .running-item {
+  min-width: 0;
   padding: 14px 0;
   border-bottom: 1px solid var(--border);
 }

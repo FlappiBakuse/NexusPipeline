@@ -38,6 +38,17 @@ node tooling/web_contracts.mjs --root <源码根> --modules <上述modules> --su
 
 ## 浏览器
 
+运行中心与日志场景使用真实 `RunningExecution`、`LiveLogPanel` 和页面组件：
+
+| 场景 | 可观察结果 |
+|---|---|
+| 启动布局 | 十项任务启动后两张卡片保持父级宽度，任务条在自身滚动区展示；桌面与窄屏操作完整可达 |
+| 调用计数 | 冻结三次调用时随实际 writer 显示 1/3、2/3、3/3，任务重试及恢复前调用计入总数 |
+| 增量日志 | 完整接收 500 帧并合并刷新；切换身份、隐藏、离开视口及卸载释放旧流，晚到回调保持原归属 |
+| 依赖边界 | 现役 TS/Vue AST 门禁拒绝面板导入应用 store、宽端口、原始 Control client 和日志服务值，保留日志类型及页面组装 |
+
+配置读取另按[配置存储](configuration-storage.md#配置读取验收)核对，前端通过结果不替代真实专项与原始配置字节验收。
+
 ```text
 node tooling/web_browser.mjs --root <源码根> --modules <上述modules> --browser <实际浏览器exe> --scenario controls --runtime <构建槽> --output <新空报告目录>
 ```

@@ -1,5 +1,5 @@
 import { locale, t } from '../app/locale';
-import type { ActiveRun } from '../control/execution';
+import { currentStep, type ActiveRun } from '../control/execution';
 
 const phases: Record<string, string> = {
   preparing: '准备中',
@@ -22,7 +22,14 @@ export function runPhase(value: string): string {
   return t(phases[value] || value);
 }
 
+export function invocationAttempt(run: ActiveRun): { ordinal: number; maximum: number } {
+  const step = currentStep(run);
+  return { ordinal: Math.max(1, step?.invocationOrdinal ?? run.ordinal),
+    maximum: step?.maximumInvocations ?? run.display?.maximumAttempts ?? Math.max(1, run.ordinal) };
+}
+
 export function runAttempt(run: ActiveRun): string {
-  const value = run.ordinal + '/' + (run.display?.maximumAttempts || '—');
+  const attempt = invocationAttempt(run);
+  const value = attempt.ordinal + '/' + attempt.maximum;
   return locale.value === 'en-US' ? 'Attempt ' + value : '第' + value + '次';
 }

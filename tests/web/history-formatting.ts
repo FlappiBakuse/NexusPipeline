@@ -3,6 +3,8 @@ import { locale, t } from '../../apps/web/src/app/locale';
 import { historyRow, historyDate, outcomeName } from '../../apps/web/src/pages/history-row';
 import '../../apps/web/src/pages/history-messages';
 import { historyDuration, historyTime, historyReason, startedInvocations } from '../../apps/web/src/pages/history-detail';
+import { runAttempt, invocationAttempt } from '../../apps/web/src/pages/execution-text';
+import type { ActiveRun } from '../../apps/web/src/control/execution';
 
 const record = {
   finalAttempt: { runId: '', attemptId: '', ordinal: 1, engine: 'succeeded', business: 'succeeded', lifecycle: 'completed', recovery: 'restored', reasonCode: 'execution_completed' },
@@ -46,6 +48,15 @@ export function run(): string[] {
     cases.push('History locale and duration precision remain exact in ' + language);
   }
   locale.value = 'zh-CN';
+  const active = { ordinal: 1, display: { maximumAttempts: 3 }, steps: [
+    { phase: 'running', maximumInvocations: 3, invocationOrdinal: 2 }
+  ] } as ActiveRun;
+  assert.equal(runAttempt(active), '第2/3次');
+  assert.deepEqual(invocationAttempt(active), { ordinal: 2, maximum: 3 });
+  locale.value = 'en-US';
+  assert.equal(runAttempt(active), 'Attempt 2/3');
+  locale.value = 'zh-CN';
+  cases.push('Active script invocation counts include retries within one durable attempt');
   assert.equal(historyDuration(60000), '1 分钟');
   cases.push('Changing locale back refreshes existing history formatting');
   const timing = { startedAt: null, endedAt: null, durationMilliseconds: null };
