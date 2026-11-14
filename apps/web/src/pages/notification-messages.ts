@@ -25,8 +25,6 @@ registerMessages({
   添加通知任务: 'Add notification',
   '渠道：': 'Channel: ',
   凭据: 'Credentials',
-  '保存的凭据只显示状态；编辑草稿在关闭后销毁。':
-    'Saved credentials show status only; editing drafts are discarded when closed.',
   已配置: 'Configured',
   未配置: 'Not configured',
   不可读取: 'Cannot be read',

@@ -23,8 +23,9 @@ function fixture(mode = 'desktop') {
       return new Response(JSON.stringify({ saved: { revision: state.revision, values: source } }));
     } };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../../apps/desktop/tray-lifecycle.cjs'), 'utf8'), sandbox);
-  const bridge = { requestClose: async () => { state.quit++; }, publishMode: async mode => { state.effective = mode; }, changeWindow: async callback => {
-    if (!state.allow) throw new Error('desktop_drafts_not_prepared');
+  const bridge = { requestClose: async () => { state.quit++; if (state.waitQuit) await state.waitQuit;
+    if (state.failQuit) throw new Error('desktop_close_pending'); }, publishMode: async mode => { state.effective = mode; }, changeWindow: async callback => {
+    if (!state.allow) throw new Error('desktop_writes_pending');
     return await callback();
   } };
   const windows = { show: async () => { state.shown++; },
@@ -46,7 +47,7 @@ function fixture(mode = 'desktop') {
   } };
 }
 
-test('tray releases the desktop only after prepared drafts and a successful shared settings CAS', async () => {
+test('tray releases the desktop only after write readiness and a successful shared settings CAS', async () => {
   const f = fixture(); await f.lifecycle.start(); await f.lifecycle.complete();
   try {
     await f.lifecycle.show(); assert.equal(f.state.shown, 1);
@@ -61,7 +62,7 @@ test('tray releases the desktop only after prepared drafts and a successful shar
     await f.click(0); assert.equal(f.state.menus.at(-1).lightweight, true);
     await f.lifecycle.show(); assert.equal(f.state.opened, 'http://127.0.0.1:1234/settings');
     await f.click(2); assert.equal(f.state.reloaded, 1);
-    await f.click(1); assert.equal(f.state.shown, 2);
+    await f.click(1); assert.equal(f.state.shown, 3);
     assert.equal(f.state.posts.at(-1).values.desktop.mode, 'desktop');
     assert.equal(f.state.effective, 'desktop');
     await f.click(3); assert.equal(f.state.quit, 1);
@@ -92,4 +93,31 @@ test('failed startup dismisses its own surface without requesting Host close', a
     assert.equal(f.state.dismissed, true);
     assert.equal(f.state.quit, 0);
   } finally { f.lifecycle.dispose(); }
+});
+
+
+test('pending quit leaves click, double click and native menu available and releases after failure', async () => {
+  const f = fixture(); await f.lifecycle.start(); await f.lifecycle.complete();
+  let release;
+  f.state.waitQuit = new Promise(resolve => { release = resolve; });
+  try {
+    const quitting = f.click(3);
+    for (let index = 0; index < 8; index++) await Promise.resolve();
+    assert.equal(f.state.quit, 1);
+    await f.state.events.get('click')(); await f.state.events.get('double-click')();
+    assert.equal(f.state.shown, 2);
+    const before = f.state.menus.length;
+    await f.click(0);
+    assert.equal(f.state.menus.length, before + 1);
+    assert.equal(f.state.menus.at(-1).disabled, true);
+    release(); await quitting;
+    f.state.waitQuit = undefined; f.state.failQuit = true;
+    const shown = f.state.shown;
+    await f.click(3); await f.click(0);
+    assert.equal(f.state.menus.at(-1).disabled, false);
+    assert(f.state.shown > shown);
+    assert.equal(f.state.warnings.length, 0);
+    f.state.failQuit = false; await f.click(3);
+    assert.equal(f.state.quit, 3);
+  } finally { release(); f.lifecycle.dispose(); }
 });

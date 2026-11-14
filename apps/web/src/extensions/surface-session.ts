@@ -3,6 +3,7 @@ import {
   type ExtensionSurface,
   type SurfaceContext,
   type Cleanup,
+  type EditorDraftScope,
   type AppearanceOverrides
 } from '@nexuspipeline/extension-sdk';
 import { releaseAppearance, setAppearance } from './appearance-owner.js';
@@ -16,10 +17,11 @@ export class SurfaceSession implements ExtensionSurface {
   constructor(
     readonly element: HTMLElement,
     context: SurfaceContext,
-    readonly scope: ExtensionScope
+    readonly scope: ExtensionScope,
+    readonly drafts: EditorDraftScope
   ) {
     this.context = Object.freeze({ ...context });
-    this.signal = scope.signal;
+    this.signal = AbortSignal.any([scope.signal, drafts.signal]);
     this.signal.addEventListener(
       'abort',
       () => {

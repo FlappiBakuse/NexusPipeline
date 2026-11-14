@@ -1,6 +1,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { AppStore } from './store';
 import { locale, t } from './locale';
+import { interfaceSettings } from './interface-settings';
 import { desktop } from './desktop';
 
 export function useAppAppearance(store: AppStore) {
@@ -39,7 +40,7 @@ export function useAppAppearance(store: AppStore) {
     themeBusy.value = true;
     try {
       const mode = ({ system: 'light', light: 'dark', dark: 'system' } as const)[current.values.theme];
-      await store.saveInterface({ ...current.values, theme: mode }, current.revision);
+      await interfaceSettings(store).patch({ theme: mode });
       themeNotice.value = t('主题：') + t({ system: '跟随系统', light: '浅色', dark: '深色' }[mode]);
       clearTimeout(timer);
       timer = setTimeout(() => {

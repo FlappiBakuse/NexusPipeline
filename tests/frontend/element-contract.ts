@@ -4,6 +4,7 @@ import { registryContracts } from './registry-contract.js';
 import { paintedControls } from './painted-controls-contract.js';
 import { localeContract } from './locale-contract.js';
 import { recordWindowContract } from './record-window-contract.js';
+import { immediateSettingsContract } from './immediate-settings-contract';
 import { interfaceCommandContract } from './interface-command-contract.js';
 import { desktopCaptionContract } from './desktop-caption-contract.js';
 import { scrollAreaContract } from './scroll-area-contract.js';
@@ -25,6 +26,8 @@ import { startupAppearanceContract } from './startup-appearance-contract.js';
 import { pageLoadingContract } from './page-loading-contract.js';
 import { executionLayoutContract } from './execution-layout-contract.js';
 import { logPanelContract } from './log-panel-contract.js';
+import { configurationDraftContract } from './configuration-draft-contract.js';
+import { draftLifecycleContract } from './draft-lifecycle-contract.js';
 
 const checks: string[] = [];
 const create = <N extends UiElementName>(name: N): UiElement<N> => document.createElement(name) as UiElement<N>;
@@ -65,6 +68,8 @@ async function structural(): Promise<string[]> {
   await tooltipContract(fixture, assert);
   await recordWindowContract(assert);
   await adapterFormContract(fixture, assert);
+  await configurationDraftContract(fixture, assert);
+  await draftLifecycleContract(fixture, assert);
   await historyLinkContract(assert);
   await historyIndexContract(fixture, assert);
   await historyPaginationContract(fixture, assert);
@@ -81,6 +86,7 @@ async function structural(): Promise<string[]> {
   await bindingLayoutContract(fixture, assert);
   await feedbackLayoutContract(fixture, assert);
   await interfaceCommandContract(assert);
+  await immediateSettingsContract(assert);
   assert(!customElements.get('nxp-button'), 'new realm registers no retired element alias');
   const button = create('nexus-button');
   button.label = 'Action';

@@ -75,6 +75,7 @@ function reorder(ids: string[]): void {
       <div v-for="(row, index) in rows" :key="row.id" :data-item-id="row.id" class="task-row">
         <nexus-drag-handle :item-id="row.id" :label="t('调整任务顺序')" />
         <nexus-select
+        data-draft-field="QueueTasks/row.scriptId"
           :aria-label="t('任务') + ' ' + (index + 1) + ' ' + t('脚本实例')"
           aria-required="true"
           :value.prop="row.scriptId"

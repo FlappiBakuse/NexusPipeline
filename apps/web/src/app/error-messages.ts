@@ -1,4 +1,6 @@
 export const errorMessages: Readonly<Record<string, readonly [string, string]>> = {
+  desktop_exit_in_progress: ["正在准备退出，请等待当前操作结束。", "Exit is being prepared. Wait for the current operation."],
+  editor_operation_pending: ["当前保存结果待确认，请先核对原操作。", "Check the original operation before cancelling this draft."],
   access_denied: ["当前操作权限不足。", "You do not have permission for this operation."],
   account_summary_identity_invalid: ["账号记录与当前请求不匹配，请刷新记录列表。（account_summary_identity_invalid）", "The account record does not match the request. Refresh the record list. (account_summary_identity_invalid)"],
   account_summary_unbound: ["账号记录与当前请求不匹配，请刷新记录列表。（account_summary_unbound）", "The account record does not match the request. Refresh the record list. (account_summary_unbound)"],

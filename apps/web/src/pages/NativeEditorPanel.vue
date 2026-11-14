@@ -1,10 +1,13 @@
 <script setup lang="ts">
+import DraftNotice from '../components/DraftNotice.vue';
+import { draftPresentation, draftDirective as vDraft } from '../app/draft-presentation';
 import { createIdentity } from '../control/identity';
 import { computed, onBeforeUnmount, reactive, toRefs, watch } from 'vue';
 import type { ConfigurationStore } from '../app/store-ports';
 import { ControlFailure, integerValue, objectValue, stringValue } from '../control/client';
 import { t } from '../app/locale';
 import type { ConfigurationOverview } from './configuration-types';
+import { configurationDrafts } from './configuration-drafts';
 import './configuration-messages';
 
 type Session = { sessionId: string; revision: number; phase: string };
@@ -21,7 +24,7 @@ type Draft = {
 };
 const props = defineProps<{ store: ConfigurationStore; overview: ConfigurationOverview; visible: boolean }>();
 const emit = defineEmits<{ changed: [] }>();
-const key = 'configuration/native/' + props.overview.bindingId;
+const key = 'configuration/native/' + props.store.state.capabilities?.instanceId + '/' + props.overview.bindingId;
 const saved = props.store.drafts.get(key);
 const state = reactive(
   saved || {
@@ -37,10 +40,21 @@ const state = reactive(
   }
 ) as Draft;
 props.store.drafts.set(key, state);
+const scope = configurationDrafts(props.store, props.overview.bindingId).child('native');
+const store = props.store;
+const presentation = draftPresentation(scope.child('host-form'), true);
+scope.retain('native', () => {
+  scope.guardCancel(() => !state.session && !state.pending && !state.busy);
+  scope.onSettled(() => { store.drafts.delete(key); store.dirty.delete(key); });
+  return state;
+});
 watch(
-  () => [state.rootId, state.relativePath, state.argumentsText, state.resourceIds],
-  () => props.store.dirty.add(key),
-  { deep: true, flush: 'sync' }
+  () => !!state.session || !!state.pending,
+  (changed) => {
+    if (changed) props.store.dirty.add(key);
+    else props.store.dirty.delete(key);
+  },
+  { immediate: true, flush: 'sync' }
 );
 const roots = computed(() => props.store.state.automation?.roots || []);
 const { busy, note } = toRefs(state);
@@ -90,6 +104,7 @@ async function readSession(): Promise<void> {
       state.pending = null;
       state.launchId = '';
       note.value = session.phase.toLowerCase() === 'saved' ? '已保存' : '已取消';
+      presentation.saved();
       props.store.dirty.delete(key);
       if (alive) emit('changed');
     } else {
@@ -183,25 +198,34 @@ watch(
 );
 onBeforeUnmount(() => {
   alive = false;
+  if (!presentation.modified && !state.session && !state.pending && !state.busy) scope.settle('disposed');
 });
+defineExpose({ cancel: async () => {
+  if (state.session && !state.pending && !state.busy) await finish('cancel');
+  return !state.session && !state.pending && !state.busy;
+} });
 </script>
 <template>
-  <div class="config-fields">
+  <div v-draft="presentation" class="config-fields">
+    <DraftNotice :restored="presentation.state.restored" />
     <template v-if="!state.session && !state.pending">
       <label class="form-field">
         {{ t('编辑器目录') }}
-        <FormSelect v-model="state.rootId">
+        <FormSelect
+        data-draft-field="NativeEditorPanel/state.rootId" v-model="state.rootId">
           <option value="">{{ t('编辑器目录') }}</option>
           <option v-for="root in roots" :key="root.id" :value="root.id">{{ root.path }}</option>
         </FormSelect>
       </label>
       <label class="form-field">
         {{ t('编辑器相对路径') }}
-        <input v-model="state.relativePath" placeholder="tools/editor.exe" />
+        <input
+        data-draft-field="NativeEditorPanel/state.relativePath" v-model="state.relativePath" placeholder="tools/editor.exe" />
       </label>
       <label class="form-field">
         {{ t('编辑器参数') }}
         <nexus-text-area
+        data-draft-field="NativeEditorPanel/state.argumentsText"
           :value.prop="state.argumentsText"
           :aria-label="t('编辑器参数')"
           :placeholder="t('每行一个参数')"
@@ -213,6 +237,7 @@ onBeforeUnmount(() => {
         <legend>{{ t('编辑的资源') }}</legend>
         <label v-for="item in overview.resources" :key="item.resourceId" class="choice-row">
           <input
+        data-draft-field="NativeEditorPanel/state.resourceIds.includes(item.resourceId)"
             type="checkbox"
             :checked="state.resourceIds.includes(item.resourceId)"
             @change="toggle(item.resourceId)"

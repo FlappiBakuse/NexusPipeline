@@ -10,8 +10,9 @@ const emit = defineEmits<{ edit: [field: SecretField, value: string] }>();
   <label class="secret-input" :data-secret-field="field">
     {{ t(label) }}
     <input
+        data-draft-field="NotificationSecretInput/value"
       :value="value"
-      :type="field === 'webhook-url' ? 'text' : 'password'"
+      type="password"
       :aria-label="t(label)"
       :placeholder="configured ? t('留空不修改') : ''"
       autocomplete="new-password"

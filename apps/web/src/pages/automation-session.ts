@@ -13,6 +13,7 @@ export type AutomationAction = {
   definitionCommitted?: boolean;
 };
 export type AutomationSession = {
+  newDrafts?: Record<string, string>;
   revisions: Record<string, number>;
   catalogs: Record<string, number>;
   pending: AutomationAction | null;

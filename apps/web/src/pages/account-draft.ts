@@ -65,11 +65,20 @@ export function accountChanges(
   };
 }
 
-export function clearAccountDraft(store: AutomationStore, id: string): void {
+export function clearAccountDraft(store: AutomationStore, id: string, reason: 'cancel' | 'saved' = 'cancel'): void {
   const state = store.drafts.get(accountKey(store, id)) as AccountDraft | undefined;
-  for (const binding of [...(state?.items || []), ...(state?.baseline || [])])
+  for (const binding of [...(state?.items || []), ...(state?.baseline || [])]) {
     store.drafts.delete(hookPathKey(store, binding.id));
+    if (reason === 'saved') store.editors.saved(store.state.capabilities?.instanceId || '', 'bindings', binding.id);
+    else store.editors.settle(store.state.capabilities?.instanceId || '', 'bindings', binding.id, reason);
+  }
   store.drafts.delete(accountKey(store, id));
+}
+
+export function canCancelAccount(store: AutomationStore, id: string): boolean {
+  const state = store.drafts.get(accountKey(store, id)) as AccountDraft | undefined;
+  return [...(state?.items || []), ...(state?.baseline || [])].every(binding =>
+    store.editors.target(store.state.capabilities?.instanceId || '', 'bindings', binding.id).canCancel());
 }
 
 export function validAccountLimits(

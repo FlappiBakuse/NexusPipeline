@@ -1,3 +1,4 @@
+import { reactive } from 'vue';
 import { ControlClient, ControlFailure } from '../control/client.js';
 import { interfaceSnapshot, type InterfaceSnapshot, type InterfaceValues } from '../control/interface.js';
 
@@ -19,18 +20,18 @@ type State = {
 export class InterfaceChanges {
   constructor(
     private readonly client: ControlClient,
-    private readonly state: State,
-    private readonly drafts: Map<string, Record<string, unknown>>,
-    private readonly dirty: Set<string>
+    private readonly state: State
   ) {}
+
+  private readonly commands = reactive(new Map<string, Change>());
 
   private key(instance = this.state.capabilities?.instanceId): string {
     return 'interface-command/' + instance;
   }
   current(): Change {
     const key = this.key();
-    if (!this.drafts.has(key)) this.drafts.set(key, { pending: null, error: '' });
-    return this.drafts.get(key) as unknown as Change;
+    if (!this.commands.has(key)) this.commands.set(key, { pending: null, error: '' });
+    return this.commands.get(key)!;
   }
 
   observe(snapshot: InterfaceSnapshot): void {
@@ -39,13 +40,12 @@ export class InterfaceChanges {
       pending = change.pending;
     if (pending && this.matches(snapshot, pending)) {
       pending.proof = snapshot;
-      this.accept(change, this.key(), pending.id);
+      this.accept(change, pending.id);
     }
   }
 
   async save(values: InterfaceValues, revision: number, id: string): Promise<InterfaceSnapshot> {
     const instance = this.state.capabilities?.instanceId,
-      key = this.key(instance),
       change = this.current();
     if (!instance || change.pending) throw new ControlFailure(409, 'interface_change_pending');
     const pending: Pending = {
@@ -61,7 +61,6 @@ export class InterfaceChanges {
     };
     change.pending = pending;
     change.error = '';
-    this.dirty.add(key);
     try {
       const saved = await this.client.write(
         '/control/v1/settings/interface/change',
@@ -80,7 +79,7 @@ export class InterfaceChanges {
         id
       );
       pending.proof = saved;
-      this.accept(change, key, id);
+      this.accept(change, id);
       if (this.state.capabilities?.instanceId === instance) this.observe(saved);
       return saved;
     } catch (reason) {
@@ -91,7 +90,6 @@ export class InterfaceChanges {
           change.error = '界面设置结果待确认，请查询原操作。';
         } else {
           change.pending = null;
-          this.dirty.delete(key);
         }
       }
       throw reason;
@@ -123,7 +121,7 @@ export class InterfaceChanges {
     );
   }
 
-  private accept(change: Change, key: string, id: string): void {
+  private accept(change: Change, id: string): void {
     const pending = change.pending;
     if (pending?.id !== id) return;
     if (pending && this.state.uncertainOperation === pending.id) {
@@ -132,6 +130,5 @@ export class InterfaceChanges {
     }
     change.pending = null;
     change.error = '';
-    this.dirty.delete(key);
   }
 }

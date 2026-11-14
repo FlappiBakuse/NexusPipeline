@@ -78,6 +78,7 @@ function update(value: Binding): void {
       {{ t('用户名') }}
       <em>*</em>
       <nexus-text-input
+        data-draft-field="AccountFields/modelValue.name"
         :aria-label="t('用户名')"
         aria-required="true"
         :value.prop="modelValue.name"
@@ -89,6 +90,7 @@ function update(value: Binding): void {
       <label>
         {{ t('备注') }}
         <nexus-text-area
+        data-draft-field="AccountFields/modelValue.notes || ''"
           :aria-label="t('备注')"
           :rows.prop="4"
           :max-length.prop.camel="4000"
@@ -159,7 +161,7 @@ function update(value: Binding): void {
           <article
             v-for="binding in bindings"
             :key="binding.id"
-            :data-item-id="binding.id"
+            :data-item-id="binding.id" :data-draft-item="binding.id"
             :class="['binding', { expanded: expanded === binding.id }]"
           >
             <div class="binding-heading">

@@ -8,6 +8,7 @@ const words = {
   loginIncomplete: ['登录信息尚未齐全，请继续登录', 'Sign-in values are incomplete; continue signing in'],
   loginRetry: ['验证暂不可用，请重试完成', 'Verification unavailable; try finishing again'],
   show: ['显示', 'Show'], hide: ['隐藏', 'Hide'], quit: ['退出 NexusPipeline', 'Quit NexusPipeline'],
+  closing: ['正在安全退出…', 'Quitting safely…'],
   reload: ['重启页面', 'Reload page'], lightweight: ['轻量模式', 'Lightweight mode'],
   cancel: ['取消', 'Cancel'], save: ['允许保存', 'Allow save'],
   saveTitle: ['保存文件', 'Save file'], saveQuestion: ['允许保存到所选文件？', 'Allow saving to the selected file?'],

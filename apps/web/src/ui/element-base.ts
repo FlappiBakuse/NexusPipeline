@@ -68,6 +68,8 @@ export abstract class NexusElement extends HTMLElement {
       this.updating = false;
     }
     if (this.isConnected) this.render();
+    if (key === 'value' && this.hasAttribute('data-observe-value'))
+      this.dispatchEvent(new Event('nexus-value-updated', { bubbles: true, composed: true }));
   }
 
   protected change(value: unknown, source: 'pointer' | 'keyboard' | 'input' | 'assistive'): void {

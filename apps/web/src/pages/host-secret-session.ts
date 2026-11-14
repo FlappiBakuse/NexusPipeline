@@ -2,6 +2,7 @@ import { createIdentity } from '../control/identity';
 import type { AppStore } from '../app/store';
 import { ControlFailure, objectValue } from '../control/client.js';
 import { changeValue, readStatus, type LocalField, type LocalSecretStatus } from './local-secrets.js';
+import { reactive } from 'vue';
 
 type PendingSecret = {
   id: string;
@@ -16,12 +17,17 @@ export type HostSecretSession = {
   operationStatus: string;
 };
 const key = (instance: string, field: LocalField): string => 'host-secret/' + instance + '/' + field;
+const sessions = new WeakMap<AppStore, Map<string, HostSecretSession>>();
 
 export function hostSecretSession(store: AppStore, instance: string, field: LocalField): HostSecretSession {
   const id = key(instance, field);
-  if (!store.drafts.has(id))
-    store.drafts.set(id, { pending: null, status: null, error: '', operationStatus: '' });
-  return store.drafts.get(id) as unknown as HostSecretSession;
+  let values = sessions.get(store);
+  if (!values) {
+    values = new Map(); sessions.set(store, values);
+    store.editors.signal.addEventListener('abort', () => values!.clear(), { once: true });
+  }
+  if (!values.has(id)) values.set(id, reactive({ pending: null, status: null, error: '', operationStatus: '' }));
+  return values.get(id)!;
 }
 
 function accept(
@@ -31,13 +37,13 @@ function accept(
   id: string,
   result: LocalSecretStatus
 ): void {
+  if (store.editors.signal.aborted) return;
   const state = hostSecretSession(store, instance, field);
   if (state.pending?.id !== id) return;
   if (!state.status || result.revision >= state.status.revision) state.status = result;
   state.pending = null;
   state.error = '';
   state.operationStatus = '';
-  store.dirty.delete(key(instance, field));
   if (store.state.uncertainOperation === id) {
     store.state.uncertainOperation = '';
     store.state.error = '';
@@ -58,19 +64,25 @@ export async function writeHostSecret(
   state.pending = { id, revision, disposition, state: 'sending' };
   state.error = '';
   state.operationStatus = '';
-  store.dirty.add(key(instance, field));
   try {
-    const result = await changeValue(store.client, field, revision, disposition, value, id);
+    const request = changeValue(store.client, field, revision, disposition, value, id);
+    value = '';
+    const result = await request;
     accept(store, instance, field, id, result);
     return true;
   } catch (reason) {
     if (reason instanceof ControlFailure && reason.uncertain) {
       state.pending!.state = 'unknown';
-      state.error = '秘密变更结果未知，请查询原操作。';
+      state.error = '秘密变更结果待确认。';
+      for (const delay of [0, 200, 800, 2000]) {
+        if (delay) await new Promise<void>(resolve => setTimeout(resolve, delay));
+        if (store.editors.signal.aborted || !state.pending) break;
+        await inspectHostSecret(store, instance, field, store.editors.signal);
+      }
+      if (!state.pending) return true;
     } else {
       state.pending = null;
-      store.dirty.delete(key(instance, field));
-      state.error = reason instanceof Error ? reason.message : '秘密保存失败';
+          state.error = reason instanceof Error ? reason.message : '秘密保存失败';
       if (reason instanceof ControlFailure && reason.status === 409) state.status = null;
     }
     if (store.state.capabilities?.instanceId === instance) store.report(reason);

@@ -13,6 +13,7 @@ import {
 } from '@nexuspipeline/extension-sdk';
 import { abortable } from '../control/abortable';
 import { SurfaceSession } from './surface-session.js';
+import { EditorDraftStore } from '../app/editor-drafts';
 
 interface ActiveExtension {
   readonly scope: ExtensionScope;
@@ -49,7 +50,8 @@ export class FrontendRegistry {
   }
   private readonly listeners = new Set<(extensionId: string) => void>();
 
-  constructor(private readonly environment: FrontendEnvironment) {}
+  constructor(private readonly environment: FrontendEnvironment,
+    private readonly drafts = new EditorDraftStore(error => this.report(error))) {}
 
   refreshLocale(): void {
     for (const owner of this.active.values()) {
@@ -221,7 +223,11 @@ export class FrontendRegistry {
     const scope = await owner.scope.child();
     scope.signal.throwIfAborted();
     const candidate = document.createElement('div');
-    const session = new SurfaceSession(candidate, context, scope);
+    const targets: Record<string, string> = { 'automation.script.editor': 'scripts',
+      'automation.global.editor': 'users', 'automation.binding.editor': 'bindings', 'automation.queue.editor': 'queues' };
+    const drafts = this.drafts.target(context.instanceId, targets[context.surfaceId] || context.surfaceId, context.entityId)
+      .child('extension/' + extensionId).child(context.surfaceId);
+    const session = new SurfaceSession(candidate, context, scope, drafts);
     const signals = [this.preparationSignal, signal].filter((value): value is AbortSignal => !!value);
     const preparing = signals.length ? AbortSignal.any(signals) : undefined;
     const cancel = () => { void scope.dispose().catch(error => this.report(error)); };
@@ -267,6 +273,7 @@ export class FrontendRegistry {
     scope.signal.addEventListener(
       'abort',
       () => {
+        this.drafts.retireExtension(id);
         this.active.delete(id);
         for (const style of styles) style.remove();
         this.changed(id);

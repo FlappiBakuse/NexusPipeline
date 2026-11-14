@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import DraftNotice from '../components/DraftNotice.vue';
+import { draftPresentation, draftDirective as vDraft } from '../app/draft-presentation';
 import { createIdentity } from '../control/identity';
 import { computed, onBeforeUnmount, reactive, toRefs, watch } from 'vue';
 import type { ConfigurationStore } from '../app/store-ports';
@@ -9,8 +11,10 @@ import { taskTitle } from '../control/extension-metadata';
 import { configurationOverview, type ConfigurationOverview } from './configuration-types';
 import './configuration-messages';
 import { useAdapterAvailability } from './adapter-availability';
+import { configurationDrafts } from './configuration-drafts';
 import {
   adapterResult,
+  createAdapterDraft,
   resetAdapterProposal,
   type AdapterDraft as Draft
 } from './adapter-results';
@@ -19,29 +23,22 @@ const emit = defineEmits<{ changed: [] }>();
 const instance = props.store.state.capabilities?.instanceId;
 const currentInstance = () => instance === props.store.state.capabilities?.instanceId;
 const key = 'configuration/adapter/' + instance + '/' + props.overview.bindingId;
-const saved = props.store.drafts.get(key);
-const state = reactive(
-  saved || {
-    resourceIds: [] as string[],
-    operationId: '',
-    proposalDigest: '',
-    candidateIndex: -1,
-    previewed: false,
-    pending: '',
-    pendingAction: '',
-    candidates: [] as Draft['candidates'],
-    tasks: [] as Draft['tasks'],
-    diagnostics: [] as { code: string; severity: string }[],
-    request: null,
-    busy: false,
-    note: ''
-  }
-) as Draft;
-props.store.drafts.set(key, state);
+const scope = configurationDrafts(props.store, props.overview.bindingId).child('adapter');
+const store = props.store;
+const presentation = draftPresentation(scope.child('host-form'), true);
+const state = scope.retain('state', () => {
+  const state = reactive(createAdapterDraft());
+  scope.guardCancel(() => !state.pending);
+  scope.onSettled(() => store.dirty.delete(key));
+  return state;
+});
 watch(
-  () => [state.resourceIds, state.candidateIndex],
-  () => props.store.dirty.add(key),
-  { deep: true, flush: 'sync' }
+  () => !!state.pending && state.pendingAction === 'applyRepair',
+  (changed) => {
+    if (changed) props.store.dirty.add(key);
+    else props.store.dirty.delete(key);
+  },
+  { immediate: true, flush: 'sync' }
 );
 const { busy, note } = toRefs(state);
 let alive = true;
@@ -57,12 +54,11 @@ const selected = computed(() =>
   props.overview.resources.filter((item) => state.resourceIds.includes(item.resourceId) && item.isSaved)
 );
 const candidate = computed(() => state.candidates.find((item) => item.index === state.candidateIndex));
-const resetProposal = () => resetAdapterProposal(state);
 function toggle(id: string): void {
   state.resourceIds = state.resourceIds.includes(id)
     ? state.resourceIds.filter((item) => item !== id)
     : [...state.resourceIds, id];
-  resetProposal();
+  resetAdapterProposal(state);
 }
 function selection(id: string): Record<string, unknown> {
   return {
@@ -104,7 +100,7 @@ async function execute(action: 'discover' | 'propose' | 'previewRepair' | 'apply
     note.value = '需要先预览更改。';
     return;
   }
-  if (action === 'discover' || action === 'propose') resetProposal();
+  if (action === 'discover' || action === 'propose') resetAdapterProposal(state);
   if (!state.operationId) state.operationId = createIdentity();
   const operationId = state.operationId;
   if (!state.request) state.request = selection(operationId);
@@ -148,8 +144,9 @@ async function execute(action: 'discover' | 'propose' | 'previewRepair' | 'apply
       note.value = result.hasChanges === false ? '无实际更改。' : '修复预览已完成。';
     } else {
       state.pending = '';
-      resetProposal();
+      resetAdapterProposal(state);
       note.value = '修复已应用。';
+      presentation.saved();
       props.store.dirty.delete(key);
       if (alive) emit('changed');
     }
@@ -173,7 +170,7 @@ async function checkPending(): Promise<void> {
       );
       state.pending = '';
       state.pendingAction = '';
-      resetProposal();
+      resetAdapterProposal(state);
       if (alive) emit('changed');
       return;
     }
@@ -185,7 +182,7 @@ async function checkPending(): Promise<void> {
     ) {
       state.pending = '';
       state.pendingAction = '';
-      resetProposal();
+      resetAdapterProposal(state);
       note.value = '修复已应用。';
       if (alive) emit('changed');
     } else note.value = '操作仍在处理中。';
@@ -195,17 +192,20 @@ async function checkPending(): Promise<void> {
 }
 onBeforeUnmount(() => {
   alive = false;
+  if (!presentation.modified && !state.pending && !state.busy) scope.settle('disposed');
 });
 </script>
 <template>
   <AdapterCoverage :coverage="state.coverage" :game-path-check="state.gamePathCheck" />
-  <div class="config-fields">
+  <div v-draft="presentation" class="config-fields">
+    <DraftNotice :restored="presentation.state.restored" />
     <p v-if="loadingExtension" role="status">{{ t('正在读取配置资源…') }}</p>
     <p v-else-if="!available" role="status">{{ t('扩展未安装或未启用，专项配置不可用。') }}</p>
     <fieldset :disabled="busy || !!state.pending || !available">
       <legend>{{ t('选择要检查的资源') }}</legend>
       <label v-for="item in overview.resources" :key="item.resourceId" class="choice-row">
         <input
+        data-draft-field="AdapterEditorPanel/state.resourceIds.includes(item.resourceId)"
           type="checkbox"
           :checked="state.resourceIds.includes(item.resourceId)"
           :disabled="!item.isSaved"
@@ -246,6 +246,7 @@ onBeforeUnmount(() => {
     <label v-if="state.candidates.length" class="form-field">
       {{ t('选择修复候选') }}
       <FormSelect
+        data-draft-field="AdapterEditorPanel/state.candidateIndex"
         v-model.number="state.candidateIndex"
         :disabled="busy || !!state.pending"
         @change="state.previewed = false"

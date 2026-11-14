@@ -5,11 +5,12 @@ const { readProof, readSession, readClosePermit, readClosePending, readMode, res
 const { installFrontendBridge } = require('./native-frontend.cjs');
 const { installLoginBridge } = require('./native-login.cjs');
 
-function installNativeBridge(window, config, page, authorizedQuit, setLocale = () => {}) {
+function installNativeBridge(window, config, page, authorizedQuit, setLocale = () => {}, exitChanged = () => {}) {
   const host = new URL(config.address);
   let session;
   let generation = 0;
   let preparing;
+  let closing;
   let busy = false;
   let timer;
   let ended = false;
@@ -17,6 +18,12 @@ function installNativeBridge(window, config, page, authorizedQuit, setLocale = (
   let frontend;
   let login;
   const stopping = new AbortController();
+  function publishExit(stage, code) {
+    if (ended) return;
+    const state = { stage, ...(code ? { code } : {}) };
+    if (window && !window.isDestroyed()) window.webContents.send('desktop.exit-state', state);
+    exitChanged(state);
+  }
   function validateSender(event) {
     if (!window || window.isDestroyed() || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame ||
         event.senderFrame.url.split('#')[0] !== page) throw new Error('desktop_source_denied');
@@ -25,7 +32,7 @@ function installNativeBridge(window, config, page, authorizedQuit, setLocale = (
     frontend?.invalidate();
     login?.invalidate();
     generation++; session = undefined;
-    if (preparing) { preparing.reject(new Error('desktop_document_changed')); preparing = undefined; }
+    preparing?.reject(new Error('desktop_document_changed'));
   }
   const publishWindowState = () => {
     if (window && !window.isDestroyed()) window.webContents.send('desktop.window-state', { maximized: window.isMaximized() });
@@ -64,15 +71,31 @@ function installNativeBridge(window, config, page, authorizedQuit, setLocale = (
   async function prepareRenderer(reason = 'close') {
     if (!window) return;
     if (preparing || window.isDestroyed() || window.webContents.isCrashed()) throw new Error('desktop_draft_preparation_unavailable');
-    const token = crypto.randomUUID();
-    const current = generation;
+    const token = crypto.randomUUID(), current = generation, target = window;
     await new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => { preparing = undefined; reject(new Error('desktop_draft_preparation_timeout')); }, 10000);
-      preparing = { token, resolve: accepted => {
-        clearTimeout(timeout); preparing = undefined;
-        accepted && current === generation ? resolve() : reject(new Error('desktop_drafts_not_prepared'));
-      }, reject: error => { clearTimeout(timeout); reject(error); } };
-      window.webContents.send('desktop.prepare-exit', token, reason);
+      let timeout;
+      const preparation = {
+        token,
+        resolve: readiness => {
+          if (preparing !== preparation) return;
+          clearTimeout(timeout); preparing = undefined;
+          if (current !== generation) reject(new Error('desktop_document_changed'));
+          else if (readiness === 'ready') resolve();
+          else reject(new Error('desktop_writes_pending'));
+        },
+        reject: error => {
+          if (preparing !== preparation) return;
+          clearTimeout(timeout); preparing = undefined; reject(error);
+          if (!target.isDestroyed()) {
+            try { target.webContents.send('desktop.cancel-exit', token); }
+            catch { console.error('desktop_exit_cancel_unavailable'); }
+          }
+        }
+      };
+      preparing = preparation;
+      timeout = setTimeout(() => preparation.reject(new Error('desktop_draft_preparation_timeout')), 10000);
+      try { target.webContents.send('desktop.prepare-exit', token, reason); }
+      catch { preparation.reject(new Error('desktop_draft_preparation_unavailable')); }
     });
   }
   function requestIdentity(correlationId) {
@@ -87,15 +110,19 @@ function installNativeBridge(window, config, page, authorizedQuit, setLocale = (
     if (current !== generation || Date.parse(permit.expiresAt) <= Date.now()) throw new Error('desktop_close_expired');
     await authorizedQuit();
   }
-  async function requestClose() {
+  function requestClose() {
+    if (!closing) closing = authorizeClose().finally(() => { closing = undefined; });
+    return closing;
+  }
+  async function authorizeClose() {
     if (busy) throw new Error('desktop_action_busy');
     busy = true;
-    let closingWindow; let wasEnabled = false;
+    let failure;
     try {
+      publishExit('preparing');
       const current = generation;
       await prepareRenderer();
-      closingWindow = window; wasEnabled = closingWindow?.isEnabled() === true;
-      if (wasEnabled) closingWindow.setEnabled(false);
+      publishExit('authorizing');
       await connect();
       if (current !== generation) throw new Error('desktop_document_changed');
       const until = performance.now() + 30000;
@@ -113,9 +140,12 @@ function installNativeBridge(window, config, page, authorizedQuit, setLocale = (
         return;
       }
       throw new Error('desktop_close_pending');
+    } catch (error) {
+      failure = error.message;
+      throw error;
     } finally {
-      if (wasEnabled && window === closingWindow && !closingWindow.isDestroyed()) closingWindow.setEnabled(true);
       busy = false;
+      publishExit('idle', failure);
     }
   }
   async function pollMaintenance() {
@@ -149,10 +179,12 @@ function installNativeBridge(window, config, page, authorizedQuit, setLocale = (
     validateSender(event);
     return { ...await connectWhenReady(), route: config.route };
   });
-  ipcMain.handle('desktop.prepared', (event, token, accepted) => {
+  ipcMain.handle('desktop.prepared', (event, token, readiness) => {
     validateSender(event);
-    if (preparing?.token !== token || typeof accepted !== 'boolean') throw new Error('desktop_preparation_mismatch');
-    preparing.resolve(accepted);
+    if (!['ready', 'pending-writes'].includes(readiness)) throw new Error('desktop_preparation_mismatch');
+    if (preparing?.token !== token) return false;
+    preparing.resolve(readiness);
+    return true;
   });
   ipcMain.handle('desktop.locale', (event, locale) => {
     validateSender(event);
@@ -204,8 +236,10 @@ function installNativeBridge(window, config, page, authorizedQuit, setLocale = (
   async function changeWindow(change) {
     if (busy) throw new Error('desktop_action_busy');
     busy = true;
-    try { await prepareRenderer(); return await change(); }
-    finally { busy = false; }
+    let failure;
+    try { publishExit('preparing'); await prepareRenderer(); return await change(); }
+    catch (error) { failure = error.message; throw error; }
+    finally { busy = false; publishExit('idle', failure); }
   }
   async function publishMode(mode) {
     if (!['desktop', 'browser'].includes(mode)) throw new Error('desktop_mode_invalid');

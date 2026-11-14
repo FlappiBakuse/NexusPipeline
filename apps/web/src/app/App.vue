@@ -21,10 +21,11 @@ import { registryKey } from '../extensions/registry-context';
 import { FrontendLoader } from '../extensions/frontend-loader';
 import { locale, t, registerMessages } from './locale';
 import { pageMeta } from './page-meta';
-import { confirmAction } from './confirmation';
+import { prepareAppExit } from './exit-preparation';
 import StartupPreparation from './StartupPreparation.vue';
 import { interfacePreparation } from './interface-preparation';
 import { clearExtensionIcons } from '../control/extension-icons';
+import { useDesktopExit } from './desktop-exit-state';
 registerMessages({
   '部分界面准备失败，可重新准备。': 'Some interface preparation failed. Retry preparation.',
   '与宿主的连接已中断，请重新连接。': 'Connection to the Host was lost. Reconnect to continue.',
@@ -32,6 +33,7 @@ registerMessages({
   '界面设置结果待确认，请查询原操作。': 'Interface change outcome is unknown. Check the original operation.'
 });
 const client = new ControlClient();
+const { exitMessage, exitFailed } = useDesktopExit(client);
 const store = createStore(client);
 const { theme, themeBusy, themeNotice, themeIcon, toggleTheme } = useAppAppearance(store);
 const registry = markRaw(
@@ -43,7 +45,7 @@ const registry = markRaw(
       return theme.value;
     },
     translate: (_id, key) => t(key)
-  })
+  }, store.editors)
 );
 provide(registryKey, registry);
 const frontend = markRaw(new FrontendLoader(client, store.media, registry, error => preparation.report(error)));
@@ -125,7 +127,7 @@ function locationChanged(): void {
   void store.navigate(routePage(), true);
 }
 function leaving(event: BeforeUnloadEvent): void {
-  if (client.pendingWrites || store.dirty.size) {
+  if (client.pendingWrites) {
     event.preventDefault();
     event.returnValue = '';
   }
@@ -133,11 +135,7 @@ function leaving(event: BeforeUnloadEvent): void {
 onMounted(async () => {
   window.addEventListener('hashchange', locationChanged);
   window.addEventListener('beforeunload', leaving);
-  desktop?.prepareExit(
-    async (reason) =>
-      (reason === 'maintenance' ? client.canExitMaintenance() : client.pendingWrites === 0) &&
-      (!store.dirty.size || (await confirmAction(t('存在未保存的草稿，仍要退出窗口？'))))
-  );
+  desktop?.prepareExit(prepareAppExit(client));
   try {
     if (desktop) {
       const session = await desktop.connect();
@@ -203,13 +201,13 @@ onBeforeUnmount(() => {
           <div class="header-actions"><div id="page-actions"></div>
             <nexus-button v-if="preparationFailed && !coreFailed" :disabled.prop="preparing" @click="prepareInterface().catch(store.report)">{{ t('重试') }}</nexus-button>
             <nexus-button v-if="store.state.error === 'connection_lost'" @click="authenticate">{{ t('重新连接') }}</nexus-button>
-            <nexus-button v-if="store.interfaceChange.pending?.state === 'unknown'" @click="store.inspectInterface().catch(store.report)">{{ t('查询界面设置原操作') }}</nexus-button>
           </div>
         </header>
         <nexus-toast v-if="store.state.error || store.state.uncertainOperation" class="operation-toast" tone="danger"
           :message.prop="t(store.state.uncertainOperation ? '写入结果待确认，请返回原操作查询状态。' : store.state.error === 'connection_lost' ? '与宿主的连接已中断，请重新连接。' : store.state.error)">
         </nexus-toast>
         <nexus-toast v-if="store.state.feedError" class="connection-toast" tone="warning" :message.prop="t('事件连接中断，正在重连')" />
+        <nexus-toast v-if="exitMessage" :tone="exitFailed ? 'warning' : 'info'" :message.prop="t(exitMessage)" />
         <form v-if="!preparing && (!store.state.capabilities || coreFailed)" class="authentication" @submit.prevent="authenticate">
           <label>
             {{ t('远程访问令牌') }}

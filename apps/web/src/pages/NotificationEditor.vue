@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { createIdentity } from '../control/identity';
 import { computed, onBeforeUnmount, reactive, ref, toRefs, watch } from 'vue';
+import DraftNotice from '../components/DraftNotice.vue';
+import { draftPresentation, draftDirective as vDraft } from '../app/draft-presentation';
 import NotificationFields from './NotificationFields.vue';
 import { NotificationCredentials } from './notification-credentials';
 import { NotificationCommands, type NotificationSession } from './notification-commands';
@@ -26,6 +28,7 @@ const props = defineProps<{
 const emit = defineEmits<{ close: []; saved: [] }>();
 const panel = ref<HTMLElement>();
 const port = props.port;
+const presentation = draftPresentation(port.drafts.child('host-form'), !!props.task, () => dirty.value || !!session.pending);
 const savedDraft = port.readDraft();
 const initial = props.task
   ? {
@@ -55,6 +58,10 @@ const session = reactive(
       }
 ) as NotificationSession;
 port.keepDraft(session);
+port.drafts.retain('pending-guard', () => {
+  port.drafts.guardCancel(() => !session.pending && !session.busy);
+  return {};
+});
 const { draft, baseline, pending, busy, error, notice } = toRefs(session);
 let alive = true;
 let latestRead: AbortController | undefined;
@@ -79,21 +86,16 @@ const dirty = computed(() => JSON.stringify(draft.value) !== baseline.value || c
 const loadCredentials = (id: string) => credentials.read(id);
 const editSecret = (field: SecretField, value: string) => credentials.edit(field, value);
 watch(
-  () => credentials.shown,
-  (fields) => credentials.retain(fields),
-  { flush: 'sync' }
-);
-watch(
   [dirty, pending],
   ([edited, operation]) => port.markDirty(edited || !!operation),
   { immediate: true, flush: 'sync' }
 );
-if (props.task) void loadCredentials(props.task.id);
+if (props.task && !credentialsReady.value) void loadCredentials(props.task.id);
 onBeforeUnmount(() => {
   alive = false;
   latestRead?.abort();
   credentials.dispose();
-  if (!pending.value && JSON.stringify(draft.value) === baseline.value) port.markDirty(false);
+  if (!dirty.value && !pending.value && !busy.value) port.removeDraft('disposed');
 });
 
 watch(
@@ -125,6 +127,7 @@ async function loadLatest(): Promise<void> {
         configuration: copyDraft(task.configuration)
       };
       baseline.value = JSON.stringify(draft.value);
+      presentation.saved();
       session.taskRevision = task.revision;
     }
     port.clearError(error.value);
@@ -142,6 +145,11 @@ async function loadLatest(): Promise<void> {
     busy.value = false;
   }
 }
+function cancel(): void {
+  if (busy.value || pending.value || !port.drafts.canCancel()) return;
+  port.removeDraft('cancel');
+  emit('close');
+}
 </script>
 
 <template>
@@ -152,7 +160,8 @@ async function loadLatest(): Promise<void> {
     :locked.prop="busy"
     @nexus-close="emit('close')"
   >
-    <div ref="panel" class="editor">
+    <div v-draft="presentation" ref="panel" class="editor">
+      <DraftNotice :restored="presentation.state.restored" />
       <NotificationFields
         v-model="draft"
         :disabled="busy || !!pending"
@@ -164,7 +173,7 @@ async function loadLatest(): Promise<void> {
       <p v-if="error" class="error" role="alert">
         {{ t(error) }}
         <button v-if="session.conflict" :disabled="busy || !!pending" @click="loadLatest">
-          {{ t('载入最新') }}
+          {{ t('取消修改并载入最新') }}
         </button>
         <button v-if="task && !credentialsReady" :disabled="busy" @click="loadCredentials(task.id)">
           {{ t('重试') }}
@@ -187,7 +196,7 @@ async function loadLatest(): Promise<void> {
       >
         {{ t('测试通知') }}
       </button>
-      <button :disabled="busy" @click="emit('close')">{{ t('取消') }}</button>
+      <button :disabled="busy || !!pending" @click="cancel">{{ t('取消') }}</button>
       <button
         class="primary"
         :disabled="

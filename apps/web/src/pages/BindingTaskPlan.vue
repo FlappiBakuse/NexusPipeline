@@ -4,6 +4,7 @@ import type { AutomationStore } from '../app/store-ports';
 import { configurationOverview, type ConfigurationOverview } from './configuration-types';
 import AdapterEditorPanel from './AdapterEditorPanel.vue';
 import { t, registerMessages } from '../app/locale';
+import { configurationDrafts } from './configuration-drafts';
 registerMessages({
   任务计划: 'Task plan',
   '配置不可用，请先保存用户配置快照。': 'Configuration is unavailable. Save the account configuration first.',
@@ -13,6 +14,12 @@ registerMessages({
 const props = defineProps<{ store: AutomationStore; bindingId: string; visible: boolean }>();
 const overview = ref<ConfigurationOverview>();
 const error = ref('');
+const epoch = ref(0);
+let stopDraft: (() => void | Promise<void>) | undefined;
+watch(() => [props.bindingId, props.store.state.capabilities?.instanceId, epoch.value], () => {
+  stopDraft?.();
+  stopDraft = configurationDrafts(props.store, props.bindingId).onSettled(() => { epoch.value++; });
+}, { immediate: true, flush: 'post' });
 let owner: AbortController | undefined;
 async function read(): Promise<void> {
   owner?.abort(); overview.value = undefined; error.value = '';
@@ -32,13 +39,13 @@ async function read(): Promise<void> {
   }
 }
 watch(() => [props.visible, props.bindingId, props.store.state.automation?.catalogRevision], read, { immediate: true });
-onBeforeUnmount(() => owner?.abort());
+onBeforeUnmount(() => { owner?.abort(); stopDraft?.(); });
 </script>
 <template>
   <section class="binding-task-plan">
     <header><h3>{{ t('任务计划') }}</h3><button type="button" @click="read">{{ t('重新检查') }}</button></header>
     <p v-if="error" role="alert">{{ t(error) }}</p>
-    <AdapterEditorPanel v-if="overview?.resources.some(item => item.isSaved)" :store="store" :overview="overview" :visible="visible" @changed="read" />
+    <AdapterEditorPanel v-if="overview?.resources.some(item => item.isSaved)" :key="epoch" :store="store" :overview="overview" :visible="visible" @changed="read" />
     <p v-else-if="overview">{{ t('配置不可用，请先保存用户配置快照。') }}</p>
   </section>
 </template>

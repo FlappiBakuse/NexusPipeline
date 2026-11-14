@@ -1,4 +1,5 @@
 import type { AutomationStore } from '../app/store-ports';
+import { draftPresentation } from '../app/draft-presentation';
 import { ControlFailure, objectValue } from '../control/client';
 import { copyDraft } from '../app/draft-copy';
 import type { AutomationAction, AutomationSession } from './automation-session';
@@ -118,12 +119,16 @@ export class AutomationCommands {
     if (!this.current() || this.session.pending?.id !== action.id) return null;
     this.completedView(action);
     if ((action.action === 'save' || action.action === 'import') && action.key) {
+      draftPresentation(this.store.editors.target(this.instanceId || '', action.kind, action.target).child('host-form'), true).saved();
       this.store.dirty.delete(action.key);
       this.store.drafts.delete(action.key);
       delete this.session.revisions[action.key];
       delete this.session.catalogs[action.key];
       if (action.kind === 'queues') this.store.drafts.delete(action.key + '/schedules');
-      if (action.kind === 'users') clearAccountDraft(this.store, action.target);
+      if (action.kind === 'users') clearAccountDraft(this.store, action.target, 'saved');
+      this.store.editors.saved(this.instanceId || '', action.kind, action.target);
+      for (const [slot, value] of Object.entries(this.session.newDrafts || {}))
+        if (value === action.target) delete this.session.newDrafts![slot];
       this.store.drafts.delete(hookPathKey(this.store, action.target));
       if (action.kind === 'scripts') {
         this.store.drafts.delete(scriptPathKey(action.target));

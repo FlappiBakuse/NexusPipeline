@@ -72,6 +72,7 @@ onBeforeUnmount(() => owner.abort());
       </p>
       <div class="switches">
         <nexus-switch-setting
+        data-draft-field="BindingPolicyFields/(groups.general as Overrides['general']).syncEnabled"
           v-if="global"
           :title="t('同步通用设置')"
           :description="t('开启后覆盖每个脚本绑定的通用设置')"
@@ -79,6 +80,7 @@ onBeforeUnmount(() => owner.abort());
           @nexus-change="set('general', 'syncEnabled', $event.detail.value)"
         />
         <nexus-switch-setting
+        data-draft-field="BindingPolicyFields/groups.general.enabled"
           :title="t('是否启用')"
           :description="t('运行天数为 0 时不会参与运行')"
           :disabled.prop="locked('general')"
@@ -89,6 +91,7 @@ onBeforeUnmount(() => owner.abort());
       <label>
         {{ t('运行天数') }}
         <nexus-number-input
+        data-draft-field="BindingPolicyFields/groups.general.runDays ?? -1"
           :aria-label="t('运行天数')"
           aria-required="true"
           :min.prop="-1"
@@ -102,6 +105,7 @@ onBeforeUnmount(() => owner.abort());
       <label>
         {{ t('最多成功运行次数') }}
         <nexus-number-input
+        data-draft-field="BindingPolicyFields/groups.general.maximumSuccessfulRunsPerDay ?? -1"
           :aria-label="t('最多成功运行次数')"
           aria-required="true"
           :min.prop="-1"
@@ -131,6 +135,7 @@ onBeforeUnmount(() => owner.abort());
       </p>
       <div class="switches">
         <nexus-switch-setting
+        data-draft-field="BindingPolicyFields/(groups.notification as Overrides['notification']).syncEnabled"
           v-if="global"
           :title="t('同步通知设置')"
           :description="t('开启后覆盖每个脚本绑定的通知设置')"
@@ -138,6 +143,7 @@ onBeforeUnmount(() => owner.abort());
           @nexus-change="set('notification', 'syncEnabled', $event.detail.value)"
         />
         <nexus-switch-setting
+        data-draft-field="BindingPolicyFields/groups.notification.notifyEnabled"
           :title="t('开启通知推送')"
           :description="t('按用户绑定通知设置发送运行状态通知。')"
           :disabled.prop="locked('notification')"
@@ -148,6 +154,7 @@ onBeforeUnmount(() => owner.abort());
       <label>
         {{ t('通知任务') }}
         <nexus-select
+        data-draft-field="BindingPolicyFields/groups.notification.notificationTaskIds"
           :aria-label="t('通知任务')"
           :multiple.prop="true"
           :disabled.prop="locked('notification')"
@@ -165,6 +172,7 @@ onBeforeUnmount(() => owner.abort());
       <p>{{ t('任务前后脚本设置。') }}</p>
       <div v-if="global" class="switches">
         <nexus-switch-setting
+        data-draft-field="BindingPolicyFields/(groups.advanced as Overrides['advanced']).syncEnabled"
           :title="t('同步高级设置')"
           :description="t('开启后覆盖每个脚本绑定的高级设置')"
           :value.prop="(groups.advanced as Overrides['advanced']).syncEnabled"

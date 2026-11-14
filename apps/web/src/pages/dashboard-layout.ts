@@ -1,215 +1,69 @@
-import { createIdentity } from '../control/identity';
-import { computed, reactive, toRefs } from 'vue';
+import { computed, reactive, shallowRef, toRefs, watch } from 'vue';
 import type { AppStore } from '../app/store';
-import { copyDraft } from '../app/draft-copy';
-import { ControlFailure } from '../control/client.js';
-import {
-  dashboardCards,
-  dashboardDefaults,
-  type DashboardCard,
-  type InterfaceSnapshot,
-  type InterfaceValues
-} from '../control/interface.js';
-
-interface LayoutSession {
-  draft: DashboardCard[] | null;
-  baseline: InterfaceSnapshot | null;
-  pendingId: string;
-  pendingValues: InterfaceValues | null;
-  editing: boolean;
-  busy: boolean;
-  error: string;
-  notice: string;
-}
-
-class DashboardLayoutOwner {
-  readonly session: LayoutSession;
-  private readonly instance: string;
-  private readonly key: string;
-  constructor(private readonly store: AppStore, private readonly defaults: () => DashboardCard[]) {
-    this.instance = store.state.capabilities!.instanceId;
-    this.key = 'dashboard-layout/' + this.instance;
-    if (!store.drafts.has(this.key))
-      store.drafts.set(
-        this.key,
-        reactive({
-          draft: null,
-          baseline: null,
-          pendingId: '',
-          pendingValues: null,
-          editing: false,
-          busy: false,
-          error: '',
-          notice: ''
-        })
-      );
-    this.session = store.drafts.get(this.key) as unknown as LayoutSession;
-  }
-  private current(): boolean {
-    return this.store.state.capabilities?.instanceId === this.instance;
-  }
-  private mark(): void {
-    const state = this.session;
-    const dirty =
-      state.pendingId ||
-      (state.draft &&
-        JSON.stringify(state.draft) !==
-          JSON.stringify(state.baseline?.revision === 0 ? this.defaults() : dashboardCards(state.baseline?.values.dashboardCards || [])));
-    if (dirty) this.store.dirty.add(this.key);
-    else this.store.dirty.delete(this.key);
-  }
-  async read(): Promise<void> {
-    if (!this.current() || this.session.busy || !this.store.can('settings.read')) return;
-    this.session.busy = true;
-    try {
-      await this.store.inspectInterface();
-      this.session.error = '';
-    } catch (reason) {
-      if (this.current()) {
-        this.store.report(reason);
-        this.session.error = '布局读取失败。';
-      }
-    } finally {
-      this.session.busy = false;
-    }
-  }
-  async begin(): Promise<void> {
-    if (!this.current() || this.session.busy) return;
-    if (this.session.pendingId || this.session.draft) {
-      this.session.editing = true;
-      return;
-    }
-    if (!this.store.state.interface) await this.read();
-    const snapshot = this.store.state.interface;
-    if (!this.current() || !snapshot || this.store.interfaceChange.pending) return;
-    this.session.baseline = copyDraft(snapshot);
-    this.session.draft = snapshot.revision === 0 ? this.defaults() : dashboardCards(snapshot.values.dashboardCards);
-    this.session.editing = true;
-    this.session.error = '';
-    this.session.notice = '';
-    this.mark();
-  }
-  cancel(): void {
-    this.session.editing = false;
-    if (!this.session.pendingId) {
-      this.session.draft = null;
-      this.session.error = '';
-    }
-    this.mark();
-  }
-  change(cards: DashboardCard[]): void {
-    if (this.session.busy || this.session.pendingId) return;
-    this.session.draft = dashboardCards(cards);
-    this.mark();
-  }
-  rebase(keep: boolean): void {
-    const snapshot = this.store.state.interface;
-    if (!this.current() || !snapshot || this.session.pendingId || this.session.busy) return;
-    this.session.baseline = copyDraft(snapshot);
-    if (!keep) this.session.draft = snapshot.revision === 0 ? this.defaults() : dashboardCards(snapshot.values.dashboardCards);
-    this.session.error = '';
-    this.mark();
-  }
-  private accept(notice: string): void {
-    this.session.pendingId = '';
-    this.session.pendingValues = null;
-    this.session.draft = null;
-    this.session.editing = false;
-    this.session.error = '';
-    this.session.notice = notice;
-    this.mark();
-  }
-  async save(): Promise<void> {
-    const state = this.session,
-      baseline = state.baseline;
-    if (
-      !this.current() ||
-      !state.draft ||
-      !baseline ||
-      state.busy ||
-      state.pendingId ||
-      this.store.state.interface?.revision !== baseline.revision ||
-      !this.store.can('settings.write')
-    )
-      return;
-    const values = { ...copyDraft(baseline.values), dashboardCards: [...state.draft] },
-      id = createIdentity();
-    state.pendingId = id;
-    state.pendingValues = values;
-    state.busy = true;
-    state.error = '';
-    this.mark();
-    let conflict = false;
-    try {
-      await this.store.saveInterface(values, baseline.revision, id);
-      this.accept('布局已保存。');
-    } catch (reason) {
-      if (!(reason instanceof ControlFailure && reason.uncertain)) {
-        state.pendingId = '';
-        state.pendingValues = null;
-      }
-      state.error = state.pendingId
-        ? '布局结果待确认；请只读查询，勿重复保存。'
-        : reason instanceof Error
-          ? reason.message
-          : '布局保存失败，草稿仍在。';
-      conflict = reason instanceof ControlFailure && reason.status === 409;
-      if (this.current()) this.store.report(reason);
-    } finally {
-      state.busy = false;
-      this.mark();
-    }
-    if (conflict) await this.read();
-  }
-  async inspect(): Promise<void> {
-    const state = this.session,
-      id = state.pendingId,
-      expected = state.baseline?.revision,
-      values = state.pendingValues;
-    if (!this.current() || !id || state.busy || !values) return;
-    state.busy = true;
-    try {
-      const latest = await this.store.inspectInterface();
-      if (!this.current() || state.pendingId !== id) return;
-      if (
-        latest.operationId === id &&
-        latest.revision === expected! + 1 &&
-        JSON.stringify(latest.values) === JSON.stringify(values)
-      )
-        this.accept('布局已确认保存。');
-      else state.error = '目前无法证明保存已完成；草稿和操作 ID 已保留。';
-    } catch (reason) {
-      if (this.current()) this.store.report(reason);
-    } finally {
-      state.busy = false;
-    }
-  }
-}
+import { interfaceSettings } from '../app/interface-settings';
+import { dashboardCards, dashboardDefaults, type DashboardCard } from '../control/interface';
 
 export function useDashboardLayout(store: AppStore, contributions: () => DashboardCard[] = () => []) {
   const defaults = () => [...contributions(), ...dashboardDefaults];
-  const owner = new DashboardLayoutOwner(store, defaults),
-    state = owner.session;
-  const { draft, editing, busy, error, notice, pendingId } = toRefs(state);
-  const layout = computed(() => store.state.interface);
+  const owner = shallowRef<ReturnType<typeof interfaceSettings>>();
+  const state = reactive({ editing: false, error: '', notice: '' });
+  let baseline: DashboardCard[] | undefined, owned: DashboardCard[] | undefined, instance = '';
+  let changing = Promise.resolve();
+  function commands() {
+    if (!store.state.interface) throw Error('布局读取未完成。');
+    const current = store.state.capabilities!.instanceId;
+    if (!owner.value || instance !== current) {
+      owner.value = interfaceSettings(store); instance = current;
+    }
+    return owner.value;
+  }
+  const selected = () => {
+    const snapshot = store.state.interface;
+    if (!snapshot) return defaults();
+    const values = commands().state.values.dashboardCards;
+    return snapshot.revision === 0 && JSON.stringify(values) === JSON.stringify(snapshot.values.dashboardCards)
+      ? defaults() : dashboardCards(values);
+  };
+  watch(() => store.state.interface, value => { if (value) commands().observe(value); }, { immediate: true });
+  const close = () => { state.editing = false; baseline = undefined; owned = undefined; };
+  function change(cards: DashboardCard[]): void {
+    if (!state.editing || !store.can('settings.write') || JSON.stringify(cards) === JSON.stringify(selected())) return;
+    changing = commands().patch({ dashboardCards: dashboardCards(cards) }).then(saved => {
+      owned = [...saved.values.dashboardCards];
+    }).catch(reason => { store.report(reason); });
+  }
+  async function begin(): Promise<void> {
+    if (!store.state.interface) {
+      try { await store.inspectInterface(); } catch (reason) { store.report(reason); return; }
+    }
+    await changing;
+    const writer = commands(); writer.observe(store.state.interface!);
+    if (writer.state.pending) { await writer.resume(); if (writer.state.pending) return; }
+    baseline = [...selected()]; owned = [...baseline];
+    state.editing = true; state.error = ''; state.notice = '';
+  }
+  async function cancel(): Promise<void> {
+    try {
+      const writer = commands();
+      await changing;
+      await writer.settled();
+      const current = dashboardCards(store.state.interface!.values.dashboardCards);
+      if (JSON.stringify(current) !== JSON.stringify(owned) &&
+          JSON.stringify(current) !== JSON.stringify(baseline)) throw Error('布局已在其他位置更改，请检查当前值。');
+      if (baseline) await writer.patch({ dashboardCards: [...baseline] });
+      if (!writer.state.error) close();
+    } catch (reason) { state.error = reason instanceof Error ? reason.message : '布局还原失败。'; }
+  }
+  const { editing, error, notice } = toRefs(state);
   return {
-    layout,
-    draft,
-    layoutOpen: editing,
-    layoutBusy: busy,
-    layoutError: error,
-    layoutNotice: notice,
-    pendingLayoutId: pendingId,
-    cards: computed(() => layout.value?.revision === 0 ? defaults() : dashboardCards(layout.value?.values.dashboardCards || [])),
-    layoutChanged: computed(() => !!state.draft && layout.value?.revision !== state.baseline?.revision),
-    beginLayout: () => owner.begin(),
-    cancelLayout: () => owner.cancel(),
-    saveLayout: () => owner.save(),
-    checkLayout: () => owner.inspect(),
-    readLayout: () => owner.read(),
-    rebase: () => owner.rebase(true),
-    loadLatest: () => owner.rebase(false),
-    changeLayout: (cards: DashboardCard[]) => owner.change(cards),
-    resetLayout: () => owner.change(defaults())
+    layout: computed(() => store.state.interface),
+    layoutCards: computed(() => state.editing ? selected() : null),
+    layoutOpen: editing, layoutBusy: computed(() => owner.value?.state.unknown || false),
+    layoutError: computed(() => error.value || owner.value?.state.error || ''), layoutNotice: notice,
+    cards: computed(selected), beginLayout: begin, cancelLayout: cancel, closeLayout: close,
+    saveLayout: async () => { try { await commands().settled(); close(); } catch (reason) { store.report(reason); } },
+    readLayout: async () => { try { const latest = await store.inspectInterface(); commands().observe(latest); } catch (reason) { store.report(reason); } },
+    changeLayout: (cards: DashboardCard[]) => void change(cards),
+    resetLayout: () => void change(defaults())
   };
 }

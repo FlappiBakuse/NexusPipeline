@@ -1,4 +1,5 @@
 import type { Cleanup, ExtensionScope } from './extension-scope.js';
+import type { EditorDraftScope } from './editor-drafts.js';
 
 export const surfaceIds = Object.freeze([
   'overview.cards', 'overview.after-running',
@@ -25,6 +26,7 @@ export interface ExtensionSurface {
   readonly context: SurfaceContext;
   readonly scope: ExtensionScope;
   readonly signal: AbortSignal;
+  readonly drafts: EditorDraftScope;
   readonly visible: boolean;
   onVisibilityChanged(listener: (visible: boolean) => void): Cleanup;
   setAppearance(overrides: AppearanceOverrides | null): void;

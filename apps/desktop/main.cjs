@@ -147,7 +147,7 @@ app.whenReady().then(async () => {
       quitting = true; windowState.dispose();
       screen.removeListener('display-removed', displayChanged); screen.removeListener('display-metrics-changed', displayChanged);
       tray?.dispose(); overlay?.dispose(); startup.dispose(); await bridge.dispose(); window?.destroy(); app.quit();
-    }, locale => { config.locale = locale; setLocale(locale); tray?.refreshMenu(); });
+    }, locale => { config.locale = locale; setLocale(locale); tray?.refreshMenu(); }, value => tray?.exitState(value));
     if (window) {
       installFilePermissions(window, page, dialog);
       await loadHostPage(window, page); loadedPage = true;

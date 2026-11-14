@@ -12,7 +12,7 @@ const emit = defineEmits<{ change: [cards: DashboardCard[]] }>();
 <template>
   <div class="layout-fields">
     <p>
-      {{ t('拖动把手或使用把手上的键盘方向键排序。编辑仅修改此处的草稿，点击保存后才会应用到今日概览。') }}
+      {{ t('拖动把手或使用把手上的键盘方向键排序。修改立即生效，取消可恢复本次打开前的布局。') }}
     </p>
     <h3>{{ t('当前显示') }}</h3>
     <nexus-sortable-list

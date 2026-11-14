@@ -61,20 +61,20 @@ def refresh(root, output):
     reader = output / "build/bin/NexusPipeline.Boundaries/release/NexusPipeline.Boundaries.dll"
     execute([sdk['path'], str(reader), "--sdk-surface", str(assembly), "--write",
              str(root / "contracts/sdk-public-api.json")], frozen, "dotnet-api")
-    sdk = output / "frontend-sdk"
-    synchronize(frozen / "sdk/frontend", sdk, output / "frontend-owner.json")
+    frontend = output / "frontend-sdk"
+    synchronize(frozen / "sdk/frontend", frontend, output / "frontend-owner.json")
     node, npm = shutil.which("node"), shutil.which("npm")
     if not node or not npm:
         raise ValueError("SDK generation requires Node and npm")
     npm_cli = str(Path(npm).parent / "node_modules/npm/bin/npm-cli.js")
-    installed = sdk / "node_modules/typescript/package.json"
+    installed = frontend / "node_modules/typescript/package.json"
     if not installed.exists():
-        execute([node, npm_cli, "ci", "--ignore-scripts", "--no-audit", "--no-fund"], sdk, "frontend-dependencies")
+        execute([node, npm_cli, "ci", "--ignore-scripts", "--no-audit", "--no-fund"], frontend, "frontend-dependencies")
     if json.loads(installed.read_bytes())["version"] != "5.9.3":
         raise ValueError("SDK TypeScript compiler differs from the lock")
-    execute([node, str(sdk / "node_modules/typescript/bin/tsc"), "-p", str(sdk / "tsconfig.json")], sdk, "frontend-declarations")
+    execute([node, str(frontend / "node_modules/typescript/bin/tsc"), "-p", str(frontend / "tsconfig.json")], frontend, "frontend-declarations")
     execute([node, str(frozen / "tooling/sdk_frontend_surface.mjs"),
-             str(sdk / "node_modules/typescript/lib/typescript.js"), str(sdk / "dist"), "--write",
+              str(frontend / "node_modules/typescript/lib/typescript.js"), str(frontend / "dist"), "--write",
              str(root / "contracts/sdk-frontend-api.json")], frozen, "frontend-api")
     expected = json.loads(Path(source["sourceManifestPath"]).read_bytes())["files"]
     changed = {"contracts/sdk-public-api.json", "contracts/sdk-frontend-api.json"}

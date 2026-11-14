@@ -116,6 +116,7 @@ function android(key: string, value: string): void {
     <h3>{{ t('游戏联动设置') }}</h3>
     <div class="switch-grid">
       <nexus-switch-setting
+        data-draft-field="GameFields/selfManagedPc ? false : target.launchByHost"
         :title="t('启动游戏')"
         :description="t('任务开始前主动启动游戏')"
         :value.prop="selfManagedPc ? false : target.launchByHost"
@@ -123,12 +124,14 @@ function android(key: string, value: string): void {
         @nexus-change="update({ launchByHost: $event.detail.value })"
       />
       <nexus-switch-setting
+        data-draft-field="GameFields/target.forceCloseAtEnd"
         :title="t('强制关闭')"
         :description="t('仅清理本次持有的游戏进程')"
         :value.prop="target.forceCloseAtEnd"
         @nexus-change="update({ forceCloseAtEnd: $event.detail.value })"
       />
       <nexus-switch-setting
+        data-draft-field="GameFields/modelValue.updateConfigurationAtFinish"
         :title="t('自动更新配置')"
         :description="t('运行结束时同步用户配置')"
         :value.prop="modelValue.updateConfigurationAtFinish"
@@ -158,6 +161,7 @@ function android(key: string, value: string): void {
         <label>
           {{ t('脚本自启动参数') }}
           <nexus-text-input
+        data-draft-field="GameFields/paths.gameArguments"
             :aria-label="t('游戏启动参数')"
             :value.prop="paths.gameArguments"
             :disabled.prop="policyPending || selfManagedPc"
@@ -181,6 +185,7 @@ function android(key: string, value: string): void {
         <label>
           {{ t('ADB 地址') }}
           <nexus-text-input
+        data-draft-field="GameFields/target.android?.endpoint || ''"
             :aria-label="t('ADB 地址')"
             :value.prop="target.android?.endpoint || ''"
             @nexus-change="android('endpoint', $event.detail.value)"
@@ -189,6 +194,7 @@ function android(key: string, value: string): void {
         <label>
           {{ t('游戏包名') }}
           <nexus-text-input
+        data-draft-field="GameFields/target.android?.package || ''"
             :aria-label="t('游戏包名')"
             :value.prop="target.android?.package || ''"
             @nexus-change="android('package', $event.detail.value)"
@@ -197,7 +203,8 @@ function android(key: string, value: string): void {
       </template>
       <label>
         {{ t('启动方式') }}
-        <FormSelect :value="target.kind" @change="mode(($event.target as HTMLSelectElement).value)">
+        <FormSelect
+        data-draft-field="GameFields/target.kind" :value="target.kind" @change="mode(($event.target as HTMLSelectElement).value)">
           <option value="pc">{{ t('PC 客户端') }}</option>
           <option value="android" :disabled="policy?.supportsAndroid === false">{{ t('安卓模拟器') }}</option>
         </FormSelect>
@@ -205,6 +212,7 @@ function android(key: string, value: string): void {
       <label>
         {{ t('启动后等待秒数') }}
         <nexus-number-input
+        data-draft-field="GameFields/target.waitSeconds"
           :aria-label="t('启动后等待秒数')"
           :min.prop="0"
           :max.prop="604800"

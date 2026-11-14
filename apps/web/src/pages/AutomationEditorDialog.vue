@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, toRefs, watch, onBeforeUnmount } from 'vue';
+import { computed, ref, toRefs, watch, onBeforeUnmount, type ComputedRef } from 'vue';
 import { extensionList } from '../control/extensions';
 import { metadataText, type ExtensionMetadata } from '../control/extension-metadata';
 import type { AutomationStore } from '../app/store-ports';
@@ -13,6 +13,8 @@ import AccountFields from './AccountFields.vue';
 import ScriptFields from './ScriptFields.vue';
 import ScriptActions from './ScriptActions.vue';
 import ExtensionOutlet from '../extensions/ExtensionOutlet.vue';
+import DraftNotice from '../components/DraftNotice.vue';
+import { draftPresentation, draftDirective as vDraft } from '../app/draft-presentation';
 import { t, locale } from '../app/locale';
 const props = defineProps<{
   store: AutomationStore;
@@ -41,6 +43,9 @@ const {
   createLabel
 } = props.model;
 const { saving, error, notice, pending } = toRefs(props.session);
+const presentation: ComputedRef<ReturnType<typeof draftPresentation>> = computed(() => draftPresentation(props.store.editors.target(
+  props.store.state.capabilities?.instanceId || '', activeKind.value, selected.value).child('host-form'),
+  rows.value.some(row => row.id === selected.value), (): boolean => props.model.edited || presentation.value.state.changed || !!props.session.pending));
 const scriptUnavailable = computed(() => props.model.unavailable);
 const typeMetadata = ref<ExtensionMetadata>();
 let typeOwner: AbortController | undefined;
@@ -56,7 +61,7 @@ watch(() => [props.visible, activeKind.value, draft.value.extensionId] as const,
     if (!owner.signal.aborted) error.value = reason instanceof Error ? reason.message : '脚本类型加载失败，请重新打开。';
   }
 }, { immediate: true });
-onBeforeUnmount(() => typeOwner?.abort());
+onBeforeUnmount(() => { typeOwner?.abort(); if (!presentation.value.modified) props.model.releasePristine(); });
 const specializedTitle = computed(() => typeMetadata.value ?
   (rows.value.some(row => row.id === selected.value) ? t('编辑脚本实例') : t('新建脚本实例')) + ' · ' +
   metadataText(typeMetadata.value, locale.value).displayName : '');
@@ -93,7 +98,8 @@ const specializedTitle = computed(() => typeMetadata.value ?
         @import="emit('import', $event)"
         @error="error = $event"
     />
-    <div ref="form" class="editor-pane">
+    <div ref="form" v-draft="presentation" class="editor-pane">
+      <DraftNotice :restored="presentation.state.restored" />
       <p v-if="error || scriptUnavailable" role="alert" class="error-text">
         {{ t(error || '请先选择脚本根目录并读取脚本配置。') }}
       </p>

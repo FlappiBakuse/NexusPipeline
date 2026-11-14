@@ -1,8 +1,10 @@
 .layout-footer {
   display: flex;
   justify-content: end;
-  gap: 8px;
+  gap: 12px;
+  flex-wrap: wrap;
 }
+.layout-footer > button { min-width: 80px; }
 .dashboard {
   display: grid;
   gap: 16px;

@@ -1,5 +1,5 @@
 import { createIdentity } from '../control/identity';
-import { reactive } from 'vue';
+import { markRaw, reactive } from 'vue';
 import { InterfaceChanges } from './interface-changes';
 import { AppSession } from './app-session';
 import { HostSnapshots } from './host-snapshots';
@@ -10,6 +10,7 @@ import type { ControlAutomationChange } from '../control/wire.generated';
 import type { InterfaceValues } from '../control/interface';
 import { MediaPool } from '../control/media-pool';
 import { LiveLogs } from '../control/live-logs';
+import { EditorDraftStore } from './editor-drafts';
 
 export { navigation, routePage } from './navigation';
 export type { PageId, AppRoute } from './navigation';
@@ -24,7 +25,8 @@ export function createStore(client: ControlClient) {
     if (error instanceof ControlFailure && error.uncertain)
       state.uncertainOperation = error.operationId || '';
   };
-  const interfaces = new InterfaceChanges(client, state, drafts, dirty);
+  const interfaces = new InterfaceChanges(client, state);
+  const editors = markRaw(new EditorDraftStore(report));
   const snapshots = new HostSnapshots(client, state, interfaces);
   const session = new AppSession(client, state, snapshots, report, routePage);
   const change = async (body: ControlAutomationChange): Promise<void> => {
@@ -49,6 +51,7 @@ export function createStore(client: ControlClient) {
     state,
     drafts,
     dirty,
+    editors,
     report,
     change,
     command,
@@ -64,7 +67,7 @@ export function createStore(client: ControlClient) {
     logs: new LiveLogs(client),
     can: (capability: string) => state.capabilities?.capabilities.includes(capability) === true,
     start: (signal?: AbortSignal) => session.start(signal),
-    dispose: () => session.dispose()
+    dispose: () => { session.dispose(); editors.dispose(); drafts.clear(); dirty.clear(); }
   };
 }
 

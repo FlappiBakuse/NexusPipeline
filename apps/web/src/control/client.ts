@@ -24,6 +24,7 @@ export class ControlClient {
   }
   private token = '';
   private writes = 0;
+  private exitBlocked = false;
   private restarting = false;
   private readonly frontendSession: FrontendSession;
   constructor(
@@ -32,6 +33,10 @@ export class ControlClient {
   ) { this.frontendSession = new FrontendSession(origin, send, () => this.headers(), typeof window === 'undefined' ? undefined : window.nexusDesktopChannel); }
   get pendingWrites(): number {
     return this.writes;
+  }
+  setExitBlocked(value: boolean): void { this.exitBlocked = value; }
+  private requireWrite(): void {
+    if (this.exitBlocked) throw new ControlFailure(409, 'desktop_exit_in_progress');
   }
   // The restart response waits for native exit, so its own RPC cannot block that signed handoff.
   canExitMaintenance(): boolean {
@@ -54,6 +59,7 @@ export class ControlClient {
     return decode(await this.request(path, body, signal, undefined, false));
   }
   async write<T>(path: string, body: unknown, decode: Decoder<T>, operationId?: string, signal?: AbortSignal): Promise<T> {
+    this.requireWrite();
     this.clearPrepared();
     this.writes++;
     try {
@@ -69,6 +75,7 @@ export class ControlClient {
   }
   // Local secret writes use a separate raw transport but must block maintenance exit while unsettled.
   async trackExternalWrite<T>(send: () => Promise<T>): Promise<T> {
+    this.requireWrite();
     this.clearPrepared();
     this.writes++;
     try {

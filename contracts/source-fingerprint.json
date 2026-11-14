@@ -1,6 +1,6 @@
 {
   "algorithm": "nexus-sdk-source-manifest-sha256-v1",
-  "sourceFingerprint": "95e7d8e557eeb524dc1bfc650abda34bac88a039c7cffacbd7f4d545bf9f8477",
+  "sourceFingerprint": "f034beb5e5609c7e3f3f756c71e1a4707306891ac331b7e588e81db9bfe89556",
   "inputs": [
     {
       "path": "Directory.Build.props",
@@ -744,8 +744,8 @@
     },
     {
       "path": "contracts/sdk-frontend-api.json",
-      "sizeBytes": 56398,
-      "sha256": "3da0c27483c8464f633f89efb6c1102ecbff5d9e086b2f56cef8604fa6c1aa69"
+      "sizeBytes": 57295,
+      "sha256": "17c01cfdc47cbc0bd7e921f21a569cc0ab0a32c27b1043b1becd0b95d4c6eaa7"
     },
     {
       "path": "contracts/sdk-public-api.json",
@@ -1173,14 +1173,19 @@
       "sha256": "fbab024f7caedc7e5de516810ff770a84cb47a41d292385f73505312ebd346af"
     },
     {
+      "path": "sdk/frontend/src/editor-drafts.ts",
+      "sizeBytes": 747,
+      "sha256": "f94511675fbf66e9346aba6869680c5d989e32f6bfcfa3431f179900958cb91c"
+    },
+    {
       "path": "sdk/frontend/src/extension-scope.ts",
       "sizeBytes": 1589,
       "sha256": "bcfe55643bdd17dadc5f39bacc6178a069f376bcf2e5d57af94eac75ae629789"
     },
     {
       "path": "sdk/frontend/src/frontend-extension.ts",
-      "sizeBytes": 2699,
-      "sha256": "8ed427e78fe6ac141f251ff34c255e335b18cb6909317deab472b61ab558393d"
+      "sizeBytes": 2796,
+      "sha256": "662048372108bb46f7cb2183a517bc008e79f6e3172b1b1debac3514ca086083"
     },
     {
       "path": "sdk/frontend/src/frontend-transport.ts",
@@ -1189,8 +1194,8 @@
     },
     {
       "path": "sdk/frontend/src/index.ts",
-      "sizeBytes": 509,
-      "sha256": "b6e349dafb3d2663406a32ef0eea0e54858715d7a2dd5b202411783eb398f032"
+      "sizeBytes": 550,
+      "sha256": "1b1951047dc6747ca63a7d6857da215ac3ee2c7e9f4eac8169071381ef6fde85"
     },
     {
       "path": "sdk/frontend/tsconfig.json",

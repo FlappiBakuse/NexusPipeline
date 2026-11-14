@@ -39,6 +39,7 @@ function editSecret(field: SecretField, value: string): void {
       {{ t('任务名称') }}
       <span class="required">*</span>
       <input
+        data-draft-field="NotificationFields/modelValue.name"
         :value="modelValue.name"
         :aria-label="t('任务名称')"
         maxlength="64"
@@ -49,6 +50,7 @@ function editSecret(field: SecretField, value: string): void {
     <label>
       {{ t('备注') }}
       <nexus-text-area
+        data-draft-field="NotificationFields/modelValue.remark"
         :aria-label="t('备注')"
         :value.prop="modelValue.remark"
         :max-length.prop.camel="512"
@@ -58,6 +60,7 @@ function editSecret(field: SecretField, value: string): void {
     </label>
     <div class="switches">
       <nexus-switch-setting
+        data-draft-field="NotificationFields/modelValue.isEnabled"
         :title="t('启用此任务')"
         :description="t('启用后，选择此任务的用户、队列或扩展任务可发送通知；禁用时跳过发送。')"
         :value.prop="modelValue.isEnabled"
@@ -65,6 +68,7 @@ function editSecret(field: SecretField, value: string): void {
         @nexus-change="patch({ isEnabled: $event.detail.value })"
       />
       <nexus-switch-setting
+        data-draft-field="NotificationFields/modelValue.configuration.screenshotEnabled"
         :title="t('发送截图')"
         :description="t('脚本完成通知附带所选截图；队列汇总通知不附图')"
         :value.prop="modelValue.configuration.screenshotEnabled"
@@ -77,6 +81,7 @@ function editSecret(field: SecretField, value: string): void {
         <label>
           {{ t('SMTP 服务器') }}
           <input
+        data-draft-field="NotificationFields/modelValue.configuration.smtpHost"
             :value="modelValue.configuration.smtpHost"
             @input="configure({ smtpHost: ($event.target as HTMLInputElement).value })"
           />
@@ -84,6 +89,7 @@ function editSecret(field: SecretField, value: string): void {
         <label>
           {{ t('端口') }}
           <FormNumber
+        data-draft-field="NotificationFields/modelValue.configuration.smtpPort"
             :model-value="modelValue.configuration.smtpPort"
             :min="1"
             :max="65535"
@@ -93,6 +99,7 @@ function editSecret(field: SecretField, value: string): void {
         <label>
           {{ t('加密方式') }}
           <FormSelect
+        data-draft-field="NotificationFields/modelValue.configuration.smtpSecurity"
             :model-value="modelValue.configuration.smtpSecurity"
             @update:model-value="configure({ smtpSecurity: $event })"
           >
@@ -107,6 +114,7 @@ function editSecret(field: SecretField, value: string): void {
         <label>
           {{ t('账号') }}
           <input
+        data-draft-field="NotificationFields/modelValue.configuration.smtpUser"
             :value="modelValue.configuration.smtpUser"
             autocomplete="off"
             @input="configure({ smtpUser: ($event.target as HTMLInputElement).value })"
@@ -125,6 +133,7 @@ function editSecret(field: SecretField, value: string): void {
         <label>
           {{ t('收件人（逗号分隔）') }}
           <input
+        data-draft-field="NotificationFields/modelValue.configuration.smtpTo"
             :value="modelValue.configuration.smtpTo"
             @input="configure({ smtpTo: ($event.target as HTMLInputElement).value })"
           />
@@ -132,6 +141,7 @@ function editSecret(field: SecretField, value: string): void {
         <label>
           {{ t('发件人显示地址（留空=账号）') }}
           <input
+        data-draft-field="NotificationFields/modelValue.configuration.smtpFrom"
             :value="modelValue.configuration.smtpFrom"
             @input="configure({ smtpFrom: ($event.target as HTMLInputElement).value })"
           />
@@ -141,6 +151,7 @@ function editSecret(field: SecretField, value: string): void {
         <label>
           {{ t('主题前缀') }}
           <input
+        data-draft-field="NotificationFields/modelValue.configuration.smtpSubjectPrefix"
             :value="modelValue.configuration.smtpSubjectPrefix"
             @input="configure({ smtpSubjectPrefix: ($event.target as HTMLInputElement).value })"
           />
@@ -148,6 +159,7 @@ function editSecret(field: SecretField, value: string): void {
         <label>
           {{ t('超时秒数') }}
           <FormNumber
+        data-draft-field="NotificationFields/modelValue.configuration.timeoutSeconds"
             :model-value="modelValue.configuration.timeoutSeconds"
             :min="1"
             :max="300"
@@ -161,6 +173,7 @@ function editSecret(field: SecretField, value: string): void {
         <label>
           {{ t('Webhook 类型') }}
           <FormSelect
+        data-draft-field="NotificationFields/modelValue.configuration.webhookKind"
             :model-value="modelValue.configuration.webhookKind"
             @update:model-value="configure({ webhookKind: $event })"
           >
@@ -174,6 +187,7 @@ function editSecret(field: SecretField, value: string): void {
         <label>
           {{ t('超时秒数') }}
           <FormNumber
+        data-draft-field="NotificationFields/modelValue.configuration.timeoutSeconds"
             :model-value="modelValue.configuration.timeoutSeconds"
             :min="1"
             :max="300"
@@ -203,6 +217,7 @@ function editSecret(field: SecretField, value: string): void {
         <label>
           {{ t('飞书 App ID') }}
           <input
+        data-draft-field="NotificationFields/modelValue.configuration.feishuAppId"
             :value="modelValue.configuration.feishuAppId"
             @input="configure({ feishuAppId: ($event.target as HTMLInputElement).value })"
           />
@@ -220,6 +235,7 @@ function editSecret(field: SecretField, value: string): void {
         <label>
           Slack Channel ID
           <input
+        data-draft-field="NotificationFields/modelValue.configuration.slackChannelId"
             :value="modelValue.configuration.slackChannelId"
             @input="configure({ slackChannelId: ($event.target as HTMLInputElement).value })"
           />
@@ -236,6 +252,7 @@ function editSecret(field: SecretField, value: string): void {
       <label v-if="modelValue.configuration.webhookKind === 'generic'">
         {{ t('generic 自定义模板（JSON）') }}
         <nexus-text-area
+        data-draft-field="NotificationFields/modelValue.configuration.webhookTemplate"
           :aria-label="t('generic 自定义模板（JSON）')"
           :value.prop="modelValue.configuration.webhookTemplate"
           :rows.prop="4"

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, reactive, ref, toRef, watch } from 'vue';
 import type { ConfigurationStore } from '../app/store-ports';
 import { t } from '../app/locale';
 import { configurationOverview, type ConfigurationOverview } from './configuration-types';
@@ -9,11 +9,23 @@ import AdapterEditorPanel from './AdapterEditorPanel.vue';
 import ConfigurationImport from './ConfigurationImport.vue';
 import './configuration-messages';
 import './configuration.css';
+import { configurationDrafts } from './configuration-drafts';
 
 const props = defineProps<{ store: ConfigurationStore; bindingId: string; visible: boolean }>();
 const emit = defineEmits<{ close: [] }>();
+const native = ref<InstanceType<typeof NativeEditorPanel>>();
+const editing = configurationDrafts(props.store, props.bindingId);
+async function cancel(): Promise<void> {
+  if (props.store.client.pendingWrites || native.value && !await native.value.cancel() || !editing.canCancel()) {
+    error.value = '原操作尚未完成，请保留草稿并稍后查询。';
+    return;
+  }
+  editing.settle('cancel');
+  emit('close');
+}
 const overview = ref<ConfigurationOverview | null>(null);
-const mode = ref<'value' | 'native' | 'adapter'>('value');
+const selection = editing.retain('selection', () => reactive({ mode: 'value' as 'value' | 'native' | 'adapter', initialized: false }));
+const mode = toRef(selection, 'mode');
 const busy = ref(false);
 const error = ref('');
 let owner: AbortController | undefined;
@@ -34,11 +46,12 @@ async function load(preserveMode = false): Promise<void> {
     next.signal.throwIfAborted();
     overview.value = value;
     if (
-      !preserveMode ||
+      !selection.initialized || !preserveMode ||
       (mode.value === 'value' && value.kind !== 'generic') ||
       (mode.value === 'adapter' && value.kind !== 'specialized')
     )
       mode.value = nativeAllowed.value ? 'native' : value.kind === 'generic' ? 'value' : 'adapter';
+    selection.initialized = true;
   } catch (reason) {
     if (!next.signal.aborted) {
       error.value = reason instanceof Error ? reason.message : '配置不可用';
@@ -50,7 +63,7 @@ async function load(preserveMode = false): Promise<void> {
 watch(
   () => [props.bindingId, props.visible],
   () => {
-    if (props.visible) void load();
+    if (props.visible) void load(true);
     else owner?.abort();
   },
   { immediate: true }
@@ -100,6 +113,7 @@ onBeforeUnmount(() => owner?.abort());
           @changed="load(true)"
         />
         <NativeEditorPanel
+          ref="native"
           v-else-if="mode === 'native' && nativeAllowed"
           :store="store"
           :overview="overview"
@@ -117,6 +131,7 @@ onBeforeUnmount(() => owner?.abort());
       </template>
     </div>
     <div slot="footer" class="row">
+      <button type="button" @click="cancel">{{ t('取消') }}</button>
       <button type="button" @click="emit('close')">{{ t('暂时关闭') }}</button>
     </div>
   </nexus-modal>

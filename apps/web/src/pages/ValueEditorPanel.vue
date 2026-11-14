@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import DraftNotice from '../components/DraftNotice.vue';
+import { draftPresentation, draftDirective as vDraft } from '../app/draft-presentation';
 import { computed, onBeforeUnmount, reactive, toRefs, watch } from 'vue';
 import type { ConfigurationStore } from '../app/store-ports';
 import { t } from '../app/locale';
@@ -6,20 +8,25 @@ import JsonValueInput from '../components/JsonValueInput.vue';
 import type { ConfigurationOverview } from './configuration-types';
 import { ConfigurationDocument, type ConfigurationValueDraft } from './configuration-document';
 import { ConfigurationValueCommands } from './configuration-value-commands';
+import { configurationDrafts } from './configuration-drafts';
 import './configuration-messages';
 
 const props = defineProps<{ store: ConfigurationStore; overview: ConfigurationOverview; visible: boolean }>();
 const emit = defineEmits<{ changed: [] }>();
 const key =
   'configuration/value/' + props.store.state.capabilities?.instanceId + '/' + props.overview.bindingId;
-const state = reactive(
-  props.store.drafts.get(key) || {
+const scope = configurationDrafts(props.store, props.overview.bindingId).child('value');
+const store = props.store;
+const presentation = draftPresentation(scope.child('host-form'), true, () => document.edited || !!state.pending);
+const state = scope.retain('state', () => {
+  const state = reactive({
     resourceId: '',
     filePath: '',
     syntax: 'json',
     path: '',
     expected: null,
     value: null,
+    baseline: '[null,null]',
     preview: '',
     operationId: '',
     pending: '',
@@ -29,24 +36,20 @@ const state = reactive(
     resourceRevision: 0,
     busy: false,
     note: ''
-  }
-) as ConfigurationValueDraft;
-props.store.drafts.set(key, state);
-watch(
-  () => [
-    state.resourceId,
-    state.filePath,
-    state.syntax,
-    state.path,
-    state.expected,
-    state.value,
-    state.expectedText,
-    state.valueText
-  ],
-  () => props.store.dirty.add(key),
-  { deep: true, flush: 'sync' }
-);
+   }) as ConfigurationValueDraft;
+  scope.guardCancel(() => !state.pending);
+  scope.onSettled(() => store.dirty.delete(key));
+  return state;
+});
 const document = new ConfigurationDocument(props.store, state, () => props.overview);
+watch(
+  () => document.edited || !!state.pending && state.pendingAction === 'apply',
+  (changed) => {
+    if (changed) props.store.dirty.add(key);
+    else props.store.dirty.delete(key);
+  },
+  { immediate: true, flush: 'sync' }
+);
 let alive = true;
 const commands = new ConfigurationValueCommands(
   props.store,
@@ -82,13 +85,16 @@ watch(
 onBeforeUnmount(() => {
   alive = false;
   document.dispose();
+  if (!document.edited && !state.pending) scope.settle('disposed');
 });
 </script>
 <template>
-  <div class="config-fields">
+  <div v-draft="presentation" class="config-fields" :data-draft-item="state.resourceId + '/' + state.filePath + '/' + state.path">
+    <DraftNotice :restored="presentation.state.restored" />
     <label class="form-field">
       {{ t('选择资源') }}
       <FormSelect
+        data-draft-field="ValueEditorPanel/state.resourceId"
         :value="state.resourceId"
         :disabled="busy || !!state.pending"
         @change="chooseResource(($event.target as HTMLSelectElement).value)"
@@ -102,6 +108,7 @@ onBeforeUnmount(() => {
     <label v-if="files.length" class="form-field">
       {{ t('选择文件') }}
       <FormSelect
+        data-draft-field="ValueEditorPanel/state.filePath"
         :value="state.filePath"
         :disabled="busy || !!state.pending"
         @change="chooseFile(($event.target as HTMLSelectElement).value)"
@@ -115,6 +122,7 @@ onBeforeUnmount(() => {
     <label v-if="file && fields.length" class="form-field">
       {{ t('选择字段') }}
       <FormSelect
+        data-draft-field="ValueEditorPanel/state.path"
         :value="state.path"
         :disabled="busy || !!state.pending"
         @change="chooseField(($event.target as HTMLSelectElement).value)"
@@ -127,6 +135,7 @@ onBeforeUnmount(() => {
       <label class="form-field">
         {{ t('配置语法') }}
         <FormSelect
+        data-draft-field="ValueEditorPanel/state.syntax"
           v-model="state.syntax"
           :disabled="busy || !!state.pending"
           @change="chooseFile(state.filePath, true)"
@@ -139,6 +148,7 @@ onBeforeUnmount(() => {
       <label class="form-field">
         {{ t('字段路径') }}
         <input
+        data-draft-field="ValueEditorPanel/state.path"
           v-model="state.path"
           :disabled="busy || !!state.pending"
           placeholder="/account/token"
@@ -147,6 +157,7 @@ onBeforeUnmount(() => {
         <small>{{ t('字段路径使用 / 分隔，例如 /account/token。') }}</small>
       </label>
       <JsonValueInput
+        data-draft-field="ValueEditorPanel/state.expected"
         :key="'expected/' + state.resourceId + '/' + state.filePath + state.path"
         v-model="state.expected"
         v-model:raw-value="state.expectedText"
@@ -156,6 +167,7 @@ onBeforeUnmount(() => {
         @update:model-value="changed"
       />
       <JsonValueInput
+        data-draft-field="ValueEditorPanel/state.value"
         :key="'value/' + state.resourceId + '/' + state.filePath + state.path"
         v-model="state.value"
         v-model:raw-value="state.valueText"

@@ -6,6 +6,7 @@ import { desktop } from '../app/desktop';
 import { t } from '../app/locale';
 import { templateKey } from './script-template';
 import { scriptPaths, scriptPathKey, type ScriptPaths } from './script-paths';
+import ScriptLimits from './ScriptLimits.vue';
 import GameFields from './GameFields.vue';
 import ScriptSourceFields from './ScriptSourceFields.vue';
 type Script = AutomationBundle['scripts'][number];
@@ -36,12 +37,6 @@ async function browse(key: Exclude<keyof ScriptPaths, 'judgeLanguage' | 'emulato
   } catch (reason) {
     props.store.report(reason);
   }
-}
-function limit(key: keyof Script['limits'], value: number): void {
-  update('limits', {
-    ...props.modelValue.limits,
-    [key]: key === 'maximumAttempts' ? value : Math.round(value * 60)
-  });
 }
 function keywords(key: 'successKeywords' | 'failureKeywords', value: string): void {
   update('judgement', {
@@ -94,6 +89,7 @@ async function upload(event: Event): Promise<void> {
         {{ t('脚本名称') }}
         <em>*</em>
         <nexus-text-input
+        data-draft-field="ScriptFields/modelValue.name"
           :aria-label="t('脚本名称')"
           aria-required="true"
           :value.prop="modelValue.name"
@@ -132,6 +128,7 @@ async function upload(event: Event): Promise<void> {
         <label>
           {{ t('脚本自启动参数') }}
           <nexus-text-input
+        data-draft-field="ScriptFields/paths.arguments"
             :aria-label="t('脚本启动参数')"
             :placeholder="t('可选启动参数')"
             :value.prop="paths.arguments"
@@ -176,53 +173,14 @@ async function upload(event: Event): Promise<void> {
       :store="store"
       @update:model-value="emit('update:modelValue', $event)"
     />
-    <section class="script-section">
-      <h3>{{ t('运行设置') }}</h3>
-      <div class="columns three">
-        <label>
-          {{ t('最大尝试次数（含首次）') }}
-          <em>*</em>
-          <nexus-number-input
-            :aria-label="t('最大尝试次数（含首次）')"
-            aria-required="true"
-            :min.prop="1"
-            :max.prop="99"
-            :value.prop="modelValue.limits.maximumAttempts"
-            @nexus-change="limit('maximumAttempts', $event.detail.value)"
-          />
-        </label>
-        <label>
-          {{ t('日志无更新上限（分钟）') }}
-          <em>*</em>
-          <nexus-number-input
-            :aria-label="t('日志无更新上限（分钟）')"
-            aria-required="true"
-            :min.prop="0"
-            :max.prop="1440"
-            :value.prop="modelValue.limits.stallTimeoutSeconds / 60"
-            @nexus-change="limit('stallTimeoutSeconds', $event.detail.value)"
-          />
-        </label>
-        <label>
-          {{ t('运行总时间上限（分钟）') }}
-          <em>*</em>
-          <nexus-number-input
-            :aria-label="t('运行总时间上限（分钟）')"
-            aria-required="true"
-            :min.prop="0"
-            :max.prop="10080"
-            :value.prop="modelValue.limits.totalTimeoutSeconds / 60"
-            @nexus-change="limit('totalTimeoutSeconds', $event.detail.value)"
-          />
-        </label>
-      </div>
-    </section>
+    <ScriptLimits :model-value="modelValue.limits" @update:model-value="update('limits', $event)" />
     <section v-if="modelValue.kind === 'generic'" class="script-section judgement">
       <h3>{{ t('自定义完成标志') }}</h3>
       <template v-if="modelValue.judgement.language === 'keywords'">
         <label>
           {{ t('成功关键字') }}
           <nexus-text-area
+        data-draft-field="ScriptFields/modelValue.judgement.successKeywords.join('\n')"
             class="keywords"
             :aria-label="t('成功关键字')"
             :rows.prop="4"
@@ -233,6 +191,7 @@ async function upload(event: Event): Promise<void> {
         <label>
           {{ t('失败关键字') }}
           <nexus-text-area
+        data-draft-field="ScriptFields/modelValue.judgement.failureKeywords.join('\n')"
             class="keywords"
             :aria-label="t('失败关键字')"
             :rows.prop="4"
@@ -245,6 +204,7 @@ async function upload(event: Event): Promise<void> {
         <label>
           {{ t('判断脚本语言') }}
           <FormSelect
+        data-draft-field="ScriptFields/modelValue.judgement.language"
             :aria-label="t('判断脚本语言')"
             :value="modelValue.judgement.language"
             @change="
@@ -264,6 +224,7 @@ async function upload(event: Event): Promise<void> {
             <em>*</em>
           </span>
           <nexus-text-area
+        data-draft-field="ScriptFields/modelValue.judgement.script || ''"
             class="judge-code"
             :aria-label="t('判断脚本')"
             aria-required="true"
@@ -280,9 +241,11 @@ async function upload(event: Event): Promise<void> {
           <button type="button" class="upload-script" @click="uploadInput?.click()">
             {{ t('上传脚本文件') }}
           </button>
-          <input ref="uploadInput" type="file" accept=".js,.py" hidden @change="upload" />
+          <input
+        data-draft-field="ScriptFields/field-6720" ref="uploadInput" type="file" accept=".js,.py" hidden @change="upload" />
         </template>
         <nexus-switch-setting
+        data-draft-field="ScriptFields/modelValue.judgement.language !== 'keywords'"
           class="judge-switch"
           :class="{ enabled: modelValue.judgement.language !== 'keywords' }"
           :title="t('使用判断脚本')"

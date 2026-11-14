@@ -1,9 +1,10 @@
-import { createApp, h, nextTick } from 'vue';
+import { createApp, h, nextTick, reactive } from 'vue';
 import FormSelect from '../../apps/web/src/components/FormSelect';
 import AdapterEditorPanel from '../../apps/web/src/pages/AdapterEditorPanel.vue';
 import { ControlClient } from '../../apps/web/src/control/client';
 import { createStore } from '../../apps/web/src/app/store';
 import type { ConfigurationOverview } from '../../apps/web/src/pages/configuration-types';
+import { configurationDrafts } from '../../apps/web/src/pages/configuration-drafts';
 
 export async function adapterFormContract(fixture: HTMLElement, check: (value: unknown, name: string) => void): Promise<void> {
   const operationId = '00000000-0000-4000-8000-000000000001';
@@ -21,7 +22,7 @@ export async function adapterFormContract(fixture: HTMLElement, check: (value: u
     kind: 'specialized', extensionId: 'fixture-adapter', resources: [] };
   const draft = { resourceIds: [], operationId, proposalDigest: '', candidateIndex: -1, previewed: false,
     pending: operationId, pendingAction: 'applyRepair', candidates: [], tasks: [], diagnostics: [], request: null, busy: false, note: '' };
-  store.drafts.set('configuration/adapter/undefined/binding', draft);
+  configurationDrafts(store, overview.bindingId).child('adapter').retain('state', () => reactive(draft));
   const mount = document.createElement('section'); fixture.append(mount);
   const app = createApp({ render: () => h('form', { onSubmit: (event: SubmitEvent) => { event.preventDefault(); saves++; } }, [
     h(AdapterEditorPanel, { store, overview, visible: true }),

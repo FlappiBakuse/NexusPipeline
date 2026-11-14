@@ -101,6 +101,7 @@ function setTime(id: string, value: string): void {
         <em>*</em>
       </span>
       <nexus-text-input
+        data-draft-field="QueueFields/modelValue.name"
         :aria-label="t('队列名称')"
         aria-required="true"
         :value.prop="modelValue.name"
@@ -111,7 +112,8 @@ function setTime(id: string, value: string): void {
     <div class="columns">
       <label>
         {{ t('自动运行方式') }}
-        <FormSelect :value="mode" @change="setMode(($event.target as HTMLSelectElement).value)">
+        <FormSelect
+        data-draft-field="QueueFields/mode" :value="mode" @change="setMode(($event.target as HTMLSelectElement).value)">
           <option value="none">{{ t('不运行') }}</option>
           <option value="schedule">{{ t('定时运行') }}</option>
           <option value="startup">{{ t('启动时运行') }}</option>
@@ -120,6 +122,7 @@ function setTime(id: string, value: string): void {
       <label>
         {{ t('运行完成操作') }}
         <FormSelect
+        data-draft-field="QueueFields/modelValue.completionAction"
           :value="modelValue.completionAction"
           @change="
             update(
@@ -137,6 +140,7 @@ function setTime(id: string, value: string): void {
       </label>
     </div>
     <nexus-switch-setting
+        data-draft-field="QueueFields/modelValue.notifyEnabled"
       class="notification-setting"
       :title="t('队列通知')"
       :description="t('开启后仅发送队列汇总，不再发送队列内用户通知；未选择通知任务时不发送。')"
@@ -146,6 +150,7 @@ function setTime(id: string, value: string): void {
     <label>
       {{ t('通知任务') }}
       <nexus-select
+        data-draft-field="QueueFields/modelValue.notificationTaskIds"
         :aria-label="t('通知任务')"
         :multiple.prop="true"
         :value.prop="modelValue.notificationTaskIds"
@@ -174,7 +179,7 @@ function setTime(id: string, value: string): void {
         <article
           v-for="(item, index) in schedules"
           :key="item.id"
-          :data-item-id="item.id"
+          :data-item-id="item.id" :data-draft-item="item.id"
           class="schedule-item"
         >
           <div class="schedule-heading">
@@ -212,6 +217,7 @@ function setTime(id: string, value: string): void {
             </div>
             <div class="end-actions">
               <nexus-switch
+        data-draft-field="QueueFields/item.enabled"
                 :aria-label="t('启用定时')"
                 :value.prop="item.enabled"
                 @nexus-change="setSchedule(item.id, { enabled: $event.detail.value })"

@@ -1,4 +1,4 @@
-import { shallowReactive } from 'vue';
+import { shallowReactive, shallowRef } from 'vue';
 import type { ConfigurationStore } from '../app/store-ports';
 import { arrayValue, integerValue, objectValue, stringValue } from '../control/client';
 import { copyDraft } from '../app/draft-copy';
@@ -6,12 +6,14 @@ import type { ConfigurationOverview } from './configuration-types';
 import { valueSelector } from './value-selector';
 
 export interface ConfigurationValueDraft extends Record<string, unknown> {
+  fields?: Record<string, FieldDraft>;
   resourceId: string;
   filePath: string;
   syntax: 'json' | 'jsonWithComments' | 'yaml';
   path: string;
   expected: unknown;
   value: unknown;
+  baseline: string;
   expectedText?: string;
   valueText?: string;
   preview: string;
@@ -24,6 +26,8 @@ export interface ConfigurationValueDraft extends Record<string, unknown> {
   busy: boolean;
   note: string;
 }
+type FieldDraft = Pick<ConfigurationValueDraft, 'expected' | 'value' | 'baseline' | 'expectedText' | 'valueText' |
+  'sourceSha256' | 'bindingRevision' | 'resourceRevision' | 'preview' | 'operationId'>;
 interface ConfigurationFile {
   position: number;
   relativePath: string;
@@ -43,12 +47,42 @@ export class ConfigurationDocument {
   });
   private owner?: AbortController;
   private value: unknown;
+  private readonly restoring = shallowRef<ConfigurationValueDraft>();
 
   constructor(
     private readonly store: ConfigurationStore,
     readonly state: ConfigurationValueDraft,
     private readonly overview: () => ConfigurationOverview
   ) {}
+
+  get edited(): boolean {
+    const changed = (field: FieldDraft): boolean => {
+      try {
+        return JSON.stringify([
+          field.expectedText === undefined ? field.expected : JSON.parse(field.expectedText),
+          field.valueText === undefined ? field.value : JSON.parse(field.valueText)
+        ]) !== field.baseline;
+      } catch { return true; }
+    };
+    return changed(this.restoring.value || this.state) || Object.entries(this.state.fields || {})
+      .some(([key, field]) => key !== this.fieldKey() && changed(field));
+  }
+
+  private clearField(): void {
+    Object.assign(this.state, { expected: null, value: null, expectedText: undefined,
+      valueText: undefined, baseline: '[null,null]' });
+  }
+  private fieldKey(path = this.state.path): string {
+    return JSON.stringify([this.state.resourceId, this.state.filePath, this.state.syntax, path]);
+  }
+  private retainField(): void {
+    if (!this.state.path || this.restoring.value) return;
+    const { expected, value, baseline, expectedText, valueText, sourceSha256,
+      bindingRevision, resourceRevision, preview, operationId } = this.state;
+    (this.state.fields ??= {})[this.fieldKey()] = copyDraft({ expected, value, baseline, expectedText,
+      valueText, sourceSha256, bindingRevision, resourceRevision, preview, operationId });
+  }
+  saved(): void { if (this.state.fields) delete this.state.fields[this.fieldKey()]; }
 
   get resource() {
     return this.overview().resources.find((item) => item.resourceId === this.state.resourceId);
@@ -59,6 +93,8 @@ export class ConfigurationDocument {
 
   dispose(): void {
     this.owner?.abort();
+    this.owner = undefined;
+    if (!this.state.pending) this.state.busy = false;
   }
 
   selector(): (string | number)[] {
@@ -68,6 +104,8 @@ export class ConfigurationDocument {
 
   async chooseResource(id: string): Promise<void> {
     this.dispose();
+    this.retainField();
+    this.clearField();
     const owner = new AbortController();
     this.owner = owner;
     Object.assign(this.state, {
@@ -117,6 +155,8 @@ export class ConfigurationDocument {
 
   async chooseFile(path: string, keepSyntax = false): Promise<void> {
     this.dispose();
+    this.retainField();
+    this.clearField();
     const owner = new AbortController();
     this.owner = owner;
     Object.assign(this.state, { filePath: path, path: '', preview: '', note: '' });
@@ -172,9 +212,13 @@ export class ConfigurationDocument {
   }
 
   chooseField(path: string): void {
+    this.retainField();
     this.state.path = path;
+    const retained = this.state.fields?.[this.fieldKey(path)];
+    if (retained) { this.clearField(); Object.assign(this.state, copyDraft(retained)); return; }
     this.state.expected = copyDraft(this.view.fields.find((item) => item.path === path)?.value ?? null);
     this.state.value = copyDraft(this.state.expected);
+    this.state.baseline = JSON.stringify([this.state.expected, this.state.value]);
     this.state.expectedText = JSON.stringify(this.state.expected, null, 2);
     this.state.valueText = JSON.stringify(this.state.value, null, 2);
     this.state.preview = '';
@@ -184,6 +228,7 @@ export class ConfigurationDocument {
   async restore(): Promise<void> {
     if (!this.state.resourceId || this.state.pending || this.state.busy) return;
     const saved = copyDraft(this.state);
+    this.restoring.value = saved;
     try {
       await this.chooseResource(saved.resourceId);
       if (saved.filePath && this.view.files.some((item) => item.relativePath === saved.filePath)) {
@@ -192,6 +237,7 @@ export class ConfigurationDocument {
       }
     } finally {
       Object.assign(this.state, saved, { busy: false });
+      this.restoring.value = undefined;
     }
   }
 

@@ -80,31 +80,7 @@ async function restart(): Promise<void> {
 <template>
   <main ref="form" class="settings-page" @nexus-toggle="categoryOwner.toggle">
     <nexus-toast v-if="host.session.error" tone="danger" :message.prop="t(host.session.error)" />
-    <div v-if="host.session.error" class="row">
-      <button v-if="host.session.uncertain" :disabled="host.session.busy" @click="host.inspect">
-        {{ t('查询原操作') }}
-      </button>
-      <button v-else-if="!host.conflict" :disabled="host.session.busy" @click="host.save">
-        {{ t('重试保存') }}
-      </button>
-    </div>
-    <nexus-toast v-if="host.conflict && !host.session.pending" tone="warning" :message.prop="t('设置已在其他位置更改，当前草稿已保留。')" />
-    <div v-if="host.conflict && !host.session.pending" class="row">
-      <button @click="host.loadLatest">{{ t('载入最新') }}</button>
-    </div>
     <nexus-toast v-if="view.state.error" tone="danger" :message.prop="t(view.state.error)" />
-    <div v-if="view.state.error" class="row">
-      <button v-if="view.state.pending" :disabled="view.state.busy" @click="view.checkPending">
-        {{ t('查询原操作') }}
-      </button>
-      <button v-else-if="!view.conflict" :disabled="view.state.busy" @click="view.save">
-        {{ t('重试保存') }}
-      </button>
-    </div>
-    <nexus-toast v-if="view.conflict && !view.state.pending" tone="warning" :message.prop="t('视图设置已在其他位置更新。')" />
-    <div v-if="view.conflict && !view.state.pending" class="row">
-      <button @click="view.loadLatest">{{ t('载入最新') }}</button>
-    </div>
     <nexus-toast v-if="notice" :message.prop="t(notice) + (restartPort ? ' ' + restartPort : '')" @nexus-close="notice = ''" />
     <p v-if="store.state.settings?.restartReasons.length" class="notice">
       {{ t('更改等待重启：') }} {{ store.state.settings.restartReasons.join('、') }}
@@ -141,11 +117,12 @@ async function restart(): Promise<void> {
         />
         <SettingsFields
           v-else
+          :key="String(visible) + '/' + String(categoryOwner.isExpanded(item.id))"
           :category="item.id"
-          :value="host.session.draft"
+          :value="host.session.values"
           :disabled="!canEdit"
           :locale="view.state.values.locale"
-          :locale-disabled="view.state.busy || !!view.state.pending"
+          :locale-disabled="view.state.unknown"
           @patch="host.patch"
           @locale="view.setLocale"
         >
@@ -155,7 +132,8 @@ async function restart(): Promise<void> {
                 {{ t('访问令牌') }}
                 <div class="token-input">
                   <input
-                    :value="secrets.tokenVisible ? secrets.token : ''"
+                    :value="secrets.token"
+                    :type="secrets.tokenVisible ? 'text' : 'password'"
                     :placeholder="t('留空不修改')"
                     :disabled="
                       !secrets.tokenReady ||
@@ -236,7 +214,7 @@ async function restart(): Promise<void> {
               {{ t('密码') }}
               <input
                 type="password"
-                :value="secrets.secretVisible ? secrets.secret : ''"
+                :value="secrets.secret"
                 :placeholder="t('留空不修改')"
                 :disabled="
                   !secrets.secretReady ||
@@ -266,7 +244,7 @@ async function restart(): Promise<void> {
             <SettingsUpdates
               :store="store"
               :visible="visible && categoryOwner.isExpanded(item.id)"
-              :channel="host.session.draft.updates.channel"
+              :channel="host.session.values.updates.channel"
             />
           </template>
         </SettingsFields>

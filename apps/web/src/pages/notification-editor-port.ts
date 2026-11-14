@@ -23,15 +23,17 @@ function command(action: EditorAction, target: NotificationTarget): ControlNotif
 }
 
 export function notificationEditorPort(
-  store: Pick<AppStore, 'state' | 'client' | 'can' | 'report' | 'drafts' | 'dirty'>,
+  store: Pick<AppStore, 'state' | 'client' | 'can' | 'report' | 'drafts' | 'dirty' | 'editors'>,
   instanceId: string,
   draftName: string
 ) {
   const { client, state, drafts, dirty } = store;
   const key = 'notification/editor/' + instanceId + '/' + draftName;
-  const current = () => state.capabilities?.instanceId === instanceId;
+  const memory = () => store.editors.target(instanceId, 'notification', draftName);
+  const current = () => state.capabilities?.instanceId === instanceId && !store.editors.signal.aborted;
   return {
     current,
+    get drafts() { return memory(); },
     can: (capability: EditorCapability) => current() && store.can(capability),
     readDraft: () => drafts.get(key),
     keepDraft(draft: Record<string, unknown>): void {
@@ -41,7 +43,8 @@ export function notificationEditorPort(
       if (edited) dirty.add(key);
       else dirty.delete(key);
     },
-    removeDraft(): void {
+    removeDraft(reason: 'cancel' | 'saved' | 'disposed' = 'saved'): void {
+      memory().settle(reason);
       drafts.delete(key);
       dirty.delete(key);
     },

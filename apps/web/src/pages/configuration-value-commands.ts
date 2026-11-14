@@ -1,3 +1,5 @@
+import { draftPresentation } from '../app/draft-presentation';
+import { configurationDrafts } from './configuration-drafts';
 import { createIdentity } from '../control/identity';
 import type { ConfigurationStore } from '../app/store-ports';
 import { ControlFailure, objectValue } from '../control/client';
@@ -149,6 +151,8 @@ export class ConfigurationValueCommands {
   }
 
   private saved(): void {
+    this.document.saved();
+    draftPresentation(configurationDrafts(this.store, this.binding).child('value').child('host-form'), true).saved();
     Object.assign(this.state, {
       pending: '',
       pendingAction: '',
@@ -156,6 +160,7 @@ export class ConfigurationValueCommands {
       path: '',
       expected: null,
       value: null,
+      baseline: '[null,null]',
       expectedText: undefined,
       valueText: undefined,
       preview: '',

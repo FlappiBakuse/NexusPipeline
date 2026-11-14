@@ -1,4 +1,5 @@
-import { ref, watch, onBeforeUnmount } from 'vue';
+import { reactive, toRefs, watch, onBeforeUnmount } from 'vue';
+import { configurationDrafts } from './configuration-drafts';
 import type { ConfigurationStore } from '../app/store-ports';
 import { extensionList } from '../control/extensions';
 import { createIdentity } from '../control/identity';
@@ -7,12 +8,15 @@ import type { ScriptSourceCandidate } from '../control/wire.generated';
 import type { ConfigurationOverview } from './configuration-types';
 
 export function useBindingSource(store: ConfigurationStore, overview: () => ConfigurationOverview) {
-  const candidates = ref<readonly ScriptSourceCandidate[]>([]), selected = ref(''), revision = ref(0), busy = ref(false);
-  const error = ref('');
+  const state = configurationDrafts(store, overview().bindingId).retain('source', () => reactive({
+    candidates: [] as readonly ScriptSourceCandidate[], selected: '', revision: 0, busy: false, error: '', initialized: false
+  }));
+  const { candidates, selected, revision, busy, error } = toRefs(state);
   let owner: AbortController | undefined;
   const required = () => overview().kind === 'specialized' && overview().resources.length > 0 && overview().resources.every(item => !item.isSaved);
   async function discover(): Promise<void> {
     owner?.abort(); const scope = new AbortController(); owner = scope;
+    state.initialized = true;
     candidates.value = []; selected.value = ''; revision.value = 0; error.value = '';
     if (!required()) return;
     busy.value = true;
@@ -36,7 +40,11 @@ export function useBindingSource(store: ConfigurationStore, overview: () => Conf
       if (!scope.signal.aborted) error.value = reason instanceof Error ? reason.message : String(reason);
     } finally { if (owner === scope) busy.value = false; }
   }
-  watch(() => [overview().bindingId, overview().bindingRevision, overview().scriptRevision, required()], discover, { immediate: true });
-  onBeforeUnmount(() => owner?.abort());
-  return { candidates, selected, revision, busy, error, required, discover };
+  watch(() => [overview().bindingId, required()], () => { if (!state.initialized) void discover(); }, { immediate: true });
+  onBeforeUnmount(() => {
+    owner?.abort(); state.busy = false;
+    if (!state.candidates.length) state.initialized = false;
+  });
+  const reset = () => { owner?.abort(); Object.assign(state, { candidates: [], selected: '', revision: 0, initialized: false }); };
+  return { candidates, selected, revision, busy, error, required, discover, reset };
 }

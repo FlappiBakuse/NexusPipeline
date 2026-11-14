@@ -60,8 +60,12 @@ function sign(value) {
     signatureBase64: crypto.sign('sha256', payload, { key: key.privateKey, dsaEncoding: 'ieee-p1363' }).toString('base64') };
 }
 const page = `<!doctype html><html><head><meta charset="utf-8"></head><body><input id="draft"><script>
-window.acceptExit=true;
-(async()=>{window.session=await nexusDesktopChannel.connect();nexusDesktopChannel.prepareExit(async()=>window.acceptExit);
+window.acceptExit=true;window.exitStates=[];
+nexusDesktopChannel.onExitState(state=>window.exitStates.push(state));
+(async()=>{window.session=await nexusDesktopChannel.connect();nexusDesktopChannel.prepareExit(async()=>{
+if(!window.deferExit)return window.acceptExit?'ready':'pending-writes';
+window.waitingForExit=true;
+try{return await new Promise(resolve=>window.resolveExit=resolve);}finally{window.waitingForExit=false;}});
 await nexusDesktopChannel.preparation({stage:'准备页面数据',done:2,total:5});window.ready=true;
 if(HOLD_PREPARATION)await new Promise(resolve=>window.releaseStartup=resolve);await nexusDesktopChannel.presented();})();
 </script></body></html>`;
@@ -236,10 +240,28 @@ async function run() {
   await window.webContents.executeJavaScript('nexusDesktopChannel.setLocale("en-US")');
   await click(0); assert.equal(lastMenu.locale, 'en-US');
   cases.push('existing-renderer-updates-native-menu-language');
+  await window.webContents.executeJavaScript('window.deferExit=true');
+  window.close(); assert.equal(window.isVisible(), false);
+  const warningCount = warnings.length;
+  const waitingClose = click(3);
+  await waitFor(() => window.webContents.executeJavaScript('window.waitingForExit === true'));
+  await leftClick(); assert.equal(window.isVisible(), true);
+  await click(0); assert.equal(lastMenu.busy, true);
+  cases.push('pending-exit-keeps-real-window-activation-and-native-menu-channel-available');
+  window.close();
+  await new Promise(resolve => setTimeout(resolve, 11000)); await waitingClose;
+  assert.equal(warnings.length, warningCount); assert.equal(closePermits, 0);
+  assert.equal(window.isDestroyed(), false); assert.equal(window.isVisible(), true);
+  assert.equal(await window.webContents.executeJavaScript('window.exitStates.at(-1).code'), 'desktop_draft_preparation_timeout');
+  await window.webContents.executeJavaScript('window.resolveExit("ready");window.deferExit=false');
+  cases.push('unresponsive-hidden-renderer-times-out-restores-interaction-and-ignores-late-readiness');
   await window.webContents.executeJavaScript('window.acceptExit=false'); await click(3);
   assert.equal(closePermits, 0); assert.equal(window.isDestroyed(), false);
-  await window.webContents.executeJavaScript('window.acceptExit=true');
-  cases.push('close-refusal-retains-window-without-host-permit');
+  assert.equal(warnings.length, warningCount);
+  await click(0); assert.equal(lastMenu.busy, false);
+  await window.webContents.executeJavaScript('window.acceptExit=true;document.querySelector("input").value="retained-draft"');
+  window.close(); assert.equal(window.isVisible(), false);
+  cases.push('real-writes-refuse-exit-with-status-and-hidden-drafts-do-not-require-confirmation');
   const closed = new Promise(resolve => window.once('closed', () => {
     assert.equal(closePermits, 1);
     cases.push('signed-close-permit-destroys-real-window-and-quits');

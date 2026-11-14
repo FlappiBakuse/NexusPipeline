@@ -72,14 +72,16 @@ function select(value: string): void {
 <template>
   <div class="emulator-fields">
     <label>{{ text('便携版搜索根目录', 'Portable search root') }}
-      <FormSelect :value="rootId" @change="rootId = ($event.target as HTMLSelectElement).value"><option v-for="root in store.state.automation?.bundle.roots" :key="root.id" :value="root.id">{{ root.name }}</option></FormSelect>
+      <FormSelect
+        data-draft-field="EmulatorFields/rootId" :value="rootId" @change="rootId = ($event.target as HTMLSelectElement).value"><option v-for="root in store.state.automation?.bundle.roots" :key="root.id" :value="root.id">{{ root.name }}</option></FormSelect>
     </label>
     <button type="button" :disabled="loading || !store.state.automation?.bundle.scripts.some(script => script.id === modelValue.id)" @click="discover">
       {{ text('发现模拟器实例', 'Discover emulator instances') }}
     </button>
     <p v-if="!store.state.automation?.bundle.scripts.some(script => script.id === modelValue.id)">{{ text('请先保存脚本，再发现实例；也可填写手动 ADB 路径。', 'Save the script before discovery, or enter a manual ADB path.') }}</p>
     <label>{{ text('实例与 ADB 地址', 'Instance and ADB endpoint') }}
-      <FormSelect :value="''" @change="select(($event.target as HTMLSelectElement).value)">
+      <FormSelect
+        data-draft-field="EmulatorFields/''" :value="''" @change="select(($event.target as HTMLSelectElement).value)">
         <option value="">{{ text('使用手动 ADB', 'Use manual ADB') }}</option>
         <option v-for="(option, index) in options" :key="option.selection.targetId + option.endpoint" :value="String(index)">{{ option.selection.vendor }} · {{ option.name }} · {{ option.endpoint }}</option>
       </FormSelect>

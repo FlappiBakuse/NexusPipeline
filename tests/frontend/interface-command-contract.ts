@@ -18,15 +18,14 @@ export async function interfaceCommandContract(check: Check): Promise<void> {
 
 async function unknownResult(check: Check): Promise<void> {
   const state = { interface: snapshot(), capabilities: { instanceId: id('1') }, uncertainOperation: '', error: '' };
-  const drafts = new Map<string, Record<string, unknown>>(), dirty = new Set<string>();
   let writes = 0, read = snapshot();
   const client = new ControlClient('http://127.0.0.1', async (_url, request) => {
     if (request?.method === 'POST') { writes++; return response({ revision: 1 }); }
     return response(read);
   });
-  const changes = new InterfaceChanges(client, state, drafts, dirty), values = snapshot(1, id('2'), 'light').values;
+  const changes = new InterfaceChanges(client, state), values = snapshot(1, id('2'), 'light').values;
   const write = changes.save(values, 0, id('2')).catch(() => undefined);
-  check(changes.current().pending?.id === id('2') && dirty.size === 1, 'interface command owns its original body before dispatch');
+  check(changes.current().pending?.id === id('2'), 'interface command owns its original body before dispatch');
   await write;
   check(changes.current().pending?.state === 'unknown', 'valid JSON with a malformed interface write result keeps its original command');
   await changes.save(values, 0, id('3')).catch(() => undefined);
@@ -34,19 +33,18 @@ async function unknownResult(check: Check): Promise<void> {
   read = snapshot(2, id('3'), 'light'); await changes.inspect();
   check(changes.current().pending?.id === id('2'), 'equal interface values from another operation are not completion proof');
   changes.observe(snapshot(1, id('2'), 'light'));
-  check(changes.current().pending === null && state.interface.revision === 2 && dirty.size === 0,
+  check(changes.current().pending === null && state.interface.revision === 2,
     'a delayed exact operation proof unlocks without regressing a newer interface snapshot');
 }
 
 async function overlappingProof(check: Check): Promise<void> {
   const state = { interface: snapshot(), capabilities: { instanceId: id('1') }, uncertainOperation: '', error: '' };
-  const replies = new Map<string, (value: Response) => void>(), drafts = new Map<string, Record<string, unknown>>();
-  const dirty = new Set<string>();
+  const replies = new Map<string, (value: Response) => void>();
   const client = new ControlClient('http://127.0.0.1', async (_url, request) => {
     const body = JSON.parse(String(request?.body)) as { operationId: string };
     return new Promise<Response>(resolve => replies.set(body.operationId, resolve));
   });
-  const changes = new InterfaceChanges(client, state, drafts, dirty);
+  const changes = new InterfaceChanges(client, state);
   const first = changes.save(snapshot(1, id('2'), 'light').values, 0, id('2'));
   changes.observe(snapshot(1, id('2'), 'light'));
   const second = changes.save(snapshot(2, id('3')).values, 1, id('3'));
@@ -55,7 +53,7 @@ async function overlappingProof(check: Check): Promise<void> {
   check(confirmed.operationId === id('2') && changes.current().pending?.id === id('3'),
     'a proven late first result cannot clear a newer interface command');
   replies.get(id('3'))!(response(snapshot(2, id('3')))); await second;
-  check(changes.current().pending === null && state.interface.operationId === id('3') && dirty.size === 0,
+  check(changes.current().pending === null && state.interface.operationId === id('3'),
     'the newer interface command retains ownership until its own result arrives');
 }
 
@@ -63,7 +61,7 @@ async function changedInstance(check: Check): Promise<void> {
   const state = { interface: snapshot(), capabilities: { instanceId: id('1') }, uncertainOperation: '', error: '' };
   let reply: (value: Response) => void = () => undefined;
   const client = new ControlClient('http://127.0.0.1', async () => new Promise<Response>(resolve => { reply = resolve; }));
-  const changes = new InterfaceChanges(client, state, new Map(), new Set());
+  const changes = new InterfaceChanges(client, state);
   const first = changes.save(snapshot(1, id('2'), 'light').values, 0, id('2'));
   state.capabilities = { instanceId: id('4') }; state.interface = snapshot();
   reply(response(snapshot(1, id('2'), 'light'))); await first;

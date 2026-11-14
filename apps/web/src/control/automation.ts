@@ -142,4 +142,3 @@ export function automationBundle(value: unknown): AutomationBundle {
         sizeBytes: boundedInteger(attachment.sizeBytes, 0, 8388608) };
     }) };
 }
-

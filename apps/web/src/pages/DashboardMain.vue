@@ -38,21 +38,17 @@ const catalog = computed<{ id: DashboardCard; title: string; description: string
 ]);
 const {
   layout,
-  draft,
+  layoutCards,
   layoutOpen,
   layoutBusy,
   layoutError,
-  pendingLayoutId,
   layoutNotice,
   cards,
-  layoutChanged,
   readLayout,
   beginLayout,
   cancelLayout,
-  rebase,
-  loadLatest,
+  closeLayout,
   saveLayout,
-  checkLayout,
   changeLayout,
   resetLayout
 } = useDashboardLayout(props.store, () => (props.overviewCards ?? []).flatMap(item => item.dashboard && item.dashboard.defaultVisible ? [item.dashboard] : []).sort((a, b) => a.order - b.order).map(item => item.key));
@@ -178,7 +174,7 @@ watch(statisticsVisible, (visible) => {
 });
 onMounted(() => {
   layoutTimer = setInterval(() => {
-    if (props.visible && !draft.value) void readLayout();
+    if (props.visible && !layoutCards.value) void readLayout();
   }, 60000);
   armDayBoundary();
 });
@@ -198,14 +194,13 @@ onBeforeUnmount(() => {
         :disabled="
           layoutBusy ||
           !layout ||
-          (!!store.interfaceChange.pending && !pendingLayoutId) ||
           !store.can('settings.write')
         "
         @click="beginLayout"
       >
         {{ t('编辑页面布局') }}
       </button>
-      <button v-if="layoutError && !draft" @click="readLayout">{{ t('重新读取') }}</button>
+      <button v-if="layoutError && !layoutCards" @click="readLayout">{{ t('重新读取') }}</button>
     </PageActions>
     <nexus-toast v-if="layoutError" tone="danger" :message.prop="t(layoutError)" />
     <nexus-toast v-if="layoutNotice" :message.prop="t(layoutNotice)" @nexus-close="layoutNotice = ''" />
@@ -258,33 +253,24 @@ onBeforeUnmount(() => {
         :title="t('编辑页面布局')"
         size="wide"
         surface="secondary"
-        @nexus-close="cancelLayout"
+        @nexus-close="closeLayout"
       >
         <p v-if="layoutError" role="alert">{{ t(layoutError) }}</p>
-        <p v-if="layoutChanged && !pendingLayoutId" role="alert">
-          {{ t('布局已在其他位置更新。可载入最新布局，或以最新修订保留当前排列。') }}
-          <button :disabled="layoutBusy" @click="loadLatest">{{ t('载入最新') }}</button>
-          <button :disabled="layoutBusy" @click="rebase">{{ t('保留我的排列') }}</button>
-        </p>
         <DashboardLayout
-          v-if="draft"
-          :cards="draft"
+          v-if="layoutCards"
+          :cards="layoutCards"
           :catalog="catalog"
-          :locked="layoutBusy || !!pendingLayoutId"
+          :locked="layoutBusy"
           @change="changeLayout"
         />
-        <p v-if="pendingLayoutId" role="status">
-          {{ t('待确认操作：') }}{{ pendingLayoutId }}
-          <button :disabled="layoutBusy" @click="checkLayout">{{ t('读取设置确认') }}</button>
-        </p>
         <div slot="footer" class="layout-footer">
-          <button :disabled="layoutBusy || !!pendingLayoutId" @click="resetLayout">
+          <button :disabled="layoutBusy" @click="resetLayout">
             {{ t('恢复默认') }}
           </button>
-          <button @click="cancelLayout">{{ t(pendingLayoutId ? '关闭' : '取消') }}</button>
+          <button :disabled="layoutBusy" @click="cancelLayout">{{ t('取消') }}</button>
           <button
             class="primary"
-            :disabled="layoutBusy || !!pendingLayoutId || layoutChanged || !store.can('settings.write')"
+            :disabled="layoutBusy || !store.can('settings.write')"
             @click="saveLayout"
           >
             {{ t('保存') }}

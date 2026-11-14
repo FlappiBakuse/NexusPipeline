@@ -7,26 +7,29 @@ import type { NotificationEditorPort } from './notification-editor-port';
 import { secretFields, type SecretField, type SecretState } from './notification-types';
 
 export class NotificationCredentials {
-  readonly view = reactive({
-    statuses: [] as SecretState[],
-    ready: false,
-    modes: Object.fromEntries(secretFields.map((field) => [field, 'keep'])) as Record<
-      SecretField,
-      'keep' | 'set' | 'clear'
-    >,
-    values: Object.fromEntries(secretFields.map((field) => [field, ''])) as Record<SecretField, string>
-  });
+  readonly view;
   private owner?: AbortController;
   private alive = true;
 
   constructor(
-    private readonly port: Pick<NotificationEditorPort, 'current' | 'readCredentials' | 'report'>,
+    private readonly port: Pick<NotificationEditorPort, 'current' | 'readCredentials' | 'report' | 'drafts'>,
     private readonly taskId: string | undefined,
     private readonly draft: () => ControlNotificationCommandInput,
     private readonly revision: () => number,
     private readonly failed: (message: string) => void
   ) {
-    this.view.ready = !taskId;
+    this.view = port.drafts.protect('credentials', () => reactive({
+      statuses: [] as SecretState[],
+      ready: false,
+      modes: Object.fromEntries(secretFields.map((field) => [field, 'keep'])) as Record<
+        SecretField,
+        'keep' | 'set' | 'clear'
+      >,
+      values: Object.fromEntries(secretFields.map((field) => [field, ''])) as Record<SecretField, string>
+    }), view => {
+      for (const field of secretFields) { view.values[field] = ''; view.modes[field] = 'keep'; }
+    });
+    this.view.ready = !taskId || this.view.ready;
   }
 
   get shown(): SecretField[] {
@@ -70,13 +73,6 @@ export class NotificationCredentials {
     this.view.modes[field] = value ? 'set' : 'keep';
   }
 
-  retain(fields: readonly SecretField[]): void {
-    for (const field of secretFields)
-      if (!fields.includes(field)) {
-        this.view.values[field] = '';
-        this.view.modes[field] = 'keep';
-      }
-  }
 
   edits(): ControlNotificationCommandSecret[] {
     return this.shown.flatMap((field) => {
@@ -104,6 +100,5 @@ export class NotificationCredentials {
   dispose(): void {
     this.alive = false;
     this.owner?.abort();
-    this.clear();
   }
 }

@@ -154,3 +154,21 @@ function requireSource(source: Record<string, unknown>, request: Record<string, 
   )
     throw new Error('adapter_source_unbound');
 }
+
+export function createAdapterDraft(): AdapterDraft {
+  return {
+    resourceIds: [],
+    operationId: '',
+    proposalDigest: '',
+    candidateIndex: -1,
+    previewed: false,
+    pending: '',
+    pendingAction: '',
+    candidates: [],
+    tasks: [],
+    diagnostics: [],
+    request: null,
+    busy: false,
+    note: ''
+  };
+}

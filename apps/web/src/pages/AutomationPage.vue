@@ -55,7 +55,7 @@ function beginCreate(): void {
   activeKind.value = props.kind;
   userGlobal.value = false;
   if (activeKind.value === 'scripts') typesOpen.value = true;
-  else if (!editorModel.resumeNew()) edit();
+  else edit();
 }
 function chooseScript(choice?: ScriptChoice): void {
   typesOpen.value = false;

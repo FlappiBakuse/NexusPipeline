@@ -48,7 +48,7 @@ function edit(value: string): void {
 }
 </script>
 <template>
-  <label class="form-field">
+  <label class="form-field" data-draft-json>
     {{ label }}
     <nexus-text-area
       :value.prop="text"

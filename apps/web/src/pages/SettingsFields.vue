@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed, ref, watch } from 'vue';
 import type { ControlHostSettingsValues } from '../control/wire.generated';
 import type { InterfaceValues } from '../control/interface';
 import { t } from '../app/locale';
@@ -21,8 +22,20 @@ function service(value: Partial<Values['service']>): void {
 function desktop(value: Partial<Values['desktop']>): void {
   emit('patch', { desktop: { ...props.value.desktop, ...value } });
 }
+const proxyInput = ref<Values['proxy']>();
+const proxyValue = computed(() => proxyInput.value || props.value.proxy);
+watch(() => props.value.proxy, () => { proxyInput.value = undefined; });
 function proxy(value: Partial<Values['proxy']>): void {
-  emit('patch', { proxy: { ...props.value.proxy, ...value } });
+  const next = { ...proxyValue.value, ...value };
+  proxyInput.value = next;
+  if (value.mode && value.mode !== 'http') next.url = props.value.proxy.url;
+  if (next.mode === 'http') {
+    try {
+      const address = new URL(next.url || '');
+      if (!['http:', 'https:'].includes(address.protocol) || !address.hostname) return;
+    } catch { return; }
+  }
+  emit('patch', { proxy: next });
 }
 function updates(value: Partial<Values['updates']>): void {
   emit('patch', { updates: { ...props.value.updates, ...value } });
@@ -158,7 +171,7 @@ function updates(value: Partial<Values['updates']>): void {
         {{ t('代理模式') }}
         <FormSelect
           :disabled="disabled"
-          :model-value="value.proxy.mode"
+          :model-value="proxyValue.mode"
           @update:model-value="proxy({ mode: $event })"
         >
           <option value="none">{{ t('不使用代理') }}</option>
@@ -166,12 +179,12 @@ function updates(value: Partial<Values['updates']>): void {
           <option value="http">{{ t('HTTP 代理') }}</option>
         </FormSelect>
       </label>
-      <template v-if="value.proxy.mode === 'http'">
+      <template v-if="proxyValue.mode === 'http'">
         <label>
           {{ t('代理地址') }}
           <input
             :disabled="disabled"
-            :value="value.proxy.url || ''"
+            :value="proxyValue.url || ''"
             type="url"
             required
             pattern="https?://.+"
@@ -184,7 +197,7 @@ function updates(value: Partial<Values['updates']>): void {
             {{ t('用户名') }}
             <input
               :disabled="disabled"
-              :value="value.proxy.userName"
+              :value="proxyValue.userName"
               autocomplete="off"
               @change="proxy({ userName: ($event.target as HTMLInputElement).value })"
             />
